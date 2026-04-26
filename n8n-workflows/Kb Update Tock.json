@@ -1,0 +1,191 @@
+{
+  "name": "Kb Update Tock",
+  "nodes": [
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1qkgGKwT6sRuylLggrficVNImypFvpbYNYN7pKOwCg78/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "FAQ",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        560,
+        32
+      ],
+      "id": "33879376-b84e-4b2e-ace8-60e6439c5622",
+      "name": "Get FAQ Data",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E5EnoGSQA8JIvuiR",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"pageContent\": \"Tipo: {{ ($json.tipo || 'faq').toLowerCase() }}\\nCategoria: {{ $json.categoria || 'geral' }}\\nProduto: {{ $json.produto || 'geral' }}\\nIntenção: {{ $json.intencao || 'duvida_geral' }}\\nPergunta: {{ $json.titulo }}\\nResposta: {{ $json.conteudo }}{{ $json.link ? ('\\nLink: ' + $json.link) : '' }}\",\n  \"metadata\": {\n    \"kb_id\": \"{{ $json.kb_id || '' }}\",\n    \"prioridade\": {{ Number($json.prioridade || 99) }},\n    \"row_number\": {{ Number($json.row_number || 0) }},\n    \"tipo\": \"{{ ($json.tipo || 'faq').toLowerCase() }}\",\n    \"categoria\": \"{{ $json.categoria || 'geral' }}\",\n    \"intencao\": \"{{ $json.intencao || 'duvida_geral' }}\",\n    \"produto\": \"{{ $json.produto || 'geral' }}\",\n    \"status\": \"{{ $json.status || 'ATIVO' }}\",\n    \"link\": {{ $json.link ? '\"' + $json.link + '\"' : 'null' }}\n  }\n}",
+        "options": {}
+      },
+      "id": "f63a7873-100d-40c4-9569-976d89671bf3",
+      "name": "Format FAQ for Vector Store",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        784,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "bb1fc37d-3a5f-4644-be18-6869bd04df20",
+      "name": "Load FAQ Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        336,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "memoryKey": {
+          "__rl": true,
+          "value": "vector",
+          "mode": "id"
+        },
+        "clearStore": true
+      },
+      "id": "ce00af30-9297-4b96-8a96-cc85abe0f02a",
+      "name": "Insert FAQ into Vector Store1",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.3,
+      "position": [
+        1008,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "56d67446-1985-4f2a-b4eb-2308aa2e8b52",
+      "name": "Embeddings OpenAI Insert1",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1024,
+        256
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "RGThohEfF9qZkcBj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{\n'Tipo: ' + ($json.tipo || 'faq') +\n'\\nCategoria: ' + ($('Get FAQ Data').item.json.categoria || 'geral') +\n'\\nProduto: ' + ($('Get FAQ Data').item.json.produto || 'geral') +\n'\\nIntenção: ' + ($('Get FAQ Data').item.json.intencao|| 'duvida_geral') +\n'\\nPergunta: ' + ($('Get FAQ Data').item.json.titulo || '') +\n'\\nResposta: ' + ($('Get FAQ Data').item.json.conteudo || '') +\n($json.link ? '\\nLink: ' + $('Get FAQ Data').item.json.link : '')\n}}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        1184,
+        240
+      ],
+      "id": "273ddd44-617a-4cf9-bd79-bce13d29562f",
+      "name": "Default Data Loader"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get FAQ Data": {
+      "main": [
+        [
+          {
+            "node": "Format FAQ for Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format FAQ for Vector Store": {
+      "main": [
+        [
+          {
+            "node": "Insert FAQ into Vector Store1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load FAQ Schedule": {
+      "main": [
+        [
+          {
+            "node": "Get FAQ Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI Insert1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Insert FAQ into Vector Store1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Insert FAQ into Vector Store1",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "834350f2-c072-4674-9f3b-8d7a89d5f8a8",
+  "meta": {
+    "instanceId": "d27d9c9e0615200bdece87c4003737514f58ce543d53f5433870e51fbdcc4710"
+  },
+  "id": "gFaqWec3eDparhOL",
+  "tags": []
+}

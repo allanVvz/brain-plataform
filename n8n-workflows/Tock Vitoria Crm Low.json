@@ -1,0 +1,2318 @@
+{
+  "name": "Tock Vitoria Crm Low",
+  "nodes": [
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a0330d20-554b-4042-b35e-b737d131e6b0",
+                    "leftValue": "={{ $json.classifier.route_hint }}",
+                    "rightValue": "CLOSER",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.classifier.route_hint }}",
+                    "rightValue": "=SDR",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "825f70de-3022-4317-b98e-c9c105bd7cb6"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c83ff576-71f1-45bd-b7e3-553440cd943c",
+      "name": "Classificar Agente",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2944,
+        1680
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "gpt-4o-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "853c129d-59a9-4008-b2aa-d2a1e923e9ae",
+      "name": "Model SDR",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        4416,
+        2240
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "RGThohEfF9qZkcBj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5.4-pro",
+          "mode": "list",
+          "cachedResultName": "gpt-5.4-pro"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "0436ad78-eaea-4e4a-9411-92898f4f89d5",
+      "name": "Model Closer",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        4864,
+        1536
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "RGThohEfF9qZkcBj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ \"lead-\" + ($json.lead_id) }}",
+        "tableName": "chat_history",
+        "contextWindowLength": 30
+      },
+      "id": "be8cf65e-a91d-4343-b015-a1c2b278601d",
+      "name": "Memory Conversacional",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        5056,
+        1648
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "BBlBCf0VMk3atMqh",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{$json.last_message}}",
+        "options": {
+          "systemMessage": "=# PAPEL\n\nVocê é um SDR comercial em um fluxo de CRM de vendas de roupas.\n\nSeu papel é:\n\n1. Responder o cliente com clareza\n2. Fazer a conversa avançar comercialmente\n3. Coletar e completar as informações necessárias do lead\n\nVocê deve soar humano, direto e comercial.\n\n---\n\n# CONTEXTO DO CLIENTE\n\nNome da lead: {{ $json.name || \"não informado\" }}\nMensagem do cliente: {{ $json.last_message || \"mensagem não informada\" }}\n\n---\n\n# DADOS EXTRAÍDOS (PODEM ESTAR ERRADOS)\n\nCidade: {{ $json.cidade || \"não informada\" }}\nCEP: {{ $json.cep || \"não informado\" }}\nProduto de interesse: {{ $json.product_interest || \"não informado\" }}\n\n---\n\n# CONTEXTO DA BASE (FAQ)\n\n{{ $json.contexto_kb || \"base não informada\" }}\n\n---\n\n# OBJETIVO CENTRAL\n\nVocê deve sempre:\n\n1. Resolver a intenção atual do cliente\n2. Identificar o que ainda falta\n3. Perguntar a próxima informação necessária para avançar a venda\n\n---\n\n# INFORMAÇÕES A COLETAR\n\n1. Produto de interesse\n2. Se já conhece a loja ou os produtos\n3. Quantidade de peças\n4. Cidade ou CEP\n5. Endereço, quando fizer sentido para envio\n\n---\n\n# REGRAS\n\n- Sempre avançar a conversa\n- Nunca responder seco\n- Se não souber algo, não inventar\n- Se faltar informação, perguntar a próxima mais útil\n- Se enviar catálogo, pedir CEP e endereço na sequência\n\n---\n\n# ESTILO\n\n- curto\n- direto\n- comercial\n- humano\n- 1 a 2 frases\n\n---\n\n# REGRA DE STAGE\n\nUse apenas um destes valores:\n\n- novo\n- engajado\n- qualificado\n- oportunidade\n\n---\n\n# REGRA CRÍTICA DE SAÍDA\n\nResponda somente com um objeto JSON válido.\n\nNão escreva texto antes do JSON.\nNão escreva texto depois do JSON.\nNão explique a resposta.\nNão use markdown.\n\nVocê deve retornar exatamente esta estrutura:\n\n{\n  \"reply\": \"string\",\n  \"detected_fields\": {\n    \"nome\": null,\n    \"produto\": null,\n    \"cidade\": null,\n    \"cep\": null,\n    \"endereco\": null\n  },\n  \"stage_sugerido\": \"novo\"\n}\n\nTodos os campos devem existir.\nSe não souber, use null.\nNunca use arrays.\nNunca adicione campos extras."
+        }
+      },
+      "id": "29b289b8-f532-489d-8b2e-31bb46b072df",
+      "name": "Agente SDR",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        4480,
+        2016
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto }}",
+        "options": {
+          "systemMessage": "=# PAPEL\n\nVocê é um CLOSER em um fluxo de CRM comercial.\n\n🚨 REGRA ABSOLUTA\n\nVocê NÃO é um classificador.\n\nVocê NÃO pode retornar:\n- intent\n- interest_level\n- urgency\n- fit\n- summary\n- route_hint\n\nSe retornar qualquer um desses campos, sua resposta está ERRADA.\n\nSeu único objetivo é:\n- responder o cliente\n- remover objeções\n- conduzir para fechamento\n\n---\n\n# CONTEXTO DO CLIENTE\n\nNome da lead: {{ $json.nome }}\nStage atual: {{ $json.stage }}\nUltimo produto mensionado: {{ $json.product_interest }}\nMensagem do cliente: {{ $json.texto }}\n\n---\n\n# CONTEXTO DO LEAD (RESUMO)\n\n{{ $json.summary }}\n\n---\n\n# TAREFA\n\nVocê deve:\n\n1. Responder diretamente a mensagem do cliente\n2. Reduzir qualquer fricção ou dúvida\n3. Conduzir para a próxima ação\n4. Encaminhar para humano se necessário\n\n---\n\n# REGRA DE OBJEÇÃO\n\nSe houver objeção:\n\n- responda com segurança\n- simplifique decisão\n- reduza risco percebido\n- conduza para ação\n\n---\n\n# REGRA DE ENCAMINHAMENTO\n\nEncaminhe para humano APENAS se:\n\n- cliente pedir falar com alguém\n- negociação complexa\n- problema real\n- dúvida fora da base\n\n---\n\n# ESTILO\n\n- 1 a 3 frases\n- direto\n- comercial\n- humano\n- sempre conduzindo próximo passo\n\n---\n\n# REGRA DE STAGE\n\nDefina baseado na situação:\n\n- engajado → ainda avaliando\n- qualificado → interesse claro\n- oportunidade → pronto para fechar\n- fechado → já comprou / confirmou ação\n\n---\n\n# 🚨 FORMATO OBRIGATÓRIO\n\nVocê DEVE responder EXATAMENTE assim:\n\n{\n  \"reply\": \"string\",\n  \"encaminhar_humano\": boolean,\n  \"motivo_encaminhamento\": string | null,\n  \"stage_sugerido\": \"engajado\" | \"qualificado\" | \"oportunidade\" | \"fechado\"\n}\n\n---\n\n# 🚨 REGRAS DE VALIDAÇÃO\n\n- NÃO adicionar campos\n- NÃO remover campos\n- NÃO usar arrays\n- NÃO retornar texto fora do JSON\n- NÃO usar markdown\n- NÃO quebrar estrutura\n- Se não souber → null\n\n---\n\n# EXEMPLO CORRETO\n\n{\n  \"reply\": \"Temos essas cores disponíveis sim. Quer que eu já te passe o link pra garantir o teu?\",\n  \"encaminhar_humano\": false,\n  \"motivo_encaminhamento\": null,\n  \"stage_sugerido\": \"oportunidade\"\n}\n\n---\n\nRetorne apenas o JSON final."
+        }
+      },
+      "id": "fb8dff53-e48c-4e6d-85f1-7c2ca1040267",
+      "name": "Agente Closer",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        4976,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"lead_context\": {\n    \"name\": \"{{$('Unify Lead Data').item.json.nome ||'Lead' || $('Unify Lead Data').item.json.nome }}\"\n    \"lead_id\": {{ $('Unify Lead Data').item.json.lead_id }},\n    \"lead_ref\": {{ $json.lead.ref }}\n    \"product_interest\": \"{{ $('Unify Lead Data').item.json.interesse_produto || 'Não informado' }}\",\n    \"current_stage\": \"{{ $json.stage || 'novo' }}\",\n    \"channel\": \"{{ $json.canal || 'whatsapp' }}\",\n    \"city\": \"{{ $json.cidade || 'não informada' }}\",\n    \"cep\": \"{{ $json.cep || 'não informado' }}\"\n  },\n  \"conversation\": {\n    \"last_message\": \"{{ $('Unify Lead Data').item.json.mensagem || '' }}\",\n    \"history\": \"sem histórico\"\n  },\n  \"classification\": {\n    \"intent\": \"{{ $json.classifier?.intent || '' }}\",\n    \"interest_level\": \"{{ $json.classifier?.interest_level || '' }}\",\n    \"urgency\": \"{{ $json.classifier?.urgency || '' }}\",\n    \"fit\": \"{{ $json.classifier?.fit || '' }}\",\n    \"objections\": {{ JSON.stringify($json.classifier?.objections || []) }},\n    \"summary\": \"{{ $json.classifier?.summary || '' }}\",\n    \"route_hint\": \"{{ $json.classifier?.route_hint || 'SDR' }}\"\n  },\n  \"crm_context\": {\n    \"score\": {{ $json.crm?.score || 0 }},\n    \"tags\": {{ JSON.stringify($json.crm?.tags || []) }},\n    \"new_funnel_stage\": \"{{ $json.crm?.funnel_stage || 'novo' }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "91de4c00-abae-47ab-be3c-75a513989379",
+      "name": "Preparar Contexto SDR",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3168,
+        1840
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"lead_ref\": \"{{ $json.lead?.ref || '' }}\",\n  \"lead_id\": \"{{ $json.lead?.id || '' }}\",\n  \"nome\": \"{{ $json.lead?.name || '' }}\",\n  \"stage\": \"{{ $json.lead?.stage || 'novo' }}\",\n  \"ai_enabled\": {{ $json.lead?.ai_enabled || false }},\n  \"product_interest\": \"{{ $json.lead?.product_interest || 'não informado' }}\",\n  \"cidade\": \"{{ $json.lead?.city || 'não informada' }}\",\n  \"cep\": \"{{ $json.lead?.cep || 'não informado' }}\",\n  \"canal\": \"{{ $json.lead?.channel || 'whatsapp' }}\",\n  \"texto\": \"{{ $json.message?.text || '' }}\",\n  \"intent\": \"{{ $json.classifier?.intent || '' }}\",\n  \"interest_level\": \"{{ $json.classifier?.interest_level || '' }}\",\n  \"urgency\": \"{{ $json.classifier?.urgency || '' }}\",\n  \"fit\": \"{{ $json.classifier?.fit || '' }}\",\n  \"summary\": \"{{ $json.classifier?.summary || '' }}\",\n  \"route_hint\": \"{{ $json.classifier?.route_hint || '' }}\",\n  \"score\": {{ $json.crm?.score || 0 }},\n  \"contexto_closer\": \"{{ \n    'LEAD:\\\\n' +\n    'Nome: ' + ($json.lead?.name || '') + '\\\\n' +\n    'Stage: ' + ($json.lead?.stage || 'novo') + '\\\\n' +\n    'Produto de interesse: ' + ($json.lead?.product_interest || 'não informado') + '\\\\n' +\n    'Cidade: ' + ($json.lead?.city || 'não informada') + '\\\\n' +\n    'CEP: ' + ($json.lead?.cep || 'não informado') + '\\\\n\\\\n' +\n    'MENSAGEM DO CLIENTE:\\\\n' +\n    ($json.message?.text || '') + '\\\\n\\\\n' +\n    'CLASSIFICAÇÃO:\\\\n' +\n    'Intent: ' + ($json.classifier?.intent || '') + '\\\\n' +\n    'Urgência: ' + ($json.classifier?.urgency || '') + '\\\\n' +\n    'Score: ' + ($json.crm?.score || 0)\n  }}\"\n}",
+        "options": {}
+      },
+      "id": "8b9da540-413b-4cd4-a0e2-d19b02d514f7",
+      "name": "Preparar Contexto Closer",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4784,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1ff129bb-f849-4f86-afe6-bf007295d0d8",
+              "name": "lead_ref",
+              "value": "={{ $json.lead_ref }}",
+              "type": "number"
+            },
+            {
+              "id": "6c095543-1039-45dc-922c-64315038532f",
+              "name": "nome",
+              "value": "={{ $('Edit Fields').item.json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "607ed76f-8c58-46f0-9409-a5e89880436c",
+              "name": "Contexto Kb",
+              "value": "={{ $('Deduplicar').item.json.contexto_kb }}",
+              "type": "string"
+            },
+            {
+              "id": "beaff3e1-145d-4e52-8edf-f21b499d340d",
+              "name": "produto",
+              "value": "={{ $json.produto || $('Edit Fields').item.json.produto || null }}",
+              "type": "string"
+            },
+            {
+              "id": "c5555d44-743f-4ff3-a854-5f9d74df8c6c",
+              "name": "stage",
+              "value": "={{ $json.Stage }}",
+              "type": "string"
+            },
+            {
+              "id": "24e8d69c-2b98-4dfe-b516-5fbccf44ce83",
+              "name": "cep",
+              "value": "={{ $json.cidade || $('Edit Fields').item.json.cidade || null }}",
+              "type": "string"
+            },
+            {
+              "id": "0061d2a9-5268-4d3d-b1b1-6d3a0e447b1f",
+              "name": "cidade",
+              "value": "={{ $json.cidade || $('Edit Fields').item.json.cidade || null }}",
+              "type": "string"
+            },
+            {
+              "id": "b0ff9a9a-c884-48e2-8e74-501dfc5812b0",
+              "name": "Resposta",
+              "value": "={{ $json.reply || $json.raw_output || null }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9ac22723-ee2a-4bbc-b079-01db36933819",
+      "name": "Preparar Resposta SDR",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5712,
+        1840
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "lead_ref",
+              "value": "={{ $('Preparar Contexto Closer').item.json.lead_ref }}",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "message_id",
+              "value": "={{ 'ai_' + $now.toMillis() }}",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "sender_type",
+              "value": "ai",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "canal",
+              "value": "={{ $('Preparar Contexto Closer').item.json.canal }}",
+              "type": "string"
+            },
+            {
+              "id": "id-5",
+              "name": "texto",
+              "value": "={{ $json.reply }}",
+              "type": "string"
+            },
+            {
+              "id": "id-6",
+              "name": "tipo",
+              "value": "text",
+              "type": "string"
+            },
+            {
+              "id": "id-7",
+              "name": "status",
+              "value": "sent",
+              "type": "string"
+            },
+            {
+              "id": "id-8",
+              "name": "direction",
+              "value": "outbound",
+              "type": "string"
+            },
+            {
+              "id": "id-9",
+              "name": "agent_name",
+              "value": "Closer",
+              "type": "string"
+            },
+            {
+              "id": "id-10",
+              "name": "created_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "c3f65761-210b-4f28-ade7-a50c87c94cd3",
+              "name": "nome",
+              "value": "={{ $('Preparar Contexto Closer').item.json.nome }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9163cf5b-d7f5-466f-b234-1030f1f62ca4",
+      "name": "Preparar Resposta Closer",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5712,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "tableId": "messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "lead_ref",
+              "fieldValue": "={{ $json.lead_ref }}"
+            },
+            {
+              "fieldId": "message_id",
+              "fieldValue": "={{ 'ai_' + $now.toMillis() + '_' + $json.lead_ref }}"
+            },
+            {
+              "fieldId": "sender_type",
+              "fieldValue": "=chat gpt 4.1 - lite"
+            },
+            {
+              "fieldId": "canal",
+              "fieldValue": "=whatsapp"
+            },
+            {
+              "fieldId": "texto",
+              "fieldValue": "={{ $json.texto ||  $json.Resposta}}"
+            },
+            {
+              "fieldId": "direction",
+              "fieldValue": "=outbound"
+            },
+            {
+              "fieldId": "sender_type",
+              "fieldValue": "=agent"
+            },
+            {
+              "fieldId": "Lead_Stage",
+              "fieldValue": "={{\n$('Code in JavaScript').isExecuted\n  ? $('Code in JavaScript').item.json.stage\n  : (\n      $('Edit Fields').isExecuted\n        ? $('Edit Fields').item.json.Stage\n        : 'novo'\n    )\n}}"
+            },
+            {
+              "fieldId": "nome",
+              "fieldValue": "={{ $json.nome }}"
+            }
+          ]
+        }
+      },
+      "id": "ec07f66e-4971-49bf-bd75-a0274742569a",
+      "name": "Salvar Resposta IA",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        5936,
+        1616
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "4ZZ75vDJ5j4YIMZt",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1qkgGKwT6sRuylLggrficVNImypFvpbYNYN7pKOwCg78/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "FAQ",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -320,
+        2544
+      ],
+      "id": "2fa7aef8-afb8-406b-9504-9efa66342901",
+      "name": "Get FAQ Data",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E5EnoGSQA8JIvuiR",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"pageContent\": \"Tipo: {{ ($json.tipo || 'faq').toLowerCase() }}\\nCategoria: {{ $json.categoria || 'geral' }}\\nProduto: {{ $json.produto || 'geral' }}\\nIntenção: {{ $json.intencao || 'duvida_geral' }}\\nPergunta: {{ $json.titulo }}\\nResposta: {{ $json.conteudo }}{{ $json.link ? ('\\nLink: ' + $json.link) : '' }}\",\n  \"metadata\": {\n    \"kb_id\": \"{{ $json.kb_id || '' }}\",\n    \"prioridade\": {{ Number($json.prioridade || 99) }},\n    \"row_number\": {{ Number($json.row_number || 0) }},\n    \"tipo\": \"{{ ($json.tipo || 'faq').toLowerCase() }}\",\n    \"categoria\": \"{{ $json.categoria || 'geral' }}\",\n    \"intencao\": \"{{ $json.intencao || 'duvida_geral' }}\",\n    \"produto\": \"{{ $json.produto || 'geral' }}\",\n    \"status\": \"{{ $json.status || 'ATIVO' }}\",\n    \"link\": {{ $json.link ? '\"' + $json.link + '\"' : 'null' }}\n  }\n}",
+        "options": {}
+      },
+      "id": "e2216bae-90ba-4440-976c-fef05a0f3680",
+      "name": "Format FAQ for Vector Store",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -96,
+        2544
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "ec72cb39-2180-4b25-9ddb-ff519eb943e2",
+      "name": "Load FAQ Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -544,
+        2544
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"lead_id\": \"{{ $json.lead_id }}\",\n  \"nome\": \"{{ $json.nome }}\",\n  \"text\": \"{{ $json.text}}\",\n  \"msg_id\": \"{{ $json.msg_id }}\",\n  \"timestamp\": \"{{ $json.timestamp }}\",\n  \"has_text\": {{ $json.has_text }},\n  \"has_media\": {{ $json.has_media }},\n  \"media_id\": \"{{ $json.media_id || '' }}\",\n  \"direct_url\": \"{{ $json.direct_url || '' }}\",\n  \"filename\": \"{{ $json.filename || '' }}\",\n  \"is_heic\": {{ $json.is_heic || false }}\n}",
+        "options": {}
+      },
+      "id": "12301708-da1d-43b5-bb78-02a03f7907fb",
+      "name": "Normalize Message Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        352,
+        1776
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "=leads",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "=lead_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.lead_id }}"
+            }
+          ]
+        }
+      },
+      "id": "c17cbd0c-a9d0-4515-a57c-845701b4e37a",
+      "name": "Check Lead Exists",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        576,
+        1776
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "4ZZ75vDJ5j4YIMZt",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.id }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "rightValue": 0
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ee831d2e-966d-40c6-b796-698e8529a022",
+      "name": "Lead Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        800,
+        1776
+      ]
+    },
+    {
+      "parameters": {
+        "tableId": "leads",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "lead_id",
+              "fieldValue": "={{ $json.lead_id }}"
+            },
+            {
+              "fieldId": "nome",
+              "fieldValue": "={{ $json.nome }}"
+            },
+            {
+              "fieldId": "ultima_mensagem",
+              "fieldValue": "={{ $json.ultima_mensagem }}"
+            },
+            {
+              "fieldId": "last_update",
+              "fieldValue": "={{ $json.last_update }}"
+            }
+          ]
+        }
+      },
+      "id": "c90ffc9e-4c3c-4dcd-81a4-6dfca89617ef",
+      "name": "Create New Lead",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1248,
+        1872
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "4ZZ75vDJ5j4YIMZt",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "leads",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Lead Exists').item.json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "nome",
+              "fieldValue": "={{ $json.nome }}"
+            },
+            {
+              "fieldId": "ultima_mensagem",
+              "fieldValue": "={{ $json.ultima_mensagem }}"
+            },
+            {
+              "fieldId": "last_update",
+              "fieldValue": "={{ $json.last_update }}"
+            }
+          ]
+        }
+      },
+      "id": "9d563b39-9af9-4721-80eb-748082fda1e9",
+      "name": "Update Existing Lead",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1248,
+        1680
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "4ZZ75vDJ5j4YIMZt",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"lead_id\": \"{{ $('Normalize Message Data').item.json.lead_id }}\",\n  \"nome\": \"{{ $('Normalize Message Data').item.json.nome }}\",\n  \"ultima_mensagem\": \"{{ $('Normalize Message Data').item.json.text }}\",\n  \"last_update\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "8037333b-85d0-4eaf-a030-4cc5b862bd50",
+      "name": "Prepare New Lead Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1024,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n   \"id\": {{ $item(\"0\").$node[\"Lead Exists?\"].json[\"id\"] }},\n  \"nome\": \"{{ $('Normalize Message Data').item.json.nome }}\",\n  \"ultima_mensagem\": \"{{ $('Normalize Message Data').item.json.text }}\",\n  \"last_update\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "89911509-a58d-4666-be01-675b287e2680",
+      "name": "Prepare Lead Update Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1024,
+        1680
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "lead_ref",
+              "value": "={{ $json.lead_ref }}",
+              "type": "number"
+            },
+            {
+              "id": "id-2",
+              "name": "message_id",
+              "value": "={{ $('Normalize Message Data').item.json.msg_id }}",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "sender_type",
+              "value": "lead",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "canal",
+              "value": "={{ $('Normalize Message Data').item.json.canal || 'whatsapp' }}",
+              "type": "string"
+            },
+            {
+              "id": "id-5",
+              "name": "texto",
+              "value": "={{ $('Normalize Message Data').item.json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "id-6",
+              "name": "tipo",
+              "value": "text",
+              "type": "string"
+            },
+            {
+              "id": "id-7",
+              "name": "status",
+              "value": "received",
+              "type": "string"
+            },
+            {
+              "id": "id-8",
+              "name": "direction",
+              "value": "inbound",
+              "type": "string"
+            },
+            {
+              "id": "id-9",
+              "name": "created_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "id-10",
+              "name": "stage",
+              "value": "={{ $json.stage }}",
+              "type": "string"
+            },
+            {
+              "id": "id-11",
+              "name": "lead_id",
+              "value": "={{ $json.lead_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "07fa570d-eea5-4a48-ae2a-16fab03309aa",
+      "name": "Prepare Message Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1920,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "tableId": "messages",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "lead_ref",
+              "fieldValue": "={{ $json.lead_ref }}"
+            },
+            {
+              "fieldId": "texto",
+              "fieldValue": "={{ $json.texto }}"
+            },
+            {
+              "fieldId": "created_at",
+              "fieldValue": "={{ $item(\"0\").$node[\"Prepare Message Data\"].json[\"created_at\"] }}"
+            },
+            {
+              "fieldId": "message_id",
+              "fieldValue": "={{ $item(\"0\").$node[\"Prepare Message Data\"].json[\"message_id\"] }}"
+            },
+            {
+              "fieldId": "sender_type",
+              "fieldValue": "={{ $json.sender_type || 'lead' }}"
+            },
+            {
+              "fieldId": "canal",
+              "fieldValue": "={{ $item(\"0\").$node[\"Prepare Message Data\"].json[\"canal\"] }}"
+            },
+            {
+              "fieldId": "direction",
+              "fieldValue": "={{ $item(\"0\").$node[\"Prepare Message Data\"].json[\"direction\"] }}"
+            },
+            {
+              "fieldId": "Lead_Stage",
+              "fieldValue": "={{ $json.stage }}"
+            },
+            {
+              "fieldId": "nome",
+              "fieldValue": "={{ $('Unify Lead Data').item.json.nome }}"
+            }
+          ]
+        }
+      },
+      "id": "4e4fadc3-c4e6-4b33-bdad-1326730e5add",
+      "name": "Insert Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2144,
+        1872
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "4ZZ75vDJ5j4YIMZt",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "lead_ref",
+              "value": "={{ $('Update Existing Lead').item.json.id }}",
+              "type": "number"
+            },
+            {
+              "id": "id-2",
+              "name": "lead_id",
+              "value": "={{ $('Normalize Message Data').item.json.lead_id }}",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "ai_enabled",
+              "value": "={{ $('Check Lead Exists').item.json.ai_enabled || true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "id-5",
+              "name": "nome",
+              "value": "={{ $('Normalize Message Data').item.json.nome }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dfd5f894-77ef-4286-8428-59faa1129def",
+      "name": "Normalize Lead After Update",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1472,
+        1680
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "lead_ref",
+              "value": "={{ $('Create New Lead').item.json.id }}",
+              "type": "number"
+            },
+            {
+              "id": "id-2",
+              "name": "lead_id",
+              "value": "={{ $('Normalize Message Data').item.json.lead_id }}",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "stage",
+              "value": "={{$json.stage|| 'nao qualificado' }}",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "ai_enabled",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "id-5",
+              "name": "nome",
+              "value": "={{ $('Normalize Message Data').item.json.nome }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ec9ab679-0063-4d97-9fae-211f313aef69",
+      "name": "Normalize Lead After Create",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1472,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"lead_ref\": {{\n    $('Update Existing Lead').isExecuted\n      ? $('Update Existing Lead').item.json.id\n      : $('Create New Lead').item.json.id\n  }},\n\n  \"lead_id\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.lead_id || '')\n      : ($('Create New Lead').item.json.lead_id || '')\n  }}\",\n\n  \"nome\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.nome || '')\n      : ($('Create New Lead').item.json.nome || '')\n  }}\",\n\n  \"stage\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.stage || 'novo')\n      : ($('Create New Lead').item.json.stage || 'novo')\n  }}\",\n\n  \"ai_enabled\": {{\n    $('Update Existing Lead').isExecuted\n      ? Boolean($('Update Existing Lead').item.json.ai_enabled)\n      : Boolean($('Create New Lead').item.json.ai_enabled)\n  }},\n\n  \"interesse_produto\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.interesse_produto || '')\n      : ($('Create New Lead').item.json.interesse_produto || '')\n  }}\",\n\n  \"cidade\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.cidade || '')\n      : ($('Create New Lead').item.json.cidade || '')\n  }}\",\n\n  \"cep\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.cep || '')\n      : ($('Create New Lead').item.json.cep || '')\n  }}\",\n\n  \"canal\": \"{{ $('Normalize Message Data').item.json.canal || 'whatsapp' }}\",\n\n  \"mensagem\": \"{{ $('Normalize Message Data').item.json.text }}\",\n\n  \"ultima_mensagem\": \"{{ $('Normalize Message Data').item.json.mensagem || '' }}\",\n\n  \"created_at\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.created_at || '')\n      : ($('Create New Lead').item.json.created_at || '')\n  }}\",\n\n  \"updated_at\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.updated_at || '')\n      : ($('Create New Lead').item.json.updated_at || '')\n  }}\"\n}",
+        "options": {}
+      },
+      "id": "2d50d5a5-288b-42a2-ae9c-0f319301564b",
+      "name": "Unify Lead Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1696,
+        1776
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "={{ $('WhatsApp Trigger').item.json.metadata.phone_number_id }}",
+        "recipientPhoneNumber": "={{ $('WhatsApp Trigger').item.json.contacts[0].wa_id }}",
+        "textBody": "={{ $json.message }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        6384,
+        1712
+      ],
+      "id": "2f52da2c-6444-4a56-a3ca-672d286eb391",
+      "name": "Send message",
+      "webhookId": "45cbd18e-5d42-4efe-a464-04c1be0678bf",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "86wjjSQKLF41HmuD",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "to",
+              "value": "={{ $('WhatsApp Trigger').item.json.contacts[0].wa_id }}",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "message",
+              "value": "={{ $json.texto }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5d854ca9-6cd0-4505-833c-592d63c41e6d",
+      "name": "Preparar Envio WhatsApp",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6160,
+        1712
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ],
+        "options": {}
+      },
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        -544,
+        1680
+      ],
+      "id": "3273604d-23ce-46ac-ac19-5f69e659d6b9",
+      "name": "WhatsApp Trigger",
+      "webhookId": "4d179da4-fb6c-4924-86c2-56af2acbcbcd",
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "Jgzde9lVOwk34O0n",
+          "name": "WhatsApp OAuth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json || {};\nconst textRaw = item.conversation?.last_message || item.texto || \"\";\nconst text = String(textRaw).trim();\nconst lower = text.toLowerCase();\n\n// =========================\n// HELPERS\n// =========================\nfunction clean(value) {\n  if (!value) return null;\n\n  const t = String(value).trim();\n  const l = t.toLowerCase();\n\n  const invalid = [\n    \"não informado\",\n    \"nao informado\",\n    \"não informada\",\n    \"nao informada\",\n    \"sem histórico\",\n    \"sem historico\",\n    \"[null]\",\n    \"null\"\n  ];\n\n  if (invalid.includes(l)) return null;\n\n  return t;\n}\n\nfunction cap(str) {\n  if (!str) return null;\n  return str\n    .split(\" \")\n    .filter(Boolean)\n    .map(s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase())\n    .join(\" \");\n}\n\nfunction cleanCep(value) {\n  if (!value) return null;\n  const digits = String(value).replace(/\\D/g, \"\");\n  return digits || null;\n}\n\n// =========================\n// CAMPOS EXTRAÍDOS\n// =========================\nlet nome = null;\nlet produto = null;\nlet cidade = null;\nlet cep = null;\nlet endereco = null;\n\n// =========================\n// NOME\n// =========================\nlet m =\n  text.match(/\\bmeu nome é ([A-Za-zÀ-ÿ]+(?:\\s+[A-Za-zÀ-ÿ]+){0,2})/i) ||\n  text.match(/\\beu sou ([A-Za-zÀ-ÿ]+(?:\\s+[A-Za-zÀ-ÿ]+){0,2})/i) ||\n  text.match(/\\bsou ([A-Za-zÀ-ÿ]+(?:\\s+[A-Za-zÀ-ÿ]+){0,2})/i) ||\n  text.match(/^(oi|olá|ola|bom dia|boa tarde|boa noite)\\s+([A-Za-zÀ-ÿ]+)/i);\n\nif (m) {\n  nome = cap(m[2] || m[1]);\n}\n\n// =========================\n// PRODUTO (ROUPAS)\n// =========================\nconst produtosRoupas = [\n  \"blusa\",\n  \"camiseta\",\n  \"vestido\",\n  \"conjunto\",\n  \"tricot\",\n  \"casaco\",\n  \"jaqueta\",\n  \"calça\",\n  \"short\",\n  \"saia\",\n  \"roupa\",\n  \"moda\"\n];\n\nfor (const p of produtosRoupas) {\n  if (lower.includes(p)) {\n    produto = cap(p);\n    break;\n  }\n}\n\n// =========================\n// CIDADE (EVITA PEGAR FRASES COMO \"qual a localização\")\n// =========================\nm =\n  text.match(/\\bsou de ([A-Za-zÀ-ÿ\\s\\-]{2,40})$/i) ||\n  text.match(/\\bmoro em ([A-Za-zÀ-ÿ\\s\\-]{2,40})$/i) ||\n  text.match(/\\bestou em ([A-Za-zÀ-ÿ\\s\\-]{2,40})$/i);\n\nif (m) {\n  cidade = cap(m[1].trim());\n}\n\n// =========================\n// CEP\n// =========================\nm = text.match(/\\b\\d{5}-?\\d{3}\\b/);\nif (m) {\n  cep = cleanCep(m[0]);\n}\n\n// =========================\n// ENDEREÇO\n// =========================\nm = text.match(\n  /\\b(rua|r\\.|avenida|av\\.|travessa|trav\\.|alameda)\\s+[A-Za-zÀ-ÿ0-9\\s,\\-]{3,80}/i\n);\n\nif (m) {\n  endereco = cap(m[0].trim());\n}\n\n// =========================\n// CONTEXTO LIMPO PARA SDR\n// =========================\nreturn [\n  {\n    json: {\n      contexto_kb: item.contexto_kb || \"\",\n\n      lead_context: {\n        name: clean(item.lead_context?.name),\n        id: item.lead_context?.id || null,\n        ref: item.lead_context?.ref || null,\n        product_interest: clean(item.lead_context?.product_interest),\n        current_stage: clean(item.lead_context?.current_stage) || \"novo\",\n        channel: clean(item.lead_context?.channel),\n        city: clean(item.lead_context?.city),\n        cep: cleanCep(item.lead_context?.cep)\n      },\n\n      conversation: {\n        last_message: text,\n        history: clean(item.conversation?.history)\n      },\n\n      detected_fields: {\n        nome,\n        produto,\n        cidade,\n        cep,\n        endereco\n      }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3392,
+        1760
+      ],
+      "id": "2955269e-f93a-4773-bf2f-41ea80c0c93a",
+      "name": "Extrair campos"
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "memoryKey": {
+          "__rl": true,
+          "value": "vector",
+          "mode": "id"
+        },
+        "prompt": "={{\n[\n  'Lead: ' + ($json.lead_context?.name || 'não informado'),\n  'Produto: ' + ($json.detected_fields?.produto || 'geral'),\n  'Intenção: ' + ($json.classification?.intent || 'duvida_geral'),\n  'Mensagem: ' + ($json.conversation?.last_message || '')\n].join('\\n')\n}}\nSe não houver contexto relevante da base de conhecimento:\n- responda normalmente\n- continue o fluxo comercial",
+        "topK": 20
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.3,
+      "position": [
+        3616,
+        1616
+      ],
+      "id": "94ae8615-2147-4a15-ba6f-a88ae298cd3c",
+      "name": "Simple Vector Store"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "c1f3ce18-859e-4583-b167-0096a2c1de23",
+      "name": "Merge Contexto + Stage + KB",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        4000,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "leads",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.lead_ref }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "interesse_produto",
+              "fieldValue": "={{ $('Preparar Resposta SDR').item.json.produto }}"
+            },
+            {
+              "fieldId": "stage",
+              "fieldValue": "={{ $json.Lead_Stage }}"
+            },
+            {
+              "fieldId": "interesse_produto",
+              "fieldValue": "={{ $('Finalize Funnel Decision').item.json.produto }}"
+            },
+            {
+              "fieldId": "cep",
+              "fieldValue": "={{ $('Finalize Funnel Decision').item.json.cep }}"
+            },
+            {
+              "fieldId": "cidade",
+              "fieldValue": "={{ $('Finalize Funnel Decision').item.json.cidade }}"
+            },
+            {
+              "fieldId": "ultima_mensagem",
+              "fieldValue": "={{ $json.texto }}"
+            },
+            {
+              "fieldId": "nome",
+              "fieldValue": "={{ $json.nome }}"
+            }
+          ]
+        }
+      },
+      "id": "5e991dd7-8284-4acb-9aee-555192d2ee2d",
+      "name": "Atualizar Lead Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        6160,
+        1520
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "4ZZ75vDJ5j4YIMZt",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const docs = $input.all();\n\nconst seen = new Set();\nconst chunks = [];\n\nfor (const item of docs) {\n  const original = item.json.document?.pageContent?.trim();\n  if (!original) continue;\n\n  const normalized = original\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  if (seen.has(normalized)) continue;\n\n  seen.add(normalized);\n  chunks.push(original);\n}\n\nreturn [\n  {\n    json: {\n      contexto_kb: chunks.join('\\n\\n')\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3968,
+        1616
+      ],
+      "id": "2dab2a22-1267-4a45-94a5-d16b9d196057",
+      "name": "Deduplicar"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $json.output;\n\n// 1. Se vier como string, parseia\nif (typeof raw === 'string') {\n  try {\n    raw = JSON.parse(raw);\n  } catch (e) {\n    return [{\n      json: {\n        error: 'INVALID_JSON',\n        raw_output: $json.output\n      }\n    }];\n  }\n}\n\n// 2. Normaliza estrutura\nreturn [{\n  json: {\n    reply: raw.reply || null,\n    name: raw.detected_fields?.nome || null,\n    produto: raw.detected_fields?.produto || null,\n    cidade: raw.detected_fields?.cidade || null,\n    cep: raw.detected_fields?.cep || null,\n    endereco: raw.detected_fields?.endereco || null,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4880,
+        1984
+      ],
+      "id": "cf773f2e-b4e1-4428-8515-a5c03ad78449",
+      "name": "normalize"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f49c300b-670f-4284-a9ee-d5f3c5f7d6de",
+              "name": "lead_id",
+              "value": "={{ $('Classificar Agente').item.json.lead.id }}",
+              "type": "string"
+            },
+            {
+              "id": "249a3bdd-b5fb-4e4e-b28d-99af9a6cc804",
+              "name": "lead_ref",
+              "value": "={{ $('Map Input Classifier').item.json.lead_ref }}",
+              "type": "number"
+            },
+            {
+              "id": "48e035b0-55fc-4ae3-bcdb-f86eb81463a8",
+              "name": "name",
+              "value": "={{ $json.lead_context.name }}",
+              "type": "string"
+            },
+            {
+              "id": "a657cfaf-0584-47e9-bc56-336c63397c96",
+              "name": "produto",
+              "value": "={{ $json.lead_context.product_interest }}",
+              "type": "string"
+            },
+            {
+              "id": "9ec78c30-3688-4c42-9eb8-3050e56fa105",
+              "name": "Stage",
+              "value": "={{ $json.crm_context.new_funnel_stage }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4896,
+        1792
+      ],
+      "id": "72cf55c0-65c0-4399-a3bc-e8c2b26e1dc2",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        5200,
+        1840
+      ],
+      "id": "34453e10-2967-436c-8fe5-46e0fbf1ac27",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# PAPEL\n\nVocê é um classificador comercial de leads para um sistema de CRM inteligente.\n\nSua função é analisar o contexto completo do lead e retornar exclusivamente um JSON estruturado com informações comerciais relevantes.\n\nVocê NÃO responde ao cliente.\nVocê NÃO escreve texto explicativo.\nVocê NÃO adiciona comentários.\nVocê NÃO usa markdown.\n\nVocê apenas classifica o lead.\n\n---\n\n# OBJETIVO\n\nInterpretar com precisão:\n\n- intenção comercial atual\n- maturidade real do lead\n- estágio da jornada\n- sinais comerciais explícitos e implícitos\n- produto identificado no contexto\n- contexto logístico de compra\n- necessidade correta de roteamento\n\nE decidir corretamente entre:\n\n- SDR\n- CLOSER\n- FOLLOW_UP\n- SUPPORT\n- PRODUCT_SPEC\n\n---\n\n# CONTEXTO (INPUT)\n\nAnalise TODO o contexto disponível abaixo, e não apenas a última mensagem:\n\n{{ $json.classifier_input }}\n\n---\n\n# REGRA MESTRA DE CONTEXTO\n\nA última mensagem do lead NÃO deve ser interpretada de forma isolada quando houver histórico, estágio anterior, produto anterior, sinais anteriores de compra ou contexto já acumulado.\n\nVocê deve classificar com base em:\n\n1. mensagem atual\n2. histórico\n3. dados já conhecidos do lead\n4. estágio atual\n5. produto já mencionado anteriormente\n6. contexto comercial previamente conquistado\n\n---\n\n# REGRA CRÍTICA: NUNCA DIMINUIR O NÍVEL DO LEAD\n\nSe o lead já demonstrou interesse forte anteriormente, já falou de produto, preço, frete, pagamento, compra ou envio, uma mensagem curta posterior NÃO deve rebaixar o entendimento comercial.\n\nExemplos:\n\n- se antes perguntou preço e agora pergunta localização → continua lead comercial\n- se antes falou produto e agora manda “essa tem entrega?” → manter contexto do produto\n- se antes já mostrou intenção de compra, não tratar mensagem curta posterior como curiosidade fraca\n\nA mensagem atual pode:\n- manter o nível\n- aumentar o nível\n- refinar o contexto\n\nMas não deve reduzir o lead sem evidência forte.\n\n---\n\n# REGRA DE USO DO HISTÓRICO\n\nSe a mensagem atual for curta, vaga, ambígua ou aparentemente fraca, use o histórico e os dados anteriores para reconstruir a intenção real.\n\nExemplos de mensagens fracas que exigem leitura contextual:\n- “tem?”\n- “qual a localização?”\n- “quanto fica?”\n- “manda”\n- “essa aí”\n- “e o frete?”\n- “faz no pix?”\n- “qual prazo?”\n\nNesses casos:\n- recuperar produto anterior, se houver\n- recuperar intenção anterior, se houver\n- recuperar estágio já alcançado, se houver\n- manter coerência comercial\n\n---\n\n# REGRA DE PRESERVAÇÃO DE CONTEXTO\n\nConsidere como contexto válido e aproveitável:\n\n- produto de interesse já informado\n- cidade/CEP/endereço já informados\n- intenção já detectada antes\n- estágio atual do lead\n- histórico textual da conversa\n\nSe o produto já estiver presente no contexto anterior, ele continua válido até que o lead mude explicitamente.\n\nSe o lead já estiver em estágio avançado, não reclassifique como curiosidade inicial só porque a última mensagem é curta.\n\n---\n\n# INTENT (INTENÇÃO PRINCIPAL)\n\nUse SEMPRE uma destas opções:\n\nquer_preco_produto\nquer_preco_frete\nquer_condicao_pagamento\nquer_comprar\ninteresse_produto\ncomparando_opcoes\nduvida_geral\nfollow_up\nsuporte\nespecificacao_produto\nsem_intencao_clara\n\n---\n\n# REGRAS DE INTERPRETAÇÃO\n\n## PRODUTO\n\nConsidere produto identificado quando houver:\n\n- nome direto\n- categoria\n- referência implícita clara\n- produto já presente no histórico ou contexto anterior\n\nSe o produto já apareceu antes e não foi substituído, continue considerando que há produto identificado.\n\nSó considere produto desconhecido quando realmente não houver produto atual nem anterior utilizável.\n\n---\n\n## LOGÍSTICA / ENTREGA\n\nConsidere contexto logístico quando houver:\n\n- CEP\n- endereço\n- cidade + intenção de entrega/frete\n- referência clara a envio, prazo ou recebimento\n\nSe cidade, CEP ou endereço já estiverem no histórico/contexto, isso continua valendo.\n\n---\n\n## PREÇO\n\nPergunta de preço indica intenção comercial forte.\n\nSe houver produto identificado, isso pesa mais.\n\n---\n\n## PAGAMENTO\n\nPerguntas sobre parcelamento, desconto, PIX, condição ou negociação são sinais fortes de avanço comercial.\n\n---\n\n## COMPRA\n\nConsidere intenção de compra forte quando houver:\n\n- desejo explícito de comprar\n- pedido de fechamento\n- pagamento + produto\n- frete + produto\n- logística + decisão\n- sequência histórica que indique fechamento próximo\n\n---\n\n# INTEREST_LEVEL\n\nUse apenas:\n\nbaixo\nmedio\nalto\n\nRegras:\n\n- baixo = curiosidade leve e sem contexto comercial relevante\n- medio = interesse comercial inicial ou parcial\n- alto = intenção comercial clara, contexto consistente ou continuidade de avanço\n\n⚠️ Nunca usar \"baixo\" se houver, na mensagem atual OU no histórico:\n- produto identificado\n- preço\n- frete\n- CEP\n- endereço\n- pagamento\n- intenção de compra\n- estágio avançado\n- sinais comerciais já consolidados\n\n⚠️ Se o lead já vinha aquecido, preserve no mínimo \"medio\", mesmo que a última mensagem seja curta.\n\n---\n\n# URGENCY\n\nUse apenas:\n\nbaixa\nmedia\nalta\n\nRegras:\n\n- baixa = sem pressa aparente\n- media = está em conversa ativa\n- alta = quer resolver, comprar, pagar ou receber agora\n\nSe houver continuidade comercial ativa, não reduza para baixa sem evidência forte.\n\n---\n\n# FIT\n\nUse apenas:\n\nbom\nneutro\nruim\n\nRegras:\n\n- bom = lead compatível com a operação\n- neutro = informação insuficiente\n- ruim = claramente fora do público ou fora do escopo\n\n---\n\n# OBJECTIONS\n\nUse apenas se houver sinal claro:\n\nobjecao_preco\nobjecao_tempo\nobjecao_confianca\ncomparando_concorrente\nsem_resposta\n\nSe não houver → []\n\n---\n\n# ROUTE_HINT\n\nUse apenas:\n\nSDR\nCLOSER\nFOLLOW_UP\nSUPPORT\nPRODUCT_SPEC\n\n---\n\n# REGRA CRÍTICA DE ROTEAMENTO\n\n## CLOSER\n\nUse CLOSER APENAS quando houver maturidade real para fechamento.\n\nCondição mínima obrigatória:\n\n- produto identificado no contexto atual ou histórico\n\nE pelo menos uma das condições abaixo:\n\n- CEP informado\n- endereço informado\n- cidade + intenção de frete/entrega\n- intenção explícita de compra\n- condição de pagamento com contexto de decisão\n- lead claramente avançado no histórico\n\nImportante:\nUma mensagem curta posterior NÃO anula maturidade já construída.\n\n---\n\n## SDR\n\nUse SDR quando:\n\n- ainda falta descobrir produto\n- ainda falta contexto logístico\n- está em descoberta comercial\n- está em qualificação inicial ou intermediária\n- há dúvida comercial, mas não maturidade suficiente para fechamento\n\nSDR é o padrão seguro.\n\n---\n\n## FOLLOW_UP\n\nUse FOLLOW_UP quando:\n\n- não há avanço real\n- lead está frio\n- resposta é vaga e sem base contextual suficiente\n- depende de retomada futura\n\nNão usar FOLLOW_UP se houver contexto comercial ativo no histórico.\n\n---\n\n## SUPPORT\n\nUse SUPPORT quando houver:\n- problema\n- reclamação\n- pós-venda\n- suporte operacional\n\n---\n\n## PRODUCT_SPEC\n\nUse PRODUCT_SPEC quando houver:\n- dúvida técnica profunda\n- especificação técnica detalhada\n- comparação técnica avançada\n\n---\n\n# SUMMARY\n\nEscreva um resumo curto e objetivo contendo:\n\n- intenção principal\n- produto identificado ou ausência dele\n- contexto relevante herdado do histórico, se aplicável\n- próximo passo necessário\n\nO summary deve refletir o contexto completo, não apenas a última mensagem.\n\n---\n\n# REGRA FINAL DE CONSISTÊNCIA\n\nAntes de retornar, valide mentalmente:\n\n1. Estou usando apenas a última mensagem ou considerei o histórico inteiro?\n2. Estou apagando contexto anterior sem motivo?\n3. Estou rebaixando o lead sem evidência forte?\n4. O produto já existia antes e deveria continuar valendo?\n5. O stage atual sugere maturidade maior do que a última frase isolada aparenta?\n\nSe houver conflito entre mensagem fraca e histórico forte:\n→ priorize o contexto acumulado.\n\n---\n\n# FORMATO DE SAÍDA (OBRIGATÓRIO)\n\nRetorne SOMENTE JSON válido:\n\n{\n\"intent\": \"\",\n\"interest_level\": \"\",\n\"urgency\": \"\",\n\"fit\": \"\",\n\"objections\": [],\n\"summary\": \"\",\n\"route_hint\": \"\"\n}\n\n---\n\n# EXEMPLOS\n\nEntrada contextual:\nProduto anterior: Juliet\nHistórico: pediu preço ontem\nMensagem atual: \"qual a localização?\"\n\n{\n\"intent\": \"duvida_geral\",\n\"interest_level\": \"alto\",\n\"urgency\": \"media\",\n\"fit\": \"bom\",\n\"objections\": [],\n\"summary\": \"Lead segue em contexto comercial sobre produto já identificado e pediu localização para avançar.\",\n\"route_hint\": \"SDR\"\n}\n\n---\n\nEntrada contextual:\nProduto anterior: blusa modal\nCidade anterior: Canoas\nMensagem atual: \"e o frete?\"\n\n{\n\"intent\": \"quer_preco_frete\",\n\"interest_level\": \"alto\",\n\"urgency\": \"media\",\n\"fit\": \"bom\",\n\"objections\": [],\n\"summary\": \"Lead pediu frete mantendo contexto de produto e localização já iniciados.\",\n\"route_hint\": \"SDR\"\n}\n\n---\n\nEntrada contextual:\nProduto anterior: Juliet\nCEP já informado\nMensagem atual: \"tem desconto no pix?\"\n\n{\n\"intent\": \"quer_condicao_pagamento\",\n\"interest_level\": \"alto\",\n\"urgency\": \"media\",\n\"fit\": \"bom\",\n\"objections\": [\"objecao_preco\"],\n\"summary\": \"Lead com produto e logística já identificados perguntou condição de pagamento para avançar no fechamento.\",\n\"route_hint\": \"CLOSER\"\n}\n\n---\n\nEntrada contextual:\nMensagem atual: \"Qual a localização?\"\nSem produto anterior\nSem histórico comercial\n\n{\n\"intent\": \"duvida_geral\",\n\"interest_level\": \"medio\",\n\"urgency\": \"baixa\",\n\"fit\": \"neutro\",\n\"objections\": [],\n\"summary\": \"Lead pediu localização sem produto identificado e sem contexto comercial suficiente.\",\n\"route_hint\": \"SDR\"\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2368,
+        1680
+      ],
+      "id": "e4a7fd9d-2bcd-4d57-94c5-71f60454b4f8",
+      "name": "Classifier Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ==========================\n// COMPUTE SCORE & TAGS\n// ==========================\n\nconst classifierNode = $input.first().json || {};\nconst mapped = $items(\"Map Input Classifier\", 0, 0)?.[0]?.json || {};\nconst unified = $items(\"Unify Lead Data\", 0, 0)?.[0]?.json || {};\n\n// ==========================\n// NORMALIZAÇÃO DA SAÍDA DO CLASSIFIER\n// Suporta:\n// 1) saída estruturada direta\n// 2) { output: \"{...json...}\" }\n// 3) { output: {...} }\n// ==========================\n\nlet parsed = {};\n\ntry {\n  if (\n    classifierNode &&\n    typeof classifierNode === \"object\" &&\n    \"intent\" in classifierNode\n  ) {\n    parsed = classifierNode;\n  } else if (typeof classifierNode.output === \"string\") {\n    parsed = JSON.parse(classifierNode.output);\n  } else if (\n    classifierNode.output &&\n    typeof classifierNode.output === \"object\"\n  ) {\n    parsed = classifierNode.output;\n  } else {\n    parsed = {};\n  }\n} catch (error) {\n  parsed = {};\n}\n\n// ==========================\n// BASE CONSOLIDADA\n// prioridade:\n// classifier > mapped > unified\n// ==========================\n\nconst base = {\n  ...unified,\n  ...mapped,\n  ...parsed\n};\n\n// ==========================\n// HELPERS\n// ==========================\n\nfunction normalizeText(value) {\n  return (value ?? \"\").toString().trim();\n}\n\nfunction normalizeLower(value) {\n  return normalizeText(value).toLowerCase();\n}\n\nfunction addTag(tag, tags) {\n  if (tag && !tags.includes(tag)) tags.push(tag);\n}\n\n// ==========================\n// CAMPOS PRINCIPAIS\n// ==========================\n\nconst intent = normalizeText(base.intent);\nconst interest = normalizeLower(base.interest_level);\nconst urgency = normalizeLower(base.urgency);\nconst fit = normalizeLower(base.fit);\nconst summary = normalizeText(base.summary);\nconst objections = Array.isArray(base.objections) ? base.objections : [];\n\n// lead data\nconst leadRef = base.lead_ref ?? base.ref ?? null;\nconst leadId = base.lead_id ?? base.id ?? null;\nconst leadName = normalizeText(base.lead_name || base.name || base.nome) || null;\nconst leadStage = normalizeText(base.lead_stage || base.stage || base.current_stage) || \"novo\";\nconst aiEnabled = base.ai_enabled ?? true;\nconst productInterest = normalizeText(\n  base.product_interest || base.productInterest || base.interesse_produto\n) || null;\nconst city = normalizeText(base.city || base.cidade) || null;\nconst cep = normalizeText(base.cep) || null;\nconst channel = normalizeText(base.channel || base.canal) || null;\n\n// message data\nconst messageText = normalizeText(\n  base.last_message ||\n  base.mensagem ||\n  base.ultima_mensagem ||\n  base.message ||\n  base.text\n);\n\nconst classifierInput = normalizeText(base.classifier_input);\n\n// ==========================\n// SCORE + TAGS\n// ==========================\n\nlet score = 0;\nconst tags = [];\n\n// --------------------------\n// INTENT\n// --------------------------\n\nswitch (intent) {\n  case \"quer_preco_frete\":\n    score += 30;\n    addTag(\"frete\", tags);\n    addTag(\"intencao_compra\", tags);\n    break;\n\n  case \"quer_preco_produto\":\n    score += 25;\n    addTag(\"preco_produto\", tags);\n    addTag(\"intencao_compra\", tags);\n    break;\n\n  case \"quer_condicao_pagamento\":\n    score += 30;\n    addTag(\"condicao_pagamento\", tags);\n    addTag(\"negociacao\", tags);\n    break;\n\n  case \"quer_comprar\":\n    score += 40;\n    addTag(\"compra_direta\", tags);\n    addTag(\"intencao_compra\", tags);\n    addTag(\"lead_quente\", tags);\n    break;\n\n  case \"interesse_produto\":\n    score += 15;\n    addTag(\"interesse_produto\", tags);\n    break;\n\n  case \"comparando_opcoes\":\n    score += 10;\n    addTag(\"comparando_opcoes\", tags);\n    break;\n\n  case \"duvida_geral\":\n    score += 5;\n    addTag(\"duvida_geral\", tags);\n    break;\n\n  case \"follow_up\":\n    score += 5;\n    addTag(\"follow_up\", tags);\n    break;\n\n  case \"suporte\":\n    addTag(\"suporte\", tags);\n    break;\n\n  case \"especificacao_produto\":\n    score += 10;\n    addTag(\"especificacao_produto\", tags);\n    break;\n\n  case \"sem_intencao_clara\":\n    addTag(\"sem_intencao_clara\", tags);\n    break;\n}\n\n// --------------------------\n// INTEREST\n// --------------------------\n\nif (interest === \"alto\") {\n  score += 20;\n  addTag(\"lead_quente\", tags);\n} else if (interest === \"medio\") {\n  score += 10;\n  addTag(\"lead_morno\", tags);\n} else if (interest === \"baixo\") {\n  addTag(\"lead_frio\", tags);\n}\n\n// --------------------------\n// URGENCY\n// --------------------------\n\nif (urgency === \"alta\") {\n  score += 20;\n  addTag(\"urgencia_alta\", tags);\n} else if (urgency === \"media\") {\n  score += 10;\n  addTag(\"urgencia_media\", tags);\n} else if (urgency === \"baixa\") {\n  addTag(\"urgencia_baixa\", tags);\n}\n\n// --------------------------\n// FIT\n// --------------------------\n\nif (fit === \"bom\") {\n  score += 15;\n  addTag(\"fit_bom\", tags);\n} else if (fit === \"neutro\") {\n  score += 5;\n  addTag(\"fit_neutro\", tags);\n} else if (fit === \"ruim\") {\n  addTag(\"fit_ruim\", tags);\n}\n\n// --------------------------\n// DADOS ÚTEIS DO LEAD\n// --------------------------\n\nif (productInterest) addTag(\"produto_identificado\", tags);\nif (city) addTag(\"cidade_detectada\", tags);\nif (cep) {\n  addTag(\"cep_detectado\", tags);\n  score += 10;\n}\n\n// CEP vindo da mensagem\nif (!cep && /\\b\\d{8}\\b/.test(messageText)) {\n  addTag(\"cep_detectado\", tags);\n  score += 10;\n}\n\n// --------------------------\n// OBJECTIONS\n// --------------------------\n\nfor (const obj of objections) {\n  addTag(obj, tags);\n\n  if (obj === \"objecao_preco\") score -= 10;\n  if (obj === \"objecao_tempo\") score -= 5;\n  if (obj === \"objecao_confianca\") score -= 15;\n  if (obj === \"comparando_concorrente\") score -= 5;\n  if (obj === \"sem_resposta\") score -= 10;\n}\n\n// --------------------------\n// LIMITADOR\n// --------------------------\n\nscore = Math.max(0, Math.min(score, 100));\n\n// ==========================\n// FUNNEL STAGE\n// ==========================\n\nlet funnel_stage = \"novo\";\nif (score > 20) funnel_stage = \"contatado\";\nif (score > 40) funnel_stage = \"engajado\";\nif (score > 60) funnel_stage = \"qualificado\";\nif (score > 80) funnel_stage = \"oportunidade\";\n\n// ==========================\n// ROUTE HINT\n// prioridade do classifier\n// upgrade controlado apenas se fizer sentido\n// ==========================\n\nlet route_hint = normalizeText(base.route_hint) || \"SDR\";\n\nif (\n  route_hint === \"SDR\" &&\n  score > 80 &&\n  productInterest &&\n  (\n    intent === \"quer_comprar\" ||\n    intent === \"quer_preco_produto\" ||\n    intent === \"quer_condicao_pagamento\" ||\n    intent === \"quer_preco_frete\"\n  )\n) {\n  route_hint = \"CLOSER\";\n}\n\n// ==========================\n// OUTPUT\n// ==========================\n\nreturn [\n  {\n    json: {\n      lead: {\n        ref: leadRef,\n        id: leadId,\n        name: leadName,\n        stage: leadStage,\n        ai_enabled: aiEnabled,\n        product_interest: productInterest,\n        city,\n        cep,\n        channel\n      },\n      message: {\n        text: messageText,\n        classifier_input: classifierInput\n      },\n      classifier: {\n        intent,\n        interest_level: interest || null,\n        urgency: urgency || null,\n        fit: fit || null,\n        objections,\n        summary,\n        route_hint\n      },\n      crm: {\n        score,\n        tags,\n        funnel_stage\n      }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        1680
+      ],
+      "id": "1ddd2381-a250-48c7-89f6-3daa5feda748",
+      "name": "Compute Score & Tags"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nconst score = item.crm_context?.score || 0;\nconst intent = item.classification?.intent || \"\";\nconst routeHint = item.classification?.route_hint || \"SDR\";\nconst stage = item.stage_decision?.new_funnel_stage || \"novo\";\n\nlet action = \"send_to_sdr\";\nlet priority = \"medium\";\nlet handoffTo = \"SDR\";\nlet shouldUpdateStage = true;\nlet reason = \"Default\";\n\n// prioridade\nif (score >= 80) priority = \"high\";\nif (score < 40) priority = \"low\";\n\n// decisão principal\nif (intent === \"quer_comprar\") {\n  action = \"send_to_closer\";\n  handoffTo = \"Closer\";\n  priority = \"high\";\n  reason = \"Intenção direta de compra\";\n}\n\nelse if (intent === \"quer_condicao_pagamento\") {\n  action = \"send_to_closer\";\n  handoffTo = \"Closer\";\n  reason = \"Negociação\";\n}\n\nelse if (intent === \"suporte\") {\n  action = \"send_to_support\";\n  handoffTo = \"Support\";\n  shouldUpdateStage = false;\n  reason = \"Solicitação de suporte\";\n}\n\nelse if (score < 30) {\n  action = \"follow_up\";\n  handoffTo = \"SDR\";\n  reason = \"Lead frio\";\n}\n\nreturn [\n  {\n    json: {\n      ...item,\n      funnel_decision: {\n        action,\n        priority,\n        handoff_to: handoffTo,\n        should_update_stage: shouldUpdateStage,\n        target_stage: stage,\n        reason\n      }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5488,
+        1840
+      ],
+      "id": "94a722a2-0d1e-421d-a01d-e64af2104c23",
+      "name": "Finalize Funnel Decision"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-nano",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-nano"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        2384,
+        1904
+      ],
+      "id": "cdfe40a8-0ec3-4110-9ba8-bf3992530511",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "RGThohEfF9qZkcBj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = ($json.text || \"\").toString().trim();\n\nconst hasText = text.length > 0;\nconst hasMedia = !!$json.has_media;\n\nif (!hasText && !hasMedia) {\n  return [];\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      text\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        1776
+      ],
+      "id": "7bb2f70d-e6ab-41e0-928b-e3d7faaaa8d2",
+      "name": "Validation Messages"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =========================\n// HELPERS\n// =========================\nfunction asNull(value) {\n  return value === undefined || value === null || value === '' ? null : value;\n}\n\nfunction safeBool(value) {\n  return value === true;\n}\n\nfunction pick(...values) {\n  for (const v of values) {\n    if (v !== undefined && v !== null && v !== '') return v;\n  }\n  return null;\n}\n\n// =========================\n// INPUTS CORRETOS (FIXO)\n// =========================\n\n// 🔥 AGORA SIM — BUSCA PELO NODE CERTO\nconst closerNode = $('Agente Closer').first()?.json || {};\nconst contexto = $('Preparar Contexto Closer').first()?.json || {};\n\n// =========================\n// PARSE DO OUTPUT DO CLOSER\n// =========================\nlet raw = closerNode.output ?? closerNode;\n\n// array (n8n)\nif (Array.isArray(raw)) {\n  raw = raw[0]?.text || raw[0] || null;\n}\n\n// string\nif (typeof raw === 'string') {\n  try {\n    raw = JSON.parse(raw);\n  } catch {\n    raw = {\n      reply: raw,\n      produto: null,\n      link: null,\n      oferta_pix: false,\n      handoff_humano: false,\n      motivo_handoff: null\n    };\n  }\n}\n\n// wrapper\nif (raw && raw.output) {\n  raw = raw.output;\n}\n\n// fallback final\nif (!raw || typeof raw !== 'object') {\n  raw = {\n    reply: null,\n    produto: null,\n    link: null,\n    oferta_pix: false,\n    handoff_humano: false,\n    motivo_handoff: null\n  };\n}\n\n// =========================\n// CAMPOS CORRETOS\n// =========================\n\nconst lead_ref = asNull(contexto.lead_ref);\nconst lead_id = asNull(contexto.lead_id);\n\nconst name = asNull(pick(contexto.nome, contexto.name));\nconst canal = asNull(pick(contexto.canal, contexto.channel));\nconst stage = asNull(pick(contexto.stage, contexto.current_stage));\n\nconst produto_contexto = asNull(\n  pick(contexto.product_interest, contexto.produto)\n);\n\n// 🔥 CONSOLIDAÇÃO\nconst produto =  produto_contexto || null;\n\nconst city = asNull(pick(contexto.city, contexto.cidade));\nconst cep = asNull(contexto.cep);\n\nconst contexto_closer = asNull(contexto.contexto_closer);\n\n// 🔥 ESSA LINHA ERA UM DOS ERROS\nconst originalMessage = asNull(\n  pick(contexto.texto, contexto.message)\n);\n\n// =========================\n// OUTPUT FINAL\n// =========================\nreturn [\n  {\n    json: {\n      error: null,\n\n      lead_ref,\n      lead_id,\n      name,\n      canal,\n      stage,\n\n      produto,\n\n      city,\n      cep,\n\n      contexto_closer,\n\n      message: originalMessage,\n      reply: asNull(raw.reply),\n\n      link: asNull(raw.link),\n      oferta_pix: safeBool(raw.oferta_pix),\n\n      handoff_humano: safeBool(raw.handoff_humano),\n      motivo_handoff: asNull(raw.motivo_handoff)\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5392,
+        1360
+      ],
+      "id": "9e2ccc0b-403d-4863-9ff1-6d0f66a8af5b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "memoryKey": {
+          "__rl": true,
+          "value": "vector",
+          "mode": "id"
+        },
+        "clearStore": true
+      },
+      "id": "a5a2766c-7c7d-431a-aab6-44d774492d51",
+      "name": "Insert FAQ into Vector Store1",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.3,
+      "position": [
+        128,
+        2544
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "65a33306-d6d2-41d7-a4d5-ca2bf49a1b06",
+      "name": "Embeddings OpenAI Insert1",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        144,
+        2768
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "RGThohEfF9qZkcBj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "71aef53c-dce3-4ba4-90f6-cb4fe7ed6e2a",
+      "name": "Embeddings OpenAI Insert",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        3696,
+        1840
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "RGThohEfF9qZkcBj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Busca informações relevantes na base de conhecimento (FAQ) da loja de óculos usando similaridade semântica. Use esta ferramenta sempre que o cliente fizer perguntas sobre produtos, preços, frete ou atendimento.",
+        "memoryKey": {
+          "__rl": true,
+          "value": "vector_store_key",
+          "mode": "list",
+          "cachedResultName": "vector_store_key"
+        },
+        "topK": 3
+      },
+      "id": "7bab1b9e-5fd8-49df-b2d6-e014f8dae939",
+      "name": "Vector Store KB (Cache)",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.3,
+      "position": [
+        4560,
+        2240
+      ]
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{\n'Tipo: ' + ($json.tipo || 'faq') +\n'\\nCategoria: ' + ($('Get FAQ Data').item.json.categoria || 'geral') +\n'\\nProduto: ' + ($('Get FAQ Data').item.json.produto || 'geral') +\n'\\nIntenção: ' + ($('Get FAQ Data').item.json.intencao|| 'duvida_geral') +\n'\\nPergunta: ' + ($('Get FAQ Data').item.json.titulo || '') +\n'\\nResposta: ' + ($('Get FAQ Data').item.json.conteudo || '') +\n($json.link ? '\\nLink: ' + $('Get FAQ Data').item.json.link : '')\n}}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        2768
+      ],
+      "id": "22f8931f-1be9-41df-b216-8b96046a4219",
+      "name": "Default Data Loader"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "48ecff9c-50d9-4e89-b040-a003b3325ada",
+      "name": "Embeddings OpenAI Insert2",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        4624,
+        2448
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "RGThohEfF9qZkcBj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $json.messages?.[0] || {};\nconst contact = $json.contacts?.[0] || {};\n\nconst type = msg.type || \"unknown\";\nconst text =\n  msg.text?.body ||\n  msg.caption ||\n  \"\";\n\nlet media_id = null;\nlet filename = null;\nlet mime = null;\nlet direct_url = null;\nlet has_media = false;\nlet media_kind = null;\n\nif (msg.image) {\n  has_media = true;\n  media_kind = \"image\";\n  media_id = msg.image.id || null;\n  mime = msg.image.mime_type || \"image\";\n  direct_url = msg.image.url || null;\n}\n\nif (msg.document) {\n  has_media = true;\n  media_kind = \"document\";\n  media_id = msg.document.id || null;\n  filename = msg.document.filename || null;\n  mime = msg.document.mime_type || null;\n  direct_url = msg.document.url || null;\n}\n\nconst is_heic =\n  (filename || \"\").toLowerCase().endsWith(\".heic\") ||\n  (mime || \"\").toLowerCase().includes(\"heic\");\n\nreturn [{\n  json: {\n    lead_id: contact.wa_id || msg.from || null,\n    nome: contact.profile?.name || \"\",\n    msg_id: msg.id || null,\n    timestamp: msg.timestamp || null,\n\n    // base comum\n    message_type: type,\n    text,\n    has_text: !!text,\n    has_media,\n    media_kind,\n    media_id,\n    filename,\n    mime,\n    direct_url,\n    is_heic,\n\n    // flags de roteamento\n    route_text: !!text,\n    route_media: has_media\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        1680
+      ],
+      "id": "0c8b57ce-c06a-41b8-9bb1-62c4ec220247",
+      "name": "normalize inbound"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0c72e0be-cc15-4fd1-93da-9de9fc63622c",
+              "leftValue": "={{ $json.has_media }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -96,
+        1584
+      ],
+      "id": "6d0240ec-b77b-4903-9970-521bc07eb1c1",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0c72e0be-cc15-4fd1-93da-9de9fc63622c",
+              "leftValue": "={{ $json.has_text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -96,
+        1776
+      ],
+      "id": "029621ec-1ce0-4e6e-a7b6-3a01eba12f09",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"classifier_input\": \"{{ String(\n    'INFORMAÇÕES DO LEAD:\\n' +\n    'Nome: ' + ($json.nome || '') + '\\n' +\n    'Produto de interesse: ' + ($json.interesse_produto || 'não informado') + '\\n' +\n    'Stage atual: ' + ($json.stage || 'novo') + '\\n' +\n    'Canal: ' + ($json.canal || '') + '\\n' +\n    'Cidade: ' + ($json.cidade || 'não informada anteriormente') + '\\n' +\n    'CEP: ' + ($json.cep || 'não informado anteriormente') + '\\n\\n' +\n    'MENSAGEM DO LEAD:\\n' +\n    ($json.mensagem || '') + '\\n\\n' +\n    'HISTÓRICO:\\n' +\n    ($json.conversation_history || 'sem histórico')\n  ) }}\"\n}",
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1920,
+        1680
+      ],
+      "id": "d0263aaa-7fa6-4c7a-a63b-207183228ff4",
+      "name": "Map Input Classifier"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d28e4bcf-7a1f-4e39-a020-7a0b320a92b1",
+              "leftValue": "={{ $json.stage }}",
+              "rightValue": "MAKER",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2144,
+        1680
+      ],
+      "id": "c6267fd1-41cc-441c-a012-16d383247b76",
+      "name": "On maker?"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"intent\": {\n      \"type\": \"string\"\n    },\n    \"interest_level\": {\n      \"type\": \"string\",\n      \"enum\": [\"baixo\", \"medio\", \"alto\"]\n    },\n    \"urgency\": {\n      \"type\": \"string\",\n      \"enum\": [\"baixa\", \"media\", \"alta\"]\n    },\n    \"fit\": {\n      \"type\": \"string\",\n      \"enum\": [\"ruim\", \"neutro\", \"bom\"]\n    },\n    \"objections\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"summary\": {\n      \"type\": \"string\"\n    },\n    \"route_hint\": {\n      \"type\": \"string\",\n      \"enum\": [\"SDR\", \"CLOSER\", \"FOLLOW_UP\", \"SUPPORT\", \"PRODUCT_SPEC\"]\n    }\n  },\n  \"required\": [\n    \"intent\",\n    \"interest_level\",\n    \"urgency\",\n    \"fit\",\n    \"objections\",\n    \"summary\",\n    \"route_hint\"\n  ],\n  \"additionalProperties\": false\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2752,
+        1920
+      ],
+      "id": "dc1abb56-b843-401c-ab97-e64b84024a2a",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json || {};\n\n// =========================\n// HELPERS\n// =========================\nfunction firstDefined(...values) {\n  for (const value of values) {\n    if (value !== undefined && value !== null && value !== \"\") {\n      return value;\n    }\n  }\n  return null;\n}\n\nfunction normalizeText(value) {\n  if (value === undefined || value === null) return null;\n\n  const text = String(value).trim();\n  if (!text) return null;\n\n  const lower = text.toLowerCase();\n\n  const invalidValues = [\n    \"não informado\",\n    \"nao informado\",\n    \"não informada\",\n    \"nao informada\",\n    \"não informado anteriormente\",\n    \"nao informado anteriormente\",\n    \"não informada anteriormente\",\n    \"nao informada anteriormente\",\n    \"null\",\n    \"[null]\",\n    \"undefined\",\n    \"sem histórico\",\n    \"sem historico\"\n  ];\n\n  if (invalidValues.includes(lower)) return null;\n\n  return text;\n}\n\nfunction normalizeCep(value) {\n  const text = normalizeText(value);\n  if (!text) return null;\n\n  const digits = text.replace(/\\D/g, \"\");\n  return digits || null;\n}\n\n// =========================\n// LEAD CONTEXT LIMPO\n// =========================\nconst leadContext = {\n  name: normalizeText(\n    firstDefined(\n      item.lead_context?.name,\n      item.lead?.name,\n      item.nome,\n      item.name\n    )\n  ),\n\n  id: firstDefined(\n    item.lead_context?.id,\n    item.lead?.id,\n    item.id,\n    item.lead_id\n  ),\n\n  ref: firstDefined(\n    item.lead_context?.ref,\n    item.lead?.ref,\n    item.ref,\n    item.lead_ref\n  ),\n\n  product_interest: normalizeText(\n    firstDefined(\n      item.lead_context?.product_interest,\n      item.lead_context?.productInterest,\n      item.lead?.product_interest,\n      item.product_interest,\n      item.interesse_produto\n    )\n  ),\n\n  current_stage: normalizeText(\n    firstDefined(\n      item.lead_context?.current_stage,\n      item.lead?.stage,\n      item.current_stage,\n      item.stage\n    )\n  ) || \"novo\",\n\n  channel: normalizeText(\n    firstDefined(\n      item.lead_context?.channel,\n      item.lead?.channel,\n      item.channel,\n      item.canal\n    )\n  ),\n\n  city: normalizeText(\n    firstDefined(\n      item.lead_context?.city,\n      item.lead?.city,\n      item.city,\n      item.cidade\n    )\n  ),\n\n  cep: normalizeCep(\n    firstDefined(\n      item.lead_context?.cep,\n      item.lead?.cep,\n      item.cep\n    )\n  )\n};\n\n// =========================\n// CONVERSATION LIMPA\n// =========================\nconst conversation = {\n  last_message: normalizeText(\n    firstDefined(\n      item.conversation?.last_message,\n      item.last_message,\n      item.mensagem,\n      item.message\n    )\n  ) || \"\",\n\n  history: normalizeText(\n    firstDefined(\n      item.conversation?.history,\n      item.history,\n      item.historico\n    )\n  )\n};\n\n// =========================\n// DETECTED FIELDS INICIAIS\n// Mantém somente o que ajuda o SDR.\n// Sem carregar estrutura de classifier.\n// =========================\nconst detectedFields = {\n  nome: normalizeText(\n    firstDefined(\n      item.detected_fields?.nome,\n      item.detected_fields?.name\n    )\n  ),\n\n  produto: normalizeText(\n    firstDefined(\n      item.detected_fields?.produto,\n      item.detected_fields?.produto_mencionado,\n      item.detected_fields?.product,\n      leadContext.product_interest\n    )\n  ),\n\n  cidade: normalizeText(\n    firstDefined(\n      item.detected_fields?.cidade,\n      leadContext.city\n    )\n  ),\n\n  cep: normalizeCep(\n    firstDefined(\n      item.detected_fields?.cep,\n      leadContext.cep\n    )\n  ),\n\n  endereco: normalizeText(\n    firstDefined(\n      item.detected_fields?.endereco,\n      item.detected_fields?.address\n    )\n  )\n};\n\n// =========================\n// CONTEXTO KB\n// =========================\nconst contextoKb = normalizeText(item.contexto_kb) || \"\";\n\n// =========================\n// OUTPUT SANITIZADO PARA SDR\n// IMPORTANTE:\n// - NÃO passa classification\n// - NÃO passa crm_context\n// - NÃO passa stage_decision\n// - NÃO passa route_hint\n// - NÃO passa score/tags\n// =========================\nreturn [\n  {\n    json: {\n      contexto_kb: contextoKb,\n      lead_context: leadContext,\n      conversation: conversation,\n      detected_fields: detectedFields\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3552,
+        2096
+      ],
+      "id": "78ea737f-0683-4086-b860-85d85d1c1586",
+      "name": "extruturar input"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ad4eb67f-f6a4-4a0a-b8d5-fe22419b396a",
+              "name": "last_message",
+              "value": "={{ $json.conversation.last_message }}",
+              "type": "string"
+            },
+            {
+              "id": "31443625-deeb-4438-98fc-475446db0d82",
+              "name": "lead_context",
+              "value": "={{ $json.contexto_kb }}",
+              "type": "string"
+            },
+            {
+              "id": "c176fb13-f46f-4dd9-933c-47625cb02667",
+              "name": "name",
+              "value": "={{ $json.lead_context.name }}",
+              "type": "string"
+            },
+            {
+              "id": "cd79efbc-7be2-4bab-9232-89af9162dbcc",
+              "name": "lead_id",
+              "value": "={{ $json.lead_context.id }}",
+              "type": "string"
+            },
+            {
+              "id": "ebc3f6e9-e6e6-4c82-ab4d-3862fa14bf0f",
+              "name": "cidade",
+              "value": "={{ $json.lead_context.city }}",
+              "type": "string"
+            },
+            {
+              "id": "730af82b-5de9-44e9-bad5-790f8d34ab46",
+              "name": "cep",
+              "value": "={{ $json.lead_context.cep }}",
+              "type": "string"
+            },
+            {
+              "id": "b923f9a4-3d80-4997-a585-b9cc978d01c4",
+              "name": "product_interest",
+              "value": "={{ $json.lead_context.product_interest }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4224,
+        2016
+      ],
+      "id": "e862b685-ebc6-45f7-b929-d5490184e92b",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ \"lead-\" + ( $json.lead_id) }}",
+        "tableName": "chat_history",
+        "contextWindowLength": 10
+      },
+      "id": "bce6ec3f-7c9c-4810-a4b3-d272e638027b",
+      "name": "Memory Conversacional1",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        2544,
+        2080
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "BBlBCf0VMk3atMqh",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "WhatsApp Trigger": [
+      {
+        "json": {
+          "messaging_product": "whatsapp",
+          "metadata": {
+            "display_phone_number": "555131916538",
+            "phone_number_id": "949967854877404"
+          },
+          "contacts": [
+            {
+              "profile": {
+                "name": "Allan"
+              },
+              "wa_id": "555182608510",
+              "user_id": "BR.2166817064078896"
+            }
+          ],
+          "messages": [
+            {
+              "from": "555182608510",
+              "from_user_id": "BR.2166817064078896",
+              "id": "wamid.HBgMNTU1MTgyNjA4NTEwFQIAEhgWM0VCMEU1MzhEMTI2RkU3QUE4RDhCOAA=",
+              "timestamp": "1776706849",
+              "text": {
+                "body": "olaa quais as novidades"
+              },
+              "type": "text"
+            }
+          ],
+          "field": "messages"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Model SDR": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente SDR",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Model Closer": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente Closer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory Conversacional": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agente SDR",
+            "type": "ai_memory",
+            "index": 0
+          },
+          {
+            "node": "Agente Closer",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classificar Agente": {
+      "main": [
+        [
+          {
+            "node": "Preparar Contexto Closer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar Contexto SDR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Contexto SDR": {
+      "main": [
+        [
+          {
+            "node": "Extrair campos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Contexto + Stage + KB",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Preparar Contexto Closer": {
+      "main": [
+        [
+          {
+            "node": "Agente Closer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente SDR": {
+      "main": [
+        [
+          {
+            "node": "normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente Closer": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Resposta SDR": {
+      "main": [
+        [
+          {
+            "node": "Salvar Resposta IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Resposta Closer": {
+      "main": [
+        [
+          {
+            "node": "Salvar Resposta IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar Resposta IA": {
+      "main": [
+        [
+          {
+            "node": "Preparar Envio WhatsApp",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Atualizar Lead Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get FAQ Data": {
+      "main": [
+        [
+          {
+            "node": "Format FAQ for Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format FAQ for Vector Store": {
+      "main": [
+        [
+          {
+            "node": "Insert FAQ into Vector Store1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load FAQ Schedule": {
+      "main": [
+        [
+          {
+            "node": "Get FAQ Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Message Data": {
+      "main": [
+        [
+          {
+            "node": "Check Lead Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Lead Exists": {
+      "main": [
+        [
+          {
+            "node": "Lead Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Exists?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Lead Update Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare New Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create New Lead": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead After Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Existing Lead": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead After Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare New Lead Data": {
+      "main": [
+        [
+          {
+            "node": "Create New Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Lead Update Data": {
+      "main": [
+        [
+          {
+            "node": "Update Existing Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Message Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Message": {
+      "main": [
+        []
+      ]
+    },
+    "Normalize Lead After Update": {
+      "main": [
+        [
+          {
+            "node": "Unify Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lead After Create": {
+      "main": [
+        [
+          {
+            "node": "Unify Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unify Lead Data": {
+      "main": [
+        [
+          {
+            "node": "Prepare Message Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Map Input Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Envio WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Send message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Trigger": {
+      "main": [
+        [
+          {
+            "node": "normalize inbound",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair campos": {
+      "main": [
+        [
+          {
+            "node": "Simple Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Vector Store": {
+      "main": [
+        [
+          {
+            "node": "Deduplicar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send message": {
+      "main": [
+        []
+      ]
+    },
+    "Merge Contexto + Stage + KB": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplicar": {
+      "main": [
+        [
+          {
+            "node": "Merge Contexto + Stage + KB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "normalize": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Atualizar Lead Supabase": {
+      "main": [
+        []
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Finalize Funnel Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classifier Agent": {
+      "main": [
+        [
+          {
+            "node": "Compute Score & Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Score & Tags": {
+      "main": [
+        [
+          {
+            "node": "Classificar Agente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Funnel Decision": {
+      "main": [
+        [
+          {
+            "node": "Preparar Resposta SDR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Classifier Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validation Messages": {
+      "main": [
+        [
+          {
+            "node": "Normalize Message Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Preparar Resposta Closer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI Insert1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Insert FAQ into Vector Store1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI Insert": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Simple Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Store KB (Cache)": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente SDR",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Insert FAQ into Vector Store1",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI Insert2": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Vector Store KB (Cache)",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "normalize inbound": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [],
+        []
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Validation Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Input Classifier": {
+      "main": [
+        [
+          {
+            "node": "On maker?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On maker?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Classifier Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        []
+      ]
+    },
+    "extruturar input": {
+      "main": [
+        []
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Agente SDR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory Conversacional1": {
+      "ai_memory": [
+        [
+          {
+            "node": "Classifier Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "6338ee64-f667-45a1-9686-59e05cbca4e0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d27d9c9e0615200bdece87c4003737514f58ce543d53f5433870e51fbdcc4710"
+  },
+  "id": "na8QqA7afBBVRaN9",
+  "tags": []
+}

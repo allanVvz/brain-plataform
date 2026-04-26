@@ -1,0 +1,1126 @@
+{
+  "name": "Midware Crm Supabase to AirTable",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "supabase-messages",
+        "options": {}
+      },
+      "id": "f8b8ff53-937a-46d5-97ae-952c89ce56d0",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        144,
+        160
+      ],
+      "webhookId": "0b01765b-75b2-4cd3-8c73-828ff67a0af1"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "base": {
+          "__rl": true,
+          "value": "app092VYeSi5KGfDK",
+          "mode": "list",
+          "cachedResultName": "CRM WhatsApp & Instagram",
+          "cachedResultUrl": "https://airtable.com/app092VYeSi5KGfDK"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblAAGymDxZ8kX781",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://airtable.com/app092VYeSi5KGfDK/tblAAGymDxZ8kX781"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_ref": "={{ $json.lead_ref }}",
+            "nome": "={{ $json.nome }}",
+            "canal": "={{ $(\"Webhook Trigger\").item.json.query.canal?.toLowerCase() === \"whatsapp\" ? \"WhatsApp\" : $(\"Webhook Trigger\").item.json.query.canal?.toLowerCase() === \"instagram\" ? \"Instagram\" : \"WhatsApp\" }}",
+            "stage": "={{ $json.Lead_Stage?.toLowerCase() === \"novo\" ? \"Novo lead\" : $json.Lead_Stage?.toLowerCase() === \"contatado\" ? \"Contato Inicial\" : $json.Lead_Stage?.toLowerCase() === \"qualificacao\" ? \"Qualificação\" : $json.Lead_Stage?.toLowerCase() === \"qualificado\" ? \"Qualificado\" : $json.Lead_Stage?.toLowerCase() === \"em atendimento\" ? \"Em atendimento\" : $json.Lead_Stage?.toLowerCase() === \"interesse confirmado\" ? \"Interesse confirmado\" : $json.Lead_Stage?.toLowerCase() === \"proposta enviada\" ? \"Proposta enviada\" : $json.Lead_Stage?.toLowerCase() === \"cliente\" ? \"Cliente\" : $json.Lead_Stage?.toLowerCase() === \"pos-venda\" ? \"Pós-venda\" : $json.Lead_Stage?.toLowerCase() === \"perdido\" ? \"Perdido\" : \"Novo lead\" }}",
+            "ultima_interacao": "={{ $json.created_at }}",
+            "DUPLICADO?": false,
+            "score_lead": 0,
+            "preco_base_produto": 0,
+            "data_criacao": "={{ $json.created_at }}"
+          },
+          "matchingColumns": [
+            "lead_ref"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "lead_ref",
+              "displayName": "lead_ref",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "canal",
+              "displayName": "canal",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "WhatsApp",
+                  "value": "WhatsApp"
+                },
+                {
+                  "name": "Instagram",
+                  "value": "Instagram"
+                },
+                {
+                  "name": "Facebook",
+                  "value": "Facebook"
+                },
+                {
+                  "name": "Indicação",
+                  "value": "Indicação"
+                },
+                {
+                  "name": "Site",
+                  "value": "Site"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "stage",
+              "displayName": "stage",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Novo lead",
+                  "value": "Novo lead"
+                },
+                {
+                  "name": "Em atendimento",
+                  "value": "Em atendimento"
+                },
+                {
+                  "name": "Qualificado",
+                  "value": "Qualificado"
+                },
+                {
+                  "name": "Interesse confirmado",
+                  "value": "Interesse confirmado"
+                },
+                {
+                  "name": "Proposta enviada",
+                  "value": "Proposta enviada"
+                },
+                {
+                  "name": "Cliente",
+                  "value": "Cliente"
+                },
+                {
+                  "name": "Pós-venda",
+                  "value": "Pós-venda"
+                },
+                {
+                  "name": "Perdido",
+                  "value": "Perdido"
+                },
+                {
+                  "name": "Novo",
+                  "value": "Novo"
+                },
+                {
+                  "name": "Contato Inicial",
+                  "value": "Contato Inicial"
+                },
+                {
+                  "name": "Qualificação",
+                  "value": "Qualificação"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "interesse_produto",
+              "displayName": "interesse_produto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "cidade",
+              "displayName": "cidade",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "cep",
+              "displayName": "cep",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ultima_mensagem",
+              "displayName": "ultima_mensagem",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ultima_resposta_assistente",
+              "displayName": "ultima_resposta_assistente",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "categoria",
+              "displayName": "categoria",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Preço",
+                  "value": "Preço"
+                },
+                {
+                  "name": "Frete",
+                  "value": "Frete"
+                },
+                {
+                  "name": "Produto",
+                  "value": "Produto"
+                },
+                {
+                  "name": "Garantia",
+                  "value": "Garantia"
+                },
+                {
+                  "name": "Humano",
+                  "value": "Humano"
+                },
+                {
+                  "name": "Pessoa Física",
+                  "value": "Pessoa Física"
+                },
+                {
+                  "name": "Pessoa Jurídica",
+                  "value": "Pessoa Jurídica"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "score_lead",
+              "displayName": "score_lead",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "data_criacao",
+              "displayName": "data_criacao",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ultima_interacao",
+              "displayName": "ultima_interacao",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "vendedor_responsavel",
+              "displayName": "vendedor_responsavel",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "observacoes",
+              "displayName": "observacoes",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Mensagens",
+              "displayName": "Mensagens",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "DUPLICADO?",
+              "displayName": "DUPLICADO?",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Lead Summary",
+              "displayName": "Lead Summary",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "produto_id",
+              "displayName": "produto_id",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "nome_produto",
+              "displayName": "nome_produto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "categoria_produto",
+              "displayName": "categoria_produto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "preco_base_produto",
+              "displayName": "preco_base_produto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "descricao_produto",
+              "displayName": "descricao_produto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "link_produto",
+              "displayName": "link_produto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status_produto",
+              "displayName": "status_produto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Ativo",
+                  "value": "Ativo"
+                },
+                {
+                  "name": "Inativo",
+                  "value": "Inativo"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "0ab3bb23-66cd-47fc-9fdc-2502bf837604",
+      "name": "Upsert Lead",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        592,
+        160
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "0954j5acRC7gTZfJ",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "app092VYeSi5KGfDK",
+          "mode": "list",
+          "cachedResultName": "CRM WhatsApp & Instagram",
+          "cachedResultUrl": "https://airtable.com/app092VYeSi5KGfDK"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblBKMT8AlGySfENR",
+          "mode": "list",
+          "cachedResultName": "Mensagens",
+          "cachedResultUrl": "https://airtable.com/app092VYeSi5KGfDK/tblBKMT8AlGySfENR"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "texto": "={{ $json.texto }}",
+            "data_envio": "={{ $json.data_envio }}",
+            "canal": "={{ $json.canal }}",
+            "origem": "={{ $json.origem }}",
+            "Lead": "={{ $json.lead_id && $json.lead_id.startsWith(\"rec\") ? [$json.lead_id] : [] }}",
+            "latencia_resposta": "={{ $json.latencia_resposta }}"
+          },
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "message_id",
+              "displayName": "message_id",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Lead",
+              "displayName": "Lead",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "origem",
+              "displayName": "origem",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Cliente",
+                  "value": "Cliente"
+                },
+                {
+                  "name": "Assistente",
+                  "value": "Assistente"
+                },
+                {
+                  "name": "Usuário",
+                  "value": "Usuário"
+                },
+                {
+                  "name": "Sistema",
+                  "value": "Sistema"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "texto",
+              "displayName": "texto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "categoria",
+              "displayName": "categoria",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Preço",
+                  "value": "Preço"
+                },
+                {
+                  "name": "Frete",
+                  "value": "Frete"
+                },
+                {
+                  "name": "Produto",
+                  "value": "Produto"
+                },
+                {
+                  "name": "Garantia",
+                  "value": "Garantia"
+                },
+                {
+                  "name": "Humano",
+                  "value": "Humano"
+                },
+                {
+                  "name": "Outro",
+                  "value": "Outro"
+                },
+                {
+                  "name": "Consulta",
+                  "value": "Consulta"
+                },
+                {
+                  "name": "Resposta",
+                  "value": "Resposta"
+                },
+                {
+                  "name": "Solicitação",
+                  "value": "Solicitação"
+                },
+                {
+                  "name": "Problema",
+                  "value": "Problema"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "data_envio",
+              "displayName": "data_envio",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "canal",
+              "displayName": "canal",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "WhatsApp",
+                  "value": "WhatsApp"
+                },
+                {
+                  "name": "Instagram",
+                  "value": "Instagram"
+                },
+                {
+                  "name": "Chat Web",
+                  "value": "Chat Web"
+                },
+                {
+                  "name": "App",
+                  "value": "App"
+                },
+                {
+                  "name": "Telefone",
+                  "value": "Telefone"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "intent_detectada",
+              "displayName": "intent_detectada",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "latencia_resposta",
+              "displayName": "latencia_resposta",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Message Summary",
+              "displayName": "Message Summary",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "referencia_faq",
+              "displayName": "referencia_faq",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "metrica_resposta",
+              "displayName": "metrica_resposta",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pergunta_faq",
+              "displayName": "pergunta_faq",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "resposta_faq",
+              "displayName": "resposta_faq",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "tag_faq",
+              "displayName": "tag_faq",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "prioridade_faq",
+              "displayName": "prioridade_faq",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Alta",
+                  "value": "Alta"
+                },
+                {
+                  "name": "Média",
+                  "value": "Média"
+                },
+                {
+                  "name": "Baixa",
+                  "value": "Baixa"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status_faq",
+              "displayName": "status_faq",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Ativo",
+                  "value": "Ativo"
+                },
+                {
+                  "name": "Inativo",
+                  "value": "Inativo"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "9d7ac777-66a9-4c41-a80c-570d6db1118d",
+      "name": "Upsert Message",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [
+        1264,
+        160
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "0954j5acRC7gTZfJ",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "49b3985d-5649-4222-a776-d5fa9f29e4f0",
+              "name": "lead_ref",
+              "value": "={{ $json.query.lead_ref }}",
+              "type": "string"
+            },
+            {
+              "id": "9a92f534-17ad-41b3-923e-27820d9af375",
+              "name": "nome",
+              "value": "={{ $json.query.nome }}",
+              "type": "string"
+            },
+            {
+              "id": "1550a9b5-84aa-440e-b3f4-b917586cfdb0",
+              "name": "texto",
+              "value": "={{ $json.query.texto }}",
+              "type": "string"
+            },
+            {
+              "id": "7eff2473-e70d-41f3-a338-e3566781cb29",
+              "name": "Lead_Stage",
+              "value": "={{ $json.query.Lead_Stage }}",
+              "type": "string"
+            },
+            {
+              "id": "2342cb57-de6b-4261-b059-d9a79a271806",
+              "name": "created_at",
+              "value": "={{ $json.query.created_at }}",
+              "type": "string"
+            },
+            {
+              "id": "11858f16-57f5-415c-a129-62dc5b867d45",
+              "name": "sender_type",
+              "value": "={{ $json.query.sender_type }}",
+              "type": "string"
+            },
+            {
+              "id": "9bd2c20d-59f4-42ac-b06a-34304afe7c1c",
+              "name": "canal",
+              "value": "={{ $json.query.canal }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        368,
+        160
+      ],
+      "id": "904d801f-dd70-4288-8cc1-bcef43898ede",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+              "name": "lead_ref",
+              "value": "={{ $json.fields.lead_ref }}",
+              "type": "string"
+            },
+            {
+              "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+              "name": "nome",
+              "value": "={{ $json.fields.nome }}",
+              "type": "string"
+            },
+            {
+              "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+              "name": "canal",
+              "value": "={{ $json.fields.canal }}",
+              "type": "string"
+            },
+            {
+              "id": "d4e5f6a7-b8c9-0123-def1-234567890123",
+              "name": "stage",
+              "value": "={{ $json.fields.stage }}",
+              "type": "string"
+            },
+            {
+              "id": "e5f6a7b8-c9d0-1234-ef12-345678901234",
+              "name": "ultima_interacao",
+              "value": "={{ $json.fields.ultima_interacao }}",
+              "type": "string"
+            },
+            {
+              "id": "f6a7b8c9-d0e1-2345-f123-456789012345",
+              "name": "data_criacao",
+              "value": "={{ $json.fields.data_criacao }}",
+              "type": "string"
+            },
+            {
+              "id": "a7b8c9d0-e1f2-3456-1234-567890123456",
+              "name": "lead_id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3c3c9260-5afc-45c3-8913-f6d710d796c1",
+      "name": "Sanitize Lead Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        816,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "msg-001",
+              "name": "message_id",
+              "value": "={{ $(\"Webhook Trigger\").item.json.query.message_id.toString() }}",
+              "type": "string"
+            },
+            {
+              "id": "msg-002",
+              "name": "texto",
+              "value": "={{ $(\"Edit Fields\").item.json.texto }}",
+              "type": "string"
+            },
+            {
+              "id": "msg-003",
+              "name": "data_envio",
+              "value": "={{ $(\"Edit Fields\").item.json.created_at }}",
+              "type": "string"
+            },
+            {
+              "id": "msg-004",
+              "name": "canal",
+              "value": "={{ $(\"Edit Fields\").item.json.canal?.toLowerCase() === \"whatsapp\" ? \"WhatsApp\" : $(\"Edit Fields\").item.json.canal?.toLowerCase() === \"instagram\" ? \"Instagram\" : $(\"Edit Fields\").item.json.canal?.toLowerCase() === \"chat web\" ? \"Chat Web\" : $(\"Edit Fields\").item.json.canal?.toLowerCase() === \"app\" ? \"App\" : $(\"Edit Fields\").item.json.canal?.toLowerCase() === \"telefone\" ? \"Telefone\" : \"WhatsApp\" }}",
+              "type": "string"
+            },
+            {
+              "id": "msg-005",
+              "name": "origem",
+              "value": "={{ $(\"Edit Fields\").item.json.sender_type === \"lead\" ? \"Usuário\" : $(\"Edit Fields\").item.json.sender_type === \"agent\" ? \"Assistente\" : \"Sistema\" }}",
+              "type": "string"
+            },
+            {
+              "id": "msg-006",
+              "name": "lead_id",
+              "value": "={{ $(\"Sanitize Lead Data\").item.json.lead_id }}",
+              "type": "string"
+            },
+            {
+              "id": "msg-007",
+              "name": "latencia_resposta",
+              "value": 0,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d30a5aa0-077c-4864-bf47-2e49c1b42dd3",
+      "name": "Sanitize Message Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1040,
+        160
+      ]
+    }
+  ],
+  "pinData": {
+    "Webhook Trigger": [
+      {
+        "json": {
+          "headers": {
+            "host": "allanvvz.app.n8n.cloud",
+            "user-agent": "pg_net/0.19.5",
+            "content-length": "36",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "cdn-loop": "cloudflare; loops=1; subreqs=1",
+            "cf-connecting-ip": "2600:1f13:838:6e2a:b5c8:b95a:ab81:328b",
+            "cf-ew-via": "15",
+            "cf-ipcountry": "US",
+            "cf-ray": "9ecb4666dcecc146-PDX",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-worker": "n8n.cloud",
+            "content-type": "application/json",
+            "x-forwarded-for": "2600:1f13:838:6e2a:b5c8:b95a:ab81:328b, 104.23.160.16",
+            "x-forwarded-host": "allanvvz.app.n8n.cloud",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "traefik-prod-users-gwc-124-7fc5778798-tvcn8",
+            "x-is-trusted": "yes",
+            "x-real-ip": "2600:1f13:838:6e2a:b5c8:b95a:ab81:328b"
+          },
+          "params": {},
+          "query": {
+            "id": "938",
+            "nome": "Allan",
+            "tipo": "text",
+            "canal": "whatsapp",
+            "texto": "Claro! Você pode conferir o catálogo de modais completo [aqui](https://tockfatal.com/pages/catalogo-modal). Tem algum modelo específico que você gostaria de explorar ou mais informações sobre os preços?",
+            "status": "received",
+            "lead_ref": "55",
+            "metadata": "{}",
+            "direction": "outbound",
+            "Lead_Stage": "contatado",
+            "created_at": "2026-04-15T13:25:13.055566+00:00",
+            "message_id": "ai_1776259512547_55",
+            "sender_type": "agent"
+          },
+          "body": {
+            "Content-Type": "application/json"
+          },
+          "webhookUrl": "https://allanvvz.app.n8n.cloud/webhook/supabase-messages",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Lead": {
+      "main": [
+        [
+          {
+            "node": "Sanitize Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Message": {
+      "main": [
+        []
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Upsert Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize Lead Data": {
+      "main": [
+        [
+          {
+            "node": "Sanitize Message Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize Message Data": {
+      "main": [
+        [
+          {
+            "node": "Upsert Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "3a1eaac0-527f-4402-99bd-2f94858ebe4f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d27d9c9e0615200bdece87c4003737514f58ce543d53f5433870e51fbdcc4710"
+  },
+  "id": "5LaMNRl4OLN69nLW",
+  "tags": []
+}

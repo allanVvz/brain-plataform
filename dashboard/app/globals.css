@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brain-bg: #0f1117;
+  --brain-surface: #1a1d27;
+  --brain-border: #2a2d3a;
+  --brain-accent: #6366f1;
+  --brain-muted: #6b7280;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
