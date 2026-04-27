@@ -88,6 +88,10 @@ export const api = {
   kbIntakeSave: (session_id: string, content = "") =>
     req<any>("/kb-intake/save", { method: "POST", body: JSON.stringify({ session_id, content }) }),
 
+  // Knowledge Graph
+  graphData: (personaSlug?: string) =>
+    req<any>(`/knowledge/graph-data${personaSlug ? `?persona_slug=${personaSlug}` : ""}`),
+
   // WA Validator
   waFlows: () => req<any[]>("/wa-validator/flows"),
   waModels: () => req<any[]>("/wa-validator/models"),

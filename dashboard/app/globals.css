@@ -2,13 +2,81 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Obsidiana CSS Variables ─────────────────────────────────── */
 :root {
-  --brain-bg: #0f1117;
-  --brain-surface: #1a1d27;
-  --brain-border: #2a2d3a;
-  --brain-accent: #6366f1;
-  --brain-muted: #6b7280;
+  --brain-bg:      #080b12;
+  --brain-surface: #0e1118;
+  --brain-border:  #1e2130;
+  --brain-accent:  #7c6fff;
+  --brain-muted:   #4a5068;
+
+  --obs-violet:    #7c6fff;
+  --obs-amber:     #f59e0b;
+  --obs-slate:     #64748b;
+  --obs-rose:      #f43f5e;
+  --obs-text:      #e2e8f0;
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; }
+body { margin: 0; background: #080b12; color: #e2e8f0; }
+
+/* ── Glass surface utility ───────────────────────────────────── */
+@layer utilities {
+  .glass {
+    background: rgba(14, 17, 24, 0.72);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .glass-raised {
+    background: rgba(20, 23, 36, 0.80);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .glow-violet {
+    box-shadow: 0 0 20px rgba(124, 111, 255, 0.25), 0 0 0 1px rgba(124, 111, 255, 0.35);
+  }
+  .glow-amber {
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.20), 0 0 0 1px rgba(245, 158, 11, 0.30);
+  }
+
+  .node-obs {
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 4px 24px rgba(0,0,0,0.6);
+  }
+
+  .sep {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* ── ReactFlow overrides ─────────────────────────────────────── */
+.react-flow__background {
+  background-color: #050709 !important;
+}
+.react-flow__edge-path {
+  stroke: rgba(100, 116, 139, 0.30) !important;
+  stroke-width: 1.5px !important;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: rgba(124, 111, 255, 0.60) !important;
+  stroke-width: 2px !important;
+}
+.react-flow__controls button {
+  background: #0e1118 !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  color: #8892a4 !important;
+}
+.react-flow__controls button:hover {
+  background: #141724 !important;
+  color: #e2e8f0 !important;
+}
+.react-flow__minimap {
+  background: #0e1118 !important;
+  border: 1px solid rgba(255,255,255,0.06) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}

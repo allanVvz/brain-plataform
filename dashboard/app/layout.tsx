@@ -7,26 +7,30 @@ import { api } from "@/lib/api";
 import {
   LayoutDashboard, Users, MessageSquare, BookOpen,
   Image, Plug, Cpu, ScrollText, Lightbulb, UserCircle,
-  RefreshCw, CheckSquare, Upload, Activity, MessageCircle, TestTube2,
+  RefreshCw, CheckSquare, Activity, MessageCircle, TestTube2,
+  GitMerge, Folder, Layers, Network,
 } from "lucide-react";
 
 const nav = [
-  { section: null,         href: "/",                    label: "Dashboard",    icon: LayoutDashboard },
-  { section: null,         href: "/pipeline",            label: "Pipeline",     icon: Activity },
-  { section: null,         href: "/persona",             label: "Persona",      icon: UserCircle },
-  { section: null,         href: "/leads",               label: "Leads",        icon: Users },
-  { section: null,         href: "/messages",            label: "Mensagens",    icon: MessageSquare },
-  { section: "Knowledge",  href: "/kb",                     label: "KB Validada",  icon: BookOpen },
-  { section: "Knowledge",  href: "/knowledge/intake",    label: "KB Intake",    icon: MessageCircle },
-  { section: "Knowledge",  href: "/knowledge/sync",      label: "Sync Vault",   icon: RefreshCw },
-  { section: "Knowledge",  href: "/knowledge/validate",  label: "Validar",      icon: CheckSquare },
-  { section: "Knowledge",  href: "/knowledge/upload",    label: "Upload",       icon: Upload },
-  { section: "Validação",   href: "/wa-validator",        label: "WA Validator", icon: TestTube2 },
-  { section: null,         href: "/assets",              label: "Assets",       icon: Image },
-  { section: null,         href: "/integrations",        label: "Integrações",  icon: Plug },
-  { section: null,         href: "/mcp",                 label: "MCP",          icon: Cpu },
-  { section: null,         href: "/logs",                label: "Logs",         icon: ScrollText },
-  { section: null,         href: "/insights",            label: "Insights",     icon: Lightbulb },
+  { section: null,          href: "/",                      label: "Dashboard",      icon: LayoutDashboard },
+  { section: null,          href: "/pipeline",              label: "Pipeline",        icon: Activity },
+  { section: null,          href: "/persona",               label: "Persona",         icon: UserCircle },
+  { section: null,          href: "/leads",                 label: "Leads",           icon: Users },
+  { section: null,          href: "/messages",              label: "Mensagens",       icon: MessageSquare },
+
+  { section: "Knowledge",   href: "/knowledge/graph",       label: "Grafo",           icon: Network },
+  { section: "Knowledge",   href: "/knowledge/capture",     label: "Capturar",        icon: MessageCircle },
+  { section: "Knowledge",   href: "/knowledge/quality",     label: "Curadoria",       icon: CheckSquare },
+  { section: "Knowledge",   href: "/knowledge/assets",      label: "Assets",          icon: Image },
+  { section: "Knowledge",   href: "/kb",                    label: "KB Validada",     icon: BookOpen },
+  { section: "Knowledge",   href: "/knowledge/sync",        label: "Sync Vault",      icon: RefreshCw },
+
+  { section: "Validação",   href: "/wa-validator",          label: "WA Validator",    icon: TestTube2 },
+
+  { section: null,          href: "/integrations",          label: "Integrações",     icon: Plug },
+  { section: null,          href: "/mcp",                   label: "MCP",             icon: Cpu },
+  { section: null,          href: "/logs",                  label: "Logs",            icon: ScrollText },
+  { section: null,          href: "/insights",              label: "Insights",        icon: Lightbulb },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -40,13 +44,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <html lang="pt-BR">
-      <body className="bg-brain-bg text-white min-h-screen flex">
+      <body className="bg-obs-base text-obs-text min-h-screen flex" style={{ background: "#080b12" }}>
         {/* Sidebar */}
-        <aside className="w-52 bg-brain-surface border-r border-brain-border flex flex-col shrink-0">
-          <div className="px-4 py-5 border-b border-brain-border">
-            <span className="font-bold text-brain-accent text-lg tracking-tight">AI Brain</span>
+        <aside className="w-52 shrink-0 flex flex-col border-r" style={{ background: "rgba(14,17,24,0.95)", borderColor: "rgba(255,255,255,0.06)" }}>
+          {/* Logo */}
+          <div className="px-4 py-5" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center font-black text-sm"
+                style={{ background: "linear-gradient(135deg, #7c6fff, #a78bfa)", color: "#050709" }}>
+                B
+              </div>
+              <span className="font-bold text-obs-text text-sm tracking-tight">AI Brain</span>
+            </div>
           </div>
-          <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
+
+          {/* Nav */}
+          <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
             {nav.map(({ href, label, icon: Icon, section }, idx) => {
               const active = pathname === href || (href !== "/" && pathname.startsWith(href));
               const prevSection = idx > 0 ? nav[idx - 1].section : null;
@@ -54,17 +67,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               return (
                 <div key={href}>
                   {showHeader && (
-                    <p className="text-[10px] text-brain-muted uppercase tracking-widest px-3 pt-3 pb-1">{section}</p>
+                    <p className="text-[9px] text-obs-faint uppercase tracking-[0.12em] px-3 pt-4 pb-1.5 font-semibold">
+                      {section}
+                    </p>
                   )}
-                  <Link
-                    href={href}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+                  <Link href={href}
+                    className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs transition-all ${
                       active
-                        ? "bg-brain-accent/20 text-brain-accent font-medium"
-                        : "text-brain-muted hover:text-white hover:bg-white/5"
+                        ? "text-obs-violet font-medium"
+                        : "text-obs-subtle hover:text-obs-text"
                     }`}
-                  >
-                    <Icon size={15} />
+                    style={active ? { background: "rgba(124,111,255,0.12)" } : {}}>
+                    <Icon size={13} />
                     {label}
                   </Link>
                 </div>
@@ -74,11 +88,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </aside>
 
         {/* Main */}
-        <div className="flex-1 flex flex-col min-h-screen">
+        <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
           {/* Topbar */}
-          <header className="h-12 border-b border-brain-border bg-brain-surface flex items-center px-6 gap-4 shrink-0">
+          <header className="h-11 flex items-center px-6 gap-4 shrink-0"
+            style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(14,17,24,0.90)" }}>
             <select
-              className="bg-brain-bg border border-brain-border text-sm text-white rounded px-2 py-1"
+              className="text-xs text-obs-text rounded-lg px-2 py-1 focus:outline-none"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
               value={persona}
               onChange={(e) => setPersona(e.target.value)}
             >
@@ -86,7 +102,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 ? personas.map((p) => <option key={p.slug} value={p.slug}>{p.name}</option>)
                 : <option value="tock-fatal">Tock Fatal</option>}
             </select>
-            <div className="ml-auto text-xs text-brain-muted">AI Brain Platform</div>
+            <div className="ml-auto text-[10px] text-obs-faint tracking-wide">AI Brain Platform</div>
           </header>
 
           {/* Content */}

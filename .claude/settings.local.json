@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/personas)",
+      "Bash(curl -s http://localhost:8000/integrations)",
+      "Bash(curl -s \"http://localhost:8000/health/score\")",
+      "Bash(grep -E \"\\\\.\\(py|js|ts|json\\)$\")",
+      "Bash(pkill -f uvicorn)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
