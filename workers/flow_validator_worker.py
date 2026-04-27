@@ -1,16 +1,13 @@
-import asyncio
 import os
-from agents.flow_validator.orchestrator import run
+from workers.base_worker import BaseWorker
+from services import sre_logger
 
 
-class FlowValidatorWorker:
-    interval = int(os.environ.get("FLOW_VALIDATOR_INTERVAL", 900))  # 15min default
+class FlowValidatorWorker(BaseWorker):
+    name = "FlowValidatorWorker"
+    interval = int(os.environ.get("FLOW_VALIDATOR_INTERVAL", 900))
 
-    async def start(self):
-        print(f"[FlowValidatorWorker] started — interval={self.interval}s")
-        while True:
-            try:
-                await asyncio.to_thread(run)
-            except Exception as e:
-                print(f"[FlowValidatorWorker] error: {e}")
-            await asyncio.sleep(self.interval)
+    def _run_cycle(self):
+        from agents.flow_validator.orchestrator import run
+        run()
+        sre_logger.info(self.name, "cycle complete")

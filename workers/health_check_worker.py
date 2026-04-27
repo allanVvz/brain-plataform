@@ -1,48 +1,44 @@
-import asyncio
 import os
 import time
 import httpx
-from services import supabase_client, n8n_client
 from datetime import datetime, timezone
+from workers.base_worker import BaseWorker
+from services import supabase_client, n8n_client, sre_logger
 
 
-class HealthCheckWorker:
-    interval = int(os.environ.get("HEALTH_CHECK_INTERVAL", 120))  # 2min default
+class HealthCheckWorker(BaseWorker):
+    name = "HealthCheckWorker"
+    interval = int(os.environ.get("HEALTH_CHECK_INTERVAL", 120))
 
-    async def start(self):
-        print(f"[HealthCheckWorker] started — interval={self.interval}s")
-        while True:
-            try:
-                await asyncio.to_thread(self._check_all)
-            except Exception as e:
-                print(f"[HealthCheckWorker] error: {e}")
-            await asyncio.sleep(self.interval)
-
-    def _check_all(self):
+    def _run_cycle(self):
         checks = [
-            ("supabase", self._check_supabase),
-            ("n8n", self._check_n8n),
-            ("airtable", self._check_airtable),
-            ("openai", self._check_openai),
+            ("supabase",  self._check_supabase),
+            ("n8n",       self._check_n8n),
+            ("airtable",  self._check_airtable),
+            ("anthropic", self._check_anthropic),
         ]
+        results = {}
         for service, fn in checks:
             try:
-                status, ms = fn()
-                supabase_client.upsert_integration_status({
-                    "service": service,
-                    "status": "healthy" if status else "down",
-                    "response_ms": ms,
-                    "last_check": datetime.now(timezone.utc).isoformat(),
-                    "error_message": None if status else "connection failed",
-                })
-            except Exception as e:
-                supabase_client.upsert_integration_status({
-                    "service": service,
-                    "status": "down",
-                    "response_ms": -1,
-                    "last_check": datetime.now(timezone.utc).isoformat(),
-                    "error_message": str(e),
-                })
+                ok, ms = fn()
+                status = "healthy" if ok else "down"
+                err = None if ok else "connection failed"
+            except Exception as exc:
+                ok, ms, status = False, -1, "down"
+                err = str(exc)
+                sre_logger.error(self.name, f"{service} check raised: {exc}", exc)
+
+            results[service] = status
+            supabase_client.upsert_integration_status({
+                "service": service,
+                "status": status,
+                "response_ms": ms,
+                "last_check": datetime.now(timezone.utc).isoformat(),
+                "error_message": err,
+            })
+
+        summary = " | ".join(f"{s}={v}" for s, v in results.items())
+        sre_logger.info(self.name, f"health: {summary}")
 
     def _check_supabase(self) -> tuple[bool, int]:
         t0 = time.monotonic()
@@ -64,15 +60,16 @@ class HealthCheckWorker:
                 headers={"Authorization": f"Bearer {airtable_key}"},
                 params={"maxRecords": 1},
             )
-            ms = int((time.monotonic() - t0) * 1000)
-            return r.status_code == 200, ms
+            return r.status_code == 200, int((time.monotonic() - t0) * 1000)
 
-    def _check_openai(self) -> tuple[bool, int]:
+    def _check_anthropic(self) -> tuple[bool, int]:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             return False, -1
         t0 = time.monotonic()
         with httpx.Client(timeout=5) as client:
-            r = client.get("https://api.anthropic.com/v1/models", headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"})
-            ms = int((time.monotonic() - t0) * 1000)
-            return r.status_code == 200, ms
+            r = client.get(
+                "https://api.anthropic.com/v1/models",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+            )
+            return r.status_code == 200, int((time.monotonic() - t0) * 1000)

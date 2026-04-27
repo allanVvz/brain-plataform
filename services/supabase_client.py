@@ -15,16 +15,48 @@ def get_client() -> Client:
     return _client
 
 
+# ── Safe query helpers ─────────────────────────────────────────────────────
+# All public functions use _q() / _one() so that:
+#   • A None result never causes AttributeError
+#   • A missing table returns a safe default instead of a 500
+
+def _q(query) -> list:
+    """Execute a list query; return [] on None or any exception."""
+    try:
+        result = query.execute()
+        return result.data or []
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"query failed: {exc}", exc)
+        except Exception:
+            pass
+        return []
+
+
+def _one(query) -> Optional[dict]:
+    """Execute a single-row query (maybe_single); return None on error."""
+    try:
+        result = query.execute()
+        return result.data
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"query failed: {exc}", exc)
+        except Exception:
+            pass
+        return None
+
+
 # ── Leads ──────────────────────────────────────────────────────────────────
 
 def get_lead(lead_id: str) -> Optional[dict]:
-    result = get_client().table("leads").select("*").eq("lead_id", lead_id).maybe_single().execute()
-    return result.data
+    return _one(get_client().table("leads").select("*").eq("lead_id", lead_id).maybe_single())
 
 
 def get_leads(persona_slug: Optional[str] = None, limit: int = 100, offset: int = 0) -> list:
     q = get_client().table("leads").select("*").order("updated_at", desc=True).range(offset, offset + limit - 1)
-    return q.execute().data
+    return _q(q)
 
 
 def update_lead(lead_ref: int, data: dict) -> None:
@@ -34,29 +66,27 @@ def update_lead(lead_ref: int, data: dict) -> None:
 # ── Messages ───────────────────────────────────────────────────────────────
 
 def get_messages(lead_id: str, limit: int = 30) -> list:
-    result = (
+    q = (
         get_client().table("messages")
         .select("*")
         .eq("lead_id", lead_id)
         .order("created_at", desc=True)
         .limit(limit)
-        .execute()
     )
-    return list(reversed(result.data))
+    return list(reversed(_q(q)))
 
 
 def get_recent_messages(hours: int = 24, limit: int = 500) -> list:
     from datetime import datetime, timedelta
     since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
-    result = (
+    q = (
         get_client().table("messages")
         .select("*")
         .gte("created_at", since)
         .order("created_at", desc=True)
         .limit(limit)
-        .execute()
     )
-    return result.data
+    return _q(q)
 
 
 def insert_message(data: dict) -> None:
@@ -69,7 +99,7 @@ def get_insights(status: Optional[str] = None, limit: int = 50) -> list:
     q = get_client().table("flow_insights").select("*").order("created_at", desc=True).limit(limit)
     if status:
         q = q.eq("status", status)
-    return q.execute().data
+    return _q(q)
 
 
 def insert_insight(data: dict) -> None:
@@ -81,8 +111,8 @@ def update_insight(insight_id: str, data: dict) -> None:
 
 
 def get_open_insights_titles() -> list[str]:
-    result = get_client().table("flow_insights").select("title").eq("status", "open").execute()
-    return [r["title"] for r in result.data]
+    rows = _q(get_client().table("flow_insights").select("title").eq("status", "open"))
+    return [r["title"] for r in rows if r.get("title")]
 
 
 # ── System Health ──────────────────────────────────────────────────────────
@@ -92,14 +122,13 @@ def insert_health_snapshot(data: dict) -> None:
 
 
 def get_health_history(limit: int = 30) -> list:
-    result = (
+    rows = _q(
         get_client().table("system_health")
         .select("*")
         .order("snapshot_at", desc=True)
         .limit(limit)
-        .execute()
     )
-    return list(reversed(result.data))
+    return list(reversed(rows))
 
 
 # ── Integration Status ──────────────────────────────────────────────────────
@@ -125,8 +154,7 @@ def get_integration_statuses(persona_id: Optional[str] = None) -> list:
     q = client.table("integration_status").select("*").order("service").order("last_check", desc=True)
     if persona_id:
         q = q.eq("persona_id", persona_id)
-    # Return only the most recent row per service (deduplicate accumulated rows)
-    rows = q.execute().data
+    rows = _q(q)
     seen: set[str] = set()
     result = []
     for row in rows:
@@ -140,12 +168,11 @@ def get_integration_statuses(persona_id: Optional[str] = None) -> list:
 # ── Personas ───────────────────────────────────────────────────────────────
 
 def get_personas() -> list:
-    return get_client().table("personas").select("*").eq("active", True).execute().data
+    return _q(get_client().table("personas").select("*").eq("active", True))
 
 
 def get_persona(slug: str) -> Optional[dict]:
-    result = get_client().table("personas").select("*").eq("slug", slug).maybe_single().execute()
-    return result.data
+    return _one(get_client().table("personas").select("*").eq("slug", slug).maybe_single())
 
 
 def upsert_persona(data: dict) -> None:
@@ -160,7 +187,7 @@ def get_kb_entries(persona_id: Optional[str] = None, status: str = "ATIVO") -> l
         q = q.eq("persona_id", persona_id)
     if status:
         q = q.eq("status", status)
-    return q.order("prioridade").execute().data
+    return _q(q.order("prioridade"))
 
 
 def upsert_kb_entry(data: dict) -> None:
@@ -171,8 +198,7 @@ def search_kb(query_embedding: list, persona_id: Optional[str] = None, top_k: in
     params = {"query_embedding": query_embedding, "match_count": top_k}
     if persona_id:
         params["filter_persona_id"] = persona_id
-    result = get_client().rpc("match_kb_entries", params).execute()
-    return result.data
+    return _q(get_client().rpc("match_kb_entries", params))
 
 
 # ── Agent Logs ─────────────────────────────────────────────────────────────
@@ -185,7 +211,7 @@ def get_agent_logs(lead_id: Optional[str] = None, limit: int = 50) -> list:
     q = get_client().table("agent_logs").select("*").order("created_at", desc=True).limit(limit)
     if lead_id:
         q = q.eq("lead_id", lead_id)
-    return q.execute().data
+    return _q(q)
 
 
 # ── n8n Executions Mirror ──────────────────────────────────────────────────
@@ -203,30 +229,27 @@ def get_n8n_executions(limit: int = 100, status: Optional[str] = None) -> list:
     )
     if status:
         q = q.eq("status", status)
-    return q.execute().data
+    return _q(q)
 
 
 def get_n8n_error_rate(hours: int = 24) -> float:
     from datetime import datetime, timedelta
     since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
-    all_rows = (
+    all_rows = _q(
         get_client().table("n8n_executions")
         .select("status")
         .gte("started_at", since)
-        .execute()
-        .data
     )
     if not all_rows:
         return 0.0
-    errors = sum(1 for r in all_rows if r["status"] == "error")
+    errors = sum(1 for r in all_rows if r.get("status") == "error")
     return errors / len(all_rows)
 
 
 # ── Knowledge Sources ──────────────────────────────────────────────────────
 
 def get_knowledge_source_by_path(path: str) -> Optional[dict]:
-    result = get_client().table("knowledge_sources").select("*").eq("path", path).maybe_single().execute()
-    return result.data
+    return _one(get_client().table("knowledge_sources").select("*").eq("path", path).maybe_single())
 
 
 def insert_knowledge_source(data: dict) -> dict:
@@ -239,11 +262,11 @@ def update_knowledge_source(source_id: str, data: dict) -> None:
 
 
 def get_or_create_manual_source() -> dict:
-    result = get_client().table("knowledge_sources").select("*").eq("source_type", "upload").maybe_single().execute()
-    if result.data:
-        return result.data
+    existing = _one(get_client().table("knowledge_sources").select("*").eq("source_type", "upload").maybe_single())
+    if existing:
+        return existing
     r = get_client().table("knowledge_sources").insert({"source_type": "upload", "name": "Manual Upload"}).execute()
-    return r.data[0]
+    return (r.data or [{}])[0]
 
 
 # ── Knowledge Items ────────────────────────────────────────────────────────
@@ -267,23 +290,20 @@ def get_knowledge_items(
         q = q.eq("persona_id", persona_id)
     if content_type:
         q = q.eq("content_type", content_type)
-    return q.execute().data
+    return _q(q)
 
 
 def get_knowledge_item(item_id: str) -> Optional[dict]:
-    result = get_client().table("knowledge_items").select("*").eq("id", item_id).maybe_single().execute()
-    return result.data
+    return _one(get_client().table("knowledge_items").select("*").eq("id", item_id).maybe_single())
 
 
 def get_knowledge_item_by_path(file_path: str) -> Optional[dict]:
-    result = (
+    return _one(
         get_client().table("knowledge_items")
         .select("id,content,status")
         .eq("file_path", file_path)
         .maybe_single()
-        .execute()
     )
-    return result.data
 
 
 def insert_knowledge_item(data: dict) -> dict:
@@ -298,7 +318,7 @@ def update_knowledge_item(item_id: str, data: dict) -> None:
 
 
 def get_knowledge_item_counts() -> dict:
-    rows = get_client().table("knowledge_items").select("status,content_type").execute().data
+    rows = _q(get_client().table("knowledge_items").select("status,content_type"))
     by_status: dict = {}
     by_type: dict = {}
     for r in rows:
@@ -321,13 +341,11 @@ def update_sync_run(run_id: str, data: dict) -> None:
 
 
 def get_sync_runs(limit: int = 20) -> list:
-    return (
+    return _q(
         get_client().table("sync_runs")
         .select("*")
         .order("started_at", desc=True)
         .limit(limit)
-        .execute()
-        .data
     )
 
 
@@ -336,24 +354,33 @@ def insert_sync_log(data: dict) -> None:
 
 
 def get_sync_logs(run_id: str, limit: int = 200) -> list:
-    return (
+    return _q(
         get_client().table("sync_logs")
         .select("*")
         .eq("run_id", run_id)
         .order("created_at", desc=False)
         .limit(limit)
-        .execute()
-        .data
     )
 
 
 # ── Workflow Bindings ──────────────────────────────────────────────────────
 
 def get_workflow_bindings(persona_id: Optional[str] = None) -> list:
-    q = get_client().table("workflow_bindings").select("*,personas(name,slug)")
+    # Try with relationship join first; fall back to plain select if PGRST205
+    try:
+        q = get_client().table("workflow_bindings").select("*,personas(name,slug)")
+        if persona_id:
+            q = q.eq("persona_id", persona_id)
+        rows = _q(q)
+        if rows is not None:  # _q already handles None, but check for PGRST205 path
+            return rows
+    except Exception:
+        pass
+    # Fallback: plain select without relationship join
+    q = get_client().table("workflow_bindings").select("*")
     if persona_id:
         q = q.eq("persona_id", persona_id)
-    return q.execute().data
+    return _q(q)
 
 
 def upsert_workflow_binding(data: dict) -> dict:
@@ -366,14 +393,12 @@ def upsert_workflow_binding(data: dict) -> dict:
 # ── Brand Profiles ─────────────────────────────────────────────────────────
 
 def get_brand_profile(persona_id: str) -> Optional[dict]:
-    result = (
+    return _one(
         get_client().table("brand_profiles")
         .select("*")
         .eq("persona_id", persona_id)
         .maybe_single()
-        .execute()
     )
-    return result.data
 
 
 def upsert_brand_profile(data: dict) -> dict:
@@ -389,7 +414,7 @@ def get_campaigns(persona_id: Optional[str] = None) -> list:
     q = get_client().table("campaigns").select("*").order("created_at", desc=True)
     if persona_id:
         q = q.eq("persona_id", persona_id)
-    return q.execute().data
+    return _q(q)
 
 
 # ── System Events ──────────────────────────────────────────────────────────
@@ -413,18 +438,16 @@ def get_events(
         q = q.eq("event_type", event_type)
     if persona_id:
         q = q.eq("persona_id", persona_id)
-    return q.execute().data
+    return _q(q)
 
 
 # ── Pipeline Status ────────────────────────────────────────────────────────
 
 def get_pipeline_statuses() -> list:
-    return (
+    return _q(
         get_client().table("pipeline_status")
         .select("*")
         .order("service")
-        .execute()
-        .data
     )
 
 
@@ -436,48 +459,34 @@ def get_pipeline_metrics() -> dict:
     from datetime import datetime, timedelta
     today = (datetime.utcnow() - timedelta(hours=24)).isoformat()
 
-    # Pending items needing attention
-    attention_rows = (
+    attention_rows = _q(
         get_client().table("knowledge_items")
         .select("status")
         .in_("status", ["pending", "needs_persona", "needs_category"])
-        .execute()
-        .data
     )
-    # Approved today
-    approved_rows = (
+    approved_rows = _q(
         get_client().table("knowledge_items")
         .select("id")
         .eq("status", "approved")
         .gte("updated_at", today)
-        .execute()
-        .data
     )
-    # KB entries total
-    kb_rows = (
+    kb_rows = _q(
         get_client().table("kb_entries")
         .select("id")
         .eq("status", "ATIVO")
-        .execute()
-        .data
     )
-    # Assets pending
-    asset_rows = (
+    asset_rows = _q(
         get_client().table("knowledge_items")
         .select("id")
         .eq("content_type", "asset")
         .in_("status", ["pending", "needs_persona"])
-        .execute()
-        .data
     )
-    # Recent errors
-    error_rows = (
-        get_client().table("system_events")
+    # Recent errors from agent_logs (works even if system_events is missing)
+    error_rows = _q(
+        get_client().table("agent_logs")
         .select("id")
-        .eq("event_type", "error")
+        .like("action", "[ERROR]%")
         .gte("created_at", today)
-        .execute()
-        .data
     )
 
     return {
@@ -509,4 +518,4 @@ def get_knowledge_items_multi(
         q = q.eq("persona_id", persona_id)
     if content_type:
         q = q.eq("content_type", content_type)
-    return q.execute().data
+    return _q(q)
