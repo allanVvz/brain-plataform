@@ -1,0 +1,22 @@
+{
+  "_doc": {
+    "purpose": "Mapeamento Bot interno -> Contato WhatsApp/Meta para testes E2E.",
+    "rule": "Para validações E2E via WhatsApp Web, o contato buscado no WhatsApp deve ser o contato associado ao nome interno do bot. A conta logada pelo QR Code atua como CLIENTE/VALIDADOR e procura o contato do bot. O bot responde pelo fluxo real (WhatsApp/API/Meta/n8n/backend).",
+    "two_views": {
+      "validation_tab": "Conversa vista do ponto de vista do cliente/validador falando com o bot.",
+      "messages_tab": "Conversa vista do ponto de vista do servidor/marca/leads/processamento interno.",
+      "warning": "Estas duas visões NÃO devem ser confundidas. O E2E valida a visão do cliente. Logs internos são evidência complementar."
+    }
+  },
+  "bots": {
+    "Sofia": {
+      "bot_name": "Sofia",
+      "whatsapp_contact_name": "Sofia",
+      "meta_business_contact_name": "Sofia",
+      "persona_id": "sofia",
+      "channel": "whatsapp",
+      "validation_mode": "client_view",
+      "notes": "No teste E2E, a conta que escaneia o QR Code atua como cliente/validador e procura o contato Sofia no WhatsApp Web. A Sofia responde pelo fluxo real do WhatsApp/API/Meta/backend."
+    }
+  }
+}

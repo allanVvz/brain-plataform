@@ -1,3 +1,5 @@
+import logging
+import re
 import time
 from fastapi import APIRouter
 from schemas.events import LeadEvent
@@ -8,6 +10,7 @@ from services import supabase_client
 from datetime import datetime, timezone
 
 router = APIRouter(tags=["process"])
+logger = logging.getLogger("process")
 
 _AGENTS = {
     "SDR": SDRAgent,
@@ -21,7 +24,19 @@ async def process(event: LeadEvent):
 
     ctx = context_builder.build(event)
 
-    classification = classifier.classify(ctx)
+    try:
+        classification = classifier.classify(ctx)
+    except Exception as exc:
+        logger.warning("classifier failed, using SDR defaults: %s", exc)
+        classification = {
+            "intent": "duvida_geral",
+            "interest_level": "medio",
+            "urgency": "baixa",
+            "fit": "neutro",
+            "objections": [],
+            "summary": "classifier unavailable",
+            "route_hint": "SDR",
+        }
     ctx.classification = classification
 
     score, tags, funnel_stage = decision_engine.compute_score(ctx)
@@ -34,7 +49,7 @@ async def process(event: LeadEvent):
 
     agent_result: dict = {"reply": None, "agent": route, "detected_fields": {}}
 
-    agent_cls = _AGENTS.get(route)
+    agent_cls = _AGENTS.get(route) or _AGENTS.get("SDR")
     if agent_cls:
         try:
             agent_result = await agent_cls().run(ctx)
@@ -43,32 +58,47 @@ async def process(event: LeadEvent):
 
     latency_ms = int((time.monotonic() - t0) * 1000)
 
+    # Resolve lead_ref: Supabase row id when available, otherwise WA phone number as int
+    resolved_lead_ref: int | None = ctx.lead.ref
+    if resolved_lead_ref is None:
+        try:
+            digits = re.sub(r"\D", "", ctx.lead.id or "")
+            if digits:
+                resolved_lead_ref = int(digits)
+        except Exception:
+            pass
+
     if agent_result.get("reply"):
-        supabase_client.insert_message({
-            "lead_id": ctx.lead.id,
-            "lead_ref": ctx.lead.ref,
-            "message_id": f"ai_{int(time.time() * 1000)}_{ctx.lead.ref}",
-            "sender_type": "agent",
-            "canal": ctx.lead.canal,
-            "texto": agent_result["reply"],
-            "direction": "outbound",
-            "Lead_Stage": funnel_stage,
-            "nome": ctx.lead.nome,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        try:
+            supabase_client.insert_message({
+                "lead_ref": resolved_lead_ref,
+                "message_id": f"ai_{int(time.time() * 1000)}_{resolved_lead_ref}",
+                "sender_type": "agent",
+                "canal": ctx.lead.canal,
+                "texto": agent_result["reply"],
+                "direction": "Outbounding",
+                "Lead_Stage": funnel_stage,
+                "nome": ctx.lead.nome,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception as exc:
+            logger.warning("insert_message failed (non-fatal): %s", exc)
 
         if ctx.lead.ref:
-            update = {"stage": funnel_stage, "ultima_mensagem": ctx.mensagem}
-            df = agent_result.get("detected_fields", {}) or {}
-            if df.get("produto"):
-                update["interesse_produto"] = df["produto"]
-            if df.get("cidade"):
-                update["cidade"] = df["cidade"]
-            if df.get("cep"):
-                update["cep"] = df["cep"]
-            if df.get("nome"):
-                update["nome"] = df["nome"]
-            supabase_client.update_lead(ctx.lead.ref, update)
+            try:
+                update = {"stage": funnel_stage, "ultima_mensagem": ctx.mensagem}
+                df = agent_result.get("detected_fields", {}) or {}
+                if df.get("produto"):
+                    update["interesse_produto"] = df["produto"]
+                if df.get("cidade"):
+                    update["cidade"] = df["cidade"]
+                if df.get("cep"):
+                    update["cep"] = df["cep"]
+                if df.get("nome"):
+                    update["nome"] = df["nome"]
+                supabase_client.update_lead(ctx.lead.ref, update)
+            except Exception as exc:
+                logger.warning("update_lead failed (non-fatal): %s", exc)
 
     insight_engine.record(ctx, agent_result, latency_ms)
 

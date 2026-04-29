@@ -36,3 +36,8 @@ _validator_output_*.json
 
 # Logs
 *.log
+
+# E2E WhatsApp Web — sessão persistente (NUNCA commitar) e evidências locais
+.test-browser-profile/
+test-artifacts/
+
