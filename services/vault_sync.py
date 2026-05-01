@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime, timezone
 
-from services import supabase_client
+from services import supabase_client, knowledge_graph
 
 VAULT_PATH = os.environ.get("VAULT_PATH", r"C:\Ai-Brain\Ai-Brain")
 
@@ -112,13 +112,13 @@ def _detect_content_type(path: Path, frontmatter: dict) -> str:
         return "brand"
     if "briefing" in name:
         return "briefing"
-    if "tone" in name or "tom" in name:
+    if "tone" in name or "tom" in name or "07_tone" in parts_lower:
         return "tone"
-    if "audience" in name or "persona_buyer" in name:
+    if "audience" in name or "persona_buyer" in name or "08_audience" in parts_lower:
         return "audience"
-    if "moodboard" in name:
+    if "moodboard" in name or "12_maker" in parts_lower:
         return "maker_material"
-    if "competitor" in parts_lower or "competitors" in parts_lower or name in {"nina_luxo", "supervaidosa", "zafira"}:
+    if "competitor" in parts_lower or "competitors" in parts_lower or "09_competitors" in parts_lower or name in {"nina_luxo", "supervaidosa", "zafira"}:
         return "competitor"
     if "07_prompts" in parts_lower or "prompts" in parts_lower:
         return "prompt"
@@ -128,14 +128,22 @@ def _detect_content_type(path: Path, frontmatter: dict) -> str:
         return "rule"
     if "06_intents" in parts_lower or "intents" in parts_lower:
         return "rule"
-    if "campanha" in parts_lower or "campanhas" in parts_lower or "campaign" in name:
+    if "campanha" in parts_lower or "campanhas" in parts_lower or "04_campaigns" in parts_lower or "campaign" in name:
         return "campaign"
-    if "copie" in name or "copy" in name or "copies" in parts_lower:
+    if "copie" in name or "copy" in name or "copies" in parts_lower or "05_copy" in parts_lower:
         return "copy"
-    if "produto" in name or "products" in name:
+    if "produto" in name or "products" in name or "03_products" in parts_lower:
         return "product"
-    if "faq" in name or "kb" in name:
+    if "faq" in name or "kb" in name or "06_faq" in parts_lower:
         return "faq"
+    if "01_brand" in parts_lower:
+        return "brand"
+    if "02_briefing" in parts_lower:
+        return "briefing"
+    if "10_rules" in parts_lower:
+        return "rule"
+    if "11_prompts" in parts_lower:
+        return "prompt"
     if "02_skills" in parts_lower:
         return "prompt"
     if "04_memory" in parts_lower:
@@ -299,13 +307,10 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
             # Check if already exists
             existing = supabase_client.get_knowledge_item_by_path(rel_path)
 
-            # Auto-assign status based on completeness
-            if persona_id is None:
-                auto_status = "needs_persona"
-            elif content_type == "other":
-                auto_status = "needs_category"
-            else:
-                auto_status = "pending"
+            # Keep writes compatible with older Supabase constraints that only
+            # accept pending/approved/rejected/embedded. Missing persona/category
+            # is still visible through metadata and the queue's pending status.
+            auto_status = "pending"
 
             item_data = {
                 "persona_id": persona_id,
@@ -314,7 +319,11 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
                 "content_type": content_type,
                 "title": title,
                 "content": body[:8000],
-                "metadata": {k: v for k, v in fm.items() if isinstance(v, (str, int, float, bool, list))},
+                "metadata": {
+                    **{k: v for k, v in fm.items() if isinstance(v, (str, int, float, bool, list))},
+                    "needs_persona": persona_id is None,
+                    "needs_category": content_type == "other",
+                },
                 "file_path": rel_path,
                 "file_type": ext.lstrip("."),
             }
@@ -326,13 +335,16 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
                     supabase_client.update_knowledge_item(existing["id"], item_data)
                     counts["updated"] += 1
                     action = "updated"
+                    item_for_graph = {**existing, **item_data}
                 else:
                     counts["skipped"] += 1
                     action = "skipped"
+                    item_for_graph = existing
             else:
-                supabase_client.insert_knowledge_item(item_data)
+                inserted = supabase_client.insert_knowledge_item(item_data)
                 counts["new"] += 1
                 action = "created"
+                item_for_graph = {**item_data, **(inserted or {})}
 
             supabase_client.insert_sync_log({
                 "run_id": run_id,
@@ -341,6 +353,25 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
                 "action": action,
                 "content_type": content_type,
             })
+
+            # Mirror into the semantic graph (knowledge_nodes/edges).
+            # Defensive: never let graph maintenance break the sync.
+            try:
+                if item_for_graph and item_for_graph.get("id"):
+                    knowledge_graph.bootstrap_from_item(
+                        item_for_graph,
+                        frontmatter=fm,
+                        body=body,
+                        persona_id=persona_id,
+                        source_table="knowledge_items",
+                    )
+            except Exception as exc:
+                supabase_client.insert_sync_log({
+                    "run_id": run_id,
+                    "file_path": rel_path,
+                    "action": "error",
+                    "error_message": f"Graph mirror warning: {str(exc)[:470]}",
+                })
 
         except Exception as e:
             counts["skipped"] += 1

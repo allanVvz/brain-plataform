@@ -3,6 +3,7 @@ KB Intake Service — conversational classifier for knowledge ingestion.
 Writes to vault → git commit → sync Supabase.
 """
 import os
+import base64
 import json
 import re
 import subprocess
@@ -11,12 +12,9 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
-import anthropic
-
 from services import supabase_client
 from services.vault_sync import run_sync, VAULT_PATH
-
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+from services.model_router import ModelRouter, ModelRouterError
 
 AVAILABLE_MODELS = {
     "claude-haiku-4-5-20251001": "Claude Haiku 4.5 — Rápido",
@@ -48,9 +46,32 @@ _CONTENT_TYPE_FOLDERS = {
     "other":         "00_OTHER",
 }
 
+_CONTENT_ALIASES = {
+    "faq": "faq", "pergunta": "faq", "perguntas": "faq", "kb": "faq",
+    "produto": "product", "product": "product",
+    "copy": "copy",
+    "campanha": "campaign", "campaign": "campaign",
+    "briefing": "briefing",
+    "tom": "tone", "tone": "tone",
+    "moodboard": "maker_material", "maker": "maker_material",
+    "regra": "rule", "rule": "rule",
+}
+
+_PERSONA_ALIASES = {
+    "tock fatal": "tock-fatal",
+    "tock-fatal": "tock-fatal",
+    "tock_fatal": "tock-fatal",
+    "vz lupas": "vz-lupas",
+    "vz-lupas": "vz-lupas",
+    "baita conveniencia": "baita-conveniencia",
+    "baita conveniência": "baita-conveniencia",
+    "baita-conveniencia": "baita-conveniencia",
+}
+
 _ASSET_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".mp4", ".pdf", ".ai", ".psd"}
 
 _sessions: dict[str, dict] = {}
+_SESSION_DIR = Path(os.environ.get("KB_INTAKE_SESSION_DIR", ".runtime/kb-intake-sessions"))
 
 _SYSTEM_PROMPT = """Você é o KB Classifier, um agente especializado em classificar materiais para a base de conhecimento da plataforma AI Brain.
 
@@ -111,6 +132,50 @@ def _strip_cls(text: str) -> str:
     return re.sub(r"\s*<classification>.*?</classification>", "", text, flags=re.DOTALL).strip()
 
 
+def _session_path(session_id: str) -> Path:
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "", session_id)
+    return _SESSION_DIR / f"{safe}.json"
+
+
+def _serialize_session(session: dict) -> dict:
+    data = json.loads(json.dumps(session, default=str))
+    raw = session.get("classification", {}).get("file_bytes")
+    if isinstance(raw, (bytes, bytearray)):
+        data.setdefault("classification", {})["file_bytes_b64"] = base64.b64encode(raw).decode("ascii")
+        data["classification"]["file_bytes"] = None
+    return data
+
+
+def _save_session(session: dict) -> None:
+    try:
+        _SESSION_DIR.mkdir(parents=True, exist_ok=True)
+        _session_path(session["id"]).write_text(
+            json.dumps(_serialize_session(session), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _load_session(session_id: str) -> Optional[dict]:
+    path = _session_path(session_id)
+    if not path.exists():
+        return None
+    try:
+        session = json.loads(path.read_text(encoding="utf-8"))
+        b64 = session.get("classification", {}).pop("file_bytes_b64", None)
+        if b64:
+            session["classification"]["file_bytes"] = base64.b64decode(b64)
+        _sessions[session_id] = session
+        return session
+    except Exception:
+        return None
+
+
+def _get_session(session_id: str) -> Optional[dict]:
+    return _sessions.get(session_id) or _load_session(session_id)
+
+
 def create_session(model: str = "claude-sonnet-4-6") -> dict:
     sid = str(uuid.uuid4())
     session = {
@@ -130,15 +195,16 @@ def create_session(model: str = "claude-sonnet-4-6") -> dict:
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _sessions[sid] = session
+    _save_session(session)
     return session
 
 
 def get_session(session_id: str) -> Optional[dict]:
-    return _sessions.get(session_id)
+    return _get_session(session_id)
 
 
 def chat(session_id: str, user_message: str, file_info: Optional[dict] = None) -> dict:
-    session = _sessions.get(session_id)
+    session = _get_session(session_id)
     if not session:
         return {"error": "Session not found"}
 
@@ -166,15 +232,23 @@ Estado atual:
 - Arquivo binário recebido: {'Sim (' + cls['file_ext'] + ')' if cls.get('file_bytes') else 'Não'}
 """
 
-    client_ai = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    response = client_ai.messages.create(
-        model=session["model"],
-        max_tokens=1024,
-        system=_SYSTEM_PROMPT + "\n\n" + state_ctx,
-        messages=session["messages"],
-    )
+    try:
+        router = ModelRouter()
+        raw = router.messages_create(
+            model=session["model"],
+            messages=session["messages"],
+            system=_SYSTEM_PROMPT + "\n\n" + state_ctx,
+            max_tokens=1024,
+        )
+    except ModelRouterError as exc:
+        session["messages"].pop()  # roll back the user message on failure
+        _save_session(session)
+        return {"error": f"LLM indisponível: {exc}"}
+    except Exception as exc:
+        session["messages"].pop()
+        _save_session(session)
+        return {"error": f"Erro inesperado no LLM: {exc}"}
 
-    raw = response.content[0].text
     cls_data = _extract_cls(raw)
     visible = _strip_cls(raw)
 
@@ -186,6 +260,8 @@ Estado atual:
             session["stage"] = "ready_to_save"
 
     session["messages"].append({"role": "assistant", "content": raw})
+    _apply_save_inference(session)
+    _save_session(session)
 
     return {
         "message": visible,
@@ -196,6 +272,96 @@ Estado atual:
 
 def _safe_filename(name: str) -> str:
     return re.sub(r"[^\w\s\-]", "_", name).strip().replace(" ", "_")
+
+
+def _fold(text: str) -> str:
+    import unicodedata
+    normalized = unicodedata.normalize("NFKD", text or "")
+    return normalized.encode("ascii", "ignore").decode("ascii").lower()
+
+
+def _infer_from_transcript(session: dict) -> dict:
+    transcript = "\n".join(str(m.get("content") or "") for m in session.get("messages", []))
+    visible = _strip_cls(transcript)
+    folded = _fold(visible)
+    inferred: dict = {}
+
+    def label_key(label: str) -> str | None:
+        normalized = _fold(label).strip().replace("?", "")
+        if normalized == "cliente":
+            return "persona_slug"
+        if normalized in {"tipo", "tipo de conteudo", "tipo de contedo"}:
+            return "content_type"
+        if normalized in {"titulo", "ttulo"}:
+            return "title"
+        if normalized in {"descricao", "descrio"}:
+            return "description"
+        if normalized == "link":
+            return "link"
+        return None
+    for line in visible.splitlines():
+        clean = line.strip().lstrip("-").strip()
+        if ":" not in clean:
+            continue
+        label, value = clean.split(":", 1)
+        key = label_key(label)
+        if key and value.strip():
+            inferred[key] = value.strip().strip("-").strip()
+
+    if inferred.get("persona_slug"):
+        key = _fold(inferred["persona_slug"]).strip()
+        inferred["persona_slug"] = _PERSONA_ALIASES.get(key, key.replace(" ", "-"))
+    else:
+        for alias, slug in _PERSONA_ALIASES.items():
+            if alias in folded:
+                inferred["persona_slug"] = slug
+                break
+
+    if inferred.get("content_type"):
+        key = _fold(inferred["content_type"]).strip()
+        inferred["content_type"] = _CONTENT_ALIASES.get(key, key)
+    else:
+        for alias, ctype in _CONTENT_ALIASES.items():
+            if re.search(rf"\b{re.escape(alias)}\b", folded):
+                inferred["content_type"] = ctype
+                break
+
+    return inferred
+
+
+def _apply_save_inference(session: dict) -> None:
+    cls = session["classification"]
+    inferred = _infer_from_transcript(session)
+    for key in ("persona_slug", "content_type", "title"):
+        if inferred.get(key) and (not cls.get(key) or cls.get(key) == "other"):
+            cls[key] = inferred[key]
+    if inferred.get("description"):
+        cls["description"] = inferred["description"]
+    if inferred.get("link"):
+        cls["link"] = inferred["link"]
+
+
+def _build_content(session: dict, content_text: str) -> str:
+    if content_text and content_text.strip():
+        return content_text.strip()
+    cls = session["classification"]
+    inferred = _infer_from_transcript(session)
+    description = cls.get("description") or inferred.get("description") or ""
+    link = cls.get("link") or inferred.get("link") or ""
+
+    if cls.get("content_type") == "faq":
+        lines = [f"Pergunta: {cls.get('title') or 'FAQ'}"]
+        lines.append(f"Resposta: {description}" if description else "Resposta: ")
+        if link:
+            lines.extend(["", f"Link: {link}"])
+        return "\n".join(lines)
+
+    lines: list[str] = []
+    if description:
+        lines.extend(["## Descrição", "", description, ""])
+    if link:
+        lines.extend(["## Link", "", link, ""])
+    return "\n".join(lines).strip()
 
 
 def _write_file(session: dict, content_text: str) -> Path:
@@ -224,6 +390,8 @@ def _write_file(session: dict, content_text: str) -> Path:
         now = datetime.now(timezone.utc).isoformat()
         lines = ["---", f"title: {cls['title']}", f"client: {cls['persona_slug']}",
                  f"type: {cls['content_type']}"]
+        if cls.get("link"):
+            lines.append(f"link: {cls['link']}")
         if cls.get("asset_type"):
             lines.append(f"asset_type: {cls['asset_type']}")
         if cls.get("asset_function"):
@@ -252,41 +420,74 @@ def _git_ops(vault_path: str, rel_path: str, title: str, client: str) -> dict:
 
 
 def save(session_id: str, content_text: str = "") -> dict:
-    session = _sessions.get(session_id)
+    session = _get_session(session_id)
     if not session:
         return {"error": "Session not found"}
 
+    _apply_save_inference(session)
     cls = session["classification"]
-    if not cls.get("persona_slug") or not cls.get("content_type") or not cls.get("title"):
-        return {"error": "Classification incomplete — missing persona, content_type or title"}
+    missing = [k for k in ("persona_slug", "content_type", "title") if not cls.get(k)]
+    if missing:
+        return {
+            "error": "Classification incomplete — missing " + ", ".join(missing),
+            "classification": {k: v for k, v in cls.items() if k != "file_bytes"},
+        }
 
+    content_text = _build_content(session, content_text)
+
+    # ── 1. Write to vault (mandatory) ──────────────────────────────────
     try:
         file_path = _write_file(session, content_text)
     except Exception as e:
         return {"error": f"Write failed: {e}"}
 
     rel_path = str(file_path.relative_to(Path(VAULT_PATH)))
-    git = _git_ops(VAULT_PATH, rel_path, cls["title"], cls["persona_slug"])
-    sync = run_sync(VAULT_PATH, persona_filter=cls["persona_slug"])
 
-    supabase_client.insert_event({
-        "event_type": "kb_intake",
-        "payload": {
-            "title": cls["title"],
-            "persona_slug": cls["persona_slug"],
-            "content_type": cls["content_type"],
-            "file_path": rel_path,
-            "git": git,
-            "sync_new": sync.get("new", 0),
-            "sync_updated": sync.get("updated", 0),
-        },
-    })
+    # ── 2. Git (best-effort) ───────────────────────────────────────────
+    # If git is not on PATH or the vault isn't a repo, the call raises
+    # FileNotFoundError/CalledProcessError. We surface that as a non-fatal
+    # status instead of letting FastAPI 500 the whole request.
+    try:
+        git_result = _git_ops(VAULT_PATH, rel_path, cls["title"], cls["persona_slug"])
+    except Exception as exc:
+        git_result = {
+            "add_ok": False, "commit_ok": False, "push_ok": False,
+            "error": f"git unavailable: {exc}".strip()[:200],
+        }
+
+    # ── 3. Vault sync into knowledge_items (best-effort) ───────────────
+    try:
+        sync_result = run_sync(VAULT_PATH, persona_filter=cls["persona_slug"])
+    except Exception as exc:
+        sync_result = {"error": f"sync failed: {exc}".strip()[:200], "new": 0, "updated": 0}
+
+    # ── 4. Audit event (best-effort) ──────────────────────────────────
+    try:
+        supabase_client.insert_event({
+            "event_type": "kb_intake",
+            "payload": {
+                "title": cls["title"],
+                "persona_slug": cls["persona_slug"],
+                "content_type": cls["content_type"],
+                "file_path": rel_path,
+                "git": git_result,
+                "sync_new": sync_result.get("new", 0),
+                "sync_updated": sync_result.get("updated", 0),
+            },
+        })
+    except Exception:
+        pass  # insert_event is fire-and-forget anyway
 
     session["stage"] = "done"
+    _save_session(session)
 
     return {
         "ok": True,
         "file_path": rel_path,
-        "git": git,
-        "sync": {"new": sync.get("new", 0), "updated": sync.get("updated", 0)},
+        "git": git_result,
+        "sync": {
+            "new": sync_result.get("new", 0),
+            "updated": sync_result.get("updated", 0),
+            "error": sync_result.get("error"),
+        },
     }

@@ -1,0 +1,82 @@
+{
+  "_doc": "Cenario parametrizavel de produto + grafo de brand. NADA do conteudo aqui pode estar duplicado dentro de codigo de teste/servico — o codigo deve apenas ler este arquivo. Para rodar com outro produto/cliente, copie e ajuste apenas os campos.",
+  "persona_slug": "tock-fatal",
+  "brand": {
+    "node_type": "brand",
+    "slug": "tock-fatal",
+    "title": "Tock Fatal",
+    "tags": ["brand"]
+  },
+  "campaign": {
+    "node_type": "campaign",
+    "slug": "campanha-inverno-2026",
+    "title": "Campanha Inverno 2026",
+    "aliases": ["Campanha Inverno 26"],
+    "tags": ["campaign", "inverno", "2026"]
+  },
+  "product": {
+    "node_type": "product",
+    "slug": "conjunto-moosi-calca-pantalona",
+    "title": "Conjunto Moosi com calca Pantalona",
+    "aliases": [
+      "Conjuto Moosi com calca Pontalona",
+      "Conijunto Mossi",
+      "Conjunto Mossi",
+      "Moosi"
+    ],
+    "metadata": {
+      "price": {"amount": 169.90, "currency": "BRL", "display": "R$ 169,90"},
+      "colors_count": 5,
+      "size": "unico"
+    },
+    "catalog_url_env": "MOOSI_CATALOG_URL",
+    "catalog_url_default": null,
+    "tags": ["product", "inverno-2026", "moosi"]
+  },
+  "related": [
+    {"node_type": "product", "slug": "modais-2026", "title": "Modais 2026", "tags": ["product", "inverno-2026"]},
+    {"node_type": "faq", "slug": "catalogo-de-modais-2026", "title": "Catalogo de Modais 2026", "tags": ["faq", "catalogo"]}
+  ],
+  "copies": [
+    {
+      "node_type": "copy",
+      "slug": "copy-conjunto-moosi-inverno-2026",
+      "title": "Copy Conjunto Moosi Inverno 2026",
+      "body": "Texto comercial curto destacando preco, cores, tamanho unico e a campanha de inverno.",
+      "tags": ["copy", "inverno-2026"]
+    }
+  ],
+  "faqs": [
+    {
+      "node_type": "faq",
+      "slug": "faq-conjunto-moosi-preco",
+      "title": "Qual o preco do Conjunto Moosi?",
+      "question": "Qual o preco do Conjunto Moosi?",
+      "answer_template": "O Conjunto Moosi com calca Pantalona sai por {price.display}, em {colors_count} cores, tamanho {size}. Catalogo: {catalog_url}.",
+      "answer_requirements": ["price.display", "colors_count", "size", "catalog_url"],
+      "tags": ["faq", "preco"]
+    }
+  ],
+  "expected_edges": [
+    {"src_slug": "conjunto-moosi-calca-pantalona", "relation_type": "part_of_campaign", "tgt_slug": "campanha-inverno-2026"},
+    {"src_slug": "conjunto-moosi-calca-pantalona", "relation_type": "same_topic_as",    "tgt_slug": "modais-2026"},
+    {"src_slug": "catalogo-de-modais-2026",        "relation_type": "answers_question", "tgt_slug": "conjunto-moosi-calca-pantalona"},
+    {"src_slug": "copy-conjunto-moosi-inverno-2026","relation_type": "supports_copy",   "tgt_slug": "conjunto-moosi-calca-pantalona"},
+    {"src_slug": "conjunto-moosi-calca-pantalona", "relation_type": "belongs_to_persona","tgt_slug": "self"}
+  ],
+  "expected_sidebar": {
+    "product_nodes": [{"slug": "conjunto-moosi-calca-pantalona", "must_render": ["title", "metadata.price.display", "metadata.colors_count", "metadata.size", "catalog_url"]}],
+    "campaign_nodes": [{"slug": "campanha-inverno-2026"}],
+    "related_nodes": [{"slug": "modais-2026"}, {"slug": "catalogo-de-modais-2026"}]
+  },
+  "validation_rules": {
+    "product_must_have_price": true,
+    "missing_price_action": "propose_correction",
+    "expected_curation_proposal_kind": "missing_required_field"
+  },
+  "search_queries": [
+    "Oi, queria saber do conjunto Moosi com calca pantalona. Tem preco, cores e link?",
+    "tem o moosi pra mim?",
+    "qual o preco do conjuto Moosi com calca pontalona?"
+  ]
+}

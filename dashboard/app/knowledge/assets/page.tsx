@@ -1,9 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
-
-const BASE = process.env.NEXT_PUBLIC_AI_BRAIN_URL || "http://localhost:8000";
+import { api, BASE } from "@/lib/api";
 
 const IMAGE_EXTS = new Set(["png","jpg","jpeg","svg","gif","webp"]);
 const VIDEO_EXTS = new Set(["mp4","mov","webm"]);

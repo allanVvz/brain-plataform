@@ -1,8 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
-
-const BASE = process.env.NEXT_PUBLIC_AI_BRAIN_URL || "http://localhost:8000";
+import { api, BASE } from "@/lib/api";
 
 interface KnowledgeItem {
   id: string;

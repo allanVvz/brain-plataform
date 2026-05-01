@@ -1,9 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Bot, User, Upload, Send, CheckCircle, Circle, Loader2, Save, FileText, FolderOpen } from "lucide-react";
-import { api } from "@/lib/api";
-
-const BASE = process.env.NEXT_PUBLIC_AI_BRAIN_URL || "http://localhost:8000";
+import { api, BASE } from "@/lib/api";
 
 const MODELS = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5 — Rápido" },
@@ -76,6 +74,11 @@ function ChatPanel() {
       setSessionId(d.session_id);
       setMessages([{ role: "assistant", content: d.welcome }]);
       setStage("chatting");
+    } catch (e: any) {
+      setMessages((p) => [...p, {
+        role: "system",
+        content: `Erro ao salvar: ${e?.message || "falha desconhecida"}`,
+      }]);
     } finally { setLoading(false); }
   }
 

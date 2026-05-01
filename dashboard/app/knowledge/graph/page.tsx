@@ -40,7 +40,9 @@ export default function GraphPage() {
         <div className="flex items-center gap-2 ml-auto">
           {data?.meta && (
             <span className="text-[11px] text-obs-subtle">
-              {data.meta.total_personas} personas · {data.meta.total_items} itens
+              {data.meta.total_personas} personas ·{" "}
+              {data.meta.kb_entries ?? 0} KB ·{" "}
+              {data.meta.ki_items ?? 0} queue
             </span>
           )}
 
@@ -70,7 +72,8 @@ export default function GraphPage() {
 
       {/* Legend */}
       <div className="flex items-center gap-4 px-6 py-2 border-b border-white/04 shrink-0">
-        <LegendDot color="bg-obs-violet" label="Persona (raiz)" />
+        <LegendDot color="bg-obs-violet" label="Persona" />
+        <LegendDot color="bg-obs-amber/60 rounded-sm" label="Galho (tipo)" shape="square" />
         <LegendDot color="bg-obs-slate" label="Validado" />
         <LegendDot color="bg-obs-amber" label="Pendente" />
         <LegendDot color="bg-obs-rose" label="Rejeitado" />
@@ -93,16 +96,20 @@ export default function GraphPage() {
         )}
 
         {/* Drawer overlay */}
-        <NodeDrawer node={selectedNode} onClose={() => setSelectedNode(null)} />
+        <NodeDrawer
+          node={selectedNode}
+          onClose={() => setSelectedNode(null)}
+          onUpdated={() => load(selectedPersona)}
+        />
       </div>
     </div>
   );
 }
 
-function LegendDot({ color, label }: { color: string; label: string }) {
+function LegendDot({ color, label, shape }: { color: string; label: string; shape?: "square" }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className={`w-2 h-2 rounded-full ${color}`} />
+      <span className={`w-2 h-2 ${shape === "square" ? "rounded-sm" : "rounded-full"} ${color}`} />
       <span className="text-[10px] text-obs-subtle">{label}</span>
     </div>
   );

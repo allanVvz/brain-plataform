@@ -1,10 +1,39 @@
+import hashlib
+import hmac
+import json
 import os
+import time
 import httpx
 from typing import Optional
 
 
 def _headers() -> dict:
     return {"X-N8N-API-KEY": os.environ["N8N_API_KEY"]}
+
+
+def send_to_webhook(
+    url: str,
+    payload: dict,
+    secret: Optional[str] = None,
+    timeout: float = 10.0,
+) -> tuple[int, str]:
+    """POST a payload to an arbitrary n8n webhook URL.
+
+    If secret is given, signs the body with HMAC-SHA256 and sends the
+    signature in X-Hub-Signature-256 (GitHub-compatible format).
+
+    Returns (status_code, body_preview). Raises httpx.HTTPError on connection
+    failures so the caller can mark the message as failed.
+    """
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        sig = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        headers["X-Hub-Signature-256"] = f"sha256={sig}"
+        headers["X-Timestamp"] = str(int(time.time()))
+    with httpx.Client(timeout=timeout) as client:
+        resp = client.post(url, content=body, headers=headers)
+        return resp.status_code, (resp.text or "")[:300]
 
 
 def _base() -> str:

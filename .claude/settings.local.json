@@ -19,7 +19,10 @@
       "Bash(read f *)",
       "Bash(echo \"exit: $?\")",
       "Bash(wait %1)",
-      "Read(//c/Users/Alan/AppData/Local/Temp/claude/C--Users-Alan-Documents-repositorios-ai-brain/7a967aa8-fa5e-4787-9f34-7b8344ea3c0a/tasks/**)"
+      "Read(//c/Users/Alan/AppData/Local/Temp/claude/C--Users-Alan-Documents-repositorios-ai-brain/7a967aa8-fa5e-4787-9f34-7b8344ea3c0a/tasks/**)",
+      "Bash(git commit -m ' *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(PYTHONIOENCODING=utf-8 python tests/integration_prime_bulk_real.py --apply --create-test-lead --bootstrap --products 5 --copies 10 --faqs 50)"
     ]
   },
   "hooks": {
@@ -29,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python tests/hook_smoke_check.py",
+            "command": "cd /c/Users/Alan/Documents/repositorios/ai-brain && python tests/hook_smoke_check.py",
             "timeout": 60
           }
         ]

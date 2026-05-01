@@ -1,11 +1,22 @@
-const BASE = process.env.NEXT_PUBLIC_AI_BRAIN_URL || "http://localhost:8000";
+// Requests go through the Next.js rewrite proxy (/api-brain → backend).
+// This avoids cross-origin CORS issues entirely, regardless of environment.
+export const BASE = "/api-brain";
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...opts,
   });
-  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail || body);
+    } catch {
+      detail = await res.text().catch(() => "");
+    }
+    throw new Error(`${res.status} ${path}${detail ? ` - ${detail}` : ""}`);
+  }
   return res.json();
 }
 
@@ -24,10 +35,21 @@ export const api = {
   healthHistory: (limit = 30) => req<any[]>(`/logs/health-history?limit=${limit}`),
 
   // Leads & Messages
-  leads: (limit = 100, offset = 0) => req<any[]>(`/leads?limit=${limit}&offset=${offset}`),
+  leads: (limit = 100, offset = 0, personaId?: string) =>
+    req<any[]>(`/leads?limit=${limit}&offset=${offset}${personaId ? `&persona_id=${personaId}` : ""}`),
   lead: (id: string) => req<any>(`/leads/${id}`),
+  pauseAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/pause-ai`, { method: "POST" }),
+  resumeAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/resume-ai`, { method: "POST" }),
   messages: (leadId: string) => req<any[]>(`/messages/${leadId}`),
+  messagesByRef: (leadRef: number, limit = 200) => req<any[]>(`/messages/by-ref/${leadRef}?limit=${limit}`),
   recentMessages: (hours = 24) => req<any[]>(`/messages?hours=${hours}`),
+  conversations: (hours = 168, personaId?: string) =>
+    req<any[]>(`/messages/conversations?hours=${hours}${personaId ? `&persona_id=${personaId}` : ""}`),
+  sendMessage: (body: { lead_ref: number; texto: string; agent_id?: string; sender_id?: string; nome?: string }) =>
+    req<{ ok: boolean; message_id: string; status: string; webhook_status?: number; webhook_error?: string }>(
+      "/messages/send",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
 
   // KB
   kb: (personaId?: string, status = "ATIVO") => req<any[]>(`/kb?status=${status}${personaId ? `&persona_id=${personaId}` : ""}`),
@@ -47,6 +69,14 @@ export const api = {
   triggerSync: (persona?: string) => req<any>(`/knowledge/sync${persona ? `?persona=${persona}` : ""}`, { method: "POST" }),
   syncRuns: (limit = 20) => req<any[]>(`/knowledge/sync/runs?limit=${limit}`),
   syncRunLogs: (runId: string) => req<any[]>(`/knowledge/sync/runs/${runId}/logs`),
+
+  // Knowledge — Single item fetch
+  queueItem: (id: string) => req<any>(`/knowledge/queue/${id}`),
+  kbEntry: (id: string) => req<any>(`/knowledge/kb/${id}`),
+  updateKbEntry: (id: string, data: Record<string, any>) =>
+    req<any>(`/knowledge/kb/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  validateKbEntry: (id: string) =>
+    req<any>(`/knowledge/kb/${id}/validate`, { method: "POST" }),
 
   // Knowledge — Queue
   knowledgeQueue: (status = "pending", personaId?: string, contentType?: string) => {
@@ -92,7 +122,24 @@ export const api = {
   graphData: (personaSlug?: string) =>
     req<any>(`/knowledge/graph-data${personaSlug ? `?persona_slug=${personaSlug}` : ""}`),
 
+  // Knowledge — Chat sidebar context (semantic graph + KB fallback)
+  knowledgeChatContext: (leadRef: number, q?: string, personaId?: string) => {
+    const params = new URLSearchParams();
+    params.set("lead_ref", String(leadRef));
+    if (q) params.set("q", q);
+    if (personaId) params.set("persona_id", personaId);
+    return req<{
+      query_terms: string[];
+      nodes: any[];
+      edges: any[];
+      kb_entries: any[];
+      assets: any[];
+      summary: string;
+    }>(`/knowledge/chat-context?${params.toString()}`);
+  },
+
   // WA Validator
+  waBots: () => req<any[]>("/wa-validator/bots"),
   waFlows: () => req<any[]>("/wa-validator/flows"),
   waModels: () => req<any[]>("/wa-validator/models"),
   waSessions: () => req<any[]>("/wa-validator/sessions"),
@@ -101,6 +148,8 @@ export const api = {
     req<any>("/wa-validator/generate-script", { method: "POST", body: JSON.stringify(body) }),
   waRun: (session_id: string) =>
     req<any>("/wa-validator/run", { method: "POST", body: JSON.stringify({ session_id }) }),
+  waRunDirect: (session_id: string) =>
+    req<any>("/wa-validator/run-direct", { method: "POST", body: JSON.stringify({ session_id }) }),
   waAnalyze: (session_id: string, model?: string) =>
     req<any>("/wa-validator/analyze", { method: "POST", body: JSON.stringify({ session_id, model }) }),
 

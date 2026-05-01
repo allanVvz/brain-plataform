@@ -47,7 +47,10 @@ def start_session(body: StartBody):
 
 @router.post("/message")
 def send_message(body: MessageBody):
-    result = chat(body.session_id, body.message)
+    try:
+        result = chat(body.session_id, body.message)
+    except Exception as exc:
+        raise HTTPException(500, f"Erro interno: {exc}") from exc
     if "error" in result:
         raise HTTPException(400, result["error"])
     return result
@@ -62,6 +65,29 @@ async def upload_file(
     content = await file.read()
     fname = file.filename or "upload"
     ext = ("." + fname.rsplit(".", 1)[-1].lower()) if "." in fname else ""
+
+    # Persist to Supabase Storage + kb_intake table (best-effort)
+    storage_path: Optional[str] = None
+    file_url: Optional[str] = None
+    try:
+        from services.supabase_client import upload_to_storage, insert_kb_intake
+        storage_path = f"kb_intake/{session_id}/{fname}"
+        file_url = upload_to_storage(
+            "knowledge",
+            storage_path,
+            content,
+            file.content_type or "application/octet-stream",
+        )
+        insert_kb_intake({
+            "filename": fname,
+            "file_path": storage_path,
+            "persona_id": None,
+            "status": "pending",
+        })
+    except Exception as exc:
+        from services import sre_logger
+        sre_logger.warn("kb_intake_upload", f"storage/db write skipped: {exc}", exc)
+
     file_info = {
         "filename": fname,
         "size": len(content),
@@ -69,9 +95,15 @@ async def upload_file(
         "ext": ext,
         "bytes": content,
     }
-    result = chat(session_id, message, file_info=file_info)
+    try:
+        result = chat(session_id, message, file_info=file_info)
+    except Exception as exc:
+        raise HTTPException(500, f"Erro interno: {exc}") from exc
     if "error" in result:
         raise HTTPException(400, result["error"])
+    if file_url:
+        result["file_url"] = file_url
+        result["storage_path"] = storage_path
     return result
 
 
@@ -93,5 +125,13 @@ def get_session_info(session_id: str):
 def save_knowledge(body: SaveBody):
     result = save(body.session_id, body.content)
     if "error" in result:
-        raise HTTPException(400, result["error"])
+        try:
+            from services import sre_logger
+            sre_logger.warn(
+                "kb_intake_save",
+                f"save rejected session={body.session_id[:8]} error={result.get('error')} classification={result.get('classification')}",
+            )
+        except Exception:
+            pass
+        raise HTTPException(400, result)
     return result

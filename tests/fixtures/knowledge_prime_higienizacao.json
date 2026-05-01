@@ -1,0 +1,186 @@
+{
+  "_doc": "Cenario mockado de cadastro completo de conhecimento para um novo cliente, sem WhatsApp real e sem n8n. A logica do teste deve ler estes dados em vez de hardcodar regras de negocio.",
+  "persona": {
+    "slug": "prime-higienizacao",
+    "name": "Prime Higienizacao",
+    "tone": "serio, direto ao ponto, regional, clean e seguro",
+    "products": [
+      "Higienizacao de Cadeiras",
+      "Higienizacao de Sofas",
+      "Impermeabilizacao",
+      "Plano Dia Inteiro"
+    ],
+    "config": {
+      "region": "Novo Hamburgo",
+      "mock_only": true
+    }
+  },
+  "items": [
+    {
+      "node_type": "brand",
+      "slug": "prime-higienizacao",
+      "title": "Prime Higienizacao",
+      "content": "Marca de servicos de higienizacao premium na regiao de Novo Hamburgo. Atendimento regional, limpo, seguro e direto.",
+      "aliases": ["Prime", "Prime Higienizacao", "higienizacao prime"],
+      "tags": ["brand", "novo-hamburgo", "azul"],
+      "metadata": {
+        "dominant_color": {"name": "azul", "hex": "#1d4ed8"},
+        "region": "Novo Hamburgo",
+        "positioning": "servicos de qualidade em higienizacao"
+      }
+    },
+    {
+      "node_type": "briefing",
+      "slug": "briefing-geral-prime-higienizacao",
+      "title": "Briefing Geral Prime Higienizacao",
+      "content": "Briefing geral: um casal conduz a Prime Higienizacao na regiao de Novo Hamburgo, com foco em servicos de qualidade para estofados, sofas, cadeiras e itens similares. A comunicacao deve transmitir seguranca, limpeza e objetividade.",
+      "aliases": ["briefing geral", "casal prime", "novo hamburgo"],
+      "tags": ["briefing", "novo-hamburgo", "servicos"],
+      "metadata": {
+        "region": "Novo Hamburgo",
+        "operator_profile": "casal",
+        "service_scope": ["estofados", "sofas", "cadeiras"]
+      }
+    },
+    {
+      "node_type": "tone",
+      "slug": "tom-prime-higienizacao",
+      "title": "Tom Prime Higienizacao",
+      "content": "Tom serio, direto ao ponto, regional, clean e seguro. Evitar exageros, manter clareza de preco e proximidade com Novo Hamburgo.",
+      "aliases": ["tom prime", "tom de voz"],
+      "tags": ["tone", "seguro", "regional"],
+      "metadata": {
+        "voice": ["serio", "direto ao ponto", "regional", "clean", "seguro"]
+      }
+    },
+    {
+      "node_type": "product",
+      "slug": "higienizacao-cadeiras",
+      "title": "Higienizacao de Cadeiras",
+      "content": "Servico de higienizacao de cadeiras. Cobranca de R$ 100,00 para cada cadeira.",
+      "aliases": ["cadeira", "cadeiras", "higienizar cadeira", "limpeza de cadeira"],
+      "tags": ["product", "cadeiras", "estofados"],
+      "metadata": {
+        "price": {"amount": 100.0, "currency": "BRL", "display": "R$ 100,00", "unit": "por cadeira"},
+        "region": "Novo Hamburgo",
+        "service_category": "estofados"
+      }
+    },
+    {
+      "node_type": "product",
+      "slug": "higienizacao-sofas",
+      "title": "Higienizacao de Sofas",
+      "content": "Servico de higienizacao de sofas. Cobranca de R$ 200,00 para cada sofa.",
+      "aliases": ["sofa", "sofas", "higienizar sofa", "limpeza de sofa", "estofado"],
+      "tags": ["product", "sofas", "estofados"],
+      "metadata": {
+        "price": {"amount": 200.0, "currency": "BRL", "display": "R$ 200,00", "unit": "por sofa"},
+        "region": "Novo Hamburgo",
+        "service_category": "estofados"
+      }
+    },
+    {
+      "node_type": "product",
+      "slug": "impermeabilizacao",
+      "title": "Impermeabilizacao",
+      "content": "Servico adicional de impermeabilizacao. Quando contratado junto da higienizacao, acrescenta 30% ao valor do servico.",
+      "aliases": ["hipermeabilizacao", "impermeabilizar", "adicional de 30%", "acrescimo de 30%"],
+      "tags": ["product", "adicional", "impermeabilizacao"],
+      "metadata": {
+        "price": {"amount": 30.0, "currency": "BRL", "display": "+30%", "unit": "acrescimo percentual"},
+        "price_modifier": {"type": "percentage", "amount": 30},
+        "region": "Novo Hamburgo"
+      }
+    },
+    {
+      "node_type": "product",
+      "slug": "plano-dia-inteiro",
+      "title": "Plano Dia Inteiro",
+      "content": "Plano alternativo para contratar a equipe pelo dia inteiro. Valor de R$ 1.500,00 pelo dia inteiro.",
+      "aliases": ["dia inteiro", "plano diario", "equipe por dia", "servico por dia"],
+      "tags": ["product", "plano", "dia-inteiro"],
+      "metadata": {
+        "price": {"amount": 1500.0, "currency": "BRL", "display": "R$ 1.500,00", "unit": "dia inteiro"},
+        "region": "Novo Hamburgo"
+      }
+    },
+    {
+      "node_type": "rule",
+      "slug": "regra-precos-prime",
+      "title": "Regra de Precos Prime Higienizacao",
+      "content": "Sempre responder precos de forma clara: R$ 100,00 por cadeira, R$ 200,00 por sofa, +30% para impermeabilizacao e R$ 1.500,00 para plano de dia inteiro.",
+      "aliases": ["precos prime", "tabela prime"],
+      "tags": ["rule", "precos"],
+      "metadata": {
+        "rule_scope": "pricing",
+        "requires_clear_price": true
+      }
+    },
+    {
+      "node_type": "faq",
+      "slug": "faq-precos-prime-higienizacao",
+      "title": "FAQ Precos Prime Higienizacao",
+      "content": "Pergunta: Quanto custa higienizar cadeira ou sofa?\nResposta: A cadeira custa R$ 100,00 cada e o sofa custa R$ 200,00 cada. Se incluir impermeabilizacao, ha acrescimo de 30%. Tambem existe plano de dia inteiro por R$ 1.500,00.",
+      "aliases": ["quanto custa", "preco cadeira", "preco sofa"],
+      "tags": ["faq", "precos"],
+      "metadata": {
+        "question": "Quanto custa higienizar cadeira ou sofa?"
+      }
+    },
+    {
+      "node_type": "copy",
+      "slug": "copy-prime-higienizacao-regional",
+      "title": "Copy Prime Higienizacao Regional",
+      "content": "Higienizacao de estofados em Novo Hamburgo com atendimento serio, direto e seguro. Cadeiras por R$ 100,00, sofas por R$ 200,00 e opcao de impermeabilizacao com acrescimo de 30%.",
+      "aliases": ["copy prime", "texto comercial prime"],
+      "tags": ["copy", "novo-hamburgo"],
+      "metadata": {
+        "channel": "chat",
+        "tone": "serio e direto"
+      }
+    }
+  ],
+  "expected_edges": [
+    {"src_slug": "briefing-geral-prime-higienizacao", "src_type": "briefing", "relation_type": "defines_brand", "tgt_slug": "prime-higienizacao", "tgt_type": "brand"},
+    {"src_slug": "tom-prime-higienizacao", "src_type": "tone", "relation_type": "defines_brand", "tgt_slug": "prime-higienizacao", "tgt_type": "brand"},
+    {"src_slug": "prime-higienizacao", "src_type": "brand", "relation_type": "has_tone", "tgt_slug": "tom-prime-higienizacao", "tgt_type": "tone"},
+    {"src_slug": "higienizacao-cadeiras", "src_type": "product", "relation_type": "has_tone", "tgt_slug": "tom-prime-higienizacao", "tgt_type": "tone"},
+    {"src_slug": "higienizacao-sofas", "src_type": "product", "relation_type": "has_tone", "tgt_slug": "tom-prime-higienizacao", "tgt_type": "tone"},
+    {"src_slug": "higienizacao-cadeiras", "src_type": "product", "relation_type": "same_topic_as", "tgt_slug": "higienizacao-sofas", "tgt_type": "product"},
+    {"src_slug": "higienizacao-cadeiras", "src_type": "product", "relation_type": "same_topic_as", "tgt_slug": "impermeabilizacao", "tgt_type": "product"},
+    {"src_slug": "higienizacao-sofas", "src_type": "product", "relation_type": "same_topic_as", "tgt_slug": "impermeabilizacao", "tgt_type": "product"},
+    {"src_slug": "plano-dia-inteiro", "src_type": "product", "relation_type": "same_topic_as", "tgt_slug": "higienizacao-sofas", "tgt_type": "product"},
+    {"src_slug": "regra-precos-prime", "src_type": "rule", "relation_type": "about_product", "tgt_slug": "higienizacao-cadeiras", "tgt_type": "product"},
+    {"src_slug": "regra-precos-prime", "src_type": "rule", "relation_type": "about_product", "tgt_slug": "higienizacao-sofas", "tgt_type": "product"},
+    {"src_slug": "faq-precos-prime-higienizacao", "src_type": "faq", "relation_type": "answers_question", "tgt_slug": "higienizacao-cadeiras", "tgt_type": "product"},
+    {"src_slug": "faq-precos-prime-higienizacao", "src_type": "faq", "relation_type": "answers_question", "tgt_slug": "higienizacao-sofas", "tgt_type": "product"},
+    {"src_slug": "copy-prime-higienizacao-regional", "src_type": "copy", "relation_type": "supports_copy", "tgt_slug": "higienizacao-sofas", "tgt_type": "product"}
+  ],
+  "test_messages": [
+    {
+      "text": "Oi, voces fazem higienizacao de cadeira em Novo Hamburgo? Quanto custa?",
+      "expected_focus_slug": "higienizacao-cadeiras",
+      "expected_related_slugs": ["higienizacao-sofas", "impermeabilizacao", "regra-precos-prime"],
+      "expected_reply_terms": ["R$ 100,00", "Novo Hamburgo"]
+    },
+    {
+      "text": "Tenho um sofa e queria impermeabilizacao tambem. Qual o valor?",
+      "expected_focus_slug": "higienizacao-sofas",
+      "expected_related_slugs": ["impermeabilizacao", "regra-precos-prime"],
+      "expected_reply_terms": ["R$ 200,00", "30%"]
+    },
+    {
+      "text": "Para muitos estofados, tem plano por dia inteiro?",
+      "expected_focus_slug": "plano-dia-inteiro",
+      "expected_related_slugs": ["higienizacao-sofas"],
+      "expected_reply_terms": ["R$ 1.500,00", "dia inteiro"]
+    }
+  ],
+  "expected_sidebar": {
+    "brand": ["Prime Higienizacao", "azul"],
+    "briefing": ["Novo Hamburgo", "casal"],
+    "products": ["Higienizacao de Cadeiras", "R$ 100,00", "Higienizacao de Sofas", "R$ 200,00", "Impermeabilizacao", "+30%", "Plano Dia Inteiro", "R$ 1.500,00"],
+    "tone_rules": ["serio", "direto", "regional", "clean", "seguro"],
+    "similarity": ["graph_distance", "path", "same_topic_as"]
+  }
+}

@@ -1,8 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Bot, User, Upload, Send, CheckCircle, Circle, Loader2, Save } from "lucide-react";
-
-const BASE = process.env.NEXT_PUBLIC_AI_BRAIN_URL || "http://localhost:8000";
+import { BASE } from "@/lib/api";
 
 const MODELS = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5 — Rápido" },

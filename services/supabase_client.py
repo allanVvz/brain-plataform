@@ -1,8 +1,17 @@
 import os
+import time
 from supabase import create_client, Client
 from typing import Optional
 
 _client: Optional[Client] = None
+_TRANSIENT_ERROR_MARKERS = (
+    "Server disconnected",
+    "RemoteProtocolError",
+    "ReadError",
+    "ConnectError",
+    "TimeoutException",
+    "Connection reset",
+)
 
 
 def get_client() -> Client:
@@ -15,6 +24,32 @@ def get_client() -> Client:
     return _client
 
 
+def _reset_client() -> None:
+    global _client
+    _client = None
+
+
+def _is_transient_transport_error(exc: Exception) -> bool:
+    text = f"{type(exc).__module__}.{type(exc).__name__}: {exc}"
+    return any(marker in text for marker in _TRANSIENT_ERROR_MARKERS)
+
+
+def _execute_with_retry(query, retries: int = 2):
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            return query.execute()
+        except Exception as exc:
+            last_exc = exc
+            if not _is_transient_transport_error(exc) or attempt >= retries:
+                raise
+            _reset_client()
+            time.sleep(0.25 * (attempt + 1))
+    if last_exc:
+        raise last_exc
+    return None
+
+
 # ── Safe query helpers ─────────────────────────────────────────────────────
 # All public functions use _q() / _one() so that:
 #   • A None result never causes AttributeError
@@ -23,7 +58,9 @@ def get_client() -> Client:
 def _q(query) -> list:
     """Execute a list query; return [] on None or any exception."""
     try:
-        result = query.execute()
+        result = _execute_with_retry(query)
+        if result is None:
+            return []
         return result.data or []
     except Exception as exc:
         try:
@@ -37,7 +74,9 @@ def _q(query) -> list:
 def _one(query) -> Optional[dict]:
     """Execute a single-row query (maybe_single); return None on error."""
     try:
-        result = query.execute()
+        result = _execute_with_retry(query)
+        if result is None:
+            return None
         return result.data
     except Exception as exc:
         try:
@@ -48,32 +87,192 @@ def _one(query) -> Optional[dict]:
         return None
 
 
+def _insert_one(query) -> dict:
+    """Execute an insert and return the first row. Returns {} if result.data is None."""
+    try:
+        result = _execute_with_retry(query)
+        if result is None or not result.data:
+            return {}
+        return result.data[0]
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"insert failed: {exc}", exc)
+        except Exception:
+            pass
+        return {}
+
+
 # ── Leads ──────────────────────────────────────────────────────────────────
 
 def get_lead(lead_id: str) -> Optional[dict]:
-    return _one(get_client().table("leads").select("*").eq("lead_id", lead_id).maybe_single())
+    client = get_client()
+    try:
+        import re as _re
+        digits = _re.sub(r"\D", "", lead_id or "")
+        if digits and len(digits) <= 10:
+            row = _one(client.table("leads").select("*").eq("id", int(digits)).maybe_single())
+            if row:
+                return row
+    except Exception:
+        pass
+    return _one(client.table("leads").select("*").eq("lead_id", lead_id).maybe_single())
+
+
+def _resolve_persona_id(persona_slug_or_id: Optional[str]) -> Optional[str]:
+    if not persona_slug_or_id:
+        return None
+    if len(persona_slug_or_id) == 36 and persona_slug_or_id.count("-") == 4:
+        return persona_slug_or_id
+    persona = get_persona(persona_slug_or_id)
+    return persona.get("id") if persona else None
+
+
+def ensure_lead_for_persona(
+    *,
+    lead_id: str,
+    persona_slug_or_id: Optional[str],
+    lead_ref: Optional[int] = None,
+    nome: Optional[str] = None,
+    stage: Optional[str] = None,
+    canal: Optional[str] = None,
+    mensagem: Optional[str] = None,
+    interesse_produto: Optional[str] = None,
+    cidade: Optional[str] = None,
+    cep: Optional[str] = None,
+) -> Optional[dict]:
+    """Ensure an inbound lead is tied to the intended persona branch.
+
+    If an existing lead has no persona, assign it. If it already belongs to a
+    different persona and no explicit lead_ref was provided, keep it unchanged
+    to avoid moving a real lead between clients by phone/name collision.
+    """
+    if not lead_id and lead_ref is None:
+        return None
+    from datetime import datetime, timezone
+
+    client = get_client()
+    persona_id = _resolve_persona_id(persona_slug_or_id)
+    existing = get_lead_by_ref(lead_ref) if lead_ref is not None else get_lead(lead_id)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    update: dict = {
+        "last_update": now_iso,
+        "updated_at": now_iso,
+    }
+    if nome:
+        update["nome"] = nome
+    if stage:
+        update["stage"] = stage
+    if canal:
+        update["canal"] = canal
+    if mensagem:
+        update["ultima_mensagem"] = mensagem
+    if interesse_produto:
+        update["interesse_produto"] = interesse_produto
+    if cidade:
+        update["cidade"] = cidade
+    if cep:
+        update["cep"] = cep
+    if lead_id:
+        update["lead_id"] = lead_id
+        digits = "".join(ch for ch in lead_id if ch.isdigit())
+        if digits:
+            update["telefone"] = digits
+
+    if existing:
+        current_persona = existing.get("persona_id")
+        if persona_id and (not current_persona or lead_ref is not None or current_persona == persona_id):
+            update["persona_id"] = persona_id
+        elif current_persona and persona_id and current_persona != persona_id:
+            update = {k: v for k, v in update.items() if k in {"last_update", "updated_at", "ultima_mensagem"}}
+        try:
+            result = _execute_with_retry(client.table("leads").update(update).eq("id", existing["id"]))
+            return (result.data or [{**existing, **update}])[0]
+        except Exception:
+            return {**existing, **update}
+
+    payload = {
+        **update,
+        "lead_id": lead_id,
+        "nome": nome,
+        "stage": stage or "novo",
+        "canal": canal or "whatsapp",
+        "persona_id": persona_id,
+        "ai_enabled": True,
+        "created_at": now_iso,
+    }
+    payload = {k: v for k, v in payload.items() if v is not None}
+    return _insert_one(client.table("leads").insert(payload))
 
 
 def get_leads(persona_slug: Optional[str] = None, limit: int = 100, offset: int = 0) -> list:
-    q = get_client().table("leads").select("*").order("updated_at", desc=True).range(offset, offset + limit - 1)
-    return _q(q)
+    try:
+        q = get_client().table("leads").select("*").order("updated_at", desc=True).range(offset, offset + limit - 1)
+        if persona_slug:
+            persona_id = _resolve_persona_id(persona_slug) or persona_slug
+            q = q.eq("persona_id", persona_id)
+        return _q(q)
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"get_leads failed: {exc}", exc)
+        except Exception:
+            pass
+        return []
 
 
 def update_lead(lead_ref: int, data: dict) -> None:
-    get_client().table("leads").update(data).eq("id", lead_ref).execute()
+    _execute_with_retry(get_client().table("leads").update(data).eq("id", lead_ref))
+
+
+def get_lead_by_ref(lead_ref: int) -> Optional[dict]:
+    """Fetch a lead row by its integer primary key (`leads.id`)."""
+    return _one(get_client().table("leads").select("*").eq("id", lead_ref).maybe_single())
 
 
 # ── Messages ───────────────────────────────────────────────────────────────
 
 def get_messages(lead_id: str, limit: int = 30) -> list:
-    q = (
-        get_client().table("messages")
-        .select("*")
-        .eq("lead_id", lead_id)
-        .order("created_at", desc=True)
-        .limit(limit)
-    )
-    return list(reversed(_q(q)))
+    """
+    Fetch messages for a lead, ordered ascending (chronological chat order).
+    Primary key: lead_ref (integer) — the messages table has NO lead_id column.
+    Accepts either the integer id as string ("117") or a nome string as fallback.
+    """
+    client = get_client()
+
+    # Primary: lead_ref (integer) — strip non-digits and cast
+    try:
+        import re as _re
+        digits = _re.sub(r"\D", "", lead_id or "")
+        # Only use digits if they look like an integer DB id (not a phone number > 12 digits)
+        if digits and len(digits) <= 10:
+            rows = _q(
+                client.table("messages")
+                .select("*")
+                .eq("lead_ref", int(digits))
+                .order("created_at", desc=False)
+                .order("id", desc=False)
+                .limit(limit)
+            )
+            if rows:
+                return rows
+    except Exception:
+        pass
+
+    # Fallback: filter by nome if a name string was passed
+    if lead_id and not lead_id.isdigit():
+        rows = _q(
+            client.table("messages")
+            .select("*")
+            .eq("nome", lead_id)
+            .order("created_at", desc=False)
+            .order("id", desc=False)
+            .limit(limit)
+        )
+        return rows
+
+    return []
 
 
 def get_recent_messages(hours: int = 24, limit: int = 500) -> list:
@@ -89,17 +288,406 @@ def get_recent_messages(hours: int = 24, limit: int = 500) -> list:
     return _q(q)
 
 
+def get_conversations(hours: int = 168, limit: int = 1000, persona_id: Optional[str] = None) -> list:
+    """
+    Returns the last message per unique conversation.
+
+    lead_ref is the canonical conversation key. Names are only a fallback for
+    orphan messages because the same contact name can exist under different
+    personas.
+    """
+    from datetime import datetime, timedelta
+    since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    client = get_client()
+    rows = _q(
+        client.table("messages")
+        .select("id,nome,lead_ref,Lead_Stage,texto,created_at,direction,sender_type,status")
+        .gte("created_at", since)
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    # Group by conversation key (nome → lead_ref → lead_id), keep latest message
+    lead_refs = sorted({row.get("lead_ref") for row in rows if row.get("lead_ref") is not None})
+    leads_by_ref: dict = {}
+    for idx in range(0, len(lead_refs), 200):
+        chunk = lead_refs[idx:idx + 200]
+        for lead in _q(
+            client.table("leads")
+            .select("id,lead_id,nome,persona_id,stage,interesse_produto")
+            .in_("id", chunk)
+        ):
+            leads_by_ref[lead.get("id")] = lead
+
+    known_lead_names = {
+        (lead.get("nome") or "").strip().lower()
+        for lead in leads_by_ref.values()
+        if lead.get("nome")
+    }
+    seen: dict = {}
+    for row in rows:
+        lead_ref = row.get("lead_ref")
+        lead = leads_by_ref.get(lead_ref) or {}
+        if persona_id and lead.get("persona_id") != persona_id:
+            continue
+        row_name = (row.get("nome") or "").strip()
+        if lead_ref is None and row_name.lower() in known_lead_names:
+            continue
+        key = f"lead:{lead_ref}" if lead_ref is not None else (row.get("nome") or "unknown")
+        if key not in seen:
+            seen[key] = {
+                "key": key,
+                "nome": lead.get("nome") or row.get("nome") or key,
+                "lead_id": lead.get("lead_id"),
+                "lead_ref": lead_ref,
+                "persona_id": lead.get("persona_id"),
+                "interesse_produto": lead.get("interesse_produto"),
+                "Lead_Stage": row.get("Lead_Stage") or lead.get("stage") or "novo",
+                "last_message": row.get("texto") or "",
+                "last_direction": row.get("direction") or "",
+                "last_sender_type": row.get("sender_type") or "",
+                "last_at": row.get("created_at") or "",
+            }
+    return list(seen.values())
+
+
 def insert_message(data: dict) -> None:
-    get_client().table("messages").insert(data).execute()
+    _execute_with_retry(get_client().table("messages").insert(data))
+
+
+# ── Knowledge Graph: nodes & edges (migration 008) ────────────────────────
+# All functions are defensive: missing tables (e.g., migration 008 not applied)
+# return safe defaults so the rest of the system keeps working.
+
+_KG_TABLES_MISSING = False  # flipped to True on PGRST205 to short-circuit
+
+
+def _kg_unavailable(exc: Exception) -> bool:
+    """Detect 'table not found' from PostgREST/Supabase, regardless of message wording."""
+    text = str(exc)
+    return (
+        "knowledge_nodes" in text or "knowledge_edges" in text
+    ) and ("PGRST205" in text or "schema cache" in text or "Could not find the table" in text)
+
+
+def _unique_violation(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return (
+        "duplicate key value violates unique constraint" in text
+        or "unique constraint" in text
+        or "23505" in text
+    )
+
+
+def upsert_knowledge_node(data: dict) -> Optional[dict]:
+    """Idempotent upsert of a knowledge node, keyed by (persona_id, node_type, slug).
+
+    `data` should at minimum contain node_type, slug, title.
+    Returns the inserted/updated row, or None if the table is missing.
+    """
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING:
+        return None
+    from datetime import datetime, timezone
+
+    required = {"node_type", "slug", "title"}
+    if not required.issubset(data.keys()):
+        raise ValueError(f"upsert_knowledge_node missing keys: {required - set(data.keys())}")
+
+    client = get_client()
+    persona_id = data.get("persona_id")
+    try:
+        q = (
+            client.table("knowledge_nodes")
+            .select("id,metadata,tags,summary,title,status")
+            .eq("node_type", data["node_type"])
+            .eq("slug", data["slug"])
+        )
+        q = q.eq("persona_id", persona_id) if persona_id else q.is_("persona_id", "null")
+        existing = (q.limit(1).execute().data or [None])[0]
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return None
+        if _unique_violation(exc):
+            # Parallel approvals can race between the select and insert.
+            # Treat the duplicate as a successful idempotent upsert.
+            q = (
+                client.table("knowledge_nodes")
+                .select("*")
+                .eq("node_type", data["node_type"])
+                .eq("slug", data["slug"])
+            )
+            q = q.eq("persona_id", persona_id) if persona_id else q.is_("persona_id", "null")
+            existing = (q.limit(1).execute().data or [None])[0]
+            if existing:
+                return existing
+        raise
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if existing:
+        # Merge tags & metadata to keep prior context.
+        merged_tags = sorted(set((existing.get("tags") or []) + (data.get("tags") or [])))
+        merged_meta = {**(existing.get("metadata") or {}), **(data.get("metadata") or {})}
+        update = {
+            "title":    data.get("title") or existing.get("title"),
+            "summary":  data.get("summary") or existing.get("summary"),
+            "tags":     merged_tags,
+            "metadata": merged_meta,
+            "status":   data.get("status") or existing.get("status") or "active",
+            "updated_at": now_iso,
+        }
+        if data.get("source_table"):
+            update["source_table"] = data["source_table"]
+        if data.get("source_id"):
+            update["source_id"] = data["source_id"]
+        try:
+            r = client.table("knowledge_nodes").update(update).eq("id", existing["id"]).execute()
+            return (r.data or [{**existing, **update}])[0]
+        except Exception as exc:
+            if _kg_unavailable(exc):
+                _KG_TABLES_MISSING = True
+                return None
+            raise
+
+    payload = dict(data)
+    payload.setdefault("tags", [])
+    payload.setdefault("metadata", {})
+    payload.setdefault("status", "active")
+    payload["created_at"] = now_iso
+    payload["updated_at"] = now_iso
+    try:
+        r = client.table("knowledge_nodes").insert(payload).execute()
+        return (r.data or [{}])[0]
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return None
+        if _unique_violation(exc):
+            q = (
+                client.table("knowledge_nodes")
+                .select("*")
+                .eq("node_type", data["node_type"])
+                .eq("slug", data["slug"])
+            )
+            q = q.eq("persona_id", persona_id) if persona_id else q.is_("persona_id", "null")
+            existing = (q.limit(1).execute().data or [None])[0]
+            if existing:
+                return existing
+        raise
+
+
+def upsert_knowledge_edge(
+    source_node_id: str,
+    target_node_id: str,
+    relation_type: str,
+    persona_id: Optional[str] = None,
+    weight: float = 1.0,
+    metadata: Optional[dict] = None,
+) -> Optional[dict]:
+    """Idempotent upsert keyed by (source_node_id, target_node_id, relation_type)."""
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING:
+        return None
+    if not source_node_id or not target_node_id or not relation_type:
+        return None
+    if source_node_id == target_node_id:
+        return None  # don't allow self-loops
+
+    client = get_client()
+    try:
+        existing_q = (
+            client.table("knowledge_edges")
+            .select("id")
+            .eq("source_node_id", source_node_id)
+            .eq("target_node_id", target_node_id)
+            .eq("relation_type", relation_type)
+            .limit(1)
+            .execute()
+        )
+        existing = (existing_q.data or [None])[0]
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return None
+        if _unique_violation(exc):
+            existing_q = (
+                client.table("knowledge_edges")
+                .select("*")
+                .eq("source_node_id", source_node_id)
+                .eq("target_node_id", target_node_id)
+                .eq("relation_type", relation_type)
+                .limit(1)
+                .execute()
+            )
+            existing = (existing_q.data or [None])[0]
+            if existing:
+                return existing
+        raise
+
+    if existing:
+        return existing
+    try:
+        r = client.table("knowledge_edges").insert({
+            "source_node_id": source_node_id,
+            "target_node_id": target_node_id,
+            "relation_type": relation_type,
+            "persona_id": persona_id,
+            "weight": weight,
+            "metadata": metadata or {},
+        }).execute()
+        return (r.data or [{}])[0]
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return None
+        raise
+
+
+def find_knowledge_nodes(
+    term: str,
+    persona_id: Optional[str] = None,
+    node_types: Optional[list[str]] = None,
+    limit: int = 25,
+) -> list[dict]:
+    """Find nodes by slug, title (ILIKE), or tags membership.
+
+    Defensive: returns [] when the table is missing or any error occurs.
+    """
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING:
+        return []
+    if not term:
+        return []
+    client = get_client()
+    norm = term.strip().lower()
+    slug_norm = norm.replace(" ", "-")
+    try:
+        # Match by exact slug, then loosen by title/tags if needed.
+        q = client.table("knowledge_nodes").select("*").limit(limit)
+        if persona_id:
+            q = q.eq("persona_id", persona_id)
+        if node_types:
+            q = q.in_("node_type", node_types)
+        # PostgREST `or_` filter — slug exact match | title ILIKE | tag contains
+        or_clause = f"slug.eq.{slug_norm},title.ilike.*{norm}*,tags.cs.{{{norm}}}"
+        rows = q.or_(or_clause).execute().data or []
+        return rows
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return []
+        return []
+
+
+def get_knowledge_neighbors(
+    node_ids: list[str],
+    max_edges: int = 200,
+) -> tuple[list[dict], list[dict]]:
+    """Return (nodes, edges) within 1 hop of the given node ids.
+
+    Includes the seed nodes themselves. Edges are deduplicated.
+    """
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING or not node_ids:
+        return [], []
+    client = get_client()
+    seed_ids = list({n for n in node_ids if n})
+    try:
+        edges_out = (
+            client.table("knowledge_edges").select("*")
+            .in_("source_node_id", seed_ids).limit(max_edges).execute().data or []
+        )
+        edges_in = (
+            client.table("knowledge_edges").select("*")
+            .in_("target_node_id", seed_ids).limit(max_edges).execute().data or []
+        )
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+        return [], []
+
+    edges: dict[str, dict] = {}
+    related_ids: set[str] = set(seed_ids)
+    for e in [*edges_out, *edges_in]:
+        edges[e["id"]] = e
+        related_ids.add(e["source_node_id"])
+        related_ids.add(e["target_node_id"])
+
+    try:
+        nodes = (
+            client.table("knowledge_nodes").select("*")
+            .in_("id", list(related_ids)).execute().data or []
+        )
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+        return [], []
+
+    return nodes, list(edges.values())
+
+
+def list_knowledge_nodes_by_type(
+    node_types: list[str],
+    persona_id: Optional[str] = None,
+    limit: int = 200,
+) -> list[dict]:
+    """Helper used by chat-context: enumerate canonical product/campaign nodes
+    so we can detect mentions in free-form lead text without an LLM call."""
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING:
+        return []
+    client = get_client()
+    try:
+        q = client.table("knowledge_nodes").select("id,slug,title,node_type,tags,metadata,persona_id").in_("node_type", node_types).limit(limit)
+        if persona_id:
+            q = q.eq("persona_id", persona_id)
+        return q.execute().data or []
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+        return []
+
+
+def list_all_knowledge_graph(persona_id: Optional[str] = None, limit_nodes: int = 1500) -> tuple[list[dict], list[dict]]:
+    """Return all nodes + edges (optionally scoped to persona). Used by /knowledge/graph-data."""
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING:
+        return [], []
+    client = get_client()
+    try:
+        nq = client.table("knowledge_nodes").select("*").limit(limit_nodes)
+        if persona_id:
+            nq = nq.eq("persona_id", persona_id)
+        nodes = nq.execute().data or []
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+        return [], []
+    if not nodes:
+        return [], []
+    node_ids = [n["id"] for n in nodes]
+    try:
+        eq_in_source = client.table("knowledge_edges").select("*").in_("source_node_id", node_ids).limit(5000).execute().data or []
+    except Exception:
+        eq_in_source = []
+    return nodes, eq_in_source
 
 
 # ── Insights ───────────────────────────────────────────────────────────────
 
 def get_insights(status: Optional[str] = None, limit: int = 50) -> list:
-    q = get_client().table("flow_insights").select("*").order("created_at", desc=True).limit(limit)
-    if status:
-        q = q.eq("status", status)
-    return _q(q)
+    try:
+        q = get_client().table("flow_insights").select("*").order("created_at", desc=True).limit(limit)
+        if status:
+            q = q.eq("status", status)
+        return _q(q)
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"get_insights failed: {exc}", exc)
+        except Exception:
+            pass
+        return []
 
 
 def insert_insight(data: dict) -> None:
@@ -182,7 +770,7 @@ def upsert_persona(data: dict) -> None:
 # ── Knowledge Base ─────────────────────────────────────────────────────────
 
 def get_kb_entries(persona_id: Optional[str] = None, status: str = "ATIVO") -> list:
-    q = get_client().table("kb_entries").select("id,tipo,categoria,produto,intencao,titulo,conteudo,link,prioridade,status,source,updated_at")
+    q = get_client().table("kb_entries").select("id,persona_id,tipo,categoria,produto,intencao,titulo,conteudo,link,prioridade,status,source,tags,agent_visibility,updated_at")
     if persona_id:
         q = q.eq("persona_id", persona_id)
     if status:
@@ -190,8 +778,41 @@ def get_kb_entries(persona_id: Optional[str] = None, status: str = "ATIVO") -> l
     return _q(q.order("prioridade"))
 
 
-def upsert_kb_entry(data: dict) -> None:
-    get_client().table("kb_entries").upsert(data, on_conflict="kb_id,persona_id").execute()
+def upsert_kb_entry(data: dict) -> dict:
+    result = _execute_with_retry(get_client().table("kb_entries").upsert(data, on_conflict="kb_id,persona_id"))
+    return (result.data or [{}])[0]
+
+
+def get_kb_entry(entry_id: str) -> Optional[dict]:
+    return _one(
+        get_client().table("kb_entries")
+        .select("id,persona_id,tipo,categoria,produto,intencao,titulo,conteudo,link,prioridade,status,source,tags,agent_visibility,updated_at")
+        .eq("id", entry_id)
+        .maybe_single()
+    )
+
+
+def get_kb_entries_by_ids(ids: list) -> dict:
+    """Batch lookup; avoids N+1 when enriching graph kb_entry nodes."""
+    unique = [i for i in {str(x) for x in (ids or []) if x}]
+    if not unique:
+        return {}
+    rows: list = []
+    # Supabase/PostgREST .in_ has a URL length cap; chunk to be safe.
+    for start in range(0, len(unique), 200):
+        chunk = unique[start:start + 200]
+        rows.extend(_q(
+            get_client().table("kb_entries")
+            .select("id,persona_id,tipo,categoria,produto,intencao,titulo,conteudo,link,prioridade,status,source,tags,agent_visibility,updated_at")
+            .in_("id", chunk)
+        ))
+    return {str(r["id"]): r for r in rows if r.get("id")}
+
+
+def update_kb_entry(entry_id: str, data: dict) -> None:
+    from datetime import datetime, timezone
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _execute_with_retry(get_client().table("kb_entries").update(data).eq("id", entry_id))
 
 
 def search_kb(query_embedding: list, persona_id: Optional[str] = None, top_k: int = 5) -> list:
@@ -204,7 +825,7 @@ def search_kb(query_embedding: list, persona_id: Optional[str] = None, top_k: in
 # ── Agent Logs ─────────────────────────────────────────────────────────────
 
 def insert_agent_log(data: dict) -> None:
-    get_client().table("agent_logs").insert(data).execute()
+    _execute_with_retry(get_client().table("agent_logs").insert(data))
 
 
 def get_agent_logs(lead_id: Optional[str] = None, limit: int = 50) -> list:
@@ -253,8 +874,7 @@ def get_knowledge_source_by_path(path: str) -> Optional[dict]:
 
 
 def insert_knowledge_source(data: dict) -> dict:
-    result = get_client().table("knowledge_sources").insert(data).execute()
-    return result.data[0]
+    return _insert_one(get_client().table("knowledge_sources").insert(data))
 
 
 def update_knowledge_source(source_id: str, data: dict) -> None:
@@ -308,13 +928,20 @@ def get_knowledge_item_by_path(file_path: str) -> Optional[dict]:
 
 def insert_knowledge_item(data: dict) -> dict:
     data.setdefault("updated_at", __import__("datetime").datetime.utcnow().isoformat())
-    result = get_client().table("knowledge_items").insert(data).execute()
-    return result.data[0]
+    return _insert_one(get_client().table("knowledge_items").insert(data))
 
 
 def update_knowledge_item(item_id: str, data: dict) -> None:
     data["updated_at"] = __import__("datetime").datetime.utcnow().isoformat()
-    get_client().table("knowledge_items").update(data).eq("id", item_id).execute()
+    try:
+        get_client().table("knowledge_items").update(data).eq("id", item_id).execute()
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"update_knowledge_item failed id={item_id}: {exc}", exc)
+        except Exception:
+            pass
+        raise
 
 
 def get_knowledge_item_counts() -> dict:
@@ -332,12 +959,12 @@ def get_knowledge_item_counts() -> dict:
 # ── Sync Runs ──────────────────────────────────────────────────────────────
 
 def insert_sync_run(data: dict) -> dict:
-    result = get_client().table("sync_runs").insert(data).execute()
+    result = _execute_with_retry(get_client().table("sync_runs").insert(data))
     return result.data[0]
 
 
 def update_sync_run(run_id: str, data: dict) -> None:
-    get_client().table("sync_runs").update(data).eq("id", run_id).execute()
+    _execute_with_retry(get_client().table("sync_runs").update(data).eq("id", run_id))
 
 
 def get_sync_runs(limit: int = 20) -> list:
@@ -350,7 +977,7 @@ def get_sync_runs(limit: int = 20) -> list:
 
 
 def insert_sync_log(data: dict) -> None:
-    get_client().table("sync_logs").insert(data).execute()
+    _execute_with_retry(get_client().table("sync_logs").insert(data))
 
 
 def get_sync_logs(run_id: str, limit: int = 200) -> list:
@@ -419,14 +1046,46 @@ def get_campaigns(persona_id: Optional[str] = None) -> list:
 
 # ── System Events ──────────────────────────────────────────────────────────
 
-def insert_event(data: dict) -> None:
-    get_client().table("system_events").insert(data).execute()
+# Columns that exist in the physical system_events BASE TABLE.
+# Any key not in this set is silently dropped before insert to prevent PGRST204.
+_SYSTEM_EVENTS_COLUMNS = frozenset({
+    "event_type", "entity_type", "entity_id",
+    "persona_id", "payload", "level", "source",
+})
+
+
+def insert_event(
+    data: dict,
+    level: str = "info",
+    source: Optional[str] = None,
+) -> None:
+    """
+    Fire-and-forget event insert. Never raises — if the DB is unavailable
+    the calling code continues uninterrupted.
+
+    Only columns present in _SYSTEM_EVENTS_COLUMNS are forwarded so that
+    adding extra keys to `data` never causes a PGRST204 schema-cache error.
+    """
+    try:
+        row = {k: v for k, v in data.items() if k in _SYSTEM_EVENTS_COLUMNS}
+        row.setdefault("payload", {})
+        row.setdefault("level", level)
+        if source:
+            row["source"] = source
+        get_client().table("system_events").insert(row).execute()
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"insert_event failed: {exc}", exc)
+        except Exception:
+            pass
 
 
 def get_events(
     limit: int = 50,
     event_type: Optional[str] = None,
     persona_id: Optional[str] = None,
+    level: Optional[str] = None,
 ) -> list:
     q = (
         get_client().table("system_events")
@@ -438,6 +1097,8 @@ def get_events(
         q = q.eq("event_type", event_type)
     if persona_id:
         q = q.eq("persona_id", persona_id)
+    if level:
+        q = q.eq("level", level)
     return _q(q)
 
 
@@ -496,6 +1157,22 @@ def get_pipeline_metrics() -> dict:
         "assets_pending": len(asset_rows),
         "errors_24h": len(error_rows),
     }
+
+
+# ── Storage ───────────────────────────────────────────────────────────────
+
+def upload_to_storage(bucket: str, path: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+    """Upload bytes to Supabase Storage; returns the public URL."""
+    client = get_client()
+    client.storage.from_(bucket).upload(path, data, {"content-type": content_type, "upsert": "true"})
+    return client.storage.from_(bucket).get_public_url(path)
+
+
+# ── KB Intake tracking ─────────────────────────────────────────────────────
+
+def insert_kb_intake(data: dict) -> dict:
+    result = get_client().table("kb_intake").insert(data).execute()
+    return (result.data or [{}])[0]
 
 
 # ── Knowledge Items: multi-status query ───────────────────────────────────

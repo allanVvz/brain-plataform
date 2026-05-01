@@ -29,13 +29,16 @@ class HealthCheckWorker(BaseWorker):
                 sre_logger.error(self.name, f"{service} check raised: {exc}", exc)
 
             results[service] = status
-            supabase_client.upsert_integration_status({
-                "service": service,
-                "status": status,
-                "response_ms": ms,
-                "last_check": datetime.now(timezone.utc).isoformat(),
-                "error_message": err,
-            })
+            try:
+                supabase_client.upsert_integration_status({
+                    "service": service,
+                    "status": status,
+                    "response_ms": ms,
+                    "last_check": datetime.now(timezone.utc).isoformat(),
+                    "error_message": err,
+                })
+            except Exception as exc:
+                sre_logger.error(self.name, f"failed to persist {service} health status: {exc}", exc)
 
         summary = " | ".join(f"{s}={v}" for s, v in results.items())
         sre_logger.info(self.name, f"health: {summary}")

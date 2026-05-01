@@ -6,7 +6,7 @@ from schemas.events import LeadEvent
 from core import context_builder, classifier, decision_engine, insight_engine
 from agents.sdr import SDRAgent
 from agents.closer import CloserAgent
-from services import supabase_client
+from services import agents_service, event_emitter, supabase_client
 from datetime import datetime, timezone
 
 router = APIRouter(tags=["process"])
@@ -17,12 +17,34 @@ _AGENTS = {
     "CLOSER": CloserAgent,
 }
 
+# Map agents_service role → legacy agent class key.
+# Followup falls back to SDR until a FollowupAgent class exists.
+_ROLE_TO_AGENT_KEY = {
+    "sdr":      "SDR",
+    "closer":   "CLOSER",
+    "followup": "SDR",
+}
+
 
 @router.post("/process")
 async def process(event: LeadEvent):
     t0 = time.monotonic()
 
     ctx = context_builder.build(event)
+
+    # ── Gate 1: lead.ai_paused → operador humano cuidando, não responde ──
+    lead_data = supabase_client.get_lead_by_ref(ctx.lead.ref) if ctx.lead.ref else supabase_client.get_lead(event.lead_id)
+    lead_data = lead_data or {}
+    if lead_data.get("ai_paused"):
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        return {
+            "reply": None,
+            "stage_update": ctx.lead.stage,
+            "agent_used": "PAUSED",
+            "score": 0,
+            "detected_fields": {},
+            "latency_ms": latency_ms,
+        }
 
     try:
         classification = classifier.classify(ctx)
@@ -44,7 +66,57 @@ async def process(event: LeadEvent):
     ctx.tags = tags
     ctx.funnel_stage = funnel_stage
 
-    route = decision_engine.decide(ctx)
+    # ── Gate 2: role assignment para essa persona+stage está em humano? ──
+    # Se sim, pausa o lead e devolve sem rodar agente (handoff).
+    handoff_reason: str | None = None
+    try:
+        agent_record, role = agents_service.resolve_for_stage(
+            event.persona_slug or ctx.persona_slug, funnel_stage,
+        )
+    except Exception as exc:
+        logger.warning("resolve_for_stage failed: %s", exc)
+        agent_record, role = None, "sdr"
+
+    if agent_record is None and event.persona_slug:
+        # Nenhum agente atribuído a esse role para essa persona → humano.
+        # Pausa o lead pra o /process não voltar a tentar enquanto operador
+        # responde via dashboard. Manual resume via /leads/{id}/resume-ai.
+        if ctx.lead.ref:
+            try:
+                supabase_client.update_lead(ctx.lead.ref, {"ai_paused": True})
+            except Exception as exc:
+                logger.warning("auto-pause update_lead failed: %s", exc)
+        try:
+            event_emitter.emit(
+                "lead.handoff",
+                entity_type="lead",
+                entity_id=str(ctx.lead.ref or ctx.lead.id),
+                payload={
+                    "role": role,
+                    "stage": funnel_stage,
+                    "persona_slug": event.persona_slug,
+                    "reason": "no_agent_for_role",
+                },
+                source="process",
+            )
+        except Exception:
+            pass
+        handoff_reason = f"no agent for role={role}"
+
+    if handoff_reason:
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        return {
+            "reply": None,
+            "stage_update": funnel_stage,
+            "agent_used": "HUMAN_HANDOFF",
+            "score": score,
+            "detected_fields": {},
+            "latency_ms": latency_ms,
+            "handoff_reason": handoff_reason,
+        }
+
+    # Decisão de rota: usa role do assignment se disponível; senão decision_engine.
+    route = _ROLE_TO_AGENT_KEY.get(role, decision_engine.decide(ctx))
     ctx.route_hint = route
 
     agent_result: dict = {"reply": None, "agent": route, "detected_fields": {}}

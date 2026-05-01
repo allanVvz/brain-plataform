@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
-from services import supabase_client
+from services import supabase_client, knowledge_graph
 from services.vault_sync import run_sync, scan_vault, VAULT_PATH
 from services.event_emitter import emit
 
@@ -61,6 +61,7 @@ def serve_vault_file(path: str):
 # Statuses that require human attention before content can be used
 ATTENTION_STATUSES = ["needs_persona", "needs_category", "pending"]
 
+# Fixed paths MUST be registered before parameterised /{item_id}
 @router.get("/queue")
 def list_queue(
     status: str = Query("pending"),
@@ -90,12 +91,22 @@ def list_queue(
 @router.get("/queue/counts")
 def queue_counts():
     counts = supabase_client.get_knowledge_item_counts()
-    # Add virtual "attention" count
     bs = counts.get("by_status", {})
     counts["by_status"]["attention"] = sum(
         bs.get(s, 0) for s in ATTENTION_STATUSES
     )
     return counts
+
+
+@router.get("/queue/{item_id}")
+def get_queue_item(item_id: str):
+    try:
+        item = supabase_client.get_knowledge_item(item_id)
+    except Exception as exc:
+        raise HTTPException(502, f"Database error: {exc}") from exc
+    if not item:
+        raise HTTPException(404, "Item not found")
+    return item
 
 
 class ItemUpdate(BaseModel):
@@ -116,21 +127,31 @@ def update_queue_item(item_id: str, body: ItemUpdate):
     data = body.model_dump(exclude_none=True)
     if not data:
         raise HTTPException(400, "Nothing to update")
-    # If persona is being assigned, upgrade status from needs_persona → pending
-    if "persona_id" in data:
-        item = supabase_client.get_knowledge_item(item_id)
-        if item and item.get("status") == "needs_persona":
-            ct = data.get("content_type") or item.get("content_type", "other")
-            data["status"] = "needs_category" if ct == "other" else "pending"
-    # If content_type is being set from "other", upgrade from needs_category → pending
-    if "content_type" in data and data["content_type"] != "other":
-        item = item if "item" in dir() else supabase_client.get_knowledge_item(item_id)
-        if item and item.get("status") == "needs_category":
-            data["status"] = "pending"
-    supabase_client.update_knowledge_item(item_id, data)
-    updated = supabase_client.get_knowledge_item(item_id)
+    try:
+        # Auto-upgrade status based on what's being filled in
+        cached_item: Optional[dict] = None
+
+        if "persona_id" in data:
+            cached_item = supabase_client.get_knowledge_item(item_id)
+            if cached_item and cached_item.get("status") == "needs_persona":
+                ct = data.get("content_type") or cached_item.get("content_type", "other")
+                data["status"] = "pending"
+
+        if "content_type" in data and data["content_type"] != "other":
+            if cached_item is None:
+                cached_item = supabase_client.get_knowledge_item(item_id)
+            if cached_item and cached_item.get("status") == "needs_category":
+                data["status"] = "pending"
+
+        supabase_client.update_knowledge_item(item_id, data)
+        updated = supabase_client.get_knowledge_item(item_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Database error: {exc}") from exc
+
     if not updated:
-        raise HTTPException(404, "Item not found")
+        raise HTTPException(404, "Item not found after update")
     return updated
 
 
@@ -142,22 +163,27 @@ class ApproveBody(BaseModel):
 @router.post("/queue/{item_id}/approve")
 def approve_item(item_id: str, body: ApproveBody = ApproveBody()):
     from datetime import datetime, timezone
-    item = supabase_client.get_knowledge_item(item_id)
-    if not item:
-        raise HTTPException(404, "Item not found")
-    if not item.get("persona_id"):
-        raise HTTPException(400, "Assign a persona before approving")
+    try:
+        item = supabase_client.get_knowledge_item(item_id)
+        if not item:
+            raise HTTPException(404, "Item not found")
+        if not item.get("persona_id"):
+            raise HTTPException(400, "Assign a persona before approving")
 
-    update_data: dict = {
-        "status": "approved",
-        "approved_at": datetime.now(timezone.utc).isoformat(),
-        "agent_visibility": body.agent_visibility,
-    }
-    supabase_client.update_knowledge_item(item_id, update_data)
+        update_data: dict = {
+            "status": "approved",
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "agent_visibility": body.agent_visibility,
+        }
+        supabase_client.update_knowledge_item(item_id, update_data)
 
-    if body.promote_to_kb:
-        _promote_to_kb({**item, **update_data})
-        supabase_client.update_knowledge_item(item_id, {"status": "embedded"})
+        if body.promote_to_kb:
+            _promote_to_kb({**item, **update_data})
+            supabase_client.update_knowledge_item(item_id, {"status": "embedded"})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Approve/promote failed: {exc}") from exc
 
     emit("item_approved", entity_type="knowledge_item", entity_id=item_id,
          persona_id=item.get("persona_id"),
@@ -188,15 +214,20 @@ def reject_item(item_id: str, body: RejectBody = RejectBody()):
 
 @router.post("/queue/{item_id}/to-kb")
 def promote_to_kb(item_id: str):
-    item = supabase_client.get_knowledge_item(item_id)
-    if not item:
-        raise HTTPException(404, "Item not found")
-    if item["status"] not in ("approved", "embedded"):
-        raise HTTPException(400, "Item must be approved before promoting to KB")
-    if not item.get("persona_id"):
-        raise HTTPException(400, "Item must have a persona assigned")
-    _promote_to_kb(item)
-    supabase_client.update_knowledge_item(item_id, {"status": "embedded"})
+    try:
+        item = supabase_client.get_knowledge_item(item_id)
+        if not item:
+            raise HTTPException(404, "Item not found")
+        if item["status"] not in ("approved", "embedded"):
+            raise HTTPException(400, "Item must be approved before promoting to KB")
+        if not item.get("persona_id"):
+            raise HTTPException(400, "Item must have a persona assigned")
+        _promote_to_kb(item)
+        supabase_client.update_knowledge_item(item_id, {"status": "embedded"})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Promote to KB failed: {exc}") from exc
     emit("item_promoted_to_kb", entity_type="knowledge_item", entity_id=item_id,
          persona_id=item.get("persona_id"),
          payload={"title": item.get("title")})
@@ -208,7 +239,7 @@ def _promote_to_kb(item: dict) -> None:
     kb_id = "ki_" + hashlib.md5(
         f"{item.get('file_path', item['id'])}:{item['persona_id']}".encode()
     ).hexdigest()[:12]
-    supabase_client.upsert_kb_entry({
+    entry = supabase_client.upsert_kb_entry({
         "kb_id": kb_id,
         "persona_id": item["persona_id"],
         "tipo": _content_type_to_tipo(item["content_type"]),
@@ -220,6 +251,23 @@ def _promote_to_kb(item: dict) -> None:
         "agent_visibility": item.get("agent_visibility") or ["SDR", "Closer", "Classifier"],
         "tags": item.get("tags") or [],
     })
+    if entry:
+        knowledge_graph.bootstrap_from_item(
+            {
+                "id": entry.get("id"),
+                "title": entry.get("titulo"),
+                "content_type": item.get("content_type"),
+                "content": entry.get("conteudo") or item.get("content"),
+                "tags": entry.get("tags") or item.get("tags") or [],
+                "status": entry.get("status") or "ATIVO",
+                "persona_id": entry.get("persona_id") or item.get("persona_id"),
+                "file_path": item.get("file_path") or entry.get("link"),
+            },
+            frontmatter=item.get("metadata") or {},
+            body=entry.get("conteudo") or item.get("content") or "",
+            persona_id=entry.get("persona_id") or item.get("persona_id"),
+            source_table="kb_entries",
+        )
 
 
 def _content_type_to_tipo(ct: str) -> str:
@@ -245,9 +293,7 @@ class UploadTextBody(BaseModel):
 @router.post("/upload/text")
 def upload_text(body: UploadTextBody):
     source = supabase_client.get_or_create_manual_source()
-    status = "pending" if (body.persona_id and body.content_type != "other") else (
-        "needs_persona" if not body.persona_id else "needs_category"
-    )
+    status = "pending"
     item = supabase_client.insert_knowledge_item({
         "persona_id": body.persona_id,
         "source_id": source["id"],
@@ -258,6 +304,14 @@ def upload_text(body: UploadTextBody):
         "metadata": body.metadata,
         "file_type": "text",
     })
+    if item:
+        knowledge_graph.bootstrap_from_item(
+            item,
+            frontmatter=body.metadata or {},
+            body=body.content,
+            persona_id=body.persona_id,
+            source_table="knowledge_items",
+        )
     emit("upload_received", entity_type="knowledge_item", entity_id=item["id"],
          persona_id=body.persona_id,
          payload={"title": body.title, "content_type": body.content_type})
@@ -277,9 +331,7 @@ async def upload_file(
         raise HTTPException(400, "File must be UTF-8 text")
 
     source = supabase_client.get_or_create_manual_source()
-    status = "pending" if (persona_id and content_type != "other") else (
-        "needs_persona" if not persona_id else "needs_category"
-    )
+    status = "pending"
     item = supabase_client.insert_knowledge_item({
         "persona_id": persona_id,
         "source_id": source["id"],
@@ -290,9 +342,64 @@ async def upload_file(
         "file_type": (file.filename or "").rsplit(".", 1)[-1] if file.filename else "txt",
         "metadata": {"original_filename": file.filename},
     })
+    if item:
+        knowledge_graph.bootstrap_from_item(
+            item,
+            frontmatter={"original_filename": file.filename},
+            body=text,
+            persona_id=persona_id,
+            source_table="knowledge_items",
+        )
     emit("upload_received", entity_type="knowledge_item", entity_id=item["id"],
          persona_id=persona_id, payload={"filename": file.filename})
     return item
+
+
+# ── KB Entries (Vault) — single-item CRUD ────────────────────
+
+@router.get("/kb/{entry_id}")
+def get_kb_entry(entry_id: str):
+    entry = supabase_client.get_kb_entry(entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    return entry
+
+
+class KbEntryUpdate(BaseModel):
+    titulo: Optional[str] = None
+    conteudo: Optional[str] = None
+    tipo: Optional[str] = None
+    categoria: Optional[str] = None
+    tags: Optional[list] = None
+    status: Optional[str] = None
+    agent_visibility: Optional[list] = None
+
+
+@router.patch("/kb/{entry_id}")
+def update_kb_entry(entry_id: str, body: KbEntryUpdate):
+    data = body.model_dump(exclude_none=True)
+    if not data:
+        raise HTTPException(400, "Nothing to update")
+    supabase_client.update_kb_entry(entry_id, data)
+    entry = supabase_client.get_kb_entry(entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    emit("kb_entry_updated", entity_type="kb_entry", entity_id=entry_id,
+         persona_id=entry.get("persona_id"),
+         payload={"titulo": entry.get("titulo"), "fields": list(data.keys())})
+    return entry
+
+
+@router.post("/kb/{entry_id}/validate")
+def validate_kb_entry(entry_id: str):
+    entry = supabase_client.get_kb_entry(entry_id)
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    supabase_client.update_kb_entry(entry_id, {"status": "ATIVO"})
+    emit("kb_entry_validated", entity_type="kb_entry", entity_id=entry_id,
+         persona_id=entry.get("persona_id"),
+         payload={"titulo": entry.get("titulo")})
+    return {"ok": True, "status": "ATIVO"}
 
 
 # ── Workflow Bindings ─────────────────────────────────────────
@@ -313,6 +420,60 @@ class BindingBody(BaseModel):
 @router.post("/bindings")
 def create_binding(body: BindingBody):
     return supabase_client.upsert_workflow_binding(body.model_dump())
+
+
+# ── Knowledge Graph rebuild (admin) ──────────────────────────
+
+@router.post("/graph/rebuild")
+def rebuild_graph(persona_slug: Optional[str] = Query(None)):
+    """Reprocessa knowledge_items + kb_entries existentes para popular
+    knowledge_nodes / knowledge_edges (migration 008).
+
+    Use após aplicar 008 ou quando o grafo divergir das tabelas-fonte.
+
+    Quando `persona_slug` é informado, escopa pra essa persona; senão,
+    roda globalmente (cuidado em prod com muitos clientes).
+
+    Resposta:
+      {persona_slug, persona_id, counts: {items_seen, items_mirrored,
+       items_skipped, kb_seen, kb_mirrored, kb_skipped, errors[]}}
+    """
+    persona_id: Optional[str] = None
+    if persona_slug:
+        persona = supabase_client.get_persona(persona_slug)
+        if not persona:
+            raise HTTPException(404, f"Persona not found: {persona_slug}")
+        persona_id = persona.get("id")
+
+    counts = knowledge_graph.rebuild_graph_for_persona(persona_id)
+    return {
+        "persona_slug": persona_slug,
+        "persona_id": persona_id,
+        "counts": counts,
+    }
+
+
+# ── Chat Context (semantic graph + KB fallback) ──────────────
+
+@router.get("/chat-context")
+def chat_context(
+    lead_ref: int = Query(None),
+    persona_id: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    limit: int = Query(12, le=50),
+):
+    """Knowledge bundle for the messages sidebar.
+
+    Resolves products/campaigns/assets/FAQs related to a lead's recent
+    conversation (or to an explicit `q`). Falls back gracefully when the
+    semantic graph has no data — always returns the same response shape.
+    """
+    return knowledge_graph.get_chat_context(
+        lead_ref=lead_ref,
+        persona_id=persona_id,
+        user_text=q,
+        limit=limit,
+    )
 
 
 # ── KB Context (for external consumers like wa-wscrap-bot) ───

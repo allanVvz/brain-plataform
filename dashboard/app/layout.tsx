@@ -35,12 +35,33 @@ const nav = [
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [persona, setPersona] = useState("tock-fatal");
+  const [persona, setPersona] = useState("");
   const [personas, setPersonas] = useState<any[]>([]);
 
   useEffect(() => {
-    api.personas().then(setPersonas).catch(() => {});
+    const saved = window.localStorage.getItem("ai-brain-persona-slug");
+    api.personas()
+      .then((list) => {
+        setPersonas(list);
+        const savedExists = saved && list.some((p: any) => p.slug === saved);
+        setPersona(savedExists ? saved : (list[0]?.slug || "tock-fatal"));
+      })
+      .catch(() => setPersona(saved || "tock-fatal"));
   }, []);
+
+  useEffect(() => {
+    if (!persona) return;
+    const selected = personas.find((p) => p.slug === persona);
+    window.localStorage.setItem("ai-brain-persona-slug", persona);
+    if (selected?.id) {
+      window.localStorage.setItem("ai-brain-persona-id", selected.id);
+    } else {
+      window.localStorage.removeItem("ai-brain-persona-id");
+    }
+    window.dispatchEvent(new CustomEvent("ai-brain-persona-change", {
+      detail: { slug: persona, id: selected?.id || "" },
+    }));
+  }, [persona, personas]);
 
   return (
     <html lang="pt-BR">
@@ -100,7 +121,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             >
               {personas.length > 0
                 ? personas.map((p) => <option key={p.slug} value={p.slug}>{p.name}</option>)
-                : <option value="tock-fatal">Tock Fatal</option>}
+                : <option value="">Carregando clientes...</option>}
             </select>
             <div className="ml-auto text-[10px] text-obs-faint tracking-wide">AI Brain Platform</div>
           </header>

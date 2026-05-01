@@ -17,8 +17,21 @@ const STAGE_COLOR: Record<string, string> = {
 export default function LeadsPage() {
   const [leads, setLeads] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+  const [personaFilterId, setPersonaFilterId] = useState("");
 
-  useEffect(() => { api.leads().then(setLeads).catch(console.error); }, []);
+  useEffect(() => {
+    setPersonaFilterId(window.localStorage.getItem("ai-brain-persona-id") || "");
+    const onPersonaChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string }>).detail;
+      setPersonaFilterId(detail?.id || window.localStorage.getItem("ai-brain-persona-id") || "");
+    };
+    window.addEventListener("ai-brain-persona-change", onPersonaChange);
+    return () => window.removeEventListener("ai-brain-persona-change", onPersonaChange);
+  }, []);
+
+  useEffect(() => {
+    api.leads(100, 0, personaFilterId || undefined).then(setLeads).catch(console.error);
+  }, [personaFilterId]);
 
   const filtered = leads.filter((l) => {
     const q = search.toLowerCase();

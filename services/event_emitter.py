@@ -12,17 +12,22 @@ def emit(
     entity_id: Optional[str] = None,
     persona_id: Optional[str] = None,
     payload: Optional[dict] = None,
+    level: str = "info",
+    source: Optional[str] = None,
 ) -> None:
     try:
         from services import supabase_client
-        supabase_client.insert_event({
-            "event_type": event_type,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "persona_id": persona_id,
-            "payload": payload or {},
-        })
-        # Update pipeline_status for relevant services
+        supabase_client.insert_event(
+            {
+                "event_type": event_type,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "persona_id": persona_id,
+                "payload": payload or {},
+            },
+            level=level,
+            source=source,
+        )
         _update_pipeline_service(event_type)
     except Exception:
         pass

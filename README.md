@@ -1,3 +1,9 @@
+## Fluxo de Conhecimento
+
+A documentacao completa do fluxo, hierarquia e grafo de conhecimento esta em [`docs/knowledge-flow.md`](docs/knowledge-flow.md).
+
+---
+
 ## 11. WORKFLOWS N8N (FONTE OPERACIONAL)
 
 Este repositório utiliza workflows validados do n8n como base de operação atual.
