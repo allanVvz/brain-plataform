@@ -7,8 +7,11 @@ from typing import Optional
 from services import supabase_client, knowledge_graph
 from services.knowledge_rag_backfill import backfill_knowledge_rag
 from services.knowledge_rag_intake import process_intake
-from services.vault_sync import run_sync, scan_vault, VAULT_PATH
+from services.vault_sync import run_sync, scan_vault
 from services.event_emitter import emit
+
+VAULT_SOURCE_MODE = os.environ.get("VAULT_SOURCE_MODE")
+OBSIDIAN_LOCAL_PATH = os.environ.get("OBSIDIAN_LOCAL_PATH")
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -31,7 +34,8 @@ class RagBackfillBody(BaseModel):
     persona_id: Optional[str] = None
     persona_slug: Optional[str] = None
     include_vault: bool = True
-    vault_path: Optional[str] = None
+    # This is no longer used, vault source is configured by env vars
+    # vault_path: Optional[str] = None 
     limit_items: int = 5000
     limit_nodes: int = 5000
 
@@ -71,7 +75,10 @@ async def backfill_rag_knowledge(body: RagBackfillBody):
     if body.persona_id and body.persona_slug:
         raise HTTPException(400, "Use persona_id or persona_slug, not both")
     try:
-        result = await asyncio.to_thread(backfill_knowledge_rag, **body.model_dump())
+        # Pass a dictionary without vault_path to the backfill function
+        dump = body.model_dump()
+        dump.pop("vault_path", None) 
+        result = await asyncio.to_thread(backfill_knowledge_rag, **dump)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     except Exception as exc:
@@ -86,10 +93,9 @@ async def backfill_rag_knowledge(body: RagBackfillBody):
 
 
 @router.post("/sync")
-async def trigger_sync(persona: str = Query(None), vault_path: str = Query(None)):
-    path = vault_path or VAULT_PATH
-    emit("vault_sync_started", entity_type="sync", payload={"path": path})
-    result = await asyncio.to_thread(run_sync, path, persona)
+async def trigger_sync(persona: str = Query(None)):
+    emit("vault_sync_started", entity_type="sync", payload={})
+    result = await asyncio.to_thread(run_sync, persona_filter=persona)
     if "error" in result:
         emit("vault_sync_failed", payload=result)
         raise HTTPException(400, result["error"])
@@ -97,9 +103,8 @@ async def trigger_sync(persona: str = Query(None), vault_path: str = Query(None)
 
 
 @router.get("/sync/preview")
-async def preview_sync(vault_path: str = Query(None)):
-    path = vault_path or VAULT_PATH
-    result = await asyncio.to_thread(scan_vault, path)
+async def preview_sync():
+    result = await asyncio.to_thread(scan_vault)
     return result
 
 
@@ -117,9 +122,17 @@ def get_sync_logs(run_id: str, limit: int = 200):
 
 @router.get("/file")
 def serve_vault_file(path: str):
-    """Serve a file from the vault. Path is relative to VAULT_PATH."""
+    """Serve a file from the vault. Only available in local mode."""
+    if VAULT_SOURCE_MODE != "local":
+        raise HTTPException(
+            status_code=501,
+            detail="File serving from vault is only supported in VAULT_SOURCE_MODE='local'."
+        )
+    if not OBSIDIAN_LOCAL_PATH:
+        raise HTTPException(status_code=500, detail="OBSIDIAN_LOCAL_PATH is not set.")
+
     from pathlib import Path
-    vault_root = Path(VAULT_PATH).resolve()
+    vault_root = Path(OBSIDIAN_LOCAL_PATH).resolve()
     requested = (vault_root / path).resolve()
     # Security: prevent path traversal
     if not str(requested).startswith(str(vault_root)):
@@ -575,7 +588,7 @@ def get_kb_context(persona_slug: str):
     for tipo in order:
         if tipo not in sections:
             continue
-        lines.append(f"\n### {tipo.upper()}")
+        lines.append(f'\n### {tipo.upper()}')
         for item in sections[tipo][:6]:
             lines.append(f"- {item[:400]}")
 
