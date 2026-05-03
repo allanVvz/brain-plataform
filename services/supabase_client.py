@@ -140,6 +140,7 @@ def ensure_lead_for_persona(
     interesse_produto: Optional[str] = None,
     cidade: Optional[str] = None,
     cep: Optional[str] = None,
+    whatsapp_phone_number_id: Optional[str] = None,
 ) -> Optional[dict]:
     """Ensure an inbound lead is tied to the intended persona branch.
 
@@ -153,6 +154,8 @@ def ensure_lead_for_persona(
 
     client = get_client()
     persona_id = _resolve_persona_id(persona_slug_or_id)
+    if not whatsapp_phone_number_id and persona_id:
+        whatsapp_phone_number_id = get_default_whatsapp_phone_number_id(persona_id)
     existing = get_lead_by_ref(lead_ref) if lead_ref is not None else get_lead(lead_id)
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -174,6 +177,8 @@ def ensure_lead_for_persona(
         update["cidade"] = cidade
     if cep:
         update["cep"] = cep
+    if whatsapp_phone_number_id:
+        update["whatsapp_phone_number_id"] = whatsapp_phone_number_id
     if lead_id:
         update["lead_id"] = lead_id
         digits = "".join(ch for ch in lead_id if ch.isdigit())
@@ -673,6 +678,109 @@ def list_all_knowledge_graph(persona_id: Optional[str] = None, limit_nodes: int 
     return nodes, eq_in_source
 
 
+# ── Registries (migration 009) ─────────────────────────────────────────────
+# Cached in-memory with short TTL — config rarely changes and the graph
+# endpoint reads them on every request.
+
+_REGISTRY_TTL_SECONDS = 300
+_NODE_TYPE_REGISTRY_CACHE: tuple[float, list[dict]] | None = None
+_RELATION_TYPE_REGISTRY_CACHE: tuple[float, list[dict]] | None = None
+
+# Defensive fallback: mirrors the seed inserts of migration 009.
+# Used when the table is missing or empty (009 partially applied) so the
+# graph endpoint still returns useful level/color/icon hints.
+_NODE_TYPE_REGISTRY_FALLBACK: list[dict] = [
+    {"node_type": "persona",        "label": "Persona",   "default_level":  0, "default_importance": 1.00, "color": "#7c6fff", "icon": "user",        "sort_order":  0},
+    {"node_type": "entity",         "label": "Entidade",  "default_level": 10, "default_importance": 0.95, "color": "#7c6fff", "icon": "network",     "sort_order": 10},
+    {"node_type": "brand",          "label": "Brand",     "default_level": 20, "default_importance": 0.90, "color": "#a78bfa", "icon": "badge",       "sort_order": 20},
+    {"node_type": "campaign",       "label": "Campanha",  "default_level": 30, "default_importance": 0.80, "color": "#fb923c", "icon": "megaphone",   "sort_order": 30},
+    {"node_type": "product",        "label": "Produto",   "default_level": 40, "default_importance": 0.85, "color": "#60a5fa", "icon": "box",         "sort_order": 40},
+    {"node_type": "briefing",       "label": "Briefing",  "default_level": 50, "default_importance": 0.75, "color": "#c084fc", "icon": "file-text",   "sort_order": 50},
+    {"node_type": "audience",       "label": "Audiência", "default_level": 55, "default_importance": 0.70, "color": "#f472b6", "icon": "users",       "sort_order": 55},
+    {"node_type": "tone",           "label": "Tom",       "default_level": 60, "default_importance": 0.70, "color": "#22d3ee", "icon": "palette",     "sort_order": 60},
+    {"node_type": "rule",           "label": "Regra",     "default_level": 65, "default_importance": 0.80, "color": "#f87171", "icon": "scale",       "sort_order": 65},
+    {"node_type": "copy",           "label": "Copy",      "default_level": 70, "default_importance": 0.65, "color": "#64748b", "icon": "text",        "sort_order": 70},
+    {"node_type": "faq",            "label": "FAQ",       "default_level": 75, "default_importance": 0.65, "color": "#4ade80", "icon": "circle-help", "sort_order": 75},
+    {"node_type": "asset",          "label": "Asset",     "default_level": 80, "default_importance": 0.55, "color": "#f59e0b", "icon": "image",       "sort_order": 80},
+    {"node_type": "tag",            "label": "Tag",       "default_level": 90, "default_importance": 0.30, "color": "#94a3b8", "icon": "tag",         "sort_order": 90},
+    {"node_type": "mention",        "label": "Menção",    "default_level": 92, "default_importance": 0.25, "color": "#94a3b8", "icon": "at-sign",     "sort_order": 92},
+    {"node_type": "knowledge_item", "label": "Fila",      "default_level": 95, "default_importance": 0.40, "color": "#94a3b8", "icon": "inbox",       "sort_order": 95},
+    {"node_type": "kb_entry",       "label": "KB Entry",  "default_level": 95, "default_importance": 0.50, "color": "#94a3b8", "icon": "database",    "sort_order": 96},
+]
+
+_RELATION_TYPE_REGISTRY_FALLBACK: list[dict] = [
+    {"relation_type": "belongs_to_persona", "label": "pertence à persona", "inverse_label": "possui",        "default_weight": 1.00, "directional": True,  "sort_order":  10},
+    {"relation_type": "defines_brand",      "label": "define brand",       "inverse_label": "é definido por", "default_weight": 0.90, "directional": True,  "sort_order":  20},
+    {"relation_type": "has_tone",           "label": "usa tom",            "inverse_label": "tom de",         "default_weight": 0.80, "directional": True,  "sort_order":  30},
+    {"relation_type": "about_product",      "label": "sobre produto",      "inverse_label": "tem conhecimento", "default_weight": 0.85, "directional": True, "sort_order":  40},
+    {"relation_type": "part_of_campaign",   "label": "parte da campanha",  "inverse_label": "contém",         "default_weight": 0.75, "directional": True,  "sort_order":  50},
+    {"relation_type": "supports_campaign",  "label": "apoia campanha",     "inverse_label": "apoiada por",    "default_weight": 0.70, "directional": True,  "sort_order":  55},
+    {"relation_type": "answers_question",   "label": "responde pergunta",  "inverse_label": "é respondido por", "default_weight": 0.80, "directional": True, "sort_order":  60},
+    {"relation_type": "supports_copy",      "label": "suporta copy",       "inverse_label": "é suportado por", "default_weight": 0.70, "directional": True,  "sort_order":  70},
+    {"relation_type": "uses_asset",         "label": "usa asset",          "inverse_label": "é usado por",    "default_weight": 0.65, "directional": True,  "sort_order":  80},
+    {"relation_type": "briefed_by",         "label": "briefado por",       "inverse_label": "briefa",         "default_weight": 0.70, "directional": True,  "sort_order":  90},
+    {"relation_type": "same_topic_as",      "label": "mesmo tópico",       "inverse_label": "mesmo tópico",   "default_weight": 0.45, "directional": False, "sort_order": 100},
+    {"relation_type": "duplicate_of",       "label": "duplicado de",       "inverse_label": "tem duplicado",  "default_weight": 1.00, "directional": True,  "sort_order": 110},
+    {"relation_type": "derived_from",       "label": "derivado de",        "inverse_label": "origina",        "default_weight": 0.90, "directional": True,  "sort_order": 120},
+    {"relation_type": "contains",           "label": "contém",             "inverse_label": "contido em",     "default_weight": 0.75, "directional": True,  "sort_order": 130},
+    {"relation_type": "has_tag",            "label": "tem tag",            "inverse_label": "marca",          "default_weight": 0.30, "directional": True,  "sort_order": 200},
+    {"relation_type": "mentions",           "label": "menciona",           "inverse_label": "mencionado por", "default_weight": 0.30, "directional": True,  "sort_order": 210},
+    {"relation_type": "visible_to_agent",   "label": "visível para agente", "inverse_label": "vê",            "default_weight": 0.50, "directional": True,  "sort_order": 220},
+]
+
+
+def get_node_type_registry() -> list[dict]:
+    """Return the knowledge_node_type_registry rows (migration 009).
+
+    Caches the result for _REGISTRY_TTL_SECONDS to avoid querying on every
+    request. Falls back to a hardcoded mirror of the seed inserts when the
+    table is missing or empty so the graph endpoint stays useful.
+    """
+    global _NODE_TYPE_REGISTRY_CACHE
+    now = time.monotonic()
+    if _NODE_TYPE_REGISTRY_CACHE and (now - _NODE_TYPE_REGISTRY_CACHE[0]) < _REGISTRY_TTL_SECONDS:
+        return _NODE_TYPE_REGISTRY_CACHE[1]
+    rows: list[dict] = []
+    try:
+        rows = (
+            get_client().table("knowledge_node_type_registry")
+            .select("node_type,label,default_level,default_importance,color,icon,sort_order,active")
+            .execute().data or []
+        )
+        rows = [r for r in rows if r.get("active", True)]
+    except Exception:
+        rows = []
+    if not rows:
+        rows = _NODE_TYPE_REGISTRY_FALLBACK
+    _NODE_TYPE_REGISTRY_CACHE = (now, rows)
+    return rows
+
+
+def get_relation_type_registry() -> list[dict]:
+    """Return the knowledge_relation_type_registry rows (migration 009).
+
+    Same cache + fallback strategy as get_node_type_registry.
+    """
+    global _RELATION_TYPE_REGISTRY_CACHE
+    now = time.monotonic()
+    if _RELATION_TYPE_REGISTRY_CACHE and (now - _RELATION_TYPE_REGISTRY_CACHE[0]) < _REGISTRY_TTL_SECONDS:
+        return _RELATION_TYPE_REGISTRY_CACHE[1]
+    rows: list[dict] = []
+    try:
+        rows = (
+            get_client().table("knowledge_relation_type_registry")
+            .select("relation_type,label,inverse_label,default_weight,directional,sort_order,active")
+            .execute().data or []
+        )
+        rows = [r for r in rows if r.get("active", True)]
+    except Exception:
+        rows = []
+    if not rows:
+        rows = _RELATION_TYPE_REGISTRY_FALLBACK
+    _RELATION_TYPE_REGISTRY_CACHE = (now, rows)
+    return rows
+
+
 # ── Insights ───────────────────────────────────────────────────────────────
 
 def get_insights(status: Optional[str] = None, limit: int = 50) -> list:
@@ -765,6 +873,61 @@ def get_persona(slug: str) -> Optional[dict]:
 
 def upsert_persona(data: dict) -> None:
     get_client().table("personas").upsert(data, on_conflict="slug").execute()
+
+
+_PERSONA_ROUTING_FIELDS = (
+    "process_mode",
+    "outbound_webhook_url",
+    "outbound_webhook_secret",
+    "inbound_webhook_token",
+)
+
+
+def get_persona_routing(slug: str) -> Optional[dict]:
+    """Returns the routing config for a persona, or None if missing.
+
+    Falls back gracefully when migration 011 is not yet applied (older
+    columns will be missing — the function returns defaults so callers can
+    keep working without crashing).
+    """
+    persona = get_persona(slug)
+    if not persona:
+        return None
+    migration_applied = all(field in persona for field in _PERSONA_ROUTING_FIELDS)
+    legacy_bindings = get_workflow_bindings(persona.get("id")) if persona.get("id") else []
+    has_legacy_n8n = any(binding.get("active", True) for binding in legacy_bindings)
+    process_mode = persona.get("process_mode") if migration_applied else None
+    if not process_mode:
+        process_mode = "n8n" if has_legacy_n8n else "internal"
+    return {
+        "slug": persona.get("slug"),
+        "id": persona.get("id"),
+        "process_mode": process_mode,
+        "outbound_webhook_url": persona.get("outbound_webhook_url"),
+        "outbound_webhook_secret": persona.get("outbound_webhook_secret"),
+        "inbound_webhook_token": persona.get("inbound_webhook_token"),
+        "migration_applied": migration_applied,
+        "routing_source": "persona_columns" if migration_applied else ("legacy_workflow_binding" if has_legacy_n8n else "default"),
+    }
+
+
+def update_persona_routing(slug: str, data: dict) -> Optional[dict]:
+    """Partial update of persona routing fields. Ignores unknown keys."""
+    payload = {k: v for k, v in (data or {}).items() if k in _PERSONA_ROUTING_FIELDS}
+    if not payload:
+        return get_persona_routing(slug)
+    try:
+        _execute_with_retry(
+            get_client().table("personas").update(payload).eq("slug", slug)
+        )
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"update_persona_routing failed: {exc}", exc)
+        except Exception:
+            pass
+        raise
+    return get_persona_routing(slug)
 
 
 # ── Knowledge Base ─────────────────────────────────────────────────────────
@@ -944,6 +1107,71 @@ def update_knowledge_item(item_id: str, data: dict) -> None:
         raise
 
 
+def insert_knowledge_intake_message(data: dict) -> dict:
+    return _insert_one(get_client().table("knowledge_intake_messages").insert(data))
+
+
+def update_knowledge_intake_message(intake_id: str, data: dict) -> None:
+    _execute_with_retry(
+        get_client().table("knowledge_intake_messages").update(data).eq("id", intake_id)
+    )
+
+
+def upsert_knowledge_rag_entry(data: dict) -> dict:
+    from datetime import datetime, timezone
+
+    payload = dict(data)
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = _execute_with_retry(
+        get_client()
+        .table("knowledge_rag_entries")
+        .upsert(payload, on_conflict="persona_id,canonical_key")
+    )
+    return (result.data or [{}])[0]
+
+
+def replace_knowledge_rag_chunks(rag_entry_id: str, persona_id: str, chunks: list[dict]) -> list[dict]:
+    client = get_client()
+    _execute_with_retry(client.table("knowledge_rag_chunks").delete().eq("rag_entry_id", rag_entry_id))
+    if not chunks:
+        return []
+    payload = []
+    for idx, chunk in enumerate(chunks):
+        row = dict(chunk)
+        row.setdefault("chunk_index", idx)
+        row["rag_entry_id"] = rag_entry_id
+        row["persona_id"] = persona_id
+        payload.append(row)
+    result = _execute_with_retry(client.table("knowledge_rag_chunks").insert(payload))
+    return result.data or []
+
+
+def upsert_knowledge_rag_link(data: dict) -> dict:
+    result = _execute_with_retry(
+        get_client()
+        .table("knowledge_rag_links")
+        .upsert(data, on_conflict="source_entry_id,target_entry_id,relation_type")
+    )
+    return (result.data or [{}])[0]
+
+
+def find_knowledge_rag_entry_by_slug(
+    *,
+    persona_id: str,
+    content_type: str,
+    slug: str,
+) -> Optional[dict]:
+    return _one(
+        get_client()
+        .table("knowledge_rag_entries")
+        .select("*")
+        .eq("persona_id", persona_id)
+        .eq("content_type", content_type)
+        .eq("slug", slug)
+        .maybe_single()
+    )
+
+
 def get_knowledge_item_counts() -> dict:
     rows = _q(get_client().table("knowledge_items").select("status,content_type"))
     by_status: dict = {}
@@ -960,7 +1188,7 @@ def get_knowledge_item_counts() -> dict:
 
 def insert_sync_run(data: dict) -> dict:
     result = _execute_with_retry(get_client().table("sync_runs").insert(data))
-    return result.data[0]
+    return (result.data or [{}])[0]
 
 
 def update_sync_run(run_id: str, data: dict) -> None:
@@ -1008,6 +1236,16 @@ def get_workflow_bindings(persona_id: Optional[str] = None) -> list:
     if persona_id:
         q = q.eq("persona_id", persona_id)
     return _q(q)
+
+
+def get_default_whatsapp_phone_number_id(persona_id: Optional[str] = None) -> Optional[str]:
+    if not persona_id:
+        return None
+    for binding in get_workflow_bindings(persona_id):
+        value = binding.get("whatsapp_phone_number_id")
+        if value and binding.get("active", True):
+            return value
+    return None
 
 
 def upsert_workflow_binding(data: dict) -> dict:

@@ -3,7 +3,8 @@ import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { api } from "@/lib/api";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { MessageSquare, User, Clock, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database } from "lucide-react";
+import { MessageSquare, User, Clock, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, Maximize2, ArrowLeft, ChevronRight, Tag } from "lucide-react";
+import Link from "next/link";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -322,14 +323,105 @@ function nodeFocus(node: { node_type?: string | null; slug?: string | null; id?:
   return slug ? `${type}:${slug}` : null;
 }
 
-function conversationTarget(leadRef: number | null | undefined, focus?: string | null, edgeId?: string | null): string | null {
-  if (!leadRef) return null;
-  const params = new URLSearchParams();
-  if (focus) params.set("focus", focus);
-  if (edgeId) params.set("edge", edgeId);
-  const query = params.toString();
-  return `/messages/${leadRef}${query ? `?${query}` : ""}`;
+function graphTarget(focus?: string | null): string {
+  return focus ? `/knowledge/graph?focus=${focus}` : "/knowledge/graph";
 }
+
+function normalizeKnowledgeText(value?: string | null): string {
+  return (value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactKnowledgeText(value?: string | null): string {
+  return normalizeKnowledgeText(value).replace(/\s+/g, "");
+}
+
+function knowledgeSearchText(node: KnowledgeNode): string {
+  const meta = node.metadata || {};
+  const aliases = Array.isArray(meta.aliases) ? meta.aliases.join(" ") : "";
+  const price = meta.price?.display || "";
+  return [node.title, node.slug, node.summary, aliases, price, ...(node.tags || [])].join(" ");
+}
+
+function typePriority(nodeType: string): number {
+  switch (nodeType) {
+    case "product": return 140;
+    case "brand": return 80;
+    case "faq": return 70;
+    case "copy": return 50;
+    case "campaign": return 45;
+    case "briefing": return 35;
+    case "rule":
+    case "tone": return 25;
+    case "asset": return 20;
+    case "mention": return -80;
+    case "tag":
+    case "persona": return -140;
+    default: return 10;
+  }
+}
+
+function nodeRelevanceScore(node: KnowledgeNode, queryTerms: string[]): number {
+  const rawText = knowledgeSearchText(node);
+  const text = normalizeKnowledgeText(rawText);
+  const compactText = compactKnowledgeText(rawText);
+  const title = normalizeKnowledgeText(node.title);
+  const slug = normalizeKnowledgeText(node.slug);
+  const terms = queryTerms.map(normalizeKnowledgeText).filter(Boolean);
+  let score = typePriority(node.node_type);
+
+  if (typeof node.graph_distance === "number") {
+    score += Math.max(0, 50 - node.graph_distance * 18);
+  }
+  if (node.validated || node.validation_status === "validated") score += 10;
+  if (node.node_type === "product" && productFacts(node.metadata).length > 0) score += 20;
+
+  for (const term of terms) {
+    const compactTerm = term.replace(/\s+/g, "");
+    if (!term) continue;
+    if (title === term || slug === term) score += 160;
+    else if (title.includes(term) || slug.includes(term)) score += 110;
+    else if (text.includes(term)) score += 75;
+    if (compactTerm.length >= 5 && compactText.includes(compactTerm)) score += 75;
+
+    for (const word of term.split(" ").filter((w) => w.length >= 4)) {
+      if (title.includes(word) || slug.includes(word)) score += 12;
+      else if (text.includes(word)) score += 5;
+    }
+  }
+
+  return score;
+}
+
+function rankKnowledgeNodes(nodes: KnowledgeNode[], queryTerms: string[]): KnowledgeNode[] {
+  return [...nodes]
+    .map((node) => ({ node, score: nodeRelevanceScore(node, queryTerms) }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const da = typeof a.node.graph_distance === "number" ? a.node.graph_distance : 999;
+      const db = typeof b.node.graph_distance === "number" ? b.node.graph_distance : 999;
+      if (da !== db) return da - db;
+      return a.node.title.localeCompare(b.node.title);
+    })
+    .map((item) => item.node);
+}
+
+function pickPrimaryKnowledge(nodes: KnowledgeNode[], queryTerms: string[]): KnowledgeNode | null {
+  const ranked = rankKnowledgeNodes(nodes, queryTerms).filter((node) =>
+    !["tag", "mention", "persona"].includes(node.node_type)
+  );
+  return ranked[0] || null;
+}
+
+// ── Knowledge expand state ───────────────────────────────────────────────────
+
+type ExpandedKind = "node" | "kb" | "similar";
+type ExpandedKnowledge = { kind: ExpandedKind; id: string } | null;
 
 function productFacts(metadata: Record<string, any> | null): string[] {
   const meta = metadata || {};
@@ -386,19 +478,29 @@ function KnowledgeSection({
   );
 }
 
-function NodePill({ node, leadRef }: { node: KnowledgeNode; leadRef?: number | null }) {
-  const focus = nodeFocus(node);
-  const target = conversationTarget(leadRef, focus) || node.link_target || `/knowledge/graph?focus=${node.node_type}:${node.slug}`;
+function NodePill({
+  node,
+  active,
+  onSelect,
+}: {
+  node: KnowledgeNode;
+  active: boolean;
+  onSelect: (id: string) => void;
+}) {
   const facts = productFacts(node.metadata);
   const url = catalogUrl(node.metadata);
   const graphPath = pathLabel(node.path_relations, node.path_slugs);
+  const id = nodeIdentity(node);
   return (
-    <a
-      href={target}
-      target={target.startsWith("/api-brain/") ? "_blank" : undefined}
-      rel={target.startsWith("/api-brain/") ? "noopener noreferrer" : undefined}
-      className="block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
-      style={{ background: "rgba(124,111,255,0.10)", border: "1px solid rgba(124,111,255,0.30)", color: "#dcd9ff" }}
+    <button
+      type="button"
+      onClick={() => onSelect(id)}
+      className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
+      style={{
+        background: active ? "rgba(124,111,255,0.22)" : "rgba(124,111,255,0.10)",
+        border: `1px solid ${active ? "rgba(124,111,255,0.65)" : "rgba(124,111,255,0.30)"}`,
+        color: "#dcd9ff",
+      }}
     >
       <div className="flex items-center gap-1 min-w-0">
         <p className="font-medium truncate">{node.title}</p>
@@ -406,7 +508,7 @@ function NodePill({ node, leadRef }: { node: KnowledgeNode; leadRef?: number | n
           {node.node_type}
         </span>
         {pendingLabel(node)}
-        <ExternalLink size={9} className="ml-auto shrink-0 opacity-60" />
+        <ChevronRight size={10} className="ml-auto shrink-0 opacity-60" />
       </div>
       {node.summary && <p className="text-[11px] text-obs-subtle line-clamp-2 mt-0.5">{node.summary}</p>}
       {facts.length > 0 && (
@@ -424,19 +526,31 @@ function NodePill({ node, leadRef }: { node: KnowledgeNode; leadRef?: number | n
           dist. {node.graph_distance}{graphPath ? ` · ${graphPath}` : ""}
         </p>
       )}
-    </a>
+    </button>
   );
 }
 
-function SimilarCard({ node, leadRef }: { node: SimilarNode; leadRef?: number | null }) {
-  const focus = nodeFocus({ node_type: node.node_type, slug: node.slug, id: node.node_id });
-  const target = conversationTarget(leadRef, focus) || node.link_target || `/knowledge/graph?focus=${node.node_type}:${node.slug}`;
+function SimilarCard({
+  node,
+  active,
+  onSelect,
+}: {
+  node: SimilarNode;
+  active: boolean;
+  onSelect: (id: string) => void;
+}) {
   const graphPath = pathLabel(node.path_relations, node.path_slugs);
+  const id = similarIdentity(node);
   return (
-    <a
-      href={target}
-      className="block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
-      style={{ background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.22)", color: "#d8fbff" }}
+    <button
+      type="button"
+      onClick={() => onSelect(id)}
+      className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
+      style={{
+        background: active ? "rgba(34,211,238,0.18)" : "rgba(34,211,238,0.08)",
+        border: `1px solid ${active ? "rgba(34,211,238,0.55)" : "rgba(34,211,238,0.22)"}`,
+        color: "#d8fbff",
+      }}
     >
       <div className="flex items-center gap-1 min-w-0">
         <p className="font-medium truncate">{node.title}</p>
@@ -446,39 +560,50 @@ function SimilarCard({ node, leadRef }: { node: SimilarNode; leadRef?: number | 
         <span className="ml-auto shrink-0 text-[10px] text-obs-faint">d{node.graph_distance ?? "-"}</span>
       </div>
       {graphPath && <p className="mt-0.5 truncate text-[10px] text-obs-faint">{graphPath}</p>}
-    </a>
+    </button>
   );
 }
 
-function KbCard({ entry, leadRef }: { entry: KnowledgeKbEntry; leadRef?: number | null }) {
+function KbCard({
+  entry,
+  active,
+  onSelect,
+}: {
+  entry: KnowledgeKbEntry;
+  active: boolean;
+  onSelect: (id: string) => void;
+}) {
   const title = entry.titulo || "(sem título)";
   const body = (entry.conteudo || "").slice(0, 220);
-  const focus = `${entry.node_type || entry.tipo || "kb"}:${entry.id || entry.source_id || entry.kb_id || title}`;
-  const target = conversationTarget(leadRef, focus) || entry.link_target || (entry.id ? `/knowledge/quality?kb_entry_id=${entry.id}` : "/knowledge/quality");
+  const id = kbEntryIdentity(entry);
   return (
-    <a
-      href={target}
-      className="block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
-      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+    <button
+      type="button"
+      onClick={() => onSelect(id)}
+      className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
+      style={{
+        background: active ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)",
+        border: `1px solid ${active ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.07)"}`,
+      }}
     >
       <div className="flex items-center gap-1 min-w-0">
         <p className="text-white font-medium truncate">{title}</p>
         {pendingLabel(entry)}
-        <ExternalLink size={9} className="ml-auto shrink-0 opacity-60" />
+        <ChevronRight size={10} className="ml-auto shrink-0 opacity-60" />
       </div>
       {body && <p className="text-[11px] text-obs-subtle line-clamp-3 mt-0.5">{body}</p>}
-    </a>
+    </button>
   );
 }
 
-function AssetCard({ asset, leadRef }: { asset: KnowledgeAsset; leadRef?: number | null }) {
+function AssetCard({ asset }: { asset: KnowledgeAsset }) {
   const path = asset.file_path || "";
   const url = asset.url;
   const isImage = url && ASSET_IMAGE_EXT.test(path);
   const isVideo = url && ASSET_VIDEO_EXT.test(path);
   const Icon = isImage ? ImageIcon : isVideo ? FileVideo : FileType;
   const ext = path.split(".").pop()?.toUpperCase() || "FILE";
-  const target = conversationTarget(leadRef, `asset:${asset.id || asset.title}`) || asset.link_target || url || "#";
+  const target = asset.link_target || url || "#";
 
   return (
     <a
@@ -510,35 +635,252 @@ function AssetCard({ asset, leadRef }: { asset: KnowledgeAsset; leadRef?: number
 function RelationCard({
   edge,
   nodeById,
-  leadRef,
+  onSelect,
 }: {
   edge: KnowledgeEdge;
   nodeById: Map<string, KnowledgeNode>;
-  leadRef?: number | null;
+  onSelect: (id: string) => void;
 }) {
   const source = edge.source_node_id ? nodeById.get(edge.source_node_id) : undefined;
   const targetNode = edge.target_node_id ? nodeById.get(edge.target_node_id) : undefined;
-  const focus = source ? nodeFocus(source) : null;
-  const target = conversationTarget(leadRef, focus, edge.id || relationIdentity(edge))
-    || (focus ? `/knowledge/graph?focus=${focus}` : "/knowledge/graph");
+  const handleClick = () => {
+    const pick = source || targetNode;
+    if (pick) onSelect(nodeIdentity(pick));
+  };
 
   return (
-    <a
-      href={target}
-      className="block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
+    <button
+      type="button"
+      onClick={handleClick}
+      className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
       style={{ background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.08)" }}
     >
       <div className="flex items-center gap-1 min-w-0">
         <p className="font-medium text-white truncate">{source?.title || edge.source_node_id || "origem"}</p>
         <span className="shrink-0 text-[10px] text-obs-faint">→</span>
         <p className="font-medium text-white truncate">{targetNode?.title || edge.target_node_id || "destino"}</p>
-        <ExternalLink size={9} className="ml-auto shrink-0 opacity-60" />
+        <ChevronRight size={10} className="ml-auto shrink-0 opacity-60" />
       </div>
       <p className="mt-0.5 truncate text-[10px] text-obs-faint">
         {edge.relation_type || "related"}
         {typeof edge.weight === "number" ? ` · peso ${edge.weight}` : ""}
       </p>
-    </a>
+    </button>
+  );
+}
+
+function KnowledgeDetail({
+  expanded,
+  ctx,
+  onBack,
+}: {
+  expanded: { kind: ExpandedKind; id: string };
+  ctx: ChatContext;
+  onBack: () => void;
+}) {
+  // Resolve the entity by kind+id
+  const node =
+    expanded.kind === "node"
+      ? (ctx.nodes || []).find((n) => nodeIdentity(n) === expanded.id) || null
+      : null;
+  const similar =
+    expanded.kind === "similar"
+      ? (ctx.similar || []).find((n) => similarIdentity(n) === expanded.id) || null
+      : null;
+  const kb =
+    expanded.kind === "kb"
+      ? (ctx.kb_entries || []).find((e) => kbEntryIdentity(e) === expanded.id) || null
+      : null;
+
+  const title = node?.title || similar?.title || kb?.titulo || "(sem detalhes)";
+  const nodeType = node?.node_type || similar?.node_type || kb?.node_type || kb?.tipo || null;
+  const slug = node?.slug || similar?.slug || null;
+  const summary = node?.summary || null;
+  const tags = node?.tags || (kb?.tags as string[] | null) || null;
+  const meta = node?.metadata || null;
+  const facts = productFacts(meta);
+  const url = catalogUrl(meta);
+  const isPending = node
+    ? !(node.validated || node.validation_status === "validated")
+    : kb
+    ? !(kb.validated || kb.validation_status === "validated")
+    : false;
+
+  // Resolve graph focus + connected edges
+  const targetId = node?.id || similar?.node_id || null;
+  const nodeById = new Map((ctx.nodes || []).map((n) => [n.id, n]));
+  const incoming = targetId
+    ? (ctx.edges || []).filter((e) => e.target_node_id === targetId)
+    : [];
+  const outgoing = targetId
+    ? (ctx.edges || []).filter((e) => e.source_node_id === targetId)
+    : [];
+
+  const focus = (() => {
+    if (node) return nodeFocus(node);
+    if (similar) return nodeFocus({ node_type: similar.node_type, slug: similar.slug, id: similar.node_id });
+    return null;
+  })();
+
+  return (
+    <div className="p-3 space-y-3 overflow-y-auto h-full">
+      {/* Header w/ back */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1 text-[11px] text-obs-subtle hover:text-white transition"
+        >
+          <ArrowLeft size={11} />
+          <span>Voltar</span>
+        </button>
+        {nodeType && (
+          <span className="ml-auto rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase text-obs-faint">
+            {nodeType}
+          </span>
+        )}
+        {isPending && (
+          <span className="rounded border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] uppercase text-amber-200">
+            Pendente
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-white leading-tight">{title}</h3>
+        {slug && <p className="text-[11px] font-mono text-obs-subtle truncate">{slug}</p>}
+        {typeof similar?.graph_distance === "number" && (
+          <p className="text-[10px] text-obs-faint">distância no grafo: {similar.graph_distance}</p>
+        )}
+      </div>
+
+      {summary && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1">Resumo</p>
+          <p className="text-[12px] text-obs-subtle leading-snug">{summary}</p>
+        </div>
+      )}
+
+      {kb && (kb.conteudo || "").trim() && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1">Conteúdo</p>
+          <pre className="text-[11px] text-obs-subtle whitespace-pre-wrap break-words bg-white/4 border border-white/8 rounded-md p-2 leading-relaxed font-mono max-h-56 overflow-y-auto">
+            {kb.conteudo}
+          </pre>
+        </div>
+      )}
+
+      {facts.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1">Fatos</p>
+          <div className="flex flex-wrap gap-1">
+            {facts.map((f) => (
+              <span
+                key={f}
+                className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-obs-subtle"
+              >
+                {f}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tags && tags.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1 flex items-center gap-1">
+            <Tag size={9} /> Tags
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {tags.map((t) => (
+              <span
+                key={t}
+                className="rounded-full bg-obs-slate/10 border border-obs-slate/20 text-obs-slate font-mono px-2 py-0.5 text-[10px]"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {url && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1">Link</p>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] text-obs-violet underline break-all"
+          >
+            {url}
+          </a>
+        </div>
+      )}
+
+      {(incoming.length > 0 || outgoing.length > 0) && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-obs-faint">
+            Conexões · {incoming.length + outgoing.length}
+          </p>
+          {outgoing.map((e) => {
+            const dest = e.target_node_id ? nodeById.get(e.target_node_id) : undefined;
+            return (
+              <div
+                key={`out-${relationIdentity(e)}`}
+                className="rounded-md border border-white/8 bg-white/3 px-2 py-1.5"
+              >
+                <div className="flex items-center gap-1 text-[11px] text-white min-w-0">
+                  <span className="text-[10px] text-obs-faint">→</span>
+                  <span className="truncate">{dest?.title || e.target_node_id || "destino"}</span>
+                  {dest?.node_type && (
+                    <span className="ml-auto shrink-0 rounded border border-white/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+                      {dest.node_type}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-0.5 text-[10px] text-obs-faint truncate">
+                  {e.relation_type || "related"}
+                  {typeof e.weight === "number" ? ` · peso ${e.weight}` : ""}
+                </p>
+              </div>
+            );
+          })}
+          {incoming.map((e) => {
+            const src = e.source_node_id ? nodeById.get(e.source_node_id) : undefined;
+            return (
+              <div
+                key={`in-${relationIdentity(e)}`}
+                className="rounded-md border border-white/8 bg-white/3 px-2 py-1.5"
+              >
+                <div className="flex items-center gap-1 text-[11px] text-white min-w-0">
+                  <span className="text-[10px] text-obs-faint">←</span>
+                  <span className="truncate">{src?.title || e.source_node_id || "origem"}</span>
+                  {src?.node_type && (
+                    <span className="ml-auto shrink-0 rounded border border-white/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+                      {src.node_type}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-0.5 text-[10px] text-obs-faint truncate">
+                  {e.relation_type || "related"}
+                  {typeof e.weight === "number" ? ` · peso ${e.weight}` : ""}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="pt-2">
+        <a
+          href={graphTarget(focus)}
+          className="block w-full text-center text-[11px] py-1.5 rounded-md border border-obs-violet/40 bg-obs-violet/10 text-obs-violet hover:bg-obs-violet/20 transition"
+        >
+          Ver no grafo →
+        </a>
+      </div>
+    </div>
   );
 }
 
@@ -546,13 +888,16 @@ function KnowledgeSidebar({
   ctx,
   loading,
   leadSelected,
-  leadRef,
 }: {
   ctx: ChatContext | null;
   loading: boolean;
   leadSelected: boolean;
-  leadRef?: number | null;
 }) {
+  const [expanded, setExpanded] = useState<ExpandedKnowledge>(null);
+
+  // Clear expand state when ctx changes (e.g., switching leads)
+  useEffect(() => { setExpanded(null); }, [ctx]);
+
   if (!leadSelected) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-4 text-center">
@@ -569,28 +914,38 @@ function KnowledgeSidebar({
   const graphNodes = uniqueBy(ctx.nodes || [], nodeIdentity);
   const dedupedCtx = { ...ctx, nodes: graphNodes };
   const nodeById = new Map(graphNodes.map((n) => [n.id, n]));
-  const relations = uniqueBy(ctx.edges || [], relationIdentity);
-  const products  = uniqueBy(nodesByType(dedupedCtx, "product"), nodeIdentity);
-  const campaigns = uniqueBy(nodesByType(dedupedCtx, "campaign"), nodeIdentity);
-  const briefings = uniqueBy(nodesByType(dedupedCtx, "briefing"), nodeIdentity);
-  const rules     = uniqueBy([...nodesByType(dedupedCtx, "rule"), ...nodesByType(dedupedCtx, "tone")], nodeIdentity);
+  const relations = uniqueBy(ctx.edges || [], relationIdentity).slice(0, 8);
+  const primaryNode = pickPrimaryKnowledge(graphNodes, ctx.query_terms || []);
+  const primaryId = primaryNode ? nodeIdentity(primaryNode) : null;
+  const rankedGraphNodes = rankKnowledgeNodes(graphNodes, ctx.query_terms || []);
+  const graphHighlights = rankedGraphNodes
+    .filter((n) => nodeIdentity(n) !== primaryId)
+    .filter((n) => !["tag", "mention", "persona"].includes(n.node_type))
+    .slice(0, 6);
+  const products  = rankKnowledgeNodes(uniqueBy(nodesByType(dedupedCtx, "product"), nodeIdentity), ctx.query_terms || [])
+    .filter((n) => nodeIdentity(n) !== primaryId)
+    .slice(0, 5);
+  const campaigns = rankKnowledgeNodes(uniqueBy(nodesByType(dedupedCtx, "campaign"), nodeIdentity), ctx.query_terms || []).slice(0, 4);
+  const briefings = rankKnowledgeNodes(uniqueBy(nodesByType(dedupedCtx, "briefing"), nodeIdentity), ctx.query_terms || []).slice(0, 3);
+  const rules     = rankKnowledgeNodes(uniqueBy([...nodesByType(dedupedCtx, "rule"), ...nodesByType(dedupedCtx, "tone")], nodeIdentity), ctx.query_terms || []).slice(0, 4);
   const kbEntries = uniqueBy(ctx.kb_entries || [], kbEntryIdentity);
-  const faqs      = kbEntries.filter((e) => (e.node_type || e.tipo || "").toLowerCase() === "faq");
-  const copies    = kbEntries.filter((e) => (e.node_type || e.tipo || "").toLowerCase() === "copy");
-  const activeKb  = kbEntries.filter((e) => !["faq", "copy"].includes((e.node_type || e.tipo || "").toLowerCase()));
+  const faqs      = kbEntries.filter((e) => (e.node_type || e.tipo || "").toLowerCase() === "faq").slice(0, 5);
+  const copies    = kbEntries.filter((e) => (e.node_type || e.tipo || "").toLowerCase() === "copy").slice(0, 3);
+  const activeKb  = kbEntries.filter((e) => !["faq", "copy"].includes((e.node_type || e.tipo || "").toLowerCase())).slice(0, 5);
   const related   = graphNodes.filter((n) =>
-    !["persona", "product", "campaign", "briefing", "faq", "copy", "asset", "tag", "rule", "tone"].includes(n.node_type)
-  );
-  const similar = uniqueBy(ctx.similar || [], similarIdentity);
-  const assets = uniqueBy(ctx.assets || [], assetIdentity);
+    !["persona", "product", "campaign", "briefing", "faq", "copy", "asset", "tag", "mention", "rule", "tone"].includes(n.node_type)
+  ).slice(0, 5);
+  const similar = uniqueBy(ctx.similar || [], similarIdentity).slice(0, 5);
+  const assets = uniqueBy(ctx.assets || [], assetIdentity).slice(0, 6);
   const pendingNodes = uniqueBy(ctx.unvalidated?.nodes || [], nodeIdentity).filter((n) =>
     !["persona", "tag"].includes(n.node_type)
-  );
-  const pendingEntries = uniqueBy(ctx.unvalidated?.kb_entries || [], kbEntryIdentity);
-  const pendingAssets = uniqueBy(ctx.unvalidated?.assets || [], assetIdentity);
+  ).slice(0, 5);
+  const pendingEntries = uniqueBy(ctx.unvalidated?.kb_entries || [], kbEntryIdentity).slice(0, 5);
+  const pendingAssets = uniqueBy(ctx.unvalidated?.assets || [], assetIdentity).slice(0, 4);
   const total =
-    products.length + campaigns.length + briefings.length + rules.length + activeKb.length + faqs.length + copies.length +
-    related.length + relations.length + similar.length + assets.length + pendingNodes.length + pendingEntries.length + pendingAssets.length;
+    (primaryNode ? 1 : 0) + graphHighlights.length + products.length + campaigns.length + briefings.length + rules.length +
+    activeKb.length + faqs.length + copies.length + related.length + relations.length + similar.length + assets.length +
+    pendingNodes.length + pendingEntries.length + pendingAssets.length;
 
   if (total === 0) {
     return (
@@ -606,59 +961,91 @@ function KnowledgeSidebar({
     );
   }
 
+  // If a knowledge is expanded, replace the list with the detail view
+  if (expanded) {
+    return (
+      <KnowledgeDetail
+        expanded={expanded}
+        ctx={ctx}
+        onBack={() => setExpanded(null)}
+      />
+    );
+  }
+
+  // After the early return above, `expanded` is null in this branch, so cards
+  // render in their non-active state. Active styling kicks in only after a
+  // future click before detail view is rendered (single render cycle).
+  const selectNode = (id: string) => setExpanded({ kind: "node", id });
+  const selectKb = (id: string) => setExpanded({ kind: "kb", id });
+  const selectSimilar = (id: string) => setExpanded({ kind: "similar", id });
+  const isActiveNode = (_n: KnowledgeNode) => false;
+  const isActiveKb = (_e: KnowledgeKbEntry) => false;
+  const isActiveSimilar = (_n: SimilarNode) => false;
+
   return (
     <div className="p-3 space-y-3 overflow-y-auto h-full">
       {ctx.summary && (
         <p className="text-[11px] text-obs-subtle leading-snug">{ctx.summary}</p>
       )}
 
-      <KnowledgeSection icon={<Boxes size={11} />} title="Nos do grafo" count={graphNodes.length}>
-        {graphNodes.map((n) => <NodePill key={scopedKey("graph", nodeIdentity(n))} node={n} leadRef={leadRef} />)}
+      <KnowledgeSection icon={<Boxes size={11} />} title="Conhecimento principal" count={primaryNode ? 1 : 0}>
+        {primaryNode && (
+          <NodePill
+            key={scopedKey("primary", nodeIdentity(primaryNode))}
+            node={primaryNode}
+            active={isActiveNode(primaryNode)}
+            onSelect={selectNode}
+          />
+        )}
+      </KnowledgeSection>
+
+      <KnowledgeSection icon={<Boxes size={11} />} title="Mais proximos" count={graphHighlights.length}>
+        {graphHighlights.map((n) => <NodePill key={scopedKey("graph", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<Radio size={11} />} title="Relações do grafo" count={relations.length}>
-        {relations.map((e) => <RelationCard key={scopedKey("edge", relationIdentity(e))} edge={e} nodeById={nodeById} leadRef={leadRef} />)}
+        {relations.map((e) => <RelationCard key={scopedKey("edge", relationIdentity(e))} edge={e} nodeById={nodeById} onSelect={selectNode} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<Boxes size={11} />} title="Produtos" count={products.length}>
-        {products.map((n) => <NodePill key={scopedKey("product", nodeIdentity(n))} node={n} leadRef={leadRef} />)}
+        {products.map((n) => <NodePill key={scopedKey("product", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<Megaphone size={11} />} title="Campanhas" count={campaigns.length}>
-        {campaigns.map((n) => <NodePill key={scopedKey("campaign", nodeIdentity(n))} node={n} leadRef={leadRef} />)}
+        {campaigns.map((n) => <NodePill key={scopedKey("campaign", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<Database size={11} />} title="Base ativa" count={activeKb.length}>
-        {activeKb.map((e) => <KbCard key={scopedKey("active-kb", kbEntryIdentity(e))} entry={e} leadRef={leadRef} />)}
+        {activeKb.map((e) => <KbCard key={scopedKey("active-kb", kbEntryIdentity(e))} entry={e} active={isActiveKb(e)} onSelect={selectKb} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<FileQuestion size={11} />} title="FAQs" count={faqs.length}>
-        {faqs.map((e) => <KbCard key={scopedKey("faq", kbEntryIdentity(e))} entry={e} leadRef={leadRef} />)}
+        {faqs.map((e) => <KbCard key={scopedKey("faq", kbEntryIdentity(e))} entry={e} active={isActiveKb(e)} onSelect={selectKb} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<FileText size={11} />} title="Briefings" count={briefings.length}>
-        {briefings.map((n) => <NodePill key={scopedKey("briefing", nodeIdentity(n))} node={n} leadRef={leadRef} />)}
+        {briefings.map((n) => <NodePill key={scopedKey("briefing", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<FileText size={11} />} title="Copies" count={copies.length}>
-        {copies.map((e) => <KbCard key={scopedKey("copy", kbEntryIdentity(e))} entry={e} leadRef={leadRef} />)}
+        {copies.map((e) => <KbCard key={scopedKey("copy", kbEntryIdentity(e))} entry={e} active={isActiveKb(e)} onSelect={selectKb} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<Palette size={11} />} title="Regras / Tom" count={rules.length}>
-        {rules.map((n) => <NodePill key={scopedKey("rule", nodeIdentity(n))} node={n} leadRef={leadRef} />)}
+        {rules.map((n) => <NodePill key={scopedKey("rule", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<Boxes size={11} />} title="Conhecimentos relacionados" count={related.length}>
-        {related.map((n) => <NodePill key={scopedKey("related", nodeIdentity(n))} node={n} leadRef={leadRef} />)}
+        {related.map((n) => <NodePill key={scopedKey("related", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<Radio size={11} />} title="Busca por similaridade" count={similar.length}>
-        {similar.map((n) => <SimilarCard key={scopedKey("similar", similarIdentity(n))} node={n} leadRef={leadRef} />)}
+        {similar.map((n) => <SimilarCard key={scopedKey("similar", similarIdentity(n))} node={n} active={isActiveSimilar(n)} onSelect={selectSimilar} />)}
       </KnowledgeSection>
 
       <KnowledgeSection icon={<ImageIcon size={11} />} title="Assets" count={assets.length}>
         <div className="grid grid-cols-2 gap-1.5">
-          {assets.map((a) => <AssetCard key={scopedKey("asset", assetIdentity(a))} asset={a} leadRef={leadRef} />)}
+          {assets.map((a) => <AssetCard key={scopedKey("asset", assetIdentity(a))} asset={a} />)}
         </div>
       </KnowledgeSection>
 
@@ -667,11 +1054,11 @@ function KnowledgeSidebar({
         title="Pendentes de validação"
         count={pendingNodes.length + pendingEntries.length + pendingAssets.length}
       >
-        {pendingNodes.map((n) => <NodePill key={scopedKey("pending-node", nodeIdentity(n))} node={n} leadRef={leadRef} />)}
-        {pendingEntries.map((e) => <KbCard key={scopedKey("pending-kb", kbEntryIdentity(e))} entry={e} leadRef={leadRef} />)}
+        {pendingNodes.map((n) => <NodePill key={scopedKey("pending-node", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
+        {pendingEntries.map((e) => <KbCard key={scopedKey("pending-kb", kbEntryIdentity(e))} entry={e} active={isActiveKb(e)} onSelect={selectKb} />)}
         {pendingAssets.length > 0 && (
           <div className="grid grid-cols-2 gap-1.5">
-            {pendingAssets.map((a) => <AssetCard key={scopedKey("pending-asset", assetIdentity(a))} asset={a} leadRef={leadRef} />)}
+            {pendingAssets.map((a) => <AssetCard key={scopedKey("pending-asset", assetIdentity(a))} asset={a} />)}
           </div>
         )}
       </KnowledgeSection>
@@ -1084,6 +1471,15 @@ export default function MessagesPage() {
                 </div>
               )}
 
+              {/* Expand conversation: open dedicated timeline view */}
+              <Link
+                href={`/messages/${selectedLead.id}`}
+                title="Expandir conversa (abrir timeline em página dedicada)"
+                className="p-1.5 rounded-md text-obs-subtle hover:text-white hover:bg-white/5 transition shrink-0"
+              >
+                <Maximize2 size={13} />
+              </Link>
+
               <button
                 type="button"
                 onClick={togglePause}
@@ -1210,7 +1606,7 @@ export default function MessagesPage() {
           )}
         </div>
         <div className="flex-1 overflow-hidden">
-          <KnowledgeSidebar ctx={knowledge} loading={knowledgeLoading} leadSelected={!!selectedLead} leadRef={selectedId} />
+          <KnowledgeSidebar ctx={knowledge} loading={knowledgeLoading} leadSelected={!!selectedLead} />
         </div>
       </aside>
     </div>

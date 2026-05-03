@@ -5,12 +5,85 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 from services import supabase_client, knowledge_graph
+from services.knowledge_rag_backfill import backfill_knowledge_rag
+from services.knowledge_rag_intake import process_intake
 from services.vault_sync import run_sync, scan_vault, VAULT_PATH
 from services.event_emitter import emit
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
+
+class RagIntakeBody(BaseModel):
+    raw_text: str
+    persona_id: Optional[str] = None
+    persona_slug: Optional[str] = None
+    source: str = "manual"
+    source_ref: Optional[str] = None
+    title: Optional[str] = None
+    content_type: Optional[str] = None
+    tags: list[str] = []
+    metadata: dict = {}
+    submitted_by: Optional[str] = None
+    validate: bool = False
+
+
+class RagBackfillBody(BaseModel):
+    persona_id: Optional[str] = None
+    persona_slug: Optional[str] = None
+    include_vault: bool = True
+    vault_path: Optional[str] = None
+    limit_items: int = 5000
+    limit_nodes: int = 5000
+
+
+@router.post("/intake")
+def intake_rag_knowledge(body: RagIntakeBody):
+    if not body.raw_text.strip():
+        raise HTTPException(400, "raw_text is required")
+    if not body.persona_id and not body.persona_slug:
+        raise HTTPException(400, "persona_id or persona_slug is required")
+    try:
+        result = process_intake(**body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"Knowledge intake failed: {exc}") from exc
+
+    rag_entry = result.get("rag_entry") or {}
+    emit(
+        "knowledge_rag_intake_created",
+        entity_type="knowledge_rag_entry",
+        entity_id=rag_entry.get("id"),
+        persona_id=rag_entry.get("persona_id"),
+        payload={
+            "title": rag_entry.get("title"),
+            "content_type": rag_entry.get("content_type"),
+            "status": rag_entry.get("status"),
+        },
+    )
+    return result
+
 # ── Vault Sync ────────────────────────────────────────────────
+
+@router.post("/rag/backfill")
+async def backfill_rag_knowledge(body: RagBackfillBody):
+    """Reprocess legacy knowledge into knowledge_rag_entries/chunks/links."""
+    if body.persona_id and body.persona_slug:
+        raise HTTPException(400, "Use persona_id or persona_slug, not both")
+    try:
+        result = await asyncio.to_thread(backfill_knowledge_rag, **body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"RAG backfill failed: {exc}") from exc
+    emit(
+        "knowledge_rag_backfill_completed",
+        entity_type="knowledge_rag_backfill",
+        persona_id=body.persona_id,
+        payload=result,
+    )
+    return result
+
 
 @router.post("/sync")
 async def trigger_sync(persona: str = Query(None), vault_path: str = Query(None)):

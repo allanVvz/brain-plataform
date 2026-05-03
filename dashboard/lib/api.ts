@@ -59,6 +59,32 @@ export const api = {
   personas: () => req<any[]>("/personas"),
   persona: (slug: string) => req<any>(`/personas/${slug}`),
 
+  // Persona Routing — process_mode (internal | n8n) + per-persona webhook config
+  personaRouting: (slug: string) =>
+    req<{
+      slug: string;
+      id: string;
+      process_mode: "internal" | "n8n";
+      outbound_webhook_url: string | null;
+      has_outbound_webhook_secret: boolean;
+      has_inbound_webhook_token: boolean;
+      inbound_webhook_token?: string;
+      migration_applied?: boolean;
+      routing_source?: string;
+    }>(`/personas/${slug}/routing`),
+  updatePersonaRouting: (slug: string, body: {
+    process_mode?: "internal" | "n8n";
+    outbound_webhook_url?: string | null;
+    outbound_webhook_secret?: string | null;
+    inbound_webhook_token?: string | null;
+    rotate_inbound_token?: boolean;
+  }) => req<any>(`/personas/${slug}/routing`, { method: "PATCH", body: JSON.stringify(body) }),
+  testPersonaRouting: (slug: string) =>
+    req<{ ok: boolean; status: number | null; body?: string; error?: string }>(
+      `/personas/${slug}/routing/test`,
+      { method: "POST", body: "{}" },
+    ),
+
   // Integrations & Logs
   integrations: (personaId?: string) => req<any[]>(`/integrations${personaId ? `?persona_id=${personaId}` : ""}`),
   n8nLogs: (limit = 100, status?: string) => req<any[]>(`/logs/n8n?limit=${limit}${status ? `&status=${status}` : ""}`),
@@ -111,16 +137,38 @@ export const api = {
 
   // KB Intake (conversational classifier)
   kbIntakeModels: () => req<any[]>("/kb-intake/models"),
-  kbIntakeStart: (model: string) =>
-    req<any>("/kb-intake/start", { method: "POST", body: JSON.stringify({ model }) }),
+  kbIntakeStart: (model: string, initial_context = "") =>
+    req<any>("/kb-intake/start", { method: "POST", body: JSON.stringify({ model, initial_context }) }),
   kbIntakeMessage: (session_id: string, message: string) =>
     req<any>("/kb-intake/message", { method: "POST", body: JSON.stringify({ session_id, message }) }),
   kbIntakeSave: (session_id: string, content = "") =>
     req<any>("/kb-intake/save", { method: "POST", body: JSON.stringify({ session_id, content }) }),
+  kbIntakeCrawlPreview: (url: string, session_id?: string) =>
+    req<any>("/kb-intake/crawl-preview", { method: "POST", body: JSON.stringify({ url, session_id }) }),
 
   // Knowledge Graph
-  graphData: (personaSlug?: string) =>
-    req<any>(`/knowledge/graph-data${personaSlug ? `?persona_slug=${personaSlug}` : ""}`),
+  graphData: (
+    personaSlug?: string,
+    opts?: {
+      focus?: string;            // "<node_type>:<slug>" or node_id
+      max_depth?: number;         // 1..6
+      include_tags?: boolean;
+      include_mentions?: boolean;
+      include_technical?: boolean;
+      mode?: "layered" | "semantic_tree" | "graph";
+    },
+  ) => {
+    const params = new URLSearchParams();
+    if (personaSlug) params.set("persona_slug", personaSlug);
+    if (opts?.focus) params.set("focus", opts.focus);
+    if (typeof opts?.max_depth === "number") params.set("max_depth", String(opts.max_depth));
+    if (opts?.include_tags) params.set("include_tags", "true");
+    if (opts?.include_mentions) params.set("include_mentions", "true");
+    if (opts?.include_technical) params.set("include_technical", "true");
+    if (opts?.mode) params.set("mode", opts.mode);
+    const qs = params.toString();
+    return req<any>(`/knowledge/graph-data${qs ? `?${qs}` : ""}`);
+  },
 
   // Knowledge — Chat sidebar context (semantic graph + KB fallback)
   knowledgeChatContext: (leadRef: number, q?: string, personaId?: string) => {
@@ -137,6 +185,29 @@ export const api = {
       summary: string;
     }>(`/knowledge/chat-context?${params.toString()}`);
   },
+
+  // Marketing — text generation backed by ModelRouter (OpenAI cascade + Anthropic)
+  marketingModes: () =>
+    req<{
+      modes: Array<{
+        key: string;
+        label: string;
+        description: string;
+        inputs: Array<{ name: string; label: string; type: "text" | "textarea" | "select"; placeholder?: string; required?: boolean; options?: string[] }>;
+      }>;
+      available_models: Record<string, string>;
+    }>("/marketing/modes"),
+  marketingGenerate: (body: {
+    mode: string;
+    inputs: Record<string, string>;
+    persona_id?: string | null;
+    model?: string;
+    max_tokens?: number;
+  }) =>
+    req<{ content: string; model_used?: string; mode: string; persona_id?: string | null }>(
+      "/marketing/generate",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
 
   // WA Validator
   waBots: () => req<any[]>("/wa-validator/bots"),

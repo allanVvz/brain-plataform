@@ -2,15 +2,18 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
+from services.catalog_crawler import crawl_catalog_url
 from services.kb_intake_service import (
-    create_session, get_session, chat, save, AVAILABLE_MODELS,
+    create_session, get_session, chat, save, AVAILABLE_MODELS, get_agent_profile, attach_crawler_capture,
 )
 
 router = APIRouter(prefix="/kb-intake", tags=["kb-intake"])
 
 
 class StartBody(BaseModel):
-    model: str = "claude-sonnet-4-6"
+    model: str = "gpt-4o-mini"
+    initial_context: str = ""
+    agent_key: str = "sofia"
 
 
 class MessageBody(BaseModel):
@@ -23,6 +26,11 @@ class SaveBody(BaseModel):
     content: str = ""
 
 
+class CrawlBody(BaseModel):
+    url: str
+    session_id: Optional[str] = None
+
+
 @router.get("/models")
 def list_models():
     return [{"id": k, "name": v} for k, v in AVAILABLE_MODELS.items()]
@@ -32,15 +40,16 @@ def list_models():
 def start_session(body: StartBody):
     if body.model not in AVAILABLE_MODELS:
         raise HTTPException(400, f"Modelo não disponível: {body.model}")
-    session = create_session(body.model)
+    session = create_session(body.model, initial_context=body.initial_context, agent_key=body.agent_key)
+    agent = get_agent_profile(session.get("agent_key"))
     return {
         "session_id": session["id"],
         "model": session["model"],
         "model_name": AVAILABLE_MODELS[body.model],
+        "agent": {"key": session.get("agent_key"), "name": agent["name"], "role": agent["role"]},
         "welcome": (
-            "Olá! Sou o **KB Classifier**. Envie um texto, cole um conteúdo ou "
-            "faça upload de um arquivo. Vou fazer algumas perguntas para classificar "
-            "corretamente antes de salvar no vault."
+            f"{agent['greeting']} Envie um texto, cole um conteúdo ou faça upload de um arquivo. "
+            "Se faltar contexto, vou perguntar o que falta antes de propor entries, links, copys ou salvar no vault."
         ),
     }
 
@@ -53,6 +62,19 @@ def send_message(body: MessageBody):
         raise HTTPException(500, f"Erro interno: {exc}") from exc
     if "error" in result:
         raise HTTPException(400, result["error"])
+    return result
+
+
+@router.post("/crawl-preview")
+def crawl_preview(body: CrawlBody):
+    try:
+        result = crawl_catalog_url(body.url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"Erro no crawler: {exc}") from exc
+    if body.session_id:
+        attach_crawler_capture(body.session_id, result)
     return result
 
 

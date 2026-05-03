@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from api.routes import health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph
+from api.routes import health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, marketing
 from workers.flow_validator_worker import FlowValidatorWorker
 from workers.n8n_mirror_worker import N8nMirrorWorker
 from workers.health_check_worker import HealthCheckWorker
@@ -56,3 +56,4 @@ app.include_router(kb_intake.router)
 app.include_router(generation.router)
 app.include_router(wa_validator.router)
 app.include_router(graph.router)
+app.include_router(marketing.router)

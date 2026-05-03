@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { X, Edit2, Save, CheckCircle, XCircle, Tag, Loader2 } from "lucide-react";
+import { X, Edit2, Save, CheckCircle, XCircle, Tag, Loader2, Crosshair } from "lucide-react";
 import { api, BASE } from "@/lib/api";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "svg", "gif"]);
@@ -23,9 +23,18 @@ interface NodeDrawerProps {
   node: any | null;
   onClose: () => void;
   onUpdated?: (itemId: string) => void;
+  focusPath?: Array<{
+    node_id: string;
+    slug?: string;
+    title?: string;
+    node_type?: string;
+    relation_type?: string | null;
+    direction?: string | null;
+  }>;
+  onFocusHere?: () => void;
 }
 
-export default function NodeDrawer({ node, onClose, onUpdated }: NodeDrawerProps) {
+export default function NodeDrawer({ node, onClose, onUpdated, focusPath = [], onFocusHere }: NodeDrawerProps) {
   const [editing, setEditing]     = useState(false);
   const [fullItem, setFullItem]   = useState<any>(null);
   const [fetching, setFetching]   = useState(false);
@@ -172,6 +181,38 @@ export default function NodeDrawer({ node, onClose, onUpdated }: NodeDrawerProps
                 {isVault ? "vault" : "queue"}
               </span>
             )}
+
+            {typeof d.level === "number" && (
+              <span
+                className="text-[9px] px-1.5 py-0.5 rounded border font-mono"
+                style={{
+                  borderColor: `${d.color || "#94a3b8"}55`,
+                  background: `${d.color || "#94a3b8"}14`,
+                  color: d.color || "#94a3b8",
+                }}
+                title="Nivel semantico no registry"
+              >
+                L{d.level}
+              </span>
+            )}
+
+            {typeof d.importance === "number" && (
+              <span
+                className="text-[9px] px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-obs-subtle font-mono"
+                title="Importancia (0..1)"
+              >
+                imp {d.importance.toFixed(2)}
+              </span>
+            )}
+
+            {typeof d.confidence === "number" && (
+              <span
+                className="text-[9px] px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-obs-subtle font-mono"
+                title="Confianca (0..1)"
+              >
+                conf {d.confidence.toFixed(2)}
+              </span>
+            )}
           </div>
 
           {/* Title — editable in edit mode */}
@@ -188,9 +229,22 @@ export default function NodeDrawer({ node, onClose, onUpdated }: NodeDrawerProps
           {d.slug && (
             <p className="text-[11px] text-obs-subtle font-mono">{d.slug}</p>
           )}
+
+          {typeof d.graph_distance === "number" && (
+            <p className="text-[10px] text-obs-faint">distancia no grafo: {d.graph_distance}</p>
+          )}
         </div>
 
         <div className="flex items-center gap-1 ml-3 shrink-0">
+          {onFocusHere && !isPersona && (
+            <button
+              onClick={onFocusHere}
+              title="Centralizar foco neste no"
+              className="p-1.5 rounded-lg hover:bg-white/5 text-obs-subtle hover:text-obs-text transition-colors"
+            >
+              <Crosshair size={13} />
+            </button>
+          )}
           {canEdit && !editing && (
             <button
               onClick={() => setEditing(true)}
@@ -227,6 +281,30 @@ export default function NodeDrawer({ node, onClose, onUpdated }: NodeDrawerProps
         {fetching && (
           <div className="flex items-center gap-2 text-xs text-obs-subtle">
             <Loader2 size={11} className="animate-spin" /> Carregando...
+          </div>
+        )}
+
+        {/* Focus path breadcrumb (when this node is part of the active focus) */}
+        {focusPath.length > 0 && focusPath.some((s) => s.node_id === (d?.item_id || node?.id?.replace(/^gn:/, ""))) && (
+          <div>
+            <p className="text-[10px] text-obs-subtle uppercase tracking-wide mb-1.5">Caminho desde a persona</p>
+            <div className="flex items-center gap-1 flex-wrap text-[10px]">
+              {focusPath.map((step, i) => (
+                <span key={`${step.node_id}-${i}`} className="flex items-center gap-1">
+                  {i > 0 && <span className="text-obs-faint">→</span>}
+                  <span
+                    className="px-1.5 py-0.5 rounded border truncate max-w-[140px]"
+                    style={{
+                      borderColor: i === focusPath.length - 1 ? "rgba(167,139,250,0.6)" : "rgba(255,255,255,0.10)",
+                      color: i === focusPath.length - 1 ? "#a78bfa" : "rgba(255,255,255,0.6)",
+                    }}
+                    title={`${step.node_type}:${step.slug}${step.relation_type ? ` (${step.relation_type})` : ""}`}
+                  >
+                    {step.title || step.slug || step.node_type}
+                  </span>
+                </span>
+              ))}
+            </div>
           </div>
         )}
 
@@ -270,6 +348,40 @@ export default function NodeDrawer({ node, onClose, onUpdated }: NodeDrawerProps
                 {!fullItem && (displayContent?.length ?? 0) >= 200 && "…"}
               </pre>
             )}
+          </div>
+        )}
+
+        {/* Focus path */}
+        {!editing && focusPath.length > 0 && (
+          <div>
+            <p className="text-[10px] text-obs-subtle uppercase tracking-wide mb-1.5">
+              Caminho semantico
+            </p>
+            <div className="space-y-1.5">
+              {focusPath.map((step, idx) => (
+                <div
+                  key={`${step.node_id}-${idx}`}
+                  className="rounded-lg border border-white/06 bg-white/3 px-2 py-1.5"
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-[10px] text-obs-faint">{idx + 1}</span>
+                    <span className="text-[11px] text-obs-text truncate">
+                      {step.title || step.slug || step.node_type || step.node_id}
+                    </span>
+                    {step.node_type && (
+                      <span className="ml-auto shrink-0 rounded border border-white/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+                        {step.node_type}
+                      </span>
+                    )}
+                  </div>
+                  {step.relation_type && (
+                    <p className="mt-0.5 text-[10px] text-obs-faint truncate">
+                      {step.relation_type}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

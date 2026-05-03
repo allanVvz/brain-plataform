@@ -190,7 +190,7 @@ export default function IntakePage() {
         <div className="flex items-center justify-between px-4 py-3 border-b border-brain-border">
           <div className="flex items-center gap-2">
             <Bot size={16} className="text-brain-accent" />
-            <span className="text-sm font-semibold">KB Classifier</span>
+            <span className="text-sm font-semibold">Criar</span>
             {sessionId && (
               <span className="text-[10px] text-brain-muted font-mono">{sessionId.slice(0, 8)}</span>
             )}
@@ -228,7 +228,7 @@ export default function IntakePage() {
             <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
               <Bot size={40} className="text-brain-accent/50" />
               <div>
-                <p className="text-white font-medium">KB Classifier</p>
+                <p className="text-white font-medium">Criar</p>
                 <p className="text-sm text-brain-muted mt-1">
                   Envie textos, arquivos ou conteúdo. O agente classificará e salvará no vault automaticamente.
                 </p>

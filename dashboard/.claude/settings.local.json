@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk 'NR>=850' C:/Users/Alan/.claude/projects/C--Users-Alan-Documents-repositorios-ai-brain/7a967aa8-fa5e-4787-9f34-7b8344ea3c0a.jsonl)",
+      "Bash(awk 'NR>=603 && NR<=750' C:/Users/Alan/.claude/projects/C--Users-Alan-Documents-repositorios-ai-brain/7a967aa8-fa5e-4787-9f34-7b8344ea3c0a.jsonl)",
+      "Bash(grep -o '\"text\":\"[^\"]\\\\{40,\\\\}')",
+      "Bash(awk 'NR==636' C:/Users/Alan/.claude/projects/C--Users-Alan-Documents-repositorios-ai-brain/7a967aa8-fa5e-4787-9f34-7b8344ea3c0a.jsonl)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('api/routes/messages.py'\\).read\\(\\)\\); ast.parse\\(open\\('services/supabase_client.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -m tests.smoke_knowledge_graph)",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in ['services/knowledge_graph.py','services/supabase_client.py','services/vault_sync.py','api/routes/knowledge.py','api/routes/graph.py','core/context_builder.py']]; print\\('PY OK'\\)\")",
+      "Bash(npx tsc *)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}

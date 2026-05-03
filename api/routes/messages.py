@@ -34,12 +34,26 @@ def send_message(body: SendMessageBody) -> dict:
     # Find the agent. Prefer the explicit agent_id; otherwise resolve via
     # the lead's persona+stage so the message is correctly tagged with
     # whoever is on the role for this conversation.
+    lead = supabase_client.get_lead_by_ref(body.lead_ref) or {}
+    persona_id = lead.get("persona_id")
+    whatsapp_phone_number_id = lead.get("whatsapp_phone_number_id") or supabase_client.get_default_whatsapp_phone_number_id(persona_id)
+    persona_routing: dict | None = None
+    if persona_id:
+        # Resolve persona slug to load the per-persona outbound webhook
+        # config (used in BOTH internal and n8n routing modes — the operator
+        # reply always goes out through this hook).
+        try:
+            personas = supabase_client.get_personas() or []
+            persona_row = next((p for p in personas if p.get("id") == persona_id), None)
+            if persona_row and persona_row.get("slug"):
+                persona_routing = supabase_client.get_persona_routing(persona_row["slug"])
+        except Exception as exc:
+            logger.warning("persona routing lookup failed in send: %s", exc)
+
     agent: dict | None = None
     if body.agent_id:
         agent = agents_service.get_agent(body.agent_id)
     else:
-        lead = supabase_client.get_lead_by_ref(body.lead_ref) or {}
-        persona_id = lead.get("persona_id")
         stage = lead.get("stage") or lead.get("funnel_stage") or "novo"
         if persona_id:
             try:
@@ -57,6 +71,7 @@ def send_message(body: SendMessageBody) -> dict:
         "direction": "Outbounding",
         "nome": body.nome or body.sender_id or "Operador",
         "status": "pending",
+        "whatsapp_phone_number_id": whatsapp_phone_number_id,
         "metadata": {"agent_id": agent.get("id") if agent else None,
                      "bot_name": agent.get("bot_name") if agent else None},
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -68,13 +83,31 @@ def send_message(body: SendMessageBody) -> dict:
         logger.error("insert_message failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"insert_message failed: {exc}")
 
+    # Outbound webhook precedence:
+    #   1) persona.outbound_webhook_url (preferred — works for both
+    #      process_modes; configured per-persona in the dashboard).
+    #   2) agent.n8n_webhook_url (legacy fallback for personas that haven't
+    #      been migrated to per-persona webhook config yet).
+    outbound_url: str | None = None
+    outbound_secret: str | None = None
+    if persona_routing and persona_routing.get("outbound_webhook_url"):
+        outbound_url = persona_routing["outbound_webhook_url"]
+        outbound_secret = persona_routing.get("outbound_webhook_secret")
+    elif agent and agent.get("n8n_webhook_url"):
+        outbound_url = agent["n8n_webhook_url"]
+        outbound_secret = agent.get("n8n_webhook_secret")
+
     webhook_status: int | None = None
     webhook_error: str | None = None
-    if agent and agent.get("n8n_webhook_url"):
+    if outbound_url:
         webhook_payload = {
             "lead_ref": body.lead_ref,
-            "agent_id": agent.get("id"),
-            "bot_name": agent.get("bot_name"),
+            "agent_id": agent.get("id") if agent else None,
+            "bot_name": agent.get("bot_name") if agent else None,
+            "persona_id": persona_id,
+            "lead_id": lead.get("lead_id"),
+            "telefone": lead.get("telefone"),
+            "whatsapp_phone_number_id": whatsapp_phone_number_id,
             "from": "human",
             "sender_id": body.sender_id,
             "texto": body.texto,
@@ -82,9 +115,9 @@ def send_message(body: SendMessageBody) -> dict:
         }
         try:
             webhook_status, _ = n8n_client.send_to_webhook(
-                agent["n8n_webhook_url"],
+                outbound_url,
                 webhook_payload,
-                secret=agent.get("n8n_webhook_secret"),
+                secret=outbound_secret,
             )
             msg_payload["status"] = "sent" if 200 <= webhook_status < 300 else "failed"
         except Exception as exc:

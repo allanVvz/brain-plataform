@@ -15,308 +15,352 @@ import ReactFlow, {
   NodeProps,
   ReactFlowProvider,
   Panel,
+  MarkerType,
 } from "reactflow";
 import dagre from "dagre";
 import "reactflow/dist/style.css";
+import {
+  buildNeuronGraphLayout,
+  buildTreeFromGraph,
+  GraphEdgeData,
+  GraphNodeData,
+  KnowledgeViewMode,
+} from "./knowledgeGraphLayout";
 
 // ── Types ──────────────────────────────────────────────────────
 
-interface GraphNode extends Node {
-  data: {
-    label: string;
-    slug?: string;
-    description?: string;
-    status?: string;
-    content_type?: string;
-    file_type?: string;
-    file_path?: string;
-    content_preview?: string;
-    nodeClass: "persona" | "validated" | "pending" | "rejected" | "orphan";
-    item_id?: string;
-  };
-}
+type ViewMode = KnowledgeViewMode;
 
 interface GraphViewProps {
   rawNodes: any[];
   rawEdges: any[];
-  onNodeClick: (node: GraphNode) => void;
+  onNodeClick: (node: any) => void;
+  mode: ViewMode;
+  searchQuery?: string;
+  focusNodeId?: string | null;
+  onlyPrimaryTreeEdges?: boolean;
 }
 
-type ViewMode = "type" | "status";
+// ── Layout helpers ─────────────────────────────────────────────
 
-// ── Dagre layout (TB — top-down tree) ─────────────────────────
+function nodeSize(data: GraphNodeData): { w: number; h: number } {
+  const importance = data.importance ?? 0.5;
+  // Persona always wide
+  if (data.node_type === "persona") return { w: 180, h: 56 };
+  if (importance >= 0.85) return { w: 170, h: 52 };
+  if (importance >= 0.65) return { w: 140, h: 44 };
+  if (importance >= 0.50) return { w: 120, h: 38 };
+  return { w: 104, h: 32 };
+}
 
-const NODE_DIMS: Record<string, { w: number; h: number }> = {
-  personaNode:   { w: 160, h: 48 },
-  branchNode:    { w: 130, h: 36 },
-  knowledgeNode: { w: 140, h: 48 },
-};
+// Map level (0-95) → dagre rank bucket so all persona share rank 0,
+// brand/entity rank 1, campaign/product rank 2, etc.
+function levelToRank(level: number | undefined): number {
+  if (level == null) return 5;
+  if (level <= 0) return 0;        // persona
+  if (level <= 15) return 1;       // entity
+  if (level <= 25) return 2;       // brand
+  if (level <= 35) return 3;       // campaign
+  if (level <= 45) return 4;       // product
+  if (level <= 55) return 5;       // briefing/audience
+  if (level <= 65) return 6;       // tone/rule
+  if (level <= 72) return 7;       // copy
+  if (level <= 78) return 8;       // faq
+  if (level <= 85) return 9;       // asset
+  return 10;                       // tag/mention/technical
+}
 
-function applyLayout(nodes: Node[], edges: Edge[]): Node[] {
+function applyLayoutLayered(nodes: Node[], edges: Edge[]): Node[] {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "TB", ranksep: 56, nodesep: 18, edgesep: 8 });
+  g.setGraph({ rankdir: "TB", ranksep: 80, nodesep: 24, edgesep: 8, ranker: "network-simplex" });
 
   nodes.forEach((n) => {
-    const { w, h } = NODE_DIMS[n.type!] ?? NODE_DIMS.knowledgeNode;
+    const data = n.data as GraphNodeData;
+    const { w, h } = nodeSize(data);
     g.setNode(n.id, { width: w, height: h });
   });
+
+  // Group nodes by rank and add invisible "rank-anchor" edges so dagre
+  // honors the level hierarchy even when real edges are sparse.
+  const ranks = new Map<number, string[]>();
+  nodes.forEach((n) => {
+    const r = levelToRank((n.data as GraphNodeData).level);
+    if (!ranks.has(r)) ranks.set(r, []);
+    ranks.get(r)!.push(n.id);
+  });
+  const rankList = Array.from(ranks.keys()).sort((a, b) => a - b);
+  for (let i = 0; i < rankList.length - 1; i++) {
+    const a = ranks.get(rankList[i])![0];
+    const b = ranks.get(rankList[i + 1])![0];
+    if (a && b) g.setEdge(a, b, { weight: 0.001 });
+  }
+
   edges.forEach((e) => g.setEdge(e.source, e.target));
   dagre.layout(g);
 
   return nodes.map((n) => {
     const pos = g.node(n.id);
     if (!pos) return n;
-    const { w, h } = NODE_DIMS[n.type!] ?? NODE_DIMS.knowledgeNode;
+    const { w, h } = nodeSize(n.data as GraphNodeData);
     return { ...n, position: { x: pos.x - w / 2, y: pos.y - h / 2 } };
   });
 }
 
-// ── Branch palette ─────────────────────────────────────────────
-
-const BRANCH_PALETTE: Record<string, { cls: string; hex: string }> = {
-  asset:          { cls: "border-obs-amber/70 bg-obs-amber/10 text-obs-amber",       hex: "#f59e0b" },
-  brand:          { cls: "border-obs-violet/70 bg-obs-violet/10 text-obs-violet",    hex: "#7c6fff" },
-  product:        { cls: "border-blue-400/70 bg-blue-400/10 text-blue-400",          hex: "#60a5fa" },
-  faq:            { cls: "border-green-400/70 bg-green-400/10 text-green-400",       hex: "#4ade80" },
-  rule:           { cls: "border-obs-rose/70 bg-obs-rose/10 text-obs-rose",          hex: "#f87171" },
-  copy:           { cls: "border-obs-slate/70 bg-obs-slate/10 text-obs-slate",       hex: "#64748b" },
-  tone:           { cls: "border-cyan-400/70 bg-cyan-400/10 text-cyan-400",          hex: "#22d3ee" },
-  briefing:       { cls: "border-purple-400/70 bg-purple-400/10 text-purple-400",    hex: "#c084fc" },
-  campaign:       { cls: "border-orange-400/70 bg-orange-400/10 text-orange-400",    hex: "#fb923c" },
-  audience:       { cls: "border-pink-400/70 bg-pink-400/10 text-pink-400",          hex: "#f472b6" },
-  competitor:     { cls: "border-red-400/70 bg-red-400/10 text-red-400",             hex: "#f87171" },
-  prompt:         { cls: "border-indigo-400/70 bg-indigo-400/10 text-indigo-400",    hex: "#818cf8" },
-  maker_material: { cls: "border-yellow-400/70 bg-yellow-400/10 text-yellow-400",   hex: "#facc15" },
-  other:          { cls: "border-white/20 bg-white/5 text-obs-subtle",              hex: "#475569" },
-  // status mode keys
-  validated:      { cls: "border-obs-slate/70 bg-obs-slate/10 text-obs-slate",       hex: "#64748b" },
-  pending:        { cls: "border-obs-amber/70 bg-obs-amber/10 text-obs-amber",       hex: "#f59e0b" },
-  rejected:       { cls: "border-obs-rose/70 bg-obs-rose/10 text-obs-rose",          hex: "#f87171" },
-  orphan:         { cls: "border-white/20 bg-white/5 text-obs-faint",               hex: "#3d4559" },
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  asset: "Asset", brand: "Brand", product: "Produto", faq: "FAQ",
-  rule: "Regra", copy: "Copy", tone: "Tom", briefing: "Briefing",
-  campaign: "Campanha", audience: "Audiência", competitor: "Concorrente",
-  prompt: "Prompt", maker_material: "Maker", other: "Outros",
-  validated: "Validado", pending: "Pendente", rejected: "Rejeitado", orphan: "Sem Persona",
-};
-
-// ── Tree builder — inserts branch layer between personas and items ──
-
-function buildTree(
-  rawNodes: Node[],
-  rawEdges: Edge[],
-  viewMode: ViewMode,
-  typeFilter: string | null,
-): { nodes: Node[]; edges: Edge[] } {
-  // item id → parent id (persona:xxx or "orphan")
-  const parentMap = new Map<string, string>();
-  rawEdges.forEach((e) => {
-    if (e.source.startsWith("persona:") || e.source === "orphan") {
-      parentMap.set(e.target, e.source);
-    }
-  });
-
-  const personaNodes = rawNodes.filter((n) => n.type === "personaNode");
-  const itemNodes    = rawNodes.filter((n) => n.type === "knowledgeNode");
-
-  // persona id → Set of branch keys that will exist
-  const personaHasChildren = new Set<string>();
-
-  // group key = "parentId__branchKey"
-  const groups = new Map<string, Node[]>();
-
-  itemNodes.forEach((item) => {
-    const parentId  = parentMap.get(item.id) ?? "orphan";
-    const branchKey = viewMode === "type"
-      ? (item.data.content_type || "other")
-      : (item.data.nodeClass   || "pending");
-
-    if (typeFilter && viewMode === "type" && branchKey !== typeFilter) return;
-
-    const key = `${parentId}__${branchKey}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(item);
-    personaHasChildren.add(parentId);
-  });
-
-  // Only keep persona nodes that have visible children (when filter is active)
-  const visiblePersonas = typeFilter
-    ? personaNodes.filter((n) => personaHasChildren.has(n.id))
-    : personaNodes;
-
-  const resultNodes: Node[] = [...visiblePersonas];
-  const resultEdges: Edge[] = [];
-
-  groups.forEach((items, groupKey) => {
-    const sep       = groupKey.indexOf("__");
-    const parentId  = groupKey.slice(0, sep);
-    const branchKey = groupKey.slice(sep + 2);
-
-    // Skip if parent persona was filtered away
-    if (!visiblePersonas.some((n) => n.id === parentId)) return;
-
-    const branchId = `branch:${parentId}:${branchKey}`;
-
-    resultNodes.push({
-      id: branchId,
-      type: "branchNode",
-      position: { x: 0, y: 0 },
-      data: {
-        label:     TYPE_LABELS[branchKey] ?? branchKey,
-        branchKey,
-        count:     items.length,
-        viewMode,
-      },
-    });
-
-    resultEdges.push({
-      id:     `e:p-b:${parentId}:${branchKey}`,
-      source: parentId,
-      target: branchId,
-      type:   "smoothstep",
-      style:  { strokeOpacity: 0.35, strokeWidth: 1 },
-    });
-
-    items.forEach((item) => {
-      resultNodes.push(item);
-      resultEdges.push({
-        id:     `e:b-i:${branchId}:${item.id}`,
-        source: branchId,
-        target: item.id,
-        type:   "smoothstep",
-        style:  { strokeOpacity: 0.18, strokeWidth: 1 },
-      });
-    });
-  });
-
-  return { nodes: resultNodes, edges: resultEdges };
+function applyLayoutGraphSeed(nodes: Node[], edges: Edge[]): Node[] {
+  return buildNeuronGraphLayout(nodes as Node<GraphNodeData>[], edges as Edge<GraphEdgeData>[]);
 }
 
-// ── Node components ────────────────────────────────────────────
+function applyLayoutTree(nodes: Node[], edges: Edge[]): Node[] {
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: "TB", ranksep: 92, nodesep: 34, edgesep: 10, ranker: "tight-tree" });
+  nodes.forEach((n) => {
+    const { w, h } = nodeSize(n.data as GraphNodeData);
+    g.setNode(n.id, { width: w, height: h });
+  });
+  edges
+    .filter((e) => (e.data as GraphEdgeData | undefined)?.primary)
+    .forEach((e) => g.setEdge(e.source, e.target, { weight: 2 }));
+  dagre.layout(g);
+  return nodes.map((n) => {
+    const pos = g.node(n.id);
+    if (!pos) return n;
+    const { w, h } = nodeSize(n.data as GraphNodeData);
+    return { ...n, position: { x: pos.x - w / 2, y: pos.y - h / 2 } };
+  });
+}
 
-const PERSONA_STYLES: Record<string, string> = {
-  persona: "border-obs-violet bg-obs-violet-glow glow-violet text-obs-violet",
-  orphan:  "border-obs-faint bg-obs-raised text-obs-subtle",
-};
+// ── Filtering by mode ──────────────────────────────────────────
 
-const KI_STYLES: Record<string, { ring: string; dot: string; label: string }> = {
-  validated: { ring: "border-obs-slate/40",           dot: "bg-obs-slate",  label: "text-obs-text/80" },
-  pending:   { ring: "border-obs-amber/40 glow-amber", dot: "bg-obs-amber", label: "text-obs-amber" },
-  rejected:  { ring: "border-obs-rose/30",             dot: "bg-obs-rose",  label: "text-obs-subtle line-through" },
-};
+function filterEdgesForMode(edges: Edge[], mode: ViewMode): Edge[] {
+  return edges;
+}
+
+// ── Edge style by tier ─────────────────────────────────────────
+
+function edgeStyle(data: GraphEdgeData | undefined, isInPath: boolean): Edge["style"] {
+  const tier = data?.tier || "auxiliary";
+  if (isInPath) {
+    return { stroke: "#7c6fff", strokeWidth: 3, strokeOpacity: 0.95 };
+  }
+  if (data?.primary) {
+    return { stroke: "rgba(190,210,255,0.74)", strokeWidth: 2.4, strokeOpacity: 0.86 };
+  }
+  if (data?.secondary) {
+    return { stroke: "rgba(170,190,220,0.22)", strokeWidth: 1, strokeOpacity: 0.28, strokeDasharray: "5 5" };
+  }
+  if (tier === "strong") {
+    return { stroke: "rgba(125,211,252,0.55)", strokeWidth: 2.2, strokeOpacity: 0.72 };
+  }
+  if (tier === "structural") {
+    return { stroke: "rgba(255,255,255,0.34)", strokeWidth: 1.4, strokeOpacity: 0.48 };
+  }
+  if (tier === "curation") {
+    return { stroke: "#f87171", strokeWidth: 2, strokeOpacity: 0.7 };
+  }
+  // auxiliary
+  return { stroke: "rgba(255,255,255,0.18)", strokeWidth: 1, strokeOpacity: 0.25, strokeDasharray: "4 4" };
+}
+
+// ── Node component ─────────────────────────────────────────────
 
 function PersonaNode({ data, selected }: NodeProps) {
-  const style = PERSONA_STYLES[data.nodeClass] || PERSONA_STYLES.persona;
+  const d = data as GraphNodeData;
+  const focused = !!d.is_focus;
+  const inPath = !!d.in_focus_path;
   return (
     <div
-      className={`rounded-xl border px-4 py-2.5 text-sm font-semibold tracking-wide cursor-pointer transition-all ${style} ${selected ? "scale-105" : ""}`}
-      style={{ minWidth: 140, textAlign: "center" }}
+      className={`rounded-xl border-2 px-4 py-2.5 text-sm font-semibold tracking-wide cursor-pointer transition-all ${selected || focused ? "scale-105" : ""}`}
+      style={{
+        minWidth: 160, textAlign: "center",
+        borderColor: focused ? "#a78bfa" : (d.color || "#7c6fff"),
+        background: `${d.color || "#7c6fff"}1A`,
+        color: d.color || "#a78bfa",
+        boxShadow: focused ? "0 0 16px rgba(167,139,250,0.55)" : (inPath ? "0 0 10px rgba(124,111,255,0.4)" : "none"),
+        opacity: 1,
+      }}
     >
-      <Handle type="target" position={Position.Top}    style={{ opacity: 0 }} />
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
-      <div className="text-[10px] uppercase tracking-widest opacity-60 mb-0.5">persona</div>
-      {data.label}
-    </div>
-  );
-}
-
-function BranchNode({ data, selected }: NodeProps) {
-  const palette = BRANCH_PALETTE[data.branchKey] ?? BRANCH_PALETTE.other;
-  return (
-    <div
-      className={`rounded-lg border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider transition-all ${palette.cls} ${selected ? "scale-105" : ""}`}
-      style={{ minWidth: 110, textAlign: "center" }}
-    >
-      <Handle type="target" position={Position.Top}    style={{ opacity: 0 }} />
-      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
-      <span>{data.label}</span>
-      <span className="ml-1.5 text-[10px] opacity-55 font-mono normal-case">{data.count}</span>
+      <div className="text-[10px] uppercase tracking-widest opacity-60 mb-0.5">{d.node_type || "persona"}</div>
+      {d.label}
     </div>
   );
 }
 
 function KnowledgeNode({ data, selected }: NodeProps) {
-  const cls    = KI_STYLES[data.nodeClass] || KI_STYLES.pending;
-  const isVideo = ["mp4", "mov", "webm"].includes(data.file_type || "");
-  const isImage = ["png", "jpg", "jpeg", "webp", "svg"].includes(data.file_type || "");
+  const d = data as GraphNodeData;
+  const focused = !!d.is_focus;
+  const inPath = !!d.in_focus_path;
+  const isVideo = ["mp4", "mov", "webm"].includes(d.file_type || "");
+  const isImage = ["png", "jpg", "jpeg", "webp", "svg"].includes(d.file_type || "");
+  const importance = d.importance ?? 0.5;
+  const isAuxiliary = !!d.is_auxiliary;
+  const color = d.color || "#94a3b8";
+  const isGraphMode = d._viewMode === "graph";
 
   return (
     <div
-      className={`rounded-lg border glass px-3 py-2 cursor-pointer transition-all node-obs ${cls.ring} ${selected ? "ring-1 ring-obs-violet" : ""}`}
-      style={{ minWidth: 120, maxWidth: 140 }}
+      className={`rounded-lg border glass cursor-pointer transition-all ${focused ? "ring-2 ring-obs-violet" : ""} ${selected ? "ring-1 ring-obs-violet" : ""}`}
+      style={{
+        minWidth: importance >= 0.85 ? 150 : importance >= 0.65 ? 130 : importance >= 0.5 ? 110 : 96,
+        maxWidth: importance >= 0.85 ? 180 : 150,
+        padding: importance >= 0.85 ? "8px 12px" : importance >= 0.5 ? "6px 10px" : "4px 8px",
+        borderColor: focused ? "#a78bfa" : `${color}99`,
+        background: focused ? `${color}33` : isGraphMode ? `radial-gradient(circle at 35% 25%, ${color}3D, ${color}14 58%, rgba(5,7,9,0.68))` : `${color}14`,
+        boxShadow: focused
+          ? `0 0 20px ${color}CC, 0 0 44px ${color}33`
+          : isGraphMode
+            ? `0 0 ${10 + importance * 18}px ${color}55`
+            : (inPath ? `0 0 10px ${color}77` : "none"),
+        opacity: isAuxiliary ? 0.75 : 1,
+      }}
     >
-      <Handle type="target" position={Position.Top}    style={{ opacity: 0 }} />
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
-      <div className="flex items-center gap-1.5 mb-1">
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${cls.dot}`} />
-        <span className="text-[9px] text-obs-subtle uppercase tracking-wider truncate flex-1">
-          {data.content_type}
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} />
+        <span className="text-[9px] uppercase tracking-wider truncate flex-1" style={{ color: `${color}DD` }}>
+          {d.node_type || d.content_type}
         </span>
         {isVideo && <span className="text-[8px] text-obs-amber">▶</span>}
         {isImage && <span className="text-[8px] text-obs-slate">⬛</span>}
-        {(data as any).source === "vault" && (
-          <span className="text-[8px] text-obs-slate opacity-60">V</span>
+        {typeof d.graph_distance === "number" && d.graph_distance > 0 && (
+          <span className="text-[8px] text-obs-faint">d{d.graph_distance}</span>
         )}
       </div>
-      <div className={`text-xs font-medium truncate ${cls.label}`}>{data.label}</div>
+      <div
+        className="font-medium truncate"
+        style={{
+          color: focused ? "#fff" : "rgba(255,255,255,0.85)",
+          fontSize: importance >= 0.85 ? 13 : importance >= 0.5 ? 12 : 11,
+        }}
+      >
+        {d.label}
+      </div>
     </div>
   );
 }
 
 const nodeTypes: NodeTypes = {
-  personaNode:   PersonaNode,
-  branchNode:    BranchNode,
+  personaNode: PersonaNode,
   knowledgeNode: KnowledgeNode,
 };
 
 // ── Main component ─────────────────────────────────────────────
 
-function GraphInner({ rawNodes, rawEdges, onNodeClick }: GraphViewProps) {
-  const [viewMode,    setViewMode]    = useState<ViewMode>("type");
-  const [typeFilter,  setTypeFilter]  = useState<string | null>(null);
+function GraphInner({ rawNodes, rawEdges, onNodeClick, mode, searchQuery, focusNodeId, onlyPrimaryTreeEdges = true }: GraphViewProps) {
+  const visibleEdges = useMemo(
+    () => filterEdgesForMode(rawEdges as Edge[], mode),
+    [rawEdges, mode],
+  );
 
-  // Unique content types present in data
-  const availableTypes = useMemo(() => {
-    const types = new Set<string>();
-    rawNodes.forEach((n) => {
-      if (n.type === "knowledgeNode" && n.data?.content_type) {
-        types.add(n.data.content_type as string);
-      }
+  const treeGraph = useMemo(() => {
+    if (mode !== "semantic_tree") {
+      return { nodes: rawNodes as Node<GraphNodeData>[], edges: visibleEdges as Edge<GraphEdgeData>[] };
+    }
+    return buildTreeFromGraph(
+      rawNodes as Node<GraphNodeData>[],
+      visibleEdges as Edge<GraphEdgeData>[],
+      onlyPrimaryTreeEdges,
+    );
+  }, [mode, rawNodes, visibleEdges, onlyPrimaryTreeEdges]);
+
+  const activeRawNodes = treeGraph.nodes as Node[];
+  const activeRawEdges = treeGraph.edges as Edge[];
+
+  const neighborIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!focusNodeId) return ids;
+    ids.add(focusNodeId);
+    for (const edge of activeRawEdges) {
+      if (edge.source === focusNodeId) ids.add(edge.target);
+      if (edge.target === focusNodeId) ids.add(edge.source);
+    }
+    return ids;
+  }, [activeRawEdges, focusNodeId]);
+
+  // Search filter — matched nodes get full opacity, others fade.
+  const fold = (s: string) =>
+    (s || "").toString().toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
+  const q = fold(searchQuery || "");
+  const isSearchHit = useCallback(
+    (n: any) => {
+      if (!q) return true;
+      const data = n.data || {};
+      return (
+        fold(data.label).includes(q) ||
+        fold(data.slug || "").includes(q) ||
+        fold(data.content_type || "").includes(q) ||
+        fold(data.node_type || "").includes(q)
+      );
+    },
+    [q],
+  );
+
+  // Decorate edges with style+marker based on tier and focus path.
+  const styledEdges = useMemo<Edge[]>(() => {
+    return activeRawEdges.map((e) => {
+      const data = (e.data || {}) as GraphEdgeData;
+      const inPath = !!data.in_focus_path;
+      const style = edgeStyle(data, inPath);
+      const directional = data.directional !== false;
+      const dimmed = focusNodeId && e.source !== focusNodeId && e.target !== focusNodeId && !inPath;
+      return {
+        ...e,
+        type: mode === "graph" ? "default" : "smoothstep",
+        animated: inPath || (mode === "graph" && (data.primary || data.tier === "strong")),
+        style: dimmed ? { ...style, strokeOpacity: 0.12 } : style,
+        markerEnd: directional && data.tier !== "auxiliary" ? {
+          type: MarkerType.ArrowClosed,
+          color: (style?.stroke as string) || "rgba(255,255,255,0.35)",
+          width: 14,
+          height: 14,
+        } : undefined,
+        // Secondary edges stay visible in graph/layered mode and are dimmed
+        // when focus is active.
+      };
     });
-    return Array.from(types).sort();
-  }, [rawNodes]);
+  }, [activeRawEdges, focusNodeId, mode]);
 
-  const { nodes: treeNodes, edges: treeEdges } = useMemo(
-    () => buildTree(rawNodes, rawEdges, viewMode, typeFilter),
-    [rawNodes, rawEdges, viewMode, typeFilter],
-  );
+  // Decorate nodes with search/focus state for fade-out.
+  const decoratedNodes = useMemo<Node[]>(() => {
+    return (activeRawNodes as Node[]).map((n) => {
+      const data = n.data as GraphNodeData;
+      const matchesSearch = !q || isSearchHit(n);
+      const nearFocus = !focusNodeId || neighborIds.has(n.id) || data.in_focus_path || data.is_focus;
+      const visible = matchesSearch && nearFocus;
+      return {
+        ...n,
+        data: { ...data, _faded: !visible, _viewMode: mode },
+        style: visible ? n.style : { ...n.style, opacity: 0.18 },
+      };
+    });
+  }, [activeRawNodes, q, isSearchHit, focusNodeId, neighborIds, mode]);
 
-  const laid = useMemo(
-    () => applyLayout(treeNodes as Node[], treeEdges as Edge[]),
-    [treeNodes, treeEdges],
-  );
+  const laid = useMemo<Node[]>(() => {
+    const layoutFn = mode === "graph" ? applyLayoutGraphSeed : mode === "semantic_tree" ? applyLayoutTree : applyLayoutLayered;
+    return layoutFn(decoratedNodes, styledEdges);
+  }, [decoratedNodes, styledEdges, mode]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(laid);
-  const [edges, ,          onEdgesChange] = useEdgesState(treeEdges as Edge[]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(styledEdges);
 
   useEffect(() => {
-    setNodes(applyLayout(treeNodes as Node[], treeEdges as Edge[]));
-  }, [treeNodes, treeEdges]);
+    setNodes(laid);
+  }, [laid, setNodes]);
+
+  useEffect(() => {
+    setEdges(styledEdges);
+  }, [styledEdges, setEdges]);
 
   const handleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      if (node.type === "branchNode") return;
-      onNodeClick(node as GraphNode);
+      onNodeClick(node);
     },
     [onNodeClick],
   );
-
-  const pendingCount   = rawNodes.filter((n) => n.data?.nodeClass === "pending").length;
-  const validatedCount = rawNodes.filter((n) => n.data?.nodeClass === "validated").length;
 
   return (
     <ReactFlow
@@ -327,7 +371,7 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick }: GraphViewProps) {
       onNodeClick={handleClick}
       nodeTypes={nodeTypes}
       fitView
-      fitViewOptions={{ padding: 0.12 }}
+      fitViewOptions={{ padding: 0.18 }}
       minZoom={0.08}
       maxZoom={2}
       proOptions={{ hideAttribution: true }}
@@ -336,79 +380,11 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick }: GraphViewProps) {
       <Controls showInteractive={false} />
       <MiniMap
         nodeColor={(n) => {
-          if (n.type === "branchNode") {
-            return BRANCH_PALETTE[(n.data as any)?.branchKey]?.hex ?? "#3d4559";
-          }
-          const cls = (n.data as any)?.nodeClass;
-          if (cls === "persona") return "#7c6fff";
-          if (cls === "pending") return "#f59e0b";
-          if (cls === "validated") return "#64748b";
-          return "#3d4559";
+          const c = (n.data as GraphNodeData)?.color;
+          return c || "#3d4559";
         }}
         maskColor="rgba(5,7,9,0.8)"
       />
-
-      <Panel position="top-left">
-        <div className="flex flex-col gap-2">
-
-          {/* View mode toggle */}
-          <div className="flex gap-1">
-            {(["type", "status"] as ViewMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => { setViewMode(m); setTypeFilter(null); }}
-                className={`text-[10px] px-2.5 py-1 rounded-md border transition-colors ${
-                  viewMode === m
-                    ? "bg-obs-violet/20 border-obs-violet text-obs-violet"
-                    : "glass border-white/10 text-obs-subtle hover:text-obs-text"
-                }`}
-              >
-                {m === "type" ? "Por Tipo" : "Por Validação"}
-              </button>
-            ))}
-          </div>
-
-          {/* Type filter chips — only in "Por Tipo" mode */}
-          {viewMode === "type" && availableTypes.length > 0 && (
-            <div className="flex flex-wrap gap-1 max-w-[380px]">
-              <button
-                onClick={() => setTypeFilter(null)}
-                className={`text-[9px] px-2 py-0.5 rounded-full border transition-colors ${
-                  typeFilter === null
-                    ? "bg-white/10 border-white/25 text-obs-text"
-                    : "border-white/10 text-obs-faint hover:text-obs-subtle"
-                }`}
-              >
-                Todos
-              </button>
-              {availableTypes.map((t) => {
-                const active = typeFilter === t;
-                const pal    = BRANCH_PALETTE[t];
-                return (
-                  <button
-                    key={t}
-                    onClick={() => setTypeFilter(active ? null : t)}
-                    style={active && pal
-                      ? { borderColor: pal.hex + "90", backgroundColor: pal.hex + "22", color: pal.hex }
-                      : undefined}
-                    className={`text-[9px] px-2 py-0.5 rounded-full border transition-colors ${
-                      active ? "" : "border-white/10 text-obs-faint hover:text-obs-subtle"
-                    }`}
-                  >
-                    {TYPE_LABELS[t] ?? t}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Quick stats */}
-          <div className="text-[9px] text-obs-faint flex gap-2.5">
-            <span className="text-obs-slate">{validatedCount} validados</span>
-            <span className="text-obs-amber">{pendingCount} pendentes</span>
-          </div>
-        </div>
-      </Panel>
     </ReactFlow>
   );
 }

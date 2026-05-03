@@ -40,6 +40,7 @@ _CONTENT_TYPE_TO_NODE: dict[str, str] = {
     "rule":     "rule",
     "tone":     "tone",
     "audience": "audience",
+    "entity":   "entity",
     "brand":    "brand",
     "briefing": "briefing",
     "prompt":   "rule",
@@ -157,6 +158,30 @@ def _tipo_to_node_type(tipo: str) -> str:
         "entidade": "entity",
         "entity": "entity",
     }.get(t, "knowledge_item")
+
+
+def _common_prefix_len(a: str, b: str) -> int:
+    """Return the length of the longest common prefix of a and b."""
+    n = 0
+    for ca, cb in zip(a, b):
+        if ca != cb:
+            break
+        n += 1
+    return n
+
+
+def _prefix_overlap(needle: str, haystack_tokens: set[str], min_prefix: int = 4) -> bool:
+    """True when `needle` shares a prefix of at least min_prefix chars with
+    any token in haystack_tokens. Useful for Portuguese plural/singular
+    pairs like modal/modais, papel/papeis, animal/animais."""
+    if len(needle) < min_prefix:
+        return False
+    for tok in haystack_tokens:
+        if len(tok) < min_prefix:
+            continue
+        if _common_prefix_len(needle, tok) >= min_prefix:
+            return True
+    return False
 
 
 def _term_matches(terms: list[str], *values: object) -> bool:
@@ -978,13 +1003,23 @@ def _detect_terms(
     """Return topic terms to look up in the graph.
 
     Matching is driven by existing product/campaign/brand/entity nodes, using
-    slug, title, tags and optional metadata aliases/synonyms.
+    slug, title, tags and optional metadata aliases/synonyms. Recent message
+    history is *always* included so the sidebar surfaces relevant knowledge
+    even when the latest client message is short (e.g., a name or yes/no).
     """
-    raw_terms: list[str] = []
+    user_terms: list[str] = []
     if user_text:
-        raw_terms = re.findall(r"[A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9'-]{2,}", user_text.lower())
-    if not raw_terms:
-        raw_terms = _candidate_terms_from_messages(messages)
+        user_terms = re.findall(r"[A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9'-]{2,}", user_text.lower())
+    msg_terms = _candidate_terms_from_messages(messages)
+
+    seen_lower: set[str] = set()
+    raw_terms: list[str] = []
+    for t in [*user_terms, *msg_terms]:
+        key = t.lower()
+        if key in seen_lower:
+            continue
+        seen_lower.add(key)
+        raw_terms.append(t)
 
     if not raw_terms:
         return []
@@ -1006,12 +1041,17 @@ def _detect_terms(
             meta = n.get("metadata") or {}
             aliases = [_fold(a) for a in _as_list(meta.get("aliases") or meta.get("synonyms")) if a]
             slug_parts = [p for p in slug.split("-") if len(p) >= 3]
+            # Substring match (slug/title in blob) handles exact mentions.
+            # Prefix match against tokens handles PT plural/singular pairs
+            # (e.g., "modal" vs "modais", "papel" vs "papeis").
             matched = (
                 (slug and slug in raw_blob)
                 or (title and title in raw_blob)
                 or any(part in raw_set for part in slug_parts)
-                or any(tag and (tag in raw_set or tag in raw_blob) for tag in tags)
-                or any(alias and alias in raw_blob for alias in aliases)
+                or any(_prefix_overlap(part, raw_set) for part in slug_parts)
+                or (slug and _prefix_overlap(slug, raw_set))
+                or any(tag and (tag in raw_set or tag in raw_blob or _prefix_overlap(tag, raw_set)) for tag in tags)
+                or any(alias and (alias in raw_blob or _prefix_overlap(alias, raw_set)) for alias in aliases)
             )
             if matched:
                 if n.get("title") and n["title"] not in detected:
@@ -1028,6 +1068,101 @@ def _detect_terms(
         seen.add(key)
         out.append(term)
     return out
+
+
+def _infer_persona_from_messages(
+    lead_ref: int,
+    user_text: Optional[str],
+    interesse_produto: Optional[str],
+    min_dominance: float = 0.70,
+    min_hits: int = 1,
+) -> Optional[str]:
+    """Walk the knowledge graph to infer which persona owns the conversation.
+
+    Strategy:
+      1. Pull recent messages + lead.interesse_produto + user_text.
+      2. Tokenize into candidate terms (same logic as _detect_terms).
+      3. Match each term against ALL personas' knowledge_nodes (no scope).
+      4. Score per-persona by counting matched nodes (weighted by node_type
+         priority — product/brand/campaign/entity > faq/copy > tag/mention).
+      5. Return the persona_id whose share of total hits >= min_dominance and
+         whose absolute hit count >= min_hits. Otherwise None.
+
+    This is intentionally conservative — when the conversation is ambiguous
+    or short, we keep the safety block instead of guessing a persona and
+    leaking another client's knowledge.
+    """
+    try:
+        messages = supabase_client.get_messages(str(lead_ref), limit=30) or []
+    except Exception:
+        messages = []
+
+    blob_parts: list[str] = []
+    if user_text:
+        blob_parts.append(user_text)
+    if interesse_produto:
+        blob_parts.append(interesse_produto)
+    blob_parts.extend((m or {}).get("texto", "") for m in messages)
+    blob = " ".join(p for p in blob_parts if p)
+    if not blob.strip():
+        return None
+
+    # Tokenize same way _detect_terms does — but here we run global lookup.
+    raw_tokens = re.findall(r"[A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9'-]{2,}", blob.lower())
+    if not raw_tokens:
+        return None
+    raw_blob = _fold(" ".join(raw_tokens))
+    raw_set = set(re.findall(r"[a-z0-9][a-z0-9'-]{1,}", raw_blob))
+
+    # Pull canonical topic nodes globally and score by persona.
+    try:
+        canon_nodes = supabase_client.list_knowledge_nodes_by_type(
+            ["product", "campaign", "brand", "entity"], persona_id=None, limit=1000,
+        )
+    except Exception:
+        return None
+
+    # Score map: persona_id -> weighted hits
+    type_weight = {"product": 4, "brand": 3, "campaign": 3, "entity": 2}
+    persona_score: dict[str, float] = {}
+    matched_per_persona: dict[str, int] = {}
+
+    for n in canon_nodes:
+        pid = n.get("persona_id")
+        if not pid:
+            continue
+        slug = _fold(n.get("slug") or "")
+        title = _fold(n.get("title") or "")
+        tags = [_fold(t) for t in _normalize_tags(n.get("tags"))]
+        meta = n.get("metadata") or {}
+        aliases = [_fold(a) for a in _as_list(meta.get("aliases") or meta.get("synonyms")) if a]
+        slug_parts = [p for p in slug.split("-") if len(p) >= 3]
+        matched = (
+            (slug and slug in raw_blob)
+            or (title and title in raw_blob)
+            or any(part in raw_set for part in slug_parts)
+            or any(_prefix_overlap(part, raw_set) for part in slug_parts)
+            or (slug and _prefix_overlap(slug, raw_set))
+            or any(tag and (tag in raw_set or tag in raw_blob or _prefix_overlap(tag, raw_set)) for tag in tags)
+            or any(alias and (alias in raw_blob or _prefix_overlap(alias, raw_set)) for alias in aliases)
+        )
+        if matched:
+            w = type_weight.get(n.get("node_type", ""), 1)
+            persona_score[pid] = persona_score.get(pid, 0.0) + w
+            matched_per_persona[pid] = matched_per_persona.get(pid, 0) + 1
+
+    if not persona_score:
+        return None
+    total = sum(persona_score.values())
+    best_pid, best_score = max(persona_score.items(), key=lambda kv: kv[1])
+    dominance = best_score / total if total > 0 else 0
+    if dominance >= min_dominance and matched_per_persona.get(best_pid, 0) >= min_hits:
+        logger.info(
+            "knowledge_graph: inferred persona for lead_ref=%s -> %s (dominance=%.2f, hits=%d)",
+            lead_ref, best_pid, dominance, matched_per_persona.get(best_pid),
+        )
+        return best_pid
+    return None
 
 
 def get_chat_context(
@@ -1049,12 +1184,33 @@ def get_chat_context(
             lead_data = {}
     if not persona_id:
         persona_id = lead_data.get("persona_id")
+
+    persona_was_inferred = False
+    if not persona_id and lead_ref:
+        # Walk the graph: try to infer persona from message history. Only
+        # accepted when one persona dominates the matches — otherwise we
+        # keep the safety block to avoid leaking another client's knowledge.
+        inferred = _infer_persona_from_messages(
+            int(lead_ref),
+            user_text=user_text,
+            interesse_produto=(lead_data.get("interesse_produto") or "").strip() or None,
+        )
+        if inferred:
+            persona_id = inferred
+            persona_was_inferred = True
+            # Backfill the lead so downstream calls (and future requests)
+            # don't repeat this work. Best-effort: ignore failures.
+            try:
+                supabase_client.update_lead(int(lead_ref), {"persona_id": inferred})
+            except Exception as exc:
+                logger.warning("knowledge_graph: persona backfill failed for lead %s: %s", lead_ref, exc)
+
     if not persona_id:
         # Sem persona definida (lead sem vínculo OU chamada sem escopo) o
         # contexto não pode ser global — devolveríamos conhecimento de outro
         # cliente. Bloqueia explicitamente.
         reason = (
-            "Lead sem persona vinculada"
+            "Lead sem persona vinculada e conversa não bate com nenhum cliente conhecido"
             if lead_ref
             else "Persona não especificada"
         )
@@ -1070,6 +1226,7 @@ def get_chat_context(
             "validated": {"nodes": [], "kb_entries": [], "assets": []},
             "unvalidated": {"nodes": [], "kb_entries": [], "assets": []},
             "summary": f"{reason}; contexto de conhecimento bloqueado para evitar mistura entre clientes.",
+            "persona_inferred": False,
         }
     lead_interest = (lead_data.get("interesse_produto") or "").strip()
 
@@ -1290,6 +1447,8 @@ def get_chat_context(
             "assets": [a for a in assets if not a.get("validated")],
         },
         "summary": summary,
+        "persona_id": persona_id,
+        "persona_inferred": persona_was_inferred,
     }
 
 

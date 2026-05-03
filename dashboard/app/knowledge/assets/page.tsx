@@ -74,9 +74,9 @@ export default function AssetsPage() {
           <h1 className="text-lg font-semibold text-obs-text">Assets Visuais</h1>
           <p className="text-xs text-obs-subtle mt-0.5">Imagens, vídeos e documentos da base de conhecimento</p>
         </div>
-        <a href="/knowledge/capture"
+        <a href="/marketing/criacao"
           className="text-xs glass border border-white/06 text-obs-subtle hover:text-obs-text px-3 py-1.5 rounded-lg transition-colors">
-          + Capturar
+          + Criar
         </a>
       </div>
 
@@ -112,9 +112,9 @@ export default function AssetsPage() {
       {!loading && filtered.length === 0 && (
         <div className="glass border border-white/06 rounded-2xl px-6 py-16 text-center space-y-3">
           <p className="text-obs-subtle text-sm">Nenhum asset encontrado.</p>
-          <a href="/knowledge/capture"
+          <a href="/marketing/criacao"
             className="inline-block text-xs bg-obs-violet/10 border border-obs-violet/30 text-obs-violet px-4 py-2 rounded-lg transition-colors hover:bg-obs-violet/20">
-            Capturar material →
+            Criar material →
           </a>
         </div>
       )}

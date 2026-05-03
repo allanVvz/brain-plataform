@@ -67,7 +67,7 @@ export default function LeadsPage() {
             {filtered.map((lead) => (
               <tr key={lead.id || lead.lead_id} className="hover:bg-white/5 transition-colors">
                 <td className="px-4 py-3 font-medium">
-                  <Link href={`/messages/${lead.lead_id}`} className="hover:text-brain-accent transition-colors">
+                  <Link href={`/messages/${lead.id}`} className="hover:text-brain-accent transition-colors">
                     {lead.nome || lead.lead_id || "—"}
                   </Link>
                 </td>

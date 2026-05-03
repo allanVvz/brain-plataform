@@ -1,7 +1,7 @@
 import logging
 import re
 import time
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
 from schemas.events import LeadEvent
 from core import context_builder, classifier, decision_engine, insight_engine
 from agents.sdr import SDRAgent
@@ -27,8 +27,73 @@ _ROLE_TO_AGENT_KEY = {
 
 
 @router.post("/process")
-async def process(event: LeadEvent):
+async def process(
+    event: LeadEvent,
+    x_webhook_token: str | None = Header(default=None, alias="X-Webhook-Token"),
+):
     t0 = time.monotonic()
+
+    # ── Gate 0: persona routing mode ─────────────────────────────────────
+    # When persona.process_mode == 'n8n', the AI Brain delegates the reply
+    # to n8n. We only persist the inbound message and resolve the lead so
+    # the dashboard sees the conversation. n8n is responsible for replying.
+    persona_routing: dict | None = None
+    if event.persona_slug:
+        try:
+            persona_routing = supabase_client.get_persona_routing(event.persona_slug)
+        except Exception as exc:
+            logger.warning("get_persona_routing failed: %s", exc)
+            persona_routing = None
+    if persona_routing and persona_routing.get("process_mode") == "n8n":
+        expected = persona_routing.get("inbound_webhook_token")
+        if expected and x_webhook_token != expected:
+            raise HTTPException(401, "invalid webhook token")
+        # Resolve/create lead bound to the persona, persist inbound message,
+        # then hand control back to n8n.
+        try:
+            lead_row = supabase_client.ensure_lead_for_persona(
+                lead_id=event.lead_id,
+                lead_ref=event.lead_ref,
+                persona_slug_or_id=event.persona_slug,
+                nome=event.nome,
+                stage=event.stage,
+                canal=event.canal,
+                mensagem=event.mensagem,
+                interesse_produto=event.interesse_produto,
+                cidade=event.cidade,
+                cep=event.cep,
+                whatsapp_phone_number_id=event.whatsapp_phone_number_id,
+            ) or {}
+        except Exception as exc:
+            logger.warning("ensure_lead_for_persona (n8n mode) failed: %s", exc)
+            lead_row = {}
+        resolved_ref = lead_row.get("id") or event.lead_ref
+        if event.mensagem and resolved_ref is not None:
+            try:
+                supabase_client.insert_message({
+                    "lead_ref": resolved_ref,
+                    "message_id": f"n8n_in_{int(time.time() * 1000)}_{resolved_ref}",
+                    "sender_type": "client",
+                    "canal": event.canal or "whatsapp",
+                    "texto": event.mensagem,
+                    "direction": "inbound",
+                    "nome": event.nome or lead_row.get("nome"),
+                    "status": "received",
+                    "whatsapp_phone_number_id": event.whatsapp_phone_number_id or lead_row.get("whatsapp_phone_number_id"),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception as exc:
+                logger.warning("insert_message (n8n mode) failed: %s", exc)
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        return {
+            "reply": None,
+            "stage_update": event.stage or lead_row.get("stage") or "novo",
+            "agent_used": "N8N_DELEGATED",
+            "score": 0,
+            "detected_fields": {},
+            "latency_ms": latency_ms,
+            "lead_ref": resolved_ref,
+        }
 
     ctx = context_builder.build(event)
 
@@ -151,6 +216,7 @@ async def process(event: LeadEvent):
                 "direction": "Outbounding",
                 "Lead_Stage": funnel_stage,
                 "nome": ctx.lead.nome,
+                "whatsapp_phone_number_id": lead_data.get("whatsapp_phone_number_id"),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })
         except Exception as exc:

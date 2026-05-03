@@ -22,6 +22,7 @@ def build(event: LeadEvent) -> Context:
         interesse_produto=event.interesse_produto,
         cidade=event.cidade,
         cep=event.cep,
+        whatsapp_phone_number_id=event.whatsapp_phone_number_id,
     ) or supabase_client.get_lead(event.lead_id) or {}
 
     lead = Lead(

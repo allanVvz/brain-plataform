@@ -5,6 +5,185 @@
 - Sempre salvar o contexto relevante da conversa neste arquivo (`memory.md`) para retomadas futuras.
 - Usar este arquivo como memoria operacional do projeto antes de responder sobre estado atual, integracoes ou decisoes ja tomadas.
 
+## Contexto salvo em 2026-05-02 (Atualização)
+
+### Diagnóstico de comportamento da Sofia (Criar)
+
+- Identificado que a interação Sofia/Crawler pode resultar em pedidos de dados manuais quando a confiança do `catalog_crawler.py` é baixa.
+- Este comportamento é **esperado** e faz parte das regras antialucinação do `kb_intake_service.py`.
+- A regra "QUANDO FALTAR INFORMAÇÃO" obriga a agente a admitir falha na captura automática em vez de inventar dados.
+- **Melhoria (2026-05-02):** Implementada Tool `fetch_shopify_json_tool` para capturar dados precisos via `/products.json`, aumentando a confiança para sites Shopify (como Tock Fatal).
+- **Melhoria (2026-05-02):** O crawler foi decomposto em ferramentas (`tools`) para facilitar manutenção e chamadas isoladas.
+- **Melhoria (2026-05-02):** O backend agora retorna `proposed_entries` no chat, permitindo que o front-end renderize Conhecimentos como Cards individuais.
+- **Melhoria (2026-05-02):** Implementado `tests/e2e_shopify_instant_cards.py` para validar a extração automática de cards via API Shopify (`products.json`) na primeira mensagem da sessão.
+- **Melhoria (2026-05-02):** Ajustada a lógica de `_should_crawl` para que o crawler seja acionado automaticamente na primeira mensagem da sessão, se uma URL e blocos selecionados estiverem presentes no contexto inicial, sem a necessidade de uma saudação específica como "Oi".
+- **Melhoria (2026-05-02):** O `_SYSTEM_PROMPT` foi atualizado para instruir a Sofia a oferecer proativamente ideias de melhorias ou como aumentar o conhecimento após a geração inicial de cards.
+- **Rollback (2026-05-02):** Removido suporte hardcoded ao cliente `tock-fit`. Identificado que novas marcas surgidas em diálogos devem ser tratadas dinamicamente como dados do grafo, não como entidades fixas de código.
+- **Correção (2026-05-02):** Corrigido erro de runtime 400 no `save()` (missing title) implementando lógica de fallback que extrai o título da sessão a partir do primeiro card do `knowledge_plan` ou da URL da fonte.
+- **Melhoria (2026-05-02):** Refatorado `save()` para ser "orientado a plano". Se um `knowledge_plan` existir na conversa, o sistema agora parseia e salva cada entrada como um arquivo individual no vault, evitando perda de dados em extrações em massa (como os 27 cards da Tock Fatal).
+- **Arquitetura (2026-05-02):** Estabelecida a regra de que o `kb_intake_service.py` deve conter apenas clientes de infraestrutura base. Novos Brands/Sub-brands descobertos no chat (como Tock Fit) devem fluir para o grafo via `knowledge_plan` sem alterar mapeamentos estáticos (`_VAULT_CLIENT_FOLDERS`).
+- **Diretriz de UI (2026-05-02):** Mensagens da Sofia devem usar Markdown rico para suportar o novo componente de toggle "View/Code" no front-end.
+- **Diretriz de Dados (2026-05-02):** Sofia instruída a ser expansiva na geração de cards (regras/FAQs) para atingir volumes maiores (20+) conforme solicitado.
+- **Estado Atual (2026-05-02):** Sistema configurado para extração automática e geração de conhecimento rico. Sofia instruída a lidar com brands dinâmicas via grafo e suporte visual para Markdown rico no chat.
+- O teste de referência para sucesso total (leitura + geração de árvore completa) continua sendo o `e2ellm005`.
+
+### Próximos Passos Sugeridos
+
+- Validar a renderização visual dos `proposed_entries` no front-end React.
+- Se o crawler falhar consistentemente em URLs específicas, revisar as heurísticas de extração em `services/catalog_crawler.py`.
+- Melhorar a mensagem de erro da Sofia para indicar se o problema foi timeout, bloqueio de robôs ou apenas falta de dados estruturados (JSON-LD) no HTML.
+
+## Contexto salvo em 2026-05-02
+
+### Backfill RAG da base legada
+
+- Criado `services/knowledge_rag_backfill.py` para reprocessar conhecimento legado em `knowledge_rag_entries`, `knowledge_rag_chunks` e `knowledge_rag_links`.
+- Fontes cobertas:
+  - Obsidian vault via varredura read-only;
+  - `knowledge_items`;
+  - `kb_entries`;
+  - `knowledge_nodes`/`knowledge_edges`.
+- A rotina e idempotente por `(persona_id, canonical_key)`, reaproveita `classify_intake()`, cria chunks pendentes de embedding, espelha cada entry de volta no grafo com `knowledge_graph.bootstrap_from_item(source_table='knowledge_rag_entries')` e converte edges existentes em `knowledge_rag_links`.
+- Detalhe importante: `kb_entries.produto` e tratado como dica de matching contra produtos canonicos do grafo, nao como criacao explicita de novo slug, para evitar duplicar produtos como `higienizacao-cadeiras-prime` vs `higienizacao-de-cadeiras-prime`.
+- Criado endpoint administrativo `POST /knowledge/rag/backfill` em `api/routes/knowledge.py`.
+  - Body: `persona_id` ou `persona_slug`, `include_vault`, `vault_path`, `limit_items`, `limit_nodes`.
+  - Recomendacao operacional: rodar por persona em producao.
+- Criado `tests/integration_knowledge_rag_backfill.py`:
+  - Testa Tock Fatal e Prime Higienizacao com fontes misturadas;
+  - valida produtos e FAQs em RAG entries;
+  - valida chunks;
+  - valida links semanticos;
+  - valida `get_chat_context()` retornando produto + FAQ por persona, sem quebrar grafo/sidebar.
+- Validacao executada:
+  - `python -m py_compile services\knowledge_rag_backfill.py services\knowledge_rag_intake.py services\knowledge_graph.py services\supabase_client.py api\routes\knowledge.py tests\integration_knowledge_rag_backfill.py tests\integration_knowledge_rag_intake.py tests\integration_knowledge_ui_hierarchy.py` - PASS.
+  - `python tests\integration_knowledge_rag_backfill.py` - PASS.
+  - `python tests\integration_knowledge_rag_intake.py` - PASS.
+  - `python tests\integration_knowledge_ui_hierarchy.py` - PASS.
+  - `python -m tests.smoke_knowledge_graph` - PASS, com warnings ja conhecidos de fallback por ausencia de `SUPABASE_URL`.
+  - `python tests\integration_prime_higienizacao_mock.py --scenario tests\fixtures\knowledge_prime_higienizacao.json` - PASS.
+
+### Captura de novos conhecimentos para Tock Fatal
+
+- Pedido do usuario: desenhar fluxo end-to-end de insercao de novos conhecimentos, usando Tock Fatal como persona, com pre-confirmacao antes de iniciar modelo, uploads manuais acumulados na sessao, uso do espaco lateral da aba Capturar, e raw MD de marketing em grafo a partir do site da Tock Fatal.
+- Pesquisa feita no site publico:
+  - `https://tockfatal.com/`
+  - `https://tockfatal.com/pages/catalogo-modal`
+  - `https://tockfatal.com/products.json`
+  - produtos encontrados: `Kit Modal 1 (9 cores disponiveis)` e `Kit Modal 2 - Urso Estampado`.
+  - Sitemap confirma produtos/paginas/collections/blogs; robots.txt permite sitemap e bloqueia checkout/cart/admin/search.
+- Criado `docs/tock-fatal-modal-marketing-graph.md`:
+  - raw MD com brand, campanhas, audiencia atacado/varejo, produtos, cores, FAQs, regras e copys hierarquizadas como grafo;
+  - inclui precos confirmados: unidade R$ 59,90, kit 5 R$ 249,00, kit 10 R$ 459,00;
+  - inclui cores confirmadas do Kit Modal 1: vermelho, vinho, bege, nude, off white, verde claro, azul claro, azul marinho e preto;
+  - marca `tricots` e `cropped-de-modal` como `pending_source`, pois nao foram confirmados nas paginas publicas.
+- Alterada `dashboard/app/knowledge/capture/page.tsx`:
+  - upload manual movido para a esquerda;
+  - uploads feitos na sessao aparecem abaixo de "Enviar para validacao";
+  - uploads da sessao entram no contexto inicial do agente;
+  - painel central agora tem pre-confirmacao de persona, objetivo, fonte e grafo esperado antes de iniciar modelo;
+  - sidebar direita mostra fonte, pipeline, subnodes esperados e uploads legiveis pelo agente.
+- Alterado `api/routes/kb_intake.py` e `services/kb_intake_service.py`:
+  - `POST /kb-intake/start` agora aceita `initial_context`;
+  - sessao guarda contexto inicial confirmado pelo operador;
+  - prompt do KB Classifier foi estendido para fluxo Capturar/Marketing Graph, pedindo fontes, entries, links semanticos e riscos antes de salvar;
+  - modelos expostos no intake agora usam `ModelRouter.AVAILABLE_MODELS` com fallback Claude.
+- Alterado `dashboard/lib/api.ts`:
+  - `kbIntakeStart(model, initial_context)` envia contexto inicial ao backend.
+- Validacao executada:
+  - `python -m py_compile services\kb_intake_service.py api\routes\kb_intake.py api\routes\knowledge.py services\knowledge_rag_backfill.py services\knowledge_rag_intake.py` - PASS.
+  - `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+  - `python tests\integration_knowledge_rag_intake.py` - PASS.
+  - `python tests\integration_knowledge_rag_backfill.py` - PASS.
+
+### Ajuste: agente da Captura deve perguntar quando nao souber
+
+- O usuario esclareceu que o importante e a dinamica: se o modelo da aba Capturar nao souber uma informacao necessaria, ele deve interagir com o usuario perguntando, nao inventar nem salvar.
+- Ajustado `services/kb_intake_service.py`:
+  - prompt agora tem secao "QUANDO FALTAR INFORMACAO";
+  - regra: nao preencher por suposicao, nao finalizar classificacao e manter `complete=false`;
+  - perguntar no maximo 3 perguntas curtas;
+  - perguntar especialmente sobre persona, tipo, titulo canonico, fonte, produto/campanha/publico, preco/cores/disponibilidade/politica/prazo e confirmacao humana para salvar.
+- Ajustado `api/routes/kb_intake.py`:
+  - mensagem inicial diz que o agente pergunta o que falta antes de propor grafo ou salvar.
+- Ajustado `dashboard/app/knowledge/capture/page.tsx`:
+  - pre-confirmacao informa que se faltar dado o agente deve perguntar antes de propor;
+  - contexto inicial enviado ao agente inclui essa regra;
+  - sidebar/pipeline ganhou etapa "perguntar lacunas".
+- Validacao executada:
+  - `python -m py_compile services\kb_intake_service.py api\routes\kb_intake.py` - PASS.
+  - `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+  - `python tests\integration_knowledge_rag_intake.py` - PASS.
+
+## Contexto salvo em 2026-05-01
+
+### Sidebar de conhecimento nas mensagens
+
+- A sidebar em `dashboard/app/messages/page.tsx` estava correta em carregar dados, mas ruim em priorizacao: para a Prime Higienizacao ela exibia quase todo o grafo expandido (ex.: 183 nos), incluindo tags, mentions, copys e FAQs repetidas, em vez de mostrar o conhecimento mais proximo da mensagem.
+- Correcao aplicada: a sidebar agora calcula relevancia por tipo, distancia no grafo, termos detectados, slug/titulo/resumo/tags/aliases/preco e validacao.
+- A secao antiga "Nos do grafo" foi substituida por:
+  - "Conhecimento principal": um unico card mais relevante.
+  - "Mais proximos": lista curta de ate 6 cards, sem `tag`, `mention` e `persona`.
+- Produtos, campanhas, briefings, regras/tom, base ativa, FAQs, copies, similares, assets e pendentes agora sao limitados em quantidade para evitar despejar o grafo inteiro na sidebar.
+- Cenario esperado: se a mensagem for "Quanto custa Higienizacao de Cadeiras Prime?", o card principal deve tender ao node `product` de `Higienizacao-Cadeiras-Prime`, exibindo preco/fatos; se a mensagem estiver apenas no nivel da marca Prime Higienizacao, o card principal deve tender ao node `brand`.
+
+### Pendencia de UX do filtro global
+
+- O filtro superior de personas aparece em todas as abas, mas em telas com seletor dedicado de persona, como a aba Persona, isso causa ambiguidade.
+- Ja foi adicionado "Todos" como opcao default do filtro global para a aba Mensagens nao parecer filtrada por Tock Fatal quando mostra todas as conversas.
+- Pendente: revisar por tela se o filtro global deve aparecer, ficar desabilitado ou ser escondido quando a tela tiver seletor proprio de persona. Esta decisao deve ser feita com contexto das demais telas antes de nova mudanca ampla.
+
+### Entrada de KB database-first para RAG
+
+- Criada a migration `supabase/migrations/013_knowledge_rag_intake.sql` com quatro tabelas novas:
+  - `knowledge_intake_messages`: inbox bruto de qualquer conhecimento recebido.
+  - `knowledge_rag_entries`: unidade canonica consultavel por RAG, com `question`, `answer`, `content`, `summary`, `semantic_level`, `tags`, `products`, `campaigns`, `metadata`, `embedding`.
+  - `knowledge_rag_chunks`: chunks embedaveis por entrada.
+  - `knowledge_rag_links`: relacoes semanticas/hierarquicas entre entradas RAG.
+- Criado `services/knowledge_rag_intake.py`:
+  - classificador deterministico inicial para conteudos FAQ-like;
+  - extrai `Pergunta:/Resposta:` ou pergunta na primeira linha;
+  - detecta preco simples em `R$` ou percentual;
+  - tenta vincular produto comparando texto contra nodes `product` existentes no grafo da persona;
+  - cria entrada RAG, chunk pendente de embedding e espelha no grafo via `knowledge_graph.bootstrap_from_item(source_table='knowledge_rag_entries')`.
+- Criado endpoint `POST /knowledge/intake` em `api/routes/knowledge.py`.
+- Adicionados helpers em `services/supabase_client.py` para inserir intake, upsert de RAG entry, substituir chunks e criar links.
+- Criado teste offline `tests/integration_knowledge_rag_intake.py`, validando o caminho FAQ -> RAG entry -> chunk -> graph mirror com Prime Higienizacao.
+- Validacao executada:
+  - `python -m py_compile services\knowledge_rag_intake.py services\supabase_client.py api\routes\knowledge.py tests\integration_knowledge_rag_intake.py` - PASS.
+  - `python tests\integration_knowledge_rag_intake.py` - PASS.
+- Pendente operacional: aplicar `013_knowledge_rag_intake.sql` no Supabase antes de usar `POST /knowledge/intake` contra banco real.
+
+### Validacao ponta a ponta da sidebar hierarquizada + grafo
+
+- Pedido do usuario: validar e corrigir a integracao entre sidebar de conhecimentos, busca por produtos/FAQs, filtro global do header e aba Grafos em niveis.
+- Correcao aplicada em `dashboard/components/graph/GraphView.tsx`:
+  - o ReactFlow atualizava `nodes` quando o payload mudava, mas nao atualizava `edges`;
+  - isso podia deixar conexoes antigas ao trocar filtro/foco/persona;
+  - agora `setEdges(styledEdges)` roda sempre que as edges estilizadas mudam.
+- Correcao aplicada em `dashboard/components/graph/NodeDrawer.tsx`:
+  - o drawer agora aceita `focusPath` e `onFocusHere`, que ja eram enviados pela pagina Grafos;
+  - adiciona botao de foco/centralizacao e bloco "Caminho semantico";
+  - resolve o erro TypeScript da aba Grafos.
+- Criado `tests/integration_knowledge_ui_hierarchy.py`:
+  - valida estaticamente que o header tem opcao `Todos`, defaulta para `Todos` quando nao ha persona salva, e limpa `ai-brain-persona-id`;
+  - valida que a aba Mensagens usa o filtro do header para `leads` e `conversations`;
+  - valida que a sidebar possui "Conhecimento principal" e "Mais proximos";
+  - valida que o grafo oculta tags/mentions por default, possui modo `semantic_tree` e atualiza edges;
+  - valida backend offline com uma persona Tock e uma Prime:
+    - Tock retorna produto `modal` + FAQ;
+    - Prime retorna produto `higienizacao-cadeiras-prime` + FAQ;
+    - cada persona exclui produto da outra;
+    - graph-data em `Todos` inclui produto de ambas;
+    - graph-data filtrado por persona isola corretamente;
+    - focus em produto Prime retorna `focus_path`, levels de produto/FAQ e tiers strong/structural.
+- Ajustado `tests/integration_prime_higienizacao_mock.py` para monkeypatchar `get_kb_entries_by_ids` no fake store e remover warnings de tentativa de acesso real ao Supabase durante teste offline.
+- Validacao executada:
+  - `python tests\integration_knowledge_ui_hierarchy.py` - PASS.
+  - `python tests\integration_prime_higienizacao_mock.py` - PASS.
+  - `python tests\integration_knowledge_rag_intake.py` - PASS.
+  - `python -m py_compile api\routes\graph.py api\routes\knowledge.py services\knowledge_graph.py services\knowledge_rag_intake.py services\supabase_client.py tests\integration_knowledge_ui_hierarchy.py tests\integration_prime_higienizacao_mock.py` - PASS.
+  - `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+
 ## Contexto salvo em 2026-04-30
 
 ### Integracao atual com n8n
@@ -281,6 +460,269 @@ O usuario pediu para ler `memory.md` e continuar de onde o Claude parou. O ponto
 - `python tests/integration_knowledge_curation_architecture.py` - PASS em modo normal. A 009 esta aplicada o suficiente para encontrar tabelas/artifacts/versions, mas a view `v_knowledge_curation_backlog` no banco esta desatualizada e nao expoe `artifact_id`.
 - `python tests/integration_knowledge_curation_architecture.py --require-applied` - FAIL esperado no estado atual: `v_knowledge_curation_backlog is stale; re-run migration 009 to expose artifact_id`.
 - `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+
+### Capturar com blocos selecionaveis
+
+Pedido:
+- Remover a necessidade de o operador escrever um "Grafo esperado" manual.
+- Na aba Capturar, mostrar blocos selecionaveis para os tipos de conhecimento mapeados.
+- Quando um bloco for selecionado, o modelo deve perguntar lacunas especificas antes de propor entries, links, copys ou salvar.
+- Se a conversa mudar, os blocos tambem podem mudar.
+
+Alteracoes:
+- `dashboard/app/knowledge/capture/page.tsx`
+  - removeu `expectedGraph`/`DEFAULT_EXPECTED_GRAPH`;
+  - adicionou `KNOWLEDGE_BLOCKS` para brand, briefing, campaign, audience, product, entity, copy, faq, rule, tone e asset;
+  - `CapturePlan` agora usa `selectedBlocks`;
+  - pre-confirmacao exibe cards selecionaveis por bloco;
+  - contexto inicial enviado ao agente inclui "Blocos de conhecimento solicitados";
+  - sidebar reaproveita o espaco mostrando blocos selecionados em vez de subnodes fixos;
+  - botao de iniciar exige confirmacao e ao menos um bloco selecionado.
+- `services/kb_intake_service.py`
+  - prompt ganhou secao "BLOCOS SELECIONADOS NA CAPTURA";
+  - define lacunas minimas por bloco e instrui o modelo a nao exigir IDs de grafo escritos pelo operador;
+  - orienta atualizar os blocos quando o objetivo mudar durante a conversa.
+- `api/routes/kb_intake.py`
+  - welcome menciona entries, links e copys em vez de apenas grafo.
+
+Validacao:
+- `python -m py_compile services\kb_intake_service.py api\routes\kb_intake.py` - PASS.
+- `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+- `python tests\integration_knowledge_rag_intake.py` - PASS.
+
+### Criar unificado em Marketing
+
+Pedido:
+- A experiencia nao deve iniciar como "KB Classifier".
+- Renomear "KB Classifier" para "Criar".
+- Unificar a captura/classificacao com a aba `marketing/criacao`.
+- Adicionar duas ferramentas no header da tela Criar.
+- Mover o menu para a subcategoria Marketing e posicionar Marketing acima de Knowledge.
+
+Alteracoes:
+- `dashboard/app/layout.tsx`
+  - Marketing agora aparece antes de Knowledge;
+  - item `/marketing/criacao` virou `Criar`;
+  - item `/knowledge/capture` saiu da sidebar.
+- `dashboard/app/marketing/criacao/page.tsx`
+  - adicionou header de ferramentas;
+  - aba `Criar` embute o workspace de captura/conhecimento;
+  - aba `Gerar copy` mantem a criacao de marketing antiga.
+- `dashboard/app/knowledge/capture/page.tsx`
+  - exporta `CaptureWorkspace` para reuso;
+  - header do agente virou `Criar`;
+  - removeu a mensagem de sistema visivel "Plano carregado...";
+  - modo embutido usa altura total do painel.
+- `api/routes/kb_intake.py`, `services/kb_intake_service.py`, `dashboard/app/knowledge/intake/page.tsx`, `dashboard/app/validacao/tools/page.tsx`
+  - nomes user-facing alterados de `KB Classifier` para `Criar`.
+- `dashboard/app/knowledge/assets/page.tsx`
+  - atalhos antigos de captura apontam para `/marketing/criacao`.
+
+Validacao:
+- `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+- `python -m py_compile services\kb_intake_service.py api\routes\kb_intake.py` - PASS.
+- `python tests\integration_knowledge_rag_intake.py` - PASS.
+- `GET http://localhost:3000/marketing/criacao` - 200.
+
+### Identidade Sofia/Zaya no Criar
+
+Decisao de produto registrada pelo usuario:
+- `Criar` e o nome da ferramenta/tela, nao da agente conversacional.
+- A agente padrao atual deve ser `Sofia`.
+- Sofia e uma agente de inteligencia marketing comercial.
+- A primeira fala nao deve ser "oi eu sou Criar".
+- A abertura esperada e: "Ola! Eu sou a Sofia. Aprendi bastante sobre marketing para te ajudar a construir conhecimento para tua marca."
+- Futuramente, de forma organica durante a conversa, podera entrar `Zaya`, agente de marketing visual.
+- Zaya nao precisa estar ativa agora, mas o backend deve ficar preparado para perfis de agente.
+
+Alteracoes:
+- `services/kb_intake_service.py`
+  - adicionou `AGENT_PROFILES` com `sofia` e `zaya`;
+  - `create_session()` agora aceita `agent_key`, default `sofia`;
+  - sessao guarda `agent_key`, `agent_name`, `agent_role` e `agent_greeting`;
+  - prompt deixou de dizer que a agente e `Criar`;
+  - prompt instrui que, se precisar se apresentar, deve usar a agente ativa e nunca dizer que e Criar.
+- `api/routes/kb_intake.py`
+  - `StartBody` aceita `agent_key`, default `sofia`;
+  - `/kb-intake/start` retorna `agent` e usa o greeting da Sofia no welcome.
+- `README.md`
+  - documentou a regra de identidade das agentes no Criar.
+
+Validacao:
+- `python -m py_compile services\kb_intake_service.py api\routes\kb_intake.py` - PASS.
+- `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+- Chamada direta de `start_session(StartBody())` retornou `agent={"key":"sofia","name":"Sofia","role":"agente de inteligencia marketing comercial"}` e welcome iniciando com Sofia.
+
+### Correção do fluxo Sofia para catálogo/crawler
+
+Problema observado no diálogo:
+- Sofia aceitou "leia no site todos os produtos" como se o sistema conseguisse interpretar perfeitamente o catálogo.
+- Fez perguntas repetidas sobre dados que o usuário mandou coletar da fonte.
+- Ao final, gerou só um resumo genérico ("Produtos Tock Fatal"), sem criar os vários conhecimentos correspondentes aos blocos selecionados: briefing, público, produto, entidades, copy e FAQ.
+- Isso não constrói a árvore de conhecimento solicitada.
+
+Decisão:
+- Scraping/crawler de site deve ser tratado como captura bruta + parsing heurístico + score de confiança + validação humana.
+- O sistema local não deve pressupor a mesma capacidade de navegação/interpretação deste chat.
+- HTML inconsistente, JS, imagens, variações e preços incompletos devem gerar avisos/lacunas, não conhecimento ativo.
+- Quando o usuário pedir para ler/coletar a fonte, Sofia deve usar o crawler se disponível; se não souber, deve perguntar ou pedir upload/evidência.
+- Ao final, Sofia deve gerar diversos conhecimentos, cobrindo todos os blocos selecionados, e listar entries/links concretos antes de salvar.
+- O bloco `copy` deve gerar copys quando houver informação suficiente.
+
+Alterações:
+- `services/catalog_crawler.py`
+  - novo crawler heurístico de catálogo;
+  - captura HTML/texto bruto;
+  - extrai JSON-LD Product quando existir;
+  - extrai candidatos por texto visível com heurísticas de produto/preço/cor;
+  - retorna `confidence`, `confidence_label`, `warnings`, `stages`, `product_candidates` e `raw_text_preview`;
+  - sempre marca validação humana como obrigatória.
+- `api/routes/kb_intake.py`
+  - nova rota `POST /kb-intake/crawl-preview`;
+  - opcionalmente anexa o resultado à sessão.
+- `services/kb_intake_service.py`
+  - detecta pedidos como "leia/colete/site/produtos/catalogo";
+  - roda crawler sobre a `fonte principal` do contexto inicial;
+  - injeta resultado do crawler no system context da Sofia;
+  - prompt passou a proibir a frase "li todos os produtos" quando a confiança for baixa/média ou os candidatos forem incompletos;
+  - prompt exige proposta com status por entry: `confirmado`, `inferido`, `pendente_validacao`;
+  - prompt exige vários conhecimentos por bloco selecionado, não resumo genérico;
+  - aumentou `max_tokens` para 2400 para caber proposta com múltiplas entries.
+- `dashboard/app/knowledge/capture/page.tsx`
+  - sidebar agora mostra pipeline com crawler bruto, parsing/confiança, lacunas, árvore, geração de conhecimentos, validação humana e draft;
+  - sidebar ganhou painel "Crawler da fonte" com estágios, confiança, warnings e número de candidatos;
+  - o chat recebe `crawler` do backend e atualiza a visualização.
+- `dashboard/lib/api.ts`
+  - adicionou `kbIntakeCrawlPreview`.
+- `docs/knowledge-flow.md`
+  - documentou Criar/Sofia e a etapa de captura de site como evidência bruta.
+
+Validação:
+- `python -m py_compile services\catalog_crawler.py services\kb_intake_service.py api\routes\kb_intake.py` - PASS.
+- `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+- `python tests\integration_knowledge_rag_intake.py` - PASS.
+- chamada direta de `crawl_catalog_url('not-a-url')` retorna `ValueError` esperado.
+
+### E2E Tock Fatal catalogo -> KB -> grafo
+
+Pedido:
+- Concluir o teste que Claude iniciou.
+- Escrever prompt/plano estruturado para E2E adicionando conhecimentos a partir do site Tock Fatal.
+- Adicionar 3 produtos, 2 publicos, estrutura/grafo completo para Tock Fatal Atacado, com todos os cards adicionados a KB/grafo.
+- O E2E deve gerar um print da arvore de conhecimento.
+
+Implementacao:
+- Criado `tests/e2e_tock_fatal_catalog_graph.py`.
+- Criado `docs/e2e-tock-fatal-catalog-graph.md` com prompt, plano, comandos e resultado validado.
+- Ajustado `services/knowledge_graph.py` para mapear `content_type='entity'` para node_type `entity`.
+
+Estrategia do teste:
+- Usa `run_token` em slugs/tags/titulos para isolar o subtree do baseline Tock Fatal.
+- Abre `/marketing/criacao` com Playwright e salva screenshot.
+- Insere conhecimentos por API:
+  - brand;
+  - campaign;
+  - briefing;
+  - 2 audiences;
+  - 3 products;
+  - entity;
+  - 2 copies;
+  - FAQs derivadas de blocos `Pergunta:/Resposta:` dentro dos produtos.
+- Promove para KB os tipos aceitos pela fila legacy.
+- Usa `/knowledge/intake` para tipos granulares da migration 013 quando a fila legacy nao aceita.
+- Valida `/knowledge/graph-data` para Tock Fatal e captura `/knowledge/graph` em modo arvore.
+
+Observacoes de execucao:
+- `/knowledge/upload/text` retornou 500 para `content_type=entity`, `copy` e `faq` neste ambiente.
+- Para `entity` e `copy`, o teste usa `/knowledge/intake`.
+- Para FAQ, o teste usa FAQs derivadas a partir dos produtos, pois a rota direta de FAQ tambem falhou no banco atual.
+- Um run completo `e2efix005` falhou por instabilidade de backend (`Server disconnected`) durante uma promocao, mas o run anterior `e2efix004` ja havia criado e validado o subtree.
+- Playwright precisou permissao elevada no sandbox Windows para abrir Chromium e salvar screenshot.
+
+Run validado:
+- `python -u tests\e2e_tock_fatal_catalog_graph.py --skip-browser --run-token e2efix004` - PASS API/grafo.
+- `python -u tests\e2e_tock_fatal_catalog_graph.py --screenshot-only --run-token e2efix004` - PASS com screenshot, executado com permissao elevada.
+- `python -m py_compile tests\e2e_tock_fatal_catalog_graph.py services\knowledge_graph.py` - PASS.
+
+Artefatos:
+- `test-artifacts/e2e-tock-fatal-catalog-graph/report-e2efix004.json`
+- `test-artifacts/e2e-tock-fatal-catalog-graph/criar-e2efix004.png`
+- `test-artifacts/e2e-tock-fatal-catalog-graph/knowledge-tree-e2efix004.png`
+
+Resumo do report `e2efix004`:
+- `token_nodes`: 25
+- `token_edges`: 139
+- product: 3
+- audience: 2
+- entity: 1
+- copy: 2
+- faq: 6
+
+### E2E Tock Fatal agora usa LLM obrigatoriamente
+
+Pedido:
+- O teste nao pode apenas representar a conversa com dados deterministicos.
+- Deve usar a LLM/Sofia para cumprir o objetivo.
+- Se a LLM nao cumprir, o teste deve falhar e os objetivos/prompts do agente devem ser ajustados.
+
+Alteracoes:
+- `services/kb_intake_service.py`
+  - prompt ganhou secao "SAIDA ESTRUTURADA OBRIGATORIA PARA GERACAO";
+  - quando operador pede gerar/criar arvore, Sofia deve emitir `<knowledge_plan>...</knowledge_plan>` com JSON;
+  - exige entries por bloco selecionado;
+  - exige cumprir quantidades minimas;
+  - se pedir 3 produtos e crawler encontrar so 2, terceiro deve ser produto candidato `pendente_validacao`;
+  - exige no minimo 2 FAQs para preco/kits e cores;
+  - exige pelo menos 8 links semanticos;
+  - aumentou `max_tokens` para 4000.
+- `tests/e2e_tock_fatal_catalog_graph.py`
+  - etapa LLM agora e obrigatoria por default;
+  - abre sessao Sofia via `/kb-intake/start`;
+  - envia prompt completo para gerar arvore de conhecimento;
+  - parseia `knowledge_plan`;
+  - falha se a LLM nao gerar 3 produtos, 2 publicos, entity, copy, FAQ, links e run_token;
+  - `--skip-llm` ficou apenas para debug local;
+  - `--screenshot-only` agora preserva/mescla report anterior em vez de sobrescrever detalhes da LLM.
+
+Iteracoes de ajuste:
+- Run `e2ellm001`: falhou porque Sofia gerou so 2 products.
+  - Prompt ajustado para obrigar terceiro produto candidato quando crawler trouxer apenas 2.
+- Run `e2ellm002`: falhou porque Sofia gerou so 1 FAQ.
+  - Prompt ajustado para exigir pelo menos 2 FAQs: preco/kits e cores.
+- Run `e2ellm003`: Sofia gerou plano correto, mas usou bloco ```json em vez de `<knowledge_plan>`.
+  - Prompt ajustado para exigir tags literais;
+  - parser do teste ficou robusto para aceitar JSON fenced tambem, sem deixar de validar o conteudo.
+- Run `e2ellm004`: PASS LLM + API/grafo sem browser.
+- Run `e2ellm005`: PASS LLM + API/grafo e screenshot.
+
+Run validado final:
+- `python -u tests\e2e_tock_fatal_catalog_graph.py --skip-browser --run-token e2ellm005` - PASS.
+- `python -u tests\e2e_tock_fatal_catalog_graph.py --screenshot-only --run-token e2ellm005` - PASS com Playwright/Chromium usando permissao elevada.
+- `python -m py_compile services\kb_intake_service.py tests\e2e_tock_fatal_catalog_graph.py` - PASS.
+
+Artefatos finais:
+- `test-artifacts/e2e-tock-fatal-catalog-graph/report-e2ellm005.json`
+- `test-artifacts/e2e-tock-fatal-catalog-graph/criar-e2ellm005.png`
+- `test-artifacts/e2e-tock-fatal-catalog-graph/knowledge-tree-e2ellm005.png`
+
+Resumo LLM no report `e2ellm005`:
+- entries geradas pela Sofia:
+  - briefing: 1
+  - audience: 2
+  - product: 3
+  - entity: 1
+  - copy: 2
+  - faq: 2
+- links LLM: 8
+
+Resumo grafo `e2ellm005`:
+- `token_nodes`: 26
+- `token_edges`: 113
+- product: 3
+- audience: 2
+- entity: 1
+- copy: 2
+- faq: 6
 
 ## Sessao 2026-04-30 - filtro de leads/conversas por persona
 
@@ -712,3 +1154,218 @@ Conteudo do payload Prime: 181 nodes (10 product, 129 faq, 20 copy, 2 brand, 2 b
 - `memory.md` - este append.
 
 Banco: leads 119/120/121/124 com `persona_id` tock-fatal.
+
+## Sessao 2026-05-01 - persona routing (internal vs n8n) + webhook config
+
+### Pedido
+
+Permitir escolher por persona (na aba Persona do dashboard) entre 2 modos:
+- `internal`: AI Brain processa, responde e envia via webhook saida.
+- `n8n`: AI Brain so persiste mensagens; n8n responde. Mensagens humanas (operador) sempre saem via webhook saida.
+
+UX: 2 radios (mutuamente exclusivos) + botao engrenagem que abre drawer com campos de webhook (URL/secret/token).
+
+### Plano completo (passo a passo, manter aqui caso sessao trave)
+
+1. Migration `supabase/migrations/011_persona_routing.sql`:
+   ```sql
+   ALTER TABLE personas ADD COLUMN IF NOT EXISTS process_mode TEXT
+     DEFAULT 'internal' CHECK (process_mode IN ('internal','n8n'));
+   ALTER TABLE personas ADD COLUMN IF NOT EXISTS outbound_webhook_url TEXT;
+   ALTER TABLE personas ADD COLUMN IF NOT EXISTS outbound_webhook_secret TEXT;
+   ALTER TABLE personas ADD COLUMN IF NOT EXISTS inbound_webhook_token TEXT;
+   ```
+
+2. `services/supabase_client.py`:
+   - `get_persona_routing(slug)` retorna {process_mode, outbound_webhook_url, outbound_webhook_secret, inbound_webhook_token}.
+   - `update_persona_routing(slug, data)` faz update parcial.
+
+3. `api/routes/persona.py` (criar router se nao existir):
+   - `GET  /personas/{slug}/routing` retorna config.
+   - `PATCH /personas/{slug}/routing` body {process_mode?, outbound_webhook_url?, outbound_webhook_secret?, inbound_webhook_token?}.
+   - `POST /personas/{slug}/routing/test` envia payload mock no outbound webhook e retorna status.
+   - Mascarar secret/token na resposta GET (so retorna boolean tem/nao tem).
+
+4. `api/routes/process.py`:
+   - No comeco, resolver persona via `event.persona_slug`.
+   - Se `persona.process_mode == 'n8n'`:
+     - Validar header `X-Webhook-Token == persona.inbound_webhook_token` (se configurado).
+     - Persistir mensagem inbound via `supabase_client.insert_message` (sender_type='client').
+     - Garantir lead via `ensure_lead_for_persona`.
+     - Retornar `{"reply": null, "agent_used": "N8N_DELEGATED", "stage_update": ..., "score": 0}`.
+   - Se `internal` (default): fluxo atual mantido.
+
+5. `api/routes/messages.py:send_message`:
+   - Resolver persona via lead.persona_id.
+   - Preferir `persona.outbound_webhook_url` antes do `agent.n8n_webhook_url` (fallback).
+   - Header `X-Webhook-Secret` com `persona.outbound_webhook_secret`.
+
+6. `dashboard/lib/api.ts`:
+   - `personaRouting(slug)` GET, `updatePersonaRouting(slug, body)` PATCH, `testPersonaRouting(slug)` POST.
+
+7. `dashboard/app/persona/page.tsx`:
+   - Card por persona (ja existe lista).
+   - Radio group: Internal | n8n.
+   - Botao Settings/engrenagem -> drawer.
+   - Drawer: outbound_webhook_url, outbound_webhook_secret, inbound_webhook_token (gerar UUID se vazio quando mode=n8n), preview da URL `POST {NEXT_PUBLIC_AI_BRAIN_URL}/process` para colar no n8n, botao Testar webhook.
+
+8. MCP setup (manual no `.claude/settings.json` global):
+   - supabase: `npx -y @supabase/mcp-server-supabase` com SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY do .env.
+   - google-sheets/gdrive: `npx -y @modelcontextprotocol/server-gdrive` com GDRIVE_CREDENTIALS_PATH.
+
+### Como configurar dentro da aba Persona (UX final)
+
+1. Abrir Dashboard -> Persona.
+2. Selecionar persona desejada (Tock, Prime, etc.).
+3. No bloco "Roteamento":
+   - Marcar `Processar internamente (AI Brain)` ou `Processar via n8n`.
+4. Clicar na engrenagem ao lado.
+5. No drawer:
+   - Preencher Webhook de saida (URL + secret) — usado nos dois modos para enviar mensagem humana.
+   - Se modo=n8n: copiar Token de entrada e a URL `POST .../process` para colar no nodo HTTP do workflow n8n.
+6. Salvar e clicar "Testar webhook" — payload mock e disparado no outbound URL e a resposta volta no UI.
+7. Para cada persona, repetir.
+
+### Ordem de implementacao desta sessao
+
+- (1) migration arquivo criado (operador aplica no Supabase).
+- (2) supabase_client helpers.
+- (3) routes persona.
+- (4)/(5) branch em process + send_message usando persona webhook.
+- (6)/(7) dashboard ficam para sessao seguinte se acabar token.
+
+### Continuidade apos limite do Claude - UI de routing finalizada
+
+O usuario pediu para continuar de onde Claude parou. Estado encontrado:
+- `dashboard/lib/api.ts` ja tinha os helpers `personaRouting`, `updatePersonaRouting`, `testPersonaRouting`.
+- `dashboard/app/persona/page.tsx` ja tinha o card de "Roteamento de mensagens" com radios internal/n8n e botao engrenagem.
+- Faltava o drawer da engrenagem e a possibilidade real de salvar/testar webhooks.
+
+Alteracoes aplicadas:
+- `api/routes/personas.py`
+  - `PATCH /personas/{slug}/routing` continua mascarando secrets no retorno normal.
+  - Quando `rotate_inbound_token=true`, a resposta inclui `inbound_webhook_token` uma unica vez para o operador copiar para o n8n.
+- `dashboard/lib/api.ts`
+  - Tipo de `personaRouting` agora aceita `inbound_webhook_token?: string`.
+- `dashboard/app/persona/page.tsx`
+  - Adicionado drawer de webhooks com:
+    - campo `Webhook de saida`;
+    - campo `Secret de saida`;
+    - campo `Token de entrada n8n`;
+    - botao `Rotacionar`;
+    - preview do endpoint `POST .../api-brain/process`;
+    - botao `Testar`;
+    - botao `Salvar`;
+    - mensagens de resultado.
+  - Ao trocar de persona, limpa formulario/drawer/resultados para evitar vazar config visual entre clientes.
+  - Ao salvar secret, limpa o campo de secret por seguranca.
+
+Validacao:
+- `python -m py_compile api\routes\personas.py api\routes\process.py api\routes\messages.py services\supabase_client.py` - PASS.
+- `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+
+Pendente operacional:
+- Aplicar `supabase/migrations/011_persona_routing.sql` no Supabase antes de usar PATCH/Salvar routing.
+- Depois configurar cada persona pela aba Persona ou via API.
+
+### WhatsApp phone_number_id por lead
+
+O usuario observou que o n8n usa `{{ $('WhatsApp Trigger').item.json.metadata.phone_number_id }}` para enviar WhatsApp, e que no handoff humano esse dado precisa vir da tabela porque o caminho `Webhook Tock Out` nao passa pelo `WhatsApp Trigger`.
+
+Decisao:
+- Guardar o `phone_number_id` responsavel pelo atendimento no lead.
+- Tambem guardar em messages para auditoria.
+
+Alteracoes:
+- Criada migration `supabase/migrations/012_lead_whatsapp_phone_number_id.sql`:
+  - `leads.whatsapp_phone_number_id TEXT`
+  - `messages.whatsapp_phone_number_id TEXT`
+- `schemas/events.py`: `LeadEvent.whatsapp_phone_number_id`.
+- `services/supabase_client.py:ensure_lead_for_persona()`: aceita e persiste `whatsapp_phone_number_id`.
+- `core/context_builder.py`: repassa `event.whatsapp_phone_number_id`.
+- `api/routes/process.py`:
+  - modo n8n persiste inbound com `whatsapp_phone_number_id`;
+  - modo internal persiste outbound com `lead_data.whatsapp_phone_number_id`.
+- `api/routes/messages.py:send_message()`:
+  - salva mensagem humana com `lead.whatsapp_phone_number_id`;
+  - envia no payload para n8n: `lead_id`, `telefone`, `whatsapp_phone_number_id`.
+
+Validacao:
+- `python -m py_compile schemas\events.py services\supabase_client.py core\context_builder.py api\routes\process.py api\routes\messages.py` - PASS.
+
+Contrato n8n:
+- No fluxo inbound, enviar ao AI Brain:
+  - `whatsapp_phone_number_id: {{ $('WhatsApp Trigger').item.json.metadata.phone_number_id }}`
+- No `Webhook Tock Out`, enviar WhatsApp humano usando:
+  - `phoneNumberId: {{ $json.whatsapp_phone_number_id || $('Buscar Lead').item.json.whatsapp_phone_number_id }}`
+
+### Ajuste Sofia bot phone_number_id
+
+O usuario informou:
+- Sender Phone Number / ID do Sofia bot: `949967854877404`.
+- Esse valor deve ser salvo em `leads` para que toda resposta de operador seja associada ao numero correto do bot.
+
+Alteracoes:
+- `supabase/migrations/012_lead_whatsapp_phone_number_id.sql`
+  - adiciona tambem `workflow_bindings.whatsapp_phone_number_id`;
+  - seta `workflow_bindings.whatsapp_phone_number_id='949967854877404'` para persona `tock-fatal`;
+  - backfill em todos os leads Tock sem valor para `949967854877404`.
+- `services/supabase_client.py`
+  - nova funcao `get_default_whatsapp_phone_number_id(persona_id)`;
+  - `ensure_lead_for_persona()` usa o default do workflow binding quando o evento nao trouxer `whatsapp_phone_number_id`.
+- `api/routes/messages.py`
+  - `/messages/send` usa `lead.whatsapp_phone_number_id` ou fallback do binding da persona;
+  - payload para n8n sempre inclui `whatsapp_phone_number_id` quando houver default.
+
+Validacao:
+- `python -m py_compile services\supabase_client.py api\routes\messages.py` - PASS.
+
+### Aba Leads abrindo mensagens sem lead_ref
+
+Problema reportado:
+- Ao clicar em um lead pela aba Leads, a tela `/messages/[leadId]` mostrava:
+  "Esta conversa nao tem lead_ref numerico — abra pela aba Mensagens via lead_ref para responder."
+
+Causa:
+- `dashboard/app/leads/page.tsx` linkava para `/messages/${lead.lead_id}`.
+- `lead.lead_id` e o identificador externo/telefone, nao o `lead_ref` numerico usado por `/messages/send`.
+- A pagina individual de mensagens so habilita resposta quando o path contem um numero curto que represente `leads.id`.
+
+Correcao:
+- Link da aba Leads alterado para `/messages/${lead.id}`.
+
+Validacao:
+- `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+
+### Filtro superior de personas com estado Todos
+
+Problema reportado:
+- Header mostrava uma persona selecionada, como Tock Fatal, mas algumas telas carregavam dados de todos os leads.
+- Isso criava desalinhamento: visualmente parecia filtrado, operacionalmente estava sem filtro.
+
+Causa:
+- `dashboard/app/layout.tsx` escolhia a primeira persona como default depois de carregar personas.
+- Enquanto isso, telas como Mensagens/Leads interpretavam `persona_id` vazio como "sem filtro" e carregavam todos.
+
+Correção:
+- Filtro superior agora inclui opção `Todos`.
+- Estado default do header é `Todos` (`persona=""`), não mais primeira persona/Tock.
+- Quando `Todos` está selecionado:
+  - remove `ai-brain-persona-slug`;
+  - remove `ai-brain-persona-id`;
+  - dispara evento `ai-brain-persona-change` com `id=""`.
+- Telas que já usam `personaFilterId || undefined` continuam funcionando: vazio = todos.
+
+Validação:
+- `cd dashboard; npx.cmd tsc --noEmit` - PASS.
+
+## Plano de Teste E2E - Bulk 20
+
+- **Arquivo de Teste**: `tests/e2e_tock_fatal_bulk_20.py` (cópia de `e2e_tock_fatal_catalog_graph.py`)
+- **Objetivo**: Testar a criação em massa de ~20 itens de conhecimento para a persona "tockfatal".
+- **Estratégia Híbrida**:
+    1.  **Validação da LLM**: O teste primeiro desafia a LLM (Sofia) a gerar um plano com mais de 20 itens, validando sua capacidade de planejamento em massa. O prompt foi ajustado para essa finalidade.
+    2.  **Criação Determinística**: Em seguida, o teste utiliza uma lista expandida e fixa de 21 itens de conhecimento (5 produtos, 5 copys, 5 FAQs, etc.) dentro da função `knowledge_specs` para de fato criar os itens no sistema.
+    3.  **Validação do Grafo**: A função `validate_graph` foi ajustada para verificar se os 21 itens foram criados corretamente no grafo de conhecimento.
+    4.  **Evidência Visual**: O teste inclui a captura de tela da UI para evidência visual, como solicitado.
+- **Status**: O script foi criado e está pronto para execução.

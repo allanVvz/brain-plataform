@@ -7,8 +7,8 @@ import { api } from "@/lib/api";
 import {
   LayoutDashboard, Users, MessageSquare, BookOpen,
   Image, Plug, Cpu, ScrollText, Lightbulb, UserCircle,
-  RefreshCw, CheckSquare, Activity, MessageCircle, TestTube2,
-  GitMerge, Folder, Layers, Network,
+  RefreshCw, CheckSquare, Activity, TestTube2,
+  GitMerge, Folder, Layers, Network, Sparkles, Wrench,
 } from "lucide-react";
 
 const nav = [
@@ -18,14 +18,17 @@ const nav = [
   { section: null,          href: "/leads",                 label: "Leads",           icon: Users },
   { section: null,          href: "/messages",              label: "Mensagens",       icon: MessageSquare },
 
+  { section: "Marketing",   href: "/marketing/criacao",     label: "Criar",           icon: Sparkles },
+  { section: "Marketing",   href: "/marketing/assets",      label: "Assets",          icon: Image },
+
   { section: "Knowledge",   href: "/knowledge/graph",       label: "Grafo",           icon: Network },
-  { section: "Knowledge",   href: "/knowledge/capture",     label: "Capturar",        icon: MessageCircle },
   { section: "Knowledge",   href: "/knowledge/quality",     label: "Curadoria",       icon: CheckSquare },
-  { section: "Knowledge",   href: "/knowledge/assets",      label: "Assets",          icon: Image },
   { section: "Knowledge",   href: "/kb",                    label: "KB Validada",     icon: BookOpen },
   { section: "Knowledge",   href: "/knowledge/sync",        label: "Sync Vault",      icon: RefreshCw },
 
+
   { section: "Validação",   href: "/wa-validator",          label: "WA Validator",    icon: TestTube2 },
+  { section: "Validação",   href: "/validacao/tools",       label: "Tools",           icon: Wrench },
 
   { section: null,          href: "/integrations",          label: "Integrações",     icon: Plug },
   { section: null,          href: "/mcp",                   label: "MCP",             icon: Cpu },
@@ -44,15 +47,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       .then((list) => {
         setPersonas(list);
         const savedExists = saved && list.some((p: any) => p.slug === saved);
-        setPersona(savedExists ? saved : (list[0]?.slug || "tock-fatal"));
+        setPersona(savedExists ? saved : "");
       })
-      .catch(() => setPersona(saved || "tock-fatal"));
+      .catch(() => setPersona(saved || ""));
   }, []);
 
   useEffect(() => {
-    if (!persona) return;
     const selected = personas.find((p) => p.slug === persona);
-    window.localStorage.setItem("ai-brain-persona-slug", persona);
+    if (persona) {
+      window.localStorage.setItem("ai-brain-persona-slug", persona);
+    } else {
+      window.localStorage.removeItem("ai-brain-persona-slug");
+    }
     if (selected?.id) {
       window.localStorage.setItem("ai-brain-persona-id", selected.id);
     } else {
@@ -120,7 +126,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               onChange={(e) => setPersona(e.target.value)}
             >
               {personas.length > 0
-                ? personas.map((p) => <option key={p.slug} value={p.slug}>{p.name}</option>)
+                ? <>
+                    <option value="">Todos</option>
+                    {personas.map((p) => <option key={p.slug} value={p.slug}>{p.name}</option>)}
+                  </>
                 : <option value="">Carregando clientes...</option>}
             </select>
             <div className="ml-auto text-[10px] text-obs-faint tracking-wide">AI Brain Platform</div>
