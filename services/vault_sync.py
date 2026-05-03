@@ -5,22 +5,87 @@ with status='pending' for review in the Knowledge Validation queue.
 import os
 import re
 import json
+import httpx
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from services import supabase_client, knowledge_graph
 
 VAULT_PATH = os.environ.get("VAULT_PATH", r"C:\Ai-Brain\Ai-Brain")
+OBSIDIAN_LOCAL_PATH = os.environ.get("OBSIDIAN_LOCAL_PATH") or VAULT_PATH
+
+
+def _source_mode() -> str:
+    return (os.environ.get("VAULT_SOURCE_MODE") or "local").strip().lower()
+
+
+def _local_vault_path(vault_path: Optional[str] = None) -> str:
+    return vault_path or os.environ.get("OBSIDIAN_LOCAL_PATH") or os.environ.get("VAULT_PATH") or VAULT_PATH
+
+
+def _github_vault_config() -> dict:
+    repo = (os.environ.get("GITHUB_VAULT_REPO") or "").strip()
+    owner = (os.environ.get("GITHUB_VAULT_OWNER") or "").strip()
+    name = (os.environ.get("GITHUB_VAULT_NAME") or "").strip()
+    if repo and "/" in repo:
+        owner, name = repo.split("/", 1)
+    if not owner or not name:
+        raise RuntimeError("Configure GITHUB_VAULT_REPO=owner/repo or GITHUB_VAULT_OWNER + GITHUB_VAULT_NAME")
+    return {
+        "owner": owner,
+        "repo": name,
+        "branch": (os.environ.get("GITHUB_VAULT_BRANCH") or "main").strip(),
+        "root": (os.environ.get("GITHUB_VAULT_ROOT") or "").strip().strip("/"),
+        "token": os.environ.get("GITHUB_VAULT_TOKEN") or os.environ.get("GITHUB_TOKEN") or "",
+    }
+
+
+def _github_headers(accept: str = "application/vnd.github+json") -> dict:
+    cfg = _github_vault_config()
+    headers = {
+        "Accept": accept,
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "ai-brain-vault-sync",
+    }
+    if cfg["token"]:
+        headers["Authorization"] = f"Bearer {cfg['token']}"
+    return headers
+
+
+def _github_get_json(url: str, headers: dict) -> dict:
+    with httpx.Client(timeout=45.0, follow_redirects=True) as client:
+        response = client.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+
+
+def _github_get_text(url: str, headers: dict) -> str:
+    with httpx.Client(timeout=45.0, follow_redirects=True) as client:
+        response = client.get(url, headers=headers)
+        response.raise_for_status()
+        return response.text
+
+
+def _vault_source_label(vault_path: Optional[str] = None) -> str:
+    if _source_mode() == "github":
+        cfg = _github_vault_config()
+        root = f"/{cfg['root']}" if cfg["root"] else ""
+        return f"github://{cfg['owner']}/{cfg['repo']}@{cfg['branch']}{root}"
+    return _local_vault_path(vault_path)
 
 # Map vault folder names → persona slugs
 _FOLDER_TO_SLUG: dict[str, str] = {
     "BAITA_CONVENIENCIA": "baita-conveniencia",
     "TOCK_FATAL": "tock-fatal",
+    "PRIME_HIGIENIZACAO": "prime-higienizacao",
+    "PRIME": "prime-higienizacao",
     "VZ_LUPAS": "vz-lupas",
     "BAITA": "baita-conveniencia",
     "baita": "baita-conveniencia",
     "tock": "tock-fatal",
+    "prime": "prime-higienizacao",
     "vz_lupas": "vz-lupas",
 }
 
@@ -176,29 +241,97 @@ def _should_skip(path: Path) -> bool:
     return False
 
 
-def scan_vault(vault_path: str = VAULT_PATH) -> dict:
-    """
-    Scan the vault and return a preview of what would be synced.
-    Returns: {files: [{path, persona, content_type, title}], total, by_client, by_type}
-    """
-    root = Path(vault_path)
+def _iter_local_vault_files(vault_path: Optional[str] = None):
+    root = Path(_local_vault_path(vault_path))
     if not root.exists():
-        return {"error": f"Vault path not found: {vault_path}", "files": []}
-
-    files = []
+        raise FileNotFoundError(f"Vault path not found: {root}")
     for fp in root.rglob("*"):
         if fp.is_dir() or _should_skip(fp):
             continue
         ext = fp.suffix.lower()
         if ext not in _TEXT_EXTS and ext not in _ASSET_EXTS:
             continue
+        if ext in _TEXT_EXTS:
+            raw = fp.read_text(encoding="utf-8", errors="ignore")
+        else:
+            raw = f"[asset: {fp.name}]"
+        yield fp, raw, root
 
+
+def _iter_github_vault_files():
+    cfg = _github_vault_config()
+    owner = quote(cfg["owner"], safe="")
+    repo = quote(cfg["repo"], safe="")
+    branch = quote(cfg["branch"], safe="")
+    tree_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
+    tree = _github_get_json(tree_url, _github_headers())
+    root_prefix = f"{cfg['root']}/" if cfg["root"] else ""
+    api_root = f"https://api.github.com/repos/{owner}/{repo}/contents"
+
+    for item in tree.get("tree", []):
+        if item.get("type") != "blob":
+            continue
+        full_path = item.get("path") or ""
+        if root_prefix and not full_path.startswith(root_prefix):
+            continue
+        rel_path = full_path[len(root_prefix):] if root_prefix else full_path
+        fp = Path(rel_path)
+        if _should_skip(fp):
+            continue
+        ext = fp.suffix.lower()
+        if ext not in _TEXT_EXTS and ext not in _ASSET_EXTS:
+            continue
+        if ext in _TEXT_EXTS:
+            contents_url = f"{api_root}/{quote(full_path, safe='/')}?ref={branch}"
+            raw = _github_get_text(contents_url, _github_headers("application/vnd.github.raw"))
+        else:
+            raw = f"[asset: {fp.name}]"
+        yield fp, raw, Path(".")
+
+
+def _yield_vault_files(vault_path: Optional[str] = None):
+    """Yield (path, raw_content, root) from the configured vault source.
+
+    GitHub mode uses the GitHub API and does not clone or read a local
+    repository. Local mode preserves the previous filesystem scan.
+    """
+    if _source_mode() == "github":
+        yield from _iter_github_vault_files()
+        return
+    yield from _iter_local_vault_files(vault_path)
+
+
+def _frontmatter_and_body(path: Path, raw: str) -> tuple[dict, str]:
+    ext = path.suffix.lower()
+    if ext == ".md":
+        return _parse_frontmatter(raw)
+    if ext == ".json":
+        try:
+            parsed = json.loads(raw)
+            fm = {"cliente": parsed.get("cliente", "")} if isinstance(parsed, dict) else {}
+        except Exception:
+            fm = {}
+        return fm, raw
+    return {}, raw
+
+
+def scan_vault(vault_path: str = VAULT_PATH) -> dict:
+    """
+    Scan the vault and return a preview of what would be synced.
+    Returns: {files: [{path, persona, content_type, title}], total, by_client, by_type}
+    """
+    files = []
+    try:
+        vault_files = list(_yield_vault_files(vault_path))
+    except Exception as exc:
+        return {"error": str(exc), "files": [], "source_mode": _source_mode()}
+
+    for fp, raw, root in vault_files:
+        ext = fp.suffix.lower()
         fm = {}
         if ext in _TEXT_EXTS:
             try:
-                content = fp.read_text(encoding="utf-8", errors="ignore")
-                if ext == ".md":
-                    fm, _ = _parse_frontmatter(content)
+                fm, _ = _frontmatter_and_body(fp, raw)
             except Exception:
                 pass
 
@@ -206,7 +339,7 @@ def scan_vault(vault_path: str = VAULT_PATH) -> dict:
         content_type = _detect_content_type(fp, fm)
 
         files.append({
-            "path": str(fp.relative_to(root)),
+            "path": fp.relative_to(root).as_posix(),
             "full_path": str(fp),
             "persona": persona_slug,
             "content_type": content_type,
@@ -221,7 +354,14 @@ def scan_vault(vault_path: str = VAULT_PATH) -> dict:
         by_client[k] = by_client.get(k, 0) + 1
         by_type[f["content_type"]] = by_type.get(f["content_type"], 0) + 1
 
-    return {"files": files, "total": len(files), "by_client": by_client, "by_type": by_type}
+    return {
+        "files": files,
+        "total": len(files),
+        "by_client": by_client,
+        "by_type": by_type,
+        "source_mode": _source_mode(),
+        "source": _vault_source_label(vault_path),
+    }
 
 
 def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None) -> dict:
@@ -229,17 +369,19 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
     Execute a full vault sync: create/update knowledge_items with status=pending.
     Returns summary with run_id and counts.
     """
-    root = Path(vault_path)
-    if not root.exists():
-        return {"error": f"Vault path not found: {vault_path}"}
+    try:
+        vault_files = list(_yield_vault_files(vault_path))
+    except Exception as exc:
+        return {"error": str(exc)}
 
     # Get or create the vault knowledge source
-    source = supabase_client.get_knowledge_source_by_path(vault_path)
+    source_path = _vault_source_label(vault_path)
+    source = supabase_client.get_knowledge_source_by_path(source_path)
     if not source:
         source = supabase_client.insert_knowledge_source({
             "source_type": "vault",
             "name": "AI Brain Vault",
-            "path": vault_path,
+            "path": source_path,
         })
 
     source_id = source["id"]
@@ -259,35 +401,14 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
             persona_cache[slug] = p["id"] if p else None
         return persona_cache[slug]
 
-    for fp in root.rglob("*"):
-        if fp.is_dir() or _should_skip(fp):
-            continue
+    for fp, raw, root in vault_files:
         ext = fp.suffix.lower()
-        if ext not in _TEXT_EXTS and ext not in _ASSET_EXTS:
-            continue
 
         counts["found"] += 1
-        rel_path = str(fp.relative_to(root))
+        rel_path = fp.relative_to(root).as_posix()
 
         try:
-            fm: dict = {}
-            body = ""
-
-            if ext in _TEXT_EXTS:
-                raw = fp.read_text(encoding="utf-8", errors="ignore")
-                if ext == ".md":
-                    fm, body = _parse_frontmatter(raw)
-                elif ext == ".json":
-                    body = raw
-                    try:
-                        parsed = json.loads(raw)
-                        fm = {"cliente": parsed.get("cliente", "")}
-                    except Exception:
-                        pass
-                else:
-                    body = raw
-            else:
-                body = f"[asset: {fp.name}]"
+            fm, body = _frontmatter_and_body(fp, raw)
 
             persona_slug = _detect_persona(fp, fm)
             content_type = _detect_content_type(fp, fm)
@@ -323,6 +444,8 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
                     **{k: v for k, v in fm.items() if isinstance(v, (str, int, float, bool, list))},
                     "needs_persona": persona_id is None,
                     "needs_category": content_type == "other",
+                    "source_mode": _source_mode(),
+                    "vault_source": source_path,
                 },
                 "file_path": rel_path,
                 "file_type": ext.lstrip("."),

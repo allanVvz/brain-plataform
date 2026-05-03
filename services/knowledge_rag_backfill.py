@@ -3,24 +3,23 @@
 Backfill legacy knowledge sources into the RAG-ready knowledge_rag_* tables.
 
 Sources covered:
-- Obsidian vault files (optional, read-only scan)
+- configured vault source, local or GitHub API (optional, read-only scan)
 - knowledge_items
 - kb_entries
 - knowledge_nodes
 
-The routine is intentionally deterministic and idempotent. It reuses the
-classification logic from knowledge_rag_intake, writes chunks, mirrors entries
-back into the semantic graph, and converts existing graph edges into
-knowledge_rag_links when both endpoints have a RAG entry.
+The routine is deterministic and idempotent. It reuses the classification
+logic from knowledge_rag_intake, writes chunks, mirrors entries back into the
+semantic graph, and converts existing graph edges into knowledge_rag_links
+when both endpoints have a RAG entry.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 
 from services import knowledge_graph, supabase_client, vault_sync
-from services.knowledge_rag_intake import ALLOWED_CONTENT_TYPES, CONTENT_LEVELS, classify_intake
+from services.knowledge_rag_intake import ALLOWED_CONTENT_TYPES, classify_intake
 
 
 _CONTENT_TYPE_MAP = {
@@ -49,7 +48,6 @@ _CONTENT_TYPE_MAP = {
 
 _SKIP_NODE_TYPES = {"persona", "tag", "mention"}
 
-
 @dataclass
 class LegacySource:
     source_table: str
@@ -63,7 +61,6 @@ class LegacySource:
     status: Optional[str] = None
     artifact_id: Optional[str] = None
 
-
 def _as_list(value) -> list:
     if value is None:
         return []
@@ -71,11 +68,9 @@ def _as_list(value) -> list:
         return value
     return [value]
 
-
 def _normalize_content_type(value: Optional[str]) -> str:
     key = str(value or "").strip().lower()
     return _CONTENT_TYPE_MAP.get(key, key if key in ALLOWED_CONTENT_TYPES else "general_note")
-
 
 def _entry_status(source_status: Optional[str]) -> str:
     status = str(source_status or "").lower()
@@ -84,7 +79,6 @@ def _entry_status(source_status: Optional[str]) -> str:
     if status in {"rejected", "duplicate"}:
         return status
     return "pending_validation"
-
 
 def _chunk_text(content: str, max_chars: int = 1600) -> list[str]:
     text = (content or "").strip()
@@ -103,7 +97,6 @@ def _chunk_text(content: str, max_chars: int = 1600) -> list[str]:
             current = paragraph
     if current:
         chunks.append(current)
-
     out: list[str] = []
     for chunk in chunks:
         if len(chunk) <= max_chars:
@@ -112,7 +105,6 @@ def _chunk_text(content: str, max_chars: int = 1600) -> list[str]:
         for start in range(0, len(chunk), max_chars):
             out.append(chunk[start:start + max_chars])
     return out
-
 
 def _source_metadata(source: LegacySource) -> dict:
     meta = dict(source.metadata or {})
@@ -129,7 +121,6 @@ def _source_metadata(source: LegacySource) -> dict:
     if source.artifact_id:
         meta["artifact_id"] = source.artifact_id
     return meta
-
 
 def _upsert_source(source: LegacySource) -> dict:
     content_type = _normalize_content_type(source.content_type)
@@ -211,7 +202,6 @@ def _upsert_source(source: LegacySource) -> dict:
     )
     return {"source": source, "classification": classified, "entry": entry, "graph_node": mirror}
 
-
 def _sources_from_knowledge_items(persona_id: Optional[str], limit: int) -> list[LegacySource]:
     rows = supabase_client.get_knowledge_items(persona_id=persona_id, limit=limit, offset=0) or []
     sources: list[LegacySource] = []
@@ -236,7 +226,6 @@ def _sources_from_knowledge_items(persona_id: Optional[str], limit: int) -> list
             artifact_id=row.get("artifact_id"),
         ))
     return sources
-
 
 def _sources_from_kb_entries(persona_id: Optional[str]) -> list[LegacySource]:
     rows = supabase_client.get_kb_entries(persona_id=persona_id, status="") or []
@@ -270,7 +259,6 @@ def _sources_from_kb_entries(persona_id: Optional[str]) -> list[LegacySource]:
         ))
     return sources
 
-
 def _sources_from_knowledge_nodes(persona_id: Optional[str], limit: int) -> tuple[list[LegacySource], list[dict], list[dict]]:
     nodes, edges = supabase_client.list_all_knowledge_graph(persona_id=persona_id, limit_nodes=limit)
     sources: list[LegacySource] = []
@@ -301,39 +289,26 @@ def _sources_from_knowledge_nodes(persona_id: Optional[str], limit: int) -> tupl
         ))
     return sources, nodes or [], edges or []
 
-
-def _sources_from_vault(vault_path: str, persona_slug: Optional[str]) -> list[LegacySource]:
-    root = Path(vault_path)
-    if not root.exists():
-        return []
+def _sources_from_vault(vault_path: Optional[str], persona_slug: Optional[str]) -> list[LegacySource]:
+    """Read the configured vault source without assuming a local repository."""
     sources: list[LegacySource] = []
     persona_cache: dict[str, Optional[dict]] = {}
-    for fp in root.rglob("*"):
-        if fp.is_dir() or vault_sync._should_skip(fp):
-            continue
-        ext = fp.suffix.lower()
-        if ext not in vault_sync._TEXT_EXTS and ext not in vault_sync._ASSET_EXTS:
-            continue
-        fm: dict = {}
-        body = ""
-        if ext in vault_sync._TEXT_EXTS:
-            raw = fp.read_text(encoding="utf-8", errors="ignore")
-            if ext == ".md":
-                fm, body = vault_sync._parse_frontmatter(raw)
-            else:
-                body = raw
-        else:
-            body = f"[asset: {fp.name}]"
+
+    for fp, raw_content, root in vault_sync._yield_vault_files(vault_path):
+        fm, body = vault_sync._frontmatter_and_body(fp, raw_content)
         slug = vault_sync._detect_persona(fp, fm)
+
         if persona_slug and slug != persona_slug:
             continue
         if not slug:
             continue
+
         if slug not in persona_cache:
             persona_cache[slug] = supabase_client.get_persona(slug)
         persona = persona_cache.get(slug)
         if not persona:
             continue
+
         rel_path = str(fp.relative_to(root))
         sources.append(LegacySource(
             source_table="obsidian_vault",
@@ -343,11 +318,10 @@ def _sources_from_vault(vault_path: str, persona_slug: Optional[str]) -> list[Le
             content=body,
             content_type=vault_sync._detect_content_type(fp, fm),
             tags=knowledge_graph._normalize_tags(fm.get("tags")),
-            metadata={**fm, "file_path": rel_path, "file_type": ext.lstrip(".")},
+            metadata={**fm, "file_path": rel_path, "file_type": fp.suffix.lstrip(".")},
             status="pending",
         ))
     return sources
-
 
 def _link_entries(created: list[dict], graph_nodes: list[dict], graph_edges: list[dict]) -> dict:
     by_source = {
@@ -419,7 +393,6 @@ def _link_entries(created: list[dict], graph_nodes: list[dict], graph_edges: lis
             counts["links_created"] += 1
     return counts
 
-
 def backfill_knowledge_rag(
     *,
     persona_id: Optional[str] = None,
@@ -443,7 +416,7 @@ def backfill_knowledge_rag(
     node_sources, graph_nodes, graph_edges = _sources_from_knowledge_nodes(resolved_persona_id, limit_nodes)
     sources.extend(node_sources)
     if include_vault:
-        sources.extend(_sources_from_vault(vault_path or vault_sync.VAULT_PATH, persona_slug))
+        sources.extend(_sources_from_vault(vault_path, persona_slug))
 
     counts = {
         "sources_seen": len(sources),

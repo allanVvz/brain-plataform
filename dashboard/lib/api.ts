@@ -1,12 +1,13 @@
-// Requests go through the Next.js rewrite proxy (/api-brain → backend).
-// This avoids cross-origin CORS issues entirely, regardless of environment.
+// Browser requests go through the Next.js rewrite proxy.
 export const BASE = "/api-brain";
+export const API_URL = BASE;
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...opts,
   });
+
   if (!res.ok) {
     let detail = "";
     try {
@@ -59,31 +60,13 @@ export const api = {
   personas: () => req<any[]>("/personas"),
   persona: (slug: string) => req<any>(`/personas/${slug}`),
 
-  // Persona Routing — process_mode (internal | n8n) + per-persona webhook config
+  // Persona Routing
   personaRouting: (slug: string) =>
-    req<{
-      slug: string;
-      id: string;
-      process_mode: "internal" | "n8n";
-      outbound_webhook_url: string | null;
-      has_outbound_webhook_secret: boolean;
-      has_inbound_webhook_token: boolean;
-      inbound_webhook_token?: string;
-      migration_applied?: boolean;
-      routing_source?: string;
-    }>(`/personas/${slug}/routing`),
-  updatePersonaRouting: (slug: string, body: {
-    process_mode?: "internal" | "n8n";
-    outbound_webhook_url?: string | null;
-    outbound_webhook_secret?: string | null;
-    inbound_webhook_token?: string | null;
-    rotate_inbound_token?: boolean;
-  }) => req<any>(`/personas/${slug}/routing`, { method: "PATCH", body: JSON.stringify(body) }),
+    req<any>(`/personas/${slug}/routing`),
+  updatePersonaRouting: (slug: string, body: any) => 
+    req<any>(`/personas/${slug}/routing`, { method: "PATCH", body: JSON.stringify(body) }),
   testPersonaRouting: (slug: string) =>
-    req<{ ok: boolean; status: number | null; body?: string; error?: string }>(
-      `/personas/${slug}/routing/test`,
-      { method: "POST", body: "{}" },
-    ),
+    req<any>(`/personas/${slug}/routing/test`,{ method: "POST", body: "{}" }),
 
   // Integrations & Logs
   integrations: (personaId?: string) => req<any[]>(`/integrations${personaId ? `?persona_id=${personaId}` : ""}`),
@@ -139,25 +122,23 @@ export const api = {
   kbIntakeModels: () => req<any[]>("/kb-intake/models"),
   kbIntakeStart: (model: string, initial_context = "") =>
     req<any>("/kb-intake/start", { method: "POST", body: JSON.stringify({ model, initial_context }) }),
-  kbIntakeMessage: (session_id: string, message: string) =>
-    req<any>("/kb-intake/message", { method: "POST", body: JSON.stringify({ session_id, message }) }),
+  kbIntakeMessage: (session_id: string, message: string, file?: File) => {
+    if (file) {
+      const form = new FormData();
+      form.append("session_id", session_id);
+      form.append("message", message);
+      form.append("file", file);
+      return reqForm<any>("/kb-intake/upload", form);
+    }
+    return req<any>("/kb-intake/message", { method: "POST", body: JSON.stringify({ session_id, message }) });
+  },
   kbIntakeSave: (session_id: string, content = "") =>
     req<any>("/kb-intake/save", { method: "POST", body: JSON.stringify({ session_id, content }) }),
   kbIntakeCrawlPreview: (url: string, session_id?: string) =>
     req<any>("/kb-intake/crawl-preview", { method: "POST", body: JSON.stringify({ url, session_id }) }),
 
   // Knowledge Graph
-  graphData: (
-    personaSlug?: string,
-    opts?: {
-      focus?: string;            // "<node_type>:<slug>" or node_id
-      max_depth?: number;         // 1..6
-      include_tags?: boolean;
-      include_mentions?: boolean;
-      include_technical?: boolean;
-      mode?: "layered" | "semantic_tree" | "graph";
-    },
-  ) => {
+  graphData: (personaSlug?: string, opts?: any) => {
     const params = new URLSearchParams();
     if (personaSlug) params.set("persona_slug", personaSlug);
     if (opts?.focus) params.set("focus", opts.focus);
@@ -176,38 +157,13 @@ export const api = {
     params.set("lead_ref", String(leadRef));
     if (q) params.set("q", q);
     if (personaId) params.set("persona_id", personaId);
-    return req<{
-      query_terms: string[];
-      nodes: any[];
-      edges: any[];
-      kb_entries: any[];
-      assets: any[];
-      summary: string;
-    }>(`/knowledge/chat-context?${params.toString()}`);
+    return req<any>(`/knowledge/chat-context?${params.toString()}`);
   },
 
-  // Marketing — text generation backed by ModelRouter (OpenAI cascade + Anthropic)
-  marketingModes: () =>
-    req<{
-      modes: Array<{
-        key: string;
-        label: string;
-        description: string;
-        inputs: Array<{ name: string; label: string; type: "text" | "textarea" | "select"; placeholder?: string; required?: boolean; options?: string[] }>;
-      }>;
-      available_models: Record<string, string>;
-    }>("/marketing/modes"),
-  marketingGenerate: (body: {
-    mode: string;
-    inputs: Record<string, string>;
-    persona_id?: string | null;
-    model?: string;
-    max_tokens?: number;
-  }) =>
-    req<{ content: string; model_used?: string; mode: string; persona_id?: string | null }>(
-      "/marketing/generate",
-      { method: "POST", body: JSON.stringify(body) },
-    ),
+  // Marketing
+  marketingModes: () => req<any>("/marketing/modes"),
+  marketingGenerate: (body: any) =>
+    req<any>("/marketing/generate", { method: "POST", body: JSON.stringify(body) }),
 
   // WA Validator
   waBots: () => req<any[]>("/wa-validator/bots"),
@@ -215,7 +171,7 @@ export const api = {
   waModels: () => req<any[]>("/wa-validator/models"),
   waSessions: () => req<any[]>("/wa-validator/sessions"),
   waSession: (id: string) => req<any>(`/wa-validator/sessions/${id}`),
-  waGenerateScript: (body: { persona_slug: string; flow_id: string; target_contact: string; model?: string }) =>
+  waGenerateScript: (body: any) =>
     req<any>("/wa-validator/generate-script", { method: "POST", body: JSON.stringify(body) }),
   waRun: (session_id: string) =>
     req<any>("/wa-validator/run", { method: "POST", body: JSON.stringify({ session_id }) }),

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, BASE } from "@/lib/api";
+import { api, API_URL, BASE } from "@/lib/api";
 import {
   ChevronLeft, ChevronRight,
   CheckCircle, XCircle, Database, Loader2,
@@ -203,7 +203,7 @@ export default function QualityPage() {
   const ft            = (item?.file_type || "").toLowerCase();
   const isImg         = IMAGE_EXTS.has(ft);
   const isVid         = VIDEO_EXTS.has(ft);
-  const fileUrl       = item?.file_path ? `${BASE}/knowledge/file?path=${encodeURIComponent(item.file_path)}` : null;
+  const fileUrl       = item?.file_path && API_URL ? `${API_URL}/knowledge/file?path=${encodeURIComponent(item.file_path)}` : null;
   const statusMeta    = item ? (STATUS_META[item.status] ?? { badge: "border-white/10 text-obs-subtle", label: item.status }) : null;
   const needsAction   = ["pending","needs_persona","needs_category"].includes(item?.status ?? "");
   const canApprove    = needsAction && !!item?.persona_id;

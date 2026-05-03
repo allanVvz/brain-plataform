@@ -445,6 +445,9 @@ def upsert_knowledge_node(data: dict) -> Optional[dict]:
             update["source_table"] = data["source_table"]
         if data.get("source_id"):
             update["source_id"] = data["source_id"]
+        for field in ("level", "importance", "confidence"):
+            if data.get(field) is not None:
+                update[field] = data[field]
         try:
             r = client.table("knowledge_nodes").update(update).eq("id", existing["id"]).execute()
             return (r.data or [{**existing, **update}])[0]

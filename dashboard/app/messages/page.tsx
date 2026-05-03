@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { api } from "@/lib/api";
+import { createClient } from "@/lib/supabase";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { MessageSquare, User, Clock, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, Maximize2, ArrowLeft, ChevronRight, Tag } from "lucide-react";
@@ -1068,8 +1069,6 @@ function KnowledgeSidebar({
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-const POLL_INTERVAL_MS = 4000;
-
 export default function MessagesPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -1088,7 +1087,9 @@ export default function MessagesPage() {
   const [knowledge, setKnowledge] = useState<ChatContext | null>(null);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const previousLastMessageIdRef = useRef<string | null>(null);
   const selectedIdRef = useRef<number | null>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
 
@@ -1136,42 +1137,70 @@ export default function MessagesPage() {
     return m;
   }, [conversations]);
 
-  // Auto-scroll to bottom when messages change
+  const onMessageListScroll = useCallback(() => {
+    const el = messageListRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }, []);
+
+  // Auto-scroll only when the operator is already at the bottom. Realtime
+  // inserts must not pull the viewport away from older messages being read.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const lastId = messages.length ? String(messages[messages.length - 1]?.id || "") : null;
+    const isFirstLoad = previousLastMessageIdRef.current === null && !!lastId;
+    const changed = lastId !== previousLastMessageIdRef.current;
+    previousLastMessageIdRef.current = lastId;
+    if (!changed || !lastId) return;
+    if (isFirstLoad || stickToBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: isFirstLoad ? "auto" : "smooth" });
+    }
   }, [messages]);
 
-  // Polling: refresh messages for the open lead every POLL_INTERVAL_MS
+  // Realtime: refresh messages only when Supabase emits a DB event for the
+  // selected conversation. This replaces fixed polling and avoids scroll jumps.
   useEffect(() => {
     selectedIdRef.current = selectedId;
-
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
 
     if (!selectedId) {
       setLiveSync(false);
       return;
     }
 
-    setLiveSync(true);
-
-    pollRef.current = setInterval(() => {
-      const id = selectedIdRef.current;
-      if (!id) return;
-      Promise.all([api.messagesByRef(id), api.conversations(168, personaFilterId || undefined)])
-        .then(([msgRows, convRows]) => {
-          if (selectedIdRef.current !== id) return; // lead changed while fetching
-          setMessages(sortMessages(msgRows as Message[]));
-          setConversations(convRows as ConversationSummary[]);
-        })
-        .catch(() => {});
-    }, POLL_INTERVAL_MS);
+    let supabase: ReturnType<typeof createClient> | null = null;
+    let channel: any = null;
+    try {
+      supabase = createClient();
+      channel = supabase
+        .channel(`messages-live-${selectedId}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "messages", filter: `lead_ref=eq.${selectedId}` },
+          async () => {
+            const id = selectedIdRef.current;
+            if (!id) return;
+            try {
+              const [msgRows, convRows] = await Promise.all([
+                api.messagesByRef(id),
+                api.conversations(168, personaFilterId || undefined),
+              ]);
+              if (selectedIdRef.current !== id) return;
+              setMessages(sortMessages(msgRows as Message[]));
+              setConversations(convRows as ConversationSummary[]);
+            } catch {
+              /* realtime refresh is best-effort */
+            }
+          },
+        )
+        .subscribe((status) => setLiveSync(status === "SUBSCRIBED"));
+    } catch {
+      setLiveSync(false);
+    }
 
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
       setLiveSync(false);
+      if (channel) {
+        supabase?.removeChannel(channel);
+      }
     };
   }, [selectedId, personaFilterId]);
 
@@ -1179,6 +1208,8 @@ export default function MessagesPage() {
     setSelectedId(lead.id);
     setMessages([]);
     setKnowledge(null);
+    previousLastMessageIdRef.current = null;
+    stickToBottomRef.current = true;
     setLoadingMsgs(true);
     setDraft("");
     setSendError(null);
@@ -1504,7 +1535,11 @@ export default function MessagesPage() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+        <div
+          ref={messageListRef}
+          onScroll={onMessageListScroll}
+          className="flex-1 overflow-y-auto px-6 py-4 space-y-3"
+        >
           {!selectedLead && (
             <div className="flex flex-col items-center justify-center h-full gap-3">
               <MessageSquare size={32} className="text-obs-faint/20" />

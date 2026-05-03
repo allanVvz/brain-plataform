@@ -53,6 +53,25 @@ _KNOWN_ROLES = {"sdr", "closer", "followup", "maker", "classifier"}
 _VALIDATED_ITEM_STATUSES = {"approved", "embedded", "ativo", "active", "validated"}
 _PENDING_ITEM_STATUSES = {"pending", "needs_persona", "needs_category", "draft"}
 
+_NODE_HIERARCHY_DEFAULTS: dict[str, tuple[int, float]] = {
+    "persona": (0, 1.00),
+    "entity": (10, 0.95),
+    "brand": (20, 0.90),
+    "campaign": (30, 0.80),
+    "product": (40, 0.85),
+    "briefing": (50, 0.75),
+    "audience": (55, 0.70),
+    "tone": (60, 0.70),
+    "rule": (65, 0.80),
+    "copy": (70, 0.65),
+    "faq": (75, 0.65),
+    "asset": (80, 0.55),
+    "tag": (90, 0.30),
+    "mention": (92, 0.25),
+    "knowledge_item": (95, 0.40),
+    "kb_entry": (95, 0.50),
+}
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -240,6 +259,29 @@ def _structured_metadata(fm: dict) -> dict:
     ):
         if key in fm and fm.get(key) is not None:
             out[key] = fm.get(key)
+    return out
+
+
+def _hierarchy_fields(node_type: str, metadata: Optional[dict] = None, confidence: Optional[float] = None) -> dict:
+    """Default hierarchy fields used by graph layout and curation views."""
+    level, importance = _NODE_HIERARCHY_DEFAULTS.get(node_type, (50, 0.50))
+    meta = metadata or {}
+    try:
+        level = int(meta.get("level", level))
+    except Exception:
+        pass
+    try:
+        importance = float(meta.get("importance", importance))
+    except Exception:
+        pass
+    out = {"level": level, "importance": max(0.0, min(1.0, importance))}
+    if confidence is not None:
+        out["confidence"] = max(0.0, min(1.0, float(confidence)))
+    elif meta.get("confidence") is not None:
+        try:
+            out["confidence"] = max(0.0, min(1.0, float(meta["confidence"])))
+        except Exception:
+            pass
     return out
 
 
@@ -639,6 +681,7 @@ def _bootstrap_derived_subnodes(
                 "question": question,
                 "answer": answer,
             },
+            **_hierarchy_fields("faq", confidence=0.86),
         })
         if faq:
             for topic in topic_nodes:
@@ -666,6 +709,7 @@ def _bootstrap_derived_subnodes(
                 "tags": sorted({"briefing", *topic_tags}),
                 "status": "validated" if validated else "pending",
                 "metadata": {**base_meta, "derived_from": "briefing_heading"},
+                **_hierarchy_fields("briefing", confidence=0.78),
             })
             if briefing:
                 for topic in topic_nodes:
@@ -690,6 +734,7 @@ def _bootstrap_derived_subnodes(
             "tags": sorted({"mention", *topic_tags}),
             "status": "validated" if validated else "pending",
             "metadata": {**base_meta, "derived_from": "topic_mention"},
+            **_hierarchy_fields("mention", confidence=0.55),
         })
         if mention:
             for topic in topic_nodes:
@@ -760,6 +805,7 @@ def bootstrap_from_item(
             "tags": tags,
             "metadata": meta,
             "status": "validated" if _is_validated_source(source_table, source_status, node_type) else "pending",
+            **_hierarchy_fields(node_type, meta, confidence=item.get("confidence")),
         })
         if not mirror:
             return None  # graph tables missing — silently skip, sync still works
@@ -772,6 +818,7 @@ def bootstrap_from_item(
                 "slug": "self",
                 "title": "Persona",
                 "metadata": {"role": "root"},
+                **_hierarchy_fields("persona"),
             })
             if persona_node:
                 supabase_client.upsert_knowledge_edge(
@@ -785,6 +832,7 @@ def bootstrap_from_item(
                 "node_type": "tag",
                 "slug": _slugify(tag),
                 "title": tag,
+                **_hierarchy_fields("tag"),
             })
             if tnode:
                 supabase_client.upsert_knowledge_edge(
@@ -814,6 +862,7 @@ def bootstrap_from_item(
                 "title": related_title,
                 "tags": [rslug],
                 "metadata": target_meta,
+                **_hierarchy_fields(ntype, target_meta),
             })
             if not target:
                 continue
@@ -879,6 +928,7 @@ def bootstrap_from_item(
                     "slug": f"role-{role_slug}",
                     "title": role_slug.upper(),
                     "metadata": {"role": role_slug},
+                    **_hierarchy_fields("audience"),
                 })
                 if rnode:
                     supabase_client.upsert_knowledge_edge(

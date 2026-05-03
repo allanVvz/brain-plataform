@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { X, Edit2, Save, CheckCircle, XCircle, Tag, Loader2, Crosshair } from "lucide-react";
-import { api, BASE } from "@/lib/api";
+import { api, API_URL } from "@/lib/api";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "svg", "gif"]);
 const VIDEO_EXTS = new Set(["mp4", "mov", "webm"]);
@@ -85,8 +85,8 @@ export default function NodeDrawer({ node, onClose, onUpdated, focusPath = [], o
   const fileType   = (d.file_type || "").toLowerCase();
   const isImage    = IMAGE_EXTS.has(fileType);
   const isVideo    = VIDEO_EXTS.has(fileType);
-  const fileUrl    = d.file_path
-    ? `${BASE}/knowledge/file?path=${encodeURIComponent(d.file_path)}`
+  const fileUrl    = d.file_path && API_URL
+    ? `${API_URL}/knowledge/file?path=${encodeURIComponent(d.file_path)}`
     : null;
 
   const currentStatus  = fullItem?.status ?? d.status;

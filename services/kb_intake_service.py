@@ -208,6 +208,9 @@ O JSON deve seguir este formato:
 
 Regras para esse bloco:
 - precisa conter uma entry para cada bloco selecionado no inicio;
+- sempre crie uma estrutura de conhecimento em arvore com multiplos galhos: brand/campaign como raiz quando existirem, audience/product/entity como galhos intermediarios, e copy/faq/rule/asset como folhas conectadas;
+- evite listas planas: cada entry deve ter ao menos um link semantico quando houver outro node relacionado no plano;
+- distribua os links entre galhos diferentes para facilitar camadas, galhos e arvores no grafo inserido;
 - se os blocos incluirem product, gere uma entry por produto conhecido ou candidato;
 - se o operador pediu uma quantidade minima, essa quantidade e obrigatoria;
 - se o operador pediu 3 produtos e o crawler encontrou so 2, crie o terceiro como produto candidato com status pendente_validacao;
