@@ -16,6 +16,7 @@ import ReactFlow, {
   ReactFlowProvider,
   Panel,
   MarkerType,
+  useReactFlow,
 } from "reactflow";
 import dagre from "dagre";
 import "reactflow/dist/style.css";
@@ -251,6 +252,7 @@ const nodeTypes: NodeTypes = {
 // ── Main component ─────────────────────────────────────────────
 
 function GraphInner({ rawNodes, rawEdges, onNodeClick, mode, searchQuery, focusNodeId, onlyPrimaryTreeEdges = true }: GraphViewProps) {
+  const { fitView } = useReactFlow();
   const visibleEdges = useMemo(
     () => filterEdgesForMode(rawEdges as Edge[], mode),
     [rawEdges, mode],
@@ -354,6 +356,23 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, mode, searchQuery, focusN
   useEffect(() => {
     setEdges(styledEdges);
   }, [styledEdges, setEdges]);
+
+  useEffect(() => {
+    const targetId =
+      focusNodeId
+      || laid.find((node) => (node.data as GraphNodeData)?.node_type === "persona")?.id
+      || laid[0]?.id;
+    if (!targetId) return;
+    const handle = window.setTimeout(() => {
+      fitView({
+        nodes: [{ id: targetId }],
+        duration: 400,
+        padding: 0.55,
+        maxZoom: mode === "graph" ? 1.1 : 1.0,
+      });
+    }, 60);
+    return () => window.clearTimeout(handle);
+  }, [fitView, focusNodeId, laid, mode]);
 
   const handleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {

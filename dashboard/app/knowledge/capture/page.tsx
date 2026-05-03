@@ -19,7 +19,7 @@ import {
   Upload,
   User,
 } from "lucide-react";
-import { api, BASE } from "@/lib/api";
+import { api } from "@/lib/api";
 
 const MODELS = [
   { id: "gpt-4o-mini", label: "GPT-4o Mini - rapido" },
@@ -108,8 +108,14 @@ interface CapturePlan {
   sourceUrl: string;
   outputFormat: string;
   selectedBlocks: string[];
+  variationCounts: Record<string, number>;
   confirmed: boolean;
 }
+
+const DEFAULT_VARIATION_COUNTS = KNOWLEDGE_BLOCKS.reduce<Record<string, number>>((acc, block) => {
+  acc[block.id] = block.id === "faq" ? 2 : 1;
+  return acc;
+}, {});
 
 function StepDot({ done, label }: { done: boolean; label: string }) {
   return (
@@ -149,6 +155,11 @@ function buildInitialContext(plan: CapturePlan, uploads: SessionUpload[]) {
         .join("\n\n")
     : "Nenhum upload manual nesta sessao.";
 
+  const variationBlock = KNOWLEDGE_BLOCKS
+    .filter((block) => plan.selectedBlocks.includes(block.id))
+    .map((block) => `- ${block.id}: ${Math.max(1, Number(plan.variationCounts[block.id] || 1))} variacao(oes) por ramo`)
+    .join("\n");
+
   return [
     "# Plano confirmado pelo operador",
     `persona_slug: ${plan.personaSlug}`,
@@ -158,6 +169,9 @@ function buildInitialContext(plan: CapturePlan, uploads: SessionUpload[]) {
     "",
     "## Blocos de conhecimento solicitados",
     selectedBlockText,
+    "",
+    "## Variacoes por atributo",
+    variationBlock || "- usar 1 variacao por bloco; FAQ padrao 2.",
     "",
     "## Uploads manuais da sessao",
     uploadBlock,
@@ -169,7 +183,9 @@ function buildInitialContext(plan: CapturePlan, uploads: SessionUpload[]) {
     "- Fazer no maximo 3 perguntas objetivas por rodada.",
     "- Os blocos selecionados sao a intencao inicial; se a conversa mudar, aceitar novos blocos e perguntar lacunas especificas.",
     "- Ao gerar, produzir diversos conhecimentos: uma proposta por bloco selecionado e uma entry por produto/FAQ/copy quando houver dados suficientes.",
+    "- Sempre criar uma estrutura de conhecimento baseada em multiplos galhos.",
     "- Gerar conhecimento hierarquizado como grafo quando houver relacoes entre brand, campanha, publico, produto, entidades, copy, FAQ, regra ou tom.",
+    "- Respeitar as quantidades de variacao por bloco; FAQ deve se multiplicar por conhecimento quando configurado.",
     "- Nao inventar precos, cores, disponibilidade ou URLs.",
     "- Usar Tock Fatal como persona padrao.",
   ].join("\n");
@@ -198,6 +214,16 @@ function PreflightPanel({
       ? plan.selectedBlocks.filter((id) => id !== blockId)
       : [...plan.selectedBlocks, blockId];
     setPlan({ ...plan, selectedBlocks: next });
+  };
+  const setVariation = (blockId: string, delta: number) => {
+    const current = Math.max(1, Number(plan.variationCounts[blockId] || 1));
+    setPlan({
+      ...plan,
+      variationCounts: {
+        ...plan.variationCounts,
+        [blockId]: Math.max(1, current + delta),
+      },
+    });
   };
 
   return (
@@ -271,6 +297,53 @@ function PreflightPanel({
           </div>
           <p className="text-[10px] text-obs-faint mt-2">
             A selecao e ponto de partida. Durante a conversa o agente pode adicionar, remover ou trocar blocos conforme o pedido mudar.
+          </p>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-obs-faint mb-2">Variacoes por atributo</label>
+          <div className="space-y-2">
+            {KNOWLEDGE_BLOCKS.map((block) => {
+              const value = Math.max(1, Number(plan.variationCounts[block.id] || 1));
+              return (
+                <div
+                  key={block.id}
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${
+                    selectedBlocks.has(block.id)
+                      ? "border-obs-violet/30 bg-obs-violet/6"
+                      : "border-white/06 bg-obs-base"
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-obs-text">{block.label}</p>
+                    <p className="text-[10px] text-obs-faint">{selectedBlocks.has(block.id) ? "entra no plano atual" : "fora do plano atual"}</p>
+                  </div>
+                  <div className="flex items-center gap-1 rounded-lg border border-white/08 bg-obs-base p-1">
+                    <button
+                      type="button"
+                      onClick={() => setVariation(block.id, -1)}
+                      className="w-6 h-6 rounded text-xs text-obs-subtle hover:text-white hover:bg-white/5"
+                      aria-label={`reduzir-${block.id}`}
+                      data-testid={`reduzir-${block.id}`}
+                    >
+                      -
+                    </button>
+                    <span className="w-8 text-center text-xs text-obs-text font-medium">{value}</span>
+                    <button
+                      type="button"
+                      onClick={() => setVariation(block.id, 1)}
+                      className="w-6 h-6 rounded text-xs text-obs-subtle hover:text-white hover:bg-white/5"
+                      aria-label={`aumentar-${block.id}`}
+                      data-testid={`aumentar-${block.id}`}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-obs-faint mt-2">
+            Padrao: 1 variacao por bloco. FAQ inicia com 2 para favorecer multiplos galhos recuperaveis.
           </p>
         </div>
         <label className="flex items-start gap-2 text-xs text-obs-subtle border border-white/06 rounded-lg px-3 py-2 bg-obs-base">
@@ -355,8 +428,7 @@ function ChatPanel({
         form.append("session_id", sessionId);
         form.append("message", userMsg);
         form.append("file", file);
-        const res = await fetch(`${BASE}/kb-intake/upload`, { method: "POST", body: form });
-        d = await res.json();
+        d = await api.kbIntakeMessage(sessionId, userMsg, file || undefined);
         setFile(null);
         if (fileRef.current) fileRef.current.value = "";
       } else {
@@ -548,7 +620,7 @@ function UploadPanel({
 
   useEffect(() => {
     api.personas()
-      .then((rows) => {
+      .then((rows: any) => {
         setPersonas(rows);
         const tock = rows.find((p: Persona) => p.slug === "tock-fatal");
         if (tock) setPersonaId(tock.id);
@@ -809,6 +881,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
     sourceUrl: DEFAULT_SOURCE,
     outputFormat: "raw markdown com copys em niveis de marketing hierarquizados como grafo",
     selectedBlocks: DEFAULT_SELECTED_BLOCKS,
+    variationCounts: DEFAULT_VARIATION_COUNTS,
     confirmed: false,
   });
 

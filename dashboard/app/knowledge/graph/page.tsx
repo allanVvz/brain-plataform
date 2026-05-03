@@ -13,6 +13,7 @@ import {
   AtSign,
   Database,
   Crosshair,
+  Layers3,
 } from "lucide-react";
 import NodeDrawer from "@/components/graph/NodeDrawer";
 
@@ -76,6 +77,14 @@ interface GraphPayload {
   };
 }
 
+interface GraphFilterOption {
+  value: string;
+  label: string;
+  nodeType: string;
+  level: number;
+  confidence: number;
+}
+
 const MODES: { value: ViewMode; label: string; icon: React.ReactNode; help: string }[] = [
   { value: "semantic_tree", label: "Árvore",    icon: <GitBranch size={11} />, help: "Hierarquia automatica por aresta principal" },
   { value: "graph",         label: "Grafo",     icon: <Network size={11} />,   help: "Rede organica estilo Obsidian/neural" },
@@ -92,6 +101,7 @@ export default function GraphPage() {
   const [loading, setLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [headerPersonaSlug, setHeaderPersonaSlug] = useState("");
 
   // ── URL-driven state ──────────────────────────────────────────
   const personaSlug = searchParams.get("persona") || "";
@@ -115,6 +125,22 @@ export default function GraphPage() {
     [router, searchParams],
   );
 
+  useEffect(() => {
+    const syncFromHeader = () => {
+      const stored = window.localStorage.getItem("ai-brain-persona-slug") || "";
+      setHeaderPersonaSlug(stored);
+    };
+    syncFromHeader();
+    window.addEventListener("ai-brain-persona-change", syncFromHeader as EventListener);
+    return () => window.removeEventListener("ai-brain-persona-change", syncFromHeader as EventListener);
+  }, []);
+
+  useEffect(() => {
+    if (!personaSlug && headerPersonaSlug) {
+      updateParam({ persona: headerPersonaSlug, focus: null });
+    }
+  }, [personaSlug, headerPersonaSlug, updateParam]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -133,7 +159,7 @@ export default function GraphPage() {
   }, [personaSlug, focus, maxDepth, includeTags, includeMentions, includeTechnical, mode]);
 
   useEffect(() => {
-    api.personas().then((p) => setPersonas(p));
+    api.personas().then((p: any) => setPersonas(p));
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -147,6 +173,38 @@ export default function GraphPage() {
 
   const focusNode = data?.meta?.focus || null;
   const focusPath = data?.meta?.focus_path || [];
+  const effectivePersonaSlug = personaSlug || headerPersonaSlug;
+  const effectivePersona = useMemo(
+    () => personas.find((p) => p.slug === effectivePersonaSlug) || null,
+    [personas, effectivePersonaSlug],
+  );
+
+  const graphFilterOptions = useMemo<GraphFilterOption[]>(() => {
+    if (!data) return [];
+    const unique = new Map<string, GraphFilterOption>();
+    for (const node of data.nodes || []) {
+      const d = node?.data || {};
+      const nodeType = String(d.node_type || "").toLowerCase();
+      if (!nodeType || ["persona", "tag", "mention", "knowledge_item", "kb_entry"].includes(nodeType)) continue;
+      const slug = String(d.slug || "");
+      if (!slug) continue;
+      const key = `${nodeType}:${slug}`;
+      if (unique.has(key)) continue;
+      unique.set(key, {
+        value: key,
+        label: String(d.label || slug),
+        nodeType,
+        level: Number(d.level ?? 99),
+        confidence: typeof d.confidence === "number" ? d.confidence : 0,
+      });
+    }
+    return Array.from(unique.values()).sort((a, b) => {
+      if (a.level !== b.level) return a.level - b.level;
+      if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+      if (a.nodeType !== b.nodeType) return a.nodeType.localeCompare(b.nodeType);
+      return a.label.localeCompare(b.label);
+    });
+  }, [data]);
 
   const onFocusNode = useCallback(
     (node: any) => {
@@ -179,11 +237,32 @@ export default function GraphPage() {
             <select
               value={personaSlug}
               onChange={(e) => updateParam({ persona: e.target.value || null, focus: null })}
+              aria-label="filtro-persona-grafo"
               className="bg-transparent text-xs text-obs-text focus:outline-none pr-1"
             >
               <option value="">Todos os clientes</option>
               {personas.map((p) => (
                 <option key={p.slug} value={p.slug}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-obs-base border border-white/06 rounded-lg px-2 py-1 min-w-[260px]">
+            <Layers3 size={11} className="text-obs-subtle" />
+            <select
+              value={focus}
+              onChange={(e) => updateParam({ focus: e.target.value || null })}
+              aria-label="filtro-semantico-grafo"
+              className="bg-transparent text-xs text-obs-text focus:outline-none pr-1 w-full"
+              disabled={!effectivePersonaSlug || graphFilterOptions.length === 0}
+            >
+              <option value="">
+                {effectivePersona?.name ? `${effectivePersona.name} no centro` : "Centro: persona"}
+              </option>
+              {graphFilterOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {`L${option.level} · ${option.nodeType} · ${option.label}${option.confidence > 0 ? ` · conf ${option.confidence.toFixed(2)}` : ""}`}
+                </option>
               ))}
             </select>
           </div>
@@ -278,7 +357,7 @@ export default function GraphPage() {
             <div className="ml-auto flex items-center gap-2 px-2.5 py-1 rounded-md bg-obs-violet/10 border border-obs-violet/30">
               <Crosshair size={11} className="text-obs-violet" />
               <span className="text-[11px] text-obs-violet truncate max-w-[300px]">
-                Foco: {focusNode.node_type}:{focusNode.slug}
+                Foco: {focusNode.title || focusNode.slug || focusNode.node_type}
               </span>
               <button
                 onClick={onClearFocus}
@@ -293,7 +372,7 @@ export default function GraphPage() {
 
         {/* Row 3: search + focus path breadcrumb */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 bg-obs-base border border-white/06 rounded-lg px-2 py-1 w-72">
+            <div className="flex items-center gap-1.5 bg-obs-base border border-white/06 rounded-lg px-2 py-1 w-72">
             <Search size={11} className="text-obs-faint" />
             <input
               value={searchQuery}
@@ -323,6 +402,15 @@ export default function GraphPage() {
             </div>
           )}
         </div>
+
+        {effectivePersona && (
+          <div className="flex items-center gap-2 text-[11px] text-obs-subtle">
+            <span className="rounded border border-obs-violet/30 bg-obs-violet/10 px-2 py-0.5 text-obs-violet">
+              Persona central: {effectivePersona.name}
+            </span>
+            <span>Filtro semantico por nivel, tipo e confianca dentro da persona ativa.</span>
+          </div>
+        )}
       </div>
 
       {/* ── Graph canvas ─────────────────────────────────────── */}

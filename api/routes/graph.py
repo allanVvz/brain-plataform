@@ -389,9 +389,21 @@ def get_graph_data(
     semantic_nodes_count = 0
     semantic_edges_count = 0
     sem_node_ids = {n["id"]: n for n in sem_nodes}
+    semantic_persona_aliases: dict[str, str] = {}
+
+    for n in sem_nodes:
+        if (n.get("node_type") or "").lower() != "persona":
+            continue
+        pid = n.get("persona_id") or single_persona_id
+        if pid and pid in persona_node_ids_emitted:
+            semantic_persona_aliases[n["id"]] = f"persona:{pid}"
 
     for n in sem_nodes:
         ntype = (n.get("node_type") or "kb").lower()
+        if ntype == "persona":
+            # The UI already emits a stable persona root card with the real
+            # filtered entity name. Skip semantic duplicates like "Persona".
+            continue
         meta = n.get("metadata") or {}
         tags = n.get("tags") or []
         nid = f"gn:{n['id']}"
@@ -472,6 +484,10 @@ def get_graph_data(
         tgt = sem_node_ids.get(e.get("target_node_id"))
         if not src or not tgt:
             continue
+        source_id = semantic_persona_aliases.get(e.get("source_node_id"), f"gn:{e['source_node_id']}")
+        target_id = semantic_persona_aliases.get(e.get("target_node_id"), f"gn:{e['target_node_id']}")
+        if source_id == target_id:
+            continue
         rt = (e.get("relation_type") or "related").lower()
         registry_rel = rt_by_type.get(rt, {})
         weight = e.get("weight")
@@ -483,8 +499,8 @@ def get_graph_data(
 
         edges.append({
             "id": f"ge:{e['id']}",
-            "source": f"gn:{e['source_node_id']}",
-            "target": f"gn:{e['target_node_id']}",
+            "source": source_id,
+            "target": target_id,
             "type": "smoothstep",
             "data": {
                 "relation_type": rt,
