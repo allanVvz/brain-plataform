@@ -23,18 +23,26 @@ interface NodeDrawerProps {
   node: any | null;
   onClose: () => void;
   onUpdated?: (itemId: string) => void;
+  directLinks?: Array<{
+    id?: string;
+    direction: "in" | "out";
+    other_id: string;
+    other_label: string;
+    other_type: string;
+    other_summary?: string;
+    other_level?: number;
+  }>;
   focusPath?: Array<{
     node_id: string;
     slug?: string;
     title?: string;
     node_type?: string;
-    relation_type?: string | null;
     direction?: string | null;
   }>;
   onFocusHere?: () => void;
 }
 
-export default function NodeDrawer({ node, onClose, onUpdated, focusPath = [], onFocusHere }: NodeDrawerProps) {
+export default function NodeDrawer({ node, onClose, onUpdated, directLinks = [], focusPath = [], onFocusHere }: NodeDrawerProps) {
   const [editing, setEditing]     = useState(false);
   const [fullItem, setFullItem]   = useState<any>(null);
   const [fetching, setFetching]   = useState(false);
@@ -298,7 +306,7 @@ export default function NodeDrawer({ node, onClose, onUpdated, focusPath = [], o
                       borderColor: i === focusPath.length - 1 ? "rgba(167,139,250,0.6)" : "rgba(255,255,255,0.10)",
                       color: i === focusPath.length - 1 ? "#a78bfa" : "rgba(255,255,255,0.6)",
                     }}
-                    title={`${step.node_type}:${step.slug}${step.relation_type ? ` (${step.relation_type})` : ""}`}
+                    title={`${step.node_type}:${step.slug}`}
                   >
                     {step.title || step.slug || step.node_type}
                   </span>
@@ -374,12 +382,24 @@ export default function NodeDrawer({ node, onClose, onUpdated, focusPath = [], o
                       </span>
                     )}
                   </div>
-                  {step.relation_type && (
-                    <p className="mt-0.5 text-[10px] text-obs-faint truncate">
-                      {step.relation_type}
-                    </p>
-                  )}
                 </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Direct links */}
+        {!editing && directLinks.length > 0 && (
+          <div>
+            <p className="text-[10px] text-obs-subtle uppercase tracking-wide mb-1.5">
+              Cards relacionados ({directLinks.length})
+            </p>
+            <div className="space-y-1.5">
+              {directLinks.map((link) => (
+                <DirectLinkCard
+                  key={link.id || `${link.direction}-${link.other_id}`}
+                  link={link}
+                />
               ))}
             </div>
           </div>
@@ -492,6 +512,47 @@ export default function NodeDrawer({ node, onClose, onUpdated, focusPath = [], o
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+function DirectLinkCard({
+  link,
+}: {
+  link: {
+    id?: string;
+    direction: "in" | "out";
+    other_id: string;
+    other_label: string;
+    other_type: string;
+    other_summary?: string;
+    other_level?: number;
+  };
+}) {
+  return (
+    <div className="rounded-lg border border-white/06 bg-white/3 px-2 py-1.5">
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span
+          className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] uppercase ${
+            link.direction === "out"
+              ? "border-obs-violet/35 text-obs-violet"
+              : "border-white/10 text-obs-faint"
+          }`}
+        >
+          {link.direction === "out" ? "Sai" : "Entra"}
+        </span>
+        <span className="truncate text-[11px] font-medium text-obs-text">{link.other_label}</span>
+        <span className="ml-auto shrink-0 rounded border border-white/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+          {link.other_type}
+        </span>
+      </div>
+      {link.other_summary ? (
+        <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-obs-subtle">
+          {link.other_summary}
+        </p>
+      ) : (
+        <p className="mt-1 text-[10px] italic text-obs-faint">Sem resumo disponível.</p>
+      )}
     </div>
   );
 }

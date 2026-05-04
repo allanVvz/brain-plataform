@@ -73,7 +73,8 @@ export const api = {
   resumeAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/resume-ai`, { method: "POST" }),
   messages: (leadId: string) => req<any[]>(`/messages/${leadId}`),
   messagesByRef: (leadRef: number, limit = 200) => req<any[]>(`/messages/by-ref/${leadRef}?limit=${limit}`),
-  recentMessages: (hours = 24) => req<any[]>(`/messages?hours=${hours}`),
+  recentMessages: (hours = 24, personaId?: string) =>
+    req<any[]>(`/messages?hours=${hours}${personaId ? `&persona_id=${personaId}` : ""}`),
   conversations: (hours = 168, personaId?: string) =>
     req<any[]>(`/messages/conversations?hours=${hours}${personaId ? `&persona_id=${personaId}` : ""}`),
   sendMessage: (body: { lead_ref: number; texto: string; agent_id?: string; sender_id?: string; nome?: string }) =>
@@ -124,7 +125,8 @@ export const api = {
     if (contentType) params.set("content_type", contentType);
     return req<any[]>(`/knowledge/queue?${params}`);
   },
-  knowledgeCounts: () => req<any>("/knowledge/queue/counts"),
+  knowledgeCounts: (personaId?: string) =>
+    req<any>(`/knowledge/queue/counts${personaId ? `?persona_id=${personaId}` : ""}`),
   updateQueueItem: (id: string, data: Record<string, any>) =>
     req<any>(`/knowledge/queue/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   approveItem: (id: string, promoteToKb = false) =>
@@ -180,6 +182,10 @@ export const api = {
     const qs = params.toString();
     return req<any>(`/knowledge/graph-data${qs ? `?${qs}` : ""}`);
   },
+  createGraphEdge: (body: { source_node_id: string; target_node_id: string; relation_type?: string; persona_id?: string; weight?: number; metadata?: any }) =>
+    req<any>("/knowledge/graph-edges", { method: "POST", body: JSON.stringify(body) }),
+  deleteGraphEdge: (edgeId: string) =>
+    req<any>(`/knowledge/graph-edges/${encodeURIComponent(edgeId)}`, { method: "DELETE" }),
 
   // Knowledge — Chat sidebar context (semantic graph + KB fallback)
   knowledgeChatContext: (leadRef: number, q?: string, personaId?: string) => {
@@ -212,7 +218,12 @@ export const api = {
 
   // Pipeline
   pipelineStatus: () => req<any[]>("/pipeline/status"),
-  pipelineMetrics: () => req<any>("/pipeline/metrics"),
-  pipelineEvents: (limit = 50, eventType?: string) =>
-    req<any[]>(`/pipeline/events?limit=${limit}${eventType ? `&event_type=${eventType}` : ""}`),
+  pipelineMetrics: (personaId?: string) =>
+    req<any>(`/pipeline/metrics${personaId ? `?persona_id=${personaId}` : ""}`),
+  pipelineEvents: (limit = 50, eventType?: string, personaId?: string) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (eventType) params.set("event_type", eventType);
+    if (personaId) params.set("persona_id", personaId);
+    return req<any[]>(`/pipeline/events?${params.toString()}`);
+  },
 };

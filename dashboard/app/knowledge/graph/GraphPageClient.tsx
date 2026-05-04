@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import {
   RefreshCw,
-  Filter,
   Search,
   Network,
   GitBranch,
@@ -14,6 +13,8 @@ import {
   Database,
   Crosshair,
   Layers3,
+  Plus,
+  X,
 } from "lucide-react";
 import NodeDrawer from "@/components/graph/NodeDrawer";
 
@@ -31,16 +32,6 @@ interface RegistryNodeType {
   sort_order?: number;
 }
 
-interface RegistryRelation {
-  relation_type: string;
-  label?: string;
-  inverse_label?: string;
-  weight?: number;
-  directional?: boolean;
-  tier?: "strong" | "structural" | "auxiliary" | "curation";
-  sort_order?: number;
-}
-
 interface FocusInfo {
   node_id: string;
   node_type?: string;
@@ -53,7 +44,6 @@ interface FocusPathStep {
   slug?: string;
   title?: string;
   node_type?: string;
-  relation_type?: string | null;
   direction?: string | null;
 }
 
@@ -72,7 +62,6 @@ interface GraphPayload {
     applied_filters?: Record<string, unknown>;
     registry?: {
       node_types?: RegistryNodeType[];
-      relations?: RegistryRelation[];
     };
   };
 }
@@ -90,8 +79,6 @@ const MODES: { value: ViewMode; label: string; icon: React.ReactNode; help: stri
   { value: "graph",         label: "Grafo",     icon: <Network size={11} />,   help: "Rede organica estilo Obsidian/neural" },
 ];
 
-const DEPTHS = [1, 2, 3, 4, 5];
-
 export default function GraphPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -100,18 +87,19 @@ export default function GraphPageClient() {
   const [data, setData] = useState<GraphPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState<any>(null);
+  const [addPanelOpen, setAddPanelOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [headerPersonaSlug, setHeaderPersonaSlug] = useState("");
+  const [graphNotice, setGraphNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   // ── URL-driven state ──────────────────────────────────────────
-  const personaSlug = searchParams.get("persona") || "";
   const focus = searchParams.get("focus") || "";
-  const maxDepth = Number(searchParams.get("depth") || 3);
-  const mode = (searchParams.get("mode") as ViewMode) || "semantic_tree";
+  const mode = (searchParams.get("mode") as ViewMode) || "graph";
   const includeTags = searchParams.get("tags") === "1";
   const includeMentions = searchParams.get("mentions") === "1";
   const includeTechnical = searchParams.get("tech") === "1";
-  const onlyPrimaryTreeEdges = searchParams.get("primary_edges") !== "0";
+  const showAllEdges = searchParams.get("all_edges") === "1" || searchParams.get("primary_edges") === "0";
+  const branchDistance = Number(searchParams.get("distance") || 48);
 
   const updateParam = useCallback(
     (patch: Record<string, string | number | boolean | null>) => {
@@ -135,18 +123,12 @@ export default function GraphPageClient() {
     return () => window.removeEventListener("ai-brain-persona-change", syncFromHeader as EventListener);
   }, []);
 
-  useEffect(() => {
-    if (!personaSlug && headerPersonaSlug) {
-      updateParam({ persona: headerPersonaSlug, focus: null });
-    }
-  }, [personaSlug, headerPersonaSlug, updateParam]);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const d = await api.graphData(personaSlug || undefined, {
+      const d = await api.graphData(headerPersonaSlug || undefined, {
         focus: focus || undefined,
-        max_depth: maxDepth,
+        max_depth: 5,
         include_tags: includeTags,
         include_mentions: includeMentions,
         include_technical: includeTechnical,
@@ -156,7 +138,7 @@ export default function GraphPageClient() {
     } finally {
       setLoading(false);
     }
-  }, [personaSlug, focus, maxDepth, includeTags, includeMentions, includeTechnical, mode]);
+  }, [headerPersonaSlug, focus, includeTags, includeMentions, includeTechnical, mode]);
 
   useEffect(() => {
     api.personas().then((p: any) => setPersonas(p));
@@ -173,7 +155,7 @@ export default function GraphPageClient() {
 
   const focusNode = data?.meta?.focus || null;
   const focusPath = data?.meta?.focus_path || [];
-  const effectivePersonaSlug = personaSlug || headerPersonaSlug;
+  const effectivePersonaSlug = headerPersonaSlug;
   const effectivePersona = useMemo(
     () => personas.find((p) => p.slug === effectivePersonaSlug) || null,
     [personas, effectivePersonaSlug],
@@ -206,6 +188,50 @@ export default function GraphPageClient() {
     });
   }, [data]);
 
+  const selectedDirectLinks = useMemo(() => {
+    if (!data || !selectedNode) return [];
+    const byId = new Map((data.nodes || []).map((node) => [node.id, node]));
+    const hierarchyRank: Record<string, number> = {
+      persona: 0,
+      brand: 20,
+      campaign: 30,
+      briefing: 40,
+      audience: 50,
+      product: 60,
+      entity: 70,
+      tone: 80,
+      rule: 85,
+      copy: 90,
+      faq: 95,
+      asset: 100,
+      knowledge_item: 120,
+      kb_entry: 120,
+      tag: 130,
+      mention: 130,
+    };
+    return (data.edges || [])
+      .filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id)
+      .map((edge) => {
+        const outbound = edge.source === selectedNode.id;
+        const otherId = outbound ? edge.target : edge.source;
+        const other = byId.get(otherId);
+        return {
+          id: edge.id,
+          direction: (outbound ? "out" : "in") as "out" | "in",
+          other_id: otherId,
+          other_label: other?.data?.label || otherId,
+          other_type: other?.data?.node_type || other?.data?.content_type || "node",
+          other_summary: other?.data?.content_preview || other?.data?.description || "",
+          other_level: Number(other?.data?.level ?? hierarchyRank[String(other?.data?.node_type || other?.data?.content_type || "node")] ?? 999),
+        };
+      })
+      .sort((a, b) => {
+        if (a.other_level !== b.other_level) return a.other_level - b.other_level;
+        if (a.other_type !== b.other_type) return String(a.other_type).localeCompare(String(b.other_type));
+        return String(a.other_label).localeCompare(String(b.other_label));
+      });
+  }, [data, selectedNode]);
+
   const onFocusNode = useCallback(
     (node: any) => {
       const data = node.data || {};
@@ -224,6 +250,56 @@ export default function GraphPageClient() {
     updateParam({ focus: null });
   }, [updateParam]);
 
+  const handleConnectNodes = useCallback(
+    async (sourceId: string, targetId: string) => {
+      if (!sourceId.startsWith("gn:") || !targetId.startsWith("gn:")) {
+        setGraphNotice({ tone: "error", text: "Conexao permitida apenas entre blocos de conhecimento." });
+        return;
+      }
+      try {
+        setGraphNotice(null);
+        await api.createGraphEdge({
+          source_node_id: sourceId,
+          target_node_id: targetId,
+          relation_type: "manual",
+          persona_id: effectivePersona?.id,
+          weight: 1,
+          metadata: { direction: "source_to_target", created_from: "graph_ui" },
+        });
+        await load();
+        setGraphNotice({ tone: "success", text: "Conexao criada." });
+        window.setTimeout(() => setGraphNotice(null), 2200);
+      } catch (error) {
+        setGraphNotice({
+          tone: "error",
+          text: error instanceof Error ? error.message : "Nao foi possivel criar a conexao.",
+        });
+      }
+    },
+    [effectivePersona?.id, load],
+  );
+
+  const handleDeleteEdge = useCallback(
+    async (edgeId: string) => {
+      if (!edgeId.startsWith("ge:")) {
+        setGraphNotice({ tone: "error", text: "Esta conexao nao pode ser apagada pela UI." });
+        return;
+      }
+      try {
+        await api.deleteGraphEdge(edgeId);
+        await load();
+        setGraphNotice({ tone: "success", text: "Conexao apagada." });
+        window.setTimeout(() => setGraphNotice(null), 2200);
+      } catch (error) {
+        setGraphNotice({
+          tone: "error",
+          text: error instanceof Error ? error.message : "Nao foi possivel apagar a conexao.",
+        });
+      }
+    },
+    [load],
+  );
+
   return (
     <div className="flex flex-col h-[calc(100vh-96px)] -mx-6 -mt-6 overflow-hidden">
       {/* ── Top bar (3 rows) ──────────────────────────────────── */}
@@ -232,35 +308,20 @@ export default function GraphPageClient() {
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-obs-text">Grafo de Conhecimento</span>
 
-          <div className="flex items-center gap-1.5 bg-obs-base border border-white/06 rounded-lg px-2 py-1">
-            <Filter size={11} className="text-obs-subtle" />
-            <select
-              value={personaSlug}
-              onChange={(e) => updateParam({ persona: e.target.value || null, focus: null })}
-              aria-label="filtro-persona-grafo"
-              className="bg-transparent text-xs text-obs-text focus:outline-none pr-1"
-            >
-              <option value="">Todos os clientes</option>
-              {personas.map((p) => (
-                <option key={p.slug} value={p.slug}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-1.5 bg-obs-base border border-white/06 rounded-lg px-2 py-1 min-w-[260px]">
+          <div className="flex min-w-[320px] items-center gap-2 rounded-lg border border-white/08 bg-white/[0.04] px-2.5 py-1.5 shadow-sm">
             <Layers3 size={11} className="text-obs-subtle" />
             <select
               value={focus}
               onChange={(e) => updateParam({ focus: e.target.value || null })}
               aria-label="filtro-semantico-grafo"
-              className="bg-transparent text-xs text-obs-text focus:outline-none pr-1 w-full"
+              className="w-full bg-transparent text-xs font-medium text-obs-text outline-none [color-scheme:dark]"
               disabled={!effectivePersonaSlug || graphFilterOptions.length === 0}
             >
-              <option value="">
+              <option className="bg-[#11151f] text-obs-text" value="">
                 {effectivePersona?.name ? `${effectivePersona.name} no centro` : "Centro: persona"}
               </option>
               {graphFilterOptions.map((option) => (
-                <option key={option.value} value={option.value}>
+                <option className="bg-[#11151f] text-obs-text" key={option.value} value={option.value}>
                   {`L${option.level} · ${option.nodeType} · ${option.label}${option.confidence > 0 ? ` · conf ${option.confidence.toFixed(2)}` : ""}`}
                 </option>
               ))}
@@ -272,7 +333,7 @@ export default function GraphPageClient() {
               <button
                 key={m.value}
                 title={m.help}
-                onClick={() => updateParam({ mode: m.value === "semantic_tree" ? null : m.value })}
+                onClick={() => updateParam({ mode: m.value === "graph" ? null : m.value })}
                 className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition ${
                   mode === m.value
                     ? "bg-obs-violet/20 border-obs-violet text-obs-violet"
@@ -302,25 +363,20 @@ export default function GraphPageClient() {
           </div>
         </div>
 
-        {/* Row 2: depth + visibility toggles */}
+        {/* Row 2: visual spacing + visibility toggles */}
         <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] uppercase tracking-wider text-obs-faint">Profundidade</span>
-            <div className="flex items-center gap-0.5">
-              {DEPTHS.map((d) => (
-                <button
-                  key={d}
-                  onClick={() => updateParam({ depth: d === 3 ? null : d })}
-                  className={`w-6 h-6 text-[11px] rounded-md border transition ${
-                    maxDepth === d
-                      ? "bg-obs-violet/20 border-obs-violet text-obs-violet"
-                      : "glass border-white/10 text-obs-subtle hover:text-obs-text"
-                  }`}
-                >
-                  {d}
-                </button>
-              ))}
-            </div>
+          <div className="flex min-w-[320px] items-center gap-3 rounded-lg border border-white/06 bg-obs-base/80 px-3 py-2">
+            <span className="whitespace-nowrap text-[10px] uppercase tracking-wider text-obs-faint">Forca gravitacional</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={branchDistance}
+              onChange={(e) => updateParam({ distance: Number(e.target.value) === 48 ? null : e.target.value })}
+              className="h-1 flex-1 accent-obs-violet"
+              aria-label="forca-gravitacional"
+            />
+            <span className="w-8 text-right text-[10px] text-obs-subtle">{branchDistance}</span>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -344,14 +400,12 @@ export default function GraphPageClient() {
             />
           </div>
 
-          {mode === "semantic_tree" && (
-            <ToggleChip
-              active={onlyPrimaryTreeEdges}
-              onClick={() => updateParam({ primary_edges: onlyPrimaryTreeEdges ? "0" : null })}
-              icon={<GitBranch size={10} />}
-              label="Somente arestas principais"
-            />
-          )}
+          <ToggleChip
+            active={showAllEdges}
+            onClick={() => updateParam({ all_edges: !showAllEdges ? "1" : null, primary_edges: null })}
+            icon={<GitBranch size={10} />}
+            label="Mostrar todas"
+          />
 
           {focusNode && (
             <div className="ml-auto flex items-center gap-2 px-2.5 py-1 rounded-md bg-obs-violet/10 border border-obs-violet/30">
@@ -426,11 +480,26 @@ export default function GraphPageClient() {
             rawNodes={data.nodes}
             rawEdges={data.edges}
             onNodeClick={setSelectedNode}
+            onConnectNodes={handleConnectNodes}
+            onDeleteEdge={handleDeleteEdge}
             mode={mode}
             searchQuery={searchQuery}
             focusNodeId={focusNode?.node_id || null}
-            onlyPrimaryTreeEdges={onlyPrimaryTreeEdges}
+            showAllEdges={showAllEdges}
+            branchDistance={branchDistance}
           />
+        )}
+
+        {graphNotice && (
+          <div
+            className={`absolute right-4 top-4 z-50 rounded-lg border px-3 py-2 text-xs shadow-lg ${
+              graphNotice.tone === "success"
+                ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200"
+                : "border-red-400/35 bg-red-500/15 text-red-100"
+            }`}
+          >
+            {graphNotice.text}
+          </div>
         )}
 
         {/* Legend */}
@@ -452,13 +521,6 @@ export default function GraphPageClient() {
                   </span>
                 ))}
             </div>
-            <div className="text-[9px] uppercase tracking-wider text-obs-faint mt-1.5 mb-1">Relações</div>
-            <div className="flex flex-col gap-0.5 text-[10px]">
-              <LegendEdge label="Forte (about_product, answers_question, …)" color="rgba(255,255,255,0.55)" />
-              <LegendEdge label="Estrutural (belongs_to_persona, …)" color="rgba(255,255,255,0.30)" />
-              <LegendEdge label="Auxiliar (has_tag, mentions, …)" color="rgba(255,255,255,0.18)" dashed />
-              <LegendEdge label="Curadoria (duplicate_of)" color="#f87171" />
-            </div>
           </div>
         )}
 
@@ -468,8 +530,75 @@ export default function GraphPageClient() {
           onClose={() => setSelectedNode(null)}
           onUpdated={load}
           focusPath={focusPath}
+          directLinks={selectedDirectLinks}
           onFocusHere={() => selectedNode && onFocusNode(selectedNode)}
         />
+
+        <button
+          type="button"
+          onClick={() => setAddPanelOpen(true)}
+          className="absolute bottom-5 left-1/2 z-40 flex h-12 w-12 -translate-x-1/2 items-center justify-center rounded-full border border-obs-violet/45 bg-obs-violet/20 text-obs-violet shadow-obs-node transition hover:bg-obs-violet/30 hover:text-white"
+          title="Adicionar bloco"
+        >
+          <Plus size={22} />
+        </button>
+
+        {addPanelOpen && (
+          <AddBlockPanel onClose={() => setAddPanelOpen(false)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AddBlockPanel({ onClose }: { onClose: () => void }) {
+  const nodeTypes = [
+    "Persona",
+    "Entidade",
+    "Brand",
+    "Campanha",
+    "Produto",
+    "Briefing",
+    "Audiência",
+    "Tom",
+    "Regra",
+    "Copy",
+    "FAQ",
+    "Asset",
+  ];
+  return (
+    <div className="absolute inset-0 z-50 flex items-end justify-center bg-black/35 p-5">
+      <div className="w-full max-w-2xl rounded-2xl border border-white/08 bg-[#0e1118] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-white/06 px-5 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-obs-text">Adicionar bloco ao grafo</h2>
+            <p className="mt-0.5 text-xs text-obs-subtle">Escolha o tipo de card para criar o próximo bloco.</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-obs-subtle transition hover:bg-white/5 hover:text-white"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-5">
+          <section>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-obs-faint">Tipos</p>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+              {nodeTypes.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  className="rounded-lg border border-white/06 bg-white/[0.03] px-3 py-2 text-left text-xs text-obs-subtle transition hover:border-obs-violet/35 hover:text-white"
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   );
@@ -498,21 +627,5 @@ function ToggleChip({
       {icon}
       <span>{label}</span>
     </button>
-  );
-}
-
-function LegendEdge({ label, color, dashed }: { label: string; color: string; dashed?: boolean }) {
-  return (
-    <div className="flex items-center gap-1.5 text-obs-subtle">
-      <svg width="20" height="6" viewBox="0 0 20 6">
-        <line
-          x1="0" y1="3" x2="20" y2="3"
-          stroke={color}
-          strokeWidth={2}
-          strokeDasharray={dashed ? "3 3" : undefined}
-        />
-      </svg>
-      <span>{label}</span>
-    </div>
   );
 }

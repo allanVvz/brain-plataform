@@ -286,7 +286,7 @@ export function buildTreeFromGraph(
   };
 }
 
-export function buildNeuronGraphLayout(nodes: Node<GraphNodeData>[], edges: Edge<GraphEdgeData>[]): Node<GraphNodeData>[] {
+export function buildNeuronGraphLayout(nodes: Node<GraphNodeData>[], edges: Edge<GraphEdgeData>[], distanceScale = 1): Node<GraphNodeData>[] {
   const degree = new Map<string, number>();
   for (const node of nodes) degree.set(node.id, 0);
   for (const edge of edges) {
@@ -305,7 +305,7 @@ export function buildNeuronGraphLayout(nodes: Node<GraphNodeData>[], edges: Edge
   const seeded = sorted.map((node, index) => {
     const importance = Number(node.data?.importance ?? 0.5);
     const centrality = (degree.get(node.id) || 0) / Math.max(1, edges.length);
-    const radius = 80 + Math.sqrt(index + 1) * 92 - importance * 70 - centrality * 160;
+    const radius = (80 + Math.sqrt(index + 1) * 92 - importance * 70 - centrality * 160) * distanceScale;
     const angle = index * golden;
     const ringNoise = Math.sin(index * 1.618) * 24;
     return {
@@ -318,7 +318,7 @@ export function buildNeuronGraphLayout(nodes: Node<GraphNodeData>[], edges: Edge
   });
 
   const position = new Map(seeded.map((node) => [node.id, { x: node.position.x, y: node.position.y }]));
-  const area = Math.max(120_000, seeded.length * 18_000);
+  const area = Math.max(120_000, seeded.length * 18_000) * distanceScale * distanceScale;
   const k = Math.sqrt(area / Math.max(1, seeded.length));
 
   for (let step = 0; step < 180; step++) {

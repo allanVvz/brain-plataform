@@ -189,7 +189,7 @@ function buildInitialContext(plan: CapturePlan, uploads: SessionUpload[]) {
     "",
     "## Regras de execucao",
     "- Se o operador pedir para ler/coletar o site, acionar captura bruta/crawler quando disponivel e tratar resultado como evidencia com confianca, nao como verdade perfeita.",
-    "- Antes de gerar ou salvar, confirmar fontes, entries e links semanticos.",
+    "- Antes de gerar ou salvar, confirmar fontes e entries.",
     "- Se faltar qualquer informacao, perguntar ao operador antes de propor ou salvar.",
     "- Fazer no maximo 3 perguntas objetivas por rodada.",
     "- Os blocos selecionados sao a intencao inicial; se a conversa mudar, aceitar novos blocos e perguntar lacunas especificas.",
@@ -365,7 +365,7 @@ function PreflightPanel({
             className="mt-0.5 accent-obs-violet"
           />
           <span>
-            Confirmo que o modelo deve usar este plano e os {uploads.length} upload(s) da sessao como contexto. Se faltar dado, ele deve me perguntar antes de propor entradas, copys, links ou salvar.
+            Confirmo que o modelo deve usar este plano e os {uploads.length} upload(s) da sessao como contexto. Se faltar dado, ele deve me perguntar antes de propor entradas, copys ou salvar.
           </span>
         </label>
       </div>

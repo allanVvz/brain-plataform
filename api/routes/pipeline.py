@@ -10,8 +10,8 @@ def pipeline_status():
 
 
 @router.get("/metrics")
-def pipeline_metrics():
-    return supabase_client.get_pipeline_metrics()
+def pipeline_metrics(persona_id: str = Query(None)):
+    return supabase_client.get_pipeline_metrics(persona_id=persona_id)
 
 
 @router.get("/events")

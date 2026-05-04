@@ -146,9 +146,8 @@ _SYSTEM_PROMPT += """
 === FLUXO CAPTURAR / MARKETING GRAPH ===
 Quando a sessão trouxer um contexto inicial confirmado pelo operador, leia esse contexto como briefing operacional. Antes de acionar qualquer salvamento, proponha:
 1. fontes usadas;
-2. entries a criar ou atualizar por nível do grafo: brand, campaign, audience, product, variant/color, copy, faq, rule e tone;
-3. links semânticos esperados entre entries;
-4. riscos de invenção e perguntas pendentes.
+2. entries a criar ou atualizar por nivel hierarquico: brand, campaign, audience, product, variant/color, copy, faq, rule e tone;
+3. riscos de invencao e perguntas pendentes.
 
 Para pedidos de copy/marketing, gere propostas hierarquizadas por grafo, não uma lista solta de textos. Exemplo de encadeamento:
 brand -> campaign -> audience -> product -> color/variant -> copy -> faq/rule.
@@ -174,7 +173,7 @@ Ao final da coleta, gere varios conhecimentos, um para cada bloco selecionado pe
 5. copy: copys separadas por publico/canal quando houver informacao suficiente;
 6. faq: perguntas e respostas recuperaveis sobre preco, cores, kits, varejo e atacado.
 
-Antes de salvar, apresente a lista concreta de entries e links semanticos que serao criados. Nao finalize com um resumo generico.
+Antes de salvar, apresente a lista concreta de entries que serao criadas. Nao finalize com um resumo generico.
 
 === SAIDA ESTRUTURADA OBRIGATORIA PARA GERACAO ===
 Quando o operador pedir "gerar conhecimento", "pode gerar", "criar a arvore" ou equivalente, OU se houver resultados de crawler e blocos selecionados no contexto inicial, OU se a sessao for iniciada com URL e blocos:
@@ -200,17 +199,13 @@ O JSON deve seguir este formato:
       "metadata": {}
     }
   ],
-  "links": [
-    {"source": "slug", "relation_type": "part_of_campaign|about_product|answers_question|supports_copy|same_topic_as", "target": "slug"}
-  ],
   "missing_questions": []
 }
 
 Regras para esse bloco:
 - precisa conter uma entry para cada bloco selecionado no inicio;
-- sempre crie uma estrutura de conhecimento em arvore com multiplos galhos: brand/campaign como raiz quando existirem, audience/product/entity como galhos intermediarios, e copy/faq/rule/asset como folhas conectadas;
-- evite listas planas: cada entry deve ter ao menos um link semantico quando houver outro node relacionado no plano;
-- distribua os links entre galhos diferentes para facilitar camadas, galhos e arvores no grafo inserido;
+- sempre crie uma estrutura de conhecimento em arvore com multiplos galhos: brand/campaign como raiz quando existirem, audience/product/entity como galhos intermediarios, e copy/faq/rule/asset como folhas;
+- evite listas planas: cada entry deve ter titulo, conteudo e contexto suficientes para ficar clara sem depender de relacoes obrigatorias;
 - se os blocos incluirem product, gere uma entry por produto conhecido ou candidato;
 - se o operador pediu uma quantidade minima, essa quantidade e obrigatoria;
 - se o operador pediu 3 produtos e o crawler encontrou so 2, crie o terceiro como produto candidato com status pendente_validacao;
@@ -219,8 +214,7 @@ Regras para esse bloco:
 - se os blocos incluirem copy, gere copies concretas e use a ferramenta mental de geracao de copy;
 - se os blocos incluirem faq, gere perguntas e respostas recuperaveis;
 - se o operador pediu FAQ sobre preco, cores e kits, gere no minimo 2 FAQs: uma para preco/kits e outra para cores;
-- links devem conectar brand/campaign/audience/product/entity/copy/faq quando existirem;
-- para uma arvore comercial completa, gere no minimo 8 links semanticos;
+- relacoes/links sao opcionais e nao devem ser solicitados nem usados como requisito de qualidade do plano;
 - campos desconhecidos devem ficar como pendente_validacao, nao bloquear a arvore inteira.
 
 === BLOCOS SELECIONADOS NA CAPTURA ===
@@ -239,7 +233,7 @@ Para cada bloco selecionado, identifique lacunas minimas antes de propor entries
 - tone: voz, palavras preferidas, palavras proibidas e exemplos;
 - asset: tipo visual, uso, fonte, proporcao e restricoes.
 
-Se durante a conversa o operador pedir outro bloco ou mudar o objetivo, atualize a proposta e pergunte as lacunas desse novo bloco. Nao exija que o operador escreva IDs de grafo como "brand:tock-fatal"; voce deve transformar respostas naturais em entries e links semanticos propostos.
+Se durante a conversa o operador pedir outro bloco ou mudar o objetivo, atualize a proposta e pergunte as lacunas desse novo bloco. Nao exija que o operador escreva IDs de grafo como "brand:tock-fatal"; voce deve transformar respostas naturais em entries atomicas.
 
 === QUANDO FALTAR INFORMACAO ===
 Se voce nao souber uma informacao necessaria, nao preencha com suposicao e nao finalize a classificacao.
@@ -308,7 +302,7 @@ def _extract_plan_entries(text: str) -> list[dict]:
         return []
 
 def _extract_plan(text: str) -> dict:
-    """Extrai o plano completo (entries + links) do texto."""
+    """Extrai o plano completo do texto."""
     match = re.search(r"<knowledge_plan>\s*(.*?)\s*</knowledge_plan>", text, re.DOTALL)
     if not match:
         return {}
@@ -925,28 +919,6 @@ def _write_entry_file(persona_slug: str, entry: dict) -> Optional[Path]:
     return target_path
 
 
-def _create_rag_links(persona_id: str, links: list[dict], slug_to_id: dict) -> None:
-    """Cria links entre entradas RAG baseadas nos slugs do plano."""
-    for link in links:
-        src_slug = link.get("source")
-        tgt_slug = link.get("target")
-        rel = link.get("relation_type") or "same_topic_as"
-        
-        src_id = slug_to_id.get(src_slug)
-        tgt_id = slug_to_id.get(tgt_slug)
-        
-        if src_id and tgt_id and src_id != tgt_id:
-            supabase_client.upsert_knowledge_rag_link({
-                "persona_id": persona_id,
-                "source_entry_id": src_id,
-                "target_entry_id": tgt_id,
-                "relation_type": rel,
-                "weight": 1.0,
-                "confidence": 0.8,
-                "created_by": "classifier"
-            })
-
-
 def _write_file(session: dict, content_text: str) -> Path:
     cls = session["classification"]
     vault_root = Path(VAULT_PATH)
@@ -1016,24 +988,18 @@ def save(session_id: str, content_text: str = "") -> dict:
             "classification": {k: v for k, v in cls.items() if k != "file_bytes"},
         }
 
-    persona_id = supabase_client._resolve_persona_id(cls["persona_slug"])
-
     # Detecta se ha um plano para salvar multiplos arquivos
     plan_entries = []
-    plan_links = []
     for msg in reversed(session.get("messages", [])):
         content = msg.get("content") or ""
         if msg.get("role") == "assistant" and "<knowledge_plan>" in content:
             plan = _extract_plan(content)
             plan_entries = plan.get("entries", [])
-            plan_links = plan.get("links", [])
             break
 
     # ── 1. Write to vault and Structured Ingest ───────────────────────
     try:
         saved_paths = []
-        slug_to_rag_id = {}
-
         if plan_entries:
             for entry in plan_entries:
                 # 1.a Write to vault
@@ -1053,14 +1019,8 @@ def save(session_id: str, content_text: str = "") -> dict:
                         metadata=entry.get("metadata"),
                         validate=True
                     )
-                    if rag_res and rag_res.get("rag_entry"):
-                        slug_to_rag_id[entry.get("slug")] = rag_res["rag_entry"].get("id")
                 except Exception as rag_exc:
                     print(f"kb_intake: RAG processing failed for entry {entry.get('title')}: {rag_exc}")
-
-            # 1.c Create semantic links in RAG
-            if plan_links and persona_id:
-                _create_rag_links(persona_id, plan_links, slug_to_rag_id)
 
             file_path = saved_paths[0] if saved_paths else None
         else:

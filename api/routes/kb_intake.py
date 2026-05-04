@@ -49,7 +49,7 @@ def start_session(body: StartBody):
         "agent": {"key": session.get("agent_key"), "name": agent["name"], "role": agent["role"]},
         "welcome": (
             f"{agent['greeting']} Envie um texto, cole um conteúdo ou faça upload de um arquivo. "
-            "Se faltar contexto, vou perguntar o que falta antes de propor entries, links, copys ou salvar no vault."
+            "Se faltar contexto, vou perguntar o que falta antes de propor entries, copys ou salvar no vault."
         ),
     }
 

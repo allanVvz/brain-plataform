@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { Sparkles, Send, Loader2, Copy as CopyIcon, Check, ChevronRight, MessageCircle } from "lucide-react";
 import { CaptureWorkspace } from "@/app/knowledge/capture/page";
+import { CreativeEditorTab } from "@/components/creative/CreativeEditorTab";
 
 interface InputSpec {
   name: string;
@@ -31,7 +32,7 @@ export default function CriacaoPage() {
   const [error, setError] = useState<string | null>(null);
   const [content, setContent] = useState<string>("");
   const [copied, setCopied] = useState(false);
-  const [activeTool, setActiveTool] = useState<"criar" | "gerar">("criar");
+  const [activeTool, setActiveTool] = useState<"criar" | "gerar" | "criativos">("criar");
 
   // Load modes + persona scope
   useEffect(() => {
@@ -96,7 +97,7 @@ export default function CriacaoPage() {
     } catch {}
   };
 
-  const toolButton = (key: "criar" | "gerar", label: string, Icon: typeof Sparkles) => {
+  const toolButton = (key: "criar" | "gerar" | "criativos", label: string, Icon: typeof Sparkles) => {
     const active = activeTool === key;
     return (
       <button
@@ -125,12 +126,17 @@ export default function CriacaoPage() {
         <div className="flex items-center gap-1 rounded-lg bg-obs-base border border-white/06 p-1">
           {toolButton("criar", "Criar", MessageCircle)}
           {toolButton("gerar", "Gerar copy", Sparkles)}
+          {toolButton("criativos", "Criativos", Sparkles)}
         </div>
       </div>
 
       {activeTool === "criar" ? (
         <div className="flex-1 min-h-0 overflow-hidden">
           <CaptureWorkspace embedded />
+        </div>
+      ) : activeTool === "criativos" ? (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <CreativeEditorTab />
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex gap-4 overflow-hidden">

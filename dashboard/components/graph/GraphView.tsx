@@ -3,11 +3,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
+  BaseEdge,
   Controls,
+  Connection,
   MiniMap,
   Node,
   Edge,
+  EdgeLabelRenderer,
+  EdgeProps,
   NodeTypes,
+  EdgeTypes,
   useNodesState,
   useEdgesState,
   Handle,
@@ -16,6 +21,9 @@ import ReactFlow, {
   ReactFlowProvider,
   Panel,
   MarkerType,
+  ConnectionMode,
+  getSmoothStepPath,
+  getBezierPath,
   useReactFlow,
 } from "reactflow";
 import dagre from "dagre";
@@ -36,11 +44,25 @@ interface GraphViewProps {
   rawNodes: any[];
   rawEdges: any[];
   onNodeClick: (node: any) => void;
+  onConnectNodes?: (sourceId: string, targetId: string) => void | Promise<void>;
+  onDeleteEdge?: (edgeId: string) => void | Promise<void>;
   mode: ViewMode;
   searchQuery?: string;
   focusNodeId?: string | null;
-  onlyPrimaryTreeEdges?: boolean;
+  showAllEdges?: boolean;
+  branchDistance?: number;
 }
+
+const HANDLE_STYLE = {
+  width: 7,
+  height: 7,
+  borderRadius: 999,
+  border: "1px solid rgba(226,232,240,0.62)",
+  background: "rgba(14,17,24,0.92)",
+  boxShadow: "0 0 0 2px rgba(124,111,255,0.08), 0 0 7px rgba(124,111,255,0.22)",
+  opacity: 0.86,
+  zIndex: 20,
+};
 
 // ── Layout helpers ─────────────────────────────────────────────
 
@@ -71,10 +93,20 @@ function levelToRank(level: number | undefined): number {
   return 10;                       // tag/mention/technical
 }
 
-function applyLayoutLayered(nodes: Node[], edges: Edge[]): Node[] {
+function spacingConfig(branchDistance = 48) {
+  const value = Math.max(0, Math.min(100, branchDistance));
+  return {
+    rankSep: 52 + value * 1.05,
+    nodeSep: 14 + value * 0.68,
+    graphScale: 0.72 + value / 72,
+  };
+}
+
+function applyLayoutLayered(nodes: Node[], edges: Edge[], branchDistance = 48): Node[] {
+  const spacing = spacingConfig(branchDistance);
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "TB", ranksep: 80, nodesep: 24, edgesep: 8, ranker: "network-simplex" });
+  g.setGraph({ rankdir: "TB", ranksep: spacing.rankSep, nodesep: spacing.nodeSep, edgesep: 8, ranker: "network-simplex" });
 
   nodes.forEach((n) => {
     const data = n.data as GraphNodeData;
@@ -108,14 +140,15 @@ function applyLayoutLayered(nodes: Node[], edges: Edge[]): Node[] {
   });
 }
 
-function applyLayoutGraphSeed(nodes: Node[], edges: Edge[]): Node[] {
-  return buildNeuronGraphLayout(nodes as Node<GraphNodeData>[], edges as Edge<GraphEdgeData>[]);
+function applyLayoutGraphSeed(nodes: Node[], edges: Edge[], branchDistance = 48): Node[] {
+  return buildNeuronGraphLayout(nodes as Node<GraphNodeData>[], edges as Edge<GraphEdgeData>[], spacingConfig(branchDistance).graphScale);
 }
 
-function applyLayoutTree(nodes: Node[], edges: Edge[]): Node[] {
+function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Node[] {
+  const spacing = spacingConfig(branchDistance);
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "TB", ranksep: 92, nodesep: 34, edgesep: 10, ranker: "tight-tree" });
+  g.setGraph({ rankdir: "TB", ranksep: spacing.rankSep + 14, nodesep: spacing.nodeSep + 8, edgesep: 10, ranker: "tight-tree" });
   nodes.forEach((n) => {
     const { w, h } = nodeSize(n.data as GraphNodeData);
     g.setNode(n.id, { width: w, height: h });
@@ -182,8 +215,8 @@ function PersonaNode({ data, selected }: NodeProps) {
         opacity: 1,
       }}
     >
-      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
-      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      <Handle id="top-target" type="target" position={Position.Top} style={HANDLE_STYLE} />
+      <Handle id="bottom-source" type="source" position={Position.Bottom} style={HANDLE_STYLE} />
       <div className="text-[10px] uppercase tracking-widest opacity-60 mb-0.5">{d.node_type || "persona"}</div>
       {d.label}
     </div>
@@ -218,8 +251,8 @@ function KnowledgeNode({ data, selected }: NodeProps) {
         opacity: isAuxiliary ? 0.75 : 1,
       }}
     >
-      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
-      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      <Handle id="top-target" type="target" position={Position.Top} style={HANDLE_STYLE} />
+      <Handle id="bottom-source" type="source" position={Position.Bottom} style={HANDLE_STYLE} />
       <div className="flex items-center gap-1.5 mb-0.5">
         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} />
         <span className="text-[9px] uppercase tracking-wider truncate flex-1" style={{ color: `${color}DD` }}>
@@ -249,9 +282,64 @@ const nodeTypes: NodeTypes = {
   knowledgeNode: KnowledgeNode,
 };
 
+function DeletableEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  style,
+  markerEnd,
+  selected,
+  data,
+}: EdgeProps) {
+  const pathArgs = {
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  };
+  const [edgePath, labelX, labelY] = (data as any)?.viewMode === "graph"
+    ? getBezierPath({ ...pathArgs, curvature: 0.34 })
+    : getSmoothStepPath(pathArgs);
+  const onDelete = (data as any)?.onDelete;
+  const edgeIdForDelete = (data as any)?.original_edge_id || id;
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} interactionWidth={18} />
+      {selected && onDelete && (
+        <EdgeLabelRenderer>
+          <button
+            type="button"
+            aria-label="apagar-conexao"
+            data-testid={`delete-edge-${id}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete(edgeIdForDelete);
+            }}
+            className="nodrag nopan absolute flex h-7 w-7 items-center justify-center rounded-full border border-red-400/45 bg-red-500/95 text-[13px] text-white shadow-lg transition hover:bg-red-400"
+            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+            title="Apagar conexão"
+          >
+            ×
+          </button>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+}
+
+const edgeTypes: EdgeTypes = {
+  deletable: DeletableEdge,
+};
+
 // ── Main component ─────────────────────────────────────────────
 
-function GraphInner({ rawNodes, rawEdges, onNodeClick, mode, searchQuery, focusNodeId, onlyPrimaryTreeEdges = true }: GraphViewProps) {
+function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteEdge, mode, searchQuery, focusNodeId, showAllEdges = false, branchDistance = 48 }: GraphViewProps) {
   const { fitView } = useReactFlow();
   const visibleEdges = useMemo(
     () => filterEdgesForMode(rawEdges as Edge[], mode),
@@ -259,15 +347,12 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, mode, searchQuery, focusN
   );
 
   const treeGraph = useMemo(() => {
-    if (mode !== "semantic_tree") {
-      return { nodes: rawNodes as Node<GraphNodeData>[], edges: visibleEdges as Edge<GraphEdgeData>[] };
-    }
     return buildTreeFromGraph(
       rawNodes as Node<GraphNodeData>[],
       visibleEdges as Edge<GraphEdgeData>[],
-      onlyPrimaryTreeEdges,
+      !showAllEdges,
     );
-  }, [mode, rawNodes, visibleEdges, onlyPrimaryTreeEdges]);
+  }, [rawNodes, visibleEdges, showAllEdges]);
 
   const activeRawNodes = treeGraph.nodes as Node[];
   const activeRawEdges = treeGraph.edges as Edge[];
@@ -311,7 +396,7 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, mode, searchQuery, focusN
       const dimmed = focusNodeId && e.source !== focusNodeId && e.target !== focusNodeId && !inPath;
       return {
         ...e,
-        type: mode === "graph" ? "default" : "smoothstep",
+        type: "deletable",
         animated: inPath || (mode === "graph" && (data.primary || data.tier === "strong")),
         style: dimmed ? { ...style, strokeOpacity: 0.12 } : style,
         markerEnd: directional && data.tier !== "auxiliary" ? {
@@ -320,11 +405,10 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, mode, searchQuery, focusN
           width: 14,
           height: 14,
         } : undefined,
-        // Secondary edges stay visible in graph/layered mode and are dimmed
-        // when focus is active.
+        data: { ...data, onDelete: onDeleteEdge, viewMode: mode },
       };
     });
-  }, [activeRawEdges, focusNodeId, mode]);
+  }, [activeRawEdges, focusNodeId, mode, onDeleteEdge]);
 
   // Decorate nodes with search/focus state for fade-out.
   const decoratedNodes = useMemo<Node[]>(() => {
@@ -343,8 +427,8 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, mode, searchQuery, focusN
 
   const laid = useMemo<Node[]>(() => {
     const layoutFn = mode === "graph" ? applyLayoutGraphSeed : mode === "semantic_tree" ? applyLayoutTree : applyLayoutLayered;
-    return layoutFn(decoratedNodes, styledEdges);
-  }, [decoratedNodes, styledEdges, mode]);
+    return layoutFn(decoratedNodes, styledEdges, branchDistance);
+  }, [decoratedNodes, styledEdges, mode, branchDistance]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(laid);
   const [edges, setEdges, onEdgesChange] = useEdgesState(styledEdges);
@@ -381,14 +465,29 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, mode, searchQuery, focusN
     [onNodeClick],
   );
 
+  const handleConnect = useCallback(
+    (connection: Connection) => {
+      if (!connection.source || !connection.target || connection.source === connection.target) return;
+      onConnectNodes?.(connection.source, connection.target);
+    },
+    [onConnectNodes],
+  );
+
   return (
     <ReactFlow
       nodes={nodes}
       edges={edges}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
+      onConnect={handleConnect}
       onNodeClick={handleClick}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
+      connectionMode={ConnectionMode.Loose}
+      connectionRadius={28}
+      edgesFocusable
+      edgesUpdatable={false}
+      selectNodesOnDrag={false}
       fitView
       fitViewOptions={{ padding: 0.18 }}
       minZoom={0.08}

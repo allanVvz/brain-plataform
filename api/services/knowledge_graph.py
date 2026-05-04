@@ -685,9 +685,11 @@ def _bootstrap_derived_subnodes(
         })
         if faq:
             for topic in topic_nodes:
-                supabase_client.upsert_knowledge_edge(
-                    topic["id"], faq["id"], "answers_question", persona_id=persona_id,
-                )
+                topic_type = (topic.get("node_type") or "").lower()
+                if topic_type in {"product", "entity", "audience"}:
+                    supabase_client.upsert_knowledge_edge(
+                        topic["id"], faq["id"], "answers_question", persona_id=persona_id,
+                    )
             supabase_client.upsert_knowledge_edge(
                 mirror["id"], faq["id"], "contains", persona_id=persona_id,
             )

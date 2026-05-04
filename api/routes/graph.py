@@ -8,12 +8,65 @@ without re-deriving the ontology in JS.
 """
 
 from collections import deque
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from typing import Optional
 
 from services import supabase_client
 
 router = APIRouter(prefix="/knowledge", tags=["graph"])
+
+
+class GraphEdgeCreateBody(BaseModel):
+    source_node_id: str
+    target_node_id: str
+    relation_type: str = "manual"
+    persona_id: Optional[str] = None
+    weight: float = 1.0
+    metadata: dict = {}
+
+
+def _raw_graph_node_id(value: str) -> str:
+    raw = (value or "").strip()
+    if raw.startswith("gn:"):
+        return raw[3:]
+    return raw
+
+
+@router.post("/graph-edges")
+def create_graph_edge(body: GraphEdgeCreateBody):
+    source_id = _raw_graph_node_id(body.source_node_id)
+    target_id = _raw_graph_node_id(body.target_node_id)
+    if not source_id or not target_id:
+        raise HTTPException(400, "source_node_id and target_node_id are required")
+    if source_id == target_id:
+        raise HTTPException(400, "Self connections are not allowed")
+    try:
+        edge = supabase_client.upsert_knowledge_edge(
+            source_node_id=source_id,
+            target_node_id=target_id,
+            relation_type=body.relation_type or "manual",
+            persona_id=body.persona_id,
+            weight=body.weight,
+            metadata={**(body.metadata or {}), "created_from": "graph_ui"},
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Could not create graph edge: {exc}") from exc
+    if not edge:
+        raise HTTPException(400, "Graph edge was not created")
+    return {"ok": True, "edge": edge}
+
+
+@router.delete("/graph-edges/{edge_id}")
+def delete_graph_edge(edge_id: str):
+    raw_edge_id = edge_id[3:] if edge_id.startswith("ge:") else edge_id
+    try:
+        ok = supabase_client.delete_knowledge_edge(raw_edge_id)
+    except Exception as exc:
+        raise HTTPException(502, f"Could not delete graph edge: {exc}") from exc
+    if not ok:
+        raise HTTPException(404, "Graph edge not found")
+    return {"ok": True, "edge_id": raw_edge_id}
 
 # knowledge_items statuses → nodeClass
 _KI_STATUS: dict[str, str] = {

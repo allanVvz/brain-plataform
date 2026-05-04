@@ -261,7 +261,7 @@ def get_messages(lead_id: str, limit: int = 30) -> list:
                 .limit(limit)
             )
             if rows:
-                return rows
+                return _sort_messages_for_chat(rows)
     except Exception:
         pass
 
@@ -275,21 +275,75 @@ def get_messages(lead_id: str, limit: int = 30) -> list:
             .order("id", desc=False)
             .limit(limit)
         )
-        return rows
+        return _sort_messages_for_chat(rows)
 
     return []
 
 
-def get_recent_messages(hours: int = 24, limit: int = 500) -> list:
+def _sort_messages_for_chat(rows: list) -> list:
+    """Return chat messages in human-readable order.
+
+    Some WhatsApp/n8n flows persist the assistant reply row milliseconds
+    before the inbound row that triggered it. Those rows share the same
+    WhatsApp id, with the reply stored as `ai_reply.<wamid>`. For display and
+    API consumers, the inbound message must come before its generated reply.
+    """
+    from datetime import datetime
+
+    def parse_ts(value: str | None) -> float:
+        if not value:
+            return 0.0
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return 0.0
+
+    base_by_message_id = {
+        row.get("message_id"): row
+        for row in rows
+        if row.get("message_id") and not str(row.get("message_id")).startswith("ai_reply.")
+    }
+
+    def row_id(row: dict) -> int:
+        try:
+            return int(row.get("id") or 0)
+        except Exception:
+            return 0
+
+    def key(row: dict):
+        message_id = str(row.get("message_id") or "")
+        own_ts = parse_ts(row.get("created_at"))
+        own_id = row_id(row)
+        if message_id.startswith("ai_reply."):
+            base = base_by_message_id.get(message_id.removeprefix("ai_reply."))
+            if base:
+                return (parse_ts(base.get("created_at")), row_id(base), 1, own_ts, own_id)
+        return (own_ts, own_id, 0, own_ts, own_id)
+
+    return sorted(rows, key=key)
+
+
+def get_recent_messages(hours: int = 24, limit: int = 500, persona_id: Optional[str] = None) -> list:
     from datetime import datetime, timedelta
     since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    client = get_client()
     q = (
-        get_client().table("messages")
+        client.table("messages")
         .select("*")
         .gte("created_at", since)
         .order("created_at", desc=True)
         .limit(limit)
     )
+    if persona_id:
+        leads = _q(
+            client.table("leads")
+            .select("id")
+            .eq("persona_id", persona_id)
+        )
+        lead_refs = [lead.get("id") for lead in leads if lead.get("id") is not None]
+        if not lead_refs:
+            return []
+        q = q.in_("lead_ref", lead_refs)
     return _q(q)
 
 
@@ -548,6 +602,21 @@ def upsert_knowledge_edge(
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True
             return None
+        raise
+
+
+def delete_knowledge_edge(edge_id: str) -> bool:
+    """Delete a knowledge edge by id. Returns True when the delete request succeeds."""
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING or not edge_id:
+        return False
+    try:
+        _execute_with_retry(get_client().table("knowledge_edges").delete().eq("id", edge_id))
+        return True
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return False
         raise
 
 
@@ -1175,8 +1244,11 @@ def find_knowledge_rag_entry_by_slug(
     )
 
 
-def get_knowledge_item_counts() -> dict:
-    rows = _q(get_client().table("knowledge_items").select("status,content_type"))
+def get_knowledge_item_counts(persona_id: Optional[str] = None) -> dict:
+    q = get_client().table("knowledge_items").select("status,content_type")
+    if persona_id:
+        q = q.eq("persona_id", persona_id)
+    rows = _q(q)
     by_status: dict = {}
     by_type: dict = {}
     for r in rows:
@@ -1357,35 +1429,46 @@ def update_pipeline_status(service: str, data: dict) -> None:
     get_client().table("pipeline_status").update(data).eq("service", service).execute()
 
 
-def get_pipeline_metrics() -> dict:
+def get_pipeline_metrics(persona_id: Optional[str] = None) -> dict:
     from datetime import datetime, timedelta
     today = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+    client = get_client()
 
-    attention_rows = _q(
-        get_client().table("knowledge_items")
+    attention_q = (
+        client.table("knowledge_items")
         .select("status")
         .in_("status", ["pending", "needs_persona", "needs_category"])
     )
-    approved_rows = _q(
-        get_client().table("knowledge_items")
+    approved_q = (
+        client.table("knowledge_items")
         .select("id")
         .eq("status", "approved")
         .gte("updated_at", today)
     )
-    kb_rows = _q(
-        get_client().table("kb_entries")
+    kb_q = (
+        client.table("kb_entries")
         .select("id")
         .eq("status", "ATIVO")
     )
-    asset_rows = _q(
-        get_client().table("knowledge_items")
+    asset_q = (
+        client.table("knowledge_items")
         .select("id")
         .eq("content_type", "asset")
         .in_("status", ["pending", "needs_persona"])
     )
+    if persona_id:
+        attention_q = attention_q.eq("persona_id", persona_id)
+        approved_q = approved_q.eq("persona_id", persona_id)
+        kb_q = kb_q.eq("persona_id", persona_id)
+        asset_q = asset_q.eq("persona_id", persona_id)
+
+    attention_rows = _q(attention_q)
+    approved_rows = _q(approved_q)
+    kb_rows = _q(kb_q)
+    asset_rows = _q(asset_q)
     # Recent errors from agent_logs (works even if system_events is missing)
     error_rows = _q(
-        get_client().table("agent_logs")
+        client.table("agent_logs")
         .select("id")
         .like("action", "[ERROR]%")
         .gte("created_at", today)

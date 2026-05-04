@@ -175,8 +175,8 @@ def list_queue(
 
 
 @router.get("/queue/counts")
-def queue_counts():
-    counts = supabase_client.get_knowledge_item_counts()
+def queue_counts(persona_id: str = Query(None)):
+    counts = supabase_client.get_knowledge_item_counts(persona_id=persona_id)
     bs = counts.get("by_status", {})
     counts["by_status"]["attention"] = sum(
         bs.get(s, 0) for s in ATTENTION_STATUSES

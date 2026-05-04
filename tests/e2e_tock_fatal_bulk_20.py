@@ -218,6 +218,7 @@ def knowledge_specs(run_token: str) -> list[dict[str, Any]]:
             "price_tags": ["preco-unitario:59.90", "kit-5:249.00", "kit-10:459.00"],
             "colors": ["vermelho", "vinho", "bege", "nude", "off-white", "verde-claro", "azul-claro", "azul-marinho", "preto"],
             "status": "confirmado_por_catalogo_publico",
+            "audiences": [audience_revenda],
         },
         {
             "slug": f"kit-modal-2-urso-estampado-{run_token}",
@@ -225,6 +226,7 @@ def knowledge_specs(run_token: str) -> list[dict[str, Any]]:
             "price_tags": ["preco-unitario:59.90", "kit-5:249.00", "kit-10:459.00"],
             "colors": ["cores-do-catalogo-modal"],
             "status": "confirmado_por_catalogo_publico",
+            "audiences": [audience_revenda],
         },
         {
             "slug": f"cropped-de-modal-pendente-validacao-{run_token}",
@@ -232,6 +234,7 @@ def knowledge_specs(run_token: str) -> list[dict[str, Any]]:
             "price_tags": ["preco:pendente_validacao"],
             "colors": ["cores:pendente_validacao"],
             "status": "pendente_validacao_humana",
+            "audiences": [audience_final],
         },
         {
             "slug": f"regata-canelada-essencial-{run_token}",
@@ -239,6 +242,7 @@ def knowledge_specs(run_token: str) -> list[dict[str, Any]]:
             "price_tags": ["preco-unitario:49.90"],
             "colors": ["preto", "branco", "cinza"],
             "status": "confirmado_por_catalogo_publico",
+            "audiences": [audience_final],
         },
         {
             "slug": f"saia-midi-elegance-{run_token}",
@@ -246,6 +250,7 @@ def knowledge_specs(run_token: str) -> list[dict[str, Any]]:
             "price_tags": ["preco-unitario:89.90"],
             "colors": ["preto", "bordo", "verde-militar"],
             "status": "confirmado_por_catalogo_publico",
+            "audiences": [audience_revenda, audience_final],
         },
     ]
 
@@ -336,7 +341,7 @@ Resposta: Cores extraidas do catalogo devem ser revisadas por validacao humana a
                     "slug": product["slug"],
                     "brand": brand_slug,
                     "campaign": campaign_slug,
-                    "audiences": [audience_revenda, audience_final],
+                    "audiences": product["audiences"],
                     "entities": [entity_slug],
                     "source_url": CATALOG_URL,
                     "price_tags": product["price_tags"],
@@ -389,7 +394,11 @@ Resposta: Cores extraidas do catalogo devem ser revisadas por validacao humana a
                     "slug": slug,
                     "campaign": campaign_slug,
                     "audience": audience,
-                    "products": [p["slug"] for p in products],
+                    "products": [
+                        p["slug"]
+                        for p in products
+                        if audience is None or audience in p["audiences"]
+                    ],
                     "source_url": CATALOG_URL,
                 },
             }
@@ -535,9 +544,34 @@ def validate_graph(report: dict, run_token: str) -> dict:
     token_node_ids = {n.get("id") for n in token_nodes}
     token_edges = [e for e in edges if e.get("source") in token_node_ids or e.get("target") in token_node_ids]
     expect(report, len(token_edges) >= 20, "graph has semantic edges for new subtree", {"token_edges": len(token_edges)})
+    product_ids = {
+        node.get("id")
+        for node in by_type.get("product", [])
+        if node.get("id")
+    }
+    audience_nodes = by_type.get("audience", [])
+    products_per_audience: dict[str, int] = {}
+    for audience in audience_nodes:
+        audience_id = audience.get("id")
+        audience_slug = (audience.get("data") or {}).get("slug") or audience_id
+        linked_products = set()
+        for edge in token_edges:
+            source, target = edge.get("source"), edge.get("target")
+            if source == audience_id and target in product_ids:
+                linked_products.add(target)
+            if target == audience_id and source in product_ids:
+                linked_products.add(source)
+        products_per_audience[str(audience_slug)] = len(linked_products)
+    expect(
+        report,
+        len(products_per_audience) >= 2 and all(count >= 2 for count in products_per_audience.values()),
+        "graph links at least 2 products directly to each audience",
+        products_per_audience,
+    )
     report["graph_summary"] = {
         "token_nodes": len(token_nodes),
         "token_edges": len(token_edges),
+        "products_per_audience": products_per_audience,
         "by_type": {k: len(v) for k, v in by_type.items()},
     }
     return graph
@@ -582,6 +616,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-token", default=os.environ.get("RUN_TOKEN") or datetime.now(timezone.utc).strftime("e2ebulk%Y%m%d%H%M%S"))
     parser.add_argument("--model", default=os.environ.get("LLM_MODEL", "gpt-4o-mini"))
+    parser.add_argument("--skip-llm", action="store_true", help="Use deterministic 20+ entry fixture without requiring Sofia to return a structured plan")
     parser.add_argument("--skip-browser", action="store_true")
     parser.add_argument("--screenshot-only", action="store_true", help="Only validate graph and capture browser evidence for an existing run token")
     parser.add_argument("--headed", action="store_true")
@@ -609,8 +644,7 @@ def main() -> int:
             pass
 
     try:
-        print(f"
-== E2E Tock Fatal Bulk 20 ({run_token}) ==")
+        print(f"\n== E2E Tock Fatal Bulk 20 ({run_token}) ==")
         health = http_json("GET", "/health")
         expect(report, health.get("status") == "ok", "backend health ok")
         persona = resolve_persona(report)
@@ -620,30 +654,44 @@ def main() -> int:
         expect(report, len([s for s in specs if s["content_type"] == "audience"]) == 2, "plan includes 2 audiences")
         expect(report, len([s for s in specs if s["content_type"] == "copy"]) == 5, "plan includes 5 copies")
         expect(report, len([s for s in specs if s["content_type"] == "faq"]) == 5, "plan includes 5 faqs")
+        product_specs = [s for s in specs if s["content_type"] == "product"]
+        audience_counts: dict[str, int] = {}
+        for spec in product_specs:
+            for audience in spec.get("metadata", {}).get("audiences", []):
+                audience_counts[audience] = audience_counts.get(audience, 0) + 1
+        expect(
+            report,
+            len(audience_counts) >= 2 and all(count >= 2 for count in audience_counts.values()),
+            "plan distributes at least 2 products per audience",
+            audience_counts,
+        )
 
         if not args.screenshot_only:
             # Although we have a larger deterministic spec, we still run the LLM
             # to validate its ability to generate a larger plan, as requested.
-            run_llm_planning(report, run_token, model=args.model)
+            if args.skip_llm:
+                report["llm"] = {"skipped": True, "reason": "--skip-llm"}
+            else:
+                run_llm_planning(report, run_token, model=args.model)
             
             created = create_and_promote(report, persona["id"], specs)
             report["created_count"] = len(created)
         else:
-            report["created_count"] = 0
+            if not report.get("created_count"):
+                report["created_count"] = len(report.get("planned_entries") or specs)
             report["screenshot_only"] = True
         validate_graph(report, run_token)
         if not args.skip_browser:
             campaign_slug = f"tock-fatal-atacado-catalogo-modal-{run_token}"
             capture_browser_evidence(report, run_token, campaign_slug, headless=not args.headed)
         report["ok"] = True
-        print(f"
-PASS e2e Tock Fatal Bulk 20. Report: {report_path}")
+        report.pop("error", None)
+        print(f"\nPASS e2e Tock Fatal Bulk 20. Report: {report_path}")
         return 0
     except Exception as exc:
         report["ok"] = False
         report["error"] = str(exc)
-        print(f"
-FAIL {exc}")
+        print(f"\nFAIL {exc}")
         return 1
     finally:
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

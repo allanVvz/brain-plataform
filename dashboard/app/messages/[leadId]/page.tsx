@@ -26,6 +26,43 @@ function isOutbound(kind: SenderKind): boolean {
   return kind === "ai" || kind === "human";
 }
 
+function sortMessages(msgs: any[]): any[] {
+  const byMessageId = new Map<string, any>();
+  for (const msg of msgs) {
+    const messageId = String(msg.message_id || "");
+    if (messageId && !messageId.startsWith("ai_reply.")) {
+      byMessageId.set(messageId, msg);
+    }
+  }
+
+  return [...msgs].sort((a, b) => {
+    const key = (msg: any) => {
+      const messageId = String(msg.message_id || "");
+      const ts = new Date(msg.created_at || 0).getTime() || 0;
+      const id = Number(msg.id || 0);
+      if (messageId.startsWith("ai_reply.")) {
+        const base = byMessageId.get(messageId.slice("ai_reply.".length));
+        if (base) {
+          return [
+            new Date(base.created_at || 0).getTime() || 0,
+            Number(base.id || 0),
+            1,
+            ts,
+            id,
+          ];
+        }
+      }
+      return [ts, id, 0, ts, id];
+    };
+    const ka = key(a);
+    const kb = key(b);
+    for (let i = 0; i < ka.length; i++) {
+      if (ka[i] !== kb[i]) return ka[i] - kb[i];
+    }
+    return 0;
+  });
+}
+
 function extractMediaUrl(metadata: any): string | null {
   if (!metadata) return null;
   if (typeof metadata === "string") {
@@ -53,7 +90,7 @@ export default function MessageTimelinePage({ params }: { params: Promise<{ lead
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const refresh = () => {
-    api.messages(leadId).then(setMessages).catch(console.error);
+    api.messages(leadId).then((rows) => setMessages(sortMessages(rows))).catch(console.error);
     api.agentLogs(leadId, 20).then(setLogs).catch(console.error);
     api.lead(leadId).then(setLead).catch(() => setLead(null));
   };

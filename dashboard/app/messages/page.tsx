@@ -164,9 +164,36 @@ function attentionRowStyle(state: AttentionState, active: boolean): React.CSSPro
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function sortMessages(msgs: Message[]): Message[] {
+  const byMessageId = new Map<string, Message>();
+  for (const msg of msgs) {
+    if (msg.message_id && !msg.message_id.startsWith("ai_reply.")) {
+      byMessageId.set(msg.message_id, msg);
+    }
+  }
+
   return [...msgs].sort((a, b) => {
-    const dt = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-    return dt !== 0 ? dt : a.id - b.id;
+    const key = (msg: Message) => {
+      const ts = new Date(msg.created_at).getTime() || 0;
+      if (msg.message_id?.startsWith("ai_reply.")) {
+        const base = byMessageId.get(msg.message_id.slice("ai_reply.".length));
+        if (base) {
+          return [
+            new Date(base.created_at).getTime() || 0,
+            base.id || 0,
+            1,
+            ts,
+            msg.id || 0,
+          ];
+        }
+      }
+      return [ts, msg.id || 0, 0, ts, msg.id || 0];
+    };
+    const ka = key(a);
+    const kb = key(b);
+    for (let i = 0; i < ka.length; i++) {
+      if (ka[i] !== kb[i]) return ka[i] - kb[i];
+    }
+    return 0;
   });
 }
 

@@ -171,6 +171,9 @@ def get_messages(lead_id: str, limit: int = Query(200, le=500)):
 
 
 @router.get("")
-def recent_messages(hours: int = Query(24, le=168)):
+def recent_messages(
+    hours: int = Query(24, le=168),
+    persona_id: str | None = Query(None),
+):
     """Returns all recent messages without status filtering."""
-    return supabase_client.get_recent_messages(hours=hours, limit=500)
+    return supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=persona_id)
