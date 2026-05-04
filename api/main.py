@@ -1,14 +1,20 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from backend.utils.env import get_backend_env, validate_backend_env
 
+try:
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+except ImportError as exc:
+    raise RuntimeError(
+        "FastAPI nao instalado. Execute 'pip install -r requirements.txt' dentro de /api."
+    ) from exc
+
 load_dotenv()
 
-from api.routes import health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, marketing
+from routes import health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, marketing
 from workers.flow_validator_worker import FlowValidatorWorker
 from workers.n8n_mirror_worker import N8nMirrorWorker
 from workers.health_check_worker import HealthCheckWorker

@@ -11,57 +11,43 @@ build/
 
 # Environment
 .env
+.env.local
+api/.env
+dashboard/.env
+dashboard/.env.local
 secrets/
 *.pem
 *.key
 
 # Node / Next.js
+node_modules/
+.next/
+out/
 dashboard/node_modules/
 dashboard/.next/
 dashboard/out/
-dashboard/.env.local
-dashboard/.env
 *.tsbuildinfo
 
-# OS
+# OS / Editors
 .DS_Store
 Thumbs.db
-
-# Editor
 .vscode/
 .idea/
-
-# Validator temp files
-_validator_script_*.json
-_validator_output_*.json
 
 # Logs
 *.log
 .runtime/
 
-# E2E WhatsApp Web — sessão persistente (NUNCA commitar) e evidências locais
+# Local browser/e2e artifacts
 .test-browser-profile/
 test-artifacts/
 
-
-# =========================
-# TESTES
-# =========================
-tests/
-
-# =========================
-# CONTEXTO / MEMÓRIA DE IA
-# =========================
-memory.md
+# AI context / generated data
 GEMINI.md
 CLAUDE.md
 GPT.md
 *.prompt
 *.context
-
-# =========================
-# DADOS GERADOS / IA
-# =========================
 ctx*.json
 graph_*.json
 dashboard/graph_*.json
@@ -70,9 +56,7 @@ dashboard/leads.json
 dashboard/msgs*.json
 dashboard/modes.json
 
-# =========================
-# ARTEFATOS DE AGENTES / LLM
-# =========================
+# Agent output artifacts
 *.chat
 *.conversation
 *.responses
