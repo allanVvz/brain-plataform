@@ -1,8 +1,18 @@
 // Browser requests go through the Next.js rewrite proxy.
 export const BASE = "/api-brain";
 export const API_URL = BASE;
+const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_ENV_ERROR = "Backend nao configurado. Defina NEXT_PUBLIC_API_URL na Vercel.";
+
+function assertApiConfigured() {
+  // Keep local DX intact; enforce explicit config in production runtime.
+  if (process.env.NODE_ENV === "production" && !PUBLIC_API_URL) {
+    throw new Error(API_ENV_ERROR);
+  }
+}
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
+  assertApiConfigured();
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...opts,
@@ -22,6 +32,7 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 async function reqForm<T>(path: string, form: FormData): Promise<T> {
+  assertApiConfigured();
   const res = await fetch(`${BASE}${path}`, { method: "POST", body: form });
   if (!res.ok) throw new Error(`${res.status} ${path}`);
   return res.json();
