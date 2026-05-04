@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Bot, User, Upload, Send, CheckCircle, Circle, Loader2, Save } from "lucide-react";
-import { BASE } from "@/lib/api";
+import { api } from "@/lib/api";
 
 const MODELS = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5 — Rápido" },
@@ -86,12 +86,7 @@ export default function IntakePage() {
   async function startSession() {
     setLoading(true);
     try {
-      const res = await fetch(`${BASE}/kb-intake/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model }),
-      });
-      const data = await res.json();
+      const data = await api.kbIntakeStart(model);
       setSessionId(data.session_id);
       setMessages([{ role: "assistant", content: data.welcome }]);
       setStage("chatting");
@@ -113,25 +108,11 @@ export default function IntakePage() {
     ]);
 
     try {
-      let data: any;
+      const data = await api.kbIntakeMessage(sessionId!, userMsg, file || undefined);
       if (file) {
-        const form = new FormData();
-        form.append("session_id", sessionId);
-        form.append("message", userMsg);
-        form.append("file", file);
-        const res = await fetch(`${BASE}/kb-intake/upload`, { method: "POST", body: form });
-        data = await res.json();
         setFile(null);
         if (fileRef.current) fileRef.current.value = "";
-      } else {
-        const res = await fetch(`${BASE}/kb-intake/message`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, message: userMsg }),
-        });
-        data = await res.json();
       }
-
       setMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
       setStage(data.stage);
       setCls(data.classification);
@@ -144,12 +125,7 @@ export default function IntakePage() {
     if (!sessionId) return;
     setLoading(true);
     try {
-      const res = await fetch(`${BASE}/kb-intake/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, content: contentText }),
-      });
-      const data = await res.json();
+      const data = await api.kbIntakeSave(sessionId, contentText);
       setSaveResult(data);
       setStage("done");
       setMessages((prev) => [

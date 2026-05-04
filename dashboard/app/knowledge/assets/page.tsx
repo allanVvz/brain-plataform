@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, BASE } from "@/lib/api";
+import { api, API_URL } from "@/lib/api";
 
 const IMAGE_EXTS = new Set(["png","jpg","jpeg","svg","gif","webp"]);
 const VIDEO_EXTS = new Set(["mp4","mov","webm"]);
@@ -44,7 +44,8 @@ export default function AssetsPage() {
         api.knowledgeQueue("all" as any, filterPersona || undefined, "asset"),
         api.personas(),
       ]);
-      setItems(data); setPersonas(personasData);
+      setItems(data);
+      setPersonas(personasData);
     } finally { setLoading(false); }
   }
 
@@ -124,8 +125,8 @@ export default function AssetsPage() {
         {filtered.map((item) => {
           const mt = mediaType(item);
           const ft = (item.file_type || "").toLowerCase();
-          const fileUrl = item.file_path
-            ? `${BASE}/knowledge/file?path=${encodeURIComponent(item.file_path)}`
+          const fileUrl = item.file_path && API_URL
+            ? `${API_URL}/knowledge/file?path=${encodeURIComponent(item.file_path)}`
             : null;
           const statusBadge = STATUS_BADGE[item.status] || "border-white/10 text-obs-subtle";
           const isPending = ["pending","needs_persona","needs_category"].includes(item.status);

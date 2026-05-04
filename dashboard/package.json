@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:check": "npm run env:check && next build",
+    "env:check": "node scripts/check-env.mjs",
     "start": "next start"
   },
   "dependencies": {

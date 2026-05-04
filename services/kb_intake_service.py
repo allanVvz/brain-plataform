@@ -10,7 +10,7 @@ import subprocess
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from services import supabase_client
 from services import knowledge_rag_intake
@@ -362,6 +362,164 @@ def _get_session(session_id: str) -> Optional[dict]:
     return _sessions.get(session_id) or _load_session(session_id)
 
 
+def _default_mission_state(initial_context: str) -> dict[str, Any]:
+    url = _source_url_from_context(initial_context or "")
+    persona = "tock-fatal"
+    obj = "Criar inteligencia de marketing em grafo com evidencias reais."
+    blocks = ["briefing", "audience", "product", "copy", "faq"]
+    if initial_context:
+        m = re.search(r"persona_slug:\s*([a-z0-9_-]+)", initial_context, re.I)
+        if m:
+            persona = m.group(1).strip().lower()
+        m = re.search(r"objetivo:\s*(.+)", initial_context, re.I)
+        if m:
+            obj = m.group(1).strip()
+        found_blocks: list[str] = []
+        for line in initial_context.splitlines():
+            s = line.strip().lower()
+            if not s.startswith("- "):
+                continue
+            token = s[2:].split(":", 1)[0].strip()
+            token = _CONTENT_ALIASES.get(token, token)
+            if token in {"brand", "briefing", "campaign", "audience", "product", "entity", "copy", "faq", "rule", "tone", "asset"}:
+                found_blocks.append(token)
+        if found_blocks:
+            blocks = sorted(set(found_blocks), key=found_blocks.index)
+    return {
+        "persona": persona,
+        "objective": obj,
+        "source": {"type": "website", "url": url},
+        "knowledge_blocks": blocks,
+        "requested_outputs": {"models": []},
+        "format": "default_intelligence_graph",
+        "status": "collecting",
+        "evidence_items": [],
+        "last_patch": {},
+    }
+
+
+def _persona_to_slug(raw: str) -> str:
+    val = _fold(raw).strip()
+    return _PERSONA_ALIASES.get(val, val.replace(" ", "-"))
+
+
+def _upsert_model(state: dict, name: str) -> dict:
+    models = state.setdefault("requested_outputs", {}).setdefault("models", [])
+    for m in models:
+        if _fold(m.get("name", "")) == _fold(name):
+            return m
+    default_qty = state.setdefault("requested_outputs", {}).get("default_products_requested")
+    row = {"name": name, "audience": None, "products_requested": default_qty, "fields": []}
+    models.append(row)
+    return row
+
+
+def _merge_user_intent(state: dict[str, Any], message: str) -> dict[str, Any]:
+    text = message.strip()
+    low = _fold(text)
+    patch: dict[str, Any] = {}
+
+    m = re.search(r"mudar para\s+([a-z0-9 _-]+?)\s+no site\s+([a-z0-9._/-]+)", low, re.I)
+    if m:
+        persona = m.group(1).strip()
+        site = m.group(2).strip()
+        if not site.startswith("http"):
+            site = f"https://{site}"
+        state["persona"] = _persona_to_slug(persona)
+        state["source"] = {"type": "website", "url": site}
+        state["objective"] = f"Criar conhecimento de marketing para {persona.title()} a partir de {site}, mantendo os blocos selecionados."
+        patch.update({"persona": state["persona"], "source.url": site, "objective": state["objective"]})
+
+    if "os mesmos" in low:
+        patch["knowledge_blocks"] = "preserve_existing"
+
+    m2 = re.search(r"(\d+)\s+produtos?\s+de\s+cada", low)
+    if m2:
+        qty = int(m2.group(1))
+        state.setdefault("requested_outputs", {})["default_products_requested"] = qty
+        for model in state.setdefault("requested_outputs", {}).setdefault("models", []):
+            model["products_requested"] = qty
+            model["fields"] = ["price", "angle", "faq"]
+        patch["requested_outputs.products_requested_each"] = qty
+
+    for name in ("juliet", "radar ev", "radar"):
+        if name in low:
+            canonical = "Radar Ev" if "radar" in name else "Juliet"
+            _upsert_model(state, canonical)
+
+    if "street" in low and "juliet" in low:
+        row = _upsert_model(state, "Juliet")
+        row["audience"] = "Street"
+        patch["requested_outputs.models.juliet.audience"] = "Street"
+    if ("esportes" in low or "esporte" in low) and "radar" in low:
+        row = _upsert_model(state, "Radar Ev")
+        row["audience"] = "Esportes"
+        patch["requested_outputs.models.radar_ev.audience"] = "Esportes"
+
+    if "faq" in low and "angle" in low:
+        for model in state.setdefault("requested_outputs", {}).setdefault("models", []):
+            model["fields"] = ["price", "angle", "faq"]
+
+    state["last_patch"] = patch
+    return patch
+
+
+def _mission_summary(state: dict[str, Any]) -> str:
+    blocks = ", ".join(state.get("knowledge_blocks") or [])
+    models = state.get("requested_outputs", {}).get("models", [])
+    model_line = "; ".join(
+        f"{m.get('name')} -> {m.get('audience') or 'sem publico'}"
+        for m in models
+    ) or "sem modelos"
+    source = ((state.get("source") or {}).get("url") or "sem fonte")
+    persona = state.get("persona") or "sem persona"
+    return (
+        "Atualizei a missao:\n"
+        f"Persona: {persona}\n"
+        f"Fonte: {source}\n"
+        f"Blocos mantidos: {blocks}\n"
+        f"Modelos: {model_line}\n"
+        "Agora vou coletar dados reais do site. Nao vou inventar precos ou FAQs."
+    )
+
+
+def _extract_price(product: dict[str, Any]) -> str:
+    prices = product.get("prices") or []
+    if prices:
+        return str(prices[0])
+    if product.get("price"):
+        return str(product["price"])
+    return ""
+
+
+def _build_evidence_items(state: dict[str, Any], capture: dict[str, Any]) -> list[dict[str, Any]]:
+    products = capture.get("product_candidates") or []
+    models = state.get("requested_outputs", {}).get("models", [])
+    out: list[dict[str, Any]] = []
+    ts = datetime.now(timezone.utc).isoformat()
+    for req in models:
+        model_name = req.get("name") or ""
+        audience = req.get("audience") or ""
+        matched = [p for p in products if model_name and _fold(model_name) in _fold(str(p.get("title") or ""))]
+        limit = int(req.get("products_requested") or 0) or 10
+        for p in matched[:limit]:
+            out.append({
+                "name": p.get("title") or model_name,
+                "url": capture.get("final_url") or capture.get("url") or "",
+                "price": _extract_price(p),
+                "model": model_name,
+                "audience": audience,
+                "angle": "pendente_validacao",
+                "faq": [],
+                "evidence": {
+                    "source_url": capture.get("url") or "",
+                    "captured_at": ts,
+                    "confidence": "high" if (capture.get("confidence") or 0) >= 0.72 else "medium" if (capture.get("confidence") or 0) >= 0.45 else "low",
+                },
+            })
+    return out
+
+
 def create_session(model: str = "gpt-4o-mini", initial_context: str = "", agent_key: str = "sofia") -> dict:
     sid = str(uuid.uuid4())
     agent = get_agent_profile(agent_key)
@@ -375,6 +533,7 @@ def create_session(model: str = "gpt-4o-mini", initial_context: str = "", agent_
         "stage": "chatting",
         "messages": [],
         "context": (initial_context or "").strip(),
+        "mission_state": _default_mission_state(initial_context or ""),
         "crawler_captures": [],
         "classification": {
             "persona_slug": None,
@@ -464,7 +623,12 @@ def _crawler_context(captures: list[dict]) -> str:
 def chat(session_id: str, user_message: str, file_info: Optional[dict] = None) -> dict:
     session = _get_session(session_id)
     if not session:
-        return {"error": "Session not found"}
+        return {
+            "ok": False,
+            "error_code": "VALIDATION_ERROR",
+            "message": "Sessao nao encontrada.",
+            "state": None,
+        }
 
     cls = session["classification"]
 
@@ -479,10 +643,12 @@ def chat(session_id: str, user_message: str, file_info: Optional[dict] = None) -
         user_content = user_message
 
     session["messages"].append({"role": "user", "content": user_content})
+    mission_state = session.setdefault("mission_state", _default_mission_state(session.get("context") or ""))
+    patch = _merge_user_intent(mission_state, user_content)
 
     crawler_result = None
     if _should_crawl(user_content, session):
-        source_url = _source_url_from_context(session.get("context") or "")
+        source_url = (mission_state.get("source") or {}).get("url") or _source_url_from_context(session.get("context") or "")
         if source_url:
             try:
                 crawler_result = crawl_catalog_url(source_url)
@@ -498,6 +664,7 @@ def chat(session_id: str, user_message: str, file_info: Optional[dict] = None) -
                     ],
                 }
             attach_crawler_capture(session_id, crawler_result)
+            mission_state["evidence_items"] = _build_evidence_items(mission_state, crawler_result)
 
     state_ctx = f"""
 Estado atual:
@@ -527,11 +694,21 @@ Estado atual:
     except ModelRouterError as exc:
         session["messages"].pop()  # roll back the user message on failure
         _save_session(session)
-        return {"error": f"LLM indisponível: {exc}"}
+        return {
+            "ok": False,
+            "error_code": "INTERNAL_ERROR",
+            "message": f"LLM indisponivel: {exc}",
+            "state": mission_state,
+        }
     except Exception as exc:
         session["messages"].pop()
         _save_session(session)
-        return {"error": f"Erro inesperado no LLM: {exc}"}
+        return {
+            "ok": False,
+            "error_code": "INTERNAL_ERROR",
+            "message": f"Erro inesperado no LLM: {exc}",
+            "state": mission_state,
+        }
 
     cls_data = _extract_cls(raw)
     visible = _strip_cls(raw)
@@ -546,14 +723,43 @@ Estado atual:
 
     session["messages"].append({"role": "assistant", "content": raw})
     _apply_save_inference(session)
+
+    missing_targets: list[str] = []
+    for model in mission_state.get("requested_outputs", {}).get("models", []):
+        req = int(model.get("products_requested") or 0)
+        if req <= 0:
+            continue
+        found = len([
+            e for e in mission_state.get("evidence_items") or []
+            if _fold(str(e.get("model") or "")) == _fold(str(model.get("name") or ""))
+        ])
+        if found < req:
+            missing_targets.append(f"{model.get('name')}: {found}/{req}")
+    if missing_targets:
+        mission_state["status"] = "partial_collection"
+    elif mission_state.get("evidence_items"):
+        mission_state["status"] = "collected"
+
+    prefix = _mission_summary(mission_state) if patch else ""
+    if missing_targets:
+        prefix += (
+            ("\n\n" if prefix else "")
+            + "Coleta parcial: " + ", ".join(missing_targets)
+            + ". Posso complementar manualmente ou buscar outra fonte."
+        )
+    visible_out = f"{prefix}\n\n{visible}".strip() if prefix else visible
+
     _save_session(session)
 
     return {
-        "message": visible,
+        "ok": True,
+        "message": visible_out,
         "stage": session["stage"],
         "classification": {k: v for k, v in cls.items() if k != "file_bytes"},
         "crawler": crawler_result,
         "proposed_entries": plan_entries,
+        "state": mission_state,
+        "patch": patch,
     }
 
 

@@ -21,6 +21,7 @@ dashboard/.next/
 dashboard/out/
 dashboard/.env.local
 dashboard/.env
+*.tsbuildinfo
 
 # OS
 .DS_Store
@@ -41,3 +42,38 @@ _validator_output_*.json
 # E2E WhatsApp Web — sessão persistente (NUNCA commitar) e evidências locais
 .test-browser-profile/
 test-artifacts/
+
+
+# =========================
+# TESTES
+# =========================
+tests/
+
+# =========================
+# CONTEXTO / MEMÓRIA DE IA
+# =========================
+memory.md
+GEMINI.md
+CLAUDE.md
+GPT.md
+*.prompt
+*.context
+
+# =========================
+# DADOS GERADOS / IA
+# =========================
+ctx*.json
+graph_*.json
+dashboard/graph_*.json
+dashboard/ctx*.json
+dashboard/leads.json
+dashboard/msgs*.json
+dashboard/modes.json
+
+# =========================
+# ARTEFATOS DE AGENTES / LLM
+# =========================
+*.chat
+*.conversation
+*.responses
+*.output

@@ -58,10 +58,14 @@ def start_session(body: StartBody):
 def send_message(body: MessageBody):
     try:
         result = chat(body.session_id, body.message)
-    except Exception as exc:
-        raise HTTPException(500, f"Erro interno: {exc}") from exc
-    if "error" in result:
-        raise HTTPException(400, result["error"])
+    except Exception:
+        session = get_session(body.session_id)
+        return {
+            "ok": False,
+            "error_code": "INTERNAL_ERROR",
+            "message": "Nao consegui processar sua mensagem agora. Mantive sua configuracao e voce pode tentar novamente.",
+            "state": (session or {}).get("mission_state"),
+        }
     return result
 
 
@@ -119,10 +123,14 @@ async def upload_file(
     }
     try:
         result = chat(session_id, message, file_info=file_info)
-    except Exception as exc:
-        raise HTTPException(500, f"Erro interno: {exc}") from exc
-    if "error" in result:
-        raise HTTPException(400, result["error"])
+    except Exception:
+        session = get_session(session_id)
+        return {
+            "ok": False,
+            "error_code": "INTERNAL_ERROR",
+            "message": "Nao consegui processar o arquivo agora. Mantive sua configuracao e voce pode tentar novamente.",
+            "state": (session or {}).get("mission_state"),
+        }
     if file_url:
         result["file_url"] = file_url
         result["storage_path"] = storage_path
@@ -140,6 +148,7 @@ def get_session_info(session_id: str):
         "model": session["model"],
         "classification": {k: v for k, v in session["classification"].items() if k != "file_bytes"},
         "message_count": len(session["messages"]),
+        "state": session.get("mission_state"),
     }
 
 

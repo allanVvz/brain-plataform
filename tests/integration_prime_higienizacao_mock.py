@@ -320,6 +320,14 @@ class _FakeStore:
         row = self.kb_entries.get(entry_id)
         return deepcopy(row) if row else None
 
+    def get_kb_entries_by_ids(self, ids: list) -> dict:
+        wanted = {str(i) for i in ids or []}
+        return {
+            str(entry_id): deepcopy(row)
+            for entry_id, row in self.kb_entries.items()
+            if str(entry_id) in wanted
+        }
+
     def node_by_slug(self, slug: str, node_type: Optional[str] = None, persona_id: Optional[str] = None) -> Optional[dict]:
         for node in self.nodes.values():
             if node.get("slug") != slug:
@@ -351,6 +359,7 @@ def _install_fake_supabase(store: _FakeStore) -> None:
     sb.list_all_knowledge_graph = store.list_all_knowledge_graph  # type: ignore[attr-defined]
     sb.get_kb_entries = store.get_kb_entries  # type: ignore[attr-defined]
     sb.get_kb_entry = store.get_kb_entry  # type: ignore[attr-defined]
+    sb.get_kb_entries_by_ids = store.get_kb_entries_by_ids  # type: ignore[attr-defined]
 
 
 def _item_frontmatter(item: dict) -> dict:

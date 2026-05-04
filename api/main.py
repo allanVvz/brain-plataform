@@ -1,9 +1,10 @@
 import asyncio
-import os
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from backend.utils.env import get_backend_env, validate_backend_env
 
 load_dotenv()
 
@@ -13,9 +14,19 @@ from workers.n8n_mirror_worker import N8nMirrorWorker
 from workers.health_check_worker import HealthCheckWorker
 from workers.kb_sync_worker import KbSyncWorker
 
+logger = logging.getLogger("ai-brain.startup")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    missing = validate_backend_env()
+    if missing:
+        msg = "Missing required backend envs: " + ", ".join(missing)
+        logger.error(msg)
+        raise RuntimeError(msg)
+    logger.info("Backend env validation OK.")
     workers = [
         FlowValidatorWorker(),
         N8nMirrorWorker(),
@@ -30,14 +41,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Brain", version="1.0.0", lifespan=lifespan)
 
-allowed_origins = [
-    origin.strip()
-    for origin in os.environ.get(
-        "ALLOWED_ORIGINS",
-        "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000",
-    ).split(",")
-    if origin.strip()
-]
+env = get_backend_env()
+allowed_origins = env["allowed_origins"]
+logger.info("CORS origins: %s", ", ".join(allowed_origins))
 
 app.add_middleware(
     CORSMiddleware,

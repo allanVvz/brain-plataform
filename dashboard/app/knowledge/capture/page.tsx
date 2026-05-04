@@ -112,6 +112,17 @@ interface CapturePlan {
   confirmed: boolean;
 }
 
+interface MissionState {
+  persona?: string;
+  objective?: string;
+  source?: { type?: string; url?: string };
+  knowledge_blocks?: string[];
+  requested_outputs?: { models?: Array<{ name?: string; audience?: string; products_requested?: number; fields?: string[] }> };
+  format?: string;
+  status?: string;
+  evidence_items?: Array<Record<string, any>>;
+}
+
 const DEFAULT_VARIATION_COUNTS = KNOWLEDGE_BLOCKS.reduce<Record<string, number>>((acc, block) => {
   acc[block.id] = block.id === "faq" ? 2 : 1;
   return acc;
@@ -394,6 +405,9 @@ function ChatPanel({
   const [loading, setLoading] = useState(false);
   const [contentText, setContentText] = useState("");
   const [showContent, setShowContent] = useState(false);
+  const [friendlyError, setFriendlyError] = useState<string | null>(null);
+  const [lastAttempt, setLastAttempt] = useState<string>("");
+  const [missionState, setMissionState] = useState<MissionState | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -408,6 +422,7 @@ function ChatPanel({
       setSessionId(d.session_id);
       setMessages([{ role: "assistant", content: d.welcome }]);
       setStage("chatting");
+      setFriendlyError(null);
     } catch (e: any) {
       setMessages((p) => [...p, { role: "system", content: `Erro: ${e?.message || "falha desconhecida"}` }]);
     } finally {
@@ -419,7 +434,9 @@ function ChatPanel({
     if (!sessionId || (!input.trim() && !file)) return;
     setLoading(true);
     const userMsg = input.trim();
+    setLastAttempt(userMsg);
     setInput("");
+    setFriendlyError(null);
     setMessages((p) => [...p, { role: "user", content: file ? `[arquivo] ${file.name}${userMsg ? `\n${userMsg}` : ""}` : userMsg }]);
     try {
       let d: any;
@@ -434,11 +451,27 @@ function ChatPanel({
       } else {
         d = await api.kbIntakeMessage(sessionId, userMsg);
       }
+      if (d?.state) {
+        setMissionState(d.state);
+        setPlan({
+          ...plan,
+          personaSlug: d.state.persona || plan.personaSlug,
+          objective: d.state.objective || plan.objective,
+          sourceUrl: d.state?.source?.url || plan.sourceUrl,
+          selectedBlocks: (d.state.knowledge_blocks && d.state.knowledge_blocks.length > 0) ? d.state.knowledge_blocks : plan.selectedBlocks,
+        });
+      }
+      if (d?.ok === false) {
+        setFriendlyError(d?.message || "Nao consegui processar agora. Tente novamente.");
+        setMessages((p) => [...p, { role: "system", content: `Erro: ${d?.message || "falha ao enviar"}` }]);
+        return;
+      }
       if (d.crawler) onCrawlerRun(d.crawler);
       setMessages((p) => [...p, { role: "assistant", content: d.message }]);
       setStage(d.stage);
       setCls(d.classification);
     } catch (e: any) {
+      setFriendlyError("Nao consegui processar agora. Sua configuracao foi mantida.");
       setMessages((p) => [...p, { role: "system", content: `Erro: ${e?.message || "falha ao enviar"}` }]);
     } finally {
       setLoading(false);
@@ -471,6 +504,8 @@ function ChatPanel({
     setCls({ persona_slug: null, content_type: null, asset_type: null, asset_function: null, title: null });
     setContentText("");
     setShowContent(false);
+    setFriendlyError(null);
+    setMissionState(null);
   }
 
   if (stage === "idle") {
@@ -501,6 +536,29 @@ function ChatPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {missionState && (
+          <div className="border border-white/08 bg-obs-base rounded-lg p-3 text-xs">
+            <p className="text-obs-subtle">
+              Missao: <span className="text-obs-text">{missionState.persona || "—"}</span> | Fonte: <span className="text-obs-text">{missionState.source?.url || "—"}</span>
+            </p>
+            <p className="text-obs-faint mt-1">
+              Blocos: {(missionState.knowledge_blocks || []).join(", ") || "—"} | Status: {missionState.status || "collecting"}
+            </p>
+          </div>
+        )}
+        {friendlyError && (
+          <div className="border border-obs-amber/30 bg-obs-amber/10 rounded-lg p-3 text-xs text-obs-amber flex items-center justify-between gap-3">
+            <span>{friendlyError}</span>
+            <button
+              onClick={() => {
+                if (lastAttempt) setInput(lastAttempt);
+              }}
+              className="border border-white/10 rounded px-2 py-1 text-obs-text hover:bg-white/5"
+            >
+              tentar novamente
+            </button>
+          </div>
+        )}
         {messages.map((msg, i) => (
           <div key={i} className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
             <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5 ${

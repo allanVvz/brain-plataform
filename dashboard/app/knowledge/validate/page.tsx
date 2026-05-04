@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, BASE } from "@/lib/api";
+import { api, API_URL } from "@/lib/api";
 
 interface KnowledgeItem {
   id: string;
@@ -209,7 +209,7 @@ export default function ValidatePage() {
                   <div className="flex justify-center bg-brain-surface border border-brain-border rounded-lg p-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={`${BASE}/knowledge/file?path=${encodeURIComponent(item.file_path)}`}
+                      src={`${API_URL}/knowledge/file?path=${encodeURIComponent(item.file_path)}`}
                       alt={item.title}
                       className="max-h-64 max-w-full object-contain rounded"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}

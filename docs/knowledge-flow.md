@@ -25,11 +25,11 @@ O desenho desejado e: fontes brutas entram como `knowledge_items`, sao classific
 
 ## Fluxo de Entrada
 
-### 1. Conversa com o KB Classifier
+### 1. Conversa com Criar/Sofia
 
 Arquivo principal: `services/kb_intake_service.py`.
 
-O KB Classifier conduz uma conversa curta para descobrir:
+`Criar` e a ferramenta/tela. A agente conversacional padrao e Sofia, agente de inteligencia marketing comercial. Sofia conduz uma conversa para descobrir:
 
 - cliente/persona;
 - tipo de conteudo;
@@ -43,8 +43,24 @@ Quando completo, o fluxo salva no vault local, tenta fazer `git add`, `git commi
 Fluxo:
 
 ```text
-usuario -> KB Classifier -> arquivo no vault -> git commit/push -> vault_sync -> knowledge_items -> grafo
+usuario -> Sofia/Criar -> arquivo no vault -> git commit/push -> vault_sync -> knowledge_items -> grafo
 ```
+
+### 1.1. Captura de site/catalogo como evidencia bruta
+
+Quando o operador pede para ler ou coletar um site, o sistema nao deve assumir scraping perfeito. A etapa correta e:
+
+```text
+URL -> crawler heuristico -> texto bruto/candidatos -> score de confianca -> lacunas -> validacao humana -> knowledge_items/RAG draft
+```
+
+Regras:
+
+- crawler gera evidencia bruta, nao conhecimento ativo;
+- produtos, precos, cores, kits e atributos extraidos automaticamente recebem confianca;
+- quando a confianca for baixa/media ou houver campo ausente, Sofia deve perguntar ou marcar como `pendente_validacao`;
+- ao final, Sofia deve propor varios conhecimentos, cobrindo todos os blocos selecionados no inicio;
+- antes de salvar, a resposta deve listar entries e links semanticos concretos, nao apenas um resumo.
 
 ### 2. Upload Manual
 
