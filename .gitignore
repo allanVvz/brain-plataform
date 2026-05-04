@@ -61,3 +61,6 @@ dashboard/modes.json
 *.conversation
 *.responses
 *.output
+
+.vercel
+.env*.local

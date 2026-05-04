@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from backend.utils.env import get_backend_env, validate_backend_env
+from utils.env import get_backend_env, validate_backend_env
 
 try:
     from fastapi import FastAPI
