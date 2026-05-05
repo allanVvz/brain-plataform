@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { MessageSquare, User, Clock, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, Maximize2, ArrowLeft, ChevronRight, Tag } from "lucide-react";
+import { MessageSquare, User, Clock, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, Maximize2, ArrowLeft, ChevronLeft, ChevronRight, Tag } from "lucide-react";
 import Link from "next/link";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -215,7 +215,7 @@ function stageColor(stage: string | null): string {
   if (s === "qualificado" || s === "interested") return "text-yellow-400 border-yellow-400/30";
   if (s === "fechado" || s === "won") return "text-green-400 border-green-400/30";
   if (s === "perdido" || s === "lost") return "text-red-400 border-red-400/30";
-  return "text-obs-subtle border-white/10";
+  return "text-obs-subtle border-black/10";
 }
 
 function extractMediaUrl(metadata: any): string | null {
@@ -251,7 +251,7 @@ function displayName(lead: Lead | null, msg?: Message): string {
 
 function StageBadge({ stage }: { stage: string | null }) {
   return (
-    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border bg-white/4 ${stageColor(stage)}`}>
+    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border bg-white/60 ${stageColor(stage)}`}>
       {stage || "novo"}
     </span>
   );
@@ -273,8 +273,8 @@ function MessageBubble({ msg, lead }: { msg: Message; lead: Lead | null }) {
         className={`max-w-[72%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${out ? "rounded-tr-sm" : "rounded-tl-sm"}`}
         style={
           out
-            ? { background: "rgba(124,111,255,0.18)", border: "1px solid rgba(124,111,255,0.35)", color: "#e0ddff" }
-            : { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)", color: "#d4d4d8" }
+            ? { background: "rgba(124,111,255,0.16)", border: "1px solid rgba(124,111,255,0.24)", color: "#252047" }
+            : { background: "rgba(255,255,255,0.74)", border: "1px solid rgba(20,20,40,0.08)", color: "#27272a" }
         }
       >
         {hasText && <p className="whitespace-pre-wrap break-words">{msg.texto}</p>}
@@ -532,7 +532,7 @@ function NodePill({
     >
       <div className="flex items-center gap-1 min-w-0">
         <p className="font-medium truncate">{node.title}</p>
-        <span className="shrink-0 rounded border border-white/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+        <span className="shrink-0 rounded border border-black/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
           {node.node_type}
         </span>
         {pendingLabel(node)}
@@ -542,7 +542,7 @@ function NodePill({
       {facts.length > 0 && (
         <div className="mt-1 flex flex-wrap gap-1">
           {facts.map((fact) => (
-            <span key={fact} className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-obs-subtle">
+            <span key={fact} className="rounded border border-black/10 bg-white/60 px-1.5 py-0.5 text-[10px] text-obs-subtle">
               {fact}
             </span>
           ))}
@@ -582,7 +582,7 @@ function SimilarCard({
     >
       <div className="flex items-center gap-1 min-w-0">
         <p className="font-medium truncate">{node.title}</p>
-        <span className="shrink-0 rounded border border-white/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+        <span className="shrink-0 rounded border border-black/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
           {node.node_type}
         </span>
         <span className="ml-auto shrink-0 text-[10px] text-obs-faint">d{node.graph_distance ?? "-"}</span>
@@ -610,12 +610,12 @@ function KbCard({
       onClick={() => onSelect(id)}
       className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
       style={{
-        background: active ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)",
-        border: `1px solid ${active ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.07)"}`,
+        background: active ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.72)",
+        border: `1px solid ${active ? "rgba(255,255,255,0.20)" : "rgba(20,20,40,0.08)"}`,
       }}
     >
       <div className="flex items-center gap-1 min-w-0">
-        <p className="text-white font-medium truncate">{title}</p>
+        <p className="text-obs-text font-medium truncate">{title}</p>
         {pendingLabel(entry)}
         <ChevronRight size={10} className="ml-auto shrink-0 opacity-60" />
       </div>
@@ -639,7 +639,7 @@ function AssetCard({ asset }: { asset: KnowledgeAsset }) {
       target="_blank"
       rel="noopener noreferrer"
       className="block rounded-md overflow-hidden text-xs hover:opacity-90 transition"
-      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+      style={{ background: "rgba(255,255,255,0.72)", border: "1px solid rgba(20,20,40,0.08)" }}
     >
       {isImage ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -650,7 +650,7 @@ function AssetCard({ asset }: { asset: KnowledgeAsset }) {
         </div>
       )}
       <div className="px-2 py-1.5 space-y-0.5">
-        <p className="font-medium text-white truncate">{asset.title}</p>
+        <p className="font-medium text-obs-text truncate">{asset.title}</p>
         <div className="flex items-center justify-between text-[10px] text-obs-faint">
           <span>{asset.asset_function || asset.asset_type || ext}</span>
           {url && <ExternalLink size={9} />}
@@ -684,9 +684,9 @@ function RelationCard({
       style={{ background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.08)" }}
     >
       <div className="flex items-center gap-1 min-w-0">
-        <p className="font-medium text-white truncate">{source?.title || edge.source_node_id || "origem"}</p>
+        <p className="font-medium text-obs-text truncate">{source?.title || edge.source_node_id || "origem"}</p>
         <span className="shrink-0 text-[10px] text-obs-faint">→</span>
-        <p className="font-medium text-white truncate">{targetNode?.title || edge.target_node_id || "destino"}</p>
+        <p className="font-medium text-obs-text truncate">{targetNode?.title || edge.target_node_id || "destino"}</p>
         <ChevronRight size={10} className="ml-auto shrink-0 opacity-60" />
       </div>
       <p className="mt-0.5 truncate text-[10px] text-obs-faint">
@@ -757,13 +757,13 @@ function KnowledgeDetail({
         <button
           type="button"
           onClick={onBack}
-          className="flex items-center gap-1 text-[11px] text-obs-subtle hover:text-white transition"
+          className="flex items-center gap-1 text-[11px] text-obs-subtle hover:text-obs-text transition"
         >
           <ArrowLeft size={11} />
           <span>Voltar</span>
         </button>
         {nodeType && (
-          <span className="ml-auto rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase text-obs-faint">
+          <span className="ml-auto rounded border border-black/10 px-1.5 py-0.5 text-[9px] uppercase text-obs-faint">
             {nodeType}
           </span>
         )}
@@ -775,7 +775,7 @@ function KnowledgeDetail({
       </div>
 
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-white leading-tight">{title}</h3>
+        <h3 className="text-sm font-semibold text-obs-text leading-tight">{title}</h3>
         {slug && <p className="text-[11px] font-mono text-obs-subtle truncate">{slug}</p>}
         {typeof similar?.graph_distance === "number" && (
           <p className="text-[10px] text-obs-faint">distância no grafo: {similar.graph_distance}</p>
@@ -805,7 +805,7 @@ function KnowledgeDetail({
             {facts.map((f) => (
               <span
                 key={f}
-                className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-obs-subtle"
+                className="rounded border border-black/10 bg-white/60 px-1.5 py-0.5 text-[10px] text-obs-subtle"
               >
                 {f}
               </span>
@@ -858,11 +858,11 @@ function KnowledgeDetail({
                 key={`out-${relationIdentity(e)}`}
                 className="rounded-md border border-white/8 bg-white/3 px-2 py-1.5"
               >
-                <div className="flex items-center gap-1 text-[11px] text-white min-w-0">
+                <div className="flex items-center gap-1 text-[11px] text-obs-text min-w-0">
                   <span className="text-[10px] text-obs-faint">→</span>
                   <span className="truncate">{dest?.title || e.target_node_id || "destino"}</span>
                   {dest?.node_type && (
-                    <span className="ml-auto shrink-0 rounded border border-white/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+                    <span className="ml-auto shrink-0 rounded border border-black/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
                       {dest.node_type}
                     </span>
                   )}
@@ -881,11 +881,11 @@ function KnowledgeDetail({
                 key={`in-${relationIdentity(e)}`}
                 className="rounded-md border border-white/8 bg-white/3 px-2 py-1.5"
               >
-                <div className="flex items-center gap-1 text-[11px] text-white min-w-0">
+                <div className="flex items-center gap-1 text-[11px] text-obs-text min-w-0">
                   <span className="text-[10px] text-obs-faint">←</span>
                   <span className="truncate">{src?.title || e.source_node_id || "origem"}</span>
                   {src?.node_type && (
-                    <span className="ml-auto shrink-0 rounded border border-white/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+                    <span className="ml-auto shrink-0 rounded border border-black/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
                       {src.node_type}
                     </span>
                   )}
@@ -1096,11 +1096,18 @@ function KnowledgeSidebar({
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function MessagesPage() {
+export function MessagesLayout({
+  initialLeadId,
+  focused = false,
+}: {
+  initialLeadId?: number | null;
+  focused?: boolean;
+}) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [isConversationSidebarOpen, setIsConversationSidebarOpen] = useState(!focused);
   const [personaFilterId, setPersonaFilterId] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
@@ -1232,6 +1239,7 @@ export default function MessagesPage() {
   }, [selectedId, personaFilterId]);
 
   const openLead = useCallback((lead: Lead) => {
+    if (selectedIdRef.current === lead.id) return;
     setSelectedId(lead.id);
     setMessages([]);
     setKnowledge(null);
@@ -1246,6 +1254,12 @@ export default function MessagesPage() {
       .finally(() => setLoadingMsgs(false));
     setTimeout(() => draftRef.current?.focus(), 80);
   }, []);
+
+  useEffect(() => {
+    if (!initialLeadId || loadingLeads || selectedId === initialLeadId) return;
+    const lead = leads.find((l) => l.id === initialLeadId);
+    if (lead) openLead(lead);
+  }, [initialLeadId, loadingLeads, leads, openLead, selectedId]);
 
   // Knowledge sidebar: refetch context when lead changes or when the last
   // client message changes (so detected products/campaigns stay in sync).
@@ -1263,6 +1277,8 @@ export default function MessagesPage() {
     () => leads.find((l) => l.id === selectedId) ?? null,
     [leads, selectedId],
   );
+  const selectedLeadPersonaId = selectedLead?.persona_id || undefined;
+  const selectedLeadInterest = selectedLead?.interesse_produto || undefined;
 
   useEffect(() => {
     if (selectedLead && personaFilterId && selectedLead.persona_id !== personaFilterId) {
@@ -1279,12 +1295,12 @@ export default function MessagesPage() {
     }
     let cancelled = false;
     setKnowledgeLoading(true);
-    api.knowledgeChatContext(selectedId, lastClientText || selectedLead?.interesse_produto || undefined, selectedLead?.persona_id || undefined)
+    api.knowledgeChatContext(selectedId, lastClientText || selectedLeadInterest, selectedLeadPersonaId)
       .then((ctx) => { if (!cancelled) setKnowledge(ctx); })
       .catch(() => { if (!cancelled) setKnowledge(null); })
       .finally(() => { if (!cancelled) setKnowledgeLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedId, selectedLead, lastClientText, selectedLead?.interesse_produto, selectedLead?.persona_id]);
+  }, [selectedId, !!selectedLead, lastClientText, selectedLeadInterest, selectedLeadPersonaId]);
 
   const refreshSelectedLead = useCallback(async (id: number) => {
     try {
@@ -1359,46 +1375,56 @@ export default function MessagesPage() {
 
   return (
     <div
-      className="flex h-[calc(100vh-6rem)] overflow-hidden rounded-xl"
-      style={{ border: "1px solid rgba(255,255,255,0.07)" }}
+      className="messages-page flex h-[calc(100vh-6rem)] overflow-hidden rounded-xl p-3"
+      style={{
+        background:
+          "radial-gradient(circle at 15% 10%, rgba(124,92,255,0.10), transparent 28%), radial-gradient(circle at 85% 20%, rgba(120,180,255,0.10), transparent 26%), linear-gradient(180deg, #f7f7fc 0%, #f2f2f8 100%)",
+      }}
     >
       {/* ── Left: Leads list ───────────────────────────────────────────── */}
+      {isConversationSidebarOpen && (
       <aside
-        className="w-72 shrink-0 flex flex-col overflow-hidden"
-        style={{ borderRight: "1px solid rgba(255,255,255,0.07)", background: "rgba(14,17,24,0.80)" }}
+        className="conversation-sidebar w-72 shrink-0 flex flex-col overflow-hidden rounded-l-xl"
+        style={{
+          border: "1px solid rgba(20,20,40,0.08)",
+          background: "rgba(255,255,255,0.68)",
+          backdropFilter: "blur(18px) saturate(130%)",
+          WebkitBackdropFilter: "blur(18px) saturate(130%)",
+          boxShadow: "0 12px 36px rgba(20,20,40,0.06)",
+        }}
       >
         {/* Header */}
         <div
           className="flex items-center justify-between px-4 py-3"
-          style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}
+          style={{ borderBottom: "1px solid rgba(20,20,40,0.08)" }}
         >
           <div className="flex items-center gap-2">
             <User size={13} className="text-obs-violet" />
-            <span className="text-xs font-semibold text-white">Leads</span>
+            <span className="text-xs font-semibold text-obs-text">Leads</span>
             {!loadingLeads && (
               <span className="text-[10px] text-obs-faint">({filtered.length})</span>
             )}
           </div>
           <button
             onClick={loadLeads}
-            className="p-1 rounded text-obs-subtle hover:text-white transition-colors"
+            className="p-1 rounded text-obs-subtle hover:text-obs-text transition-colors"
           >
             <RefreshCw size={11} />
           </button>
         </div>
 
         {/* Search */}
-        <div className="px-3 py-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+        <div className="px-3 py-2" style={{ borderBottom: "1px solid rgba(20,20,40,0.06)" }}>
           <div
             className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
-            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}
+            style={{ background: "rgba(255,255,255,0.70)", border: "1px solid rgba(20,20,40,0.08)" }}
           >
             <Search size={11} className="text-obs-faint shrink-0" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar lead..."
-              className="flex-1 bg-transparent text-xs text-white placeholder-obs-faint focus:outline-none"
+              className="flex-1 bg-transparent text-xs text-obs-text placeholder-obs-faint focus:outline-none"
             />
           </div>
         </div>
@@ -1431,7 +1457,7 @@ export default function MessagesPage() {
                 className="w-full text-left px-4 py-3 flex flex-col gap-1 transition-colors"
                 style={{
                   ...attentionRowStyle(attention, active),
-                  borderBottom: "1px solid rgba(255,255,255,0.04)",
+                  borderBottom: "1px solid rgba(20,20,40,0.06)",
                 }}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -1442,7 +1468,7 @@ export default function MessagesPage() {
                     >
                       {name[0].toUpperCase()}
                     </div>
-                    <span className="text-xs font-medium text-white truncate">{name}</span>
+                    <span className="text-xs font-medium text-obs-text truncate">{name}</span>
                   </div>
                   <StageBadge stage={lead.stage} />
                 </div>
@@ -1484,16 +1510,32 @@ export default function MessagesPage() {
           })}
         </div>
       </aside>
+      )}
 
       {/* ── Right: Chat view ───────────────────────────────────────────── */}
       <div
-        className="flex-1 flex flex-col overflow-hidden"
-        style={{ background: "rgba(10,12,19,0.70)" }}
+        className="message-panel relative flex-1 flex flex-col overflow-hidden rounded-xl"
+        style={{
+          background: "rgba(255,255,255,0.68)",
+          border: "1px solid rgba(20,20,40,0.08)",
+          backdropFilter: "blur(18px) saturate(130%)",
+          WebkitBackdropFilter: "blur(18px) saturate(130%)",
+          boxShadow: "0 12px 36px rgba(20,20,40,0.06)",
+        }}
       >
+        <button
+          type="button"
+          onClick={() => setIsConversationSidebarOpen((v) => !v)}
+          className="absolute left-3 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white/85 text-obs-text shadow-sm backdrop-blur transition hover:text-obs-violet"
+          aria-label={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
+          title={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
+        >
+          {isConversationSidebarOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+        </button>
         {/* Chat header */}
         <div
-          className="flex items-center gap-3 px-5 py-3 shrink-0"
-          style={{ borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(14,17,24,0.80)" }}
+          className="flex items-center gap-3 px-14 py-3 shrink-0"
+          style={{ borderBottom: "1px solid rgba(20,20,40,0.08)", background: "rgba(255,255,255,0.58)" }}
         >
           {selectedLead ? (
             <>
@@ -1504,7 +1546,7 @@ export default function MessagesPage() {
                 {chatName[0].toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white truncate">{chatName}</p>
+                <p className="text-sm font-semibold text-obs-text truncate">{chatName}</p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <StageBadge stage={selectedLead.stage} />
                   {selectedLead.telefone && (
@@ -1529,11 +1571,11 @@ export default function MessagesPage() {
                 </div>
               )}
 
-              {/* Expand conversation: open dedicated timeline view */}
+              {/* Focused conversation route. */}
               <Link
                 href={`/messages/${selectedLead.id}`}
-                title="Expandir conversa (abrir timeline em página dedicada)"
-                className="p-1.5 rounded-md text-obs-subtle hover:text-white hover:bg-white/5 transition shrink-0"
+                title="Abrir conversa focada"
+                className="p-1.5 rounded-md text-obs-subtle hover:text-obs-violet hover:bg-white/60 transition shrink-0"
               >
                 <Maximize2 size={13} />
               </Link>
@@ -1603,13 +1645,13 @@ export default function MessagesPage() {
           <div
             className="px-4 py-3 shrink-0"
             style={{
-              borderTop: "1px solid rgba(255,255,255,0.07)",
-              background: "rgba(14,17,24,0.85)",
+              borderTop: "1px solid rgba(20,20,40,0.08)",
+              background: "rgba(255,255,255,0.58)",
             }}
           >
             <div
               className="rounded-xl p-3 space-y-2"
-              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+              style={{ background: "rgba(255,255,255,0.72)", border: "1px solid rgba(20,20,40,0.08)" }}
             >
               <textarea
                 ref={draftRef}
@@ -1623,7 +1665,7 @@ export default function MessagesPage() {
                 }
                 rows={2}
                 disabled={sending}
-                className="w-full bg-transparent text-sm text-white placeholder-obs-faint resize-none focus:outline-none disabled:opacity-50"
+                className="w-full bg-transparent text-sm text-obs-text placeholder-obs-faint resize-none focus:outline-none disabled:opacity-50"
               />
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] text-obs-faint min-w-0 truncate">
@@ -1652,15 +1694,21 @@ export default function MessagesPage() {
 
       {/* ── Right: Knowledge sidebar ────────────────────────────────────── */}
       <aside
-        className="w-80 shrink-0 flex flex-col overflow-hidden"
-        style={{ borderLeft: "1px solid rgba(255,255,255,0.07)", background: "rgba(14,17,24,0.80)" }}
+        className="knowledge-panel w-80 shrink-0 flex flex-col overflow-hidden rounded-r-xl"
+        style={{
+          border: "1px solid rgba(20,20,40,0.08)",
+          background: "rgba(255,255,255,0.68)",
+          backdropFilter: "blur(18px) saturate(130%)",
+          WebkitBackdropFilter: "blur(18px) saturate(130%)",
+          boxShadow: "0 12px 36px rgba(20,20,40,0.06)",
+        }}
       >
         <div
           className="flex items-center gap-2 px-4 py-3 shrink-0"
-          style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}
+          style={{ borderBottom: "1px solid rgba(20,20,40,0.08)" }}
         >
           <Boxes size={13} className="text-obs-violet" />
-          <span className="text-xs font-semibold text-white">Conhecimento</span>
+          <span className="text-xs font-semibold text-obs-text">Conhecimento</span>
           {knowledge?.query_terms && knowledge.query_terms.length > 0 && (
             <span className="text-[10px] text-obs-faint truncate">
               · {knowledge.query_terms.slice(0, 3).join(", ")}
@@ -1673,4 +1721,8 @@ export default function MessagesPage() {
       </aside>
     </div>
   );
+}
+
+export default function MessagesPage() {
+  return <MessagesLayout />;
 }

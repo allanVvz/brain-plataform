@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { X, Edit2, Save, CheckCircle, XCircle, Tag, Loader2, Crosshair } from "lucide-react";
+import { X, Edit2, Save, CheckCircle, XCircle, Tag, Loader2, Crosshair, Maximize2, Trash2, ExternalLink } from "lucide-react";
 import { api, API_URL } from "@/lib/api";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "svg", "gif"]);
@@ -21,6 +21,7 @@ const ALREADY_VALID = new Set(["ATIVO", "approved", "embedded"]);
 
 interface NodeDrawerProps {
   node: any | null;
+  selectedNodes?: any[];
   onClose: () => void;
   onUpdated?: (itemId: string) => void;
   directLinks?: Array<{
@@ -40,14 +41,17 @@ interface NodeDrawerProps {
     direction?: string | null;
   }>;
   onFocusHere?: () => void;
+  onDeleteNode?: (nodeId: string) => void | Promise<void>;
+  onDeleteEdge?: (edgeId: string) => void | Promise<void>;
 }
 
-export default function NodeDrawer({ node, onClose, onUpdated, directLinks = [], focusPath = [], onFocusHere }: NodeDrawerProps) {
+export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdated, directLinks = [], focusPath = [], onFocusHere, onDeleteNode, onDeleteEdge }: NodeDrawerProps) {
   const [editing, setEditing]     = useState(false);
   const [fullItem, setFullItem]   = useState<any>(null);
   const [fetching, setFetching]   = useState(false);
   const [saving, setSaving]       = useState(false);
   const [flash, setFlash]         = useState<"ok" | "err" | null>(null);
+  const [expanded, setExpanded]   = useState(false);
 
   // Edit fields
   const [title,   setTitle]   = useState("");
@@ -57,7 +61,7 @@ export default function NodeDrawer({ node, onClose, onUpdated, directLinks = [],
 
   // Fetch full item whenever the selected node changes
   useEffect(() => {
-    if (!node || node.type === "personaNode" || !node.data?.item_id) {
+    if (!node || node.type === "personaNode" || !node.data?.item_id || !["vault", "queue"].includes(node.data?.source)) {
       setFullItem(null);
       setEditing(false);
       return;
@@ -84,10 +88,14 @@ export default function NodeDrawer({ node, onClose, onUpdated, directLinks = [],
       .finally(() => setFetching(false));
   }, [node?.id]);
 
-  if (!node) return null;
+  if (!node && selectedNodes.length <= 1) return null;
+  if (!node && selectedNodes.length > 1) {
+    return <MultiNodeDrawer nodes={selectedNodes} onClose={onClose} />;
+  }
 
   const d          = node.data;
   const isPersona  = node.type === "personaNode";
+  const isProtected = isPersona || ["persona", "embedded", "gallery"].includes(String(d.node_type || "")) || d.protected === true;
   const isVault    = d.source === "vault";
   const isQueue    = d.source === "queue";
   const fileType   = (d.file_type || "").toLowerCase();
@@ -103,9 +111,12 @@ export default function NodeDrawer({ node, onClose, onUpdated, directLinks = [],
     ? (fullItem.conteudo ?? fullItem.content ?? "")
     : (d.content_preview ?? "");
 
-  const canEdit     = !isPersona && (isVault || isQueue);
-  const canValidate = !isPersona && !ALREADY_VALID.has(currentStatus);
-  const canReject   = !isPersona && isQueue && currentStatus !== "rejected";
+  const canEdit     = !isProtected && (isVault || isQueue);
+  const canValidate = !isProtected && !ALREADY_VALID.has(currentStatus);
+  const canReject   = !isProtected && isQueue && currentStatus !== "rejected";
+  const canDelete   = !isProtected && String(node.id || "").startsWith("gn:") && !!onDeleteNode;
+  const audiencePreview = Array.isArray(d.metadata?.preview) ? d.metadata.preview : [];
+  const audienceOpenUrl = d.metadata?.open_url || (d.metadata?.lead_import_batch_id ? `/leads/import?open=${d.metadata.lead_import_batch_id}` : "");
 
   function showFlash(kind: "ok" | "err") {
     setFlash(kind);
@@ -156,6 +167,16 @@ export default function NodeDrawer({ node, onClose, onUpdated, directLinks = [],
     } catch { showFlash("err"); }
     finally { setSaving(false); }
   }
+
+  const rawSummaryItems: Array<[string, any]> = [
+    ["Status", currentStatus || "active"],
+    ["Tipo", d.content_type || d.node_type || "node"],
+    ["Origem", d.source || "graph"],
+    ["Pergunta", fullItem?.question || d.question],
+    ["Resposta", fullItem?.answer || d.answer],
+    ["Preço", fullItem?.metadata?.price?.display || d.metadata?.price?.display],
+  ];
+  const summaryItems = rawSummaryItems.filter(([, value]) => Boolean(value));
 
   return (
     <div className="absolute top-0 right-0 h-full w-[340px] glass-raised border-l border-white/06 flex flex-col z-50 animate-slide-in-r shadow-2xl">
@@ -244,6 +265,13 @@ export default function NodeDrawer({ node, onClose, onUpdated, directLinks = [],
         </div>
 
         <div className="flex items-center gap-1 ml-3 shrink-0">
+          <button
+            onClick={() => setExpanded(true)}
+            title="Abrir card"
+            className="p-1.5 rounded-lg hover:bg-white/5 text-obs-subtle hover:text-obs-text transition-colors"
+          >
+            <Maximize2 size={13} />
+          </button>
           {onFocusHere && !isPersona && (
             <button
               onClick={onFocusHere}
@@ -399,9 +427,29 @@ export default function NodeDrawer({ node, onClose, onUpdated, directLinks = [],
                 <DirectLinkCard
                   key={link.id || `${link.direction}-${link.other_id}`}
                   link={link}
+                  onDelete={onDeleteEdge}
                 />
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Tags */}
+        {!editing && d.node_type === "audience" && audiencePreview.length > 0 && (
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-[10px] text-obs-subtle uppercase tracking-wide">Exemplos de leads</p>
+              {audienceOpenUrl && (
+                <button
+                  type="button"
+                  onClick={() => { window.location.href = audienceOpenUrl; }}
+                  className="text-[10px] text-obs-violet hover:text-white"
+                >
+                  abrir importacao
+                </button>
+              )}
+            </div>
+            <LeadPreviewList rows={audiencePreview} />
           </div>
         )}
 
@@ -500,6 +548,19 @@ export default function NodeDrawer({ node, onClose, onUpdated, directLinks = [],
                 Rejeitar
               </button>
             )}
+
+            {canDelete && (
+              <button
+                onClick={() => {
+                  if (window.confirm("Excluir este card e suas conexoes?")) onDeleteNode?.(node.id);
+                }}
+                disabled={saving}
+                className="w-full py-2 text-xs font-medium rounded-lg bg-red-500/10 border border-red-400/30 text-red-100 hover:bg-red-500/20 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+              >
+                <Trash2 size={11} />
+                Excluir card
+              </button>
+            )}
           </>
         )}
 
@@ -512,12 +573,30 @@ export default function NodeDrawer({ node, onClose, onUpdated, directLinks = [],
           </button>
         )}
       </div>
+
+      {expanded && (
+        <NodeExpandedModal
+          node={node}
+          title={title || d.label}
+          content={displayContent}
+          tags={tags}
+          summaryItems={summaryItems}
+          directLinks={directLinks}
+          audiencePreview={audiencePreview}
+          audienceOpenUrl={audienceOpenUrl}
+          onClose={() => setExpanded(false)}
+          onValidate={canValidate ? validate : undefined}
+          onDelete={canDelete ? () => onDeleteNode?.(node.id) : undefined}
+          saving={saving}
+        />
+      )}
     </div>
   );
 }
 
 function DirectLinkCard({
   link,
+  onDelete,
 }: {
   link: {
     id?: string;
@@ -528,6 +607,7 @@ function DirectLinkCard({
     other_summary?: string;
     other_level?: number;
   };
+  onDelete?: (edgeId: string) => void | Promise<void>;
 }) {
   return (
     <div className="rounded-lg border border-white/06 bg-white/3 px-2 py-1.5">
@@ -545,6 +625,16 @@ function DirectLinkCard({
         <span className="ml-auto shrink-0 rounded border border-white/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
           {link.other_type}
         </span>
+        {onDelete && link.id?.startsWith("ge:") && (
+          <button
+            type="button"
+            onClick={() => onDelete(link.id!)}
+            className="ml-1 rounded border border-red-400/25 px-1 py-0.5 text-[9px] text-red-100 hover:bg-red-500/20"
+            title="Excluir caminho"
+          >
+            excluir
+          </button>
+        )}
       </div>
       {link.other_summary ? (
         <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-obs-subtle">
@@ -553,6 +643,210 @@ function DirectLinkCard({
       ) : (
         <p className="mt-1 text-[10px] italic text-obs-faint">Sem resumo disponível.</p>
       )}
+    </div>
+  );
+}
+
+function MultiNodeDrawer({ nodes, onClose }: { nodes: any[]; onClose: () => void }) {
+  const counts = nodes.reduce((acc: Record<string, number>, node) => {
+    const type = node?.data?.node_type || node?.data?.content_type || "node";
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {});
+  const statuses = nodes.reduce((acc: Record<string, number>, node) => {
+    const status = node?.data?.status || "active";
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+  const tags = Array.from(new Set(nodes.flatMap((node) => node?.data?.tags || []))).slice(0, 24);
+  return (
+    <div className="absolute top-0 right-0 z-50 flex h-full w-[340px] flex-col border-l border-white/06 glass-raised shadow-2xl">
+      <div className="flex items-start justify-between px-5 py-5 sep">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-obs-faint">Selecao</p>
+          <h3 className="mt-1 text-sm font-semibold text-obs-text">{nodes.length} nodes selecionados</h3>
+        </div>
+        <button onClick={onClose} className="rounded-lg p-1.5 text-obs-subtle hover:bg-white/5 hover:text-white">
+          <X size={14} />
+        </button>
+      </div>
+      <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+        <SummaryBlock title="Tipos" data={counts} />
+        <SummaryBlock title="Status" data={statuses} />
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-wide text-obs-subtle">Tags</p>
+          <div className="flex flex-wrap gap-1.5">
+            {tags.length ? tags.map((tag) => (
+              <span key={tag} className="rounded-full border border-obs-slate/20 bg-obs-slate/10 px-2 py-0.5 text-[10px] text-obs-slate">
+                {tag}
+              </span>
+            )) : <span className="text-xs text-obs-faint">Sem tags em comum.</span>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryBlock({ title, data }: { title: string; data: Record<string, number> }) {
+  return (
+    <div>
+      <p className="mb-2 text-[10px] uppercase tracking-wide text-obs-subtle">{title}</p>
+      <div className="space-y-1.5">
+        {Object.entries(data).map(([key, value]) => (
+          <div key={key} className="flex items-center justify-between rounded-lg border border-white/06 bg-white/3 px-2.5 py-1.5 text-xs">
+            <span className="text-obs-text">{key}</span>
+            <span className="text-obs-subtle">{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LeadPreviewList({ rows }: { rows: any[] }) {
+  const visible = (rows || []).filter((row) => row?.status !== "invalid").slice(0, 5);
+  return (
+    <div className="overflow-hidden rounded-lg border border-white/06">
+      <table className="w-full text-xs">
+        <thead className="bg-white/[0.03] text-[9px] uppercase tracking-wide text-obs-faint">
+          <tr>
+            <th className="px-2 py-1.5 text-left">Nome</th>
+            <th className="px-2 py-1.5 text-left">Celular</th>
+            <th className="px-2 py-1.5 text-left">Email</th>
+            <th className="px-2 py-1.5 text-left">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/06">
+          {visible.map((row) => (
+            <tr key={`${row.row_index}-${row.parsed?.email || row.parsed?.lead_id || ""}`}>
+              <td className="px-2 py-1.5 text-obs-text">{row.parsed?.nome || "-"}</td>
+              <td className="px-2 py-1.5 font-mono text-obs-subtle">{row.parsed?.lead_id || "-"}</td>
+              <td className="px-2 py-1.5 text-obs-subtle">{row.parsed?.email || "-"}</td>
+              <td className="px-2 py-1.5 text-obs-faint">{row.status || "-"}</td>
+            </tr>
+          ))}
+          {!visible.length && (
+            <tr>
+              <td colSpan={4} className="px-2 py-4 text-center text-obs-faint">Sem exemplos validos.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function NodeExpandedModal({
+  node,
+  title,
+  content,
+  tags,
+  summaryItems,
+  directLinks,
+  audiencePreview,
+  audienceOpenUrl,
+  onClose,
+  onValidate,
+  onDelete,
+  saving,
+}: {
+  node: any;
+  title: string;
+  content: string;
+  tags: string[];
+  summaryItems: Array<[string, any]>;
+  directLinks: NodeDrawerProps["directLinks"];
+  audiencePreview?: any[];
+  audienceOpenUrl?: string;
+  onClose: () => void;
+  onValidate?: () => void;
+  onDelete?: () => void | Promise<void>;
+  saving: boolean;
+}) {
+  const d = node.data || {};
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-5">
+      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-white/08 bg-obs-surface shadow-2xl">
+        <div className="border-b border-white/06 px-6 py-5">
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            <span className={`rounded-full border px-2 py-0.5 text-[10px] ${STATUS_BADGE[d.status] || STATUS_BADGE.approved}`}>
+              {d.validated ? "validated" : d.status || "active"}
+            </span>
+            <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-obs-subtle">{d.content_type || d.node_type}</span>
+            <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-obs-subtle">{d.source || "graph"}</span>
+          </div>
+          <div className="flex items-start gap-4">
+            <h2 className="min-w-0 flex-1 text-2xl font-semibold leading-tight text-white">{title}</h2>
+            <button onClick={onClose} className="rounded-lg p-2 text-obs-subtle hover:bg-white/5 hover:text-white">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          <div className="grid gap-2 md:grid-cols-3">
+            {summaryItems.map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-white/06 bg-white/[0.03] p-3">
+                <p className="text-[10px] uppercase tracking-wide text-obs-faint">{label}</p>
+                <p className="mt-1 line-clamp-3 text-sm text-obs-text">{String(value)}</p>
+              </div>
+            ))}
+          </div>
+          <section>
+            <p className="mb-2 text-[10px] uppercase tracking-wide text-obs-subtle">Conteudo</p>
+            <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/06 bg-obs-base p-4 text-sm leading-relaxed text-obs-text/80">
+              {content || "Sem conteudo."}
+            </pre>
+          </section>
+          {!!audiencePreview?.length && (
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-[10px] uppercase tracking-wide text-obs-subtle">5 exemplos validos</p>
+                {audienceOpenUrl && (
+                  <button
+                    type="button"
+                    onClick={() => { window.location.href = audienceOpenUrl; }}
+                    className="inline-flex items-center gap-1 rounded-md border border-obs-violet/35 bg-obs-violet/15 px-2 py-1 text-[10px] text-obs-text hover:bg-obs-violet/25"
+                  >
+                    <ExternalLink size={11} />
+                    Abrir importacao
+                  </button>
+                )}
+              </div>
+              <LeadPreviewList rows={audiencePreview} />
+            </section>
+          )}
+          <section>
+            <p className="mb-2 text-[10px] uppercase tracking-wide text-obs-subtle">Tags</p>
+            <div className="flex flex-wrap gap-1.5">
+              {tags.length ? tags.map((tag) => (
+                <span key={tag} className="rounded-full border border-obs-slate/20 bg-obs-slate/10 px-2 py-0.5 text-[10px] text-obs-slate">
+                  {tag}
+                </span>
+              )) : <span className="text-xs text-obs-faint">Sem tags.</span>}
+            </div>
+          </section>
+          <section>
+            <p className="mb-2 text-[10px] uppercase tracking-wide text-obs-subtle">Relacoes</p>
+            <div className="grid gap-2 md:grid-cols-2">
+              {(directLinks || []).map((link) => <DirectLinkCard key={link.id || link.other_id} link={link} />)}
+              {!directLinks?.length && <p className="text-xs text-obs-faint">Sem relacoes diretas.</p>}
+            </div>
+          </section>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-white/06 px-6 py-4">
+          {onValidate && (
+            <button onClick={onValidate} disabled={saving} className="rounded-md bg-green-600 px-4 py-2 text-xs font-medium text-white disabled:opacity-50">
+              Validar e enviar para KB
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={onDelete} disabled={saving} className="rounded-md border border-red-400/30 bg-red-500/10 px-4 py-2 text-xs font-medium text-red-100 disabled:opacity-50">
+              Excluir
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

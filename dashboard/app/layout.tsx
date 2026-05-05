@@ -2,22 +2,24 @@
 
 import "./globals.css";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import {
   Activity,
   BookOpen,
   CheckSquare,
+  GitBranch,
   Image,
   LayoutDashboard,
+  LogOut,
   MessageSquare,
   Network,
+  Plus,
   RefreshCw,
   ScrollText,
   Settings,
   Sparkles,
-  TestTube2,
   UserCircle,
   Users,
   Wrench,
@@ -27,38 +29,50 @@ const nav = [
   { section: null, href: "/", label: "Dashboard", icon: LayoutDashboard },
   { section: null, href: "/pipeline", label: "Pipeline", icon: Activity },
   { section: null, href: "/knowledge/graph", label: "Grafos", icon: Network },
-  { section: null, href: "/marketing/criacao", label: "Criar", icon: Sparkles },
+  { section: null, href: "/marketing/criacao", label: "Create", icon: Sparkles },
 
   { section: "CRM", href: "/leads", label: "Leads", icon: Users },
-  { section: "CRM", href: "/messages", label: "Mensagens", icon: MessageSquare },
+  { section: "CRM", href: "/messages", label: "Messages", icon: MessageSquare },
+  { section: "CRM", href: "/leads/import", label: "Import", icon: Plus },
 
   { section: "Marketing", href: "/persona", label: "Persona", icon: UserCircle },
   { section: "Marketing", href: "/marketing/assets", label: "Assets", icon: Image },
 
-  { section: "Knowledge", href: "/knowledge/quality", label: "Curadoria", icon: CheckSquare },
-  { section: "Knowledge", href: "/kb", label: "KB Validada", icon: BookOpen },
-  { section: "Knowledge", href: "/knowledge/sync", label: "Sync Vault", icon: RefreshCw },
+    { section: "Knowledge", href: "/knowledge/sync", label: "Sync", icon: RefreshCw },
+  { section: "Knowledge", href: "/knowledge/quality", label: "Quality", icon: CheckSquare },
+  { section: "Knowledge", href: "/kb", label: "Knowledge Base", icon: BookOpen },
 
+  { section: "Configurações", href: "/wa-validator", label: "ChatBot", icon: GitBranch },
   { section: "Configurações", href: "/tools", label: "Tools", icon: Wrench },
-  { section: "Configurações", href: "/wa-validator", label: "WA Validator", icon: TestTube2 },
+  { section: "Configurações", href: "/settings", label: "Settings", icon: Settings },
   { section: "Configurações", href: "/logs", label: "Logs", icon: ScrollText },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [persona, setPersona] = useState("");
   const [personas, setPersonas] = useState<any[]>([]);
+  const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
+    if (pathname === "/login") return;
     const saved = window.localStorage.getItem("ai-brain-persona-slug");
-    api.personas()
-      .then((list) => {
+    api.me()
+      .then((session) => {
+        const list = session?.personas || [];
+        setUser(session?.user || null);
         setPersonas(list);
         const savedExists = saved && list.some((p: any) => p.slug === saved);
-        setPersona(savedExists ? saved : "");
+        const canSeeAll = session?.user?.role === "admin";
+        setPersona(savedExists ? saved : (canSeeAll ? "" : (list[0]?.slug || "")));
       })
-      .catch(() => setPersona(saved || ""));
-  }, []);
+      .catch(() => {
+        setUser(null);
+        setPersonas([]);
+        setPersona(saved || "");
+      });
+  }, [pathname]);
 
   useEffect(() => {
     const selected = personas.find((p) => p.slug === persona);
@@ -77,13 +91,40 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     }));
   }, [persona, personas]);
 
+  async function handleLogout() {
+    try {
+      await api.logout();
+    } finally {
+      window.localStorage.removeItem("ai-brain-persona-slug");
+      window.localStorage.removeItem("ai-brain-persona-id");
+      router.replace("/login");
+      router.refresh();
+    }
+  }
+
+  if (pathname === "/login") {
+    return (
+      <html lang="pt-BR" suppressHydrationWarning>
+        <body>{children}</body>
+      </html>
+    );
+  }
+
   return (
-    <html lang="pt-BR">
-      <body className="flex min-h-screen bg-obs-base text-obs-text" style={{ background: "#080b12" }}>
-        <aside className="flex w-52 shrink-0 flex-col border-r border-white/06 bg-[#0e1118]/95">
-          <div className="border-b border-white/06 px-4 py-5">
+    <html lang="pt-BR" suppressHydrationWarning>
+      <head>
+        {/* Apply theme before hydration to avoid FOUC */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('ai-brain-theme');document.documentElement.setAttribute('data-theme',t==='dark'?'dark':'clean');}catch(e){document.documentElement.setAttribute('data-theme','clean');}})();`,
+          }}
+        />
+      </head>
+      <body className="flex min-h-screen text-obs-text">
+        <aside className="flex w-52 shrink-0 flex-col bg-obs-surface/70 backdrop-blur-glass [border-right:1px_solid_var(--border-glass)]">
+          <div className="px-4 py-5 [border-bottom:1px_solid_var(--border-glass-soft)]">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-[#7c6fff] to-[#a78bfa] text-sm font-black text-[#050709]">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-obs-violet to-[#a78bfa] text-sm font-black text-[#050709]">
                 B
               </div>
               <span className="text-sm font-bold tracking-tight text-obs-text">AI Brain</span>
@@ -104,10 +145,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   )}
                   <Link
                     href={href}
-                    className={`flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs transition-all ${
+                    className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs transition-all ${
                       active
-                        ? "bg-obs-violet/12 font-medium text-obs-violet"
-                        : "text-obs-subtle hover:text-obs-text"
+                        ? "bg-obs-violet/10 font-medium text-obs-violet ring-1 ring-obs-violet/15"
+                        : "text-obs-subtle hover:bg-white/[0.05] hover:text-obs-text"
                     }`}
                   >
                     <Icon size={13} />
@@ -120,32 +161,43 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </aside>
 
         <div className="flex min-h-screen flex-1 flex-col overflow-hidden">
-          <header className="flex h-11 shrink-0 items-center gap-4 border-b border-white/06 bg-[#0e1118]/90 px-6">
-            <div className="flex items-center gap-2 rounded-lg border border-white/08 bg-white/[0.04] px-2 py-1 shadow-sm">
+          <header className="flex h-12 shrink-0 items-center gap-4 bg-obs-surface/55 backdrop-blur-glass px-6 [border-bottom:1px_solid_var(--border-glass)]">
+            <div className="flex items-center gap-2 rounded-full bg-white/[0.05] px-3 py-1.5 [border:1px_solid_var(--border-glass)]">
               <Settings size={13} className="text-obs-faint" />
               <span className="hidden text-[10px] font-medium uppercase tracking-[0.16em] text-obs-faint sm:inline">
                 Cliente
               </span>
               <select
-                className="min-w-36 bg-transparent text-xs font-medium text-obs-text outline-none [color-scheme:dark]"
+                className="min-w-36 bg-transparent text-xs font-medium text-obs-text outline-none"
                 value={persona}
                 onChange={(e) => setPersona(e.target.value)}
               >
                 {personas.length > 0 ? (
                   <>
-                    <option className="bg-[#11151f] text-obs-text" value="">Todos</option>
+                    {user?.role === "admin" && <option className="bg-obs-raised text-obs-text" value="">Todos</option>}
                     {personas.map((p) => (
-                      <option className="bg-[#11151f] text-obs-text" key={p.slug} value={p.slug}>
+                      <option className="bg-obs-raised text-obs-text" key={p.slug} value={p.slug}>
                         {p.name}
                       </option>
                     ))}
                   </>
                 ) : (
-                  <option className="bg-[#11151f] text-obs-text" value="">Carregando clientes...</option>
+                  <option className="bg-obs-raised text-obs-text" value="">Carregando clientes...</option>
                 )}
               </select>
             </div>
-            <div className="ml-auto text-[10px] tracking-wide text-obs-faint">AI Brain Platform</div>
+            <div className="ml-auto hidden text-[10px] tracking-wide text-obs-faint sm:block">
+              {user?.name || user?.email || "AI Brain Platform"}
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white/55 text-obs-subtle shadow-sm transition hover:bg-white hover:text-obs-text"
+              aria-label="Sair"
+              title="Sair"
+            >
+              <LogOut size={14} />
+            </button>
           </header>
 
           <main className="flex-1 overflow-y-auto p-6">{children}</main>

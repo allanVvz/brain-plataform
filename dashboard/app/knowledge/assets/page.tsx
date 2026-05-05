@@ -9,7 +9,7 @@ const VIDEO_EXTS = new Set(["mp4","mov","webm"]);
 interface KItem {
   id: string; title: string; status: string; content_type: string;
   asset_type: string | null; file_type: string | null; file_path: string | null;
-  persona_id: string | null; created_at: string;
+  persona_id: string | null; created_at: string; source?: string;
 }
 interface Persona { id: string; slug: string; name: string; }
 
@@ -40,12 +40,16 @@ export default function AssetsPage() {
   async function load() {
     setLoading(true);
     try {
-      const [data, personasData] = await Promise.all([
+      const [queueItems, galleryItems, personasData] = await Promise.all([
         api.knowledgeQueue("all" as any, filterPersona || undefined, "asset"),
+        api.galleryAssets(filterPersona || undefined),
         api.personas(),
       ]);
-      setItems(data);
-      setPersonas(personasData);
+      const merged = new Map<string, KItem>();
+      for (const item of queueItems || []) merged.set(`queue:${item.id}`, item);
+      for (const item of galleryItems || []) merged.set(`gallery:${item.id}`, item);
+      setItems(Array.from(merged.values()));
+      setPersonas(personasData || []);
     } finally { setLoading(false); }
   }
 

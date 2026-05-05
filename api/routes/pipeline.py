@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Query
-from services import supabase_client
+from fastapi import APIRouter, Query, Request
+from services import auth_service, supabase_client
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
@@ -10,14 +10,19 @@ def pipeline_status():
 
 
 @router.get("/metrics")
-def pipeline_metrics(persona_id: str = Query(None)):
+def pipeline_metrics(request: Request, persona_id: str = Query(None)):
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
     return supabase_client.get_pipeline_metrics(persona_id=persona_id)
 
 
 @router.get("/events")
 def pipeline_events(
+    request: Request,
     limit: int = 50,
     event_type: str = Query(None),
     persona_id: str = Query(None),
 ):
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
     return supabase_client.get_events(limit=limit, event_type=event_type, persona_id=persona_id)

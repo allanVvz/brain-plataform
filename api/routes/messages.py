@@ -2,10 +2,10 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from services import agents_service, event_emitter, n8n_client, supabase_client
+from services import agents_service, auth_service, event_emitter, n8n_client, supabase_client
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 logger = logging.getLogger("messages")
@@ -20,7 +20,7 @@ class SendMessageBody(BaseModel):
 
 
 @router.post("/send")
-def send_message(body: SendMessageBody) -> dict:
+def send_message(body: SendMessageBody, request: Request) -> dict:
     """Operator sends a message into a lead's conversation.
 
     1. INSERT a row in `messages` with sender_type='human'.
@@ -36,6 +36,8 @@ def send_message(body: SendMessageBody) -> dict:
     # whoever is on the role for this conversation.
     lead = supabase_client.get_lead_by_ref(body.lead_ref) or {}
     persona_id = lead.get("persona_id")
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
     whatsapp_phone_number_id = lead.get("whatsapp_phone_number_id") or supabase_client.get_default_whatsapp_phone_number_id(persona_id)
     persona_routing: dict | None = None
     if persona_id:
@@ -151,29 +153,55 @@ def send_message(body: SendMessageBody) -> dict:
 
 
 @router.get("/conversations")
-def get_conversations(hours: int = Query(168, le=720), persona_id: str | None = Query(None)):
+def get_conversations(request: Request, hours: int = Query(168, le=720), persona_id: str | None = Query(None)):
     """
     Returns one entry per conversation (grouped by lead_ref first),
     sorted by most-recent message. Used by the Mensagens sidebar.
     """
-    return supabase_client.get_conversations(hours=hours, persona_id=persona_id)
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+        return supabase_client.get_conversations(hours=hours, persona_id=persona_id)
+    if auth_service.is_admin(auth_service.current_user(request)):
+        return supabase_client.get_conversations(hours=hours, persona_id=None)
+    rows: list[dict] = []
+    for pid in auth_service.allowed_persona_ids(request):
+        rows.extend(supabase_client.get_conversations(hours=hours, persona_id=pid))
+    rows.sort(key=lambda item: item.get("last_message_at") or item.get("created_at") or "", reverse=True)
+    return rows
 
 
 @router.get("/by-ref/{lead_ref}")
-def get_messages_by_ref(lead_ref: int, limit: int = Query(200, le=500)):
+def get_messages_by_ref(lead_ref: int, request: Request, limit: int = Query(200, le=500)):
     """Fetch messages by integer lead_ref — the canonical way."""
+    lead = supabase_client.get_lead_by_ref(lead_ref)
+    if lead and lead.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=lead.get("persona_id"))
     return supabase_client.get_messages(str(lead_ref), limit=limit)
 
 
 @router.get("/{lead_id}")
-def get_messages(lead_id: str, limit: int = Query(200, le=500)):
+def get_messages(lead_id: str, request: Request, limit: int = Query(200, le=500)):
+    if lead_id.isdigit():
+        lead = supabase_client.get_lead_by_ref(int(lead_id))
+        if lead and lead.get("persona_id"):
+            auth_service.assert_persona_access(request, persona_id=lead.get("persona_id"))
     return supabase_client.get_messages(lead_id, limit=limit)
 
 
 @router.get("")
 def recent_messages(
+    request: Request,
     hours: int = Query(24, le=168),
     persona_id: str | None = Query(None),
 ):
     """Returns all recent messages without status filtering."""
-    return supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=persona_id)
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+        return supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=persona_id)
+    if auth_service.is_admin(auth_service.current_user(request)):
+        return supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=None)
+    rows: list[dict] = []
+    for pid in auth_service.allowed_persona_ids(request):
+        rows.extend(supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=pid))
+    rows.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+    return rows[:500]

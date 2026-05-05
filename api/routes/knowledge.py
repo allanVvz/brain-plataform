@@ -1,10 +1,10 @@
 import asyncio
 import os
-from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
-from services import supabase_client, knowledge_graph
+from services import auth_service, supabase_client, knowledge_graph
 from services.knowledge_rag_backfill import backfill_knowledge_rag
 from services.knowledge_rag_intake import process_intake, process_intake_plan
 from services.vault_sync import run_sync, scan_vault
@@ -55,11 +55,12 @@ class RagIntakePlanBody(BaseModel):
 
 
 @router.post("/intake")
-def intake_rag_knowledge(body: RagIntakeBody):
+def intake_rag_knowledge(body: RagIntakeBody, request: Request):
     if not body.raw_text.strip():
         raise HTTPException(400, "raw_text is required")
     if not body.persona_id and not body.persona_slug:
         raise HTTPException(400, "persona_id or persona_slug is required")
+    auth_service.assert_persona_access(request, persona_id=body.persona_id, persona_slug=body.persona_slug)
     try:
         result = process_intake(**body.model_dump())
     except ValueError as exc:
@@ -83,11 +84,12 @@ def intake_rag_knowledge(body: RagIntakeBody):
 
 
 @router.post("/intake/plan")
-def intake_rag_knowledge_plan(body: RagIntakePlanBody):
+def intake_rag_knowledge_plan(body: RagIntakePlanBody, request: Request):
     if not body.entries:
         raise HTTPException(400, "entries is required")
     if not body.persona_id and not body.persona_slug:
         raise HTTPException(400, "persona_id or persona_slug is required")
+    auth_service.assert_persona_access(request, persona_id=body.persona_id, persona_slug=body.persona_slug)
     try:
         result = process_intake_plan(**body.model_dump())
     except ValueError as exc:
@@ -192,12 +194,20 @@ ATTENTION_STATUSES = ["needs_persona", "needs_category", "pending"]
 # Fixed paths MUST be registered before parameterised /{item_id}
 @router.get("/queue")
 def list_queue(
+    request: Request,
     status: str = Query("pending"),
     persona_id: str = Query(None),
     content_type: str = Query(None),
     limit: int = 100,
     offset: int = 0,
 ):
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+    elif not auth_service.is_admin(auth_service.current_user(request)):
+        rows: list[dict] = []
+        for pid in auth_service.allowed_persona_ids(request):
+            rows.extend(list_queue(request, status=status, persona_id=pid, content_type=content_type, limit=limit, offset=offset))
+        return rows[:limit]
     # "attention" is a virtual combined filter
     if status == "attention":
         return supabase_client.get_knowledge_items_multi(
@@ -217,7 +227,17 @@ def list_queue(
 
 
 @router.get("/queue/counts")
-def queue_counts(persona_id: str = Query(None)):
+def queue_counts(request: Request, persona_id: str = Query(None)):
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+    elif not auth_service.is_admin(auth_service.current_user(request)):
+        combined = {"by_status": {}, "total": 0}
+        for pid in auth_service.allowed_persona_ids(request):
+            partial = queue_counts(request, persona_id=pid)
+            combined["total"] += partial.get("total", 0)
+            for key, value in (partial.get("by_status") or {}).items():
+                combined["by_status"][key] = combined["by_status"].get(key, 0) + value
+        return combined
     counts = supabase_client.get_knowledge_item_counts(persona_id=persona_id)
     bs = counts.get("by_status", {})
     counts["by_status"]["attention"] = sum(
@@ -226,14 +246,28 @@ def queue_counts(persona_id: str = Query(None)):
     return counts
 
 
+@router.get("/gallery-assets")
+def gallery_assets(request: Request, persona_id: str = Query(None), limit: int = Query(250, ge=1, le=500)):
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+    elif not auth_service.is_admin(auth_service.current_user(request)):
+        rows: list[dict] = []
+        for pid in auth_service.allowed_persona_ids(request):
+            rows.extend(supabase_client.list_gallery_assets(persona_id=pid, limit=limit))
+        return rows[:limit]
+    return supabase_client.list_gallery_assets(persona_id=persona_id, limit=limit)
+
+
 @router.get("/queue/{item_id}")
-def get_queue_item(item_id: str):
+def get_queue_item(item_id: str, request: Request):
     try:
         item = supabase_client.get_knowledge_item(item_id)
     except Exception as exc:
         raise HTTPException(502, f"Database error: {exc}") from exc
     if not item:
         raise HTTPException(404, "Item not found")
+    if item.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
     return item
 
 
@@ -251,16 +285,21 @@ class ItemUpdate(BaseModel):
 
 
 @router.patch("/queue/{item_id}")
-def update_queue_item(item_id: str, body: ItemUpdate):
+def update_queue_item(item_id: str, body: ItemUpdate, request: Request):
     data = body.model_dump(exclude_none=True)
     if not data:
         raise HTTPException(400, "Nothing to update")
     try:
         # Auto-upgrade status based on what's being filled in
         cached_item: Optional[dict] = None
+        existing = supabase_client.get_knowledge_item(item_id)
+        if existing and existing.get("persona_id"):
+            auth_service.assert_persona_access(request, persona_id=existing.get("persona_id"))
+        if data.get("persona_id"):
+            auth_service.assert_persona_access(request, persona_id=data.get("persona_id"))
 
         if "persona_id" in data:
-            cached_item = supabase_client.get_knowledge_item(item_id)
+            cached_item = existing
             if cached_item and cached_item.get("status") == "needs_persona":
                 ct = data.get("content_type") or cached_item.get("content_type", "other")
                 data["status"] = "pending"
@@ -289,7 +328,7 @@ class ApproveBody(BaseModel):
 
 
 @router.post("/queue/{item_id}/approve")
-def approve_item(item_id: str, body: ApproveBody = ApproveBody()):
+def approve_item(item_id: str, request: Request, body: ApproveBody = ApproveBody()):
     from datetime import datetime, timezone
     try:
         item = supabase_client.get_knowledge_item(item_id)
@@ -297,6 +336,7 @@ def approve_item(item_id: str, body: ApproveBody = ApproveBody()):
             raise HTTPException(404, "Item not found")
         if not item.get("persona_id"):
             raise HTTPException(400, "Assign a persona before approving")
+        auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
 
         update_data: dict = {
             "status": "approved",
@@ -326,10 +366,12 @@ class RejectBody(BaseModel):
 
 
 @router.post("/queue/{item_id}/reject")
-def reject_item(item_id: str, body: RejectBody = RejectBody()):
+def reject_item(item_id: str, request: Request, body: RejectBody = RejectBody()):
     item = supabase_client.get_knowledge_item(item_id)
     if not item:
         raise HTTPException(404, "Item not found")
+    if item.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
     supabase_client.update_knowledge_item(item_id, {
         "status": "rejected",
         "rejected_reason": body.reason,
@@ -341,7 +383,7 @@ def reject_item(item_id: str, body: RejectBody = RejectBody()):
 
 
 @router.post("/queue/{item_id}/to-kb")
-def promote_to_kb(item_id: str):
+def promote_to_kb(item_id: str, request: Request):
     try:
         item = supabase_client.get_knowledge_item(item_id)
         if not item:
@@ -350,6 +392,7 @@ def promote_to_kb(item_id: str):
             raise HTTPException(400, "Item must be approved before promoting to KB")
         if not item.get("persona_id"):
             raise HTTPException(400, "Item must have a persona assigned")
+        auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
         _promote_to_kb(item)
         supabase_client.update_knowledge_item(item_id, {"status": "embedded"})
     except HTTPException:
@@ -419,7 +462,9 @@ class UploadTextBody(BaseModel):
 
 
 @router.post("/upload/text")
-def upload_text(body: UploadTextBody):
+def upload_text(body: UploadTextBody, request: Request):
+    if body.persona_id:
+        auth_service.assert_persona_access(request, persona_id=body.persona_id)
     source = supabase_client.get_or_create_manual_source()
     status = "pending"
     item = supabase_client.insert_knowledge_item({
@@ -448,10 +493,13 @@ def upload_text(body: UploadTextBody):
 
 @router.post("/upload/file")
 async def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     persona_id: str = Form(None),
     content_type: str = Form("other"),
 ):
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
     content_bytes = await file.read()
     try:
         text = content_bytes.decode("utf-8")
@@ -486,10 +534,12 @@ async def upload_file(
 # ── KB Entries (Vault) — single-item CRUD ────────────────────
 
 @router.get("/kb/{entry_id}")
-def get_kb_entry(entry_id: str):
+def get_kb_entry(entry_id: str, request: Request):
     entry = supabase_client.get_kb_entry(entry_id)
     if not entry:
         raise HTTPException(404, "Entry not found")
+    if entry.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=entry.get("persona_id"))
     return entry
 
 
@@ -504,14 +554,17 @@ class KbEntryUpdate(BaseModel):
 
 
 @router.patch("/kb/{entry_id}")
-def update_kb_entry(entry_id: str, body: KbEntryUpdate):
+def update_kb_entry(entry_id: str, body: KbEntryUpdate, request: Request):
     data = body.model_dump(exclude_none=True)
     if not data:
         raise HTTPException(400, "Nothing to update")
-    supabase_client.update_kb_entry(entry_id, data)
     entry = supabase_client.get_kb_entry(entry_id)
     if not entry:
         raise HTTPException(404, "Entry not found")
+    if entry.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=entry.get("persona_id"))
+    supabase_client.update_kb_entry(entry_id, data)
+    entry = supabase_client.get_kb_entry(entry_id)
     emit("kb_entry_updated", entity_type="kb_entry", entity_id=entry_id,
          persona_id=entry.get("persona_id"),
          payload={"titulo": entry.get("titulo"), "fields": list(data.keys())})
@@ -519,10 +572,12 @@ def update_kb_entry(entry_id: str, body: KbEntryUpdate):
 
 
 @router.post("/kb/{entry_id}/validate")
-def validate_kb_entry(entry_id: str):
+def validate_kb_entry(entry_id: str, request: Request):
     entry = supabase_client.get_kb_entry(entry_id)
     if not entry:
         raise HTTPException(404, "Entry not found")
+    if entry.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=entry.get("persona_id"))
     supabase_client.update_kb_entry(entry_id, {"status": "ATIVO"})
     emit("kb_entry_validated", entity_type="kb_entry", entity_id=entry_id,
          persona_id=entry.get("persona_id"),
@@ -533,7 +588,9 @@ def validate_kb_entry(entry_id: str):
 # ── Workflow Bindings ─────────────────────────────────────────
 
 @router.get("/bindings")
-def list_bindings(persona_id: str = Query(None)):
+def list_bindings(request: Request, persona_id: str = Query(None)):
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
     return supabase_client.get_workflow_bindings(persona_id)
 
 
@@ -546,14 +603,18 @@ class BindingBody(BaseModel):
 
 
 @router.post("/bindings")
-def create_binding(body: BindingBody):
+def create_binding(body: BindingBody, request: Request):
+    if not auth_service.is_admin(auth_service.current_user(request)):
+        raise HTTPException(403, "Apenas admin pode criar bindings")
     return supabase_client.upsert_workflow_binding(body.model_dump())
 
 
 # ── Knowledge Graph rebuild (admin) ──────────────────────────
 
 @router.post("/graph/rebuild")
-def rebuild_graph(persona_slug: Optional[str] = Query(None)):
+def rebuild_graph(request: Request, persona_slug: Optional[str] = Query(None)):
+    if not auth_service.is_admin(auth_service.current_user(request)):
+        raise HTTPException(403, "Apenas admin pode reconstruir o grafo")
     """Reprocessa knowledge_items + kb_entries existentes para popular
     knowledge_nodes / knowledge_edges (migration 008).
 
@@ -585,11 +646,14 @@ def rebuild_graph(persona_slug: Optional[str] = Query(None)):
 
 @router.get("/chat-context")
 def chat_context(
+    request: Request,
     lead_ref: int = Query(None),
     persona_id: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     limit: int = Query(12, le=50),
 ):
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
     """Knowledge bundle for the messages sidebar.
 
     Resolves products/campaigns/assets/FAQs related to a lead's recent
@@ -607,11 +671,12 @@ def chat_context(
 # ── KB Context (for external consumers like wa-wscrap-bot) ───
 
 @router.get("/context/{persona_slug}")
-def get_kb_context(persona_slug: str):
+def get_kb_context(persona_slug: str, request: Request):
     """Return formatted KB text for a persona slug. Used by ai_fallback in wa-wscrap-bot."""
     persona = supabase_client.get_persona(persona_slug)
     if not persona:
         raise HTTPException(404, f"Persona not found: {persona_slug}")
+    auth_service.assert_persona_access(request, persona_id=persona.get("id"), persona_slug=persona_slug)
 
     persona_id = persona["id"]
     entries = supabase_client.get_kb_entries(persona_id=persona_id, status="ATIVO")
@@ -640,10 +705,12 @@ def get_kb_context(persona_slug: str):
 # ── Brand Profiles ────────────────────────────────────────────
 
 @router.get("/brand/{persona_id}")
-def get_brand(persona_id: str):
+def get_brand(persona_id: str, request: Request):
+    auth_service.assert_persona_access(request, persona_id=persona_id)
     return supabase_client.get_brand_profile(persona_id) or {}
 
 
 @router.put("/brand/{persona_id}")
-def upsert_brand(persona_id: str, body: dict):
+def upsert_brand(persona_id: str, body: dict, request: Request):
+    auth_service.assert_persona_access(request, persona_id=persona_id)
     return supabase_client.upsert_brand_profile({"persona_id": persona_id, **body})

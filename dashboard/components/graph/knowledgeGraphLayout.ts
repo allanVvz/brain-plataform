@@ -49,11 +49,15 @@ const EXPECTED_PARENT_TYPES: Record<string, string[]> = {
   campaign: ["persona", "brand"],
   briefing: ["product", "audience", "campaign", "brand", "persona"],
   audience: ["campaign", "brand", "persona", "briefing"],
+  gallery: ["copy", "faq", "asset", "background", "texture", "product", "campaign", "brand", "persona"],
+  embedded: ["copy", "faq", "asset", "product", "campaign", "brand", "persona"],
   product: ["audience", "campaign", "briefing", "brand", "persona"],
   faq: ["product", "entity", "audience", "briefing", "campaign", "brand"],
   copy: ["product", "campaign", "audience", "briefing", "brand"],
   rule: ["product", "entity", "campaign", "audience", "briefing", "brand"],
   asset: ["product", "campaign", "audience", "briefing", "brand"],
+  background: ["product", "campaign", "audience", "briefing", "brand"],
+  texture: ["product", "campaign", "audience", "briefing", "brand"],
   entity: ["audience", "product", "briefing", "campaign", "brand"],
   tone: ["brand", "campaign", "briefing"],
   tag: ["product", "campaign", "brand", "faq", "copy"],
@@ -100,6 +104,8 @@ const HIERARCHY_RANK: Record<string, number> = {
   brand: 1,
   campaign: 2,
   audience: 3,
+  gallery: 97,
+  embedded: 98,
   product: 4,
   briefing: 5,
   entity: 6,
@@ -107,6 +113,8 @@ const HIERARCHY_RANK: Record<string, number> = {
   copy: 6,
   rule: 6,
   asset: 6,
+  background: 6,
+  texture: 6,
   tone: 6,
   knowledge_item: 98,
   kb_entry: 98,
@@ -166,7 +174,7 @@ function isExplicitPrimaryEdge(edge: Edge<GraphEdgeData>): boolean {
 
 function relationAllowsParentCandidate(childId: string, parentId: string, edge: Edge<GraphEdgeData>): boolean {
   const rt = relationType(edge);
-  if (["manual", "contains", "parent_of", "targets", "supports_copy", "supports_campaign", "defines_brand", "has_tone"].includes(rt)) {
+  if (["manual", "contains", "parent_of", "targets", "supports_copy", "supports_campaign", "defines_brand", "has_tone", "gallery_asset"].includes(rt)) {
     return edge.source === parentId && edge.target === childId;
   }
   if (["belongs_to", "part_of", "derived_from", "product_of", "audience_of", "campaign_of", "brand_of"].includes(rt)) {
@@ -183,6 +191,7 @@ function relationPriority(edge: Edge<GraphEdgeData>): number {
   if (rt === "about_product" || rt === "product_of") return 3;
   if (rt === "briefed_by" || rt === "briefing_of") return 4;
   if (rt === "answers_question" || rt === "supports_copy") return 5;
+  if (rt === "gallery_asset") return 5;
   if (rt === "belongs_to_persona") return 8;
   if (rt === "derived_from") return 9;
   return 6;
@@ -294,6 +303,7 @@ export function buildTreeFromGraph(
 
     parentByChild.set(child.id, candidate.parent.id);
     primaryEdgeIds.add(candidate.edge.id);
+    const originalEdgeId = candidate.edge.data?.original_edge_id || candidate.edge.id;
     primaryEdges.push({
       ...candidate.edge,
       id: `tree:${candidate.parent.id}->${child.id}`,
@@ -304,15 +314,31 @@ export function buildTreeFromGraph(
         ...(candidate.edge.data || {}),
         primary: true,
         secondary: false,
-        original_edge_id: candidate.edge.id,
+        original_edge_id: originalEdgeId,
       },
     });
   }
 
+  const embeddedEdges = edges
+    .filter((edge) => (edge.data as GraphEdgeData | undefined)?.embedded_edge)
+    .map((edge) => ({
+      ...edge,
+      data: { ...(edge.data || {}), primary: true, secondary: false },
+    }));
+  const galleryEdges = edges
+    .filter((edge) => (edge.data as GraphEdgeData | undefined)?.gallery_edge && !primaryEdgeIds.has(edge.id))
+    .map((edge) => ({
+      ...edge,
+      data: { ...(edge.data || {}), primary: true, secondary: false },
+    }));
+
   const secondaryEdges = onlyPrimaryEdges
     ? []
     : edges
-        .filter((edge) => !primaryEdgeIds.has(edge.id))
+        .filter((edge) => {
+          const data = edge.data as GraphEdgeData | undefined;
+          return !primaryEdgeIds.has(edge.id) && !data?.embedded_edge && !data?.gallery_edge;
+        })
         .map((edge) => ({
           ...edge,
           data: { ...(edge.data || {}), primary: false, secondary: true },
@@ -320,7 +346,7 @@ export function buildTreeFromGraph(
 
   return {
     nodes,
-    edges: [...primaryEdges, ...secondaryEdges],
+    edges: [...primaryEdges, ...galleryEdges, ...embeddedEdges, ...secondaryEdges],
     primaryEdgeIds,
   };
 }

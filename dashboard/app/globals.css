@@ -2,95 +2,533 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Obsidiana CSS Variables ─────────────────────────────────── */
-:root {
-  --brain-bg:      #080b12;
-  --brain-surface: #0e1118;
-  --brain-border:  #1e2130;
-  --brain-accent:  #7c6fff;
-  --brain-muted:   #4a5068;
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(rgba(8, 11, 24, 0.24), rgba(8, 11, 24, 0.38)),
+    radial-gradient(circle at 20% 14%, rgba(255,255,255,0.42), transparent 24%),
+    radial-gradient(circle at 82% 16%, rgba(147,197,253,0.34), transparent 28%),
+    radial-gradient(circle at 72% 82%, rgba(132,204,22,0.26), transparent 28%),
+    linear-gradient(135deg, #6270a7 0%, #8aa77d 45%, #a57b70 100%);
+  background-size: cover;
+  background-position: center;
+}
 
-  --obs-violet:    #7c6fff;
-  --obs-amber:     #f59e0b;
-  --obs-slate:     #64748b;
-  --obs-rose:      #f43f5e;
-  --obs-text:      #e2e8f0;
+.login-card {
+  width: min(100%, 460px);
+  padding: 44px 40px;
+  border-radius: 32px;
+  background: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    0 28px 80px rgba(0,0,0,0.24);
+  transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+
+.login-card:hover {
+  border-color: rgba(255,255,255,0.72);
+  background: rgba(255,255,255,0.18);
+  transform: translateY(-1px);
+}
+
+.login-title {
+  font-size: 38px;
+  line-height: 1.05;
+  font-weight: 800;
+  color: white;
+}
+
+.login-subtitle {
+  margin-top: 12px;
+  font-size: 16px;
+  color: rgba(255,255,255,0.86);
+}
+
+.login-input {
+  width: 100%;
+  height: 58px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.45);
+  background: rgba(255,255,255,0.08);
+  color: white;
+  padding: 0 52px 0 18px;
+  outline: none;
+  transition: 180ms ease;
+}
+
+.login-input::placeholder {
+  color: rgba(255,255,255,0.72);
+}
+
+.login-input:hover {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.65);
+}
+
+.login-input:focus {
+  background: rgba(255,255,255,0.14);
+  border-color: rgba(255,255,255,0.85);
+  box-shadow: 0 0 0 4px rgba(255,255,255,0.12);
+}
+
+.login-button {
+  width: 100%;
+  height: 60px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.62);
+  background: linear-gradient(90deg, rgba(255,255,255,0.40), rgba(90,140,20,0.72));
+  color: white;
+  font-weight: 800;
+  font-size: 18px;
+  cursor: pointer;
+  transition: 180ms ease;
+}
+
+.login-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 18px 48px rgba(0,0,0,0.22);
+}
+
+.login-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.login-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.login-checkbox {
+  height: 18px;
+  width: 18px;
+  appearance: none;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,0.58);
+  background: rgba(255,255,255,0.10);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25);
+}
+
+.login-checkbox:checked {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.96), rgba(190,231,116,0.92));
+  box-shadow: inset 0 0 0 4px rgba(30,43,20,0.22);
+}
+
+.login-error {
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.32);
+  background: rgba(185,28,28,0.26);
+  padding: 12px 14px;
+  color: rgba(255,255,255,0.95);
+  font-size: 13px;
+  animation: login-error-in 180ms ease;
+}
+
+@keyframes login-error-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Theme tokens ─────────────────────────────────────────────
+   Two themes share the same `obs-*` Tailwind tokens.
+   Clean (default) → :root + [data-theme="clean"].
+   Dark             → [data-theme="dark"].
+   RGB triplets so they work with Tailwind's <alpha-value>.
+   ─────────────────────────────────────────────────────────── */
+:root,
+:root[data-theme="clean"] {
+  /* Surfaces */
+  --obs-deep:    244 244 247;
+  --obs-base:    245 245 247;
+  --obs-surface: 255 255 255;
+  --obs-raised:  255 255 255;
+
+  /* Text */
+  --obs-text:    29 29 31;
+  --obs-subtle:  110 110 115;
+  --obs-faint:   161 161 166;
+
+  /* Accents */
+  --obs-violet:  108  92 231;
+  --obs-amber:   217 119  6;
+  --obs-slate:   100 116 139;
+  --obs-rose:    225  29  72;
+
+  /* Neutral scrim foreground — drives white/X classes. */
+  --scrim-fg: 17 24 39;
+
+  /* Border tokens (-20% from previous baseline) */
+  --border-glass:        rgba(17, 24, 39, 0.08);
+  --border-glass-strong: rgba(17, 24, 39, 0.12);
+  --border-glass-soft:   rgba(17, 24, 39, 0.055);
+
+  /* Body chrome — soft Apple-style radial wash on light */
+  --body-bg: #f5f5f7;
+  --body-bg-image:
+    radial-gradient(ellipse at 20% 0%, rgba(108, 92, 231, 0.08), transparent 45%),
+    radial-gradient(ellipse at 80% 10%, rgba(74, 158, 255, 0.06), transparent 50%),
+    radial-gradient(ellipse at 50% 100%, rgba(255, 154, 74, 0.05), transparent 55%);
+
+  /* Liquid glass surface */
+  --glass-bg:        255 255 255;
+  --glass-bg-alpha:  0.72;
+  --glass-bg-hover:  0.85;
+  --glass-shadow:        0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.06);
+  --glass-shadow-hover:  0 2px 4px rgba(15, 23, 42, 0.06), 0 16px 40px rgba(15, 23, 42, 0.10);
+  --glass-inset-highlight: 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  /* ReactFlow */
+  --rf-bg: #ececef;
+  --rf-edge: rgba(15, 23, 42, 0.20);
+  --rf-edge-active: rgba(108, 92, 231, 0.65);
+  --rf-controls-bg: #ffffff;
+  --rf-controls-border: rgba(0, 0, 0, 0.06);
+  --rf-controls-color: #4b5563;
+  --rf-controls-bg-hover: #f3f4f6;
+  --rf-controls-color-hover: #111827;
+  --rf-minimap-bg: #ffffff;
+}
+
+:root[data-theme="dark"] {
+  --obs-deep:    5  7  9;
+  --obs-base:    8 11 18;
+  --obs-surface: 14 17 24;
+  --obs-raised:  20 23 36;
+
+  --obs-text:    226 232 240;
+  --obs-subtle:  136 146 164;
+  --obs-faint:   61  69  89;
+
+  --obs-violet:  124 111 255;
+  --obs-amber:   245 158  11;
+  --obs-slate:   100 116 139;
+  --obs-rose:    244  63  94;
+
+  --scrim-fg: 255 255 255;
+
+  --border-glass:        rgba(255, 255, 255, 0.08);
+  --border-glass-strong: rgba(255, 255, 255, 0.12);
+  --border-glass-soft:   rgba(255, 255, 255, 0.055);
+
+  /* Body chrome — multi-stop radial blend per brief */
+  --body-bg: #09051f;
+  --body-bg-image:
+    radial-gradient(circle at 15% 10%, rgba(74, 158, 255, 0.18), transparent 28%),
+    radial-gradient(circle at 85% 20%, rgba(255, 154, 74, 0.10), transparent 26%),
+    radial-gradient(circle at 50% 95%, rgba(126, 87, 255, 0.18), transparent 32%),
+    linear-gradient(135deg, #09051f 0%, #120c38 35%, #231c5c 70%, #3b2a8f 100%);
+
+  --glass-bg:        255 255 255;
+  --glass-bg-alpha:  0.045;
+  --glass-bg-hover:  0.065;
+  --glass-shadow:        inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 12px 32px rgba(0, 0, 0, 0.18);
+  --glass-shadow-hover:  inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 16px 44px rgba(0, 0, 0, 0.28);
+  --glass-inset-highlight: 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  --rf-bg: #050709;
+  --rf-edge: rgba(100, 116, 139, 0.30);
+  --rf-edge-active: rgba(124, 111, 255, 0.60);
+  --rf-controls-bg: #0e1118;
+  --rf-controls-border: rgba(255, 255, 255, 0.08);
+  --rf-controls-color: #8892a4;
+  --rf-controls-bg-hover: #141724;
+  --rf-controls-color-hover: #e2e8f0;
+  --rf-minimap-bg: #0e1118;
+}
+
+/* Legacy alias for any consumer that still reads --brain-* */
+:root {
+  --brain-bg:      var(--body-bg);
+  --brain-surface: rgb(var(--obs-surface));
+  --brain-border:  var(--border-glass);
+  --brain-accent:  rgb(var(--obs-violet));
+  --brain-muted:   rgb(var(--obs-subtle));
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; background: #080b12; color: #e2e8f0; }
+html, body { margin: 0; }
+body {
+  background-color: var(--body-bg);
+  background-image: var(--body-bg-image);
+  background-attachment: fixed;
+  color: rgb(var(--obs-text));
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
 
-/* ── Glass surface utility ───────────────────────────────────── */
-@layer utilities {
+/* ── Light-theme zinc remap (readable grays on white) ─────── */
+:root[data-theme="clean"] .text-zinc-200,
+:root[data-theme="clean"] .text-zinc-300 { color: #4b5563; }
+:root[data-theme="clean"] .text-zinc-400 { color: #6b7280; }
+:root[data-theme="clean"] .text-zinc-500 { color: #6e6e73; }
+:root[data-theme="clean"] .text-zinc-600 { color: #52525b; }
+:root[data-theme="clean"] .placeholder\:text-zinc-400::placeholder,
+:root[data-theme="clean"] .placeholder\:text-zinc-500::placeholder { color: #9ca3af; }
+
+/* Native form controls match theme */
+:root[data-theme="clean"] { color-scheme: light; }
+:root[data-theme="dark"]  { color-scheme: dark; }
+
+/* ── Liquid Glass surface (replaces .glass) ─────────────────── */
+@layer components {
+  .liquid-glass,
   .glass {
-    background: rgba(14, 17, 24, 0.72);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgb(var(--glass-bg) / var(--glass-bg-alpha));
+    backdrop-filter: blur(16px) saturate(130%);
+    -webkit-backdrop-filter: blur(16px) saturate(130%);
+    border: 1px solid var(--border-glass);
+    box-shadow: var(--glass-shadow);
   }
-
+  .liquid-glass-strong,
   .glass-raised {
-    background: rgba(20, 23, 36, 0.80);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgb(var(--glass-bg) / calc(var(--glass-bg-alpha) + 0.02));
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--border-glass-strong);
+    box-shadow: var(--glass-shadow);
+  }
+  .liquid-glass-hover:hover,
+  .glass-hover:hover {
+    background: rgb(var(--glass-bg) / var(--glass-bg-hover));
+    border-color: var(--border-glass-strong);
+    box-shadow: var(--glass-shadow-hover);
+    transform: translateY(-1px);
+    transition: all 180ms ease;
   }
 
+  /* Container helpers — windows that open inside the app */
+  .panel,
+  .window,
+  .drawer,
+  .modal-content {
+    background: rgb(var(--glass-bg) / var(--glass-bg-alpha));
+    backdrop-filter: blur(18px) saturate(135%);
+    -webkit-backdrop-filter: blur(18px) saturate(135%);
+    border: 1px solid var(--border-glass);
+    border-radius: 18px;
+    box-shadow: var(--glass-shadow);
+    padding: 22px;
+  }
+  .drawer-left  { border-right: 1px solid var(--border-glass); }
+  .drawer-right { border-left:  1px solid var(--border-glass); }
+
+  /* Card — for content tiles (less padding than panel) */
+  .lg-card {
+    background: rgb(var(--glass-bg) / var(--glass-bg-alpha));
+    backdrop-filter: blur(14px) saturate(125%);
+    -webkit-backdrop-filter: blur(14px) saturate(125%);
+    border: 1px solid var(--border-glass);
+    border-radius: 14px;
+    padding: 16px;
+    transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  }
+  .lg-card:hover {
+    background: rgb(var(--glass-bg) / var(--glass-bg-hover));
+    border-color: var(--border-glass-strong);
+    box-shadow: var(--glass-shadow-hover);
+  }
+
+  /* Inputs / search */
+  .lg-input,
+  .lg-search {
+    background: rgb(var(--glass-bg) / var(--glass-bg-alpha));
+    backdrop-filter: blur(14px) saturate(130%);
+    -webkit-backdrop-filter: blur(14px) saturate(130%);
+    border: 1px solid var(--border-glass);
+    border-radius: 14px;
+    padding: 10px 14px;
+    color: rgb(var(--obs-text));
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .lg-input::placeholder,
+  .lg-search::placeholder { color: rgb(var(--obs-faint)); }
+  .lg-input:focus,
+  .lg-search:focus {
+    outline: none;
+    border-color: var(--border-glass-strong);
+    box-shadow: 0 0 0 3px rgb(var(--obs-violet) / 0.18);
+  }
+
+  /* Buttons (pill, glass, no gradient) */
+  .lg-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+    cursor: pointer;
+  }
+  .lg-btn-primary {
+    background: rgb(var(--obs-violet) / 0.18);
+    border: 1px solid rgb(var(--obs-violet) / 0.32);
+    color: rgb(var(--obs-violet));
+  }
+  .lg-btn-primary:hover {
+    background: rgb(var(--obs-violet) / 0.26);
+    border-color: rgb(var(--obs-violet) / 0.45);
+  }
+  .lg-btn-secondary {
+    background: rgb(var(--glass-bg) / var(--glass-bg-alpha));
+    border: 1px solid var(--border-glass);
+    color: rgb(var(--obs-text));
+  }
+  .lg-btn-secondary:hover {
+    background: rgb(var(--glass-bg) / var(--glass-bg-hover));
+    border-color: var(--border-glass-strong);
+  }
+  .lg-btn-danger {
+    background: rgb(var(--obs-rose) / 0.10);
+    border: 1px solid rgb(var(--obs-rose) / 0.28);
+    color: rgb(var(--obs-rose));
+  }
+  .lg-btn-danger:hover {
+    background: rgb(var(--obs-rose) / 0.16);
+    border-color: rgb(var(--obs-rose) / 0.40);
+  }
+  .lg-btn:disabled,
+  .lg-btn[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  /* Badges (smaller, less saturated) */
+  .lg-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.3;
+    border: 1px solid var(--border-glass);
+    background: rgb(var(--glass-bg) / var(--glass-bg-alpha));
+    color: rgb(var(--obs-text));
+  }
+  .lg-badge-success { color: #2f8a4d; background: rgba(74, 222, 128, 0.10); border-color: rgba(74, 222, 128, 0.18); }
+  .lg-badge-warning { color: #a55a05; background: rgba(251, 191, 36, 0.10); border-color: rgba(251, 191, 36, 0.18); }
+  .lg-badge-error   { color: #b42323; background: rgba(248, 113, 113, 0.10); border-color: rgba(248, 113, 113, 0.20); }
+  .lg-badge-info    { color: #2667c4; background: rgba(96, 165, 250, 0.10); border-color: rgba(96, 165, 250, 0.20); }
+
+  :root[data-theme="dark"] .lg-badge-success { color: #7ee7a3; }
+  :root[data-theme="dark"] .lg-badge-warning { color: #ffd36a; }
+  :root[data-theme="dark"] .lg-badge-error   { color: #ff9b9b; }
+  :root[data-theme="dark"] .lg-badge-info    { color: #a3c8ff; }
+
+  /* Table shell + rows (lighter than default <table>) */
+  .lg-table-shell {
+    width: 100%;
+    border-radius: 18px;
+    overflow: hidden;
+    background: rgb(var(--glass-bg) / var(--glass-bg-alpha));
+    backdrop-filter: blur(16px) saturate(130%);
+    -webkit-backdrop-filter: blur(16px) saturate(130%);
+    border: 1px solid var(--border-glass);
+  }
+  .lg-table { width: 100%; border-collapse: collapse; }
+  .lg-table thead th {
+    background: rgb(var(--glass-bg) / calc(var(--glass-bg-alpha) - 0.005));
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: rgb(var(--obs-subtle));
+    padding: 10px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-glass-soft);
+  }
+  .lg-table tbody tr {
+    border-bottom: 1px solid var(--border-glass-soft);
+    transition: background 150ms ease;
+  }
+  .lg-table tbody tr:hover {
+    background: rgb(var(--glass-bg) / var(--glass-bg-hover));
+  }
+  .lg-table tbody tr:last-child { border-bottom: 0; }
+  .lg-table td {
+    padding: 12px 16px;
+    vertical-align: middle;
+    font-size: 13px;
+    color: rgb(var(--obs-text));
+  }
+  .lg-cell-truncate {
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Page shell — controls horizontal padding */
+  .lg-page {
+    padding-inline: clamp(20px, 3vw, 40px);
+    padding-block: 24px;
+  }
+  .lg-page-narrow { width: min(100%, 1320px); margin-inline: auto; }
+}
+
+@media (max-width: 768px) {
+  .lg-page { padding-inline: 16px; }
+  .panel, .window, .drawer, .modal-content { padding: 16px; }
+}
+
+/* ── Effects ────────────────────────────────────────────────── */
+@layer utilities {
   .glow-violet {
-    box-shadow: 0 0 20px rgba(124, 111, 255, 0.25), 0 0 0 1px rgba(124, 111, 255, 0.35);
+    box-shadow: 0 0 20px rgb(var(--obs-violet) / 0.25), 0 0 0 1px rgb(var(--obs-violet) / 0.35);
   }
   .glow-amber {
-    box-shadow: 0 0 16px rgba(245, 158, 11, 0.20), 0 0 0 1px rgba(245, 158, 11, 0.30);
+    box-shadow: 0 0 16px rgb(var(--obs-amber) / 0.20), 0 0 0 1px rgb(var(--obs-amber) / 0.30);
   }
-
   .node-obs {
-    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 4px 24px rgba(0,0,0,0.6);
+    box-shadow: 0 0 0 1px var(--border-glass), 0 4px 24px rgba(0,0,0,0.18);
   }
-
-  .sep {
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
-  }
+  .sep { border-top: 1px solid var(--border-glass-soft); }
 }
 
-/* ── ReactFlow overrides ─────────────────────────────────────── */
+/* ── ReactFlow overrides (theme-aware) ──────────────────────── */
 .react-flow__background {
-  background-color: #050709 !important;
+  background-color: var(--rf-bg) !important;
 }
 .react-flow__edge-path {
-  stroke: rgba(100, 116, 139, 0.30) !important;
+  stroke: var(--rf-edge) !important;
   stroke-width: 1.5px !important;
 }
 .react-flow__edge.selected .react-flow__edge-path,
 .react-flow__edge:hover .react-flow__edge-path {
-  stroke: rgba(124, 111, 255, 0.60) !important;
+  stroke: var(--rf-edge-active) !important;
   stroke-width: 2px !important;
 }
-.react-flow__handle {
-  pointer-events: all;
-}
-.react-flow__handle-top {
-  top: -4px !important;
-}
-.react-flow__handle-bottom {
-  bottom: -4px !important;
-}
+.react-flow__handle { pointer-events: all; }
+.react-flow__handle-top    { top: -4px !important; }
+.react-flow__handle-bottom { bottom: -4px !important; }
 .react-flow__handle:hover {
-  background: rgba(124, 111, 255, 0.82) !important;
-  border-color: rgba(255, 255, 255, 0.78) !important;
-  box-shadow: 0 0 0 3px rgba(124, 111, 255, 0.12), 0 0 8px rgba(124, 111, 255, 0.28) !important;
+  background: rgb(var(--obs-violet) / 0.82) !important;
+  border-color: rgb(var(--scrim-fg) / 0.78) !important;
+  box-shadow: 0 0 0 3px rgb(var(--obs-violet) / 0.12), 0 0 8px rgb(var(--obs-violet) / 0.28) !important;
 }
 .react-flow__controls button {
-  background: #0e1118 !important;
-  border: 1px solid rgba(255,255,255,0.08) !important;
-  color: #8892a4 !important;
+  background: var(--rf-controls-bg) !important;
+  border: 1px solid var(--rf-controls-border) !important;
+  color: var(--rf-controls-color) !important;
 }
 .react-flow__controls button:hover {
-  background: #141724 !important;
-  color: #e2e8f0 !important;
+  background: var(--rf-controls-bg-hover) !important;
+  color: var(--rf-controls-color-hover) !important;
 }
 .react-flow__minimap {
-  background: #0e1118 !important;
-  border: 1px solid rgba(255,255,255,0.06) !important;
+  background: var(--rf-minimap-bg) !important;
+  border: 1px solid var(--border-glass) !important;
   border-radius: 8px !important;
   overflow: hidden;
 }

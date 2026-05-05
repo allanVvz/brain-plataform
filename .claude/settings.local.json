@@ -26,7 +26,8 @@
       "Bash(python3 -c \"import json; d=json.load\\(open\\('/tmp/graph_default.json'\\)\\); print\\('nodes:', len\\(d.get\\('nodes',[]\\)\\)\\); print\\('edges:', len\\(d.get\\('edges',[]\\)\\)\\); m=d.get\\('meta',{}\\); print\\('semantic_nodes:', m.get\\('semantic_nodes'\\)\\); print\\('focus:', m.get\\('focus'\\)\\); print\\('applied:', m.get\\('applied_filters'\\)\\); print\\('registry node_types:', len\\(m.get\\('registry',{}\\).get\\('node_types',[]\\)\\)\\); print\\('first edge sample:', json.dumps\\(d['edges'][0], indent=2\\) if d.get\\('edges'\\) else 'none'\\); print\\('first gn node sample:', json.dumps\\([n for n in d['nodes'] if n['id'].startswith\\('gn:'\\)][0], indent=2\\) if any\\(n['id'].startswith\\('gn:'\\) for n in d.get\\('nodes',[]\\)\\) else 'none'\\)\")",
       "Bash(mkdir -p /c/Users/Alan/.claude/skills-staging)",
       "Read(//c/Users/Alan/.claude/**)",
-      "Bash(git clone *)"
+      "Bash(git clone *)",
+      "Bash(npm run *)"
     ]
   },
   "hooks": {

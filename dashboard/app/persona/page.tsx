@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { api } from "@/lib/api";
-import { Settings, X, RefreshCw, Send } from "lucide-react";
+import { Building2, Megaphone, MessageSquareText, Network, Package, RefreshCw, ScrollText, Send, Settings, Users, X } from "lucide-react";
 
 interface Persona { id: string; slug: string; name: string; tone: string; products: string[]; config: any; active: boolean; created_at: string; }
 
@@ -17,12 +18,122 @@ interface RoutingConfig {
   routing_source?: string;
 }
 
+interface GraphNodeSummary {
+  id: string;
+  title: string;
+  type: string;
+  summary: string;
+}
+
+interface PersonaGraphSummary {
+  products: GraphNodeSummary[];
+  brands: GraphNodeSummary[];
+  campaigns: GraphNodeSummary[];
+  audiences: GraphNodeSummary[];
+  rulesAndTone: GraphNodeSummary[];
+  copyFaq: GraphNodeSummary[];
+  operationalSummary: string;
+  totalConnected: number;
+}
+
+const GRAPH_CATEGORY_LABELS: Record<string, string> = {
+  persona: "Persona",
+  brand: "Brand",
+  campaign: "Campanha",
+  product: "Produto",
+  audience: "Publico",
+  faq: "FAQ",
+  copy: "Copy",
+  asset: "Assets",
+  gallery: "Galeria",
+  embedded: "Embed",
+  background: "Backgrounds",
+  texture: "Texturas",
+  rule: "Regras",
+  tone: "Tom de voz",
+  entity: "Entidades",
+};
+
+function graphNodeType(node: any): string {
+  return String(node?.data?.node_type || node?.data?.content_type || "").toLowerCase();
+}
+
+function graphNodeTitle(node: any): string {
+  return String(node?.data?.label || node?.data?.title || node?.data?.slug || node?.id || "Node");
+}
+
+function graphNodeSummary(node: any): string {
+  return String(node?.data?.content_preview || node?.data?.summary || node?.data?.metadata?.summary || "").trim();
+}
+
+function compactSummary(text: string, max = 150): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length > max ? `${clean.slice(0, max - 1).trim()}...` : clean;
+}
+
+function toSummary(node: any): GraphNodeSummary {
+  const type = graphNodeType(node);
+  return {
+    id: node.id,
+    title: graphNodeTitle(node),
+    type: GRAPH_CATEGORY_LABELS[type] || type || "Node",
+    summary: compactSummary(graphNodeSummary(node)),
+  };
+}
+
+function summarizePersonaGraph(graph: any, fallbackProducts: string[] = []): PersonaGraphSummary {
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+  const connectedIds = new Set<string>();
+  for (const edge of edges) {
+    if (edge?.source) connectedIds.add(edge.source);
+    if (edge?.target) connectedIds.add(edge.target);
+  }
+  const scopedNodes = nodes.filter((node: any) => {
+    const type = graphNodeType(node);
+    if (!type || ["persona", "tag", "mention", "knowledge_item", "kb_entry"].includes(type)) return false;
+    return connectedIds.size === 0 || connectedIds.has(node.id);
+  });
+
+  const byType = (types: string[]) => scopedNodes.filter((node: any) => types.includes(graphNodeType(node))).map(toSummary);
+  const productNodes = byType(["product"]);
+  const products = productNodes.length > 0
+    ? productNodes
+    : fallbackProducts.map((title) => ({ id: `fallback-product:${title}`, title, type: "Produto", summary: "" }));
+
+  const highlights = [
+    ...byType(["brand"]).slice(0, 1),
+    ...byType(["campaign"]).slice(0, 1),
+    ...products.slice(0, 2),
+    ...byType(["audience"]).slice(0, 1),
+    ...byType(["rule", "tone"]).slice(0, 2),
+  ].filter((item) => item.summary || item.title);
+
+  const operationalSummary = highlights.length > 0
+    ? highlights
+        .map((item) => item.summary ? `${item.title}: ${item.summary}` : item.title)
+        .join(" ")
+    : "Sem conexoes principais suficientes no grafo para gerar um resumo operacional.";
+
+  return {
+    products,
+    brands: byType(["brand"]),
+    campaigns: byType(["campaign"]),
+    audiences: byType(["audience"]),
+    rulesAndTone: byType(["rule", "tone"]),
+    copyFaq: byType(["copy", "faq"]),
+    operationalSummary: compactSummary(operationalSummary, 420),
+    totalConnected: scopedNodes.length,
+  };
+}
+
 export default function PersonaPage() {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [selected, setSelected] = useState<Persona | null>(null);
   const [brand, setBrand] = useState<any>(null);
   const [bindings, setBindings] = useState<any[]>([]);
   const [kbCount, setKbCount] = useState<number | null>(null);
+  const [graphSummary, setGraphSummary] = useState<PersonaGraphSummary | null>(null);
   const [routing, setRouting] = useState<RoutingConfig | null>(null);
   const [routingBusy, setRoutingBusy] = useState(false);
   const [showWebhookDrawer, setShowWebhookDrawer] = useState(false);
@@ -46,6 +157,7 @@ export default function PersonaPage() {
     setBrand(null);
     setBindings([]);
     setKbCount(null);
+    setGraphSummary(null);
     setRouting(null);
     setShowWebhookDrawer(false);
     setWebhookUrl("");
@@ -53,16 +165,18 @@ export default function PersonaPage() {
     setInboundToken("");
     setRoutingMessage(null);
     setTestResult(null);
-    const [brandData, bindingsData, kbData, routingData] = await Promise.all([
+    const [brandData, bindingsData, kbData, routingData, graphData] = await Promise.all([
       api.brandProfile(p.id).catch(() => null),
       api.workflowBindings(p.id).catch(() => []),
       api.kb(p.id).catch(() => []),
       api.personaRouting(p.slug).catch(() => null),
+      api.graphData(p.slug, { include_embedded: true, mode: "semantic_tree", max_depth: 6 }).catch(() => null),
     ]);
     setBrand(brandData);
     setBindings(bindingsData);
     setKbCount(Array.isArray(kbData) ? kbData.length : 0);
     setRouting(routingData);
+    setGraphSummary(summarizePersonaGraph(graphData, p.products || []));
   }
 
   async function setProcessMode(mode: "internal" | "n8n") {
@@ -144,20 +258,20 @@ export default function PersonaPage() {
     }
   }
 
-  if (loading) return <p className="text-brain-muted text-sm">Carregando...</p>;
+  if (loading) return <p className="text-obs-subtle text-sm">Carregando...</p>;
 
   return (
-    <div className="space-y-5">
-      <h1 className="text-xl font-semibold">Personas / Clientes</h1>
+    <div className="lg-page-narrow space-y-5">
+      <h1 className="text-xl font-semibold text-obs-text">Personas / Clientes</h1>
 
       {/* Client tabs */}
       <div className="flex gap-2 flex-wrap">
         {personas.map((p) => (
           <button key={p.id} onClick={() => selectPersona(p)}
-            className={`text-sm px-4 py-1.5 rounded-md border transition-colors ${
+            className={`lg-btn ${
               selected?.id === p.id
-                ? "bg-brain-accent/20 border-brain-accent text-brain-accent font-medium"
-                : "border-brain-border text-brain-muted hover:text-white"
+                ? "lg-btn-primary"
+                : "lg-btn-secondary"
             }`}>
             {p.name}
           </button>
@@ -168,38 +282,60 @@ export default function PersonaPage() {
         <div className="grid grid-cols-3 gap-4">
           {/* Main info */}
           <div className="col-span-2 space-y-4">
-            <div className="bg-brain-surface border border-brain-border rounded-xl p-5 space-y-4">
+            <div className="panel space-y-5">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-brain-accent/20 flex items-center justify-center text-brain-accent font-bold text-lg">
+                <div className="w-10 h-10 rounded-full bg-obs-violet/10 flex items-center justify-center text-obs-violet font-bold text-lg [border:1px_solid_var(--border-glass)]">
                   {selected.name[0]}
                 </div>
                 <div>
-                  <p className="font-semibold text-lg">{selected.name}</p>
-                  <p className="text-xs text-brain-muted font-mono">{selected.slug}</p>
+                  <p className="font-semibold text-lg text-obs-text">Persona: {selected.name}</p>
+                  <p className="text-xs text-obs-faint font-mono">{selected.slug}</p>
                 </div>
-                <span className={`ml-auto text-xs px-2 py-0.5 rounded-full border ${selected.active ? "border-green-500/40 text-green-400" : "border-red-500/40 text-red-400"}`}>
+                <span className={`ml-auto lg-badge ${selected.active ? "lg-badge-success" : "lg-badge-error"}`}>
                   {selected.active ? "ativo" : "inativo"}
                 </span>
               </div>
 
               <div>
-                <p className="text-xs text-brain-muted uppercase tracking-wide mb-1">Tom de voz</p>
-                <p className="text-sm">{selected.tone || "—"}</p>
+                <p className="text-xs text-obs-faint uppercase tracking-wide mb-1">Tom de voz</p>
+                <p className="text-sm text-obs-text">{selected.tone || "—"}</p>
               </div>
 
               <div>
-                <p className="text-xs text-brain-muted uppercase tracking-wide mb-1">Produtos</p>
+                <p className="text-xs text-obs-faint uppercase tracking-wide mb-1">Produtos cadastrados</p>
                 <div className="flex flex-wrap gap-1.5">
                   {(selected.products || []).map((p) => (
-                    <span key={p} className="text-xs bg-brain-bg border border-brain-border rounded px-2 py-0.5">{p}</span>
+                    <span key={p} className="lg-badge">{p}</span>
                   ))}
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <GraphSummarySection icon={<Package size={14} />} title="Produtos conectados" items={graphSummary?.products || []} />
+                <GraphSummarySection icon={<Building2 size={14} />} title="Brands conectadas" items={graphSummary?.brands || []} />
+                <GraphSummarySection icon={<Megaphone size={14} />} title="Campanhas conectadas" items={graphSummary?.campaigns || []} />
+                <GraphSummarySection icon={<Users size={14} />} title="Publicos conectados" items={graphSummary?.audiences || []} />
+                <GraphSummarySection icon={<ScrollText size={14} />} title="Regras e tom de voz" items={graphSummary?.rulesAndTone || []} />
+                <GraphSummarySection icon={<MessageSquareText size={14} />} title="Copy e FAQ" items={graphSummary?.copyFaq || []} />
+              </div>
+
+              <div className="lg-card space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-obs-faint">
+                    <Network size={14} className="text-obs-violet" />
+                    Resumo operacional
+                  </p>
+                  <span className="lg-badge">{graphSummary?.totalConnected ?? 0} nodes conectados</span>
+                </div>
+                <p className="text-sm leading-relaxed text-obs-text">
+                  {graphSummary?.operationalSummary || "Carregando resumo do grafo..."}
+                </p>
+              </div>
+
               {selected.config && Object.keys(selected.config).length > 0 && (
                 <div>
-                  <p className="text-xs text-brain-muted uppercase tracking-wide mb-1">Config</p>
-                  <pre className="text-xs bg-brain-bg border border-brain-border rounded p-3 overflow-x-auto">
+                  <p className="text-xs text-obs-faint uppercase tracking-wide mb-1">Config</p>
+                  <pre className="text-xs rounded-lg p-3 overflow-x-auto text-obs-text [background:rgba(255,255,255,0.58)] [border:1px_solid_var(--border-glass)]">
                     {JSON.stringify(selected.config, null, 2)}
                   </pre>
                 </div>
@@ -482,8 +618,48 @@ export default function PersonaPage() {
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-xs text-brain-muted">{label}</span>
-      <span className="text-sm font-semibold text-white">{value}</span>
+      <span className="text-xs text-obs-subtle">{label}</span>
+      <span className="text-sm font-semibold text-obs-text">{value}</span>
     </div>
+  );
+}
+
+function GraphSummarySection({
+  icon,
+  title,
+  items,
+}: {
+  icon: ReactNode;
+  title: string;
+  items: GraphNodeSummary[];
+}) {
+  const visible = items.slice(0, 5);
+  return (
+    <section className="lg-card space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-obs-faint">
+          <span className="text-obs-violet">{icon}</span>
+          {title}
+        </p>
+        <span className="text-[11px] text-obs-faint">{items.length}</span>
+      </div>
+      {visible.length === 0 ? (
+        <p className="text-xs text-obs-faint">Nenhum node conectado.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {visible.map((item) => (
+            <li key={item.id} className="rounded-lg px-2 py-1.5 [background:rgba(255,255,255,0.48)] [border:1px_solid_var(--border-glass-soft)]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-sm font-medium text-obs-text">{item.title}</span>
+                <span className="lg-badge shrink-0">{item.type}</span>
+              </div>
+              {item.summary && (
+                <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-obs-subtle">{item.summary}</p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

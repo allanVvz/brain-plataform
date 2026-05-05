@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
   Background,
@@ -29,6 +29,7 @@ import ReactFlow, {
 } from "reactflow";
 import dagre from "dagre";
 import "reactflow/dist/style.css";
+import { Database, Images } from "lucide-react";
 import {
   buildNeuronGraphLayout,
   buildTreeFromGraph,
@@ -37,7 +38,7 @@ import {
   KnowledgeViewMode,
 } from "./knowledgeGraphLayout";
 
-// ── Types ──────────────────────────────────────────────────────
+// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type ViewMode = KnowledgeViewMode;
 
@@ -45,6 +46,7 @@ interface GraphViewProps {
   rawNodes: any[];
   rawEdges: any[];
   onNodeClick: (node: any) => void;
+  onSelectionChange?: (nodes: any[]) => void;
   onConnectNodes?: (sourceId: string, targetId: string) => void | Promise<void>;
   onDeleteEdge?: (edgeId: string) => void | Promise<void>;
   mode: ViewMode;
@@ -67,7 +69,7 @@ const HANDLE_STYLE = {
   zIndex: 20,
 };
 
-// ── Layout helpers ─────────────────────────────────────────────
+// â”€â”€ Layout helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function nodeSize(data: GraphNodeData): { w: number; h: number } {
   const importance = data.importance ?? 0.5;
@@ -79,10 +81,12 @@ function nodeSize(data: GraphNodeData): { w: number; h: number } {
   return { w: 104, h: 32 };
 }
 
-// Map level (0-95) → dagre rank bucket so all persona share rank 0,
+// Map level (0-95) â†’ dagre rank bucket so all persona share rank 0,
 // brand/entity rank 1, campaign/product rank 2, etc.
 function levelToRank(level: number | undefined): number {
   if (level == null) return 5;
+  if (level >= 118) return 12;     // embedded/RAG root stays far below the tree
+  if (level >= 105) return 11;     // gallery root sits below ordinary knowledge
   if (level <= 0) return 0;        // persona
   if (level <= 15) return 1;       // entity
   if (level <= 25) return 2;       // brand
@@ -160,26 +164,70 @@ function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Nod
     .filter((e) => (e.data as GraphEdgeData | undefined)?.primary)
     .forEach((e) => g.setEdge(e.source, e.target, { weight: 2 }));
   dagre.layout(g);
-  return nodes.map((n) => {
+  const laid = nodes.map((n) => {
     const pos = g.node(n.id);
     if (!pos) return n;
     const { w, h } = nodeSize(n.data as GraphNodeData);
     return { ...n, position: { x: pos.x - w / 2, y: pos.y - h / 2 } };
   });
+  const persona = laid.find((node) => (node.data as GraphNodeData)?.node_type === "persona");
+  if (!persona) return laid;
+  const dx = persona.position.x;
+  const dy = persona.position.y;
+  const centered = laid.map((node) => ({
+    ...node,
+    position: {
+      x: node.position.x - dx,
+      y: node.position.y - dy,
+    },
+  }));
+  const baseMaxY = Math.max(
+    0,
+    ...centered
+      .filter((node) => !["embedded", "gallery"].includes(String((node.data as GraphNodeData)?.node_type || "")))
+      .map((node) => node.position.y),
+  );
+  const galleryNodes = centered.filter((node) => (node.data as GraphNodeData)?.node_type === "gallery");
+  const embeddedNodes = centered.filter((node) => (node.data as GraphNodeData)?.node_type === "embedded");
+  if (!embeddedNodes.length && !galleryNodes.length) return centered;
+  const galleryOffsetStart = -((galleryNodes.length - 1) * 160) / 2;
+  const embeddedOffsetStart = -((embeddedNodes.length - 1) * 160) / 2;
+  let galleryIndex = 0;
+  let embeddedIndex = 0;
+  return centered.map((node) => {
+    const nodeType = (node.data as GraphNodeData)?.node_type;
+    if (nodeType === "gallery") {
+      const x = galleryOffsetStart + galleryIndex * 160;
+      galleryIndex += 1;
+      return { ...node, position: { x, y: baseMaxY + 180 } };
+    }
+    if (nodeType === "embedded") {
+      const x = embeddedOffsetStart + embeddedIndex * 160;
+      embeddedIndex += 1;
+      return { ...node, position: { x, y: baseMaxY + 340 } };
+    }
+    return node;
+  });
 }
 
-// ── Filtering by mode ──────────────────────────────────────────
+// â”€â”€ Filtering by mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function filterEdgesForMode(edges: Edge[], mode: ViewMode): Edge[] {
   return edges;
 }
 
-// ── Edge style by tier ─────────────────────────────────────────
+// â”€â”€ Edge style by tier â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function edgeStyle(data: GraphEdgeData | undefined, isInPath: boolean): Edge["style"] {
   const tier = data?.tier || "auxiliary";
   if (isInPath) {
     return { stroke: "#7c6fff", strokeWidth: 3, strokeOpacity: 0.95 };
+  }
+  if (data?.embedded_edge) {
+    return { stroke: "rgba(255,255,255,0.78)", strokeWidth: 2.6, strokeOpacity: 0.88 };
+  }
+  if (data?.gallery_edge) {
+    return { stroke: "rgba(240,171,252,0.78)", strokeWidth: 2.4, strokeOpacity: 0.86 };
   }
   if (data?.primary) {
     return { stroke: "rgba(190,210,255,0.74)", strokeWidth: 2.4, strokeOpacity: 0.86 };
@@ -200,7 +248,7 @@ function edgeStyle(data: GraphEdgeData | undefined, isInPath: boolean): Edge["st
   return { stroke: "rgba(255,255,255,0.18)", strokeWidth: 1, strokeOpacity: 0.25, strokeDasharray: "4 4" };
 }
 
-// ── Node component ─────────────────────────────────────────────
+// â”€â”€ Node component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function PersonaNode({ data, selected }: NodeProps) {
   const d = data as GraphNodeData;
@@ -218,7 +266,6 @@ function PersonaNode({ data, selected }: NodeProps) {
         opacity: 1,
       }}
     >
-      <Handle id="top-target" type="target" position={Position.Top} style={HANDLE_STYLE} />
       <Handle id="bottom-source" type="source" position={Position.Bottom} style={HANDLE_STYLE} />
       <div className="text-[10px] uppercase tracking-widest opacity-60 mb-0.5">{d.node_type || "persona"}</div>
       {d.label}
@@ -234,20 +281,30 @@ function KnowledgeNode({ data, selected }: NodeProps) {
   const isImage = ["png", "jpg", "jpeg", "webp", "svg"].includes(d.file_type || "");
   const importance = d.importance ?? 0.5;
   const isAuxiliary = !!d.is_auxiliary;
-  const color = d.color || "#94a3b8";
+  const isEmbedded = d.node_type === "embedded";
+  const isGallery = d.node_type === "gallery";
+  const color = isEmbedded ? "#ffffff" : isGallery ? "#f0abfc" : d.color || "#94a3b8";
   const isGraphMode = d._viewMode === "graph";
 
   return (
     <div
-      className={`rounded-lg border glass cursor-pointer transition-all ${focused ? "ring-2 ring-obs-violet" : ""} ${selected ? "ring-1 ring-obs-violet" : ""}`}
+      className={`relative rounded-lg border glass cursor-pointer transition-all ${focused ? "ring-2 ring-obs-violet" : ""} ${selected ? "ring-1 ring-obs-violet" : ""}`}
       style={{
         minWidth: importance >= 0.85 ? 150 : importance >= 0.65 ? 130 : importance >= 0.5 ? 110 : 96,
         maxWidth: importance >= 0.85 ? 180 : 150,
         padding: importance >= 0.85 ? "8px 12px" : importance >= 0.5 ? "6px 10px" : "4px 8px",
-        borderColor: focused ? "#a78bfa" : `${color}99`,
-        background: focused ? `${color}33` : isGraphMode ? `radial-gradient(circle at 35% 25%, ${color}3D, ${color}14 58%, rgba(5,7,9,0.68))` : `${color}14`,
+        borderColor: isEmbedded ? "rgba(255,255,255,0.95)" : isGallery ? "rgba(240,171,252,0.95)" : focused ? "#a78bfa" : `${color}99`,
+        background: isEmbedded
+          ? "linear-gradient(145deg, rgba(255,255,255,0.16), rgba(30,41,59,0.62))"
+          : isGallery
+            ? "linear-gradient(145deg, rgba(240,171,252,0.20), rgba(88,28,135,0.42))"
+          : focused ? `${color}33` : isGraphMode ? `radial-gradient(circle at 35% 25%, ${color}3D, ${color}14 58%, rgba(5,7,9,0.68))` : `${color}14`,
         boxShadow: focused
           ? `0 0 20px ${color}CC, 0 0 44px ${color}33`
+          : isEmbedded
+            ? "0 0 18px rgba(255,255,255,0.22), inset 0 0 18px rgba(255,255,255,0.08)"
+          : isGallery
+            ? "0 0 18px rgba(240,171,252,0.28), inset 0 0 18px rgba(240,171,252,0.08)"
           : isGraphMode
             ? `0 0 ${10 + importance * 18}px ${color}55`
             : (inPath ? `0 0 10px ${color}77` : "none"),
@@ -255,14 +312,22 @@ function KnowledgeNode({ data, selected }: NodeProps) {
       }}
     >
       <Handle id="top-target" type="target" position={Position.Top} style={HANDLE_STYLE} />
-      <Handle id="bottom-source" type="source" position={Position.Bottom} style={HANDLE_STYLE} />
+      {!isEmbedded && !isGallery && (
+        <Handle id="bottom-source" type="source" position={Position.Bottom} style={HANDLE_STYLE} />
+      )}
       <div className="flex items-center gap-1.5 mb-0.5">
-        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} />
+        {isEmbedded ? (
+          <Database size={12} className="shrink-0 text-white" strokeWidth={2.2} />
+        ) : isGallery ? (
+          <Images size={12} className="shrink-0 text-fuchsia-200" strokeWidth={2.2} />
+        ) : (
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} />
+        )}
         <span className="text-[9px] uppercase tracking-wider truncate flex-1" style={{ color: `${color}DD` }}>
           {d.node_type || d.content_type}
         </span>
-        {isVideo && <span className="text-[8px] text-obs-amber">▶</span>}
-        {isImage && <span className="text-[8px] text-obs-slate">⬛</span>}
+        {isVideo && <span className="text-[8px] text-obs-amber">â–¶</span>}
+        {isImage && <span className="text-[8px] text-obs-slate">â¬›</span>}
         {typeof d.graph_distance === "number" && d.graph_distance > 0 && (
           <span className="text-[8px] text-obs-faint">d{d.graph_distance}</span>
         )}
@@ -311,22 +376,27 @@ function DeletableEdge({
     : getSmoothStepPath(pathArgs);
   const onDelete = (data as any)?.onDelete;
   const edgeIdForDelete = (data as any)?.original_edge_id || id;
+  const canDelete = (data as any)?.deletable !== false;
   return (
     <>
       <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} interactionWidth={18} />
-      {selected && onDelete && (
+      {selected && onDelete && canDelete && (
         <EdgeLabelRenderer>
           <button
             type="button"
-            aria-label="apagar-conexao"
+            aria-label="Excluir conexao"
             data-testid={`delete-edge-${id}`}
             onClick={(event) => {
+              event.preventDefault();
               event.stopPropagation();
-              onDelete(edgeIdForDelete);
+              console.info("[graph-edge-delete] click", { id, edgeIdForDelete, data });
+              Promise.resolve(onDelete(edgeIdForDelete)).catch((error: unknown) => {
+                console.error("[graph-edge-delete] onDelete failed", { id, edgeIdForDelete, error });
+              });
             }}
             className="nodrag nopan absolute flex h-7 w-7 items-center justify-center rounded-full border border-red-400/45 bg-red-500/95 text-[13px] text-white shadow-lg transition hover:bg-red-400"
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
-            title="Apagar conexão"
+            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, pointerEvents: "all", zIndex: 30 }}
+            title="Excluir conexao"
           >
             ×
           </button>
@@ -340,10 +410,11 @@ const edgeTypes: EdgeTypes = {
   deletable: DeletableEdge,
 };
 
-// ── Main component ─────────────────────────────────────────────
+// â”€â”€ Main component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteEdge, mode, searchQuery, focusNodeId, showAllEdges = false, branchDistance = 48 }: GraphViewProps) {
+function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConnectNodes, onDeleteEdge, mode, searchQuery, focusNodeId, showAllEdges = false, branchDistance = 48 }: GraphViewProps) {
   const { fitView, getViewport, setViewport } = useReactFlow();
+  const [panActive, setPanActive] = useState(false);
   const viewportKey = useMemo(() => {
     const personaIds = Array.from(new Set((rawNodes || []).map((n: any) => n?.data?.persona_slug || n?.data?.persona_id || n?.id).filter(Boolean))).slice(0, 3).join("|");
     return `knowledge-graph-viewport:${personaIds || "global"}:${mode}:${focusNodeId || "all"}`;
@@ -377,9 +448,9 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteE
     return ids;
   }, [activeRawEdges, focusNodeId]);
 
-  // Search filter — matched nodes get full opacity, others fade.
+  // Search filter â€” matched nodes get full opacity, others fade.
   const fold = (s: string) =>
-    (s || "").toString().toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
+    (s || "").toString().toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
   const q = fold(searchQuery || "");
   const isSearchHit = useCallback(
     (n: any) => {
@@ -428,7 +499,7 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteE
       const visible = matchesSearch && nearFocus;
       return {
         ...n,
-        data: { ...data, _faded: !visible, _viewMode: mode },
+        data: { ...data, _faded: !visible, _viewMode: mode, _nodeId: n.id },
         style: visible ? n.style : { ...n.style, opacity: 0.18 },
       };
     });
@@ -510,6 +581,26 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteE
     [onConnectNodes],
   );
 
+  useEffect(() => {
+    const blur = () => setPanActive(false);
+    const down = (event: KeyboardEvent) => {
+      const configured = window.localStorage.getItem("ai-brain-graph-pan-key") || "Control";
+      if (event.key === configured || (configured === "Control" && event.ctrlKey)) setPanActive(true);
+    };
+    const up = (event: KeyboardEvent) => {
+      const configured = window.localStorage.getItem("ai-brain-graph-pan-key") || "Control";
+      if (event.key === configured || !event.ctrlKey) setPanActive(false);
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
+
   return (
     <ReactFlow
       nodes={nodes}
@@ -518,6 +609,7 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteE
       onEdgesChange={onEdgesChange}
       onConnect={handleConnect}
       onNodeClick={handleClick}
+      onSelectionChange={({ nodes: selected }) => onSelectionChange?.(selected)}
       onMoveEnd={saveViewport}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
@@ -526,6 +618,10 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteE
       edgesFocusable
       edgesUpdatable={false}
       selectNodesOnDrag={false}
+      selectionOnDrag={!panActive}
+      selectionKeyCode={null}
+      panOnDrag={panActive}
+      nodesDraggable
       fitViewOptions={{ padding: 0.18 }}
       minZoom={0.08}
       maxZoom={2}
@@ -551,3 +647,5 @@ export default function GraphView(props: GraphViewProps) {
     </ReactFlowProvider>
   );
 }
+
+

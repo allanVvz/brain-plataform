@@ -22,6 +22,7 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${BASE}${path}`, {
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       ...opts,
     });
   } catch {
@@ -48,7 +49,7 @@ async function reqForm<T>(path: string, form: FormData): Promise<T> {
   assertApiConfigured();
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, { method: "POST", body: form });
+    res = await fetch(`${BASE}${path}`, { method: "POST", body: form, credentials: "include" });
   } catch {
     throw new Error(API_OFFLINE_ERROR);
   }
@@ -58,6 +59,12 @@ async function reqForm<T>(path: string, form: FormData): Promise<T> {
 }
 
 export const api = {
+  // Auth
+  login: (body: { identifier: string; password: string; remember?: boolean }) =>
+    req<any>("/auth/login", { method: "POST", body: JSON.stringify(body) }),
+  me: () => req<any>("/auth/me"),
+  logout: () => req<any>("/auth/logout", { method: "POST", body: "{}" }),
+
   // Health & Insights
   health: () => req<any>("/health/score"),
   insights: (status?: string) => req<any[]>(`/insights${status ? `?status=${status}` : ""}`),
@@ -69,6 +76,17 @@ export const api = {
   leads: (limit = 100, offset = 0, personaId?: string) =>
     req<any[]>(`/leads?limit=${limit}&offset=${offset}${personaId ? `&persona_id=${personaId}` : ""}`),
   lead: (id: string) => req<any>(`/leads/${id}`),
+  leadImports: (personaId?: string) =>
+    req<any[]>(`/leads/imports${personaId ? `?persona_id=${personaId}` : ""}`),
+  leadImport: (batchId: string) => req<any>(`/leads/imports/${encodeURIComponent(batchId)}`),
+  deleteLeadImport: (batchId: string) =>
+    req<any>(`/leads/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" }),
+  uploadLeadImport: (file: File, personaId?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (personaId) form.append("persona_id", personaId);
+    return reqForm<any>("/leads/imports", form);
+  },
   pauseAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/pause-ai`, { method: "POST" }),
   resumeAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/resume-ai`, { method: "POST" }),
   messages: (leadId: string) => req<any[]>(`/messages/${leadId}`),
@@ -125,6 +143,8 @@ export const api = {
     if (contentType) params.set("content_type", contentType);
     return req<any[]>(`/knowledge/queue?${params}`);
   },
+  galleryAssets: (personaId?: string) =>
+    req<any[]>(`/knowledge/gallery-assets${personaId ? `?persona_id=${personaId}` : ""}`),
   knowledgeCounts: (personaId?: string) =>
     req<any>(`/knowledge/queue/counts${personaId ? `?persona_id=${personaId}` : ""}`),
   updateQueueItem: (id: string, data: Record<string, any>) =>
@@ -204,6 +224,7 @@ export const api = {
     if (opts?.include_tags) params.set("include_tags", "true");
     if (opts?.include_mentions) params.set("include_mentions", "true");
     if (opts?.include_technical) params.set("include_technical", "true");
+    if (opts?.include_embedded === false) params.set("include_embedded", "false");
     if (opts?.mode) params.set("mode", opts.mode);
     const qs = params.toString();
     return req<any>(`/knowledge/graph-data${qs ? `?${qs}` : ""}`);
@@ -212,6 +233,8 @@ export const api = {
     req<any>("/knowledge/graph-edges", { method: "POST", body: JSON.stringify(body) }),
   deleteGraphEdge: (edgeId: string) =>
     req<any>(`/knowledge/graph-edges/${encodeURIComponent(edgeId)}`, { method: "DELETE" }),
+  deleteGraphNode: (nodeId: string) =>
+    req<any>(`/knowledge/graph-nodes/${encodeURIComponent(nodeId)}`, { method: "DELETE" }),
 
   // Knowledge — Chat sidebar context (semantic graph + KB fallback)
   knowledgeChatContext: (leadRef: number, q?: string, personaId?: string) => {

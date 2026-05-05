@@ -3,11 +3,11 @@ import secrets
 import time
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from schemas.persona import PersonaCreate, PersonaUpdate
-from services import supabase_client
+from services import auth_service, supabase_client
 
 router = APIRouter(prefix="/personas", tags=["personas"])
 logger = logging.getLogger("personas")
@@ -38,40 +38,50 @@ def _mask_routing(routing: dict) -> dict:
 
 
 @router.get("")
-def list_personas():
-    return supabase_client.get_personas()
+def list_personas(request: Request):
+    user = auth_service.current_user(request)
+    access = auth_service.allowed_access(request)
+    return auth_service.filter_personas_for_user(user, supabase_client.get_personas(), access)
 
 
 @router.get("/{slug}")
-def get_persona(slug: str):
+def get_persona(slug: str, request: Request):
     persona = supabase_client.get_persona(slug)
     if not persona:
         raise HTTPException(404, "Persona not found")
+    auth_service.assert_persona_access(request, persona_id=persona.get("id"), persona_slug=slug)
     return persona
 
 
 @router.post("")
-def create_persona(body: PersonaCreate):
+def create_persona(body: PersonaCreate, request: Request):
+    if not auth_service.is_admin(auth_service.current_user(request)):
+        raise HTTPException(403, "Apenas admin pode criar personas")
     supabase_client.upsert_persona(body.model_dump())
     return supabase_client.get_persona(body.slug)
 
 
 @router.patch("/{slug}")
-def update_persona(slug: str, body: PersonaUpdate):
+def update_persona(slug: str, body: PersonaUpdate, request: Request):
+    if not auth_service.is_admin(auth_service.current_user(request)):
+        raise HTTPException(403, "Apenas admin pode editar personas")
     supabase_client.upsert_persona({"slug": slug, **body.model_dump(exclude_none=True)})
     return supabase_client.get_persona(slug)
 
 
 @router.get("/{slug}/routing")
-def get_routing(slug: str):
+def get_routing(slug: str, request: Request):
     routing = supabase_client.get_persona_routing(slug)
     if not routing:
         raise HTTPException(404, "Persona not found")
+    auth_service.assert_persona_access(request, persona_id=routing.get("id"), persona_slug=slug)
     return _mask_routing(routing)
 
 
 @router.patch("/{slug}/routing")
-def update_routing(slug: str, body: RoutingUpdate):
+def update_routing(slug: str, body: RoutingUpdate, request: Request):
+    if not auth_service.is_admin(auth_service.current_user(request)):
+        raise HTTPException(403, "Apenas admin pode editar routing")
     current = supabase_client.get_persona_routing(slug)
     if not current:
         raise HTTPException(404, "Persona not found")
@@ -105,13 +115,14 @@ def update_routing(slug: str, body: RoutingUpdate):
 
 
 @router.post("/{slug}/routing/test")
-def test_outbound_webhook(slug: str):
+def test_outbound_webhook(slug: str, request: Request):
     """Fires a synthetic ping at the persona's outbound webhook so the
     operator can confirm n8n is wired up correctly. Returns the upstream
     status code and any error string."""
     routing = supabase_client.get_persona_routing(slug)
     if not routing:
         raise HTTPException(404, "Persona not found")
+    auth_service.assert_persona_access(request, persona_id=routing.get("id"), persona_slug=slug)
     url = routing.get("outbound_webhook_url")
     if not url:
         raise HTTPException(400, "outbound_webhook_url not configured")

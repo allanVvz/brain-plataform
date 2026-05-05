@@ -269,6 +269,7 @@ def process_intake(
         )
         status = "validated" if validate else "pending_validation"
         now_iso = datetime.now(timezone.utc).isoformat()
+        entry_metadata = {**classified["metadata"], "rag_index": (classified["metadata"] or {}).get("rag_index", "default")}
         entry = supabase_client.upsert_knowledge_rag_entry({
             "persona_id": resolved_persona_id,
             "intake_id": intake.get("id"),
@@ -286,7 +287,7 @@ def process_intake(
             "entities": classified["entities"],
             "products": classified["products"],
             "campaigns": classified["campaigns"],
-            "metadata": classified["metadata"],
+            "metadata": entry_metadata,
             "confidence": classified["confidence"],
             "importance": classified["importance"],
             "validated_at": now_iso if validate else None,
@@ -303,6 +304,7 @@ def process_intake(
                     "content_type": classified["content_type"],
                     "canonical_key": classified["canonical_key"],
                     "embedding_status": "pending",
+                    "rag_index": entry_metadata["rag_index"],
                 },
             }],
         )
@@ -513,7 +515,7 @@ def process_intake_plan(
             "entities": classified["entities"],
             "products": classified["products"],
             "campaigns": classified["campaigns"],
-            "metadata": classified["metadata"],
+            "metadata": {**classified["metadata"], "rag_index": (classified["metadata"] or {}).get("rag_index", "default")},
             "confidence": classified["confidence"],
             "importance": classified["importance"],
             "validated_at": now_iso if validate else None,
@@ -539,11 +541,12 @@ def process_intake_plan(
             "chunk_index": 0,
             "chunk_text": classified["content"],
             "chunk_summary": classified["summary"],
-            "metadata": {
-                "content_type": classified["content_type"],
-                "canonical_key": classified["canonical_key"],
-                "embedding_status": "pending",
-            },
+                "metadata": {
+                    "content_type": classified["content_type"],
+                    "canonical_key": classified["canonical_key"],
+                    "embedding_status": "pending",
+                    "rag_index": (classified["metadata"] or {}).get("rag_index", "default"),
+                },
         })
     if chunk_payload:
         client.table("knowledge_rag_chunks").upsert(

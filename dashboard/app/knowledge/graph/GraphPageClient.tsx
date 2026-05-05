@@ -87,6 +87,7 @@ export default function GraphPageClient() {
   const [data, setData] = useState<GraphPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState<any>(null);
+  const [selectedNodes, setSelectedNodes] = useState<any[]>([]);
   const [addPanelOpen, setAddPanelOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [headerPersonaSlug, setHeaderPersonaSlug] = useState("");
@@ -98,6 +99,7 @@ export default function GraphPageClient() {
   const includeTags = searchParams.get("tags") === "1";
   const includeMentions = searchParams.get("mentions") === "1";
   const includeTechnical = searchParams.get("tech") === "1";
+  const includeEmbedded = searchParams.get("embedded") !== "0";
   const showAllEdges = searchParams.get("all_edges") === "1" || searchParams.get("primary_edges") === "0";
   const branchDistance = Number(searchParams.get("distance") || 48);
 
@@ -132,13 +134,14 @@ export default function GraphPageClient() {
         include_tags: includeTags,
         include_mentions: includeMentions,
         include_technical: includeTechnical,
+        include_embedded: includeEmbedded,
         mode,
       });
       setData(d as GraphPayload);
     } finally {
       setLoading(false);
     }
-  }, [headerPersonaSlug, focus, includeTags, includeMentions, includeTechnical, mode]);
+  }, [headerPersonaSlug, focus, includeTags, includeMentions, includeTechnical, includeEmbedded, mode]);
 
   useEffect(() => {
     api.personas().then((p: any) => setPersonas(p));
@@ -204,6 +207,7 @@ export default function GraphPageClient() {
       copy: 90,
       faq: 95,
       asset: 100,
+      gallery: 115,
       knowledge_item: 120,
       kb_entry: 120,
       tag: 130,
@@ -252,22 +256,37 @@ export default function GraphPageClient() {
 
   const handleConnectNodes = useCallback(
     async (sourceId: string, targetId: string) => {
-      if (!sourceId.startsWith("gn:") || !targetId.startsWith("gn:")) {
-        setGraphNotice({ tone: "error", text: "Conexao permitida apenas entre blocos de conhecimento." });
+      const byId = new Map((data?.nodes || []).map((node) => [node.id, node]));
+      const sourceNode = byId.get(sourceId);
+      const targetNode = byId.get(targetId);
+      const sourceType = String(sourceNode?.data?.node_type || sourceNode?.data?.content_type || "");
+      const targetType = String(targetNode?.data?.node_type || targetNode?.data?.content_type || "");
+      const allowedRef = (id: string) => id.startsWith("gn:") || id.startsWith("persona:") || id.startsWith("embedded:");
+      if (!allowedRef(sourceId) || !allowedRef(targetId)) {
+        setGraphNotice({ tone: "error", text: "Conexao permitida apenas entre blocos persistidos do grafo." });
         return;
       }
+      const finalReceiverTypes = new Set(["gallery", "embedded"]);
+      const finalReceiver = finalReceiverTypes.has(targetType);
+      const involvesGallery = sourceType === "gallery" || targetType === "gallery";
+      const relationType = targetType === "gallery" ? "gallery_asset" : "manual";
       try {
         setGraphNotice(null);
         await api.createGraphEdge({
           source_node_id: sourceId,
           target_node_id: targetId,
-          relation_type: "manual",
+          relation_type: relationType,
           persona_id: effectivePersona?.id,
-          weight: 1,
-          metadata: { direction: "source_to_target", created_from: "graph_ui" },
+          weight: finalReceiver || involvesGallery ? 0.9 : 1,
+          metadata: {
+            direction: "source_to_target",
+            created_from: finalReceiver ? "graph_ui_final_receiver" : involvesGallery ? "gallery_ui" : "graph_ui",
+            primary_tree: !finalReceiver && !involvesGallery,
+            gallery: involvesGallery,
+          },
         });
         await load();
-        setGraphNotice({ tone: "success", text: "Conexao criada." });
+        setGraphNotice({ tone: "success", text: finalReceiver ? "Conexao criada para node final." : involvesGallery ? "Node adicionado a Gallery e Assets." : "Conexao criada." });
         window.setTimeout(() => setGraphNotice(null), 2200);
       } catch (error) {
         setGraphNotice({
@@ -276,21 +295,40 @@ export default function GraphPageClient() {
         });
       }
     },
-    [effectivePersona?.id, load],
+    [data?.nodes, effectivePersona?.id, load],
   );
 
   const handleDeleteEdge = useCallback(
     async (edgeId: string) => {
-      if (!edgeId.startsWith("ge:")) {
-        setGraphNotice({ tone: "error", text: "Esta conexao nao pode ser apagada pela UI." });
+      const rawEdgeId = String(edgeId || "");
+      const geIndex = rawEdgeId.indexOf("ge:");
+      const resolvedEdgeId = rawEdgeId.startsWith("ge:")
+        ? rawEdgeId
+        : geIndex >= 0
+          ? rawEdgeId.slice(geIndex)
+          : rawEdgeId;
+      if (!resolvedEdgeId.startsWith("ge:")) {
+        console.error("[graph-edge-delete] invalid edge id", { edgeId, resolvedEdgeId });
+        setGraphNotice({ tone: "error", text: `Esta conexao nao pode ser apagada pela UI (${rawEdgeId || "sem id"}).` });
         return;
       }
+      setData((current) => current ? {
+        ...current,
+        edges: (current.edges || []).filter((edge) => {
+          const candidate = String(edge?.data?.original_edge_id || edge?.id || "");
+          return candidate !== resolvedEdgeId && edge?.id !== resolvedEdgeId;
+        }),
+      } : current);
       try {
-        await api.deleteGraphEdge(edgeId);
+        console.info("[graph-edge-delete] deleting", { edgeId, resolvedEdgeId });
+        await api.deleteGraphEdge(resolvedEdgeId);
         await load();
+        console.info("[graph-edge-delete] deleted", { resolvedEdgeId });
         setGraphNotice({ tone: "success", text: "Conexao apagada." });
         window.setTimeout(() => setGraphNotice(null), 2200);
       } catch (error) {
+        console.error("[graph-edge-delete] failed", { edgeId, resolvedEdgeId, error });
+        await load();
         setGraphNotice({
           tone: "error",
           text: error instanceof Error ? error.message : "Nao foi possivel apagar a conexao.",
@@ -298,6 +336,34 @@ export default function GraphPageClient() {
       }
     },
     [load],
+  );
+
+  const handleDeleteNode = useCallback(
+    async (nodeId: string) => {
+      if (!nodeId.startsWith("gn:")) {
+        setGraphNotice({ tone: "error", text: "Este card nao pode ser apagado pela UI." });
+        return;
+      }
+      const node = data?.nodes?.find((item) => item.id === nodeId);
+      const nodeType = String(node?.data?.node_type || "");
+      if (["persona", "embedded", "gallery"].includes(nodeType) || node?.data?.protected) {
+        setGraphNotice({ tone: "error", text: "Este node e protegido e nao pode ser excluido." });
+        return;
+      }
+      try {
+        await api.deleteGraphNode(nodeId);
+        if (selectedNode?.id === nodeId) setSelectedNode(null);
+        await load();
+        setGraphNotice({ tone: "success", text: "Card apagado." });
+        window.setTimeout(() => setGraphNotice(null), 2200);
+      } catch (error) {
+        setGraphNotice({
+          tone: "error",
+          text: error instanceof Error ? error.message : "Nao foi possivel apagar o card.",
+        });
+      }
+    },
+    [data?.nodes, load, selectedNode?.id],
   );
 
   return (
@@ -314,14 +380,14 @@ export default function GraphPageClient() {
               value={focus}
               onChange={(e) => updateParam({ focus: e.target.value || null })}
               aria-label="filtro-semantico-grafo"
-              className="w-full bg-transparent text-xs font-medium text-obs-text outline-none [color-scheme:dark]"
+              className="w-full bg-transparent text-xs font-medium text-obs-text outline-none"
               disabled={!effectivePersonaSlug || graphFilterOptions.length === 0}
             >
-              <option className="bg-[#11151f] text-obs-text" value="">
+              <option className="bg-obs-raised text-obs-text" value="">
                 {effectivePersona?.name ? `${effectivePersona.name} no centro` : "Centro: persona"}
               </option>
               {graphFilterOptions.map((option) => (
-                <option className="bg-[#11151f] text-obs-text" key={option.value} value={option.value}>
+                <option className="bg-obs-raised text-obs-text" key={option.value} value={option.value}>
                   {`L${option.level} · ${option.nodeType} · ${option.label}${option.confidence > 0 ? ` · conf ${option.confidence.toFixed(2)}` : ""}`}
                 </option>
               ))}
@@ -407,6 +473,13 @@ export default function GraphPageClient() {
             label="Mostrar todas"
           />
 
+          <ToggleChip
+            active={includeEmbedded}
+            onClick={() => updateParam({ embedded: includeEmbedded ? "0" : null })}
+            icon={<Database size={10} />}
+            label="Embedded"
+          />
+
           {focusNode && (
             <div className="ml-auto flex items-center gap-2 px-2.5 py-1 rounded-md bg-obs-violet/10 border border-obs-violet/30">
               <Crosshair size={11} className="text-obs-violet" />
@@ -479,7 +552,14 @@ export default function GraphPageClient() {
           <GraphView
             rawNodes={data.nodes}
             rawEdges={data.edges}
-            onNodeClick={setSelectedNode}
+            onNodeClick={(node) => {
+              setSelectedNode(node);
+              setSelectedNodes([node]);
+            }}
+            onSelectionChange={(nodes) => {
+              setSelectedNodes(nodes);
+              if (nodes.length > 1) setSelectedNode(null);
+            }}
             onConnectNodes={handleConnectNodes}
             onDeleteEdge={handleDeleteEdge}
             mode={mode}
@@ -527,11 +607,17 @@ export default function GraphPageClient() {
         {/* Drawer overlay */}
         <NodeDrawer
           node={selectedNode}
-          onClose={() => setSelectedNode(null)}
+          selectedNodes={selectedNodes}
+          onClose={() => {
+            setSelectedNode(null);
+            setSelectedNodes([]);
+          }}
           onUpdated={load}
           focusPath={focusPath}
           directLinks={selectedDirectLinks}
           onFocusHere={() => selectedNode && onFocusNode(selectedNode)}
+          onDeleteNode={handleDeleteNode}
+          onDeleteEdge={handleDeleteEdge}
         />
 
         <button
@@ -549,9 +635,13 @@ export default function GraphPageClient() {
             edges={data?.edges || []}
             persona={effectivePersona}
             onClose={() => setAddPanelOpen(false)}
-            onCreated={async () => {
+            onCreated={async (created) => {
               setAddPanelOpen(false);
               await load();
+              const graphNode = created?.graph_node;
+              if (graphNode?.slug && graphNode?.node_type) {
+                updateParam({ focus: `${graphNode.node_type}:${graphNode.slug}` });
+              }
               setGraphNotice({ tone: "success", text: "Bloco criado e conectado." });
               window.setTimeout(() => setGraphNotice(null), 2200);
             }}
@@ -573,7 +663,7 @@ function AddBlockPanel({
   edges: any[];
   persona?: any;
   onClose: () => void;
-  onCreated: () => void | Promise<void>;
+  onCreated: (created?: any) => void | Promise<void>;
 }) {
   const nodeTypeOptions = [
     { value: "brand", label: "Brand" },
@@ -702,7 +792,7 @@ function AddBlockPanel({
     setSaving(true);
     setError("");
     try {
-      await api.intakeKnowledge({
+      const created = await api.intakeKnowledge({
         raw_text: content,
         persona_id: persona.id,
         source: "graph_ui_add_block",
@@ -721,7 +811,7 @@ function AddBlockPanel({
         parent_node_id: parentNodeId || undefined,
         parent_relation_type: "manual",
       });
-      await onCreated();
+      await onCreated(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel criar o bloco.");
     } finally {
@@ -731,7 +821,7 @@ function AddBlockPanel({
 
   return (
     <div className="absolute inset-0 z-50 flex items-end justify-center bg-black/30 p-3">
-      <form onSubmit={submit} className="w-full max-w-4xl rounded-xl border border-white/08 bg-[#0e1118] shadow-2xl">
+      <form onSubmit={submit} className="w-full max-w-4xl rounded-xl border border-white/08 bg-obs-surface shadow-2xl">
         <div className="flex items-center justify-between border-b border-white/06 px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold text-obs-text">Adicionar bloco ao grafo</h2>

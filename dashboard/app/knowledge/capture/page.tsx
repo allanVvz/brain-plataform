@@ -124,7 +124,11 @@ interface MissionState {
 }
 
 const DEFAULT_VARIATION_COUNTS = KNOWLEDGE_BLOCKS.reduce<Record<string, number>>((acc, block) => {
-  acc[block.id] = block.id === "faq" ? 2 : 1;
+  if (DEFAULT_SELECTED_BLOCKS.includes(block.id)) {
+    acc[block.id] = block.id === "faq" ? 2 : 1;
+  } else {
+    acc[block.id] = 0;
+  }
   return acc;
 }, {});
 
@@ -220,144 +224,130 @@ function PreflightPanel({
   uploads: SessionUpload[];
 }) {
   const selectedBlocks = new Set(plan.selectedBlocks);
-  const toggleBlock = (blockId: string) => {
-    const next = selectedBlocks.has(blockId)
-      ? plan.selectedBlocks.filter((id) => id !== blockId)
-      : [...plan.selectedBlocks, blockId];
-    setPlan({ ...plan, selectedBlocks: next });
-  };
-  const setVariation = (blockId: string, delta: number) => {
-    const current = Math.max(1, Number(plan.variationCounts[blockId] || 1));
+  const blockCount = (id: string) => Math.max(0, Number(plan.variationCounts[id] ?? 0));
+  const defaultCountFor = (id: string) => (id === "faq" ? 2 : 1);
+
+  const setBlockCount = (blockId: string, next: number) => {
+    const value = Math.max(0, next);
+    const nextSelected = value > 0
+      ? Array.from(new Set([...plan.selectedBlocks, blockId]))
+      : plan.selectedBlocks.filter((id) => id !== blockId);
     setPlan({
       ...plan,
-      variationCounts: {
-        ...plan.variationCounts,
-        [blockId]: Math.max(1, current + delta),
-      },
+      selectedBlocks: nextSelected,
+      variationCounts: { ...plan.variationCounts, [blockId]: value },
     });
   };
 
+  const adjust = (blockId: string, delta: number) => {
+    const current = blockCount(blockId);
+    if (delta > 0 && current === 0) {
+      setBlockCount(blockId, defaultCountFor(blockId));
+    } else {
+      setBlockCount(blockId, current + delta);
+    }
+  };
+
+  const selectedCount = plan.selectedBlocks.length;
+
   return (
-    <div className="flex flex-col h-full glass border border-white/06 rounded-2xl overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 sep">
+    <div className="panel flex h-full flex-col overflow-hidden">
+      {/* Header */}
+      <div className="-mx-[22px] -mt-[22px] flex items-center justify-between px-5 py-4 [border-bottom:1px_solid_var(--border-glass-soft)]">
         <div className="flex items-center gap-2">
           <ClipboardList size={15} className="text-obs-violet" />
-          <span className="text-sm font-semibold">Pre-confirmacao</span>
+          <span className="text-sm font-semibold text-obs-text">Pre-confirmacao</span>
         </div>
         <select
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          className="bg-obs-base border border-white/06 rounded px-2 py-1 text-xs text-obs-text focus:outline-none"
+          className="lg-input py-1 text-xs"
         >
           {MODELS.map((m) => (
-            <option key={m.id} value={m.id}>{m.label}</option>
+            <option key={m.id} value={m.id} className="bg-obs-raised">{m.label}</option>
           ))}
         </select>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        <div>
-          <label className="block text-[10px] uppercase tracking-wider text-obs-faint mb-1">Persona</label>
-          <input
-            value={plan.personaSlug}
-            onChange={(e) => setPlan({ ...plan, personaSlug: e.target.value })}
-            className="w-full bg-obs-base border border-white/06 rounded-lg px-3 py-2 text-sm text-obs-text focus:outline-none focus:border-obs-violet/50"
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] uppercase tracking-wider text-obs-faint mb-1">Objetivo</label>
-          <textarea
-            value={plan.objective}
-            onChange={(e) => setPlan({ ...plan, objective: e.target.value })}
-            rows={3}
-            className="w-full bg-obs-base border border-white/06 rounded-lg px-3 py-2 text-sm text-obs-text focus:outline-none focus:border-obs-violet/50 resize-none"
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] uppercase tracking-wider text-obs-faint mb-1">Fonte principal</label>
-          <input
-            value={plan.sourceUrl}
-            onChange={(e) => setPlan({ ...plan, sourceUrl: e.target.value })}
-            className="w-full bg-obs-base border border-white/06 rounded-lg px-3 py-2 text-sm text-obs-text focus:outline-none focus:border-obs-violet/50"
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] uppercase tracking-wider text-obs-faint mb-2">Blocos de conhecimento</label>
-          <div className="grid grid-cols-2 gap-2">
-            {KNOWLEDGE_BLOCKS.map((block) => {
-              const selected = selectedBlocks.has(block.id);
-              return (
-                <button
-                  key={block.id}
-                  type="button"
-                  onClick={() => toggleBlock(block.id)}
-                  className={`text-left border rounded-lg px-3 py-2 transition-colors ${
-                    selected
-                      ? "border-obs-violet/70 bg-obs-violet/12 text-obs-text"
-                      : "border-white/06 bg-obs-base text-obs-subtle hover:border-white/12"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    {selected ? <CheckCircle size={12} className="text-obs-violet shrink-0" /> : <Circle size={12} className="text-obs-faint shrink-0" />}
-                    <span className="text-xs font-semibold">{block.label}</span>
-                  </div>
-                  <p className="text-[10px] text-obs-faint mt-1 leading-snug">{block.description}</p>
-                </button>
-              );
-            })}
+      {/* Body */}
+      <div className="-mx-[22px] flex-1 overflow-y-auto px-5 py-5 space-y-4">
+        {/* Plan summary */}
+        <div className="grid gap-2 md:grid-cols-2">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-obs-faint mb-1">Persona</label>
+            <input
+              value={plan.personaSlug}
+              onChange={(e) => setPlan({ ...plan, personaSlug: e.target.value })}
+              className="lg-input w-full text-sm"
+            />
           </div>
-          <p className="text-[10px] text-obs-faint mt-2">
-            A selecao e ponto de partida. Durante a conversa o agente pode adicionar, remover ou trocar blocos conforme o pedido mudar.
-          </p>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-obs-faint mb-1">Fonte principal</label>
+            <input
+              value={plan.sourceUrl}
+              onChange={(e) => setPlan({ ...plan, sourceUrl: e.target.value })}
+              className="lg-input w-full text-sm"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-[10px] uppercase tracking-wider text-obs-faint mb-1">Objetivo</label>
+            <textarea
+              value={plan.objective}
+              onChange={(e) => setPlan({ ...plan, objective: e.target.value })}
+              rows={2}
+              className="lg-input w-full text-sm resize-none"
+            />
+          </div>
         </div>
+
+        {/* Knowledge blocks (single unified list) */}
         <div>
-          <label className="block text-[10px] uppercase tracking-wider text-obs-faint mb-2">Variacoes por atributo</label>
-          <div className="space-y-2">
+          <div className="mb-2 flex items-baseline justify-between">
+            <label className="text-[10px] uppercase tracking-wider text-obs-faint">Blocos de conhecimento</label>
+            <span className="text-[10px] text-obs-faint">{selectedCount} no plano</span>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
             {KNOWLEDGE_BLOCKS.map((block) => {
-              const value = Math.max(1, Number(plan.variationCounts[block.id] || 1));
+              const count = blockCount(block.id);
+              const selected = count > 0;
               return (
                 <div
                   key={block.id}
-                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${
-                    selectedBlocks.has(block.id)
-                      ? "border-obs-violet/30 bg-obs-violet/6"
-                      : "border-white/06 bg-obs-base"
+                  className={`flex items-start gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+                    selected
+                      ? "bg-obs-violet/10 [border:1px_solid_rgb(var(--obs-violet)/0.28)]"
+                      : "bg-white/[0.025] [border:1px_solid_var(--border-glass)]"
                   }`}
                 >
+                  <Stepper
+                    value={count}
+                    onDec={() => adjust(block.id, -1)}
+                    onInc={() => adjust(block.id, +1)}
+                    blockId={block.id}
+                  />
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs text-obs-text">{block.label}</p>
-                    <p className="text-[10px] text-obs-faint">{selectedBlocks.has(block.id) ? "entra no plano atual" : "fora do plano atual"}</p>
-                  </div>
-                  <div className="flex items-center gap-1 rounded-lg border border-white/08 bg-obs-base p-1">
-                    <button
-                      type="button"
-                      onClick={() => setVariation(block.id, -1)}
-                      className="w-6 h-6 rounded text-xs text-obs-subtle hover:text-white hover:bg-white/5"
-                      aria-label={`reduzir-${block.id}`}
-                      data-testid={`reduzir-${block.id}`}
-                    >
-                      -
-                    </button>
-                    <span className="w-8 text-center text-xs text-obs-text font-medium">{value}</span>
-                    <button
-                      type="button"
-                      onClick={() => setVariation(block.id, 1)}
-                      className="w-6 h-6 rounded text-xs text-obs-subtle hover:text-white hover:bg-white/5"
-                      aria-label={`aumentar-${block.id}`}
-                      data-testid={`aumentar-${block.id}`}
-                    >
-                      +
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {selected
+                        ? <CheckCircle size={11} className="text-obs-violet shrink-0" />
+                        : <Circle size={11} className="text-obs-faint shrink-0" />}
+                      <span className="text-xs font-semibold text-obs-text">{block.label}</span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] leading-snug text-obs-subtle">{block.description}</p>
+                    <p className="mt-1 text-[10px] text-obs-faint">
+                      {selected ? "Selecionado no plano atual" : "Fora do plano atual"}
+                    </p>
                   </div>
                 </div>
               );
             })}
           </div>
-          <p className="text-[10px] text-obs-faint mt-2">
-            Padrao: 1 variacao por bloco. FAQ inicia com 2 para favorecer multiplos galhos recuperaveis.
+          <p className="mt-2 text-[10px] text-obs-faint">
+            A selecao e ponto de partida. Durante a conversa o agente pode adicionar, remover ou trocar blocos conforme o pedido mudar.
           </p>
         </div>
-        <label className="flex items-start gap-2 text-xs text-obs-subtle border border-white/06 rounded-lg px-3 py-2 bg-obs-base">
+
+        {/* Confirmation */}
+        <label className="flex items-start gap-2 rounded-xl bg-white/[0.04] px-3 py-2 text-xs text-obs-subtle [border:1px_solid_var(--border-glass)]">
           <input
             type="checkbox"
             checked={plan.confirmed}
@@ -365,21 +355,59 @@ function PreflightPanel({
             className="mt-0.5 accent-obs-violet"
           />
           <span>
-            Confirmo que o modelo deve usar este plano e os {uploads.length} upload(s) da sessao como contexto. Se faltar dado, ele deve me perguntar antes de propor entradas, copys ou salvar.
+            Confirmo que o modelo deve usar este plano e os {uploads.length} upload(s) da sessao como contexto. Se faltar dado, ele deve perguntar antes de propor entradas, copys ou salvar.
           </span>
         </label>
       </div>
 
-      <div className="sep p-3">
+      {/* Footer */}
+      <div className="-mx-[22px] -mb-[22px] px-5 py-4 [border-top:1px_solid_var(--border-glass-soft)]">
         <button
           onClick={onStart}
           disabled={loading || !plan.confirmed || plan.selectedBlocks.length === 0}
-          className="w-full bg-obs-violet hover:bg-obs-violet/80 disabled:opacity-40 text-white text-sm px-4 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+          className="lg-btn lg-btn-primary w-full justify-center"
         >
           {loading ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-          Iniciar modelo com plano
+          Inicializar criacao de conhecimento
         </button>
       </div>
+    </div>
+  );
+}
+
+function Stepper({
+  value,
+  onDec,
+  onInc,
+  blockId,
+}: {
+  value: number;
+  onDec: () => void;
+  onInc: () => void;
+  blockId: string;
+}) {
+  return (
+    <div className="flex items-center gap-0.5 rounded-full bg-white/[0.05] p-0.5 [border:1px_solid_var(--border-glass)]">
+      <button
+        type="button"
+        onClick={onDec}
+        disabled={value <= 0}
+        className="h-6 w-6 rounded-full text-xs text-obs-subtle hover:bg-white/[0.08] hover:text-obs-text disabled:opacity-40 disabled:hover:bg-transparent"
+        aria-label={`reduzir-${blockId}`}
+        data-testid={`reduzir-${blockId}`}
+      >
+        −
+      </button>
+      <span className="w-6 text-center text-xs font-semibold text-obs-text tabular-nums">{value}</span>
+      <button
+        type="button"
+        onClick={onInc}
+        className="h-6 w-6 rounded-full text-xs text-obs-subtle hover:bg-white/[0.08] hover:text-obs-text"
+        aria-label={`aumentar-${blockId}`}
+        data-testid={`aumentar-${blockId}`}
+      >
+        +
+      </button>
     </div>
   );
 }

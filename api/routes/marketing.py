@@ -17,10 +17,10 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from services import supabase_client
+from services import auth_service, supabase_client
 from services.model_router import ModelRouter, ModelRouterError, AVAILABLE_MODELS
 
 logger = logging.getLogger("marketing")
@@ -351,7 +351,9 @@ def list_modes():
 
 
 @router.post("/generate", response_model=GenerateResponse)
-def generate(body: GenerateRequest):
+def generate(body: GenerateRequest, request: Request):
+    if body.persona_id:
+        auth_service.assert_persona_access(request, persona_id=body.persona_id)
     spec = _MODES.get(body.mode)
     if not spec:
         raise HTTPException(status_code=404, detail=f"Unknown mode '{body.mode}'. See /marketing/modes")

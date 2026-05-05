@@ -227,6 +227,29 @@ def get_leads(persona_slug: Optional[str] = None, limit: int = 100, offset: int 
         return []
 
 
+def get_leads_for_persona_ids(persona_ids: list[str], limit: int = 100, offset: int = 0) -> list:
+    ids = [pid for pid in persona_ids if pid]
+    if not ids:
+        return []
+    try:
+        q = (
+            get_client()
+            .table("leads")
+            .select("*")
+            .in_("persona_id", ids)
+            .order("updated_at", desc=True)
+            .range(offset, offset + limit - 1)
+        )
+        return _q(q)
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"get_leads_for_persona_ids failed: {exc}", exc)
+        except Exception:
+            pass
+        return []
+
+
 def update_lead(lead_ref: int, data: dict) -> None:
     _execute_with_retry(get_client().table("leads").update(data).eq("id", lead_ref))
 
@@ -538,6 +561,106 @@ def upsert_knowledge_node(data: dict) -> Optional[dict]:
         raise
 
 
+def get_knowledge_node(node_id: str) -> Optional[dict]:
+    """Fetch a single knowledge node by UUID."""
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING or not node_id:
+        return None
+    try:
+        return _one(get_client().table("knowledge_nodes").select("*").eq("id", node_id).maybe_single())
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return None
+        raise
+
+
+def ensure_persona_knowledge_node(persona_id: str) -> Optional[dict]:
+    """Ensure the graph has a protected semantic root for a persona."""
+    if not persona_id:
+        return None
+    persona = None
+    try:
+        persona = _one(get_client().table("personas").select("id,slug,name").eq("id", persona_id).maybe_single())
+    except Exception:
+        persona = None
+    return upsert_knowledge_node({
+        "persona_id": persona_id,
+        "node_type": "persona",
+        "slug": "self",
+        "title": (persona or {}).get("name") or "Persona",
+        "summary": "Raiz protegida da persona no grafo.",
+        "tags": ["persona"],
+        "metadata": {"role": "root", "protected": True},
+        "status": "active",
+        "level": 0,
+        "importance": 1.0,
+        "confidence": 1.0,
+    })
+
+
+def ensure_gallery_node(persona_id: str) -> Optional[dict]:
+    """Ensure a protected Gallery node exists for a persona."""
+    if not persona_id:
+        return None
+    return upsert_knowledge_node({
+        "persona_id": persona_id,
+        "node_type": "gallery",
+        "slug": "gallery-default",
+        "title": "Gallery",
+        "summary": "Bloco protegido para materiais visuais. Nodes ligados aqui aparecem em Assets.",
+        "tags": ["gallery", "assets", "visual"],
+        "metadata": {
+            "protected": True,
+            "system_node": True,
+            "asset_scope": "visual_media",
+            "open_url": "/marketing/assets",
+        },
+        "status": "active",
+        "level": 112,
+        "importance": 0.82,
+        "confidence": 1.0,
+    })
+
+
+def ensure_embedded_node(persona_id: str) -> Optional[dict]:
+    """Ensure a protected Embedded/KB destination node exists for a persona."""
+    if not persona_id:
+        return None
+    return upsert_knowledge_node({
+        "persona_id": persona_id,
+        "node_type": "embedded",
+        "slug": "embedded-default",
+        "title": "Embedded",
+        "summary": "Destino protegido para conteudos aprovados e enviados para a Knowledge Base.",
+        "tags": ["rag", "embedded", "kb", "default"],
+        "metadata": {
+            "protected": True,
+            "system_node": True,
+            "rag_index": "default",
+            "open_url": "/kb",
+        },
+        "status": "active",
+        "level": 120,
+        "importance": 0.78,
+        "confidence": 1.0,
+    })
+
+
+def _edge_is_inactive(edge: dict | None) -> bool:
+    metadata = (edge or {}).get("metadata") or {}
+    return metadata.get("active") is False
+
+
+def _primary_tree_metadata(metadata: Optional[dict]) -> dict:
+    merged = dict(metadata or {})
+    merged["primary_tree"] = True
+    merged["active"] = True
+    merged.pop("deleted_at", None)
+    merged.pop("deleted_from", None)
+    return merged
+
+
 def upsert_knowledge_edge(
     source_node_id: str,
     target_node_id: str,
@@ -546,7 +669,11 @@ def upsert_knowledge_edge(
     weight: float = 1.0,
     metadata: Optional[dict] = None,
 ) -> Optional[dict]:
-    """Idempotent upsert keyed by (source_node_id, target_node_id, relation_type)."""
+    """Idempotent upsert keyed by (source_node_id, target_node_id, relation_type).
+
+    Existing soft-deleted edges are reactivated. For primary tree paths, this
+    also deactivates any previous active primary path pointing at the target.
+    """
     global _KG_TABLES_MISSING
     if _KG_TABLES_MISSING:
         return None
@@ -559,7 +686,7 @@ def upsert_knowledge_edge(
     try:
         existing_q = (
             client.table("knowledge_edges")
-            .select("id")
+            .select("*")
             .eq("source_node_id", source_node_id)
             .eq("target_node_id", target_node_id)
             .eq("relation_type", relation_type)
@@ -586,16 +713,29 @@ def upsert_knowledge_edge(
                 return existing
         raise
 
+    requested_metadata = dict(metadata or {})
+    is_primary_path = requested_metadata.get("primary_tree") is True
+
+    if is_primary_path:
+        deactivate_primary_paths_for_target(target_node_id, except_source_node_id=source_node_id)
+
     if existing:
-        return existing
+        update_data = {
+            "persona_id": persona_id,
+            "weight": weight,
+            "metadata": _primary_tree_metadata(requested_metadata) if is_primary_path else {**(existing.get("metadata") or {}), **requested_metadata, "active": True},
+        }
+        r = client.table("knowledge_edges").update(update_data).eq("id", existing["id"]).execute()
+        return (r.data or [{**existing, **update_data}])[0]
     try:
+        insert_metadata = _primary_tree_metadata(requested_metadata) if is_primary_path else requested_metadata
         r = client.table("knowledge_edges").insert({
             "source_node_id": source_node_id,
             "target_node_id": target_node_id,
             "relation_type": relation_type,
             "persona_id": persona_id,
             "weight": weight,
-            "metadata": metadata or {},
+            "metadata": insert_metadata,
         }).execute()
         return (r.data or [{}])[0]
     except Exception as exc:
@@ -605,13 +745,90 @@ def upsert_knowledge_edge(
         raise
 
 
+def deactivate_primary_paths_for_target(target_node_id: str, except_source_node_id: Optional[str] = None) -> int:
+    """Soft-disable active primary-tree paths to a target node."""
+    if _KG_TABLES_MISSING or not target_node_id:
+        return 0
+    from datetime import datetime, timezone
+
+    client = get_client()
+    rows = _q(
+        client.table("knowledge_edges")
+        .select("id,source_node_id,metadata")
+        .eq("target_node_id", target_node_id)
+        .limit(500)
+    )
+    changed = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for row in rows:
+        metadata = row.get("metadata") or {}
+        if row.get("source_node_id") == except_source_node_id:
+            continue
+        if metadata.get("primary_tree") is not True or metadata.get("active") is False:
+            continue
+        next_metadata = {
+            **metadata,
+            "active": False,
+            "deleted_at": now_iso,
+            "deleted_from": "graph_ui_reparent",
+        }
+        _execute_with_retry(
+            client.table("knowledge_edges").update({"metadata": next_metadata}).eq("id", row["id"])
+        )
+        changed += 1
+    return changed
+
+
 def delete_knowledge_edge(edge_id: str) -> bool:
-    """Delete a knowledge edge by id. Returns True when the delete request succeeds."""
+    """Soft-delete a knowledge edge by id. Returns True when the request succeeds."""
     global _KG_TABLES_MISSING
     if _KG_TABLES_MISSING or not edge_id:
         return False
+    from datetime import datetime, timezone
+
     try:
-        _execute_with_retry(get_client().table("knowledge_edges").delete().eq("id", edge_id))
+        client = get_client()
+        row = _one(client.table("knowledge_edges").select("*").eq("id", edge_id).maybe_single())
+        if not row:
+            return False
+        metadata = row.get("metadata") or {}
+        metadata = {
+            **metadata,
+            "active": False,
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
+            "deleted_from": "graph_ui",
+        }
+        _execute_with_retry(client.table("knowledge_edges").update({"metadata": metadata}).eq("id", edge_id))
+        if row.get("relation_type") == "gallery_asset":
+            mark_gallery_asset_inactive_by_edge(edge_id)
+        return True
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return False
+        raise
+
+
+def get_knowledge_edge(edge_id: str) -> Optional[dict]:
+    if not edge_id:
+        return None
+    return _one(get_client().table("knowledge_edges").select("*").eq("id", edge_id).maybe_single())
+
+
+def delete_knowledge_node(node_id: str) -> bool:
+    """Delete a knowledge node and its graph edges by id."""
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING or not node_id:
+        return False
+    client = get_client()
+    try:
+        node = _one(client.table("knowledge_nodes").select("id,node_type,metadata").eq("id", node_id).maybe_single())
+        metadata = (node or {}).get("metadata") or {}
+        if (node or {}).get("node_type") in {"persona", "embedded", "gallery"} or metadata.get("protected") is True:
+            return False
+        _execute_with_retry(client.table("knowledge_edges").delete().eq("source_node_id", node_id))
+        _execute_with_retry(client.table("knowledge_edges").delete().eq("target_node_id", node_id))
+        _execute_with_retry(client.table("knowledge_nodes").delete().eq("id", node_id))
         return True
     except Exception as exc:
         if _kg_unavailable(exc):
@@ -686,6 +903,8 @@ def get_knowledge_neighbors(
     edges: dict[str, dict] = {}
     related_ids: set[str] = set(seed_ids)
     for e in [*edges_out, *edges_in]:
+        if _edge_is_inactive(e):
+            continue
         edges[e["id"]] = e
         related_ids.add(e["source_node_id"])
         related_ids.add(e["target_node_id"])
@@ -747,7 +966,253 @@ def list_all_knowledge_graph(persona_id: Optional[str] = None, limit_nodes: int 
         eq_in_source = client.table("knowledge_edges").select("*").in_("source_node_id", node_ids).limit(5000).execute().data or []
     except Exception:
         eq_in_source = []
-    return nodes, eq_in_source
+    active_edges = [edge for edge in eq_in_source if not _edge_is_inactive(edge)]
+    return nodes, active_edges
+
+
+def _asset_table_unavailable(exc: Exception) -> bool:
+    text = str(exc)
+    return "assets" in text and ("PGRST205" in text or "schema cache" in text or "Could not find" in text)
+
+
+def sync_gallery_asset_node(node: dict, edge: dict) -> Optional[dict]:
+    """Mirror a Gallery-linked knowledge node into the existing assets table."""
+    if not node or not edge:
+        return None
+    client = get_client()
+    metadata = node.get("metadata") or {}
+    node_type = (node.get("node_type") or "").lower()
+    file_path = metadata.get("file_path") or metadata.get("path") or metadata.get("url")
+    ext = str(file_path).rsplit(".", 1)[-1].lower() if file_path and "." in str(file_path) else ""
+    asset_type = metadata.get("asset_type") or ("gallery_node" if node_type != "asset" else "asset")
+    platform_type = "image" if ext in {"png", "jpg", "jpeg", "svg", "gif", "webp"} else ("campaign" if node_type == "campaign" else "template")
+    payload = {
+        "persona_id": node.get("persona_id") or edge.get("persona_id"),
+        "type": platform_type,
+        "name": node.get("title") or node.get("slug") or "Gallery asset",
+        "url": metadata.get("url") if metadata.get("url") else None,
+        "metadata": {
+            **metadata,
+            "knowledge_node_id": node.get("id"),
+            "knowledge_edge_id": edge.get("id"),
+            "source_table": node.get("source_table"),
+            "source_id": node.get("source_id"),
+            "node_type": node_type,
+            "file_path": file_path,
+            "gallery_active": True,
+        },
+        "source": "imported",
+        "asset_type": asset_type,
+        "asset_function": metadata.get("asset_function") or "gallery_reference",
+        "tags": node.get("tags") or [],
+        "description": node.get("summary"),
+        "embedding_status": "none",
+        "approval_status": "approved",
+        "knowledge_node_id": node.get("id"),
+        "gallery_edge_id": edge.get("id"),
+    }
+    payload = {k: v for k, v in payload.items() if v is not None}
+    try:
+        existing = _one(client.table("assets").select("id").eq("knowledge_node_id", node.get("id")).maybe_single())
+        if existing:
+            result = _execute_with_retry(client.table("assets").update(payload).eq("id", existing["id"]))
+        else:
+            result = _execute_with_retry(client.table("assets").insert(payload))
+        return (result.data or [payload])[0]
+    except Exception as exc:
+        if _asset_table_unavailable(exc):
+            return None
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"sync_gallery_asset_node failed: {exc}", exc)
+        except Exception:
+            pass
+        return None
+
+
+def sync_embedded_kb_node(node: dict, edge: dict) -> Optional[dict]:
+    """Mirror an Embedded-linked knowledge node into kb_entries.
+
+    The current Knowledge Base UI reads `kb_entries` filtered by persona and
+    `status=ATIVO`; this keeps the graph action aligned with that surface while
+    preserving the original node.
+    """
+    if not node or not edge:
+        return None
+    from datetime import datetime, timezone
+    import hashlib
+
+    persona_id = edge.get("persona_id") or node.get("persona_id")
+    if not persona_id:
+        return None
+    metadata = node.get("metadata") or {}
+    source_table = node.get("source_table")
+    source_id = node.get("source_id")
+
+    item = None
+    if source_table == "knowledge_items" and source_id:
+        try:
+            item = get_knowledge_item(source_id)
+        except Exception:
+            item = None
+
+    node_type = (node.get("node_type") or (item or {}).get("content_type") or "other").lower()
+    title = (item or {}).get("title") or node.get("title") or node.get("slug") or "Conhecimento do grafo"
+    content = (
+        (item or {}).get("content")
+        or node.get("summary")
+        or metadata.get("content")
+        or metadata.get("description")
+        or title
+    )
+    tags = (item or {}).get("tags") or node.get("tags") or []
+    kb_id = "gn_" + hashlib.md5(f"{node.get('id')}:{persona_id}".encode()).hexdigest()[:12]
+
+    if item:
+        update_knowledge_item(source_id, {
+            "status": "embedded",
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "persona_id": persona_id,
+        })
+
+    entry = upsert_kb_entry({
+        "kb_id": kb_id,
+        "persona_id": persona_id,
+        "tipo": {
+            "faq": "faq",
+            "brand": "brand",
+            "briefing": "briefing",
+            "product": "produto",
+            "copy": "copy",
+            "prompt": "prompt",
+            "rule": "regra",
+            "tone": "tom",
+            "audience": "audiencia",
+            "campaign": "campanha",
+            "asset": "asset",
+        }.get(node_type, "geral"),
+        "categoria": node_type,
+        "titulo": title,
+        "conteudo": content,
+        "status": "ATIVO",
+        "source": "graph_embed",
+        "agent_visibility": (item or {}).get("agent_visibility") or ["SDR", "Closer", "Classifier"],
+        "tags": tags,
+    })
+    if entry:
+        try:
+            from services import knowledge_graph
+            knowledge_graph.bootstrap_from_item(
+                {
+                    "id": entry.get("id"),
+                    "title": entry.get("titulo"),
+                    "content_type": node_type,
+                    "content": entry.get("conteudo") or content,
+                    "tags": entry.get("tags") or tags,
+                    "status": entry.get("status") or "ATIVO",
+                    "persona_id": persona_id,
+                    "file_path": metadata.get("file_path"),
+                },
+                frontmatter=metadata,
+                body=entry.get("conteudo") or content or "",
+                persona_id=persona_id,
+                source_table="kb_entries",
+            )
+        except Exception:
+            pass
+    return entry
+
+
+def mark_gallery_asset_inactive_by_edge(edge_id: str) -> None:
+    if not edge_id:
+        return
+    client = get_client()
+    try:
+        rows = _q(client.table("assets").select("id,metadata").eq("gallery_edge_id", edge_id).limit(50))
+        for row in rows:
+            metadata = {**(row.get("metadata") or {}), "gallery_active": False}
+            _execute_with_retry(client.table("assets").update({"metadata": metadata}).eq("id", row["id"]))
+    except Exception:
+        return
+
+
+def list_gallery_assets(persona_id: Optional[str] = None, limit: int = 250) -> list[dict]:
+    """Return knowledge nodes connected to the protected Gallery node."""
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING:
+        return []
+    client = get_client()
+    try:
+        gallery_q = client.table("knowledge_nodes").select("id").eq("node_type", "gallery").eq("status", "active")
+        if persona_id:
+            gallery_q = gallery_q.eq("persona_id", persona_id)
+        galleries = gallery_q.limit(100).execute().data or []
+        gallery_ids = [row["id"] for row in galleries if row.get("id")]
+        if not gallery_ids:
+            return []
+        source_edges = (
+            client.table("knowledge_edges")
+            .select("*")
+            .eq("relation_type", "gallery_asset")
+            .in_("source_node_id", gallery_ids)
+            .limit(limit)
+            .execute().data or []
+        )
+        target_edges = (
+            client.table("knowledge_edges")
+            .select("*")
+            .eq("relation_type", "gallery_asset")
+            .in_("target_node_id", gallery_ids)
+            .limit(limit)
+            .execute().data or []
+        )
+        edges = source_edges + target_edges
+        edges = [edge for edge in edges if not _edge_is_inactive(edge)]
+        content_ids = [
+            edge.get("target_node_id") if edge.get("source_node_id") in gallery_ids else edge.get("source_node_id")
+            for edge in edges
+        ]
+        content_ids = [node_id for node_id in content_ids if node_id]
+        if not content_ids:
+            return []
+        nodes = (
+            client.table("knowledge_nodes")
+            .select("*")
+            .in_("id", content_ids)
+            .neq("status", "archived")
+            .limit(limit)
+            .execute().data or []
+        )
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+        return []
+    edge_by_content = {
+        (edge.get("target_node_id") if edge.get("source_node_id") in gallery_ids else edge.get("source_node_id")): edge
+        for edge in edges
+    }
+    out = []
+    for node in nodes:
+        metadata = node.get("metadata") or {}
+        file_path = metadata.get("file_path") or metadata.get("path") or metadata.get("url")
+        ext = str(file_path).rsplit(".", 1)[-1].lower() if file_path and "." in str(file_path) else ""
+        out.append({
+            "id": f"gn:{node.get('id')}",
+            "title": node.get("title") or node.get("slug") or "Gallery asset",
+            "status": node.get("status") or "active",
+            "content_type": node.get("node_type") or "asset",
+            "asset_type": metadata.get("asset_type") or node.get("node_type"),
+            "asset_function": metadata.get("asset_function") or "gallery_reference",
+            "file_type": ext or metadata.get("file_type") or "node",
+            "file_path": file_path,
+            "persona_id": node.get("persona_id"),
+            "created_at": node.get("created_at"),
+            "source": "gallery",
+            "summary": node.get("summary"),
+            "tags": node.get("tags") or [],
+            "gallery_edge_id": (edge_by_content.get(node.get("id")) or {}).get("id"),
+        })
+    return out
 
 
 # ── Registries (migration 009) ─────────────────────────────────────────────
@@ -774,6 +1239,8 @@ _NODE_TYPE_REGISTRY_FALLBACK: list[dict] = [
     {"node_type": "copy",           "label": "Copy",      "default_level": 70, "default_importance": 0.65, "color": "#64748b", "icon": "text",        "sort_order": 70},
     {"node_type": "faq",            "label": "FAQ",       "default_level": 75, "default_importance": 0.65, "color": "#4ade80", "icon": "circle-help", "sort_order": 75},
     {"node_type": "asset",          "label": "Asset",     "default_level": 80, "default_importance": 0.55, "color": "#f59e0b", "icon": "image",       "sort_order": 80},
+    {"node_type": "gallery",        "label": "Gallery",   "default_level":112, "default_importance": 0.82, "color": "#f0abfc", "icon": "images",      "sort_order":112},
+    {"node_type": "embedded",       "label": "Embedded",  "default_level":120, "default_importance": 0.78, "color": "#ffffff", "icon": "database",    "sort_order":120},
     {"node_type": "tag",            "label": "Tag",       "default_level": 90, "default_importance": 0.30, "color": "#94a3b8", "icon": "tag",         "sort_order": 90},
     {"node_type": "mention",        "label": "Menção",    "default_level": 92, "default_importance": 0.25, "color": "#94a3b8", "icon": "at-sign",     "sort_order": 92},
     {"node_type": "knowledge_item", "label": "Fila",      "default_level": 95, "default_importance": 0.40, "color": "#94a3b8", "icon": "inbox",       "sort_order": 95},
@@ -790,6 +1257,7 @@ _RELATION_TYPE_REGISTRY_FALLBACK: list[dict] = [
     {"relation_type": "answers_question",   "label": "responde pergunta",  "inverse_label": "é respondido por", "default_weight": 0.80, "directional": True, "sort_order":  60},
     {"relation_type": "supports_copy",      "label": "suporta copy",       "inverse_label": "é suportado por", "default_weight": 0.70, "directional": True,  "sort_order":  70},
     {"relation_type": "uses_asset",         "label": "usa asset",          "inverse_label": "é usado por",    "default_weight": 0.65, "directional": True,  "sort_order":  80},
+    {"relation_type": "gallery_asset",      "label": "na gallery",         "inverse_label": "contém",         "default_weight": 0.90, "directional": True,  "sort_order":  82},
     {"relation_type": "briefed_by",         "label": "briefado por",       "inverse_label": "briefa",         "default_weight": 0.70, "directional": True,  "sort_order":  90},
     {"relation_type": "same_topic_as",      "label": "mesmo tópico",       "inverse_label": "mesmo tópico",   "default_weight": 0.45, "directional": False, "sort_order": 100},
     {"relation_type": "duplicate_of",       "label": "duplicado de",       "inverse_label": "tem duplicado",  "default_weight": 1.00, "directional": True,  "sort_order": 110},
@@ -943,6 +1411,10 @@ def get_persona(slug: str) -> Optional[dict]:
     return _one(get_client().table("personas").select("*").eq("slug", slug).maybe_single())
 
 
+def get_persona_by_id(persona_id: str) -> Optional[dict]:
+    return _one(get_client().table("personas").select("*").eq("id", persona_id).maybe_single())
+
+
 def upsert_persona(data: dict) -> None:
     get_client().table("personas").upsert(data, on_conflict="slug").execute()
 
@@ -1008,6 +1480,17 @@ def get_kb_entries(persona_id: Optional[str] = None, status: str = "ATIVO") -> l
     q = get_client().table("kb_entries").select("id,persona_id,tipo,categoria,produto,intencao,titulo,conteudo,link,prioridade,status,source,tags,agent_visibility,updated_at")
     if persona_id:
         q = q.eq("persona_id", persona_id)
+    if status:
+        q = q.eq("status", status)
+    return _q(q.order("prioridade"))
+
+
+def get_kb_entries_for_persona_ids(persona_ids: list[str], status: str = "ATIVO") -> list:
+    ids = [pid for pid in persona_ids if pid]
+    if not ids:
+        return []
+    q = get_client().table("kb_entries").select("id,persona_id,tipo,categoria,produto,intencao,titulo,conteudo,link,prioridade,status,source,tags,agent_visibility,updated_at")
+    q = q.in_("persona_id", ids)
     if status:
         q = q.eq("status", status)
     return _q(q.order("prioridade"))
@@ -1371,7 +1854,7 @@ def insert_event(
     data: dict,
     level: str = "info",
     source: Optional[str] = None,
-) -> None:
+) -> Optional[dict]:
     """
     Fire-and-forget event insert. Never raises — if the DB is unavailable
     the calling code continues uninterrupted.
@@ -1385,19 +1868,22 @@ def insert_event(
         row.setdefault("level", level)
         if source:
             row["source"] = source
-        get_client().table("system_events").insert(row).execute()
+        result = get_client().table("system_events").insert(row).execute()
+        return (result.data or [None])[0]
     except Exception as exc:
         try:
             from services import sre_logger
             sre_logger.error("supabase_client", f"insert_event failed: {exc}", exc)
         except Exception:
             pass
+        return None
 
 
 def get_events(
     limit: int = 50,
     event_type: Optional[str] = None,
     persona_id: Optional[str] = None,
+    entity_id: Optional[str] = None,
     level: Optional[str] = None,
 ) -> list:
     q = (
@@ -1410,6 +1896,8 @@ def get_events(
         q = q.eq("event_type", event_type)
     if persona_id:
         q = q.eq("persona_id", persona_id)
+    if entity_id:
+        q = q.eq("entity_id", entity_id)
     if level:
         q = q.eq("level", level)
     return _q(q)

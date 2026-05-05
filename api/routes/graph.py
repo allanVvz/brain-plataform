@@ -7,14 +7,16 @@ from knowledge_node_type_registry + knowledge_relation_type_registry
 without re-deriving the ontology in JS.
 """
 
+import logging
 from collections import deque
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 
-from services import supabase_client
+from services import auth_service, supabase_client
 
 router = APIRouter(prefix="/knowledge", tags=["graph"])
+logger = logging.getLogger("ai_brain.graph")
 
 
 class GraphEdgeCreateBody(BaseModel):
@@ -33,28 +35,62 @@ def _raw_graph_node_id(value: str) -> str:
     return raw
 
 
+def _resolve_graph_node_ref(value: str, persona_id: Optional[str] = None) -> Optional[dict]:
+    raw = (value or "").strip()
+    if raw.startswith("gn:"):
+        return supabase_client.get_knowledge_node(raw[3:])
+    if raw.startswith("persona:"):
+        return supabase_client.ensure_persona_knowledge_node(raw.split(":", 1)[1])
+    if raw and len(raw) == 36 and raw.count("-") == 4:
+        return supabase_client.get_knowledge_node(raw)
+    if raw == "gallery" and persona_id:
+        return supabase_client.ensure_gallery_node(persona_id)
+    if raw.startswith("embedded:"):
+        return supabase_client.ensure_embedded_node(raw.split(":", 1)[1])
+    if raw == "embedded" and persona_id:
+        return supabase_client.ensure_embedded_node(persona_id)
+    return None
+
+
 @router.post("/graph-edges")
-def create_graph_edge(body: GraphEdgeCreateBody):
-    source_id = _raw_graph_node_id(body.source_node_id)
-    target_id = _raw_graph_node_id(body.target_node_id)
-    if not source_id or not target_id:
+def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
+    source_node = _resolve_graph_node_ref(body.source_node_id, body.persona_id)
+    target_node = _resolve_graph_node_ref(body.target_node_id, body.persona_id)
+    if not source_node or not target_node:
         raise HTTPException(400, "source_node_id and target_node_id are required")
+    relation_type = (body.relation_type or "manual").strip() or "manual"
+    if target_node.get("node_type") == "gallery":
+        relation_type = "gallery_asset"
+    if relation_type == "gallery_asset" and "gallery" not in {source_node.get("node_type"), target_node.get("node_type")}:
+        raise HTTPException(400, "gallery_asset edges must involve a Gallery node")
+    source_id = source_node["id"]
+    target_id = target_node["id"]
     if source_id == target_id:
         raise HTTPException(400, "Self connections are not allowed")
+    edge_persona_id = body.persona_id or source_node.get("persona_id") or target_node.get("persona_id")
+    if edge_persona_id:
+        auth_service.assert_persona_access(request, persona_id=edge_persona_id)
+    metadata = {
+        **(body.metadata or {}),
+        "created_from": (body.metadata or {}).get("created_from") or "graph_ui",
+        "direction": (body.metadata or {}).get("direction") or "source_to_target",
+    }
+    if "primary_tree" not in metadata:
+        metadata["primary_tree"] = relation_type == "manual"
     try:
         edge = supabase_client.upsert_knowledge_edge(
             source_node_id=source_id,
             target_node_id=target_id,
-            relation_type=body.relation_type or "manual",
-            persona_id=body.persona_id,
+            relation_type=relation_type,
+            persona_id=edge_persona_id,
             weight=body.weight,
-            metadata={
-                **(body.metadata or {}),
-                "created_from": "graph_ui",
-                "direction": "source_to_target",
-                "primary_tree": True,
-            },
+            metadata=metadata,
         )
+        if edge and relation_type == "gallery_asset":
+            gallery_content_node = target_node if source_node.get("node_type") == "gallery" else source_node
+            supabase_client.sync_gallery_asset_node(gallery_content_node, edge)
+        if edge and target_node.get("node_type") == "embedded":
+            supabase_client.sync_embedded_kb_node(source_node, edge)
     except Exception as exc:
         raise HTTPException(502, f"Could not create graph edge: {exc}") from exc
     if not edge:
@@ -63,15 +99,36 @@ def create_graph_edge(body: GraphEdgeCreateBody):
 
 
 @router.delete("/graph-edges/{edge_id}")
-def delete_graph_edge(edge_id: str):
+def delete_graph_edge(edge_id: str, request: Request):
     raw_edge_id = edge_id[3:] if edge_id.startswith("ge:") else edge_id
+    edge = supabase_client.get_knowledge_edge(raw_edge_id)
+    if edge and edge.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=edge.get("persona_id"))
     try:
         ok = supabase_client.delete_knowledge_edge(raw_edge_id)
     except Exception as exc:
+        logger.exception("Could not delete graph edge", extra={"edge_id": edge_id, "raw_edge_id": raw_edge_id})
         raise HTTPException(502, f"Could not delete graph edge: {exc}") from exc
     if not ok:
+        logger.warning("Graph edge not found for delete", extra={"edge_id": edge_id, "raw_edge_id": raw_edge_id})
         raise HTTPException(404, "Graph edge not found")
+    logger.info("Graph edge soft-deleted", extra={"edge_id": edge_id, "raw_edge_id": raw_edge_id})
     return {"ok": True, "edge_id": raw_edge_id}
+
+
+@router.delete("/graph-nodes/{node_id}")
+def delete_graph_node(node_id: str, request: Request):
+    raw_node_id = _raw_graph_node_id(node_id)
+    node = supabase_client.get_knowledge_node(raw_node_id)
+    if node and node.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=node.get("persona_id"))
+    try:
+        ok = supabase_client.delete_knowledge_node(raw_node_id)
+    except Exception as exc:
+        raise HTTPException(502, f"Could not delete graph node: {exc}") from exc
+    if not ok:
+        raise HTTPException(404, "Graph node not found")
+    return {"ok": True, "node_id": raw_node_id}
 
 # knowledge_items statuses → nodeClass
 _KI_STATUS: dict[str, str] = {
@@ -104,6 +161,7 @@ _STRUCTURAL_RELATIONS: set[str] = {
     "supports_copy",
     "uses_asset",
     "manual",
+    "gallery_asset",
 }
 _AUXILIARY_RELATIONS: set[str] = {"has_tag", "mentions", "same_topic_as", "visible_to_agent"}
 _CURATION_RELATIONS: set[str] = {"duplicate_of"}
@@ -261,19 +319,99 @@ def _build_focus_path(
     return chain
 
 
+def _compute_primary_depths(nodes: list[dict], edges: list[dict]) -> tuple[dict[str, int], dict[str, str]]:
+    """Return node depth and parent map from the current structural graph."""
+    node_ids = {n["id"] for n in nodes if n.get("id")}
+    persona_ids = {n["id"] for n in nodes if n.get("node_type") == "persona"}
+    structural = _STRUCTURAL_RELATIONS | {"manual", "contains", "parent_of", "belongs_to", "part_of"}
+    parent_by_child: dict[str, str] = {}
+    parent_priority_by_child: dict[str, int] = {}
+    for edge in edges:
+        src = edge.get("source_node_id")
+        tgt = edge.get("target_node_id")
+        if not src or not tgt or src not in node_ids or tgt not in node_ids:
+            continue
+        relation = (edge.get("relation_type") or "").lower()
+        meta = edge.get("metadata") or {}
+        if relation not in structural and not meta.get("primary_tree"):
+            continue
+        priority = 0
+        if meta.get("primary_tree"):
+            priority += 10
+        if relation == "manual":
+            priority += 100
+        if tgt not in parent_by_child or priority >= parent_priority_by_child.get(tgt, -1):
+            parent_by_child[tgt] = src
+            parent_priority_by_child[tgt] = priority
+
+    children_by_parent: dict[str, list[str]] = {}
+    for child_id, parent_id in parent_by_child.items():
+        children_by_parent.setdefault(parent_id, []).append(child_id)
+
+    depth: dict[str, int] = {}
+    queue: deque[tuple[str, int]] = deque((node_id, 0) for node_id in persona_ids)
+    while queue:
+        node_id, d = queue.popleft()
+        if node_id in depth and depth[node_id] <= d:
+            continue
+        depth[node_id] = d
+        for child_id in children_by_parent.get(node_id, []):
+            queue.append((child_id, d + 1))
+
+    # Any disconnected semantic node gets a depth after the deepest connected node.
+    fallback_depth = (max(depth.values()) + 1) if depth else 1
+    for node_id in node_ids:
+        depth.setdefault(node_id, fallback_depth)
+    return depth, parent_by_child
+
+
+def _focus_path_from_parents(
+    focus_node_id: str,
+    parent_by_child: dict[str, str],
+    nodes_by_id: dict[str, dict],
+) -> list[dict]:
+    chain_ids: list[str] = []
+    seen: set[str] = set()
+    current: Optional[str] = focus_node_id
+    while current and current not in seen and len(chain_ids) < 64:
+        seen.add(current)
+        chain_ids.append(current)
+        current = parent_by_child.get(current)
+    chain_ids.reverse()
+    out: list[dict] = []
+    for node_id in chain_ids:
+        node = nodes_by_id.get(node_id, {})
+        out.append({
+            "node_id": node_id,
+            "slug": node.get("slug"),
+            "title": node.get("title"),
+            "node_type": node.get("node_type"),
+            "relation_type": None,
+            "direction": None,
+        })
+    return out
+
+
 @router.get("/graph-data")
 def get_graph_data(
+    request: Request,
     persona_slug: Optional[str] = Query(None),
     focus: Optional[str] = Query(None, description="<node_type>:<slug> or node_id"),
     max_depth: int = Query(3, ge=1, le=6, description="BFS depth from focus (or persona root)"),
     include_tags: bool = Query(False),
     include_mentions: bool = Query(False),
     include_technical: bool = Query(False, description="Include knowledge_items + kb_entries duplicate sources"),
+    include_embedded: bool = Query(True, description="Include synthetic RAG embedded node and validated links"),
     mode: str = Query("layered", description="layered|semantic_tree|graph (frontend hint only)"),
 ):
     personas = supabase_client.get_personas()
+    user = auth_service.current_user(request)
+    access = auth_service.allowed_access(request)
+    personas = auth_service.filter_personas_for_user(user, personas, access)
     if persona_slug:
         personas = [p for p in personas if p["slug"] == persona_slug]
+        if not personas:
+            raise HTTPException(403, "Acesso negado para esta persona.")
 
     persona_map = {p["id"]: p for p in personas}
     persona_id_set = set(persona_map.keys())
@@ -281,6 +419,12 @@ def get_graph_data(
     single_persona_id: Optional[str] = None
     if persona_slug and len(personas) == 1:
         single_persona_id = personas[0]["id"]
+    for p in personas:
+        try:
+            supabase_client.ensure_gallery_node(p["id"])
+            supabase_client.ensure_embedded_node(p["id"])
+        except Exception:
+            logger.exception("Could not ensure protected graph nodes", extra={"persona_id": p.get("id")})
 
     # ── Registries (cached) ─────────────────────────────────────────────
     node_type_registry = supabase_client.get_node_type_registry()
@@ -301,12 +445,14 @@ def get_graph_data(
         sem_nodes = [n for n in sem_nodes if n.get("node_type") != "tag"]
     if not include_mentions:
         sem_nodes = [n for n in sem_nodes if n.get("node_type") != "mention"]
+    sem_nodes = [n for n in sem_nodes if n.get("status") != "archived"]
 
     surviving_ids = {n["id"] for n in sem_nodes}
     sem_edges = [
         e for e in sem_edges
         if e.get("source_node_id") in surviving_ids and e.get("target_node_id") in surviving_ids
     ]
+    graph_depths, parent_by_child = _compute_primary_depths(sem_nodes, sem_edges)
 
     # ── Optional: focus subgraph (BFS) ──────────────────────────────────
     focus_node = _resolve_focus(focus, single_persona_id) if focus else None
@@ -317,24 +463,41 @@ def get_graph_data(
             # Add it back if it was filtered out by include_*
             sem_nodes.append(focus_node)
             nodes_by_id_raw[focus_node["id"]] = focus_node
+        structural_focus_path = _focus_path_from_parents(focus_node["id"], parent_by_child, nodes_by_id_raw)
         reachable, distance_map, predecessor = _bfs_focus_subgraph(
             focus_node["id"], sem_nodes, sem_edges, max_depth=max_depth,
         )
+        reachable.update(step["node_id"] for step in structural_focus_path if step.get("node_id"))
         sem_nodes = [n for n in sem_nodes if n["id"] in reachable]
         sem_edges = [
             e for e in sem_edges
             if e.get("source_node_id") in reachable and e.get("target_node_id") in reachable
         ]
-        # Find persona root id for path resolution
-        persona_root_id: Optional[str] = None
-        for n in sem_nodes:
-            if n.get("node_type") == "persona" and (n.get("persona_id") in persona_id_set or n.get("slug") == "self"):
-                persona_root_id = n["id"]
-                break
-        nodes_by_id = {n["id"]: n for n in sem_nodes}
-        focus_path = _build_focus_path(focus_node["id"], persona_root_id, nodes_by_id, predecessor)
+        focus_path = structural_focus_path
+        if len(focus_path) <= 1:
+            persona_root_id: Optional[str] = None
+            for n in sem_nodes:
+                if n.get("node_type") == "persona" and (n.get("persona_id") in persona_id_set or n.get("slug") == "self"):
+                    persona_root_id = n["id"]
+                    break
+            nodes_by_id = {n["id"]: n for n in sem_nodes}
+            focus_path = _build_focus_path(focus_node["id"], persona_root_id, nodes_by_id, predecessor)
     else:
         distance_map = {}
+
+    current_depths, _ = _compute_primary_depths(sem_nodes, sem_edges)
+    max_current_depth = max((d for d in current_depths.values() if d > 0), default=1)
+
+    def current_level_for(node_id: str, node_type: str) -> int:
+        if node_type == "persona":
+            return 0
+        if node_type == "gallery":
+            return 112
+        if node_type == "embedded":
+            return 120
+        depth = max(1, current_depths.get(node_id, max_current_depth))
+        step = 99 / max(1, max_current_depth)
+        return max(1, int(round(100 - depth * step)))
 
     # ── Build response payload ──────────────────────────────────────────
     nodes: list[dict] = []
@@ -358,12 +521,20 @@ def get_graph_data(
                 "description": p.get("description", ""),
                 "nodeClass": "persona",
                 "node_type": "persona",
+                "persona_id": p["id"],
+                "persona_slug": p.get("slug"),
                 "level": 0,
                 "importance": 1.0,
                 "color": nt_by_type.get("persona", {}).get("color", "#7c6fff"),
                 "icon": nt_by_type.get("persona", {}).get("icon", "user"),
                 "is_auxiliary": False,
                 "validated": True,
+                "in_focus_path": any(
+                    step.get("node_type") == "persona" and step.get("node_id") in {
+                        n.get("id") for n in sem_nodes if n.get("node_type") == "persona" and n.get("persona_id") == p["id"]
+                    }
+                    for step in focus_path
+                ),
             },
         })
         persona_node_ids_emitted.add(p["id"])
@@ -458,9 +629,16 @@ def get_graph_data(
     semantic_edges_count = 0
     sem_node_ids = {n["id"]: n for n in sem_nodes}
     semantic_persona_aliases: dict[str, str] = {}
+    semantic_embedded_aliases: dict[str, str] = {}
 
     for n in sem_nodes:
-        if (n.get("node_type") or "").lower() != "persona":
+        ntype = (n.get("node_type") or "").lower()
+        if ntype == "embedded":
+            pid = n.get("persona_id") or single_persona_id
+            if pid and pid in persona_node_ids_emitted:
+                semantic_embedded_aliases[n["id"]] = f"embedded:{pid}"
+            continue
+        if ntype != "persona":
             continue
         pid = n.get("persona_id") or single_persona_id
         if pid and pid in persona_node_ids_emitted:
@@ -472,18 +650,17 @@ def get_graph_data(
             # The UI already emits a stable persona root card with the real
             # filtered entity name. Skip semantic duplicates like "Persona".
             continue
+        if ntype == "embedded":
+            # The UI emits a stable Embedded destination card per persona.
+            # Semantic embedded nodes are aliases for persisted edges only.
+            continue
         meta = n.get("metadata") or {}
         tags = n.get("tags") or []
         nid = f"gn:{n['id']}"
 
         registry_row = nt_by_type.get(ntype, {})
-        # importance: prefer per-row override (009 added column to knowledge_nodes), else registry default
-        importance = n.get("importance")
-        if importance is None:
-            importance = registry_row.get("default_importance", 0.50)
-        level = n.get("level")
-        if level is None:
-            level = registry_row.get("default_level", 50)
+        level = current_level_for(n["id"], ntype)
+        importance = max(0.01, min(1.0, level / 99))
         confidence = n.get("confidence")
         is_auxiliary = ntype in _AUXILIARY_NODE_TYPES or (level or 0) >= 90
 
@@ -494,6 +671,7 @@ def get_graph_data(
             "entity": "validated", "asset": "validated", "faq": "validated",
             "copy": "validated", "briefing": "validated", "rule": "validated",
             "tone": "validated", "audience": "validated",
+            "gallery": "validated", "embedded": "validated",
             "mention": "pending", "tag": "pending",
             "knowledge_item": "pending", "kb_entry": "validated",
         }.get(ntype, "pending")
@@ -515,6 +693,9 @@ def get_graph_data(
                 "nodeClass": node_class,
                 "item_id": n.get("source_id") or n["id"],
                 "source": "graph",
+                "source_table": n.get("source_table"),
+                "source_id": n.get("source_id"),
+                "persona_id": n.get("persona_id"),
                 "tags": tags,
                 # Semantic decoration ────────
                 "node_type": ntype,
@@ -529,6 +710,8 @@ def get_graph_data(
                 "is_focus": is_focus,
                 "in_focus_path": in_focus_path,
                 "graph_distance": graph_distance,
+                "protected": bool(meta.get("protected") or ntype in {"persona", "embedded", "gallery"}),
+                "metadata": meta,
                 # Pass through legacy fields for backwards-compat with sidebar
                 "asset_type": meta.get("asset_type"),
                 "asset_function": meta.get("asset_function"),
@@ -552,8 +735,16 @@ def get_graph_data(
         tgt = sem_node_ids.get(e.get("target_node_id"))
         if not src or not tgt:
             continue
-        source_id = semantic_persona_aliases.get(e.get("source_node_id"), f"gn:{e['source_node_id']}")
-        target_id = semantic_persona_aliases.get(e.get("target_node_id"), f"gn:{e['target_node_id']}")
+        source_id = (
+            semantic_persona_aliases.get(e.get("source_node_id"))
+            or semantic_embedded_aliases.get(e.get("source_node_id"))
+            or f"gn:{e['source_node_id']}"
+        )
+        target_id = (
+            semantic_persona_aliases.get(e.get("target_node_id"))
+            or semantic_embedded_aliases.get(e.get("target_node_id"))
+            or f"gn:{e['target_node_id']}"
+        )
         if source_id == target_id:
             continue
         rt = (e.get("relation_type") or "related").lower()
@@ -581,9 +772,44 @@ def get_graph_data(
                 "deletable": True,
                 "metadata": e.get("metadata") or {},
                 "primary_tree": bool((e.get("metadata") or {}).get("primary_tree")),
+                "gallery_edge": rt == "gallery_asset",
             },
         })
         semantic_edges_count += 1
+
+    if include_embedded:
+        embedded_persona_ids = [
+            p["id"]
+            for p in personas
+            if p.get("id") in persona_node_ids_emitted
+        ]
+        for persona_id in embedded_persona_ids:
+            embedded_id = f"embedded:{persona_id}"
+            nodes.append({
+                "id": embedded_id,
+                "type": "knowledgeNode",
+                "position": {"x": 0, "y": 0},
+                "data": {
+                    "label": "Embedded",
+                    "status": "active",
+                    "content_type": "rag",
+                    "content_preview": "Fonte de conhecimento enviada ao RAG do modelo.",
+                    "nodeClass": "validated",
+                    "source": "synthetic",
+                    "tags": ["rag", "embedded", "default"],
+                    "node_type": "embedded",
+                    "slug": "embedded-default",
+                    "level": 120,
+                    "importance": 0.78,
+                    "confidence": 1,
+                    "color": "#ffffff",
+                    "icon": "database",
+                    "is_auxiliary": False,
+                    "validated": True,
+                    "persona_id": persona_id,
+                    "rag_index": "default",
+                },
+            })
 
     # ── Orphan root for ki:/kb: items without persona ────────────────
     has_orphans = any(e.get("source") == "orphan" for e in edges)
@@ -627,6 +853,7 @@ def get_graph_data(
                 "include_tags": include_tags,
                 "include_mentions": include_mentions,
                 "include_technical": include_technical,
+                "include_embedded": include_embedded,
                 "mode": mode,
                 "persona_slug": persona_slug,
             },
