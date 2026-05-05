@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 from services import supabase_client, knowledge_graph
 from services.knowledge_rag_backfill import backfill_knowledge_rag
-from services.knowledge_rag_intake import process_intake
+from services.knowledge_rag_intake import process_intake, process_intake_plan
 from services.vault_sync import run_sync, scan_vault
 from services.event_emitter import emit
 
@@ -28,6 +28,8 @@ class RagIntakeBody(BaseModel):
     metadata: dict = {}
     submitted_by: Optional[str] = None
     validate: bool = False
+    parent_node_id: Optional[str] = None
+    parent_relation_type: str = "manual"
 
 
 class RagBackfillBody(BaseModel):
@@ -38,6 +40,18 @@ class RagBackfillBody(BaseModel):
     # vault_path: Optional[str] = None 
     limit_items: int = 5000
     limit_nodes: int = 5000
+
+
+class RagIntakePlanBody(BaseModel):
+    persona_id: Optional[str] = None
+    persona_slug: Optional[str] = None
+    run_token: Optional[str] = None
+    entries: list[dict]
+    links: list[dict] = []
+    source: str = "plan"
+    source_ref: Optional[str] = None
+    submitted_by: Optional[str] = None
+    validate: bool = True
 
 
 @router.post("/intake")
@@ -63,6 +77,34 @@ def intake_rag_knowledge(body: RagIntakeBody):
             "title": rag_entry.get("title"),
             "content_type": rag_entry.get("content_type"),
             "status": rag_entry.get("status"),
+        },
+    )
+    return result
+
+
+@router.post("/intake/plan")
+def intake_rag_knowledge_plan(body: RagIntakePlanBody):
+    if not body.entries:
+        raise HTTPException(400, "entries is required")
+    if not body.persona_id and not body.persona_slug:
+        raise HTTPException(400, "persona_id or persona_slug is required")
+    try:
+        result = process_intake_plan(**body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"Knowledge plan intake failed: {exc}") from exc
+
+    emit(
+        "knowledge_rag_plan_intake_created",
+        entity_type="knowledge_rag_plan",
+        entity_id=result.get("run_token"),
+        persona_id=(result.get("persona") or {}).get("id"),
+        payload={
+            "entries_created": result.get("entries_created"),
+            "nodes_created": result.get("nodes_created"),
+            "main_edges": result.get("main_edges"),
+            "auxiliary_edges": result.get("auxiliary_edges"),
         },
     )
     return result

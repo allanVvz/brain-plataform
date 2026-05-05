@@ -48,7 +48,12 @@ def create_graph_edge(body: GraphEdgeCreateBody):
             relation_type=body.relation_type or "manual",
             persona_id=body.persona_id,
             weight=body.weight,
-            metadata={**(body.metadata or {}), "created_from": "graph_ui"},
+            metadata={
+                **(body.metadata or {}),
+                "created_from": "graph_ui",
+                "direction": "source_to_target",
+                "primary_tree": True,
+            },
         )
     except Exception as exc:
         raise HTTPException(502, f"Could not create graph edge: {exc}") from exc
@@ -89,7 +94,17 @@ _AUXILIARY_NODE_TYPES: set[str] = {"tag", "mention"}
 _TECHNICAL_NODE_TYPES: set[str] = {"knowledge_item", "kb_entry"}
 
 # Edge tier overrides — relations whose tier is fixed regardless of weight.
-_STRUCTURAL_RELATIONS: set[str] = {"belongs_to_persona", "derived_from", "contains"}
+_STRUCTURAL_RELATIONS: set[str] = {
+    "belongs_to_persona",
+    "contains",
+    "part_of_campaign",
+    "about_product",
+    "briefed_by",
+    "answers_question",
+    "supports_copy",
+    "uses_asset",
+    "manual",
+}
 _AUXILIARY_RELATIONS: set[str] = {"has_tag", "mentions", "same_topic_as", "visible_to_agent"}
 _CURATION_RELATIONS: set[str] = {"duplicate_of"}
 
@@ -562,6 +577,10 @@ def get_graph_data(
                 "directional": directional,
                 "in_focus_path": in_path,
                 "label": registry_rel.get("label"),
+                "original_edge_id": f"ge:{e['id']}",
+                "deletable": True,
+                "metadata": e.get("metadata") or {},
+                "primary_tree": bool((e.get("metadata") or {}).get("primary_tree")),
             },
         })
         semantic_edges_count += 1

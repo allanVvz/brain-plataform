@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -22,6 +22,7 @@ import ReactFlow, {
   Panel,
   MarkerType,
   ConnectionMode,
+  Viewport,
   getSmoothStepPath,
   getBezierPath,
   useReactFlow,
@@ -52,6 +53,8 @@ interface GraphViewProps {
   showAllEdges?: boolean;
   branchDistance?: number;
 }
+
+type StoredViewport = Pick<Viewport, "x" | "y" | "zoom">;
 
 const HANDLE_STYLE = {
   width: 7,
@@ -340,7 +343,13 @@ const edgeTypes: EdgeTypes = {
 // ── Main component ─────────────────────────────────────────────
 
 function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteEdge, mode, searchQuery, focusNodeId, showAllEdges = false, branchDistance = 48 }: GraphViewProps) {
-  const { fitView } = useReactFlow();
+  const { fitView, getViewport, setViewport } = useReactFlow();
+  const viewportKey = useMemo(() => {
+    const personaIds = Array.from(new Set((rawNodes || []).map((n: any) => n?.data?.persona_slug || n?.data?.persona_id || n?.id).filter(Boolean))).slice(0, 3).join("|");
+    return `knowledge-graph-viewport:${personaIds || "global"}:${mode}:${focusNodeId || "all"}`;
+  }, [rawNodes, mode, focusNodeId]);
+  const initialViewportDone = useRef(false);
+  const lastFocusNodeId = useRef<string | null | undefined>(undefined);
   const visibleEdges = useMemo(
     () => filterEdgesForMode(rawEdges as Edge[], mode),
     [rawEdges, mode],
@@ -442,6 +451,23 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteE
   }, [styledEdges, setEdges]);
 
   useEffect(() => {
+    if (!laid.length) return;
+    const focusChanged = lastFocusNodeId.current !== focusNodeId;
+    lastFocusNodeId.current = focusNodeId;
+    const stored = typeof window !== "undefined" ? window.localStorage.getItem(viewportKey) : null;
+    if (!initialViewportDone.current && stored && !focusNodeId) {
+      try {
+        const parsed = JSON.parse(stored) as StoredViewport;
+        if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y) && Number.isFinite(parsed.zoom)) {
+          setViewport(parsed, { duration: 0 });
+          initialViewportDone.current = true;
+          return;
+        }
+      } catch {
+        // Ignore corrupt viewport state and fall back to first fit.
+      }
+    }
+    if (initialViewportDone.current && !focusChanged) return;
     const targetId =
       focusNodeId
       || laid.find((node) => (node.data as GraphNodeData)?.node_type === "persona")?.id
@@ -450,13 +476,24 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteE
     const handle = window.setTimeout(() => {
       fitView({
         nodes: [{ id: targetId }],
-        duration: 400,
+        duration: focusChanged && focusNodeId ? 400 : 0,
         padding: 0.55,
         maxZoom: mode === "graph" ? 1.1 : 1.0,
       });
+      initialViewportDone.current = true;
     }, 60);
     return () => window.clearTimeout(handle);
-  }, [fitView, focusNodeId, laid, mode]);
+  }, [fitView, focusNodeId, laid, mode, setViewport, viewportKey]);
+
+  const saveViewport = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const viewport = getViewport();
+    window.localStorage.setItem(viewportKey, JSON.stringify({
+      x: viewport.x,
+      y: viewport.y,
+      zoom: viewport.zoom,
+    }));
+  }, [getViewport, viewportKey]);
 
   const handleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -481,6 +518,7 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteE
       onEdgesChange={onEdgesChange}
       onConnect={handleConnect}
       onNodeClick={handleClick}
+      onMoveEnd={saveViewport}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       connectionMode={ConnectionMode.Loose}
@@ -488,7 +526,6 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onConnectNodes, onDeleteE
       edgesFocusable
       edgesUpdatable={false}
       selectNodesOnDrag={false}
-      fitView
       fitViewOptions={{ padding: 0.18 }}
       minZoom={0.08}
       maxZoom={2}

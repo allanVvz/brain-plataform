@@ -347,20 +347,38 @@ def specs(run_token: str) -> list[dict[str, Any]]:
 
 
 def create_specs(report: dict, persona_id: str, items: list[dict[str, Any]]) -> None:
-    for spec in items:
-        result = http_json("POST", "/knowledge/intake", body={
-            "raw_text": spec["content"],
-            "persona_id": persona_id,
-            "source": "e2e_vz_lupas_oakley_graph_ui",
-            "source_ref": spec["slug"],
+    run_token = ""
+    if items:
+        tags = (items[0].get("metadata") or {}).get("tags") or []
+        run_token = next((tag for tag in tags if str(tag).startswith("e2evz")), "")
+    entries = [
+        {
+            "content": spec["content"],
             "title": spec["title"],
             "content_type": spec["content_type"],
+            "slug": spec["slug"],
             "tags": (spec.get("metadata") or {}).get("tags") or [],
             "metadata": spec.get("metadata") or {},
-            "submitted_by": "e2e",
-            "validate": True,
-        }, timeout=90)
-        expect(report, bool((result.get("rag_entry") or {}).get("id")), f"created {spec['content_type']} {spec['slug']}")
+        }
+        for spec in items
+    ]
+    result = http_json("POST", "/knowledge/intake/plan", body={
+        "persona_id": persona_id,
+        "run_token": run_token,
+        "source": "e2e_vz_lupas_oakley_graph_ui",
+        "source_ref": run_token,
+        "entries": entries,
+        "links": [],
+        "submitted_by": "e2e",
+        "validate": True,
+    }, timeout=180)
+    expect(report, result.get("ok") is True, "bulk created VZ Lupas knowledge plan", {
+        "entries_created": result.get("entries_created"),
+        "nodes_created": result.get("nodes_created"),
+        "main_edges": result.get("main_edges"),
+        "auxiliary_edges": result.get("auxiliary_edges"),
+        "fallback_parent_count": result.get("fallback_parent_count"),
+    })
 
 
 def graph_nodes_by_slug(run_token: str) -> tuple[dict[str, dict], list[dict]]:
@@ -394,10 +412,20 @@ def create_base_edges(report: dict, run_token: str, persona_id: str) -> None:
     for audience_prefix, product_list in audience_products.items():
         for product in product_list:
             edge_specs.append((f"{audience_prefix}-{run_token}", f"produto-{product}-{run_token}"))
+    audience_benefits = {
+        "publico-esportes": ["performance", "protecao-uv", "leveza", "campo-de-visao-amplo"],
+        "publico-street": ["estilo", "exclusividade", "identidade"],
+        "publico-casual": ["conforto", "versatilidade", "estetica-limpa"],
+    }
+    for audience_prefix, benefit_list in audience_benefits.items():
+        audience = audience_prefix.replace("publico-", "")
+        for benefit in benefit_list:
+            edge_specs.append((f"{audience_prefix}-{run_token}", f"beneficio-{benefit}-{audience}-{run_token}"))
     for product in products:
         pslug = f"produto-{product}-{run_token}"
         edge_specs.extend([
             (pslug, f"faq-{product}-1-{run_token}"),
+            (pslug, f"faq-{product}-2-{run_token}"),
             (pslug, f"briefing-{product}-{run_token}"),
             (pslug, f"atributos-{product}-{run_token}"),
             (pslug, f"estilo-{product}-{run_token}"),
@@ -459,6 +487,7 @@ def create_ui_edge(report: dict, run_token: str, *, headless: bool) -> None:
 def validate(report: dict, run_token: str, expected_min_edges: int) -> None:
     by_slug, edges = graph_nodes_by_slug(run_token)
     required = [
+        "campanha-oakley-vz-lupas",
         "publico-esportes",
         "publico-street",
         "publico-casual",
@@ -474,6 +503,44 @@ def validate(report: dict, run_token: str, expected_min_edges: int) -> None:
     node_ids = {node["id"] for node in by_slug.values()}
     token_edges = [edge for edge in edges if edge.get("source") in node_ids or edge.get("target") in node_ids]
     expect(report, len(token_edges) >= expected_min_edges, "graph contains seeded VZ Lupas edges", len(token_edges))
+    auxiliary_relations = {"has_tag", "mentions", "same_topic_as", "derived_from"}
+    visible_nodes = [
+        node for node in by_slug.values()
+        if (node.get("data") or {}).get("node_type") not in {"tag", "mention"}
+    ]
+    primary_degree: dict[str, int] = {node["id"]: 0 for node in visible_nodes}
+    for edge in edges:
+        relation = ((edge.get("data") or {}).get("relation_type") or "").lower()
+        if relation in auxiliary_relations:
+            continue
+        if edge.get("source") in primary_degree:
+            primary_degree[edge["source"]] += 1
+        if edge.get("target") in primary_degree:
+            primary_degree[edge["target"]] += 1
+    orphan_slugs = [
+        (node.get("data") or {}).get("slug") or node["id"]
+        for node in visible_nodes
+        if primary_degree.get(node["id"], 0) == 0
+    ]
+    expect(report, not orphan_slugs, "all VZ Lupas nodes have a primary tree connection", orphan_slugs[:12])
+
+    campaign = by_slug.get(f"campanha-oakley-vz-lupas-{run_token}")
+    campaign_has_parent = False
+    if campaign:
+        for edge in edges:
+            relation = ((edge.get("data") or {}).get("relation_type") or "").lower()
+            if edge.get("target") == campaign["id"] and relation not in auxiliary_relations:
+                campaign_has_parent = True
+                break
+    expect(report, campaign_has_parent, "campaign has a structural parent edge")
+
+    briefing_orphans = []
+    for slug, node in by_slug.items():
+        if not slug.startswith("briefing-"):
+            continue
+        if primary_degree.get(node["id"], 0) == 0:
+            briefing_orphans.append(slug)
+    expect(report, not briefing_orphans, "all briefings have a structural parent", briefing_orphans[:12])
 
 
 def main() -> int:
@@ -508,7 +575,6 @@ def main() -> int:
             report["planned_entries"] = [{"type": item["content_type"], "slug": item["slug"], "title": item["title"]} for item in items]
             create_specs(report, persona["id"], items)
             time.sleep(1.5)
-            create_base_edges(report, run_token, persona["id"])
             validate(report, run_token, 24)
             report["ok"] = True
             print(f"\nPASS e2e VZ Lupas Oakley Graph UI. Report: {report_path}")
@@ -529,7 +595,6 @@ def main() -> int:
         create_specs(report, persona["id"], items)
         # Let graph mirror writes settle behind Supabase/PostgREST.
         time.sleep(1.5)
-        create_base_edges(report, run_token, persona["id"])
         if not args.skip_browser:
             create_ui_edge(report, run_token, headless=not args.headed)
         expected_min_edges = 24 if args.skip_browser else 25

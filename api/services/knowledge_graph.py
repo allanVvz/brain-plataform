@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from uuid import UUID
 from typing import Iterable, Optional
 
 from services import supabase_client
@@ -70,6 +71,18 @@ _NODE_HIERARCHY_DEFAULTS: dict[str, tuple[int, float]] = {
     "mention": (92, 0.25),
     "knowledge_item": (95, 0.40),
     "kb_entry": (95, 0.50),
+}
+
+_MAIN_TREE_RELATIONS = {
+    "belongs_to_persona",
+    "contains",
+    "part_of_campaign",
+    "about_product",
+    "briefed_by",
+    "answers_question",
+    "supports_copy",
+    "uses_asset",
+    "manual",
 }
 
 
@@ -283,6 +296,122 @@ def _hierarchy_fields(node_type: str, metadata: Optional[dict] = None, confidenc
         except Exception:
             pass
     return out
+
+
+def _ensure_persona_root(persona_id: Optional[str]) -> Optional[dict]:
+    if not persona_id:
+        return None
+    return supabase_client.upsert_knowledge_node({
+        "persona_id": persona_id,
+        "node_type": "persona",
+        "slug": "self",
+        "title": "Persona",
+        "metadata": {"role": "root"},
+        **_hierarchy_fields("persona"),
+    })
+
+
+def _normalize_uuid(value: Optional[str]) -> Optional[str]:
+    raw = str(value or "").strip()
+    if raw.startswith("gn:"):
+        raw = raw[3:]
+    try:
+        return str(UUID(raw))
+    except Exception:
+        return None
+
+
+def ensure_main_tree_connection(
+    node: Optional[dict],
+    *,
+    persona_id: Optional[str],
+    parent_node_id: Optional[str] = None,
+    relation_type: str = "manual",
+) -> Optional[dict]:
+    """Ensure a knowledge node participates in the primary tree.
+
+    Auxiliary semantic relations such as has_tag, mentions and same_topic_as are
+    still generated elsewhere. This helper only creates the required primary
+    branch edge, falling back to persona -> node when no parent is supplied.
+    """
+    if not node or not node.get("id") or not persona_id:
+        return None
+    target_id = node["id"]
+    source_id = _normalize_uuid(parent_node_id)
+    rel = relation_type or "manual"
+    if not source_id:
+        persona_node = _ensure_persona_root(persona_id)
+        if not persona_node:
+            return None
+        source_id = persona_node["id"]
+        rel = "belongs_to_persona"
+    if source_id == target_id:
+        return None
+    return supabase_client.upsert_knowledge_edge(
+        source_id,
+        target_id,
+        rel,
+        persona_id=persona_id,
+        weight=1,
+        metadata={"primary_tree": True, "created_from": "main_tree_guard"},
+    )
+
+
+def repair_primary_tree_connections(
+    persona_id: Optional[str],
+    node_ids: Optional[list[str]] = None,
+) -> dict:
+    """Ensure every scoped non-persona node has at least one structural edge.
+
+    This is the backend guard that mirrors the database trigger. Semantic edges
+    such as has_tag, mentions and same_topic_as do not satisfy this requirement.
+    """
+    if not persona_id:
+        return {"checked": 0, "repaired": 0, "fallback_nodes": []}
+    client = supabase_client.get_client()
+    query = client.table("knowledge_nodes").select("id,node_type,slug,title,persona_id").eq("persona_id", persona_id)
+    if node_ids:
+        ids = [str(nid) for nid in node_ids if nid]
+        if not ids:
+            return {"checked": 0, "repaired": 0, "fallback_nodes": []}
+        query = query.in_("id", ids)
+    nodes = query.limit(5000).execute().data or []
+    nodes = [n for n in nodes if n.get("node_type") != "persona"]
+    if not nodes:
+        return {"checked": 0, "repaired": 0, "fallback_nodes": []}
+
+    ids = [n["id"] for n in nodes if n.get("id")]
+    source_edges = client.table("knowledge_edges").select("source_node_id,target_node_id,relation_type").in_("source_node_id", ids).limit(5000).execute().data or []
+    target_edges = client.table("knowledge_edges").select("source_node_id,target_node_id,relation_type").in_("target_node_id", ids).limit(5000).execute().data or []
+    connected: set[str] = set()
+    for edge in [*source_edges, *target_edges]:
+        if (edge.get("relation_type") or "") not in _MAIN_TREE_RELATIONS:
+            continue
+        if edge.get("source_node_id") in ids:
+            connected.add(edge["source_node_id"])
+        if edge.get("target_node_id") in ids:
+            connected.add(edge["target_node_id"])
+
+    persona_node = _ensure_persona_root(persona_id)
+    fallback_nodes: list[dict] = []
+    if not persona_node:
+        return {"checked": len(nodes), "repaired": 0, "fallback_nodes": []}
+    for node in nodes:
+        if node.get("id") in connected:
+            continue
+        edge = ensure_main_tree_connection(node, persona_id=persona_id)
+        if edge:
+            fallback_nodes.append({
+                "id": node.get("id"),
+                "slug": node.get("slug"),
+                "title": node.get("title"),
+                "node_type": node.get("node_type"),
+            })
+    return {
+        "checked": len(nodes),
+        "repaired": len(fallback_nodes),
+        "fallback_nodes": fallback_nodes,
+    }
 
 
 def _fallback_nodes_from_tables(terms: list[str], persona_id: Optional[str], existing_source_ids: set[str]) -> list[dict]:
@@ -814,17 +943,17 @@ def bootstrap_from_item(
 
         # 2) Persona link.
         if persona_id:
-            persona_node = supabase_client.upsert_knowledge_node({
-                "persona_id": persona_id,
-                "node_type": "persona",
-                "slug": "self",
-                "title": "Persona",
-                "metadata": {"role": "root"},
-                **_hierarchy_fields("persona"),
-            })
+            persona_node = _ensure_persona_root(persona_id)
             if persona_node:
                 supabase_client.upsert_knowledge_edge(
                     mirror["id"], persona_node["id"], "belongs_to_persona", persona_id=persona_id,
+                )
+                supabase_client.upsert_knowledge_edge(
+                    persona_node["id"],
+                    mirror["id"],
+                    "belongs_to_persona",
+                    persona_id=persona_id,
+                    metadata={"primary_tree": True, "created_from": "bootstrap_from_item"},
                 )
 
         # 3) Tag nodes + has_tag edges.
@@ -869,6 +998,11 @@ def bootstrap_from_item(
             if not target:
                 continue
             related_nodes[(ntype, rslug)] = target
+            ensure_main_tree_connection(
+                target,
+                persona_id=persona_id,
+                relation_type="belongs_to_persona",
+            )
 
             # Default relation for non-special content types.
             relation = "about_product" if ntype == "product" else (

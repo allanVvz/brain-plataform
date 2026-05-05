@@ -46,10 +46,10 @@ type ParentCandidate = {
 };
 
 const EXPECTED_PARENT_TYPES: Record<string, string[]> = {
-  campaign: ["brand"],
-  briefing: ["campaign", "brand"],
-  audience: ["briefing", "campaign", "brand"],
-  product: ["audience", "briefing", "campaign", "brand"],
+  campaign: ["persona", "brand"],
+  briefing: ["product", "audience", "campaign", "brand", "persona"],
+  audience: ["campaign", "brand", "persona", "briefing"],
+  product: ["audience", "campaign", "briefing", "brand", "persona"],
   faq: ["product", "entity", "audience", "briefing", "campaign", "brand"],
   copy: ["product", "campaign", "audience", "briefing", "brand"],
   rule: ["product", "entity", "campaign", "audience", "briefing", "brand"],
@@ -70,7 +70,7 @@ const STRUCTURAL_RELATIONS = new Set([
   "under",
   "parent_of",
   "contains",
-  "derived_from",
+  "manual",
   "audience_of",
   "product_of",
   "briefing_of",
@@ -96,18 +96,18 @@ const AUXILIARY_RELATIONS = new Set(["has_tag", "mentions", "references", "uses_
 const CURATION_RELATIONS = new Set(["duplicate_of", "similar_to", "alias_of"]);
 
 const HIERARCHY_RANK: Record<string, number> = {
-  brand: 0,
-  campaign: 1,
-  briefing: 2,
+  persona: 0,
+  brand: 1,
+  campaign: 2,
   audience: 3,
   product: 4,
-  entity: 5,
+  briefing: 5,
+  entity: 6,
   faq: 6,
   copy: 6,
   rule: 6,
   asset: 6,
   tone: 6,
-  persona: 99,
   knowledge_item: 98,
   kb_entry: 98,
   tag: 99,
@@ -125,6 +125,7 @@ function relationType(edge: Edge<GraphEdgeData>): string {
 function tierRank(edge: Edge<GraphEdgeData>): number {
   const rt = relationType(edge);
   const tier = edge.data?.tier;
+  if (isExplicitPrimaryEdge(edge)) return -1;
   if (STRUCTURAL_RELATIONS.has(rt) || tier === "structural") return 0;
   if (STRONG_RELATIONS.has(rt) || tier === "strong") return 1;
   if (AUXILIARY_RELATIONS.has(rt) || tier === "auxiliary") return 2;
@@ -150,11 +151,41 @@ function directionBonus(childId: string, parentId: string, edge: Edge<GraphEdgeD
     }
   }
   if (edge.source === parentId && edge.target === childId) {
-    if (["contains", "parent_of", "targets", "supports_copy", "supports_campaign", "defines_brand", "has_tone", "about", "about_product"].includes(rt)) {
+    if (["contains", "parent_of", "targets", "supports_copy", "supports_campaign", "defines_brand", "has_tone", "about", "about_product", "manual", "belongs_to_persona"].includes(rt)) {
       return 0.16;
     }
   }
   return 0;
+}
+
+function isExplicitPrimaryEdge(edge: Edge<GraphEdgeData>): boolean {
+  const data = edge.data || {};
+  const metadata = (data.metadata || {}) as Record<string, unknown>;
+  return data.primary_tree === true || metadata.primary_tree === true || relationType(edge) === "manual";
+}
+
+function relationAllowsParentCandidate(childId: string, parentId: string, edge: Edge<GraphEdgeData>): boolean {
+  const rt = relationType(edge);
+  if (["manual", "contains", "parent_of", "targets", "supports_copy", "supports_campaign", "defines_brand", "has_tone"].includes(rt)) {
+    return edge.source === parentId && edge.target === childId;
+  }
+  if (["belongs_to", "part_of", "derived_from", "product_of", "audience_of", "campaign_of", "brand_of"].includes(rt)) {
+    return edge.source === childId && edge.target === parentId;
+  }
+  return true;
+}
+
+function relationPriority(edge: Edge<GraphEdgeData>): number {
+  const rt = relationType(edge);
+  if (rt === "manual") return 0;
+  if (rt === "contains" || rt === "parent_of") return 1;
+  if (rt === "part_of_campaign" || rt === "campaign_of") return 2;
+  if (rt === "about_product" || rt === "product_of") return 3;
+  if (rt === "briefed_by" || rt === "briefing_of") return 4;
+  if (rt === "answers_question" || rt === "supports_copy") return 5;
+  if (rt === "belongs_to_persona") return 8;
+  if (rt === "derived_from") return 9;
+  return 6;
 }
 
 function isAllowedRoot(type: string): boolean {
@@ -193,8 +224,10 @@ export function getPrimaryParentEdge(
     if (!parent) continue;
 
     const parentT = nodeType(parent);
-    if (parentT === childT && !["faq", "copy"].includes(childT)) continue;
-    if (expectedTypeRank(childT, parentT) >= 80) continue;
+    const explicitPrimary = isExplicitPrimaryEdge(edge);
+    if (!relationAllowsParentCandidate(child.id, parent.id, edge)) continue;
+    if (parentT === childT && !explicitPrimary && !["faq", "copy"].includes(childT)) continue;
+    if (!explicitPrimary && expectedTypeRank(childT, parentT) >= 80) continue;
 
     candidates.push({
       child,
@@ -207,8 +240,14 @@ export function getPrimaryParentEdge(
   }
 
   candidates.sort((a, b) => {
+    const aExplicit = isExplicitPrimaryEdge(a.edge);
+    const bExplicit = isExplicitPrimaryEdge(b.edge);
+    if (aExplicit !== bExplicit) return aExplicit ? -1 : 1;
     if (a.typeRank !== b.typeRank) return a.typeRank - b.typeRank;
     if (a.relationRank !== b.relationRank) return a.relationRank - b.relationRank;
+    const aRelationPriority = relationPriority(a.edge);
+    const bRelationPriority = relationPriority(b.edge);
+    if (aRelationPriority !== bRelationPriority) return aRelationPriority - bRelationPriority;
     if (b.score !== a.score) return b.score - a.score;
     const aWeight = Number(a.edge.data?.weight ?? 0);
     const bWeight = Number(b.edge.data?.weight ?? 0);

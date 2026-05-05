@@ -544,35 +544,198 @@ export default function GraphPageClient() {
         </button>
 
         {addPanelOpen && (
-          <AddBlockPanel onClose={() => setAddPanelOpen(false)} />
+          <AddBlockPanel
+            nodes={data?.nodes || []}
+            edges={data?.edges || []}
+            persona={effectivePersona}
+            onClose={() => setAddPanelOpen(false)}
+            onCreated={async () => {
+              setAddPanelOpen(false);
+              await load();
+              setGraphNotice({ tone: "success", text: "Bloco criado e conectado." });
+              window.setTimeout(() => setGraphNotice(null), 2200);
+            }}
+          />
         )}
       </div>
     </div>
   );
 }
 
-function AddBlockPanel({ onClose }: { onClose: () => void }) {
-  const nodeTypes = [
-    "Persona",
-    "Entidade",
-    "Brand",
-    "Campanha",
-    "Produto",
-    "Briefing",
-    "Audiência",
-    "Tom",
-    "Regra",
-    "Copy",
-    "FAQ",
-    "Asset",
+function AddBlockPanel({
+  nodes,
+  edges,
+  persona,
+  onClose,
+  onCreated,
+}: {
+  nodes: any[];
+  edges: any[];
+  persona?: any;
+  onClose: () => void;
+  onCreated: () => void | Promise<void>;
+}) {
+  const nodeTypeOptions = [
+    { value: "brand", label: "Brand" },
+    { value: "campaign", label: "Campanha" },
+    { value: "product", label: "Produto" },
+    { value: "briefing", label: "Briefing" },
+    { value: "audience", label: "Audiencia" },
+    { value: "entity", label: "Entidade" },
+    { value: "tone", label: "Tom" },
+    { value: "rule", label: "Regra" },
+    { value: "copy", label: "Copy" },
+    { value: "faq", label: "FAQ" },
+    { value: "asset", label: "Asset" },
   ];
+  const parentOptions = useMemo(
+    () => nodes
+      .filter((node) => node.id?.startsWith("gn:"))
+      .filter((node) => !["tag", "mention"].includes(node.data?.node_type))
+      .map((node) => ({
+        id: node.id.slice(3),
+        graphId: node.id,
+        label: node.data?.label || node.data?.slug || node.id,
+        slug: node.data?.slug,
+        type: node.data?.node_type || "node",
+      }))
+      .slice(0, 120),
+    [nodes],
+  );
+  const graphNodesById = useMemo(() => new Map(parentOptions.map((node) => [node.graphId, node])), [parentOptions]);
+  const childOptionsByParent = useMemo(() => {
+    const structural = new Set([
+      "manual",
+      "contains",
+      "part_of_campaign",
+      "about_product",
+      "briefed_by",
+      "answers_question",
+      "supports_copy",
+      "uses_asset",
+      "belongs_to_persona",
+    ]);
+    const out = new Map<string, typeof parentOptions>();
+    for (const edge of edges || []) {
+      const relation = String(edge?.data?.relation_type || "").toLowerCase();
+      if (!structural.has(relation)) continue;
+      const source = edge?.source;
+      const target = edge?.target;
+      const child = graphNodesById.get(target);
+      if (!source || !child || source === target) continue;
+      const list = out.get(source) || [];
+      if (!list.some((item) => item.graphId === child.graphId)) list.push(child);
+      out.set(source, list);
+    }
+    for (const [key, list] of out) {
+      out.set(key, [...list].sort((a, b) => {
+        const typeOrder = ["campaign", "audience", "product", "briefing", "entity", "faq", "copy", "rule", "asset"];
+        const ar = typeOrder.indexOf(a.type);
+        const br = typeOrder.indexOf(b.type);
+        if (ar !== br) return (ar < 0 ? 99 : ar) - (br < 0 ? 99 : br);
+        return a.label.localeCompare(b.label);
+      }));
+    }
+    return out;
+  }, [edges, graphNodesById]);
+  const campaignOptions = useMemo(() => {
+    const campaigns = parentOptions.filter((node) => node.type === "campaign");
+    return campaigns.length ? campaigns : parentOptions.filter((node) => ["brand", "campaign", "audience"].includes(node.type));
+  }, [parentOptions]);
+  const [contentType, setContentType] = useState("product");
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [pathIds, setPathIds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const selectedParent = useMemo(() => {
+    const last = pathIds[pathIds.length - 1];
+    return parentOptions.find((node) => node.graphId === last);
+  }, [parentOptions, pathIds]);
+  const parentNodeId = selectedParent?.id || "";
+
+  useEffect(() => {
+    if (!pathIds.length && campaignOptions[0]?.graphId) setPathIds([campaignOptions[0].graphId]);
+  }, [campaignOptions, pathIds.length]);
+
+  const selectPathNode = (level: number, graphId: string) => {
+    setPathIds((current) => [...current.slice(0, level), graphId]);
+  };
+
+  const pathColumns = useMemo(() => {
+    const columns: Array<{ title: string; helper: string; options: typeof parentOptions; selected?: string }> = [
+      {
+        title: "Campanha",
+        helper: "Clique para escolher o galho raiz.",
+        options: campaignOptions,
+        selected: pathIds[0],
+      },
+    ];
+    const firstChildren = pathIds[0] ? childOptionsByParent.get(pathIds[0]) || [] : [];
+    columns.push({
+      title: "Alguma outra conexao?",
+      helper: "Somente filhos imediatos da campanha.",
+      options: firstChildren,
+      selected: pathIds[1],
+    });
+    if (pathIds[1]) {
+      columns.push({
+        title: "Terceiro nivel",
+        helper: "Refine com o proximo nivel hierarquico.",
+        options: childOptionsByParent.get(pathIds[1]) || [],
+        selected: pathIds[2],
+      });
+    }
+    return columns;
+  }, [campaignOptions, childOptionsByParent, pathIds]);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!persona?.id) {
+      setError("Selecione uma persona antes de criar o bloco.");
+      return;
+    }
+    if (!title.trim() || !content.trim()) {
+      setError("Titulo e conteudo sao obrigatorios.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await api.intakeKnowledge({
+        raw_text: content,
+        persona_id: persona.id,
+        source: "graph_ui_add_block",
+        source_ref: title,
+        title,
+        content_type: contentType,
+        tags: [contentType, persona.slug].filter(Boolean),
+        metadata: {
+          slug: title,
+          markdown_document: true,
+          parent_node_id: parentNodeId || undefined,
+          parent_relation_type: "manual",
+        },
+        submitted_by: "graph_ui",
+        validate: true,
+        parent_node_id: parentNodeId || undefined,
+        parent_relation_type: "manual",
+      });
+      await onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel criar o bloco.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div className="absolute inset-0 z-50 flex items-end justify-center bg-black/35 p-5">
-      <div className="w-full max-w-2xl rounded-2xl border border-white/08 bg-[#0e1118] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-white/06 px-5 py-4">
+    <div className="absolute inset-0 z-50 flex items-end justify-center bg-black/30 p-3">
+      <form onSubmit={submit} className="w-full max-w-4xl rounded-xl border border-white/08 bg-[#0e1118] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-white/06 px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold text-obs-text">Adicionar bloco ao grafo</h2>
-            <p className="mt-0.5 text-xs text-obs-subtle">Escolha o tipo de card para criar o próximo bloco.</p>
+            <p className="mt-0.5 text-[11px] text-obs-subtle">Defina o tipo, conteudo e galho principal.</p>
           </div>
           <button
             type="button"
@@ -583,23 +746,84 @@ function AddBlockPanel({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div className="p-5">
+        <div className="max-h-[76vh] overflow-y-auto p-4">
           <section>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-obs-faint">Tipos</p>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-              {nodeTypes.map((type) => (
+            <p className="mb-2 text-[9px] font-semibold uppercase tracking-[0.16em] text-obs-faint">Tipo</p>
+            <div className="flex flex-wrap gap-1.5">
+              {nodeTypeOptions.map((type) => (
                 <button
-                  key={type}
+                  key={type.value}
                   type="button"
-                  className="rounded-lg border border-white/06 bg-white/[0.03] px-3 py-2 text-left text-xs text-obs-subtle transition hover:border-obs-violet/35 hover:text-white"
+                  onClick={() => setContentType(type.value)}
+                  className={`rounded-md border px-2.5 py-1.5 text-left text-[11px] leading-none transition ${
+                    contentType === type.value
+                      ? "border-obs-violet/50 bg-obs-violet/15 text-white"
+                      : "border-white/06 bg-white/[0.03] text-obs-subtle hover:border-obs-violet/35 hover:text-white"
+                  }`}
                 >
-                  {type}
+                  {type.label}
                 </button>
               ))}
             </div>
+            <input
+              required
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Titulo do bloco"
+              className="mt-3 w-full rounded-md border border-white/06 bg-obs-base px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet/50"
+            />
+            <textarea
+              required
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={4}
+              placeholder="Conteudo markdown do novo conhecimento..."
+              className="mt-2.5 w-full resize-none rounded-md border border-white/06 bg-obs-base px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet/50"
+            />
+            <div className="mt-3 grid gap-2 md:grid-cols-3">
+              {pathColumns.map((column, index) => (
+                <div key={`${column.title}-${index}`} className="min-h-[104px] rounded-md border border-white/06 bg-obs-base/70 p-2.5">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-obs-faint">{column.title}</p>
+                  <p className="mt-0.5 truncate text-[10px] text-obs-subtle">{column.helper}</p>
+                  <div className="mt-2 max-h-28 space-y-1.5 overflow-y-auto pr-1">
+                    {column.options.length ? column.options.map((node) => (
+                      <button
+                        key={node.graphId}
+                        type="button"
+                        onClick={() => selectPathNode(index, node.graphId)}
+                        className={`w-full rounded-md border px-2 py-1.5 text-left transition ${
+                          column.selected === node.graphId
+                            ? "border-obs-violet/60 bg-obs-violet/18 text-white"
+                            : "border-white/06 bg-white/[0.03] text-obs-subtle hover:border-obs-violet/35 hover:text-white"
+                        }`}
+                      >
+                        <span className="block text-[8px] uppercase tracking-[0.12em] text-obs-faint">{node.type}</span>
+                        <span className="mt-0.5 block truncate text-[11px] font-medium leading-tight">{node.label}</span>
+                      </button>
+                    )) : (
+                      <p className="rounded-md border border-dashed border-white/08 px-2 py-3 text-[11px] text-obs-faint">
+                        Nenhum filho imediato nesse nivel.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 truncate text-[11px] text-obs-subtle">
+              Conexao principal selecionada: {selectedParent ? `${selectedParent.type} - ${selectedParent.label}` : "Persona ativa"}
+            </p>
+            {error && <p className="mt-3 text-xs text-red-200">{error}</p>}
           </section>
         </div>
-      </div>
+        <div className="flex items-center justify-end gap-2 border-t border-white/06 px-4 py-3">
+          <button type="button" onClick={onClose} className="rounded-md border border-white/06 px-3 py-2 text-xs text-obs-subtle hover:text-white">
+            Cancelar
+          </button>
+          <button type="submit" disabled={saving} className="rounded-md bg-obs-violet px-4 py-2 text-xs font-medium text-white disabled:opacity-50">
+            {saving ? "Criando..." : "Criar node"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

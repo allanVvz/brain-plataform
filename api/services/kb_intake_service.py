@@ -196,13 +196,27 @@ O JSON deve seguir este formato:
       "status": "confirmado|inferido|pendente_validacao",
       "content": "conteudo do conhecimento",
       "tags": ["tag"],
-      "metadata": {}
+      "metadata": {
+        "parent_slug": "slug-do-no-pai"
+      }
+    }
+  ],
+  "links": [
+    {
+      "source_slug": "slug-do-no-pai",
+      "target_slug": "slug-do-conhecimento",
+      "relation_type": "manual"
     }
   ],
   "missing_questions": []
 }
 
 Regras para esse bloco:
+- Cada entry deve ter uma ligacao principal. Use `metadata.parent_slug` ou inclua um item em `links`.
+- Se nao souber o galho correto, pergunte antes de salvar: brand, briefing/campanha, produto, audiencia ou criar novo galho.
+- Sugira o galho a partir de padroes semanticos existentes, mas transforme a decisao em edge principal no JSON.
+- Briefings nunca sao soltos: conecte ao produto, audiencia, campanha ou outro no indicado.
+- Se ainda nao houver pai melhor, conecte ao menos na persona da sessao.
 - precisa conter uma entry para cada bloco selecionado no inicio;
 - sempre crie uma estrutura de conhecimento em arvore com multiplos galhos: brand/campaign como raiz quando existirem, audience/product/entity como galhos intermediarios, e copy/faq/rule/asset como folhas;
 - evite listas planas: cada entry deve ter titulo, conteudo e contexto suficientes para ficar clara sem depender de relacoes obrigatorias;
@@ -214,7 +228,7 @@ Regras para esse bloco:
 - se os blocos incluirem copy, gere copies concretas e use a ferramenta mental de geracao de copy;
 - se os blocos incluirem faq, gere perguntas e respostas recuperaveis;
 - se o operador pediu FAQ sobre preco, cores e kits, gere no minimo 2 FAQs: uma para preco/kits e outra para cores;
-- relacoes/links sao opcionais e nao devem ser solicitados nem usados como requisito de qualidade do plano;
+- `links` e opcional somente quando todas as entries ja trouxerem `metadata.parent_slug`;
 - campos desconhecidos devem ficar como pendente_validacao, nao bloquear a arvore inteira.
 
 === BLOCOS SELECIONADOS NA CAPTURA ===

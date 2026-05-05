@@ -147,6 +147,32 @@ export const api = {
   },
 
   // Knowledge — Bindings & Brand
+  intakeKnowledge: (body: {
+    raw_text: string;
+    persona_id?: string;
+    persona_slug?: string;
+    source?: string;
+    source_ref?: string;
+    title?: string;
+    content_type?: string;
+    tags?: string[];
+    metadata?: Record<string, any>;
+    submitted_by?: string;
+    validate?: boolean;
+    parent_node_id?: string;
+    parent_relation_type?: string;
+  }) => req<any>("/knowledge/intake", { method: "POST", body: JSON.stringify(body) }),
+  intakeKnowledgePlan: (body: {
+    persona_id?: string;
+    persona_slug?: string;
+    run_token?: string;
+    entries: any[];
+    links?: any[];
+    source?: string;
+    source_ref?: string;
+    submitted_by?: string;
+    validate?: boolean;
+  }) => req<any>("/knowledge/intake/plan", { method: "POST", body: JSON.stringify(body) }),
   workflowBindings: (personaId?: string) => req<any[]>(`/knowledge/bindings${personaId ? `?persona_id=${personaId}` : ""}`),
   brandProfile: (personaId: string) => req<any>(`/knowledge/brand/${personaId}`),
 
