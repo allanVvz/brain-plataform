@@ -347,6 +347,8 @@ def approve_item(item_id: str, request: Request, body: ApproveBody = ApproveBody
         if not item.get("persona_id"):
             raise HTTPException(400, "Assign a persona before approving")
         auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
+        if body.promote_to_kb:
+            raise HTTPException(409, "Approval and Golden Dataset publication are now separate. Approve first, then connect the approved FAQ node to Embedded in the graph.")
         result = knowledge_lifecycle.promote_knowledge_item(
             item_id,
             promote_to_kb=body.promote_to_kb,
@@ -392,35 +394,42 @@ def reject_item(item_id: str, request: Request, body: RejectBody = RejectBody())
     return {"ok": True}
 
 
-@router.post("/queue/{item_id}/to-kb")
-def promote_to_kb(item_id: str, request: Request):
+@router.delete("/queue/{item_id}")
+def delete_queue_item(item_id: str, request: Request):
     try:
         item = supabase_client.get_knowledge_item(item_id)
         if not item:
             raise HTTPException(404, "Item not found")
-        if item["status"] not in ("approved", "embedded"):
-            raise HTTPException(400, "Item must be approved before promoting to KB")
-        if not item.get("persona_id"):
-            raise HTTPException(400, "Item must have a persona assigned")
-        auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
-        result = knowledge_lifecycle.promote_knowledge_item(
-            item_id,
-            promote_to_kb=True,
-            approval_mode="manual_validation",
-        )
+        if item.get("persona_id"):
+            auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
+        evidence = knowledge_lifecycle.delete_knowledge_item_cascade(item_id)
     except HTTPException:
         raise
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(502, f"Promote to KB failed: {exc}") from exc
-    updated_item = result.get("item") or supabase_client.get_knowledge_item(item_id)
-    evidence = result.get("evidence") or {}
-    _ensure_promotion_evidence(evidence, require_embed=True)
-    emit("item_promoted_to_kb", entity_type="knowledge_item", entity_id=item_id,
-         persona_id=updated_item.get("persona_id"),
-         payload={"title": updated_item.get("title"), "evidence": evidence})
-    return {"ok": True, "item": updated_item, "evidence": evidence}
+        raise HTTPException(502, f"Delete failed: {exc}") from exc
+    emit(
+        "knowledge_item_deleted",
+        entity_type="knowledge_item",
+        entity_id=item_id,
+        persona_id=item.get("persona_id"),
+        payload=evidence,
+    )
+    return {"ok": True, "evidence": evidence}
+
+
+@router.post("/queue/{item_id}/to-kb")
+def promote_to_kb(item_id: str, request: Request):
+    item = supabase_client.get_knowledge_item(item_id)
+    if not item:
+        raise HTTPException(404, "Item not found")
+    if item.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
+    raise HTTPException(
+        409,
+        "Publication now happens only through the graph: approve the FAQ first, then connect it to Embedded to publish it to the Golden Dataset.",
+    )
 
 
 # ── Upload / Knowledge Intake ─────────────────────────────────

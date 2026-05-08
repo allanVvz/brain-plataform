@@ -106,7 +106,7 @@ export default function AssetsPage() {
             <option value="">Todos status</option>
             <option value="pending">Pendente</option>
             <option value="approved">Aprovado</option>
-            <option value="embedded">Na KB</option>
+            <option value="embedded">No Golden Dataset</option>
             <option value="rejected">Rejeitado</option>
           </select>
         </div>

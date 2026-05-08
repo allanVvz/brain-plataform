@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Optional
 
 from services.catalog_crawler import crawl_catalog_url
 from services.kb_intake_service import (
@@ -29,6 +30,7 @@ class MessageBody(BaseModel):
 class SaveBody(BaseModel):
     session_id: str
     content: str = ""
+    plan_override: Optional[dict[str, Any]] = None
 
 
 class CrawlBody(BaseModel):
@@ -210,7 +212,7 @@ def get_session_info(session_id: str):
 @router.post("/save")
 def save_knowledge(body: SaveBody):
     try:
-        result = save(body.session_id, body.content)
+        result = save(body.session_id, body.content, body.plan_override)
     except Exception as exc:
         # Safety net: surface unhandled exceptions in the response body so the
         # frontend (and the operator) can see the real cause without digging
@@ -222,11 +224,14 @@ def save_knowledge(body: SaveBody):
             sre_logger.error("kb_intake_save", f"unhandled in save(): {exc}", exc)
         except Exception:
             pass
-        raise HTTPException(500, {
-            "error": f"Unhandled exception in save(): {exc}",
-            "exception_type": type(exc).__name__,
-            "traceback": tb_text.splitlines()[-20:],
-        })
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": f"Unhandled exception in save(): {exc}",
+                "exception_type": type(exc).__name__,
+                "traceback": tb_text.splitlines()[-20:],
+            },
+        )
 
     if "error" in result:
         try:

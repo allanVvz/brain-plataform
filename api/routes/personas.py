@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from schemas.persona import PersonaCreate, PersonaUpdate
-from services import auth_service, supabase_client
+from services import auth_service, supabase_client, vault_sync
 
 router = APIRouter(prefix="/personas", tags=["personas"])
 logger = logging.getLogger("personas")
@@ -58,6 +58,7 @@ def create_persona(body: PersonaCreate, request: Request):
     if not auth_service.is_admin(auth_service.current_user(request)):
         raise HTTPException(403, "Apenas admin pode criar personas")
     supabase_client.upsert_persona(body.model_dump())
+    vault_sync.ensure_persona_vault_structure(body.slug)
     return supabase_client.get_persona(body.slug)
 
 

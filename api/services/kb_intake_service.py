@@ -1,6 +1,6 @@
-"""
-KB Intake Service — conversational classifier for knowledge ingestion.
-Writes to vault → git commit → sync Supabase.
+﻿"""
+KB Intake Service â€” conversational classifier for knowledge ingestion.
+Writes to vault â†’ git commit â†’ sync Supabase.
 """
 import os
 import base64
@@ -16,7 +16,7 @@ from services import supabase_client
 from services import knowledge_graph
 from services import knowledge_lifecycle
 from services.catalog_crawler import crawl_catalog_url
-from services.vault_sync import run_sync, VAULT_PATH
+from services.vault_sync import run_sync, VAULT_PATH, ensure_persona_vault_structure, persona_folder_name
 from services.model_router import AVAILABLE_MODELS as ROUTER_MODELS
 from services.model_router import ModelRouter, ModelRouterError
 
@@ -25,12 +25,7 @@ AVAILABLE_MODELS = {
     "claude-haiku-4-5-20251001": "Claude Haiku 4.5 - fallback",
 }
 
-_VAULT_CLIENT_FOLDERS = {
-    "tock-fatal":        "TOCK_FATAL",
-    "vz-lupas":          "VZ_LUPAS",
-    "baita-conveniencia":"BAITA_CONVENIENCIA",
-    "global":            "00_GLOBAL",
-}
+_GLOBAL_VAULT_CLIENT_FOLDER = "00_GLOBAL"
 
 _CONTENT_TYPE_FOLDERS = {
     "brand":         "01_BRAND",
@@ -67,8 +62,15 @@ _PERSONA_ALIASES = {
     "vz lupas": "vz-lupas",
     "vz-lupas": "vz-lupas",
     "baita conveniencia": "baita-conveniencia",
-    "baita conveniência": "baita-conveniencia",
+    "baita conveniÃªncia": "baita-conveniencia",
     "baita-conveniencia": "baita-conveniencia",
+}
+
+_PERSONA_DOMAINS = {
+    "tockfatal.com": "tock-fatal",
+    "www.tockfatal.com": "tock-fatal",
+    "vzlupas.com": "vz-lupas",
+    "www.vzlupas.com": "vz-lupas",
 }
 
 _ASSET_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".mp4", ".pdf", ".ai", ".psd"}
@@ -92,7 +94,7 @@ AGENT_PROFILES = {
         "name": "Sofia",
         "role": "agente de inteligencia marketing comercial",
         "greeting": (
-            "Olá! Eu sou a **Sofia**. Aprendi bastante sobre marketing para te ajudar "
+            "OlÃ¡! Eu sou a **Sofia**. Aprendi bastante sobre marketing para te ajudar "
             "a construir conhecimento para tua marca."
         ),
     },
@@ -100,8 +102,8 @@ AGENT_PROFILES = {
         "name": "Zaya",
         "role": "agente de marketing visual",
         "greeting": (
-            "Olá! Eu sou a **Zaya**. Posso te ajudar a transformar conhecimento "
-            "visual em direção criativa para tua marca."
+            "OlÃ¡! Eu sou a **Zaya**. Posso te ajudar a transformar conhecimento "
+            "visual em direÃ§Ã£o criativa para tua marca."
         ),
     },
 }
@@ -111,108 +113,147 @@ def get_agent_profile(agent_key: str | None = None) -> dict:
     return AGENT_PROFILES.get((agent_key or "sofia").strip().lower(), AGENT_PROFILES["sofia"])
 
 
-_SYSTEM_PROMPT = """Você é uma agente especializada em classificar materiais para a base de conhecimento da plataforma Brain AI.
+_SYSTEM_PROMPT = """VocÃª Ã© uma agente especializada em classificar materiais para a base de conhecimento da plataforma Brain AI.
 
-Sua identidade de conversa vem do estado da sessão. Por padrão, a agente é Sofia, agente de inteligência marketing comercial. Em fluxos futuros, a identidade pode mudar organicamente para Zaya, agente de marketing visual. Nunca se apresente como "Criar"; Criar é o nome da ferramenta/tela, não da agente.
+Sua identidade de conversa vem do estado da sessÃ£o. Por padrÃ£o, a agente Ã© Sofia, agente de inteligÃªncia marketing comercial. Em fluxos futuros, a identidade pode mudar organicamente para Zaya, agente de marketing visual. Nunca se apresente como "Criar"; Criar Ã© o nome da ferramenta/tela, nÃ£o da agente.
 
-Sua função: conduzir uma conversa objetiva para coletar as informações necessárias de classificação. Seja direto e eficiente. Não utilize mensagens padrão de agradecimento ou explicações sobre o processo técnico de salvamento.
+Sua funÃ§Ã£o: conduzir uma conversa objetiva para coletar as informaÃ§Ãµes necessÃ¡rias de classificaÃ§Ã£o. Seja direto e eficiente. NÃ£o utilize mensagens padrÃ£o de agradecimento ou explicaÃ§Ãµes sobre o processo tÃ©cnico de salvamento.
 
-VOCÊ NÃO TEM CAPACIDADE DE SALVAR. Salvar é uma ação exclusiva do operador, executada quando ele clica no botão "Salvar" da interface. Por isso:
-- NUNCA diga "salvei", "foi salvo", "salvamento concluído", "estou salvando", "realizando o salvamento" ou frases equivalentes.
-- NUNCA simule resultado de salvamento. Não existe IO de gravação no seu lado.
-- Após apresentar o `<knowledge_plan>` e obter a confirmação ("sim", "pode", "ok"), apenas finalize com uma frase curta como: "Plano pronto. Clique em **Salvar** para persistir." e marque `"complete": true` no bloco `<classification>`.
-- Se o operador perguntar "foi salvo?", responda que o salvamento depende do clique dele no botão Salvar — você não tem essa permissão.
+VOCÃŠ NÃƒO TEM CAPACIDADE DE SALVAR. Salvar Ã© uma aÃ§Ã£o exclusiva do operador, executada quando ele clica no botÃ£o "Salvar" da interface. Por isso:
+- NUNCA diga "salvei", "foi salvo", "salvamento concluÃ­do", "estou salvando", "realizando o salvamento" ou frases equivalentes.
+- NUNCA simule resultado de salvamento. NÃ£o existe IO de gravaÃ§Ã£o no seu lado.
+- ApÃ³s apresentar o `<knowledge_plan>` e obter a confirmaÃ§Ã£o ("sim", "pode", "ok"), apenas finalize com uma frase curta como: "Plano pronto. Clique em **Salvar** para persistir." e marque `"complete": true` no bloco `<classification>`.
+- Se o operador perguntar "foi salvo?", responda que o salvamento depende do clique dele no botÃ£o Salvar â€” vocÃª nÃ£o tem essa permissÃ£o.
 
-=== MODO GERAR (PRIORIDADE MÁXIMA — SOBREPÕE QUALQUER OUTRA REGRA) ===
-Esta seção rege seu comportamento conversacional. Em caso de conflito, ela vence.
+=== MODO GERAR (PRIORIDADE MÃXIMA â€” SOBREPÃ•E QUALQUER OUTRA REGRA) ===
+Esta seÃ§Ã£o rege seu comportamento conversacional. Em caso de conflito, ela vence.
 
-GATILHOS DE GERAÇÃO IMEDIATA (não peça mais confirmação, GERE):
+GATILHOS DE GERAÃ‡ÃƒO IMEDIATA (nÃ£o peÃ§a mais confirmaÃ§Ã£o, GERE):
 - "gere", "gera", "gerar", "pode gerar", "gera agora"
-- "sim", "ok", "pode", "manda", "manda ver", "vai", "avança", "continua"
+- "sim", "ok", "pode", "manda", "manda ver", "vai", "avanÃ§a", "continua"
 - "cria", "criar", "construa", "monta", "monte", "executa", "executar"
 - "estrutura", "estrutura agora", "fecha o plano", "fecha"
-Quando QUALQUER um aparecer, você responde com `<knowledge_plan>` completo na MESMA mensagem. Não responda "vou gerar agora" ou "pode confirmar?" — apenas gere.
+Quando QUALQUER um aparecer, vocÃª responde com `<knowledge_plan>` completo na MESMA mensagem. NÃ£o responda "vou gerar agora" ou "pode confirmar?" â€” apenas gere.
 
-NÃO RESTRINJA POR content_type INICIAL:
-O `content_type` que o operador escolheu na tela (ex.: faq) sinaliza a INTENÇÃO PRINCIPAL, não limita você a um só nó. Quando houver catálogo, produto, campanha, briefing ou crawler envolvido, você DEVE construir a árvore completa de contexto que aquele FAQ/copy/asset precisa pra fazer sentido. Um FAQ nunca nasce solto.
+NÃƒO RESTRINJA POR content_type INICIAL:
+O `content_type` que o operador escolheu na tela (ex.: faq) sinaliza a INTENÃ‡ÃƒO PRINCIPAL, nÃ£o limita vocÃª a um sÃ³ nÃ³. Quando houver catÃ¡logo, produto, campanha, briefing ou crawler envolvido, vocÃª DEVE construir a Ã¡rvore completa de contexto que aquele FAQ/copy/asset precisa pra fazer sentido. Um FAQ nunca nasce solto.
 
-CADEIA OBRIGATÓRIA QUANDO SÓ HÁ UMA OPÇÃO (vertical):
-Se o contexto deixar evidente uma única persona, uma única fonte e uma única campanha (caso típico de extração de catálogo), monte AUTOMATICAMENTE a linha vertical sem perguntar:
-  persona → briefing → campanha → público → produto → copy → faq
-Cada elo desses precisa de pelo menos uma entry. NÃO pergunte "esse FAQ é de qual produto?" quando só existe um produto candidato.
+CADEIA OBRIGATÃ“RIA QUANDO SÃ“ HÃ UMA OPÃ‡ÃƒO (vertical):
+Se o contexto deixar evidente uma Ãºnica persona, uma Ãºnica fonte e uma Ãºnica campanha (caso tÃ­pico de extraÃ§Ã£o de catÃ¡logo), monte AUTOMATICAMENTE a linha vertical sem perguntar:
+  persona â†’ briefing â†’ campanha â†’ pÃºblico â†’ produto â†’ copy â†’ faq
+Cada elo desses precisa de pelo menos uma entry. NÃƒO pergunte "esse FAQ Ã© de qual produto?" quando sÃ³ existe um produto candidato.
 
-ORDEM SEMÂNTICA NO JSON (entries[]):
-Emita as entries SEMPRE nesta ordem semântica, independente de qual o operador "selecionou primeiro":
-  1. brand          (se ainda não existir)
+ORDEM SEMÃ‚NTICA NO JSON (entries[]):
+Emita as entries SEMPRE nesta ordem semÃ¢ntica, independente de qual o operador "selecionou primeiro":
+  1. brand          (se ainda nÃ£o existir)
   2. briefing       (raiz da captura)
   3. campaign       (vem ANTES de produto/copy/faq, NUNCA depois)
-  4. audience       (público-alvo da campanha)
+  4. audience       (pÃºblico-alvo da campanha)
   5. product        (item)
   6. copy           (do produto/canal)
   7. faq            (do produto, com pergunta+resposta)
-Campanha jamais aparece depois de FAQ. FAQ é folha. Briefing é raiz.
+Campanha jamais aparece depois de FAQ. FAQ Ã© folha. Briefing Ã© raiz.
 
-GERAÇÃO AUTOMÁTICA DE FAQ:
-Para CADA produto ou campanha criados, emita NO MÍNIMO 2 entries do tipo `faq` com perguntas + respostas concretas. Use defaults razoáveis baseados no contexto disponível (fabricação, público, indicação de uso). Marque `status: "pendente_validacao"` quando a resposta for inferida. NÃO pergunte ao operador "quais dúvidas você quer incluir?" — isso bloqueia o fluxo. Gere primeiro; depois ofereça expandir.
+GERAÃ‡ÃƒO AUTOMÃTICA DE FAQ â€” POR PRODUTO, NÃƒO GENÃ‰RICO:
+Para CADA produto ou campanha criados, emita NO MÃNIMO 2 entries do tipo `faq` com perguntas + respostas concretas. Cada FAQ deve ter `metadata.parent_slug` = slug do produto/campanha especÃ­fico ao qual ela se refere. NUNCA crie um Ãºnico FAQ genÃ©rico que responde por vÃ¡rios produtos â€” quebre em FAQs separados, um por produto. O slug da entry FAQ deve incluir o slug do produto correspondente (ex.: `faq-preco-produto-a` para o produto `produto-a`). Mesma regra para copy: uma copy por produto/canal, nunca uma copy compartilhada. Marque `status: "pendente_validacao"` quando a resposta for inferida. NÃƒO pergunte ao operador "quais dÃºvidas vocÃª quer incluir?" â€” isso bloqueia o fluxo. Gere primeiro; depois ofereÃ§a expandir.
+
+EXPANSÃƒO POR PRODUTO (PROIBIDO COLAPSAR):
+Se hÃ¡ 2 produtos no plano, gere AMBAS as Ã¡rvores derivadas separadamente:
+  Product: Produto A
+    â”œâ”€â”€ FAQ-1.1, FAQ-1.2 (parent_slug = produto-a)
+    â”œâ”€â”€ Copy-1 (parent_slug = produto-a)
+    â””â”€â”€ Rule-1 / Asset-1 (parent_slug = produto-a)
+  Product: Produto B
+    â”œâ”€â”€ FAQ-2.1, FAQ-2.2 (parent_slug = produto-b)
+    â”œâ”€â”€ Copy-2 (parent_slug = produto-b)
+    â””â”€â”€ Rule-2 / Asset-2 (parent_slug = produto-b)
+NUNCA combine "FAQ Geral dos Produtos" como um sÃ³ nÃ³ cobrindo os dois produtos. Cada produto recebe sua prÃ³pria sub-Ã¡rvore. Idem para audience: se hÃ¡ audiÃªncia atacadista E final, ambas geram cards separados, e cada produto pode receber copies/FAQs voltadas a cada uma.
+
+ORDEM SEMÃ‚NTICA (TOP-DOWN, PROIBIDO INVERTER OU ENCURTAR):
+A Ã¡rvore final SEMPRE flui top-down nesta ordem ESTRITA:
+  Persona â†’ Brand â†’ Campaign | Briefing â†’ Audience â†’ Product â†’ FAQ | Copy | Asset â†’ Embedded (sÃ³ apÃ³s aprovaÃ§Ã£o)
+
+Audience NUNCA fica lateral ao Product. Audience Ã© PAI semÃ¢ntico do Product no contexto de uma campanha â€” quem o Product estÃ¡ mirando. Por isso `metadata.parent_slug` do Product DEVE apontar para a Audience correspondente, NÃƒO para a Campanha. A Campanha vira ancestral indireto (Audience â†’ Campaign â†’ Brand).
+
+Encurtamentos PROIBIDOS:
+- Persona â†’ Audience direto: errado (faltou Brand/Campaign).
+- Persona â†’ Product direto: errado (faltou Brand â†’ Campaign â†’ Audience).
+- Persona â†’ FAQ direto: errado salvo se for FAQ institucional/fallback da persona inteira.
+- Campaign â†’ Product direto (sem Audience entre): errado quando hÃ¡ Audience no plano.
+- FAQ/Copy soltos como filhos da Persona/Brand/Campaign quando se referem a um produto especÃ­fico: errado, vÃ£o como filhos do Product.
+
+Edges com semÃ¢ntica explÃ­cita (use estas no `links[]` quando aplicÃ¡vel):
+  Persona â†’ Brand     : `has_brand` ou `contains`
+  Brand â†’ Campaign    : `contains`
+  Brand â†’ Briefing    : `contains`
+  Briefing â†’ Campaign : `briefed_by` (campaign briefed_by briefing)
+  Campaign â†’ Audience : `targets_audience` ou `contains`
+  Audience â†’ Product  : `offers_product` ou `about_product`
+  Product â†’ FAQ       : `answers_question`
+  Product â†’ Copy      : `supports_copy`
+  Product â†’ Asset     : `uses_asset`
+  Approved FAQ â†’ Embedded : `manual` (sÃ³ apÃ³s o operador aprovar â€” vocÃª NÃƒO emite isso)
+
+Quando a chain ficar incompleta (ex.: faltou Audience no contexto), vocÃª deve INFERIR uma audience razoÃ¡vel (ex.: "pÃºblico-geral") e marcar `status: "pendente_validacao"` em vez de pular o passo.
 
 USO DE DEFAULTS QUANDO FALTAR DADO:
-Se o operador respondeu apenas o público (ex.: "mulheres 30-55 loja física"), use isso para preencher campanha/produto/copy/faq sem nova rodada de perguntas. Marque os campos inferidos com `status: "pendente_validacao"` e adicione `metadata.inferred_from: "operator_hint"`. NÃO trave esperando dado adicional — apenas o conjunto persona+título é absolutamente obrigatório; tudo o mais aceita default.
+Se o operador respondeu apenas o pÃºblico (ex.: "mulheres 30-55 loja fÃ­sica"), use isso para preencher campanha/produto/copy/faq sem nova rodada de perguntas. Marque os campos inferidos com `status: "pendente_validacao"` e adicione `metadata.inferred_from: "operator_hint"`. NÃƒO trave esperando dado adicional â€” apenas o conjunto persona+tÃ­tulo Ã© absolutamente obrigatÃ³rio; tudo o mais aceita default.
 
-CONEXÕES (parent_slug + links) SÃO OBRIGATÓRIAS:
-Toda entry NÃO top-level (top-level = brand, briefing) precisa de UM dos dois:
-  (a) `metadata.parent_slug` apontando para o slug do nó pai imediato, OU
+CONEXÃ•ES (parent_slug + links) SÃƒO OBRIGATÃ“RIAS:
+Toda entry NÃƒO top-level (top-level = brand, briefing) precisa de UM dos dois:
+  (a) `metadata.parent_slug` apontando para o slug do nÃ³ pai imediato, OU
   (b) aparecer como `target_slug` em `links[]` com `relation_type` apropriado.
-Sem isso a árvore vira plana e o save é rejeitado pelo validador. NUNCA emita entry sem pai (exceto top-level).
+Sem isso a Ã¡rvore vira plana e o save Ã© rejeitado pelo validador. NUNCA emita entry sem pai (exceto top-level).
 
-Mapa default de relation_type por par (use no `links[]` ou implícito via parent_slug):
-  brand     → contains            → briefing
-  briefing  → briefed_by           → campaign
-  campaign  → contains            → audience
-  campaign  → contains            → product
-  product   → answers_question    → faq
-  product   → supports_copy       → copy
-  audience  → about_product       → product   (uso secundário)
+Mapa default de relation_type por par (use no `links[]` ou implÃ­cito via parent_slug):
+  brand     â†’ contains            â†’ briefing
+  briefing  â†’ briefed_by           â†’ campaign
+  campaign  â†’ contains            â†’ audience
+  campaign  â†’ contains            â†’ product
+  product   â†’ answers_question    â†’ faq
+  product   â†’ supports_copy       â†’ copy
+  audience  â†’ about_product       â†’ product   (uso secundÃ¡rio)
 
 RESUMO ANTES DO SAVE:
-Após o `<knowledge_plan>`, sempre apresente, no markdown legível, um resumo conciso ANTES de pedir o save:
-  - "Briefing: 1 ✓"
-  - "Campanha: 1 ✓"
-  - "Público: 1 ✓"
-  - "Produto: N ✓"
-  - "Copy: N ✓"
-  - "FAQ: N ✓ (gerados automaticamente, marcados como pendente_validacao)"
-  - "Conexões: <count> edges no plano"
-  - "Pendências: <lista curta ou 'nenhuma'>"
-Aí finalize: "Plano pronto. Clique em **Salvar** para persistir." e marque `"complete": true` no `<classification>`.
+ApÃ³s o `<knowledge_plan>`, sempre apresente, no markdown legÃ­vel, um resumo conciso ANTES de pedir o save:
+  - "Briefing: 1 âœ“"
+  - "Campanha: 1 âœ“"
+  - "PÃºblico: 1 âœ“"
+  - "Produto: N âœ“"
+  - "Copy: N âœ“"
+  - "FAQ: N âœ“ (gerados automaticamente, marcados como pendente_validacao)"
+  - "ConexÃµes: <count> edges no plano"
+  - "PendÃªncias: <lista curta ou 'nenhuma'>"
+AÃ­ finalize: "Plano pronto. Clique em **Salvar** para persistir." e marque `"complete": true` no `<classification>`.
 
 NUNCA DECLARE "estruturado" SEM EMITIR `<knowledge_plan>`:
-Se você for dizer "o conhecimento está estruturado e pronto para salvar", o `<knowledge_plan>` precisa estar na MESMA mensagem. Caso contrário, o operador não consegue ver/salvar nada e a sessão fica inconsistente.
+Se vocÃª for dizer "o conhecimento estÃ¡ estruturado e pronto para salvar", o `<knowledge_plan>` precisa estar na MESMA mensagem. Caso contrÃ¡rio, o operador nÃ£o consegue ver/salvar nada e a sessÃ£o fica inconsistente.
 
-=== CLIENTES DISPONÍVEIS ===
-- tock-fatal → Tock Fatal (marca de moda urbana)
-- vz-lupas → VZ Lupas (óculos e saúde visual)
-- baita-conveniencia → Baita Conveniência (bar e conveniência)
-- global → Global (aplicável a todos os clientes)
+=== CLIENTES DISPONÃVEIS ===
+- tock-fatal â†’ Tock Fatal (marca de moda urbana)
+- vz-lupas â†’ VZ Lupas (Ã³culos e saÃºde visual)
+- baita-conveniencia â†’ Baita ConveniÃªncia (bar e conveniÃªncia)
+- global â†’ Global (aplicÃ¡vel a todos os clientes)
 
-=== TIPOS DE CONTEÚDO TEXTUAL ===
+=== TIPOS DE CONTEÃšDO TEXTUAL ===
 brand, briefing, product, campaign, copy, faq, tone, audience, competitor, rule, prompt, maker_material, other
 
 === PARA ASSETS VISUAIS ===
 Tipo de asset: background, logo, product, model, banner, story, post, video, icon, other
-Função do asset: maker_material, brand_reference, campaign_hero, copy_support, product_showcase, other
+FunÃ§Ã£o do asset: maker_material, brand_reference, campaign_hero, copy_support, product_showcase, other
 
-=== FLUXO DE CLASSIFICAÇÃO ===
-1. Identifique o cliente (obrigatório)
-2. Identifique se é asset visual ou conteúdo textual
-3. Se asset: pergunte tipo e função
-4. Se texto: identifique o tipo de conteúdo
-5. Confirme o título (sugira um se não houver)
-6. Quando completo, apresente apenas o resumo técnico e aguarde a confirmação de salvamento. NÃO informe que "está realizando o salvamento" ou "agradeço a paciência".
+=== FLUXO DE CLASSIFICAÃ‡ÃƒO ===
+1. Identifique o cliente (obrigatÃ³rio)
+2. Identifique se Ã© asset visual ou conteÃºdo textual
+3. Se asset: pergunte tipo e funÃ§Ã£o
+4. Se texto: identifique o tipo de conteÃºdo
+5. Confirme o tÃ­tulo (sugira um se nÃ£o houver)
+6. Quando completo, apresente apenas o resumo tÃ©cnico e aguarde a confirmaÃ§Ã£o de salvamento. NÃƒO informe que "estÃ¡ realizando o salvamento" ou "agradeÃ§o a paciÃªncia".
 
-Você consegue extrair múltiplas informações de uma única mensagem. Por exemplo, se o usuário diz "background do Tock Fatal", você já sabe cliente=tock-fatal, content_type=asset, asset_type=background.
+VocÃª consegue extrair mÃºltiplas informaÃ§Ãµes de uma Ãºnica mensagem. Por exemplo, se o usuÃ¡rio diz "background da marca", vocÃª jÃ¡ sabe content_type=asset e asset_type=background; a persona deve vir da sessao ou da confirmacao do operador.
 
-Responda SEMPRE em português. Seja conciso.
-NÃO use rótulos como "Classe atual:" ou "Estado:". Inclua apenas o bloco de estado puro no final da mensagem: <classification>{
+Responda SEMPRE em portuguÃªs. Seja conciso.
+NÃƒO use rÃ³tulos como "Classe atual:" ou "Estado:". Inclua apenas o bloco de estado puro no final da mensagem: <classification>{
   "complete": false,
   "persona_slug": null,
   "content_type": null,
@@ -221,21 +262,21 @@ NÃO use rótulos como "Classe atual:" ou "Estado:". Inclua apenas o bloco de es
   "title": null
 }
 </classification>
-Quando TODAS as informações estiverem coletadas E confirmadas pelo usuário, marque "complete": true.
+Quando TODAS as informaÃ§Ãµes estiverem coletadas E confirmadas pelo usuÃ¡rio, marque "complete": true.
 """
 
 _SYSTEM_PROMPT += """
 
 === FLUXO CAPTURAR / MARKETING GRAPH ===
-Quando a sessão trouxer um contexto inicial confirmado pelo operador, leia esse contexto como briefing operacional. Antes de acionar qualquer salvamento, proponha:
+Quando a sessÃ£o trouxer um contexto inicial confirmado pelo operador, leia esse contexto como briefing operacional. Antes de acionar qualquer salvamento, proponha:
 1. fontes usadas;
 2. entries a criar ou atualizar por nivel hierarquico: brand, campaign, audience, product, variant/color, copy, faq, rule e tone;
 3. riscos de invencao e perguntas pendentes.
 
-Para pedidos de copy/marketing, gere propostas hierarquizadas por grafo, não uma lista solta de textos. Exemplo de encadeamento:
+Para pedidos de copy/marketing, gere propostas hierarquizadas por grafo, nÃ£o uma lista solta de textos. Exemplo de encadeamento:
 brand -> campaign -> audience -> product -> color/variant -> copy -> faq/rule.
 
-Nunca invente preço, cor, disponibilidade, URL, política comercial ou promessa. Use apenas contexto inicial, uploads, mensagens do usuário e conhecimento confirmado. Quando faltar dado, marque como pendente e pergunte ao operador.
+Nunca invente preÃ§o, cor, disponibilidade, URL, polÃ­tica comercial ou promessa. Use apenas contexto inicial, uploads, mensagens do usuÃ¡rio e conhecimento confirmado. Quando faltar dado, marque como pendente e pergunte ao operador.
 
 === CRAWLER / SITE COMO EVIDENCIA BRUTA ===
 Quando o usuario pedir para ler, coletar ou usar um site, trate o crawler como captura bruta, nao como verdade perfeita.
@@ -260,7 +301,7 @@ Antes de salvar, apresente a lista concreta de entries que serao criadas. Nao fi
 === SAIDA ESTRUTURADA OBRIGATORIA PARA GERACAO ===
 Quando o operador pedir "gerar conhecimento", "pode gerar", "criar a arvore" ou equivalente, OU se houver resultados de crawler e blocos selecionados no contexto inicial, OU se a sessao for iniciada com URL e blocos:
 - nao responda com resumo generico;
-- PRIORIZE gerar o plano imediatamente se houver evidências capturadas;
+- PRIORIZE gerar o plano imediatamente se houver evidÃªncias capturadas;
 - gere uma proposta completa em Markdown para leitura humana;
 - inclua obrigatoriamente um bloco JSON entre <knowledge_plan> e </knowledge_plan>.
 - nao substitua <knowledge_plan> por bloco ```json; o teste E2E e o parser do backend exigem as tags literais.
@@ -274,7 +315,7 @@ As tags abertura/fechamento sao OBRIGATORIAS, em letras minusculas, exatamente a
 O JSON deve seguir este formato:
 {
   "source": "URL ou origem",
-  "persona_slug": "tock-fatal",
+  "persona_slug": "global",
   "validation_policy": "human_validation_required",
   "entries": [
     {
@@ -321,13 +362,13 @@ Regras para esse bloco:
 
 === OUTPUT VALIDATION (HARD CONTRACT) ===
 Antes de fechar `<knowledge_plan>`, verifique entrada por entrada:
-- `content_type` ESTRITAMENTE ∈ {brand, briefing, product, campaign, copy, asset, prompt, faq, maker_material, tone, competitor, audience, rule, other}. Qualquer outro valor (incluindo "entity", "publico", "category", "kit") sera rejeitado pelo banco.
+- `content_type` ESTRITAMENTE âˆˆ {brand, briefing, product, campaign, copy, asset, prompt, faq, maker_material, tone, competitor, audience, rule, other}. Qualquer outro valor (incluindo "entity", "publico", "category", "kit") sera rejeitado pelo banco.
 - `title` nao vazio, com pelo menos 3 caracteres.
 - `content` nao vazio.
 - `tags` deve ser lista de strings (pode ser vazia). Nunca dict.
 - `metadata` deve ser objeto JSON (dict). Nunca string ou lista.
 - `entries` deve ser lista nao vazia.
-Se algum campo nao se encaixar, ajuste a entry — nao gere o plano.
+Se algum campo nao se encaixar, ajuste a entry â€” nao gere o plano.
 
 === BLOCOS SELECIONADOS NA CAPTURA ===
 O contexto inicial pode trazer "Blocos de conhecimento solicitados". Trate esses blocos como a intencao inicial do operador, nao como um grafo fixo.
@@ -345,16 +386,16 @@ Para cada bloco selecionado, identifique lacunas minimas antes de propor entries
 - tone: voz, palavras preferidas, palavras proibidas e exemplos;
 - asset: tipo visual, uso, fonte, proporcao e restricoes.
 
-Se durante a conversa o operador pedir outro bloco ou mudar o objetivo, atualize a proposta e pergunte as lacunas desse novo bloco. Nao exija que o operador escreva IDs de grafo como "brand:tock-fatal"; voce deve transformar respostas naturais em entries atomicas.
+Se durante a conversa o operador pedir outro bloco ou mudar o objetivo, atualize a proposta e pergunte as lacunas desse novo bloco. Nao exija que o operador escreva IDs de grafo como "brand:nome-da-persona"; voce deve transformar respostas naturais em entries atomicas.
 
 === QUANDO FALTAR INFORMACAO ===
 Atencao: o MODO GERAR no topo do prompt sobrepoe esta secao. Aplique-a SOMENTE quando ainda nao houve nenhum gatilho de geracao e voce realmente nao tem dados minimos para construir UMA arvore.
 
 Bloqueadores REAIS (so esses devem travar a geracao):
 - persona/cliente: se nao identificado, pergunte;
-- titulo canonico: se nao tiver, sugira um a partir da fonte (ex.: "Catalogo Modal Tock Fatal").
+- titulo canonico: se nao tiver, sugira um a partir da fonte (ex.: "Catalogo principal da colecao").
 
-Para QUALQUER outro campo faltante (preco, cor, disponibilidade, politica, FAQ especifico, etc.) NAO pergunte antes de gerar — preencha com `status: "pendente_validacao"` e adicione na lista `missing_questions[]` do plano. O operador valida depois.
+Para QUALQUER outro campo faltante (preco, cor, disponibilidade, politica, FAQ especifico, etc.) NAO pergunte antes de gerar â€” preencha com `status: "pendente_validacao"` e adicione na lista `missing_questions[]` do plano. O operador valida depois.
 
 Quando faltar persona OU titulo:
 1. "Para continuar preciso confirmar:"
@@ -370,16 +411,26 @@ Apos a geracao inicial de cards, ofereca proativamente ideias de melhorias ou co
 - "Que tal criar copys especificas para campanhas de lancamento?"
 - "Podemos buscar mais informacoes sobre concorrentes ou publicos-alvo?"
 
-=== CONHECIMENTO DE NEGÓCIO: TOCK FATAL ===
-- Tock Fatal (Loja Física): Kit Modal 10 peças sai por R$ 45,90 cada. Regra de flexibilidade "3 peças": o cliente pode levar apenas 3 unidades e manter o valor unitário promocional do kit de 10.
-- Tock Fatal (Atacado/Revenda): Exige obrigatoriamente o kit de 10 peças para garantir o preço de revenda.
-- Trocas: Aceitas em até 30 dias para peças sem sinal de uso.
+=== CONHECIMENTO DE NEGOCIO ===
+- Nao assuma regras comerciais, precos, lotes minimos, trocas ou politicas sem evidencia confirmada na sessao, na fonte ou pelo operador.
 
-=== VISUALIZAÇÃO E ENTREGÁVEIS ===
-- Responda em Markdown visualmente rico (use tabelas para preços, negrito para ênfase e listas claras). 
-- Suas mensagens serão exibidas em um componente com toggle "View/Code". Capriche na organização do Markdown para que a versão "View" seja elegante e profissional.
-- Ao gerar cards de conhecimento (<knowledge_plan>), certifique-se de que cada entrada (regras, faqs, produtos, briefings, públicos) seja uma entry ATÔMICA e DETALHADA.
-- Se o operador solicitar um volume alto (ex: 20+ cards), crie uma entry individual para cada FAQ, cada Regra e cada Produto. Não agrupe tudo em um único card de "FAQ Geral" se puder criar 10 cards de FAQ específicos.
+=== VISUALIZAÃ‡ÃƒO E ENTREGÃVEIS ===
+- Responda em Markdown visualmente rico (use tabelas para preÃ§os, negrito para Ãªnfase e listas claras). 
+- Suas mensagens serÃ£o exibidas em um componente com toggle "View/Code". Capriche na organizaÃ§Ã£o do Markdown para que a versÃ£o "View" seja elegante e profissional.
+- Ao gerar cards de conhecimento (<knowledge_plan>), certifique-se de que cada entrada (regras, faqs, produtos, briefings, pÃºblicos) seja uma entry ATÃ”MICA e DETALHADA.
+- Se o operador solicitar um volume alto (ex: 20+ cards), crie uma entry individual para cada FAQ, cada Regra e cada Produto. NÃ£o agrupe tudo em um Ãºnico card de "FAQ Geral" se puder criar 10 cards de FAQ especÃ­ficos.
+"""
+
+
+_SYSTEM_PROMPT += """
+
+=== REGRA FRACTAL OBRIGATORIA ===
+Sempre que houver N FAQs iniciais, cada Product dentro de cada Audience deve receber N FAQs por padrao.
+Primeiro duplique o conjunto de FAQs em formato fractal, depois pergunte se o usuario deseja modificar, excluir ou adicionar FAQs antes de salvar.
+
+=== CRAWLER MULTIPRODUTO ===
+Se o operador indicar variedade, mais de um publico, compra em quantidade ou mais de um kit/modal, o crawler deve buscar multiplas opcoes de kit modal e preparar ramos separados por publico e produto.
+Nao trate um catalogo variado como se fosse um unico produto.
 """
 
 
@@ -397,6 +448,10 @@ def _strip_cls(text: str) -> str:
     return re.sub(r"\s*<classification>.*?</classification>", "", text, flags=re.DOTALL).strip()
 
 
+def _strip_knowledge_plan(text: str) -> str:
+    return re.sub(r"\s*<knowledge_plan>.*?</knowledge_plan>", "", text, flags=re.DOTALL).strip()
+
+
 def _candidate_plan_blocks(text: str) -> list[str]:
     """Yield candidate JSON strings that might contain a knowledge_plan.
 
@@ -408,7 +463,7 @@ def _candidate_plan_blocks(text: str) -> list[str]:
 
     The model occasionally drops the tags despite the prompt rules. Salvaging
     the output is preferable to failing the save and losing the operator's
-    work — but we still log a warning so we know it happened.
+    work â€” but we still log a warning so we know it happened.
     """
     candidates: list[str] = []
 
@@ -460,21 +515,80 @@ SOFIA_TOP_LEVEL_TYPES: frozenset[str] = frozenset({"persona", "brand", "briefing
 # the FIRST matching entry already declared in the plan (most recent of
 # that type). This mirrors the architectural intent: faq belongs to a
 # product, products belong to a campaign, copies belong to a product, etc.
+# Top-down chain enforced by the operator's hierarchy:
+#   Persona â†’ Brand â†’ Campaign|Briefing â†’ Audience â†’ Product â†’ Copy|FAQ|Asset
+# Each child's preferred parents are listed from CLOSEST to fallback. The
+# audience pivot between campaign and product is what prevents a flat
+# "campaign â†’ product" shortcut that bypasses the audience semantic step.
 _PREFERRED_PARENT_TYPES: dict[str, tuple[str, ...]] = {
     "briefing": ("brand",),
     "campaign": ("briefing", "brand"),
     "audience": ("campaign", "briefing", "brand"),
-    "product": ("campaign", "briefing", "brand"),
+    # Product must hang under audience whenever an audience exists in the
+    # plan. Falls back to campaign/briefing/brand only when none does.
+    "product": ("audience", "campaign", "briefing", "brand"),
     "tone": ("brand", "briefing", "campaign"),
-    "rule": ("product", "campaign", "briefing", "brand"),
+    "rule": ("product", "campaign", "audience", "briefing", "brand"),
     "competitor": ("brand", "briefing"),
-    "copy": ("product", "campaign", "audience", "briefing"),
-    "faq": ("product", "campaign", "audience", "briefing"),
-    "asset": ("product", "campaign", "brand"),
+    # Per-product children prefer the product directly. Falling back to
+    # audience preserves the semantic step instead of jumping to campaign.
+    "copy": ("product", "audience", "campaign", "briefing"),
+    "faq": ("product", "audience", "campaign", "briefing"),
+    "asset": ("product", "audience", "campaign", "brand"),
     "maker_material": ("product", "campaign", "brand"),
     "prompt": ("campaign", "brand", "briefing"),
-    "other": ("product", "campaign", "brand", "briefing"),
+    "other": ("product", "audience", "campaign", "brand", "briefing"),
 }
+
+
+def _shared_slug_tokens(a: str, b: str) -> set[str]:
+    """Return tokens shared between two slugs, excluding generic content-type
+    prefixes/suffixes (faq, copy, briefing, etc.). Single-digit tokens like
+    '1' or '2' are kept because they distinguish "Produto A" from "Kit
+    Modal 2" in slugs like 'faq-preco-produto-b'."""
+    if not a or not b:
+        return set()
+    blacklist = {
+        "faq", "copy", "produto", "product", "audiencia", "audience",
+        "campanha", "campaign", "brand", "briefing", "rule", "regra",
+        "tone", "tom", "asset", "ativo",
+        # Generic positional/connector words.
+        "para", "pra", "com", "sem", "do", "da", "de", "e", "a", "o",
+    }
+    tokens_a = {t for t in (a or "").lower().split("-") if t and t not in blacklist}
+    tokens_b = {t for t in (b or "").lower().split("-") if t and t not in blacklist}
+    return tokens_a & tokens_b
+
+
+def _best_parent_by_slug(orphan: dict, candidates: list[dict]) -> Optional[dict]:
+    """Pick the candidate whose slug shares the most non-generic tokens with
+    the orphan's slug/title. Returns None when there is no signal at all.
+
+    This enables per-product FAQ/copy/asset matching: an entry slugged
+    `faq-preco-produto-a` correctly attaches to the product
+    `produto-a-cores` instead of an unrelated product earlier in the plan.
+    """
+    if not candidates:
+        return None
+    orphan_slug = (orphan.get("slug") or "")
+    orphan_title = (orphan.get("title") or "")
+    orphan_blob = f"{orphan_slug} {orphan_title}".lower()
+    best = None
+    best_score = 0
+    for cand in candidates:
+        if cand is orphan:
+            continue
+        cand_slug = (cand.get("slug") or "")
+        cand_title = (cand.get("title") or "")
+        # Substring match on full slug = strong signal.
+        if cand_slug and cand_slug in orphan_blob:
+            return cand
+        shared = _shared_slug_tokens(orphan_slug, cand_slug)
+        shared |= _shared_slug_tokens(orphan_title, cand_title)
+        if len(shared) > best_score:
+            best_score = len(shared)
+            best = cand
+    return best if best_score >= 1 else None
 
 
 def _auto_infer_parent_slugs(plan: dict) -> int:
@@ -486,10 +600,12 @@ def _auto_infer_parent_slugs(plan: dict) -> int:
       1. Skip if the entry is top-level (brand, briefing, persona).
       2. Skip if metadata.parent_slug is already set, or the entry's slug
          appears as a target in plan.links (explicit parent already declared).
-      3. Walk _PREFERRED_PARENT_TYPES[ctype] in order. For the first parent
-         type that has at least one matching entry in the plan, pick the
-         MOST RECENT (last declared) one — keeps the chain stable when
-         operators emit multiple products or campaigns.
+      3. Walk _PREFERRED_PARENT_TYPES[ctype] in order. For each preferred
+         parent type, prefer the candidate whose slug/title shares tokens
+         with the orphan (per-product matching). Fall back to MOST RECENT
+         only when no slug-similar candidate exists. This keeps each
+         product's FAQ/copy attached to its OWN product instead of
+         collapsing into a single most-recent product.
       4. If no preferred match, fall back to the first top-level entry
          (brand/briefing) anywhere in the plan.
       5. If still no candidate, the entry stays orphan; the validator will
@@ -509,7 +625,7 @@ def _auto_infer_parent_slugs(plan: dict) -> int:
             if isinstance(link, dict) and link.get("target_slug"):
                 link_targets.add(str(link["target_slug"]))
 
-    # Index existing entries by lowercase content_type → list (preserve order).
+    # Index existing entries by lowercase content_type â†’ list (preserve order).
     by_type: dict[str, list[dict]] = {}
     for entry in entries:
         if not isinstance(entry, dict):
@@ -534,14 +650,17 @@ def _auto_infer_parent_slugs(plan: dict) -> int:
 
         best: Optional[dict] = None
         for parent_type in _PREFERRED_PARENT_TYPES.get(ctype, ("brand", "briefing")):
-            candidates = by_type.get(parent_type) or []
-            for candidate in reversed(candidates):  # most recent of that type
-                if candidate is entry or not candidate.get("slug"):
-                    continue
-                best = candidate
-                break
-            if best is not None:
-                break
+            candidates = [c for c in (by_type.get(parent_type) or []) if c is not entry and c.get("slug")]
+            if not candidates:
+                continue
+            # Try slug-similarity first so each FAQ/copy attaches to its OWN
+            # parent product when there are multiple products in the plan.
+            picked = _best_parent_by_slug(entry, candidates)
+            if picked is None:
+                # Fallback: most recent of that type.
+                picked = candidates[-1]
+            best = picked
+            break
 
         # Fallback: first top-level entry anywhere in plan.
         if best is None:
@@ -566,7 +685,7 @@ def _auto_infer_parent_slugs(plan: dict) -> int:
     return inferred_count
 
 
-def validate_sofia_knowledge_plan(plan: dict) -> list[str]:
+def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) -> list[str]:
     """Validate a Sofia <knowledge_plan> JSON against the DB contract.
 
     Returns a list of human-readable violations (empty list = valid). Mirrors the
@@ -651,7 +770,424 @@ def validate_sofia_knowledge_plan(plan: dict) -> list[str]:
                     f"(set metadata.parent_slug OR add an entry to links[] with target_slug={slug!r})"
                 )
 
+    slug_to_entry = {
+        str(entry.get("slug")): entry
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("slug")
+    }
+    audience_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "audience"]
+    product_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "product"]
+    faq_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "faq"]
+
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        ctype_lower = _entry_type(entry)
+        parent_slug = _entry_parent_slug(entry)
+        parent_entry = slug_to_entry.get(parent_slug or "")
+        parent_type = _entry_type(parent_entry or {})
+        if ctype_lower == "audience" and parent_slug and parent_type not in {"campaign", "briefing", "brand"}:
+            errors.append(f"entry[{idx}] audience must stay under campaign/briefing/brand, got parent {parent_slug!r}")
+        if ctype_lower == "product":
+            if audience_entries and parent_type != "audience":
+                errors.append(f"entry[{idx}] product must stay under an audience when audience branches exist")
+        if ctype_lower == "faq":
+            if parent_type != "product":
+                errors.append(f"entry[{idx}] faq must stay under a product")
+
+    if product_entries:
+        faq_count_by_product: dict[str, int] = {}
+        for faq in faq_entries:
+            parent_slug = _entry_parent_slug(faq)
+            if parent_slug:
+                faq_count_by_product[parent_slug] = faq_count_by_product.get(parent_slug, 0) + 1
+        target_faq_count = _requested_variation_count(session or {}, "faq", 2) if session else None
+        for entry in product_entries:
+            product_slug = str(entry.get("slug") or "")
+            branch_count = faq_count_by_product.get(product_slug, 0)
+            if target_faq_count is not None and branch_count < target_faq_count:
+                errors.append(
+                    f"product {product_slug!r} must receive at least {target_faq_count} FAQs in the fractal plan (found {branch_count})"
+                )
+
+    if len(entries) > 1 and not (plan.get("links") or []):
+        errors.append("plan.links must not be empty when the hierarchy already contains clear parent/child relations")
+
     return errors
+
+
+def _entry_type(entry: dict) -> str:
+    if not isinstance(entry, dict):
+        return ""
+    return str(entry.get("content_type") or "").strip().lower()
+
+
+def _entry_metadata(entry: dict) -> dict:
+    meta = entry.get("metadata")
+    if isinstance(meta, dict):
+        return meta
+    meta = {}
+    entry["metadata"] = meta
+    return meta
+
+
+def _entry_parent_slug(entry: dict) -> Optional[str]:
+    parent = _entry_metadata(entry).get("parent_slug")
+    return str(parent).strip() if parent else None
+
+
+def _set_entry_parent_slug(entry: dict, parent_slug: Optional[str]) -> None:
+    meta = _entry_metadata(entry)
+    if parent_slug:
+        meta["parent_slug"] = parent_slug
+    else:
+        meta.pop("parent_slug", None)
+
+
+def _knowledge_plan_title_from_session(session: dict) -> str:
+    cls = session.get("classification") or {}
+    if cls.get("title"):
+        return str(cls["title"])
+    context = str(session.get("context") or "")
+    source_url = _source_url_from_context(context)
+    if source_url:
+        return f"Captura de {source_url.split('//')[-1]}"
+    return "Plano de conhecimento"
+
+
+def _requested_variation_count(session: dict, block_id: str, default: int) -> int:
+    context = str(session.get("context") or "")
+    pattern = rf"^\s*-\s*{re.escape(block_id)}:\s*(\d+)\s+vari"
+    match = re.search(pattern, context, flags=re.IGNORECASE | re.MULTILINE)
+    if match:
+        try:
+            return max(int(match.group(1)), 0)
+        except Exception:
+            pass
+    return default
+
+
+def _normalize_plan_entry(entry: dict) -> dict:
+    normalized = dict(entry or {})
+    normalized["content_type"] = _entry_type(normalized) or "other"
+    normalized["title"] = str(normalized.get("title") or "").strip() or "Conhecimento"
+    normalized["slug"] = _slug_for_plan_entry(str(normalized.get("slug") or normalized["title"]))
+    normalized["status"] = str(normalized.get("status") or "pendente_validacao").strip() or "pendente_validacao"
+    content = str(normalized.get("content") or "").strip()
+    normalized["content"] = content or normalized["title"]
+    tags = normalized.get("tags") or []
+    normalized["tags"] = [str(tag).strip() for tag in tags if str(tag).strip()]
+    normalized["metadata"] = dict(normalized.get("metadata") or {})
+    return normalized
+
+
+def _relation_type_for_parent(parent_type: str, child_type: str) -> str:
+    mapping = {
+        ("brand", "briefing"): "contains",
+        ("brand", "campaign"): "contains",
+        ("briefing", "campaign"): "briefed_by",
+        ("campaign", "audience"): "targets_audience",
+        ("briefing", "audience"): "contains",
+        ("audience", "product"): "offers_product",
+        ("product", "faq"): "answers_question",
+        ("product", "copy"): "supports_copy",
+        ("product", "asset"): "uses_asset",
+    }
+    return mapping.get((parent_type, child_type), "contains")
+
+
+def _is_b2b_audience(entry: dict) -> bool:
+    blob = " ".join([
+        str(entry.get("title") or ""),
+        str(entry.get("content") or ""),
+        " ".join(entry.get("tags") or []),
+    ]).lower()
+    return any(token in blob for token in ("varej", "revend", "lojist", "atacad"))
+
+
+def _is_b2b_faq(entry: dict) -> bool:
+    blob = " ".join([
+        str(entry.get("title") or ""),
+        str(entry.get("content") or ""),
+        " ".join(entry.get("tags") or []),
+    ]).lower()
+    return any(token in blob for token in ("quantidade minima", "pedido minimo", "revend", "varej", "atacad", "5 pec"))
+
+
+def _known_colors_from_session(session: dict, plan: dict) -> list[str]:
+    blob_parts = [str(session.get("context") or ""), json.dumps(plan, ensure_ascii=False)]
+    blob = " ".join(blob_parts).lower()
+    known = []
+    for color in ("preta", "preto", "vermelha", "vermelho", "roxa", "roxo", "azul", "rosa", "branca", "branco"):
+        if color in blob:
+            normalized = color[:-1] + "a" if color.endswith("o") else color
+            if normalized not in known:
+                known.append(normalized)
+    return known
+
+
+def _clone_plan_entry(template: dict, *, title: str, slug: str, parent_slug: str, content: str, tags: Optional[list[str]] = None) -> dict:
+    clone = _normalize_plan_entry(template)
+    clone["title"] = title
+    clone["slug"] = slug
+    clone["content"] = content
+    clone["status"] = "pendente_validacao"
+    clone["tags"] = [str(tag).strip() for tag in (tags or clone.get("tags") or []) if str(tag).strip()]
+    metadata = dict(clone.get("metadata") or {})
+    metadata["parent_slug"] = parent_slug
+    metadata["fractal_generated"] = True
+    clone["metadata"] = metadata
+    return clone
+
+
+def _default_faq_payload(*, audience: dict, product: dict, slot_index: int, colors: list[str]) -> tuple[str, str, list[str]]:
+    product_title = str(product.get("title") or "Produto")
+    audience_title = str(audience.get("title") or "")
+    color_text = ", ".join(colors) if colors else "as cores disponiveis"
+    if _is_b2b_audience(audience):
+        defaults = [
+            (
+                f"Quantidade minima para revenda de {product_title}",
+                f"Para {audience_title or 'revendedores'}, {product_title} segue a regra comercial de pedido minimo para revenda. "
+                "Use a validacao humana para confirmar o lote minimo e destaque a regra vigente somente quando ela estiver confirmada na fonte ou pelo operador.",
+                ["faq", "revenda", "pedido-minimo"],
+            ),
+            (
+                f"Cores, preco e politica do pedido de {product_title}",
+                f"Para {audience_title or 'revendedores'}, confirme cores disponiveis, faixa de preco e politica comercial de {product_title}. "
+                f"As cores citadas ate agora sao {color_text}. Mantenha a resposta como pendente_validacao ate revisar a fonte final.",
+                ["faq", "revenda", "pedido"],
+            ),
+        ]
+    else:
+        defaults = [
+            (
+                f"Cores disponiveis de {product_title}",
+                f"Para {audience_title or 'clientes finais'}, explique quais cores estao disponiveis para {product_title}. "
+                f"Use {color_text} como referencia inicial e marque qualquer variacao adicional como pendente_validacao.",
+                ["faq", "cores", "cliente-final"],
+            ),
+            (
+                f"Preco, conforto e beneficios de {product_title}",
+                f"Para {audience_title or 'clientes finais'}, responda como {product_title} combina preco, conforto, uso e beneficios. "
+                "Nao invente valores finais; sinalize como pendente_validacao quando a fonte nao confirmar.",
+                ["faq", "beneficios", "cliente-final"],
+            ),
+        ]
+    return defaults[(slot_index - 1) % len(defaults)]
+
+
+def _build_links_from_parent_slugs(plan: dict) -> None:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    slug_to_type = {str(entry.get("slug")): _entry_type(entry) for entry in entries if entry.get("slug")}
+    deduped: dict[tuple[str, str], dict] = {}
+    for link in plan.get("links") or []:
+        if not isinstance(link, dict):
+            continue
+        source_slug = str(link.get("source_slug") or "").strip()
+        target_slug = str(link.get("target_slug") or "").strip()
+        if not source_slug or not target_slug:
+            continue
+        deduped[(source_slug, target_slug)] = {
+            "source_slug": source_slug,
+            "target_slug": target_slug,
+            "relation_type": str(link.get("relation_type") or "").strip() or _relation_type_for_parent(
+                slug_to_type.get(source_slug, ""),
+                slug_to_type.get(target_slug, ""),
+            ),
+        }
+    for entry in entries:
+        source_slug = _entry_parent_slug(entry)
+        target_slug = str(entry.get("slug") or "").strip()
+        if not source_slug or not target_slug or source_slug == target_slug:
+            continue
+        deduped[(source_slug, target_slug)] = {
+            "source_slug": source_slug,
+            "target_slug": target_slug,
+            "relation_type": _relation_type_for_parent(slug_to_type.get(source_slug, ""), _entry_type(entry)),
+        }
+    plan["links"] = list(deduped.values())
+
+
+def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
+    normalized = dict(plan or {})
+    normalized["source"] = str(normalized.get("source") or _source_url_from_context(str(session.get("context") or "")) or "session").strip()
+    normalized["persona_slug"] = str(normalized.get("persona_slug") or (session.get("classification") or {}).get("persona_slug") or "global").strip()
+    normalized["validation_policy"] = str(normalized.get("validation_policy") or "human_validation_required").strip()
+
+    entries = [_normalize_plan_entry(entry) for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
+    normalized["entries"] = entries
+
+    # Root scaffolding: briefing/campaign first, audience under campaign/briefing.
+    briefings = [entry for entry in entries if _entry_type(entry) == "briefing"]
+    campaigns = [entry for entry in entries if _entry_type(entry) == "campaign"]
+    audiences = [entry for entry in entries if _entry_type(entry) == "audience"]
+    root_briefing = briefings[0] if briefings else None
+    root_campaign = campaigns[0] if campaigns else None
+
+    if root_briefing is None:
+        title = _knowledge_plan_title_from_session(session)
+        root_briefing = _normalize_plan_entry({
+            "content_type": "briefing",
+            "title": title,
+            "slug": _slug_for_plan_entry(title),
+            "status": "pendente_validacao",
+            "content": f"Briefing operacional para {title}. Fonte principal: {normalized['source']}.",
+            "tags": ["briefing", normalized["persona_slug"]],
+            "metadata": {},
+        })
+        entries.insert(0, root_briefing)
+    if root_campaign and not _entry_parent_slug(root_campaign):
+        _set_entry_parent_slug(root_campaign, root_briefing["slug"])
+    for audience in audiences:
+        if not _entry_parent_slug(audience):
+            _set_entry_parent_slug(audience, (root_campaign or root_briefing)["slug"])
+
+    colors = _known_colors_from_session(session, normalized)
+    target_faq_count = max(1, _requested_variation_count(session, "faq", 2))
+
+    # Product branches must live under each audience. If products are still generic,
+    # clone them once per audience to create the fractal top-down structure.
+    products = [entry for entry in list(entries) if _entry_type(entry) == "product"]
+    audience_map = {str(entry.get("slug")): entry for entry in entries if _entry_type(entry) == "audience" and entry.get("slug")}
+    if audience_map:
+        expanded_products: list[dict] = []
+        remove_slugs: set[str] = set()
+        for product in products:
+            parent_slug = _entry_parent_slug(product)
+            parent_type = _entry_type(audience_map.get(parent_slug, {})) if parent_slug else ""
+            if parent_type == "audience":
+                continue
+            if len(audience_map) == 1:
+                _set_entry_parent_slug(product, next(iter(audience_map.keys())))
+                continue
+            base_slug = str(product.get("slug"))
+            remove_slugs.add(base_slug)
+            for audience_slug, audience in audience_map.items():
+                clone = _clone_plan_entry(
+                    product,
+                    title=product["title"],
+                    slug=f"{base_slug}-{audience_slug}",
+                    parent_slug=audience_slug,
+                    content=str(product.get("content") or ""),
+                    tags=product.get("tags") or [],
+                )
+                clone_meta = _entry_metadata(clone)
+                clone_meta["fractal_base_slug"] = base_slug
+                expanded_products.append(clone)
+        if remove_slugs:
+            entries[:] = [entry for entry in entries if str(entry.get("slug")) not in remove_slugs]
+            entries.extend(expanded_products)
+
+    # FAQs must live under product and replicate per audience->product branch.
+    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+    products = [entry for entry in entries if _entry_type(entry) == "product"]
+    existing_faqs = [entry for entry in entries if _entry_type(entry) == "faq"]
+    global_templates = [entry for entry in existing_faqs if _entry_parent_slug(entry) not in entries_by_slug or _entry_type(entries_by_slug.get(_entry_parent_slug(entry), {})) != "product"]
+    faq_count_by_product: dict[str, list[dict]] = {}
+    for faq in existing_faqs:
+        parent_slug = _entry_parent_slug(faq)
+        if parent_slug and _entry_type(entries_by_slug.get(parent_slug, {})) == "product":
+            faq_count_by_product.setdefault(parent_slug, []).append(faq)
+    for product in products:
+        product_slug = str(product.get("slug"))
+        audience = entries_by_slug.get(_entry_parent_slug(product) or "")
+        branch_faqs = faq_count_by_product.setdefault(product_slug, [])
+        templates = list(branch_faqs)
+        if not templates:
+            audience_slug = str((audience or {}).get("slug") or "")
+            audience_templates = []
+            for candidate in existing_faqs:
+                candidate_parent = entries_by_slug.get(_entry_parent_slug(candidate) or "")
+                if _entry_type(candidate_parent) == "audience" and str(candidate_parent.get("slug")) == audience_slug:
+                    audience_templates.append(candidate)
+            templates = audience_templates or global_templates
+        slot_index = len(branch_faqs) + 1
+        while len(branch_faqs) < target_faq_count:
+            if templates:
+                template = templates[(slot_index - 1) % len(templates)]
+                template_title = str(template.get("title") or "")
+                template_content = str(template.get("content") or "")
+                if audience and not _is_b2b_audience(audience) and _is_b2b_faq(template):
+                    title, content, tags = _default_faq_payload(
+                        audience=audience,
+                        product=product,
+                        slot_index=slot_index,
+                        colors=colors,
+                    )
+                else:
+                    title = template_title.replace(str(entries_by_slug.get(_entry_parent_slug(template) or "", {}).get("title") or ""), str(product.get("title") or "")).strip()
+                    if not title or title == template_title:
+                        title = f"{template_title} â€” {product.get('title')}"
+                    content = template_content or title
+                    tags = template.get("tags") or []
+                clone = _clone_plan_entry(
+                    template,
+                    title=title,
+                    slug=f"{_slug_for_plan_entry(title)}-{slot_index}",
+                    parent_slug=product_slug,
+                    content=content,
+                    tags=tags,
+                )
+            else:
+                title, content, tags = _default_faq_payload(
+                    audience=audience or {"title": ""},
+                    product=product,
+                    slot_index=slot_index,
+                    colors=colors,
+                )
+                clone = _normalize_plan_entry({
+                    "content_type": "faq",
+                    "title": title,
+                    "slug": f"{_slug_for_plan_entry(title)}-{slot_index}",
+                    "status": "pendente_validacao",
+                    "content": content,
+                    "tags": tags,
+                    "metadata": {"parent_slug": product_slug, "fractal_generated": True},
+                })
+            entries.append(clone)
+            branch_faqs.append(clone)
+            slot_index += 1
+
+    if products:
+        product_slugs = {str(product.get("slug")) for product in products if product.get("slug")}
+        entries[:] = [
+            entry for entry in entries
+            if _entry_type(entry) != "faq" or (_entry_parent_slug(entry) in product_slugs)
+        ]
+
+    # Product children should never stay directly under campaign/root when audiences exist.
+    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+    for faq in [entry for entry in entries if _entry_type(entry) == "faq"]:
+        parent_slug = _entry_parent_slug(faq)
+        if not parent_slug or _entry_type(entries_by_slug.get(parent_slug, {})) != "product":
+            candidate_products = [product for product in products if product.get("slug")]
+            best_parent = _best_parent_by_slug(faq, candidate_products)
+            if best_parent is not None:
+                _set_entry_parent_slug(faq, str(best_parent.get("slug")))
+
+    normalized["entries"] = entries
+    _auto_infer_parent_slugs(normalized)
+    _build_links_from_parent_slugs(normalized)
+    return normalized
+
+
+def _rewrite_visible_plan_summary(message: str, plan_payload: Optional[dict]) -> str:
+    if not message or not isinstance(plan_payload, dict):
+        return message
+    link_count = len(plan_payload.get("links") or [])
+    if re.search(r"(?im)^Conex\S*:\s*\d+\s+edges no plano\s*$", message):
+        return re.sub(
+            r"(?im)^Conex\S*:\s*\d+\s+edges no plano\s*$",
+            f"Conexões: {link_count} edges no plano",
+            message,
+        )
+    if link_count > 0 and "Plano pronto. Clique em **Salvar** para persistir." in message:
+        return message.replace(
+            "Plano pronto. Clique em **Salvar** para persistir.",
+            f"Conexões: {link_count} edges no plano\nPlano pronto. Clique em **Salvar** para persistir.",
+        )
+    return message
 
 
 def _session_path(session_id: str) -> Path:
@@ -706,7 +1242,7 @@ def _truncate(value: Any, limit: int = _EVENT_PREVIEW_LIMIT) -> str:
     text = str(value or "").strip()
     if len(text) <= limit:
         return text
-    return text[: max(limit - 1, 0)].rstrip() + "…"
+    return text[: max(limit - 1, 0)].rstrip() + "â€¦"
 
 
 def _metrics_from_session(session: dict) -> dict[str, Any]:
@@ -774,20 +1310,31 @@ def _emit_kb_event(
     transcript: bool = False,
     extra: Optional[dict[str, Any]] = None,
 ) -> None:
-    payload = _build_event_payload(
-        session,
-        status=status,
-        result=result,
-        transcript=transcript,
-        extra=extra,
-    )
-    supabase_client.insert_event(
-        {
-            "event_type": event_type,
-            "payload": payload,
-        },
-        source=source,
-    )
+    try:
+        payload = _build_event_payload(
+            session,
+            status=status,
+            result=result,
+            transcript=transcript,
+            extra=extra,
+        )
+        supabase_client.insert_event(
+            {
+                "event_type": event_type,
+                "payload": payload,
+            },
+            source=source,
+        )
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.warn(
+                "kb_intake_event",
+                f"event emission skipped type={event_type} source={source}: {exc}",
+                exc,
+            )
+        except Exception:
+            pass
 
 
 def _append_transcript_turn(
@@ -821,7 +1368,7 @@ def _append_transcript_turn(
 
 def _default_mission_state(initial_context: str) -> dict[str, Any]:
     url = _source_url_from_context(initial_context or "")
-    persona = "tock-fatal"
+    persona = "global"
     obj = "Criar inteligencia de marketing em grafo com evidencias reais."
     blocks = ["briefing", "audience", "product", "copy", "faq"]
     if initial_context:
@@ -869,7 +1416,14 @@ def _context_objective(initial_context: str) -> str:
     return ""
 
 
-def _session_matches_resume_candidate(session: dict, *, persona_slug: str | None, agent_key: str, objective: str) -> bool:
+def _session_matches_resume_candidate(
+    session: dict,
+    *,
+    persona_slug: str | None,
+    agent_key: str,
+    objective: str,
+    source_url: str | None,
+) -> bool:
     if (session.get("agent_key") or "sofia") != agent_key:
         return False
     stage = (session.get("stage") or "").lower()
@@ -885,12 +1439,17 @@ def _session_matches_resume_candidate(session: dict, *, persona_slug: str | None
         candidate_objective = str((session.get("mission_state") or {}).get("objective") or "").strip().lower()
         if candidate_objective and candidate_objective != objective.strip().lower():
             return False
+    if source_url:
+        candidate_source = str(((session.get("mission_state") or {}).get("source") or {}).get("url") or "").strip().lower()
+        if candidate_source and candidate_source != source_url.strip().lower():
+            return False
     return True
 
 
 def _latest_local_resume_session(initial_context: str, agent_key: str) -> Optional[dict]:
     persona_slug = _context_persona_slug(initial_context)
     objective = _context_objective(initial_context)
+    source_url = _source_url_from_context(initial_context)
     candidates: list[tuple[float, dict]] = []
     try:
         if not _SESSION_DIR.exists():
@@ -900,7 +1459,13 @@ def _latest_local_resume_session(initial_context: str, agent_key: str) -> Option
                 session = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            if not _session_matches_resume_candidate(session, persona_slug=persona_slug, agent_key=agent_key, objective=objective):
+            if not _session_matches_resume_candidate(
+                session,
+                persona_slug=persona_slug,
+                agent_key=agent_key,
+                objective=objective,
+                source_url=source_url,
+            ):
                 continue
             candidates.append((path.stat().st_mtime, session))
     except Exception:
@@ -929,6 +1494,7 @@ def _resume_summary_from_payload(payload: dict[str, Any]) -> str:
 
 def _latest_persisted_resume(initial_context: str, agent_key: str) -> Optional[dict[str, Any]]:
     persona_slug = _context_persona_slug(initial_context)
+    source_url = (_source_url_from_context(initial_context) or "").strip().lower()
     try:
         events = supabase_client.get_events(limit=20, event_type="kb_intake_dialog_completed")
     except Exception:
@@ -938,6 +1504,9 @@ def _latest_persisted_resume(initial_context: str, agent_key: str) -> Optional[d
         if (payload.get("agent_key") or "sofia") != agent_key:
             continue
         if persona_slug and payload.get("persona_slug") != persona_slug:
+            continue
+        candidate_source = str(payload.get("source") or "").strip().lower()
+        if source_url and candidate_source and candidate_source != source_url:
             continue
         return {
             "resumed_from_session_id": payload.get("session_id"),
@@ -1003,6 +1572,28 @@ def _persona_to_slug(raw: str) -> str:
     return _PERSONA_ALIASES.get(val, val.replace(" ", "-"))
 
 
+def _coerce_urlish_value(value: str) -> str | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    raw = raw.strip("`'\"()[]{}<>.,; ")
+    if not raw:
+        return None
+    if re.match(r"^https?://[^\s/$.?#].[^\s]*$", raw, re.I):
+        return raw
+    if re.match(r"^(?:www\.)?[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:/[^\s]*)?$", raw, re.I):
+        return f"https://{raw}"
+    return None
+
+
+def _persona_from_urlish(value: str) -> str | None:
+    site = _coerce_urlish_value(value)
+    if not site:
+        return None
+    host = re.sub(r"^https?://", "", site, flags=re.I).split("/", 1)[0].strip().lower()
+    return _PERSONA_DOMAINS.get(host)
+
+
 def _upsert_model(state: dict, name: str) -> dict:
     models = state.setdefault("requested_outputs", {}).setdefault("models", [])
     for m in models:
@@ -1029,6 +1620,16 @@ def _merge_user_intent(state: dict[str, Any], message: str) -> dict[str, Any]:
         state["source"] = {"type": "website", "url": site}
         state["objective"] = f"Criar conhecimento de marketing para {persona.title()} a partir de {site}, mantendo os blocos selecionados."
         patch.update({"persona": state["persona"], "source.url": site, "objective": state["objective"]})
+
+    if not patch:
+        site = _coerce_urlish_value(text)
+        if site:
+            state["source"] = {"type": "website", "url": site}
+            inferred_persona = _persona_from_urlish(site)
+            if inferred_persona and (state.get("persona") in {None, "", "global"}):
+                state["persona"] = inferred_persona
+                patch["persona"] = inferred_persona
+            patch["source.url"] = site
 
     if "os mesmos" in low:
         patch["knowledge_blocks"] = "preserve_existing"
@@ -1204,16 +1805,21 @@ def attach_crawler_capture(session_id: str, capture: dict) -> bool:
 
 
 def _source_url_from_context(context: str) -> str | None:
-    match = re.search(r"fonte principal:\s*(https?://\S+)", context or "", re.I)
+    match = re.search(r"fonte principal:\s*([^\n]+)", context or "", re.I)
     if match:
-        return match.group(1).strip()
+        coerced = _coerce_urlish_value(match.group(1))
+        if coerced:
+            return coerced
     match = re.search(r"https?://\S+", context or "")
-    return match.group(0).strip() if match else None
+    if match:
+        return match.group(0).strip()
+    match = re.search(r"\b(?:www\.)?[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:/[^\s]*)?\b", context or "", re.I)
+    return _coerce_urlish_value(match.group(0)) if match else None
 
 
 def _should_crawl(user_content: str, session: dict) -> bool:
     content = user_content.lower()
-    if re.search(r"\b(leia|ler|colete|coletar|site|fonte|link|catalogo|cat[aá]logo)\b", content, re.I):
+    if re.search(r"\b(leia|ler|colete|coletar|site|fonte|link|catalogo|cat[aÃ¡]logo)\b", content, re.I):
         return True
     
     # Auto-trigger: URL no contexto + Primeira mensagem da sessao + Sem capturas ainda
@@ -1258,6 +1864,42 @@ def _crawler_context(captures: list[dict]) -> str:
 
 
 def chat(session_id: str, user_message: str, file_info: Optional[dict] = None, internal: bool = False) -> dict:
+    """Public chat wrapper that NEVER raises. Any exception escaping the
+    real implementation is converted into a controlled `{ok: false, ...}`
+    dict so the route layer never has to decide between 500 and 200."""
+    try:
+        return _chat_impl(session_id, user_message, file_info=file_info, internal=internal)
+    except Exception as exc:
+        import traceback as _tb
+        tb_text = _tb.format_exc()
+        try:
+            from services import sre_logger
+            sre_logger.error(
+                "kb_intake_chat_wrapper",
+                f"chat() escaped exception session={(session_id or '')[:8]}: {exc}",
+                exc,
+            )
+        except Exception:
+            pass
+        try:
+            session = _get_session(session_id)
+        except Exception:
+            session = None
+        return {
+            "ok": False,
+            "error_code": "INTERNAL_ERROR",
+            "exception_type": type(exc).__name__,
+            "message": (
+                "Nao consegui processar sua mensagem agora. Sua configuracao "
+                "foi mantida â€” tente novamente ou clique em Salvar se ja houver plano."
+            ),
+            "detail": str(exc)[:300],
+            "traceback_tail": tb_text.splitlines()[-12:],
+            "state": (session or {}).get("mission_state") if session else None,
+        }
+
+
+def _chat_impl(session_id: str, user_message: str, file_info: Optional[dict] = None, internal: bool = False) -> dict:
     session = _get_session(session_id)
     if not session:
         return {
@@ -1274,7 +1916,7 @@ def chat(session_id: str, user_message: str, file_info: Optional[dict] = None, i
         cls["file_ext"] = ext
         if file_info.get("bytes"):
             cls["file_bytes"] = file_info["bytes"]
-        file_desc = f"[Arquivo: {file_info['filename']} — {len(file_info.get('bytes', b''))} bytes]"
+        file_desc = f"[Arquivo: {file_info['filename']} â€” {len(file_info.get('bytes', b''))} bytes]"
         user_content = f"{file_desc}\n{user_message}".strip() if user_message else file_desc
     else:
         user_content = user_message
@@ -1295,13 +1937,13 @@ def chat(session_id: str, user_message: str, file_info: Optional[dict] = None, i
     patch = {} if internal else _merge_user_intent(mission_state, user_content)
     progress_reasons: list[str] = []
 
-    # Generation trigger detection — emit kb_intake_generation_requested when
+    # Generation trigger detection â€” emit kb_intake_generation_requested when
     # the operator types one of the autonomous-generation commands defined in
     # the system prompt (gere/sim/ok/cria/etc). This is the canonical signal
     # for "stop deliberating and produce <knowledge_plan>".
     _GEN_TRIGGER_RE = re.compile(
         r"\b(gere|gera|gerar|cria|criar|crie|construa|monte|monta|montar|"
-        r"sim|ok|pode|manda|vai|avanca|avança|continua|continue|"
+        r"sim|ok|pode|manda|vai|avanca|avanÃ§a|continua|continue|"
         r"executa|executar|fecha)\b",
         re.IGNORECASE,
     )
@@ -1359,12 +2001,12 @@ def chat(session_id: str, user_message: str, file_info: Optional[dict] = None, i
 Estado atual:
 - Agente: {session.get('agent_name') or 'Sofia'} ({session.get('agent_role') or 'agente de inteligencia marketing comercial'})
 - Regra de apresentacao: se precisar se apresentar, diga que voce e {session.get('agent_name') or 'Sofia'}; nunca diga que voce e Criar.
-- Cliente: {cls['persona_slug'] or '—'}
-- Tipo de conteúdo: {cls['content_type'] or '—'}
-- Tipo de asset: {cls['asset_type'] or '—'}
-- Função do asset: {cls['asset_function'] or '—'}
-- Título: {cls['title'] or '—'}
-- Arquivo binário recebido: {'Sim (' + cls['file_ext'] + ')' if cls.get('file_bytes') else 'Não'}
+- Cliente: {cls['persona_slug'] or 'â€”'}
+- Tipo de conteÃºdo: {cls['content_type'] or 'â€”'}
+- Tipo de asset: {cls['asset_type'] or 'â€”'}
+- FunÃ§Ã£o do asset: {cls['asset_function'] or 'â€”'}
+- TÃ­tulo: {cls['title'] or 'â€”'}
+- Arquivo binÃ¡rio recebido: {'Sim (' + cls['file_ext'] + ')' if cls.get('file_bytes') else 'NÃ£o'}
 """
 
     if session.get("context"):
@@ -1424,8 +2066,13 @@ Estado atual:
         }
 
     cls_data = _extract_cls(raw)
-    visible = _strip_cls(raw)
-    plan_entries = _extract_plan_entries(raw)
+    plan_payload = _extract_plan(raw)
+    if plan_payload:
+        plan_payload = _normalize_sofia_knowledge_plan(plan_payload, session)
+        session["last_proposed_plan"] = plan_payload
+    visible = _strip_knowledge_plan(_strip_cls(raw))
+    visible = _rewrite_visible_plan_summary(visible, plan_payload if isinstance(plan_payload, dict) else None)
+    plan_entries = plan_payload.get("entries", []) if isinstance(plan_payload, dict) else []
 
     if cls_data:
         for key in ("persona_slug", "content_type", "asset_type", "asset_function", "title"):
@@ -1558,6 +2205,7 @@ Estado atual:
         "classification": {k: v for k, v in cls.items() if k != "file_bytes"},
         "crawler": crawler_result,
         "proposed_entries": plan_entries,
+        "proposed_plan": plan_payload or None,
         "state": mission_state,
         "patch": patch,
     }
@@ -1629,27 +2277,27 @@ def _apply_save_inference(session: dict) -> None:
     cls = session["classification"]
     inferred = _infer_from_transcript(session)
     
-    # 1. Inferir campos básicos do texto do chat
+    # 1. Inferir campos bÃ¡sicos do texto do chat
     for key in ("persona_slug", "content_type", "title"):
         if inferred.get(key) and (not cls.get(key) or cls.get(key) == "other"):
             cls[key] = inferred[key]
             
-    # 2. Fallback: Se o título ainda estiver faltando, buscar no plano de conhecimento
+    # 2. Fallback: Se o tÃ­tulo ainda estiver faltando, buscar no plano de conhecimento
     if not cls.get("title"):
         for msg in reversed(session.get("messages", [])):
             if msg.get("role") == "assistant":
                 entries = _extract_plan_entries(msg.get("content") or "")
                 if entries:
-                    # Pega o título da primeira entrada ou do briefing
+                    # Pega o tÃ­tulo da primeira entrada ou do briefing
                     briefing = next((e for e in entries if e.get("content_type") == "briefing"), entries[0])
                     cls["title"] = briefing.get("title")
                     break
 
-    # 3. Último recurso: Inferir da URL ou Persona para não travar o salvamento
+    # 3. Ãšltimo recurso: Inferir da URL ou Persona para nÃ£o travar o salvamento
     if not cls.get("title"):
         url = _source_url_from_context(session.get("context") or "")
         if url:
-            cls["title"] = f"Extração: {url.split('//')[-1]}"
+            cls["title"] = f"Extracao: {url.split('//')[-1]}"
         elif cls.get("persona_slug"):
             cls["title"] = f"Conhecimento: {cls['persona_slug']}"
 
@@ -1687,10 +2335,16 @@ def _build_content(session: dict, content_text: str) -> str:
 
     lines: list[str] = []
     if description:
-        lines.extend(["## Descrição", "", description, ""])
+        lines.extend(["## DescriÃ§Ã£o", "", description, ""])
     if link:
         lines.extend(["## Link", "", link, ""])
     return "\n".join(lines).strip()
+
+
+def _vault_client_folder(persona_slug: Optional[str]) -> str:
+    if not persona_slug:
+        return _GLOBAL_VAULT_CLIENT_FOLDER
+    return persona_folder_name(persona_slug)
 
 
 def _slug_for_plan_entry(value: str) -> str:
@@ -1754,7 +2408,8 @@ def _fallback_plan_payload(session: dict, content_text: str) -> dict:
 def _write_entry_file(persona_slug: str, entry: dict) -> Optional[Path]:
     """Salva uma entrada individual de um plano de conhecimento no vault."""
     vault_root = Path(VAULT_PATH)
-    client_folder = _VAULT_CLIENT_FOLDERS.get(persona_slug or "global", "00_GLOBAL")
+    ensure_persona_vault_structure(persona_slug, VAULT_PATH)
+    client_folder = _vault_client_folder(persona_slug)
     content_type = entry.get("content_type") or "other"
     type_folder = _CONTENT_TYPE_FOLDERS.get(content_type, "00_OTHER")
     
@@ -1777,6 +2432,8 @@ def _write_entry_file(persona_slug: str, entry: dict) -> Optional[Path]:
         "slug": entry.get("slug"),
         "created_at": now,
         "status": entry.get("status", "pendente_validacao"),
+        "created_via": "kb_intake_sofia",
+        "sync_origin": "direct_save",
     }
     if entry.get("metadata"):
         fm.update(entry["metadata"])
@@ -1797,7 +2454,8 @@ def _write_entry_file(persona_slug: str, entry: dict) -> Optional[Path]:
 def _write_file(session: dict, content_text: str) -> Path:
     cls = session["classification"]
     vault_root = Path(VAULT_PATH)
-    client_folder = _VAULT_CLIENT_FOLDERS.get(cls["persona_slug"] or "global", "00_GLOBAL")
+    ensure_persona_vault_structure(cls["persona_slug"], VAULT_PATH)
+    client_folder = _vault_client_folder(cls["persona_slug"])
     type_folder = _CONTENT_TYPE_FOLDERS.get(cls["content_type"] or "other", "00_OTHER")
     safe_title = _safe_filename(cls["title"] or "untitled")
 
@@ -1819,7 +2477,7 @@ def _write_file(session: dict, content_text: str) -> Path:
     else:
         now = datetime.now(timezone.utc).isoformat()
         lines = ["---", f"title: {cls['title']}", f"client: {cls['persona_slug']}",
-                 f"type: {cls['content_type']}"]
+                 f"type: {cls['content_type']}", "created_via: kb_intake_sofia", "sync_origin: direct_save"]
         if cls.get("link"):
             lines.append(f"link: {cls['link']}")
         if cls.get("asset_type"):
@@ -1849,156 +2507,7 @@ def _git_ops(vault_path: str, rel_path: str, title: str, client: str) -> dict:
     }
 
 
-def save(session_id: str, content_text: str = "") -> dict:
-    session = _get_session(session_id)
-    if not session:
-        return {"error": "Session not found"}
-
-    _apply_save_inference(session)
-    cls = session["classification"]
-    missing = [k for k in ("persona_slug", "content_type", "title") if not cls.get(k)]
-    if missing:
-        _emit_kb_event(
-            "kb_intake_dialog_rejected",
-            session=session,
-            source="kb-intake.save",
-            status="rejected",
-            transcript=True,
-            result={
-                "error": "Classification incomplete",
-                "missing_fields": missing,
-                "classification": {k: v for k, v in cls.items() if k != "file_bytes"},
-            },
-        )
-        return {
-            "error": "Classification incomplete — missing " + ", ".join(missing),
-            "classification": {k: v for k, v in cls.items() if k != "file_bytes"},
-        }
-
-    # Detecta se ha um plano para salvar multiplos arquivos
-    plan_entries = []
-    for msg in reversed(session.get("messages", [])):
-        content = msg.get("content") or ""
-        if msg.get("role") == "assistant" and "<knowledge_plan>" in content:
-            plan = _extract_plan(content)
-            plan_entries = plan.get("entries", [])
-            break
-
-    # ── 1. Write to vault and Structured Ingest ───────────────────────
-    try:
-        saved_paths = []
-        if plan_entries:
-            for entry in plan_entries:
-                # 1.a Write to vault
-                p = _write_entry_file(cls["persona_slug"], entry)
-                if p: saved_paths.append(p)
-                
-                # 1.b Structured RAG intake (immediately creates layers/importance)
-                try:
-                    rag_res = knowledge_rag_intake.process_intake(
-                        raw_text=entry.get("content") or "",
-                        persona_slug=cls["persona_slug"],
-                        source="classifier",
-                        source_ref=session_id,
-                        title=entry.get("title"),
-                        content_type=entry.get("content_type"),
-                        tags=entry.get("tags"),
-                        metadata=entry.get("metadata"),
-                        validate=True
-                    )
-                except Exception as rag_exc:
-                    print(f"kb_intake: RAG processing failed for entry {entry.get('title')}: {rag_exc}")
-
-            file_path = saved_paths[0] if saved_paths else None
-        else:
-            # Fallback single entry
-            content_text = _build_content(session, content_text)
-            file_path = _write_file(session, content_text)
-            if file_path: saved_paths = [file_path]
-            
-        if not file_path:
-            _emit_kb_event(
-                "kb_intake_dialog_rejected",
-                session=session,
-                source="kb-intake.save",
-                status="rejected",
-                transcript=True,
-                result={"error": "No files were written."},
-            )
-            return {"error": "No files were written."}
-    except Exception as e:
-        from services import sre_logger
-        sre_logger.error("kb_intake", f"Write failed: {e}", e)
-        _emit_kb_event(
-            "kb_intake_dialog_failed",
-            session=session,
-            source="kb-intake.save",
-            status="failed",
-            transcript=True,
-            result={"error": f"Write failed: {e}", "failure_type": "write"},
-        )
-        return {"error": f"Write failed: {e}"}
-
-    # ── 2. Git (best-effort) ───────────────────────────────────────────
-    try:
-        # Adiciona cada arquivo individualmente para evitar lock de pasta
-        git_results = []
-        for p in saved_paths:
-            rel_p = str(p.relative_to(Path(VAULT_PATH)))
-            res = _git_ops(VAULT_PATH, rel_p, p.name, cls["persona_slug"])
-            git_results.append(res)
-        git_result = git_results[0] if git_results else {"ok": True, "git": "skipped"}
-    except Exception as exc:
-        git_result = {
-            "add_ok": False, "commit_ok": False, "push_ok": False,
-            "error": f"git unavailable: {exc}".strip()[:200],
-        }
-
-    try:
-        rel_path = str(file_path.relative_to(Path(VAULT_PATH)))
-    except Exception:
-        rel_path = file_path.name if file_path else "unknown"
-
-    # ── 3. Vault sync into knowledge_items (best-effort) ───────────────
-    try:
-        sync_result = run_sync(VAULT_PATH, persona_filter=cls["persona_slug"])
-    except Exception as exc:
-        sync_result = {"error": f"sync failed: {exc}".strip()[:200], "new": 0, "updated": 0}
-
-    # ── 4. Audit event (best-effort) ──────────────────────────────────
-    session["stage"] = "done"
-    _save_session(session)
-    _emit_kb_event(
-        "kb_intake_dialog_completed",
-        session=session,
-        source="kb-intake.save",
-        status="completed",
-        transcript=True,
-        result={
-            "file_path": rel_path,
-            "saved_paths": [str(p) for p in saved_paths],
-            "git": git_result,
-            "sync_new": sync_result.get("new", 0),
-            "sync_updated": sync_result.get("updated", 0),
-            "sync_error": sync_result.get("error"),
-            "entries_written": len(saved_paths),
-            "plan_entries": len(plan_entries),
-        },
-    )
-
-    return {
-        "ok": True,
-        "file_path": rel_path,
-        "git": git_result,
-        "sync": {
-            "new": sync_result.get("new", 0),
-            "updated": sync_result.get("updated", 0),
-            "error": sync_result.get("error"),
-        },
-    }
-
-
-def save(session_id: str, content_text: str = "") -> dict:
+def save(session_id: str, content_text: str = "", plan_override: Optional[dict] = None) -> dict:
     session = _get_session(session_id)
     if not session:
         return {"error": "Session not found"}
@@ -2012,6 +2521,7 @@ def save(session_id: str, content_text: str = "") -> dict:
             extra={
                 "stage": session.get("stage"),
                 "has_content_text_override": bool(content_text and content_text.strip()),
+                "has_plan_override": bool(isinstance(plan_override, dict) and plan_override.get("entries")),
             },
         )
     except Exception:
@@ -2040,16 +2550,26 @@ def save(session_id: str, content_text: str = "") -> dict:
 
     plan_entries = []
     plan_payload: dict = {}
-    for msg in reversed(session.get("messages", [])):
-        content = msg.get("content") or ""
-        if msg.get("role") == "assistant" and "<knowledge_plan>" in content:
-            plan_payload = _extract_plan(content)
-            plan_entries = plan_payload.get("entries", [])
-            break
+    if isinstance(plan_override, dict) and plan_override.get("entries"):
+        plan_payload = plan_override
+        plan_entries = plan_payload.get("entries", [])
+    elif isinstance(session.get("last_proposed_plan"), dict) and (session.get("last_proposed_plan") or {}).get("entries"):
+        plan_payload = dict(session.get("last_proposed_plan") or {})
+        plan_entries = plan_payload.get("entries", [])
+    else:
+        for msg in reversed(session.get("messages", [])):
+            content = msg.get("content") or ""
+            if msg.get("role") == "assistant" and "<knowledge_plan>" in content:
+                plan_payload = _extract_plan(content)
+                plan_entries = plan_payload.get("entries", [])
+                break
 
     if not plan_entries:
         plan_payload = _fallback_plan_payload(session, content_text)
         plan_entries = plan_payload.get("entries", [])
+
+    plan_payload = _normalize_sofia_knowledge_plan(plan_payload, session)
+    plan_entries = plan_payload.get("entries", [])
 
     # Backstop: auto-infer parent_slug for any non-top-level entry that
     # arrived without one. This catches the most frequent Sofia regression
@@ -2067,7 +2587,8 @@ def save(session_id: str, content_text: str = "") -> dict:
         except Exception:
             pass
 
-    plan_violations = validate_sofia_knowledge_plan(plan_payload)
+    _build_links_from_parent_slugs(plan_payload)
+    plan_violations = validate_sofia_knowledge_plan(plan_payload, session=session)
     if plan_violations:
         from services import sre_logger
         sre_logger.warn(
@@ -2153,6 +2674,7 @@ def save(session_id: str, content_text: str = "") -> dict:
                 metadata={
                     **(payload.get("metadata") or {}),
                     "session_id": session_id,
+                    "sync_origin": "direct_save",
                     "classification": {k: v for k, v in cls.items() if k != "file_bytes"},
                 },
                 tags=payload.get("tags") or [],
@@ -2183,6 +2705,18 @@ def save(session_id: str, content_text: str = "") -> dict:
                 plan_entries=plan_entries,
                 plan_links=plan_payload.get("links") or [],
             )
+            try:
+                repaired = knowledge_graph.repair_primary_tree_connections(
+                    persisted_items[0].get("persona_id"),
+                    node_ids=[
+                        (item.get("metadata") or {}).get("knowledge_node_id")
+                        for item in persisted_items
+                        if (item.get("metadata") or {}).get("knowledge_node_id")
+                    ],
+                )
+                hierarchy_result["tree_guard"] = repaired
+            except Exception as guard_exc:
+                hierarchy_result["tree_guard_error"] = str(guard_exc)
         except Exception as hier_exc:
             from services import sre_logger
             sre_logger.warn(
@@ -2207,6 +2741,24 @@ def save(session_id: str, content_text: str = "") -> dict:
                 evidence["main_tree_edge_id"] = hierarchy_item.get("main_tree_edge_id")
             if hierarchy_item.get("parent_slug"):
                 evidence["parent_slug"] = hierarchy_item.get("parent_slug")
+            if hierarchy_item.get("resolution_mode"):
+                evidence["resolution_mode"] = hierarchy_item.get("resolution_mode")
+            if hierarchy_item.get("quarantine_reason"):
+                evidence["quarantine_reason"] = hierarchy_item.get("quarantine_reason")
+        for persisted in persisted_items:
+            hierarchy_item = hierarchy_by_item.get(persisted.get("id")) or {}
+            if not hierarchy_item:
+                continue
+            updated_metadata = {
+                **(persisted.get("metadata") or {}),
+                "resolution_mode": hierarchy_item.get("resolution_mode"),
+                "quarantine_state": "structural" if hierarchy_item.get("resolution_mode") == "quarantined" else None,
+                "quarantine_reason": hierarchy_item.get("quarantine_reason"),
+                "resolved_parent_slug": hierarchy_item.get("parent_slug"),
+                "resolved_parent_node_id": hierarchy_item.get("parent_node_id"),
+            }
+            updated_metadata = {k: v for k, v in updated_metadata.items() if v is not None}
+            supabase_client.update_knowledge_item(persisted["id"], {"metadata": updated_metadata})
     except Exception as exc:
         from services import sre_logger
         sre_logger.error("kb_intake", f"Persistence failed: {exc}", exc)
@@ -2263,20 +2815,13 @@ def save(session_id: str, content_text: str = "") -> dict:
     except Exception:
         rel_path = file_path.name if file_path else "unknown"
 
-    try:
-        sync_result = run_sync(VAULT_PATH, persona_filter=cls["persona_slug"])
-    except Exception as exc:
-        sync_result = {"error": f"sync failed: {exc}".strip()[:200], "new": 0, "updated": 0}
-
     session["stage"] = "done"
     _save_session(session)
     completion_payload = {
         "file_path": rel_path,
         "saved_paths": [str(p) for p in saved_paths],
         "git": git_result,
-        "sync_new": sync_result.get("new", 0),
-        "sync_updated": sync_result.get("updated", 0),
-        "sync_error": sync_result.get("error"),
+        "sync_mode": "manual_only",
         "entries_written": len(saved_paths),
         "plan_entries": len(plan_entries),
         "plan_links": len(plan_payload.get("links") or []),
@@ -2288,6 +2833,7 @@ def save(session_id: str, content_text: str = "") -> dict:
         ],
         "persistence_evidence": persisted_evidence,
         "hierarchy": hierarchy_result,
+        "vault_write": {"paths": [str(p) for p in saved_paths]},
     }
     _emit_kb_event(
         "kb_intake_dialog_completed",
@@ -2323,10 +2869,14 @@ def save(session_id: str, content_text: str = "") -> dict:
         ],
         "persistence_evidence": persisted_evidence,
         "hierarchy": hierarchy_result,
+        "vault_write": {"paths": [str(p) for p in saved_paths]},
         "git": git_result,
         "sync": {
-            "new": sync_result.get("new", 0),
-            "updated": sync_result.get("updated", 0),
-            "error": sync_result.get("error"),
+            "mode": "manual_only",
+            "new": 0,
+            "updated": 0,
+            "error": None,
         },
     }
+
+

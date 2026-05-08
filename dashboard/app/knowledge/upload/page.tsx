@@ -11,7 +11,7 @@ const TYPE_OPTIONS = [
   { value: "campaign",      label: "Campanha" },
   { value: "copy",          label: "Copy / Texto" },
   { value: "prompt",        label: "Prompt de Agente" },
-  { value: "faq",           label: "FAQ / KB" },
+  { value: "faq",           label: "FAQ / Golden Dataset" },
   { value: "tone",          label: "Tom de Voz" },
   { value: "audience",      label: "Público-alvo" },
   { value: "competitor",    label: "Concorrente" },
@@ -63,7 +63,7 @@ export default function UploadPage() {
     <div className="space-y-6 max-w-2xl">
       <div>
         <h1 className="text-xl font-semibold">Upload de Conhecimento</h1>
-        <p className="text-sm text-brain-muted mt-0.5">Adicione textos ou arquivos para validação antes de entrar na KB</p>
+        <p className="text-sm text-brain-muted mt-0.5">Adicione textos ou arquivos para validação antes de entrar no Golden Dataset</p>
       </div>
 
       {success && (

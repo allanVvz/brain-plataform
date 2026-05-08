@@ -36,7 +36,7 @@ const nav = [
   { section: "Marketing", href: "/marketing/assets", label: "Assets", icon: Image },
   { section: "Knowledge", href: "/knowledge/sync", label: "Sync", icon: RefreshCw },
   { section: "Knowledge", href: "/knowledge/quality", label: "Quality", icon: CheckSquare },
-  { section: "Knowledge", href: "/kb", label: "Knowledge Base", icon: BookOpen },
+  { section: "Knowledge", href: "/kb", label: "Golden Dataset", icon: BookOpen },
   { section: "Configuracoes", href: "/wa-validator", label: "ChatBot", icon: GitBranch },
   { section: "Configuracoes", href: "/tools", label: "Tools", icon: Wrench },
   { section: "Configuracoes", href: "/settings", label: "Settings", icon: Settings },
@@ -59,8 +59,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         setUser(session?.user || null);
         setPersonas(list);
         const savedExists = saved && list.some((p: any) => p.slug === saved);
-        const canSeeAll = session?.user?.role === "admin";
-        setPersona(savedExists ? saved : (canSeeAll ? "" : (list[0]?.slug || "")));
+        setPersona(savedExists ? saved : "");
       })
       .catch(() => {
         setUser(null);
@@ -85,6 +84,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       detail: { slug: persona, id: selected?.id || "" },
     }));
   }, [persona, personas]);
+
+  useEffect(() => {
+    function handlePersonaChange(event: Event) {
+      const nextSlug = (event as CustomEvent<{ slug?: string }>).detail?.slug || "";
+      setPersona((current) => (current === nextSlug ? current : nextSlug));
+    }
+    window.addEventListener("ai-brain-persona-change", handlePersonaChange as EventListener);
+    return () => window.removeEventListener("ai-brain-persona-change", handlePersonaChange as EventListener);
+  }, []);
 
   async function handleLogout() {
     try {
@@ -156,7 +164,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             >
               {personas.length > 0 ? (
                 <>
-                  {user?.role === "admin" && <option className="bg-obs-raised text-obs-text" value="">Todos</option>}
+                  <option className="bg-obs-raised text-obs-text" value="">Todos</option>
                   {personas.map((p) => (
                     <option className="bg-obs-raised text-obs-text" key={p.slug} value={p.slug}>
                       {p.name}

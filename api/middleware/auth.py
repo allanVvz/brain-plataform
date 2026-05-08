@@ -32,10 +32,47 @@ async def auth_middleware(request: Request, call_next):
     if not payload:
         return JSONResponse({"detail": "Sessao obrigatoria."}, status_code=401)
 
-    user = auth_service.get_user_by_id(payload.get("sub") or "")
+    fallback_user = {
+        "id": payload.get("sub") or "",
+        "email": payload.get("email"),
+        "username": payload.get("email"),
+        "name": payload.get("email") or payload.get("sub") or "Sessao ativa",
+        "role": payload.get("role") or "user",
+        "is_active": True,
+    }
+
+    try:
+        user = auth_service.get_user_by_id(payload.get("sub") or "")
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.warn(
+                "auth_middleware",
+                f"falling back to signed session payload: {exc}",
+                exc,
+            )
+        except Exception:
+            pass
+        user = fallback_user if fallback_user["id"] else None
+
     if not user or not user.get("is_active", True):
         return JSONResponse({"detail": "Sessao invalida."}, status_code=401)
 
     request.state.user = user
-    request.state.persona_access = [] if auth_service.is_admin(user) else auth_service.get_user_access(user["id"])
+    if auth_service.is_admin(user):
+        request.state.persona_access = []
+    else:
+        try:
+            request.state.persona_access = auth_service.get_user_access(user["id"])
+        except Exception as exc:
+            try:
+                from services import sre_logger
+                sre_logger.warn(
+                    "auth_middleware",
+                    f"persona access unavailable, using empty scope: {exc}",
+                    exc,
+                )
+            except Exception:
+                pass
+            request.state.persona_access = []
     return await call_next(request)

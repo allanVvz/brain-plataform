@@ -19,7 +19,7 @@ class Context(BaseModel):
     mensagem: str
     historico: List[dict] = []
     kb_chunks: List[str] = []
-    persona_slug: str = "tock-fatal"
+    persona_slug: str = "global"
     classification: Optional[dict] = None
     score: int = 0
     tags: List[str] = []

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import {
@@ -6,7 +6,7 @@ import {
   CheckCircle2, Clock, Bot, FlaskConical,
 } from "lucide-react";
 
-// ── Types ──────────────────────────────────────────────────────
+// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type Turn = { role: string; text: string; ts: string; timeout?: boolean; agent?: string; latency_ms?: number };
 type Gap = { topic: string; evidence: string; priority: "high" | "medium" | "low" };
@@ -29,7 +29,7 @@ type Session = {
   error?: string;
 };
 
-// ── Helpers ────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const STATUS_COLOR: Record<string, string> = {
   ready: "text-brain-muted",
@@ -66,7 +66,7 @@ function ScoreMeter({ score }: { score: number }) {
   );
 }
 
-// ── Main Page ──────────────────────────────────────────────────
+// â”€â”€ Main Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function WaValidatorPage() {
   const [bots, setBots] = useState<any[]>([]);
@@ -75,8 +75,8 @@ export default function WaValidatorPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
 
-  // form state — bot is the primary selector (replaces persona + contact)
-  const [selectedBotId, setSelectedBotId] = useState("sofia-tock-fatal");
+  // form state â€” bot is the primary selector (replaces persona + contact)
+  const [selectedBotId, setSelectedBotId] = useState("");
   const [flowId, setFlowId] = useState("");
   // default to gpt-4o-mini so generate works before models endpoint resolves
   const [model, setModel] = useState("gpt-4o-mini");
@@ -94,8 +94,7 @@ export default function WaValidatorPage() {
   useEffect(() => {
     api.waBots().then((bs) => {
       setBots(bs);
-      // Pre-select Sofia; fall back to first bot
-      if (!bs.find((b: any) => b.id === "sofia-tock-fatal") && bs.length > 0) {
+      if (bs.length > 0) {
         setSelectedBotId(bs[0].id);
       }
     }).catch(() => {});
@@ -140,11 +139,11 @@ export default function WaValidatorPage() {
   }, [activeSession?.id, activeSession?.status]);
 
   const selectedBot = bots.find((b) => b.id === selectedBotId) || {
-    id: "sofia-tock-fatal",
-    bot_name: "Sofia",
-    label: "Sofia — Tock Fatal",
-    persona_slug: "tock-fatal",
-    description: "Agente de vendas principal do Tock Fatal",
+    id: "",
+    bot_name: "Bot",
+    label: "Bot dinamico",
+    persona_slug: "global",
+    description: "Selecione um bot carregado do banco.",
   };
 
   async function handleGenerate() {
@@ -226,7 +225,7 @@ export default function WaValidatorPage() {
 
   return (
     <div className="flex gap-6 h-[calc(100vh-96px)]">
-      {/* ── Left panel ───────────────────────────────────── */}
+      {/* â”€â”€ Left panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="flex flex-col gap-4 w-72 shrink-0">
 
         {/* Form */}
@@ -241,14 +240,14 @@ export default function WaValidatorPage() {
             <label className="text-[11px] text-brain-muted uppercase tracking-wide">Bot / Agente</label>
             <div className="space-y-1.5">
               {bots.length === 0 ? (
-                // Default Sofia card while bots load
+                // Placeholder card while bots load
                 <button
                   className="w-full text-left px-3 py-2 rounded-lg border text-xs bg-brain-accent/15 border-brain-accent/40 text-brain-accent"
                 >
                   <div className="font-semibold flex items-center gap-1.5">
-                    <Bot size={11} /> Sofia — Tock Fatal
+                    <Bot size={11} /> Carregando bots
                   </div>
-                  <div className="text-[10px] mt-0.5 opacity-70">Agente de vendas principal</div>
+                  <div className="text-[10px] mt-0.5 opacity-70">Aguardando configuracao dinamica</div>
                 </button>
               ) : (
                 bots.map((b) => {
@@ -292,7 +291,7 @@ export default function WaValidatorPage() {
 
           {/* Model selector */}
           <div className="space-y-1">
-            <label className="text-[11px] text-brain-muted uppercase tracking-wide">Modelo (geração do script)</label>
+            <label className="text-[11px] text-brain-muted uppercase tracking-wide">Modelo (geraÃ§Ã£o do script)</label>
             <select
               className="w-full bg-brain-bg border border-brain-border text-sm text-white rounded px-2 py-1.5"
               value={model}
@@ -322,7 +321,7 @@ export default function WaValidatorPage() {
         {/* Session list */}
         {sessions.length > 0 && (
           <div className="bg-brain-surface border border-brain-border rounded-xl p-3 flex-1 overflow-y-auto space-y-1">
-            <p className="text-[10px] text-brain-muted uppercase tracking-widest mb-2">Sessões anteriores</p>
+            <p className="text-[10px] text-brain-muted uppercase tracking-widest mb-2">SessÃµes anteriores</p>
             {sessions.map((s) => (
               <button
                 key={s.id}
@@ -333,7 +332,7 @@ export default function WaValidatorPage() {
                     : "text-brain-muted hover:text-white hover:bg-white/5"
                 }`}
               >
-                <div className="font-medium truncate">{s.persona_slug} — {s.flow_id}</div>
+                <div className="font-medium truncate">{s.persona_slug} â€” {s.flow_id}</div>
                 <div className={`mt-0.5 ${STATUS_COLOR[s.status] || "text-brain-muted"}`}>
                   {s.status}
                 </div>
@@ -343,12 +342,12 @@ export default function WaValidatorPage() {
         )}
       </div>
 
-      {/* ── Center panel: script + conversation ──────────── */}
+      {/* â”€â”€ Center panel: script + conversation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="flex-1 flex flex-col gap-4 min-w-0">
         {!activeSession ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-brain-muted">
             <FlaskConical size={36} className="opacity-20" />
-            <p className="text-sm">Selecione um bot, escolha o fluxo e gere um script para começar.</p>
+            <p className="text-sm">Selecione um bot, escolha o fluxo e gere um script para comeÃ§ar.</p>
           </div>
         ) : (
           <>
@@ -359,7 +358,7 @@ export default function WaValidatorPage() {
                   <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                     <Bot size={14} className="text-brain-accent" />
                     {activeSession.script?.meta?.persona_name || activeSession.persona_slug}
-                    <span className="text-brain-muted font-normal">— {activeSession.flow_id}</span>
+                    <span className="text-brain-muted font-normal">â€” {activeSession.flow_id}</span>
                   </h3>
                   {activeSession.script?.flow_description && (
                     <p className="text-xs text-brain-muted mt-0.5 pl-5">{activeSession.script.flow_description}</p>
@@ -373,7 +372,7 @@ export default function WaValidatorPage() {
               </div>
 
               <div className="text-xs text-brain-muted pl-5 mb-3">
-                {steps.length} perguntas · {expected.length} conhecimentos esperados
+                {steps.length} perguntas Â· {expected.length} conhecimentos esperados
               </div>
 
               {activeSession.status === "error" && activeSession.error && (
@@ -399,7 +398,7 @@ export default function WaValidatorPage() {
                 <button
                   onClick={handleRunDirect}
                   disabled={runningDirect || isRunning || isDone}
-                  title="Testa o agente diretamente via API — não precisa do WhatsApp"
+                  title="Testa o agente diretamente via API â€” nÃ£o precisa do WhatsApp"
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-brain-accent/80 hover:bg-brain-accent text-white transition disabled:opacity-40"
                 >
                   <FlaskConical size={12} />
@@ -447,13 +446,13 @@ export default function WaValidatorPage() {
             {/* Conversation feed */}
             <div className="flex-1 bg-brain-surface border border-brain-border rounded-xl p-4 overflow-y-auto flex flex-col gap-2 min-h-0">
               <p className="text-[10px] text-brain-muted uppercase tracking-widest shrink-0">
-                Conversa {conversation.length > 0 ? `· ${conversation.length} turnos` : ""}
+                Conversa {conversation.length > 0 ? `Â· ${conversation.length} turnos` : ""}
               </p>
 
               {conversation.length === 0 && !isRunning && (
                 <div className="flex-1 flex items-center justify-center text-brain-muted text-xs">
                   {activeSession.status === "ready"
-                    ? "Clique em «Executar Direto» para iniciar o teste interno."
+                    ? "Clique em Â«Executar DiretoÂ» para iniciar o teste interno."
                     : "Aguardando conversa..."}
                 </div>
               )}
@@ -484,7 +483,7 @@ export default function WaValidatorPage() {
               {isRunning && conversation.length > 0 && (
                 <div className="flex justify-start">
                   <div className="bg-brain-bg border border-brain-border rounded-xl px-3 py-2 text-brain-muted text-xs animate-pulse">
-                    {selectedBot.bot_name} está respondendo...
+                    {selectedBot.bot_name} estÃ¡ respondendo...
                   </div>
                 </div>
               )}
@@ -495,7 +494,7 @@ export default function WaValidatorPage() {
         )}
       </div>
 
-      {/* ── Right panel: KB gaps & insights ──────────────── */}
+      {/* â”€â”€ Right panel: Golden Dataset gaps & insights â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="w-72 shrink-0 flex flex-col gap-4">
         {expected.length > 0 && (
           <div className="bg-brain-surface border border-brain-border rounded-xl p-4">
@@ -554,7 +553,7 @@ export default function WaValidatorPage() {
 
             {(insights.recommendations ?? []).length > 0 && (
               <div>
-                <p className="text-[10px] text-brain-muted uppercase tracking-widest mb-2">Recomendações KB</p>
+                <p className="text-[10px] text-brain-muted uppercase tracking-widest mb-2">RecomendaÃ§Ãµes Golden Dataset</p>
                 <ul className="space-y-1">
                   {insights.recommendations.map((r, i) => (
                     <li key={i} className="text-xs text-brain-muted flex items-start gap-1.5">
@@ -570,7 +569,7 @@ export default function WaValidatorPage() {
           <div className="flex-1 bg-brain-surface border border-brain-border rounded-xl p-4 flex items-center justify-center">
             <p className="text-xs text-brain-muted text-center">
               {isDone
-                ? "Clique em «Analisar Gaps» para identificar lacunas na KB."
+                ? "Clique em Â«Analisar GapsÂ» para identificar lacunas no Golden Dataset."
                 : "Execute um teste para ver os insights."}
             </p>
           </div>
@@ -579,3 +578,4 @@ export default function WaValidatorPage() {
     </div>
   );
 }
+

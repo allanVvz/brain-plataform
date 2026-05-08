@@ -2,6 +2,7 @@ import os
 import re
 import time
 import unicodedata
+from datetime import datetime, timezone
 from supabase import create_client, Client
 from typing import Optional
 
@@ -905,6 +906,20 @@ def get_knowledge_node(node_id: str) -> Optional[dict]:
         raise
 
 
+def update_knowledge_node(node_id: str, data: dict) -> Optional[dict]:
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING or not node_id or not data:
+        return None
+    try:
+        result = get_client().table("knowledge_nodes").update(data).eq("id", node_id).execute()
+        return (result.data or [data])[0]
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return None
+        raise
+
+
 def ensure_persona_knowledge_node(persona_id: str) -> Optional[dict]:
     """Ensure the graph has a protected semantic root for a persona."""
     if not persona_id:
@@ -995,7 +1010,7 @@ def sync_audience_node(audience: dict) -> Optional[dict]:
 
 
 def ensure_embedded_node(persona_id: str) -> Optional[dict]:
-    """Ensure a protected Embedded/KB destination node exists for a persona."""
+    """Ensure a protected Embedded/Golden Dataset destination node exists for a persona."""
     if not persona_id:
         return None
     return upsert_knowledge_node({
@@ -1003,8 +1018,8 @@ def ensure_embedded_node(persona_id: str) -> Optional[dict]:
         "node_type": "embedded",
         "slug": "embedded-default",
         "title": "Embedded",
-        "summary": "Destino protegido para conteudos aprovados e enviados para a Knowledge Base.",
-        "tags": ["rag", "embedded", "kb", "default"],
+        "summary": "Destino protegido para FAQs publicados no Golden Dataset e enviados ao RAG.",
+        "tags": ["rag", "embedded", "golden-dataset", "default"],
         "metadata": {
             "protected": True,
             "system_node": True,
@@ -1484,13 +1499,51 @@ def sync_gallery_asset_node(node: dict, edge: dict) -> Optional[dict]:
         return None
 
 
-def sync_embedded_kb_node(node: dict, edge: dict) -> Optional[dict]:
-    """Mirror an Embedded-linked knowledge node into kb_entries.
+def _faq_publication_payload(node: dict, item: Optional[dict], edge: Optional[dict] = None) -> dict:
+    metadata = node.get("metadata") or {}
+    question = (
+        metadata.get("question")
+        or (item or {}).get("title")
+        or node.get("title")
+        or node.get("slug")
+        or "FAQ"
+    )
+    answer = (
+        metadata.get("answer")
+        or (item or {}).get("content")
+        or node.get("summary")
+        or metadata.get("content")
+        or metadata.get("description")
+        or question
+    )
+    file_path = normalize_file_path(
+        (item or {}).get("file_path")
+        or metadata.get("file_path")
+        or metadata.get("path")
+        or metadata.get("url")
+    )
+    path_slugs = []
+    for value in (
+        (item or {}).get("metadata", {}).get("path_slugs"),
+        metadata.get("path_slugs"),
+    ):
+        if isinstance(value, list) and value:
+            path_slugs = [str(v) for v in value if v]
+            break
+    return {
+        "question": question,
+        "answer": answer,
+        "title": question,
+        "content": answer,
+        "file_path": file_path,
+        "path_slugs": path_slugs,
+        "tags": (item or {}).get("tags") or node.get("tags") or [],
+        "persona_id": (edge or {}).get("persona_id") or node.get("persona_id") or (item or {}).get("persona_id"),
+    }
 
-    The current Knowledge Base UI reads `kb_entries` filtered by persona and
-    `status=ATIVO`; this keeps the graph action aligned with that surface while
-    preserving the original node.
-    """
+
+def sync_embedded_kb_node(node: dict, edge: dict) -> Optional[dict]:
+    """Publish an Embedded-linked FAQ into the Golden Dataset + RAG tables."""
     if not node or not edge:
         return None
     from datetime import datetime, timezone
@@ -1511,15 +1564,18 @@ def sync_embedded_kb_node(node: dict, edge: dict) -> Optional[dict]:
             item = None
 
     node_type = (node.get("node_type") or (item or {}).get("content_type") or "other").lower()
-    title = (item or {}).get("title") or node.get("title") or node.get("slug") or "Conhecimento do grafo"
-    content = (
-        (item or {}).get("content")
-        or node.get("summary")
-        or metadata.get("content")
-        or metadata.get("description")
-        or title
-    )
-    tags = (item or {}).get("tags") or node.get("tags") or []
+    if node_type != "faq":
+        raise ValueError("Only approved FAQ nodes can be published to the Golden Dataset")
+    if item and str(item.get("status") or "").lower() not in {"approved", "embedded"}:
+        raise ValueError("Approve the FAQ before publishing it to the Golden Dataset")
+    faq_payload = _faq_publication_payload(node, item, edge)
+    title = faq_payload["title"]
+    content = faq_payload["content"]
+    question = faq_payload["question"]
+    answer = faq_payload["answer"]
+    file_path = faq_payload["file_path"]
+    path_slugs = faq_payload["path_slugs"]
+    tags = faq_payload["tags"]
     kb_id = "gn_" + hashlib.md5(f"{node.get('id')}:{persona_id}".encode()).hexdigest()[:12]
 
     if item:
@@ -1532,33 +1588,20 @@ def sync_embedded_kb_node(node: dict, edge: dict) -> Optional[dict]:
     entry = upsert_kb_entry({
         "kb_id": kb_id,
         "persona_id": persona_id,
-        "tipo": {
-            "faq": "faq",
-            "brand": "brand",
-            "briefing": "briefing",
-            "product": "produto",
-            "copy": "copy",
-            "prompt": "prompt",
-            "rule": "regra",
-            "tone": "tom",
-            "audience": "audiencia",
-            "campaign": "campanha",
-            "asset": "asset",
-        }.get(node_type, "geral"),
+        "tipo": "faq",
         "categoria": node_type,
         "titulo": title,
         "conteudo": content,
+        "link": file_path,
         "status": "ATIVO",
         "source": "graph_embed",
         "agent_visibility": (item or {}).get("agent_visibility") or ["SDR", "Closer", "Classifier"],
         "tags": tags,
+        "embedding_status": "created",
     })
+    rag_entry = None
+    rag_chunks: list[dict] = []
     if entry:
-        # Architectural rule (README "KB vs RAG"): the KB Validada surface
-        # (kb_entries) accepts every approved node type, but the vector RAG
-        # layer (knowledge_rag_entries / knowledge_rag_chunks) is FAQ-only
-        # today. Gate behind knowledge_rag_intake.is_rag_eligible so future
-        # widening is a single-helper change.
         from services import knowledge_rag_intake as _rag_intake
         if _rag_intake.is_rag_eligible(node_type):
             rag_entry = upsert_knowledge_rag_entry({
@@ -1567,6 +1610,8 @@ def sync_embedded_kb_node(node: dict, edge: dict) -> Optional[dict]:
                 "content_type": "faq",
                 "semantic_level": int(node.get("level") or 50),
                 "title": title,
+                "question": question,
+                "answer": answer,
                 "content": content,
                 "summary": node.get("summary") or content[:280],
                 "canonical_key": f"kb:{persona_id}:{kb_id}",
@@ -1582,37 +1627,131 @@ def sync_embedded_kb_node(node: dict, edge: dict) -> Optional[dict]:
                     "graph_edge_id": edge.get("id"),
                     "node_type": node_type,
                     "original_node_type": node_type,
+                    "file_path": file_path,
+                    "path": file_path,
+                    "path_slugs": path_slugs,
+                    "question": question,
+                    "answer": answer,
+                    "persona_id": persona_id,
+                    "source_knowledge_item_id": source_id,
                 },
                 "confidence": float(node.get("confidence") or 0.8),
                 "importance": float(node.get("importance") or 0.7),
             })
             if rag_entry and rag_entry.get("id"):
-                replace_knowledge_rag_chunks(
+                rag_chunks = replace_knowledge_rag_chunks(
                     rag_entry["id"],
                     persona_id,
-                    [{"chunk_text": content, "chunk_summary": (node.get("summary") or title)[:280], "metadata": {"source": "graph_embed"}}],
+                    [{
+                        "chunk_text": content,
+                        "chunk_summary": (node.get("summary") or title)[:280],
+                        "metadata": {
+                            "source": "graph_embed",
+                            "file_path": file_path,
+                            "path": file_path,
+                            "path_slugs": path_slugs,
+                            "question": question,
+                            "answer": answer,
+                            "persona_id": persona_id,
+                            "knowledge_item_id": source_id,
+                            "knowledge_node_id": node.get("id"),
+                        },
+                    }],
                 )
-        try:
-            from services import knowledge_graph
-            knowledge_graph.bootstrap_from_item(
-                {
-                    "id": entry.get("id"),
-                    "title": entry.get("titulo"),
-                    "content_type": node_type,
-                    "content": entry.get("conteudo") or content,
-                    "tags": entry.get("tags") or tags,
-                    "status": entry.get("status") or "ATIVO",
-                    "persona_id": persona_id,
-                    "file_path": metadata.get("file_path"),
-                },
-                frontmatter=metadata,
-                body=entry.get("conteudo") or content or "",
-                persona_id=persona_id,
-                source_table="kb_entries",
-            )
-        except Exception:
-            pass
-    return entry
+        if item:
+            next_meta = {
+                **((get_knowledge_item(source_id) or item).get("metadata") or {}),
+                "kb_entry_id": entry.get("id"),
+                "knowledge_rag_entry_id": (rag_entry or {}).get("id"),
+                "embedded_edge_id": edge.get("id"),
+                "golden_dataset_file_path": file_path,
+                "golden_dataset_question": question,
+                "golden_dataset_answer": answer,
+            }
+            update_knowledge_item(source_id, {
+                "status": "embedded",
+                "metadata": next_meta,
+            })
+    return {
+        "item": get_knowledge_item(source_id) if source_id and source_table == "knowledge_items" else item,
+        "kb_entry": entry,
+        "rag_entry": rag_entry,
+        "chunks": rag_chunks,
+        "embedded_edge": edge,
+    }
+
+
+def reset_embedded_legacy_publications(persona_id: Optional[str] = None) -> dict:
+    """Deactivate Embedded links and remove Golden Dataset/RAG mirrors."""
+    client = get_client()
+    embedded_q = client.table("knowledge_nodes").select("id,persona_id").eq("node_type", "embedded")
+    if persona_id:
+        embedded_q = embedded_q.eq("persona_id", persona_id)
+    embedded_nodes = _q(embedded_q.limit(500))
+
+    report = {
+        "persona_id": persona_id,
+        "embedded_nodes": len(embedded_nodes),
+        "edges_deactivated": 0,
+        "items_reverted": 0,
+        "kb_entries_deleted": 0,
+        "rag_entries_deleted": 0,
+        "kb_mirror_nodes_deleted": 0,
+    }
+
+    for embedded in embedded_nodes:
+        edge_rows = _q(
+            client.table("knowledge_edges")
+            .select("*")
+            .eq("target_node_id", embedded.get("id"))
+            .limit(500)
+        )
+        for edge in edge_rows:
+            if _edge_is_inactive(edge):
+                continue
+            metadata = {
+                **(edge.get("metadata") or {}),
+                "active": False,
+                "deleted_from": "reset_embedded_legacy_publications",
+                "deleted_at": datetime.now(timezone.utc).isoformat(),
+            }
+            _execute_with_retry(client.table("knowledge_edges").update({"metadata": metadata}).eq("id", edge["id"]))
+            report["edges_deactivated"] += 1
+
+            source_node = get_knowledge_node(edge.get("source_node_id") or "")
+            edge_meta = edge.get("metadata") or {}
+            kb_entry_id = edge_meta.get("kb_entry_id")
+            rag_entry_id = edge_meta.get("knowledge_rag_entry_id")
+
+            item = None
+            if source_node and source_node.get("source_table") == "knowledge_items" and source_node.get("source_id"):
+                item = get_knowledge_item(str(source_node.get("source_id")))
+                item_meta = (item or {}).get("metadata") or {}
+                kb_entry_id = item_meta.get("kb_entry_id") or kb_entry_id
+                rag_entry_id = item_meta.get("knowledge_rag_entry_id") or rag_entry_id
+
+            if rag_entry_id and delete_knowledge_rag_entry(str(rag_entry_id)):
+                report["rag_entries_deleted"] += 1
+            if kb_entry_id and delete_kb_entry(str(kb_entry_id)):
+                report["kb_entries_deleted"] += 1
+                kb_node = get_knowledge_node_for_source("kb_entries", str(kb_entry_id), persona_id=embedded.get("persona_id"))
+                if kb_node and delete_knowledge_node(str(kb_node.get("id"))):
+                    report["kb_mirror_nodes_deleted"] += 1
+
+            if item and item.get("id"):
+                next_meta = {
+                    **((item.get("metadata") or {})),
+                }
+                next_meta.pop("kb_entry_id", None)
+                next_meta.pop("knowledge_rag_entry_id", None)
+                next_meta.pop("embedded_edge_id", None)
+                update_knowledge_item(str(item["id"]), {
+                    "status": "approved",
+                    "metadata": next_meta,
+                })
+                report["items_reverted"] += 1
+
+    return report
 
 
 def mark_gallery_asset_inactive_by_edge(edge_id: str) -> None:
@@ -1732,11 +1871,11 @@ _NODE_TYPE_REGISTRY_FALLBACK: list[dict] = [
     {"node_type": "faq",            "label": "FAQ",       "default_level": 75, "default_importance": 0.65, "color": "#4ade80", "icon": "circle-help", "sort_order": 75},
     {"node_type": "asset",          "label": "Asset",     "default_level": 80, "default_importance": 0.55, "color": "#f59e0b", "icon": "image",       "sort_order": 80},
     {"node_type": "gallery",        "label": "Gallery",   "default_level":112, "default_importance": 0.82, "color": "#f0abfc", "icon": "images",      "sort_order":112},
-    {"node_type": "embedded",       "label": "Embedded",  "default_level":120, "default_importance": 0.78, "color": "#ffffff", "icon": "database",    "sort_order":120},
+    {"node_type": "embedded",       "label": "Golden Dataset", "default_level":120, "default_importance": 0.78, "color": "#ffffff", "icon": "database",    "sort_order":120},
     {"node_type": "tag",            "label": "Tag",       "default_level": 90, "default_importance": 0.30, "color": "#94a3b8", "icon": "tag",         "sort_order": 90},
     {"node_type": "mention",        "label": "Menção",    "default_level": 92, "default_importance": 0.25, "color": "#94a3b8", "icon": "at-sign",     "sort_order": 92},
     {"node_type": "knowledge_item", "label": "Fila",      "default_level": 95, "default_importance": 0.40, "color": "#94a3b8", "icon": "inbox",       "sort_order": 95},
-    {"node_type": "kb_entry",       "label": "KB Entry",  "default_level": 95, "default_importance": 0.50, "color": "#94a3b8", "icon": "database",    "sort_order": 96},
+    {"node_type": "kb_entry",       "label": "Golden Dataset Entry", "default_level": 95, "default_importance": 0.50, "color": "#94a3b8", "icon": "database",    "sort_order": 96},
 ]
 
 _RELATION_TYPE_REGISTRY_FALLBACK: list[dict] = [
@@ -1988,15 +2127,88 @@ def get_kb_entries_for_persona_ids(persona_ids: list[str], status: str = "ATIVO"
     return _q(q.order("prioridade"))
 
 
+def _kb_entry_select():
+    return (
+        get_client()
+        .table("kb_entries")
+        .select("id,persona_id,kb_id,tipo,categoria,produto,intencao,titulo,conteudo,link,prioridade,status,source,tags,agent_visibility,updated_at")
+    )
+
+
+def _find_kb_entry_by_key(kb_id: Optional[str], persona_id: Optional[str]) -> Optional[dict]:
+    if not kb_id:
+        return None
+    q = _kb_entry_select().eq("kb_id", kb_id)
+    q = q.eq("persona_id", persona_id) if persona_id else q.is_("persona_id", "null")
+    return _one(q.maybe_single())
+
+
+def _log_kb_entry_write_failure(stage: str, payload: dict, exc: Exception) -> None:
+    try:
+        from services import sre_logger
+        sre_logger.error(
+            "supabase_client",
+            (
+                f"kb_entries {stage} failed: {type(exc).__name__}: {exc} "
+                f"(kb_id={payload.get('kb_id')!r}, persona_id={payload.get('persona_id')!r}, source={payload.get('source')!r})"
+            ),
+            exc,
+        )
+    except Exception:
+        pass
+
+
 def upsert_kb_entry(data: dict) -> dict:
-    result = _execute_with_retry(get_client().table("kb_entries").upsert(data, on_conflict="kb_id,persona_id"))
-    return (result.data or [{}])[0]
+    payload = dict(data or {})
+    kb_id = payload.get("kb_id")
+    persona_id = payload.get("persona_id")
+    last_exc: Exception | None = None
+
+    try:
+        result = _execute_with_retry(get_client().table("kb_entries").upsert(payload, on_conflict="kb_id,persona_id"))
+        rows = result.data or []
+        return rows[0] if rows else (_find_kb_entry_by_key(kb_id, persona_id) or {})
+    except Exception as exc:
+        last_exc = exc
+        _log_kb_entry_write_failure("upsert", payload, exc)
+
+    fallback_payload = dict(payload)
+    if fallback_payload.get("source") == "graph_embed":
+        fallback_payload["source"] = "manual"
+        try:
+            result = _execute_with_retry(get_client().table("kb_entries").upsert(fallback_payload, on_conflict="kb_id,persona_id"))
+            rows = result.data or []
+            return rows[0] if rows else (_find_kb_entry_by_key(kb_id, persona_id) or {})
+        except Exception as exc:
+            last_exc = exc
+            _log_kb_entry_write_failure("upsert-fallback-source", fallback_payload, exc)
+
+    existing = _find_kb_entry_by_key(kb_id, persona_id)
+    mutable = {
+        key: value
+        for key, value in fallback_payload.items()
+        if key not in {"id", "kb_id", "persona_id", "created_at"}
+    }
+    try:
+        if existing and existing.get("id"):
+            result = _execute_with_retry(get_client().table("kb_entries").update(mutable).eq("id", existing["id"]))
+            rows = result.data or []
+            return rows[0] if rows else (get_kb_entry(existing["id"]) or {**existing, **mutable})
+        result = _execute_with_retry(get_client().table("kb_entries").insert(fallback_payload))
+        rows = result.data or []
+        if rows:
+            return rows[0]
+        return _find_kb_entry_by_key(kb_id, persona_id) or {}
+    except Exception as exc:
+        _log_kb_entry_write_failure("manual-write", fallback_payload, exc)
+        if last_exc:
+            raise exc from last_exc
+        raise
 
 
 def get_kb_entry(entry_id: str) -> Optional[dict]:
     return _one(
-        get_client().table("kb_entries")
-        .select("id,persona_id,tipo,categoria,produto,intencao,titulo,conteudo,link,prioridade,status,source,tags,agent_visibility,updated_at")
+        _kb_entry_select()
         .eq("id", entry_id)
         .maybe_single()
     )
@@ -2012,8 +2224,7 @@ def get_kb_entries_by_ids(ids: list) -> dict:
     for start in range(0, len(unique), 200):
         chunk = unique[start:start + 200]
         rows.extend(_q(
-            get_client().table("kb_entries")
-            .select("id,persona_id,tipo,categoria,produto,intencao,titulo,conteudo,link,prioridade,status,source,tags,agent_visibility,updated_at")
+            _kb_entry_select()
             .in_("id", chunk)
         ))
     return {str(r["id"]): r for r in rows if r.get("id")}
@@ -2023,6 +2234,11 @@ def update_kb_entry(entry_id: str, data: dict) -> None:
     from datetime import datetime, timezone
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     _execute_with_retry(get_client().table("kb_entries").update(data).eq("id", entry_id))
+
+
+def delete_kb_entry(entry_id: str) -> bool:
+    result = _execute_with_retry(get_client().table("kb_entries").delete().eq("id", entry_id))
+    return bool(result.data)
 
 
 def search_kb(query_embedding: list, persona_id: Optional[str] = None, top_k: int = 5) -> list:
@@ -2110,31 +2326,38 @@ def _normalize_agent_log_row(row: dict) -> dict:
 
 def insert_agent_log(data: dict) -> None:
     payload = dict(data or {})
+    meta = payload.get("metadata") or {}
+    level = str(
+        meta.get("level")
+        or ("ERROR" if str(payload.get("action") or "").startswith("[ERROR]") else "INFO")
+    ).lower()
+    legacy_payload = {
+        "lead_id": payload.get("lead_id"),
+        "persona_id": payload.get("persona_id"),
+        "agent_name": payload.get("agent_type") or payload.get("agent_name") or meta.get("component") or "agent",
+        "input": payload.get("input") if isinstance(payload.get("input"), dict) else (meta.get("input") or {}),
+        "output": payload.get("output") if isinstance(payload.get("output"), dict) else {
+            "action": payload.get("action"),
+            "decision": payload.get("decision"),
+            "metadata": meta,
+        },
+        "latency_ms": payload.get("latency_ms") or meta.get("latency_ms"),
+        "model_used": payload.get("model_used") or meta.get("model_used"),
+        "status": "error" if level == "error" else ("timeout" if level == "timeout" else "success"),
+        "error_msg": payload.get("decision") if level == "error" else payload.get("error_msg"),
+    }
+
     mode = _detect_agent_logs_schema_mode()
-    if mode == "legacy":
-        meta = payload.get("metadata") or {}
-        level = str(
-            meta.get("level")
-            or ("ERROR" if str(payload.get("action") or "").startswith("[ERROR]") else "INFO")
-        ).lower()
-        legacy_payload = {
-            "lead_id": payload.get("lead_id"),
-            "persona_id": payload.get("persona_id"),
-            "agent_name": payload.get("agent_type") or payload.get("agent_name") or meta.get("component") or "agent",
-            "input": payload.get("input") if isinstance(payload.get("input"), dict) else (meta.get("input") or {}),
-            "output": payload.get("output") if isinstance(payload.get("output"), dict) else {
-                "action": payload.get("action"),
-                "decision": payload.get("decision"),
-                "metadata": meta,
-            },
-            "latency_ms": payload.get("latency_ms") or meta.get("latency_ms"),
-            "model_used": payload.get("model_used") or meta.get("model_used"),
-            "status": "error" if level == "error" else ("timeout" if level == "timeout" else "success"),
-            "error_msg": payload.get("decision") if level == "error" else payload.get("error_msg"),
-        }
-        _execute_with_retry(get_client().table("agent_logs").insert(legacy_payload))
-        return
-    _execute_with_retry(get_client().table("agent_logs").insert(payload))
+    attempts = [payload, legacy_payload] if mode == "modern" else [legacy_payload, payload]
+    last_exc: Exception | None = None
+    for candidate in attempts:
+        try:
+            _execute_with_retry(get_client().table("agent_logs").insert(candidate))
+            return
+        except Exception as exc:
+            last_exc = exc
+    if last_exc:
+        raise last_exc
 
 
 def get_agent_logs(lead_id: Optional[str] = None, limit: int = 50) -> list:
@@ -2359,6 +2582,11 @@ def update_knowledge_item(item_id: str, data: dict) -> None:
         raise
 
 
+def delete_knowledge_item(item_id: str) -> bool:
+    result = _execute_with_retry(get_client().table("knowledge_items").delete().eq("id", item_id))
+    return bool(result.data)
+
+
 def insert_knowledge_intake_message(data: dict) -> dict:
     return _insert_one(get_client().table("knowledge_intake_messages").insert(data))
 
@@ -2396,6 +2624,13 @@ def replace_knowledge_rag_chunks(rag_entry_id: str, persona_id: str, chunks: lis
         payload.append(row)
     result = _execute_with_retry(client.table("knowledge_rag_chunks").insert(payload))
     return result.data or []
+
+
+def delete_knowledge_rag_entry(rag_entry_id: str) -> bool:
+    client = get_client()
+    _execute_with_retry(client.table("knowledge_rag_chunks").delete().eq("rag_entry_id", rag_entry_id))
+    result = _execute_with_retry(client.table("knowledge_rag_entries").delete().eq("id", rag_entry_id))
+    return bool(result.data)
 
 
 def upsert_knowledge_rag_link(data: dict) -> dict:

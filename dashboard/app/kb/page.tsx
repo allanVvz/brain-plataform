@@ -53,7 +53,7 @@ export default function KbPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Knowledge Base</h1>
+        <h1 className="text-xl font-semibold">Golden Dataset</h1>
         <div className="flex gap-2">
           <button onClick={handleSync} disabled={syncing || !selectedPersona}
             className="text-sm border border-brain-border text-brain-muted hover:text-white disabled:opacity-40 px-4 py-1.5 rounded-md transition-colors">
@@ -107,14 +107,14 @@ export default function KbPage() {
           ))}
           {!loading && visible.length === 0 && (
             <div className="px-4 py-8 text-center text-brain-muted text-sm">
-              Nenhuma entrada.{" "}
+              Nenhuma entrada no Golden Dataset.{" "}
               <a href="/knowledge/sync" className="text-brain-accent hover:underline">Sincronizar vault</a> ou{" "}
               <a href="/knowledge/upload" className="text-brain-accent hover:underline">adicionar manualmente</a>.
             </div>
           )}
         </div>
       </div>
-      <p className="text-xs text-brain-muted">{loading ? "" : `${visible.length} entrada${visible.length !== 1 ? "s" : ""} exibida${visible.length !== 1 ? "s" : ""}`}</p>
+      <p className="text-xs text-brain-muted">{loading ? "" : `${visible.length} entrada${visible.length !== 1 ? "s" : ""} do Golden Dataset exibida${visible.length !== 1 ? "s" : ""}`}</p>
     </div>
   );
 }

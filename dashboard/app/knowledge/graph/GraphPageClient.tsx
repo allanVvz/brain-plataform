@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import NodeDrawer from "@/components/graph/NodeDrawer";
+import { getVisualHierarchyRank } from "@/components/graph/knowledgeGraphLayout";
 
 const GraphView = dynamic(() => import("@/components/graph/GraphView"), { ssr: false });
 
@@ -180,7 +181,7 @@ export default function GraphPageClient() {
         value: key,
         label: String(d.label || slug),
         nodeType,
-        level: Number(d.level ?? 99),
+        level: getVisualHierarchyRank(nodeType),
         confidence: typeof d.confidence === "number" ? d.confidence : 0,
       });
     }
@@ -195,25 +196,6 @@ export default function GraphPageClient() {
   const selectedDirectLinks = useMemo(() => {
     if (!data || !selectedNode) return [];
     const byId = new Map((data.nodes || []).map((node) => [node.id, node]));
-    const hierarchyRank: Record<string, number> = {
-      persona: 0,
-      brand: 20,
-      campaign: 30,
-      briefing: 40,
-      audience: 50,
-      product: 60,
-      entity: 70,
-      tone: 80,
-      rule: 85,
-      copy: 90,
-      faq: 95,
-      asset: 100,
-      gallery: 115,
-      knowledge_item: 120,
-      kb_entry: 120,
-      tag: 130,
-      mention: 130,
-    };
     return (data.edges || [])
       .filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id)
       .map((edge) => {
@@ -227,7 +209,7 @@ export default function GraphPageClient() {
           other_label: other?.data?.label || otherId,
           other_type: other?.data?.node_type || other?.data?.content_type || "node",
           other_summary: other?.data?.content_preview || other?.data?.description || "",
-          other_level: Number(other?.data?.level ?? hierarchyRank[String(other?.data?.node_type || other?.data?.content_type || "node")] ?? 999),
+          other_level: getVisualHierarchyRank(String(other?.data?.node_type || other?.data?.content_type || "node")),
         };
       })
       .sort((a, b) => {
@@ -268,7 +250,19 @@ export default function GraphPageClient() {
         return;
       }
       if ((sourceId.startsWith("ki:") || targetId.startsWith("ki:")) && targetType !== "embedded") {
-        setGraphNotice({ tone: "error", text: "Itens pendentes so podem ser conectados diretamente ao node Embedded para aprovacao." });
+        setGraphNotice({ tone: "error", text: "Itens pendentes nao podem ser conectados pelo grafo antes da aprovacao." });
+        return;
+      }
+      if (targetType === "embedded" && sourceType === "knowledge_item") {
+        setGraphNotice({ tone: "error", text: "Aprove o FAQ primeiro. A publicacao no Golden Dataset parte do node FAQ aprovado." });
+        return;
+      }
+      if (targetType === "embedded" && sourceType !== "faq") {
+        setGraphNotice({ tone: "error", text: "Somente nodes FAQ aprovados podem ser publicados no Golden Dataset." });
+        return;
+      }
+      if (targetType === "embedded" && sourceNode?.data?.validated === false) {
+        setGraphNotice({ tone: "error", text: "Aprove o FAQ primeiro. Rascunhos cinza ainda nao podem ir para o Golden Dataset." });
         return;
       }
       const finalReceiverTypes = new Set(["gallery", "embedded"]);
@@ -291,7 +285,16 @@ export default function GraphPageClient() {
           },
         });
         await load();
-        setGraphNotice({ tone: "success", text: finalReceiver ? "Conexao criada para node final." : involvesGallery ? "Node adicionado a Gallery e Assets." : "Conexao criada." });
+        setGraphNotice({
+          tone: "success",
+          text: targetType === "embedded"
+            ? "FAQ publicado no Golden Dataset."
+            : finalReceiver
+              ? "Conexao criada para node final."
+              : involvesGallery
+                ? "Node adicionado a Gallery e Assets."
+                : "Conexao criada.",
+        });
         window.setTimeout(() => setGraphNotice(null), 2200);
       } catch (error) {
         setGraphNotice({
@@ -345,18 +348,24 @@ export default function GraphPageClient() {
 
   const handleDeleteNode = useCallback(
     async (nodeId: string) => {
-      if (!nodeId.startsWith("gn:")) {
+      const node = data?.nodes?.find((item) => item.id === nodeId);
+      const sourceTable = String(node?.data?.source_table || "");
+      const sourceId = String(node?.data?.source_id || node?.data?.item_id || "");
+      if (!nodeId.startsWith("gn:") && !(sourceTable === "knowledge_items" && sourceId)) {
         setGraphNotice({ tone: "error", text: "Este card nao pode ser apagado pela UI." });
         return;
       }
-      const node = data?.nodes?.find((item) => item.id === nodeId);
       const nodeType = String(node?.data?.node_type || "");
       if (["persona", "embedded", "gallery"].includes(nodeType) || node?.data?.protected) {
         setGraphNotice({ tone: "error", text: "Este node e protegido e nao pode ser excluido." });
         return;
       }
       try {
-        await api.deleteGraphNode(nodeId);
+        if (sourceTable === "knowledge_items" && sourceId) {
+          await api.deleteKnowledgeItem(sourceId);
+        } else {
+          await api.deleteGraphNode(nodeId);
+        }
         if (selectedNode?.id === nodeId) setSelectedNode(null);
         await load();
         setGraphNotice({ tone: "success", text: "Card apagado." });
@@ -594,7 +603,7 @@ export default function GraphPageClient() {
             <div className="flex flex-wrap gap-1">
               {data.meta.registry.node_types
                 .filter((t) => !["tag", "mention", "knowledge_item", "kb_entry"].includes(t.node_type) || includeTags || includeMentions || includeTechnical)
-                .sort((a, b) => (a.level ?? 99) - (b.level ?? 99))
+                .sort((a, b) => getVisualHierarchyRank(a.node_type) - getVisualHierarchyRank(b.node_type))
                 .map((t) => (
                   <span
                     key={t.node_type}
@@ -694,6 +703,12 @@ function AddBlockPanel({
         slug: node.data?.slug,
         type: node.data?.node_type || "node",
       }))
+      .sort((a, b) => {
+        const ar = getVisualHierarchyRank(a.type);
+        const br = getVisualHierarchyRank(b.type);
+        if (ar !== br) return ar - br;
+        return a.label.localeCompare(b.label);
+      })
       .slice(0, 120),
     [nodes],
   );
@@ -724,10 +739,9 @@ function AddBlockPanel({
     }
     for (const [key, list] of out) {
       out.set(key, [...list].sort((a, b) => {
-        const typeOrder = ["campaign", "audience", "product", "briefing", "entity", "faq", "copy", "rule", "asset"];
-        const ar = typeOrder.indexOf(a.type);
-        const br = typeOrder.indexOf(b.type);
-        if (ar !== br) return (ar < 0 ? 99 : ar) - (br < 0 ? 99 : br);
+        const ar = getVisualHierarchyRank(a.type);
+        const br = getVisualHierarchyRank(b.type);
+        if (ar !== br) return ar - br;
         return a.label.localeCompare(b.label);
       }));
     }
@@ -735,7 +749,7 @@ function AddBlockPanel({
   }, [edges, graphNodesById]);
   const campaignOptions = useMemo(() => {
     const campaigns = parentOptions.filter((node) => node.type === "campaign");
-    return campaigns.length ? campaigns : parentOptions.filter((node) => ["brand", "campaign", "audience"].includes(node.type));
+    return campaigns.length ? campaigns : parentOptions.filter((node) => ["brand", "campaign", "briefing"].includes(node.type));
   }, [parentOptions]);
   const [contentType, setContentType] = useState("product");
   const [title, setTitle] = useState("");

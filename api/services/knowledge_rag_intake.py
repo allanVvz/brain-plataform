@@ -410,14 +410,9 @@ def _entry_slug(entry: dict, classified: Optional[dict] = None) -> str:
 
 def _default_campaign_entry(persona: dict, run_token: str) -> dict:
     persona_slug = persona.get("slug") or "persona"
-    if persona_slug == "vz-lupas":
-        title = f"Campanha Oakley VZ Lupas [{run_token}]"
-        slug = f"campanha-oakley-vz-lupas-{run_token}"
-        content = "Campanha raiz para organizar publicos, produtos Oakley, beneficios, briefings e FAQs da VZ Lupas."
-    else:
-        title = f"Campanha de Conhecimento [{run_token}]"
-        slug = f"campanha-conhecimento-{persona_slug}-{run_token}"
-        content = f"Campanha raiz para organizar o conhecimento criado para {persona_slug}."
+    title = f"Campanha de Conhecimento [{run_token}]"
+    slug = f"campanha-conhecimento-{persona_slug}-{run_token}"
+    content = f"Campanha raiz para organizar o conhecimento criado para {persona_slug}."
     return {
         "content_type": "campaign",
         "slug": slug,

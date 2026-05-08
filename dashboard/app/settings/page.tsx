@@ -5,6 +5,7 @@ import { Keyboard, Moon, Settings, SlidersHorizontal, Sun } from "lucide-react";
 
 const PAN_KEY_STORAGE = "ai-brain-graph-pan-key";
 const THEME_STORAGE = "ai-brain-theme";
+const GRAPH_NODE_OPACITY_STORAGE = "ai-brain-graph-node-opacity";
 
 type Theme = "clean" | "dark";
 
@@ -19,6 +20,7 @@ function applyTheme(theme: Theme) {
 export default function SettingsPage() {
   const [panKey, setPanKey] = useState("Control");
   const [theme, setTheme] = useState<Theme>("clean");
+  const [graphNodeOpacity, setGraphNodeOpacity] = useState(false);
   const [toggles, setToggles] = useState({
     multiSelect: true,
     advanced: false,
@@ -29,6 +31,7 @@ export default function SettingsPage() {
     setPanKey(window.localStorage.getItem(PAN_KEY_STORAGE) || "Control");
     const saved = (window.localStorage.getItem(THEME_STORAGE) as Theme) || "clean";
     setTheme(saved === "dark" ? "dark" : "clean");
+    setGraphNodeOpacity(window.localStorage.getItem(GRAPH_NODE_OPACITY_STORAGE) === "true");
   }, []);
 
   function updatePanKey(value: string) {
@@ -40,6 +43,12 @@ export default function SettingsPage() {
     const t: Theme = next ? "dark" : "clean";
     setTheme(t);
     applyTheme(t);
+  }
+
+  function toggleGraphNodeOpacity(next: boolean) {
+    setGraphNodeOpacity(next);
+    window.localStorage.setItem(GRAPH_NODE_OPACITY_STORAGE, String(next));
+    window.dispatchEvent(new CustomEvent("ai-brain-graph-appearance-change", { detail: { graphNodeOpacity: next } }));
   }
 
   return (
@@ -107,6 +116,27 @@ export default function SettingsPage() {
             />
           </label>
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
+        <div className="mb-4 flex items-center gap-2">
+          <SlidersHorizontal size={15} className="text-obs-violet" />
+          <h2 className="text-sm font-semibold text-obs-text">Aparência do grafo</h2>
+        </div>
+        <label className="flex items-center justify-between rounded-xl border border-white/10 bg-obs-base/60 px-3 py-2 text-sm">
+          <span>
+            <span className="block text-obs-text">Usar opacidade nos nodes</span>
+            <span className="mt-0.5 block text-xs text-obs-subtle">
+              Mock local: alterna entre nodes glass/translúcidos e nodes preenchidos com maior contraste.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={graphNodeOpacity}
+            onChange={(e) => toggleGraphNodeOpacity(e.target.checked)}
+            className="h-4 w-4 accent-obs-violet"
+          />
+        </label>
       </section>
 
       <section className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">

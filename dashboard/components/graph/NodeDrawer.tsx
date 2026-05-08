@@ -61,7 +61,11 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
 
   // Fetch full item whenever the selected node changes
   useEffect(() => {
-    if (!node || node.type === "personaNode" || !node.data?.item_id || !["vault", "queue"].includes(node.data?.source)) {
+    const graphKnowledgeItem =
+      node?.data?.source === "graph" &&
+      node?.data?.source_table === "knowledge_items" &&
+      !!node?.data?.item_id;
+    if (!node || node.type === "personaNode" || !node.data?.item_id || (!["vault", "queue"].includes(node.data?.source) && !graphKnowledgeItem)) {
       setFullItem(null);
       setEditing(false);
       return;
@@ -97,7 +101,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
   const isPersona  = node.type === "personaNode";
   const isProtected = isPersona || ["persona", "embedded", "gallery"].includes(String(d.node_type || "")) || d.protected === true;
   const isVault    = d.source === "vault";
-  const isQueue    = d.source === "queue";
+  const isQueue    = d.source === "queue" || (d.source === "graph" && d.source_table === "knowledge_items");
   const fileType   = (d.file_type || "").toLowerCase();
   const isImage    = IMAGE_EXTS.has(fileType);
   const isVideo    = VIDEO_EXTS.has(fileType);
@@ -115,6 +119,12 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
   const canValidate = !isProtected && !ALREADY_VALID.has(currentStatus);
   const canReject   = !isProtected && isQueue && currentStatus !== "rejected";
   const canDelete   = !isProtected && String(node.id || "").startsWith("gn:") && !!onDeleteNode;
+  const canPublish  = !isProtected
+    && d.source === "graph"
+    && d.source_table === "knowledge_items"
+    && d.node_type === "faq"
+    && currentStatus === "approved"
+    && !!d.persona_id;
   const audiencePreview = Array.isArray(d.metadata?.preview) ? d.metadata.preview : [];
   const audienceOpenUrl = d.metadata?.open_url || (d.metadata?.lead_import_batch_id ? `/leads/import?open=${d.metadata.lead_import_batch_id}` : "");
 
@@ -149,25 +159,53 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
         await onUpdated?.(d.item_id);
         setFullItem((prev: any) => prev ? { ...prev, status: "ATIVO" } : prev);
       } else {
-        const result = await api.approveItem(d.item_id, true);
+        const result = await api.approveItem(d.item_id, false);
         const evidence = result?.evidence || {};
-        if (!evidence.knowledge_item_id || !evidence.kb_entry_id || !evidence.knowledge_node_id || !evidence.embedded_edge_id) {
-          throw new Error("Aprovacao incompleta: backend nao confirmou item, KB, node e edge Embedded.");
+        if (!evidence.knowledge_item_id || !evidence.knowledge_node_id) {
+          throw new Error("Aprovacao incompleta: backend nao confirmou item e node semantico.");
         }
         const refreshed = await onUpdated?.(d.item_id);
         const expectedNodeId = `gn:${evidence.knowledge_node_id}`;
         const graphNodes = Array.isArray(refreshed?.nodes) ? refreshed.nodes : [];
-        const graphEdges = Array.isArray(refreshed?.edges) ? refreshed.edges : [];
         const nodeExists = graphNodes.some((node: any) => node?.id === expectedNodeId);
-        const embeddedEdgeExists = graphEdges.some((edge: any) => edge?.source === expectedNodeId && String(edge?.target || "").startsWith("embedded:"));
-        if (!nodeExists || !embeddedEdgeExists) {
-          throw new Error("Aprovacao parcial: o grafo nao refletiu o node aprovado conectado ao Embedded.");
+        if (!nodeExists) {
+          throw new Error("Aprovacao parcial: o grafo nao refletiu o node FAQ aprovado.");
         }
-        setFullItem((prev: any) => prev ? { ...prev, ...(result?.item || {}), status: result?.item?.status || "embedded" } : result?.item || prev);
+        setFullItem((prev: any) => prev ? { ...prev, ...(result?.item || {}), status: result?.item?.status || "approved" } : result?.item || prev);
       }
       showFlash("ok");
     } catch { showFlash("err"); }
     finally { setSaving(false); }
+  }
+
+  async function publish() {
+    if (!canPublish) return;
+    setSaving(true);
+    try {
+      const result = await api.createGraphEdge({
+        source_node_id: String(node.id),
+        target_node_id: `embedded:${d.persona_id}`,
+        relation_type: "manual",
+        persona_id: d.persona_id,
+        weight: 0.9,
+        metadata: {
+          created_from: "graph_drawer_publish",
+          direction: "source_to_target",
+          primary_tree: false,
+        },
+      });
+      const evidence = result?.evidence || {};
+      if (!evidence.knowledge_item_id || !evidence.kb_entry_id || !evidence.knowledge_node_id || !evidence.embedded_edge_id) {
+        throw new Error("Publicacao incompleta no Golden Dataset.");
+      }
+      await onUpdated?.(d.item_id);
+      setFullItem((prev: any) => prev ? { ...prev, status: "embedded" } : prev);
+      showFlash("ok");
+    } catch {
+      showFlash("err");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function reject() {
@@ -548,7 +586,18 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
                 className="w-full py-2 text-xs font-medium rounded-lg bg-green-600/80 hover:bg-green-500 disabled:opacity-50 text-white transition-colors flex items-center justify-center gap-1.5"
               >
                 {saving ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
-                {isVault ? "Validar → ATIVO" : "Aprovar e promover à KB"}
+                {isVault ? "Validar entrada" : "Aprovar"}
+              </button>
+            )}
+
+            {canPublish && (
+              <button
+                onClick={publish}
+                disabled={saving}
+                className="w-full py-2 text-xs font-medium rounded-lg bg-obs-violet/10 border border-obs-violet/30 text-obs-violet hover:bg-obs-violet/20 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+              >
+                {saving ? <Loader2 size={11} className="animate-spin" /> : <Tag size={11} />}
+                Publicar no Golden Dataset
               </button>
             )}
 
@@ -600,6 +649,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
           audienceOpenUrl={audienceOpenUrl}
           onClose={() => setExpanded(false)}
           onValidate={canValidate ? validate : undefined}
+          onPublish={canPublish ? publish : undefined}
           onDelete={canDelete ? () => onDeleteNode?.(node.id) : undefined}
           saving={saving}
         />
@@ -762,6 +812,7 @@ function NodeExpandedModal({
   audienceOpenUrl,
   onClose,
   onValidate,
+  onPublish,
   onDelete,
   saving,
 }: {
@@ -775,6 +826,7 @@ function NodeExpandedModal({
   audienceOpenUrl?: string;
   onClose: () => void;
   onValidate?: () => void;
+  onPublish?: () => void;
   onDelete?: () => void | Promise<void>;
   saving: boolean;
 }) {
@@ -851,7 +903,12 @@ function NodeExpandedModal({
         <div className="flex items-center justify-end gap-2 border-t border-white/06 px-6 py-4">
           {onValidate && (
             <button onClick={onValidate} disabled={saving} className="rounded-md bg-green-600 px-4 py-2 text-xs font-medium text-white disabled:opacity-50">
-              Validar e enviar para KB
+              Aprovar
+            </button>
+          )}
+          {onPublish && (
+            <button onClick={onPublish} disabled={saving} className="rounded-md border border-obs-violet/35 bg-obs-violet/15 px-4 py-2 text-xs font-medium text-obs-text disabled:opacity-50">
+              Publicar no Golden Dataset
             </button>
           )}
           {onDelete && (

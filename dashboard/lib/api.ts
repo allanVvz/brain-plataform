@@ -238,6 +238,8 @@ export const api = {
     req<any>(`/knowledge/queue/${id}/approve`, { method: "POST", body: JSON.stringify({ promote_to_kb: promoteToKb }) }),
   rejectItem: (id: string, reason = "") =>
     req<any>(`/knowledge/queue/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
+  deleteKnowledgeItem: (id: string) =>
+    req<any>(`/knowledge/queue/${id}`, { method: "DELETE" }),
   promoteToKb: (id: string) => req<any>(`/knowledge/queue/${id}/to-kb`, { method: "POST" }),
 
   // Knowledge — Upload
@@ -295,8 +297,8 @@ export const api = {
     }
     return req<any>("/kb-intake/message", { method: "POST", body: JSON.stringify({ session_id, message }) });
   },
-  kbIntakeSave: (session_id: string, content = "") =>
-    req<any>("/kb-intake/save", { method: "POST", body: JSON.stringify({ session_id, content }) }),
+  kbIntakeSave: (session_id: string, content = "", plan_override?: any) =>
+    req<any>("/kb-intake/save", { method: "POST", body: JSON.stringify({ session_id, content, plan_override }) }),
   kbIntakeCrawlPreview: (url: string, session_id?: string) =>
     req<any>("/kb-intake/crawl-preview", { method: "POST", body: JSON.stringify({ url, session_id }) }),
 

@@ -54,19 +54,30 @@ _KNOWN_ROLES = {"sdr", "closer", "followup", "maker", "classifier"}
 _VALIDATED_ITEM_STATUSES = {"approved", "embedded", "ativo", "active", "validated"}
 _PENDING_ITEM_STATUSES = {"pending", "needs_persona", "needs_category", "draft"}
 
+# Hierarchy levels for graph layout. Mirrors the operator-facing tree:
+#   Persona (0)
+#     ├── Briefing / Brand / Campaign (10 — top of any capture)
+#     │       └── Audience (20)
+#     │             └── Product / Entity (30)
+#     │                   ├── Copy / FAQ / Asset (40)
+#     │                   ├── Tone / Rule (40 — sibling concerns)
+#     │                   └── Embedded RAG (50, only after approval)
+# Importance scales independently of level so primary types (briefing,
+# product) rank above utility nodes (tag, mention).
 _NODE_HIERARCHY_DEFAULTS: dict[str, tuple[int, float]] = {
     "persona": (0, 1.00),
-    "entity": (10, 0.95),
-    "brand": (20, 0.90),
-    "campaign": (30, 0.80),
-    "product": (40, 0.85),
-    "briefing": (50, 0.75),
-    "audience": (55, 0.70),
-    "copy": (58, 0.84),
-    "tone": (62, 0.70),
-    "rule": (66, 0.80),
-    "faq": (74, 0.64),
-    "asset": (80, 0.55),
+    "briefing": (10, 0.85),
+    "brand": (10, 0.90),
+    "campaign": (10, 0.80),
+    "audience": (20, 0.75),
+    "entity": (30, 0.70),
+    "product": (30, 0.85),
+    "tone": (40, 0.70),
+    "rule": (40, 0.80),
+    "copy": (40, 0.65),
+    "faq": (40, 0.65),
+    "asset": (40, 0.55),
+    "embedded": (50, 0.95),
     "tag": (90, 0.30),
     "mention": (92, 0.25),
     "knowledge_item": (95, 0.40),
@@ -403,7 +414,10 @@ def repair_primary_tree_connections(
             return {"checked": 0, "repaired": 0, "fallback_nodes": []}
         query = query.in_("id", ids)
     nodes = query.limit(5000).execute().data or []
-    nodes = [n for n in nodes if n.get("node_type") != "persona"]
+    nodes = [
+        n for n in nodes
+        if n.get("node_type") not in {"persona", "embedded", "gallery", "tag", "mention"}
+    ]
     if not nodes:
         return {"checked": 0, "repaired": 0, "fallback_nodes": []}
 
@@ -498,6 +512,40 @@ def _resolve_plan_node(
     return node
 
 
+def _candidate_parent_slugs_from_entry(
+    *,
+    entry: dict,
+    item: dict,
+    node: dict,
+) -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+    metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+    tags = entry.get("tags") or item.get("tags") or []
+    if node.get("node_type") == "faq":
+        for raw_tag in tags:
+            tag_slug = _slugify(str(raw_tag or ""))
+            if tag_slug:
+                candidates.append(("product", tag_slug))
+    topic_relations = _topic_relations_for_item(
+        {
+            "title": entry.get("title") or item.get("title"),
+            "content_type": entry.get("content_type") or item.get("content_type"),
+            "tags": tags,
+        },
+        metadata or {},
+        node.get("node_type") or "",
+    )
+    candidates.extend(topic_relations)
+    seen: set[tuple[str, str]] = set()
+    deduped: list[tuple[str, str]] = []
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
 def apply_plan_hierarchy(
     *,
     persona_id: Optional[str],
@@ -570,41 +618,70 @@ def apply_plan_hierarchy(
             or None
         )
         parent_node = _resolve_plan_node(slug=parent_slug, persona_id=persona_id, nodes_by_slug=nodes_by_slug)
+        resolution_mode = "explicit_plan" if parent_slug else "deterministic_fallback"
+        quarantine_reason = None
+        if parent_slug and not parent_node:
+            resolution_mode = "quarantined"
+            quarantine_reason = "missing_explicit_parent"
         if not parent_node:
-            topic_relations = _topic_relations_for_item(
-                {
-                    "title": entry.get("title") or (report["item"] or {}).get("title"),
-                    "content_type": entry.get("content_type") or (report["item"] or {}).get("content_type"),
-                    "tags": entry.get("tags") or (report["item"] or {}).get("tags") or [],
-                },
-                metadata or {},
-                node.get("node_type") or "",
+            candidate_pairs = _candidate_parent_slugs_from_entry(
+                entry=entry,
+                item=report["item"] or {},
+                node=node,
             )
             for preferred_type in _preferred_parent_types(node.get("node_type")):
-                candidate = next((slug for ntype, slug in topic_relations if ntype == preferred_type), None)
-                if not candidate:
+                candidate_slugs = [
+                    slug for ntype, slug in candidate_pairs
+                    if ntype == preferred_type and slug
+                ]
+                candidate_slugs = [slug for slug in dict.fromkeys(candidate_slugs) if slug != child_slug]
+                if len(candidate_slugs) > 1:
+                    resolution_mode = "quarantined"
+                    quarantine_reason = f"ambiguous_{preferred_type}_parent"
+                    break
+                if not candidate_slugs:
                     continue
+                candidate = candidate_slugs[0]
                 parent_node = _resolve_plan_node(slug=candidate, persona_id=persona_id, nodes_by_slug=nodes_by_slug)
                 if parent_node and parent_node.get("id") != node.get("id"):
                     parent_slug = candidate
+                    resolution_mode = "deterministic_fallback"
                     break
+            if resolution_mode == "quarantined":
+                parent_node = None
         relation_type = (
             (explicit or {}).get("relation_type")
             or _default_plan_relation((parent_node or {}).get("node_type"), node.get("node_type"))
         )
-        edge = ensure_main_tree_connection(
-            node,
-            persona_id=persona_id,
-            parent_node_id=(parent_node or {}).get("id"),
-            relation_type=relation_type,
-        )
+        edge = None
+        if resolution_mode != "quarantined":
+            edge = ensure_main_tree_connection(
+                node,
+                persona_id=persona_id,
+                parent_node_id=(parent_node or {}).get("id"),
+                relation_type=relation_type,
+            )
+        node_meta = {
+            **(node.get("metadata") or {}),
+            "resolution_mode": resolution_mode,
+            "quarantine_state": "structural" if resolution_mode == "quarantined" else None,
+            "quarantine_reason": quarantine_reason,
+            "resolved_parent_slug": parent_slug if resolution_mode != "quarantined" else None,
+            "resolved_parent_node_id": (parent_node or {}).get("id") if resolution_mode != "quarantined" else None,
+        }
+        node_meta = {k: v for k, v in node_meta.items() if v is not None}
+        supabase_client.update_knowledge_node(node.get("id"), {"metadata": node_meta})
         report["main_tree_edge"] = edge
         report["parent_node_id"] = (parent_node or {}).get("id")
         report["parent_slug"] = parent_slug or ("self" if not parent_node else None)
+        report["resolution_mode"] = resolution_mode
+        report["quarantine_reason"] = quarantine_reason
         if parent_slug and not parent_node:
             missing_links.append({
                 "target_slug": child_slug,
                 "missing_parent_slug": parent_slug,
+                "resolution_mode": resolution_mode,
+                "quarantine_reason": quarantine_reason,
             })
         elif edge and edge.get("id") and parent_node:
             resolved_links += 1
@@ -618,6 +695,8 @@ def apply_plan_hierarchy(
                 "parent_slug": report.get("parent_slug"),
                 "parent_node_id": report.get("parent_node_id"),
                 "main_tree_edge_id": ((report.get("main_tree_edge") or {}).get("id")),
+                "resolution_mode": report.get("resolution_mode"),
+                "quarantine_reason": report.get("quarantine_reason"),
             }
             for report in items_report
         ],

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from services import knowledge_graph, knowledge_rag_intake, supabase_client
+from services import vault_sync
 
 
 def _resolve_persona(*, persona_id: Optional[str] = None, persona_slug: Optional[str] = None) -> dict:
@@ -219,6 +220,8 @@ def promote_knowledge_item(
         "embedded_edge_id": None,
         "final_status": "approved",
     }
+    if promote_to_kb:
+        raise ValueError("Publication to the Golden Dataset now happens only by connecting an approved FAQ node to Embedded in the graph")
     if not promote_to_kb:
         mirror = knowledge_graph.bootstrap_from_item(
             item,
@@ -233,130 +236,43 @@ def promote_knowledge_item(
         evidence["knowledge_node_id"] = confirmed_node.get("id")
         return {"item": item, "evidence": evidence}
 
-    kb_id = "ki_" + hashlib.md5(
-        f"{item.get('file_path', item['id'])}:{item['persona_id']}".encode()
-    ).hexdigest()[:12]
-    kb_entry = supabase_client.upsert_kb_entry({
-        "kb_id": kb_id,
-        "persona_id": item["persona_id"],
-        "tipo": _content_type_to_tipo(item["content_type"]),
-        "categoria": item["content_type"],
-        "titulo": item["title"],
-        "conteudo": item["content"],
-        "status": "ATIVO",
-        "source": "knowledge_item_promotion",
-        "agent_visibility": update_data["agent_visibility"],
-        "tags": item.get("tags") or [],
-        "embedding_status": "pending",
-    })
-    evidence["kb_entry_id"] = kb_entry.get("id") if kb_entry else None
 
-    metadata = {
-        **(item.get("metadata") or {}),
-        "slug": _slug_from_file_path(item.get("file_path"), item.get("title") or ""),
-        "file_path": item.get("file_path"),
+def delete_knowledge_item_cascade(item_id: str) -> dict:
+    item = supabase_client.get_knowledge_item(item_id)
+    if not item:
+        raise ValueError("Item not found")
+
+    metadata = item.get("metadata") or {}
+    evidence = {
+        "knowledge_item_deleted": False,
+        "knowledge_node_deleted_or_detached": False,
+        "vault_file_deleted": False,
+        "references_cleaned": False,
         "knowledge_item_id": item_id,
-        "kb_entry_id": evidence["kb_entry_id"],
-        "approval_mode": approval_mode,
+        "knowledge_node_id": None,
+        "kb_entry_id": metadata.get("kb_entry_id"),
+        "knowledge_rag_entry_id": metadata.get("knowledge_rag_entry_id"),
+        "file_path": item.get("file_path"),
     }
-    rag_allowed = knowledge_rag_intake.is_rag_eligible(item.get("content_type"))
-    rag_entry = {}
-    chunks: list[dict] = []
-    if rag_allowed:
-        rag_result = knowledge_rag_intake.process_intake(
-            raw_text=item.get("content") or "",
-            persona_id=item["persona_id"],
-            source="knowledge_item_promotion",
-            source_ref=item_id,
-            title=item.get("title"),
-            content_type=item.get("content_type"),
-            tags=item.get("tags") or [],
-            metadata=metadata,
-            validate=True,
-            mirror_graph=False,
-        )
-        rag_entry = rag_result.get("rag_entry") or {}
-        chunks = rag_result.get("chunks") or []
-    item = supabase_client.get_knowledge_item(item_id) or item
-    mirror_node = knowledge_graph.bootstrap_from_item(
-        item,
-        frontmatter=item.get("metadata") or {},
-        body=item.get("content") or "",
-        persona_id=item["persona_id"],
-        source_table="knowledge_items",
-    ) or {}
 
-    # Architectural rule: the FAQ → Embedded edge represents "this item is
-    # live in the agent's RAG retrieval". Only auto-create it when the
-    # approved item is a FAQ (the only RAG-eligible type today). For other
-    # approved types the kb_entry above is still created — the operator can
-    # always drag the edge manually in the graph UI if a non-RAG visual
-    # link is desired.
-    confirmed_node = _confirmed_graph_node_for_item(item) or mirror_node or {}
-    embedded_node = supabase_client.ensure_embedded_node(item["persona_id"])
-    embedded_edge = None
-    if embedded_node and confirmed_node.get("id"):
-        embedded_edge = supabase_client.upsert_knowledge_edge(
-            source_node_id=confirmed_node["id"],
-            target_node_id=embedded_node["id"],
-            relation_type="manual",
-            persona_id=item["persona_id"],
-            weight=0.9,
-            metadata={
-                **(edge_metadata or {}),
-                "created_from": (edge_metadata or {}).get("created_from") or "knowledge_item_promotion",
-                "direction": (edge_metadata or {}).get("direction") or "source_to_target",
-                "primary_tree": False,
-                "approval_mode": approval_mode,
-                "knowledge_item_id": item_id,
-                "kb_entry_id": evidence["kb_entry_id"],
-                "knowledge_rag_entry_id": rag_entry.get("id"),
-                "rag_eligible": rag_allowed,
-            },
-        )
-        embedded_edge = (
-            supabase_client.get_knowledge_edge_between(confirmed_node["id"], embedded_node["id"], relation_type="manual")
-            or embedded_edge
-        )
+    node = _confirmed_graph_node_for_item(item)
+    if node and node.get("id"):
+        evidence["knowledge_node_id"] = node.get("id")
+        supabase_client.delete_knowledge_node(node["id"])
+        evidence["knowledge_node_deleted_or_detached"] = True
 
-    if not kb_entry or not kb_entry.get("id"):
-        raise ValueError("KB promotion not confirmed: kb_entry was not created")
-    if not confirmed_node.get("id"):
-        raise ValueError("KB promotion not confirmed: knowledge_node was not resolved")
-    if not embedded_edge or not embedded_edge.get("id"):
-        raise ValueError("KB promotion not confirmed: embedded edge was not created")
-    if rag_allowed and (not rag_entry.get("id") or not chunks):
-        raise ValueError("KB promotion not confirmed: RAG entry/chunks were not created")
+    rag_entry_id = metadata.get("knowledge_rag_entry_id")
+    if rag_entry_id:
+        supabase_client.delete_knowledge_rag_entry(rag_entry_id)
 
-    supabase_client.update_knowledge_item(item_id, {
-        "status": "embedded",
-        "metadata": {
-            **(item.get("metadata") or {}),
-            "kb_entry_id": evidence["kb_entry_id"],
-            "knowledge_rag_entry_id": rag_entry.get("id"),
-            "knowledge_node_id": confirmed_node.get("id"),
-            "embedded_edge_id": (embedded_edge or {}).get("id"),
-        },
-    })
-    if kb_entry and kb_entry.get("id"):
-        supabase_client.update_kb_entry(kb_entry["id"], {"embedding_status": "created"})
+    kb_entry_id = metadata.get("kb_entry_id")
+    if kb_entry_id:
+        supabase_client.delete_kb_entry(kb_entry_id)
 
-    evidence.update({
-        "knowledge_rag_entry_id": rag_entry.get("id"),
-        "knowledge_rag_chunk_ids": [chunk.get("id") for chunk in chunks if chunk.get("id")],
-        "knowledge_node_id": confirmed_node.get("id"),
-        "main_tree_edge_id": None,
-        "embedded_edge_id": (embedded_edge or {}).get("id"),
-        "final_status": "embedded",
-    })
-    item = supabase_client.get_knowledge_item(item_id) or item
-    return {
-        "item": item,
-        "kb_entry": kb_entry,
-        "rag_entry": rag_entry,
-        "chunks": chunks,
-        "graph_node": confirmed_node,
-        "main_tree_edge": None,
-        "embedded_edge": embedded_edge,
-        "evidence": evidence,
-    }
+    evidence["vault_file_deleted"] = vault_sync.delete_vault_relative_path(item.get("file_path"))
+    evidence["knowledge_item_deleted"] = supabase_client.delete_knowledge_item(item_id)
+    evidence["references_cleaned"] = (
+        evidence["knowledge_item_deleted"]
+        and (evidence["knowledge_node_deleted_or_detached"] or not node)
+    )
+    return evidence

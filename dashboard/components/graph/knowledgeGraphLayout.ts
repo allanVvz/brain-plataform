@@ -46,19 +46,19 @@ type ParentCandidate = {
 };
 
 const EXPECTED_PARENT_TYPES: Record<string, string[]> = {
-  campaign: ["persona", "brand"],
-  briefing: ["product", "audience", "campaign", "brand", "persona"],
-  audience: ["campaign", "brand", "persona", "briefing"],
+  campaign: ["brand", "persona"],
+  briefing: ["campaign", "brand", "persona"],
+  audience: ["briefing", "campaign", "brand", "persona"],
   gallery: ["copy", "faq", "asset", "background", "texture", "product", "campaign", "brand", "persona"],
-  embedded: ["copy", "faq", "asset", "product", "campaign", "brand", "persona"],
-  product: ["audience", "campaign", "briefing", "brand", "persona"],
+  embedded: ["faq"],
+  product: ["audience", "briefing", "campaign", "brand", "persona"],
   faq: ["product", "entity", "audience", "briefing", "campaign", "brand"],
-  copy: ["product", "campaign", "audience", "briefing", "brand"],
-  rule: ["product", "entity", "campaign", "audience", "briefing", "brand"],
-  asset: ["product", "campaign", "audience", "briefing", "brand"],
-  background: ["product", "campaign", "audience", "briefing", "brand"],
-  texture: ["product", "campaign", "audience", "briefing", "brand"],
-  entity: ["audience", "product", "briefing", "campaign", "brand"],
+  copy: ["product", "audience", "briefing", "campaign", "brand"],
+  rule: ["product", "entity", "audience", "briefing", "campaign", "brand"],
+  asset: ["product", "audience", "briefing", "campaign", "brand"],
+  background: ["product", "audience", "briefing", "campaign", "brand"],
+  texture: ["product", "audience", "briefing", "campaign", "brand"],
+  entity: ["product", "audience", "briefing", "campaign", "brand"],
   tone: ["brand", "campaign", "briefing"],
   tag: ["product", "campaign", "brand", "faq", "copy"],
   mention: ["product", "campaign", "brand", "faq", "copy"],
@@ -103,24 +103,29 @@ const HIERARCHY_RANK: Record<string, number> = {
   persona: 0,
   brand: 1,
   campaign: 2,
-  audience: 3,
+  briefing: 3,
+  audience: 4,
+  product: 5,
+  entity: 6,
+  tone: 7,
+  rule: 8,
+  copy: 9,
+  asset: 10,
+  background: 10,
+  texture: 10,
+  faq: 11,
   gallery: 97,
   embedded: 98,
-  product: 4,
-  briefing: 5,
-  entity: 6,
-  faq: 6,
-  copy: 6,
-  rule: 6,
-  asset: 6,
-  background: 6,
-  texture: 6,
-  tone: 6,
   knowledge_item: 98,
   kb_entry: 98,
   tag: 99,
   mention: 99,
 };
+
+export function getVisualHierarchyRank(nodeTypeValue?: string | null): number {
+  const key = String(nodeTypeValue || "").toLowerCase();
+  return HIERARCHY_RANK[key] ?? 50;
+}
 
 function nodeType(node: Node<GraphNodeData>): string {
   return String(node.data?.node_type || node.data?.content_type || "").toLowerCase();
