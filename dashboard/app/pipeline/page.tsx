@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, BarChart3, Boxes, Clock, GitBranch, Maximize2, MessageSquare, RefreshCw, SlidersHorizontal, Tags, Users } from "lucide-react";
+import { Activity, ArrowRight, BarChart3, Boxes, Clock, GitBranch, Maximize2, MessageSquare, RefreshCw, SlidersHorizontal, Tags, Users } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -14,6 +14,7 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "@/lib/api";
+import { summarizeLeadLifecycle } from "@/lib/lead-state";
 
 type PipelineTab = "leads" | "knowledge" | "system";
 type DistributionMode = "stage" | "date" | "tag";
@@ -202,6 +203,10 @@ export default function PipelinePage() {
     () => leads.filter((lead) => inRange(lead.created_at || lead.updated_at || lead.last_update, dateRangeDays)),
     [dateRangeDays, leads],
   );
+  const lifecycle = useMemo(
+    () => summarizeLeadLifecycle(filteredLeads, conversations),
+    [filteredLeads, conversations],
+  );
 
   const distributionData = useMemo(() => {
     const mode = !includeTags && distributionMode === "tag" ? "stage" : distributionMode;
@@ -230,9 +235,12 @@ export default function PipelinePage() {
   }, [filteredLeads, messages]);
 
   const headerMetrics = [
+    { label: "Leads totais", value: lifecycle.total, icon: Users },
+    { label: "Conversas iniciadas", value: lifecycle.started, icon: MessageSquare },
+    { label: "Leads mapeadas", value: lifecycle.mapped, icon: ArrowRight },
     { label: "Conversas", value: conversations.length, icon: MessageSquare },
     { label: "Mensagens totais", value: messages.length, icon: BarChart3 },
-    { label: "Mensagens usuario", value: messages.filter(isUserMessage).length, icon: Users },
+    { label: "Mensagens usuario", value: messages.filter(isUserMessage).length, icon: Activity },
     { label: "Mensagens assistente", value: messages.filter(isAssistantMessage).length, icon: Activity },
     { label: "Latencia media", value: formatLatency(averageResponseLatency(messages)), icon: Clock },
   ];

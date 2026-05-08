@@ -1,9 +1,11 @@
 "use client";
 
 import { ArrowRight, TrendingUp, Users } from "lucide-react";
+import { summarizeLeadLifecycle } from "@/lib/lead-state";
 
 interface LeadsDashboardTabProps {
   leads: any[];
+  conversations?: any[];
 }
 
 const funnelStages = [
@@ -25,7 +27,8 @@ function pct(value: number, total: number) {
   return Math.round((value / total) * 100);
 }
 
-export function LeadsDashboardTab({ leads }: LeadsDashboardTabProps) {
+export function LeadsDashboardTab({ leads, conversations = [] }: LeadsDashboardTabProps) {
+  const lifecycle = summarizeLeadLifecycle(leads, conversations);
   const totalLeads = leads.length;
   const stageCounts = funnelStages.map((stage) => ({
     ...stage,
@@ -36,7 +39,7 @@ export function LeadsDashboardTab({ leads }: LeadsDashboardTabProps) {
 
   return (
     <section className="space-y-6 animate-fade-in">
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-5">
         <div className="rounded-xl border border-white/06 bg-white/[0.035] p-4">
           <div className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-obs-faint">
             <Users size={14} />
@@ -57,6 +60,20 @@ export function LeadsDashboardTab({ leads }: LeadsDashboardTabProps) {
             Em fluxo
           </div>
           <p className="mt-3 text-3xl font-semibold text-obs-violet">{open}</p>
+        </div>
+        <div className="rounded-xl border border-white/06 bg-white/[0.035] p-4">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-obs-faint">
+            <ArrowRight size={14} />
+            Conversas iniciadas
+          </div>
+          <p className="mt-3 text-3xl font-semibold text-emerald-300">{lifecycle.started}</p>
+        </div>
+        <div className="rounded-xl border border-white/06 bg-white/[0.035] p-4">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-obs-faint">
+            <Users size={14} />
+            Leads mapeadas
+          </div>
+          <p className="mt-3 text-3xl font-semibold text-sky-300">{lifecycle.mapped}</p>
         </div>
       </div>
 

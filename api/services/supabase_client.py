@@ -1,5 +1,7 @@
 import os
+import re
 import time
+import unicodedata
 from supabase import create_client, Client
 from typing import Optional
 
@@ -34,7 +36,13 @@ def _is_transient_transport_error(exc: Exception) -> bool:
     return any(marker in text for marker in _TRANSIENT_ERROR_MARKERS)
 
 
-def _execute_with_retry(query, retries: int = 2):
+def _execute_with_retry(query, retries: int = 4):
+    """Run a PostgREST query with exponential backoff on transient transport errors.
+
+    Supabase Edge / PostgREST occasionally drops connections under load
+    ("Server disconnected", "RemoteProtocolError"). Retries with a fresh client
+    have proven to recover most of these without operator-visible failure.
+    """
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
         try:
@@ -44,7 +52,8 @@ def _execute_with_retry(query, retries: int = 2):
             if not _is_transient_transport_error(exc) or attempt >= retries:
                 raise
             _reset_client()
-            time.sleep(0.25 * (attempt + 1))
+            # Backoff: 0.25, 0.5, 1.0, 2.0, 4.0 seconds. Caps at ~7.75s total.
+            time.sleep(min(0.25 * (2 ** attempt), 4.0))
     if last_exc:
         raise last_exc
     return None
@@ -88,19 +97,31 @@ def _one(query) -> Optional[dict]:
 
 
 def _insert_one(query) -> dict:
-    """Execute an insert and return the first row. Returns {} if result.data is None."""
+    """Execute an insert and return the first row.
+
+    Re-raises on any database error so callers see the real cause (CHECK violations,
+    NOT NULL, FK, etc.) instead of receiving a silent {}. Returns {} only when the
+    insert succeeded but PostgREST returned no row data — an anomalous shape that
+    callers can recover from via a follow-up lookup.
+    """
     try:
         result = _execute_with_retry(query)
-        if result is None or not result.data:
-            return {}
-        return result.data[0]
     except Exception as exc:
         try:
             from services import sre_logger
             sre_logger.error("supabase_client", f"insert failed: {exc}", exc)
         except Exception:
             pass
+        raise
+    if result is None or not result.data:
         return {}
+    return result.data[0]
+
+
+def _slugify(value: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower())
+    return text.strip("-") or "item"
 
 
 # ── Leads ──────────────────────────────────────────────────────────────────
@@ -126,6 +147,55 @@ def _resolve_persona_id(persona_slug_or_id: Optional[str]) -> Optional[str]:
         return persona_slug_or_id
     persona = get_persona(persona_slug_or_id)
     return persona.get("id") if persona else None
+
+
+_LEADS_MISSING_COLUMNS: set[str] = set()
+
+
+def _missing_column_from_error(exc: Exception) -> Optional[str]:
+    """Detect PGRST204 'Could not find the X column' and extract column name."""
+    text = str(exc)
+    if "PGRST204" not in text and "schema cache" not in text:
+        return None
+    import re as _re
+    m = _re.search(r"Could not find the '([^']+)' column", text)
+    return m.group(1) if m else None
+
+
+def _strip_known_missing_columns(payload: dict) -> dict:
+    if not _LEADS_MISSING_COLUMNS:
+        return payload
+    return {k: v for k, v in payload.items() if k not in _LEADS_MISSING_COLUMNS}
+
+
+def _execute_lead_write(query_factory, payload: dict, *, max_retries: int = 3) -> Optional[dict]:
+    """Run a leads INSERT/UPDATE, learning and retrying around missing columns.
+
+    Postgres + PostgREST will reject the whole write when any payload key is
+    not in the schema cache (e.g. canal column missing). Instead of swallowing
+    silently, we strip the offending column and retry, so the row still lands.
+    """
+    cleaned = _strip_known_missing_columns(payload)
+    last_exc: Exception | None = None
+    for _ in range(max_retries):
+        try:
+            result = _execute_with_retry(query_factory(cleaned))
+            return result
+        except Exception as exc:
+            missing = _missing_column_from_error(exc)
+            if not missing or missing not in cleaned:
+                last_exc = exc
+                break
+            _LEADS_MISSING_COLUMNS.add(missing)
+            cleaned = {k: v for k, v in cleaned.items() if k != missing}
+            last_exc = exc
+    if last_exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("supabase_client", f"lead write failed: {last_exc}", last_exc)
+        except Exception:
+            pass
+    return None
 
 
 def ensure_lead_for_persona(
@@ -169,6 +239,9 @@ def ensure_lead_for_persona(
         update["stage"] = stage
     if canal:
         update["canal"] = canal
+        # Mirror canal into origem so dashboards filtering by source still
+        # work even when the canal column is absent in the schema cache.
+        update.setdefault("origem", canal)
     if mensagem:
         update["ultima_mensagem"] = mensagem
     if interesse_produto:
@@ -191,11 +264,13 @@ def ensure_lead_for_persona(
             update["persona_id"] = persona_id
         elif current_persona and persona_id and current_persona != persona_id:
             update = {k: v for k, v in update.items() if k in {"last_update", "updated_at", "ultima_mensagem"}}
-        try:
-            result = _execute_with_retry(client.table("leads").update(update).eq("id", existing["id"]))
+        result = _execute_lead_write(
+            lambda payload: client.table("leads").update(payload).eq("id", existing["id"]),
+            update,
+        )
+        if result and getattr(result, "data", None):
             return (result.data or [{**existing, **update}])[0]
-        except Exception:
-            return {**existing, **update}
+        return {**existing, **_strip_known_missing_columns(update)}
 
     payload = {
         **update,
@@ -208,7 +283,14 @@ def ensure_lead_for_persona(
         "created_at": now_iso,
     }
     payload = {k: v for k, v in payload.items() if v is not None}
-    return _insert_one(client.table("leads").insert(payload))
+    payload.setdefault("origem", payload.get("canal"))
+    result = _execute_lead_write(
+        lambda body: client.table("leads").insert(body),
+        payload,
+    )
+    if result and getattr(result, "data", None):
+        return result.data[0]
+    return None
 
 
 def get_leads(persona_slug: Optional[str] = None, limit: int = 100, offset: int = 0) -> list:
@@ -257,6 +339,245 @@ def update_lead(lead_ref: int, data: dict) -> None:
 def get_lead_by_ref(lead_ref: int) -> Optional[dict]:
     """Fetch a lead row by its integer primary key (`leads.id`)."""
     return _one(get_client().table("leads").select("*").eq("id", lead_ref).maybe_single())
+
+
+def get_audiences(persona_id: Optional[str] = None) -> list[dict]:
+    q = get_client().table("audiences").select("*").order("is_system").order("name")
+    if persona_id:
+        q = q.eq("persona_id", persona_id)
+    return _q(q)
+
+
+def get_audience(audience_id: str) -> Optional[dict]:
+    return _one(get_client().table("audiences").select("*").eq("id", audience_id).maybe_single())
+
+
+def get_audience_by_slug(persona_id: str, audience_slug: str) -> Optional[dict]:
+    if not persona_id or not audience_slug:
+        return None
+    return _one(
+        get_client()
+        .table("audiences")
+        .select("*")
+        .eq("persona_id", persona_id)
+        .eq("slug", audience_slug)
+        .maybe_single()
+    )
+
+
+def create_audience(data: dict) -> dict:
+    payload = {
+        "persona_id": data.get("persona_id"),
+        "slug": _slugify(data.get("slug") or data.get("name") or "audience"),
+        "name": data.get("name") or "Audience",
+        "description": data.get("description"),
+        "source_type": data.get("source_type") or "manual",
+        "is_system": bool(data.get("is_system", False)),
+        "created_by_user_id": data.get("created_by_user_id"),
+    }
+    return _insert_one(get_client().table("audiences").insert(payload))
+
+
+def update_audience(audience_id: str, data: dict) -> Optional[dict]:
+    payload = {
+        "name": data.get("name"),
+        "description": data.get("description"),
+        "updated_at": data.get("updated_at"),
+    }
+    if data.get("slug"):
+        payload["slug"] = _slugify(data["slug"])
+    payload = {k: v for k, v in payload.items() if v is not None}
+    if not payload:
+        return get_audience(audience_id)
+    result = _execute_with_retry(get_client().table("audiences").update(payload).eq("id", audience_id))
+    return (result.data or [None])[0] if result else None
+
+
+def ensure_system_audience(
+    persona_id: str,
+    *,
+    slug: str,
+    name: str,
+    description: Optional[str] = None,
+    source_type: str = "manual",
+    created_by_user_id: Optional[str] = None,
+) -> Optional[dict]:
+    existing = get_audience_by_slug(persona_id, slug)
+    payload = {
+        "persona_id": persona_id,
+        "slug": _slugify(slug),
+        "name": name,
+        "description": description,
+        "source_type": source_type,
+        "is_system": True,
+        "created_by_user_id": created_by_user_id,
+    }
+    if existing:
+        return update_audience(existing["id"], payload) or {**existing, **payload}
+    return create_audience(payload)
+
+
+def ensure_import_audience(persona_id: str, created_by_user_id: Optional[str] = None) -> Optional[dict]:
+    return ensure_system_audience(
+        persona_id,
+        slug="import",
+        name="Import",
+        description="Audience padrao para todos os imports CSV/Bulk da persona.",
+        source_type="import",
+        created_by_user_id=created_by_user_id,
+    )
+
+
+def ensure_system_audiences_for_persona(
+    persona_id: Optional[str],
+    *,
+    created_by_user_id: Optional[str] = None,
+) -> dict:
+    """Garante que a persona tenha as audiences system padrao.
+
+    Idempotente: pode ser chamado em qualquer entrypoint (listagem, move,
+    share, login) sem efeito colateral alem de criar a `import` audience caso
+    nao exista. Devolve {'import': <audience_dict_or_None>}.
+
+    Falhas sao silenciadas para que um problema na criacao da audience nao
+    derrube o endpoint chamador. Endpoints continuam funcionando com lista
+    vazia de audiences caso a criacao falhe.
+    """
+    if not persona_id:
+        return {"import": None}
+    try:
+        imp = ensure_import_audience(persona_id, created_by_user_id=created_by_user_id)
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.warn("supabase_client", f"ensure_system_audiences_for_persona failed: {exc}", exc)
+        except Exception:
+            pass
+        imp = None
+    return {"import": imp}
+
+
+def get_lead_memberships(lead_id: int) -> list[dict]:
+    rows = _q(
+        get_client()
+        .table("lead_audience_memberships")
+        .select("id,lead_id,audience_id,membership_type,created_by_user_id,created_at")
+        .eq("lead_id", lead_id)
+        .order("created_at")
+    )
+    if not rows:
+        return []
+    audience_ids = [row.get("audience_id") for row in rows if row.get("audience_id")]
+    audiences_by_id = (
+        {
+            row.get("id"): row
+            for row in _q(get_client().table("audiences").select("*").in_("id", audience_ids))
+        }
+        if audience_ids
+        else {}
+    )
+    return [{**row, "audience": audiences_by_id.get(row.get("audience_id"))} for row in rows]
+
+
+def ensure_lead_membership(
+    lead_id: int,
+    audience_id: str,
+    *,
+    membership_type: str = "primary",
+    created_by_user_id: Optional[str] = None,
+) -> Optional[dict]:
+    if not lead_id or not audience_id:
+        return None
+    payload = {
+        "lead_id": lead_id,
+        "audience_id": audience_id,
+        "membership_type": membership_type,
+        "created_by_user_id": created_by_user_id,
+    }
+    result = _execute_with_retry(
+        get_client().table("lead_audience_memberships").upsert(payload, on_conflict="lead_id,audience_id")
+    )
+    return (result.data or [payload])[0] if result else payload
+
+
+def delete_lead_membership(lead_id: int, audience_id: str) -> None:
+    _execute_with_retry(
+        get_client().table("lead_audience_memberships").delete().eq("lead_id", lead_id).eq("audience_id", audience_id)
+    )
+
+
+def lead_has_membership(lead_id: int, persona_id: str, audience_id: Optional[str] = None) -> bool:
+    rows = _q(
+        get_client()
+        .table("lead_audience_memberships")
+        .select("lead_id,audience_id")
+        .eq("lead_id", lead_id)
+        .limit(500)
+    )
+    if not rows:
+        return False
+    audience_ids = [row.get("audience_id") for row in rows if row.get("audience_id")]
+    if not audience_ids:
+        return False
+    audience_q = get_client().table("audiences").select("id").in_("id", audience_ids).eq("persona_id", persona_id)
+    if audience_id:
+        audience_q = audience_q.eq("id", audience_id)
+    return bool(_q(audience_q.limit(1)))
+
+
+def _audience_ids_for_persona(persona_id: str, audience_id: Optional[str] = None, audience_slug: Optional[str] = None) -> list[str]:
+    if audience_id:
+        audience = get_audience(audience_id)
+        return [audience["id"]] if audience and audience.get("persona_id") == persona_id else []
+    if audience_slug:
+        audience = get_audience_by_slug(persona_id, audience_slug)
+        return [audience["id"]] if audience else []
+    rows = _q(get_client().table("audiences").select("id").eq("persona_id", persona_id))
+    return [row.get("id") for row in rows if row.get("id")]
+
+
+def get_lead_refs_for_audience_scope(
+    *,
+    persona_id: str,
+    audience_id: Optional[str] = None,
+    audience_slug: Optional[str] = None,
+) -> list[int]:
+    audience_ids = _audience_ids_for_persona(persona_id, audience_id=audience_id, audience_slug=audience_slug)
+    if not audience_ids:
+        return []
+    rows = _q(
+        get_client()
+        .table("lead_audience_memberships")
+        .select("lead_id")
+        .in_("audience_id", audience_ids)
+        .limit(5000)
+    )
+    return sorted({int(row["lead_id"]) for row in rows if row.get("lead_id") is not None})
+
+
+def get_leads_for_audience_scope(
+    *,
+    persona_id: str,
+    audience_id: Optional[str] = None,
+    audience_slug: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    lead_refs = get_lead_refs_for_audience_scope(persona_id=persona_id, audience_id=audience_id, audience_slug=audience_slug)
+    if not lead_refs:
+        return []
+    page_refs = lead_refs[offset: offset + limit]
+    if not page_refs:
+        return []
+    rows = _q(
+        get_client()
+        .table("leads")
+        .select("*")
+        .in_("id", page_refs)
+        .order("updated_at", desc=True)
+    )
+    memberships_map = {lead_id: get_lead_memberships(lead_id) for lead_id in page_refs}
+    return [{**row, "memberships": memberships_map.get(row.get("id"), [])} for row in rows]
 
 
 # ── Messages ───────────────────────────────────────────────────────────────
@@ -346,7 +667,7 @@ def _sort_messages_for_chat(rows: list) -> list:
     return sorted(rows, key=key)
 
 
-def get_recent_messages(hours: int = 24, limit: int = 500, persona_id: Optional[str] = None) -> list:
+def get_recent_messages(hours: int = 24, limit: int = 500, persona_id: Optional[str] = None, lead_refs: Optional[list[int]] = None) -> list:
     from datetime import datetime, timedelta
     since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
     client = get_client()
@@ -357,7 +678,11 @@ def get_recent_messages(hours: int = 24, limit: int = 500, persona_id: Optional[
         .order("created_at", desc=True)
         .limit(limit)
     )
-    if persona_id:
+    if lead_refs is not None:
+        if not lead_refs:
+            return []
+        q = q.in_("lead_ref", lead_refs)
+    elif persona_id:
         leads = _q(
             client.table("leads")
             .select("id")
@@ -370,7 +695,7 @@ def get_recent_messages(hours: int = 24, limit: int = 500, persona_id: Optional[
     return _q(q)
 
 
-def get_conversations(hours: int = 168, limit: int = 1000, persona_id: Optional[str] = None) -> list:
+def get_conversations(hours: int = 168, limit: int = 1000, persona_id: Optional[str] = None, lead_refs: Optional[list[int]] = None) -> list:
     """
     Returns the last message per unique conversation.
 
@@ -381,13 +706,18 @@ def get_conversations(hours: int = 168, limit: int = 1000, persona_id: Optional[
     from datetime import datetime, timedelta
     since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
     client = get_client()
-    rows = _q(
+    messages_q = (
         client.table("messages")
         .select("id,nome,lead_ref,Lead_Stage,texto,created_at,direction,sender_type,status")
         .gte("created_at", since)
         .order("created_at", desc=True)
         .limit(limit)
     )
+    if lead_refs is not None:
+        if not lead_refs:
+            return []
+        messages_q = messages_q.in_("lead_ref", lead_refs)
+    rows = _q(messages_q)
     # Group by conversation key (nome → lead_ref → lead_id), keep latest message
     lead_refs = sorted({row.get("lead_ref") for row in rows if row.get("lead_ref") is not None})
     leads_by_ref: dict = {}
@@ -409,7 +739,7 @@ def get_conversations(hours: int = 168, limit: int = 1000, persona_id: Optional[
     for row in rows:
         lead_ref = row.get("lead_ref")
         lead = leads_by_ref.get(lead_ref) or {}
-        if persona_id and lead.get("persona_id") != persona_id:
+        if persona_id and lead.get("persona_id") != persona_id and lead_refs is None:
             continue
         row_name = (row.get("nome") or "").strip()
         if lead_ref is None and row_name.lower() in known_lead_names:
@@ -623,6 +953,47 @@ def ensure_gallery_node(persona_id: str) -> Optional[dict]:
     })
 
 
+def sync_audience_node(audience: dict) -> Optional[dict]:
+    if not audience or not audience.get("persona_id") or not audience.get("id"):
+        return None
+    persona = get_persona_by_id(audience["persona_id"]) or {}
+    node = upsert_knowledge_node({
+        "persona_id": audience["persona_id"],
+        "source_table": "audiences",
+        "source_id": audience["id"],
+        "node_type": "audience",
+        "slug": audience.get("slug") or _slugify(audience.get("name") or "audience"),
+        "title": audience.get("name") or "Audience",
+        "summary": audience.get("description") or "Publico ou grupo operacional de leads.",
+        "tags": ["audience", audience.get("source_type") or "manual"],
+        "metadata": {
+            "audience_id": audience.get("id"),
+            "audience_slug": audience.get("slug"),
+            "source_type": audience.get("source_type"),
+            "is_system": audience.get("is_system"),
+            "open_url": f"/leads?audience={audience.get('slug', '')}",
+            "persona_slug": persona.get("slug"),
+        },
+        "status": "active",
+        "level": 55,
+        "importance": 0.72,
+        "confidence": 1.0,
+    })
+    # Lazy import to avoid circular dependency between supabase_client and knowledge_graph
+    from services import knowledge_graph as _kg
+    persona_root = _kg._ensure_persona_root(audience["persona_id"])
+    if node and persona_root:
+        upsert_knowledge_edge(
+            source_node_id=persona_root["id"],
+            target_node_id=node["id"],
+            relation_type="contains",
+            persona_id=audience["persona_id"],
+            weight=1,
+            metadata={"primary_tree": True, "created_from": "audiences"},
+        )
+    return node
+
+
 def ensure_embedded_node(persona_id: str) -> Optional[dict]:
     """Ensure a protected Embedded/KB destination node exists for a persona."""
     if not persona_id:
@@ -813,6 +1184,89 @@ def get_knowledge_edge(edge_id: str) -> Optional[dict]:
     if not edge_id:
         return None
     return _one(get_client().table("knowledge_edges").select("*").eq("id", edge_id).maybe_single())
+
+
+def get_knowledge_node_for_source(
+    source_table: str,
+    source_id: str,
+    *,
+    persona_id: Optional[str] = None,
+) -> Optional[dict]:
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING or not source_table or not source_id:
+        return None
+    try:
+        q = (
+            get_client().table("knowledge_nodes")
+            .select("*")
+            .eq("source_table", source_table)
+            .eq("source_id", source_id)
+        )
+        if persona_id:
+            q = q.eq("persona_id", persona_id)
+        return _one(q.maybe_single())
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return None
+        raise
+
+
+def get_knowledge_node_by_slug(
+    slug: str,
+    *,
+    persona_id: Optional[str] = None,
+    node_type: Optional[str] = None,
+) -> Optional[dict]:
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING or not slug:
+        return None
+    try:
+        q = get_client().table("knowledge_nodes").select("*").eq("slug", slug)
+        if persona_id:
+            q = q.eq("persona_id", persona_id)
+        if node_type:
+            q = q.eq("node_type", node_type)
+        rows = _q(q.limit(20))
+        for row in rows:
+            if row.get("status") != "deleted":
+                return row
+        return rows[0] if rows else None
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return None
+        raise
+
+
+def get_knowledge_edge_between(
+    source_node_id: str,
+    target_node_id: str,
+    *,
+    relation_type: Optional[str] = None,
+) -> Optional[dict]:
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING or not source_node_id or not target_node_id:
+        return None
+    try:
+        q = (
+            get_client().table("knowledge_edges")
+            .select("*")
+            .eq("source_node_id", source_node_id)
+            .eq("target_node_id", target_node_id)
+        )
+        if relation_type:
+            q = q.eq("relation_type", relation_type)
+        rows = _q(q.limit(5))
+        for row in rows:
+            if not _edge_is_inactive(row):
+                return row
+        return rows[0] if rows else None
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return None
+        raise
 
 
 def delete_knowledge_node(node_id: str) -> bool:
@@ -1100,6 +1554,44 @@ def sync_embedded_kb_node(node: dict, edge: dict) -> Optional[dict]:
         "tags": tags,
     })
     if entry:
+        # Architectural rule (README "KB vs RAG"): the KB Validada surface
+        # (kb_entries) accepts every approved node type, but the vector RAG
+        # layer (knowledge_rag_entries / knowledge_rag_chunks) is FAQ-only
+        # today. Gate behind knowledge_rag_intake.is_rag_eligible so future
+        # widening is a single-helper change.
+        from services import knowledge_rag_intake as _rag_intake
+        if _rag_intake.is_rag_eligible(node_type):
+            rag_entry = upsert_knowledge_rag_entry({
+                "persona_id": persona_id,
+                "artifact_id": metadata.get("artifact_id"),
+                "content_type": "faq",
+                "semantic_level": int(node.get("level") or 50),
+                "title": title,
+                "content": content,
+                "summary": node.get("summary") or content[:280],
+                "canonical_key": f"kb:{persona_id}:{kb_id}",
+                "slug": _slugify(title),
+                "status": "active",
+                "tags": tags,
+                "products": [title] if node_type == "product" else [],
+                "campaigns": [title] if node_type == "campaign" else [],
+                "metadata": {
+                    **metadata,
+                    "kb_entry_id": entry.get("id"),
+                    "knowledge_node_id": node.get("id"),
+                    "graph_edge_id": edge.get("id"),
+                    "node_type": node_type,
+                    "original_node_type": node_type,
+                },
+                "confidence": float(node.get("confidence") or 0.8),
+                "importance": float(node.get("importance") or 0.7),
+            })
+            if rag_entry and rag_entry.get("id"):
+                replace_knowledge_rag_chunks(
+                    rag_entry["id"],
+                    persona_id,
+                    [{"chunk_text": content, "chunk_summary": (node.get("summary") or title)[:280], "metadata": {"source": "graph_embed"}}],
+                )
         try:
             from services import knowledge_graph
             knowledge_graph.bootstrap_from_item(
@@ -1542,15 +2034,128 @@ def search_kb(query_embedding: list, persona_id: Optional[str] = None, top_k: in
 
 # ── Agent Logs ─────────────────────────────────────────────────────────────
 
+_AGENT_LOGS_SCHEMA_MODE: Optional[str] = None
+
+
+def _detect_agent_logs_schema_mode() -> str:
+    global _AGENT_LOGS_SCHEMA_MODE
+    if _AGENT_LOGS_SCHEMA_MODE:
+        return _AGENT_LOGS_SCHEMA_MODE
+    client = get_client()
+    try:
+        client.table("agent_logs").select("agent_type").limit(1).execute()
+        _AGENT_LOGS_SCHEMA_MODE = "modern"
+        return _AGENT_LOGS_SCHEMA_MODE
+    except Exception as exc:
+        text = str(exc)
+        if "agent_type" in text and ("does not exist" in text or "42703" in text):
+            _AGENT_LOGS_SCHEMA_MODE = "legacy"
+            return _AGENT_LOGS_SCHEMA_MODE
+    try:
+        client.table("agent_logs").select("agent_name").limit(1).execute()
+        _AGENT_LOGS_SCHEMA_MODE = "legacy"
+    except Exception:
+        _AGENT_LOGS_SCHEMA_MODE = "modern"
+    return _AGENT_LOGS_SCHEMA_MODE
+
+
+def _normalize_agent_log_row(row: dict) -> dict:
+    if not isinstance(row, dict):
+        return {}
+    if "agent_type" in row or "action" in row or "decision" in row:
+        meta = row.get("metadata") or {}
+        return {
+            **row,
+            "agent_type": row.get("agent_type") or meta.get("component") or row.get("agent_name"),
+            "action": row.get("action") or meta.get("message") or "",
+            "decision": row.get("decision") or meta.get("traceback") or row.get("error_msg") or "",
+            "metadata": meta,
+            "level": meta.get("level") or ("ERROR" if str(row.get("action") or "").startswith("[ERROR]") else "INFO"),
+            "component": meta.get("component") or row.get("agent_type") or row.get("agent_name") or "",
+            "message": meta.get("message") or row.get("action") or "",
+            "traceback": meta.get("traceback") or row.get("decision") or "",
+            "ts": meta.get("ts") or row.get("created_at") or "",
+        }
+
+    output = row.get("output") if isinstance(row.get("output"), dict) else {}
+    input_payload = row.get("input") if isinstance(row.get("input"), dict) else {}
+    status = str(row.get("status") or "success").lower()
+    level = "ERROR" if status in {"error", "timeout", "warn", "warning"} or row.get("error_msg") else "INFO"
+    message = row.get("error_msg") or output.get("reply") or output.get("summary") or status
+    metadata = {
+        "level": level,
+        "component": row.get("agent_name") or "agent",
+        "message": message,
+        "traceback": row.get("error_msg") or "",
+        "ts": row.get("created_at"),
+        "input": input_payload,
+        "output": output,
+        "latency_ms": row.get("latency_ms"),
+        "model_used": row.get("model_used"),
+        "legacy_schema": True,
+    }
+    return {
+        **row,
+        "agent_type": row.get("agent_name") or "agent",
+        "action": f"[{level}] {str(message)[:200]}",
+        "decision": row.get("error_msg") or json.dumps(output or input_payload, ensure_ascii=False)[:500],
+        "metadata": metadata,
+        "level": level,
+        "component": row.get("agent_name") or "agent",
+        "message": message,
+        "traceback": row.get("error_msg") or "",
+        "ts": row.get("created_at") or "",
+    }
+
+
 def insert_agent_log(data: dict) -> None:
-    _execute_with_retry(get_client().table("agent_logs").insert(data))
+    payload = dict(data or {})
+    mode = _detect_agent_logs_schema_mode()
+    if mode == "legacy":
+        meta = payload.get("metadata") or {}
+        level = str(
+            meta.get("level")
+            or ("ERROR" if str(payload.get("action") or "").startswith("[ERROR]") else "INFO")
+        ).lower()
+        legacy_payload = {
+            "lead_id": payload.get("lead_id"),
+            "persona_id": payload.get("persona_id"),
+            "agent_name": payload.get("agent_type") or payload.get("agent_name") or meta.get("component") or "agent",
+            "input": payload.get("input") if isinstance(payload.get("input"), dict) else (meta.get("input") or {}),
+            "output": payload.get("output") if isinstance(payload.get("output"), dict) else {
+                "action": payload.get("action"),
+                "decision": payload.get("decision"),
+                "metadata": meta,
+            },
+            "latency_ms": payload.get("latency_ms") or meta.get("latency_ms"),
+            "model_used": payload.get("model_used") or meta.get("model_used"),
+            "status": "error" if level == "error" else ("timeout" if level == "timeout" else "success"),
+            "error_msg": payload.get("decision") if level == "error" else payload.get("error_msg"),
+        }
+        _execute_with_retry(get_client().table("agent_logs").insert(legacy_payload))
+        return
+    _execute_with_retry(get_client().table("agent_logs").insert(payload))
 
 
 def get_agent_logs(lead_id: Optional[str] = None, limit: int = 50) -> list:
     q = get_client().table("agent_logs").select("*").order("created_at", desc=True).limit(limit)
     if lead_id:
         q = q.eq("lead_id", lead_id)
-    return _q(q)
+    rows = _q(q)
+    return [_normalize_agent_log_row(row) for row in rows]
+
+
+def get_error_logs(component: Optional[str] = None, limit: int = 100) -> list:
+    rows = get_agent_logs(limit=limit)
+    filtered = []
+    for row in rows:
+        level = str(row.get("level") or "").upper()
+        if level not in {"ERROR", "WARN", "WARNING"}:
+            continue
+        if component and str(row.get("component") or row.get("agent_type") or "").lower() != component.lower():
+            continue
+        filtered.append(row)
+    return filtered
 
 
 # ── n8n Executions Mirror ──────────────────────────────────────────────────
@@ -1635,13 +2240,105 @@ def get_knowledge_item(item_id: str) -> Optional[dict]:
     return _one(get_client().table("knowledge_items").select("*").eq("id", item_id).maybe_single())
 
 
+def normalize_file_path(file_path: Optional[str]) -> Optional[str]:
+    if not file_path:
+        return None
+    normalized = str(file_path).replace("\\", "/").strip()
+    while "//" in normalized:
+        normalized = normalized.replace("//", "/")
+    return normalized
+
+
 def get_knowledge_item_by_path(file_path: str) -> Optional[dict]:
-    return _one(
+    exact = _one(
         get_client().table("knowledge_items")
-        .select("id,content,status")
+        .select("*")
         .eq("file_path", file_path)
         .maybe_single()
     )
+    normalized = normalize_file_path(file_path)
+    if exact or not normalized or normalized == file_path:
+        return exact
+    return _one(
+        get_client().table("knowledge_items")
+        .select("*")
+        .eq("file_path", normalized)
+        .maybe_single()
+    )
+
+
+# Mirrors the CHECK constraint on knowledge_items.content_type from
+# supabase/migrations/002_knowledge_platform.sql. Keep in sync if the constraint changes.
+KNOWLEDGE_ITEM_CONTENT_TYPES: frozenset[str] = frozenset({
+    "brand", "briefing", "product", "campaign", "copy", "asset",
+    "prompt", "faq", "maker_material", "tone", "competitor",
+    "audience", "rule", "other",
+})
+
+KNOWLEDGE_ITEM_STATUSES: frozenset[str] = frozenset({
+    "pending", "approved", "rejected", "embedded",
+})
+
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def validate_knowledge_item_payload(payload: dict) -> list[str]:
+    """Return a list of contract violations for a knowledge_items insert payload.
+
+    Empty list = payload is safe to send to the DB. Mirrors NOT NULL, CHECK and
+    foreign-key shape requirements from the schema.
+    """
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        return ["payload must be a dict"]
+
+    persona_id = payload.get("persona_id")
+    if not persona_id:
+        errors.append("persona_id is required")
+    elif not isinstance(persona_id, str) or not _UUID_RE.match(persona_id):
+        errors.append(f"persona_id must be a UUID string, got {persona_id!r}")
+
+    source_id = payload.get("source_id")
+    if not source_id:
+        errors.append("source_id is required")
+    elif not isinstance(source_id, str) or not _UUID_RE.match(source_id):
+        errors.append(f"source_id must be a UUID string, got {source_id!r}")
+
+    content_type = payload.get("content_type")
+    if not content_type:
+        errors.append("content_type is required")
+    elif content_type not in KNOWLEDGE_ITEM_CONTENT_TYPES:
+        errors.append(
+            f"content_type {content_type!r} not allowed; expected one of "
+            f"{sorted(KNOWLEDGE_ITEM_CONTENT_TYPES)}"
+        )
+
+    title = payload.get("title")
+    if not isinstance(title, str) or len(title.strip()) < 3:
+        errors.append("title must be a non-empty string of at least 3 chars")
+
+    content = payload.get("content")
+    if not isinstance(content, str) or not content.strip():
+        errors.append("content must be a non-empty string")
+
+    if "tags" in payload and payload["tags"] is not None and not isinstance(payload["tags"], list):
+        errors.append(f"tags must be a list, got {type(payload['tags']).__name__}")
+
+    if "agent_visibility" in payload and payload["agent_visibility"] is not None and not isinstance(payload["agent_visibility"], list):
+        errors.append(
+            f"agent_visibility must be a list, got {type(payload['agent_visibility']).__name__}"
+        )
+
+    if "metadata" in payload and payload["metadata"] is not None and not isinstance(payload["metadata"], dict):
+        errors.append(f"metadata must be a dict, got {type(payload['metadata']).__name__}")
+
+    status = payload.get("status")
+    if status is not None and status not in KNOWLEDGE_ITEM_STATUSES:
+        errors.append(
+            f"status {status!r} not allowed; expected one of {sorted(KNOWLEDGE_ITEM_STATUSES)}"
+        )
+
+    return errors
 
 
 def insert_knowledge_item(data: dict) -> dict:
@@ -1954,13 +2651,10 @@ def get_pipeline_metrics(persona_id: Optional[str] = None) -> dict:
     approved_rows = _q(approved_q)
     kb_rows = _q(kb_q)
     asset_rows = _q(asset_q)
-    # Recent errors from agent_logs (works even if system_events is missing)
-    error_rows = _q(
-        client.table("agent_logs")
-        .select("id")
-        .like("action", "[ERROR]%")
-        .gte("created_at", today)
-    )
+    error_rows = [
+        row for row in get_error_logs(limit=500)
+        if str(row.get("created_at") or row.get("ts") or "") >= today
+    ]
 
     return {
         "pending_attention": len(attention_rows),

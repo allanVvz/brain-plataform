@@ -75,21 +75,34 @@ export default function IntakePage() {
   const [saveResult, setSaveResult] = useState<any>(null);
   const [contentText, setContentText] = useState("");
   const [showContentInput, setShowContentInput] = useState(false);
+  const [resumeSummary, setResumeSummary] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const autoStartedRef = useRef(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    if (autoStartedRef.current || sessionId || stage !== "idle" || loading || file) return;
+    autoStartedRef.current = true;
+    void startSession();
+  }, [sessionId, stage, loading, file]);
 
   async function startSession() {
     setLoading(true);
     try {
       const data = await api.kbIntakeStart(model);
       setSessionId(data.session_id);
-      setMessages([{ role: "assistant", content: data.welcome }]);
-      setStage("chatting");
+      setMessages(data.bootstrap_message ? [{ role: "assistant", content: data.bootstrap_message }] : []);
+      setStage(data.stage || "chatting");
+      setCls(data.classification || {
+        persona_slug: null, content_type: null,
+        asset_type: null, asset_function: null, title: null,
+      });
+      setResumeSummary(data.resume_summary || null);
     } finally {
       setLoading(false);
     }
@@ -143,6 +156,7 @@ export default function IntakePage() {
   }
 
   function reset() {
+    autoStartedRef.current = false;
     setSessionId(null);
     setMessages([]);
     setInput("");
@@ -152,6 +166,7 @@ export default function IntakePage() {
     setSaveResult(null);
     setContentText("");
     setShowContentInput(false);
+    setResumeSummary(null);
   }
 
   const allFilled =
@@ -200,6 +215,12 @@ export default function IntakePage() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+          {resumeSummary && (
+            <div className="bg-brain-bg border border-brain-accent/20 rounded-xl px-3.5 py-2.5 text-xs text-white whitespace-pre-wrap">
+              <p className="text-brain-accent font-medium mb-1">Retomada automatica da Sofia</p>
+              {resumeSummary}
+            </div>
+          )}
           {stage === "idle" && (
             <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
               <Bot size={40} className="text-brain-accent/50" />

@@ -15,7 +15,7 @@ _ANTI_PATTERNS = [
             "Em qualquer restart do n8n, toda a KB é apagada. "
             "Durante o rebuild (30-60s/hora), queries retornam vazio."
         ),
-        "recommendation": "Migrar KB para Supabase pgvector (já suportado no AI Brain).",
+        "recommendation": "Migrar KB para Supabase pgvector (já suportado no Brain AI).",
         "affected_component": "KB Update Tock / Simple Vector Store",
         "score_impact": -15,
     },
@@ -28,7 +28,7 @@ _ANTI_PATTERNS = [
             "Os agentes SDR e Closer usam tabelas chat_history em conexões Postgres distintas "
             "com janelas diferentes (10 msgs vs 30 msgs), criando inconsistência de contexto."
         ),
-        "recommendation": "Centralizar histórico na tabela messages do Supabase. AI Brain lê diretamente.",
+        "recommendation": "Centralizar histórico na tabela messages do Supabase. Brain AI lê diretamente.",
         "affected_component": "Memory Conversacional / Classifier Agent",
         "score_impact": -8,
     },
@@ -52,7 +52,7 @@ _DUPLICATE_ROUTING = {
         "O route_hint é computado pelo Classifier Agent, sobrescrito pelo Compute Score & Tags "
         "e novamente ajustado pelo Finalize Funnel Decision. Três pontos de decisão para a mesma variável."
     ),
-    "recommendation": "Centralizar routing no AI Brain (decision_engine.py). n8n só recebe o resultado.",
+    "recommendation": "Centralizar routing no Brain AI (decision_engine.py). n8n só recebe o resultado.",
     "affected_component": "Classifier Agent / Compute Score & Tags / Finalize Funnel Decision",
     "score_impact": -8,
 }
@@ -100,7 +100,7 @@ def analyze(persona_id: Optional[str] = None) -> list[dict]:
                 "O mapeamento de stages (ex: 'contatado' → 'Contato Inicial') está espalhado "
                 "em múltiplos nodes como expressões inline. Qualquer mudança exige editar N lugares."
             ),
-            "recommendation": "Centralizar enum de stages em tabela Supabase ou constante no AI Brain.",
+            "recommendation": "Centralizar enum de stages em tabela Supabase ou constante no Brain AI.",
             "affected_component": "Midware Crm / Edit Fields nodes",
             "score_impact": -5,
         })

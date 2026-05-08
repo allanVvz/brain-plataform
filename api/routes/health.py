@@ -7,7 +7,7 @@ router = APIRouter(tags=["health"])
 
 @router.get("/")
 def root():
-    return {"name": "AI Brain", "version": "1.0.0", "status": "ok", "docs": "/docs"}
+    return {"name": "Brain AI", "version": "1.0.0", "status": "ok", "docs": "/docs"}
 
 
 @router.get("/health")

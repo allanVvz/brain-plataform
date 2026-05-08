@@ -29,6 +29,7 @@ Execution strategy:
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
 import json
 import os
 import re
@@ -47,6 +48,13 @@ CATALOG_URL = "https://tockfatal.com/pages/catalogo-modal"
 
 API_BASE = os.environ.get("API_BASE", "http://localhost:8000").rstrip("/")
 DASHBOARD_BASE = os.environ.get("DASHBOARD_BASE", "http://localhost:3000").rstrip("/")
+
+# Auth-aware HTTP layer (added after migration 018: every API route except
+# /health, /auth/login, /auth/logout, /process/* now requires a session
+# cookie). We keep one cookiejar for the whole test run so a single login
+# call upfront authenticates every subsequent http_json call.
+_COOKIE_JAR = http.cookiejar.CookieJar()
+_HTTP_OPENER = request.build_opener(request.HTTPCookieProcessor(_COOKIE_JAR))
 
 
 class TestFailure(Exception):
@@ -70,7 +78,7 @@ def http_json(method: str, path: str, *, params: dict | None = None, body: dict 
         headers["Content-Type"] = "application/json"
     req = request.Request(url, data=data, headers=headers, method=method)
     try:
-        with request.urlopen(req, timeout=timeout) as resp:
+        with _HTTP_OPENER.open(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else None
     except error.HTTPError as exc:
@@ -78,6 +86,31 @@ def http_json(method: str, path: str, *, params: dict | None = None, body: dict 
         raise TestFailure(f"{method} {path} -> HTTP {exc.code}: {detail}") from exc
     except error.URLError as exc:
         raise TestFailure(f"{method} {path} -> connection failed: {exc}") from exc
+
+
+def login(report: dict, identifier: str, password: str) -> dict:
+    """Authenticate against /auth/login and store the session cookie in the
+    shared cookie jar so every subsequent http_json call carries it.
+
+    Required since migration 018_auth_users_permissions: the API rejects
+    unauthenticated requests to /personas, /knowledge/*, /kb-intake/*, etc.
+    """
+    if not identifier or not password:
+        raise TestFailure(
+            "auth credentials missing — pass --admin-email/--admin-password "
+            "or set ADMIN_EMAIL / ADMIN_PASSWORD env vars"
+        )
+    session = http_json(
+        "POST",
+        "/auth/login",
+        body={"identifier": identifier, "password": password, "remember": False},
+        timeout=20,
+    )
+    user = (session or {}).get("user") or {}
+    expect(report, bool(user.get("id")), f"auth login ok ({identifier})", {"role": user.get("role")})
+    cookie_present = any(c.name == "ai_brain_session" for c in _COOKIE_JAR)
+    expect(report, cookie_present, "session cookie stored in jar")
+    return session
 
 
 def expect(report: dict, condition: bool, message: str, details: Any = None) -> None:
@@ -498,7 +531,16 @@ def create_and_promote(report: dict, persona_id: str, specs: list[dict[str, Any]
                 "submitted_by": "e2e",
                 "validate": True,
             }, timeout=90)
-            expect(report, bool((result.get("rag_entry") or {}).get("id")), f"created RAG {spec['content_type']} {spec['slug']}")
+            # FAQ-only RAG gate (README "KB vs RAG"): non-FAQ types create a
+            # graph_node but skip knowledge_rag_entries. Validate against
+            # graph_node, not rag_entry.
+            graph_id = (result.get("graph_node") or {}).get("id")
+            expect(report, bool(graph_id), f"created graph node for {spec['content_type']} {spec['slug']}")
+            expect(
+                report,
+                result.get("rag_eligible") is False and result.get("rag_entry") is None,
+                f"{spec['content_type']} correctly skipped RAG (FAQ-only gate)",
+            )
             created.append({"spec": spec, "rag": result})
             continue
 
@@ -620,6 +662,16 @@ def main() -> int:
     parser.add_argument("--skip-browser", action="store_true")
     parser.add_argument("--screenshot-only", action="store_true", help="Only validate graph and capture browser evidence for an existing run token")
     parser.add_argument("--headed", action="store_true")
+    parser.add_argument(
+        "--admin-email",
+        default=os.environ.get("ADMIN_EMAIL") or os.environ.get("AI_BRAIN_SEED_ADMIN_EMAIL"),
+        help="Email/identifier for /auth/login (required since auth migration 018)",
+    )
+    parser.add_argument(
+        "--admin-password",
+        default=os.environ.get("ADMIN_PASSWORD") or os.environ.get("AI_BRAIN_SEED_ADMIN_PASSWORD"),
+        help="Password for /auth/login (required since auth migration 018)",
+    )
     args = parser.parse_args()
 
     run_token = slugify(args.run_token)
@@ -647,6 +699,7 @@ def main() -> int:
         print(f"\n== E2E Tock Fatal Bulk 20 ({run_token}) ==")
         health = http_json("GET", "/health")
         expect(report, health.get("status") == "ok", "backend health ok")
+        login(report, args.admin_email, args.admin_password)
         persona = resolve_persona(report)
         specs = knowledge_specs(run_token)
         report["planned_entries"] = [{"type": s["content_type"], "slug": s["slug"], "title": s["title"]} for s in specs]

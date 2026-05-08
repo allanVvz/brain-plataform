@@ -247,11 +247,19 @@ function displayName(lead: Lead | null, msg?: Message): string {
   );
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function StageBadge({ stage }: { stage: string | null }) {
   return (
-    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border bg-white/60 ${stageColor(stage)}`}>
+    <span
+      className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${stageColor(stage)}`}
+      style={{ background: "rgba(255,255,255,0.7)" }}
+    >
       {stage || "novo"}
     </span>
   );
@@ -527,7 +535,7 @@ function NodePill({
       style={{
         background: active ? "rgba(124,111,255,0.22)" : "rgba(124,111,255,0.10)",
         border: `1px solid ${active ? "rgba(124,111,255,0.65)" : "rgba(124,111,255,0.30)"}`,
-        color: "#dcd9ff",
+        color: "rgb(var(--obs-text))",
       }}
     >
       <div className="flex items-center gap-1 min-w-0">
@@ -542,7 +550,7 @@ function NodePill({
       {facts.length > 0 && (
         <div className="mt-1 flex flex-wrap gap-1">
           {facts.map((fact) => (
-            <span key={fact} className="rounded border border-black/10 bg-white/60 px-1.5 py-0.5 text-[10px] text-obs-subtle">
+            <span key={fact} className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-obs-subtle [background:rgba(255,255,255,0.7)]">
               {fact}
             </span>
           ))}
@@ -577,7 +585,7 @@ function SimilarCard({
       style={{
         background: active ? "rgba(34,211,238,0.18)" : "rgba(34,211,238,0.08)",
         border: `1px solid ${active ? "rgba(34,211,238,0.55)" : "rgba(34,211,238,0.22)"}`,
-        color: "#d8fbff",
+        color: "rgb(var(--obs-text))",
       }}
     >
       <div className="flex items-center gap-1 min-w-0">
@@ -610,8 +618,8 @@ function KbCard({
       onClick={() => onSelect(id)}
       className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
       style={{
-        background: active ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.72)",
-        border: `1px solid ${active ? "rgba(255,255,255,0.20)" : "rgba(20,20,40,0.08)"}`,
+        background: active ? "rgba(20,20,40,0.05)" : "rgba(255,255,255,0.72)",
+        border: `1px solid ${active ? "rgba(20,20,40,0.18)" : "var(--border-glass)"}`,
       }}
     >
       <div className="flex items-center gap-1 min-w-0">
@@ -639,7 +647,7 @@ function AssetCard({ asset }: { asset: KnowledgeAsset }) {
       target="_blank"
       rel="noopener noreferrer"
       className="block rounded-md overflow-hidden text-xs hover:opacity-90 transition"
-      style={{ background: "rgba(255,255,255,0.72)", border: "1px solid rgba(20,20,40,0.08)" }}
+      style={{ background: "rgba(255,255,255,0.78)", border: "1px solid var(--border-glass)" }}
     >
       {isImage ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -681,7 +689,7 @@ function RelationCard({
       type="button"
       onClick={handleClick}
       className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
-      style={{ background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.08)" }}
+      style={{ background: "rgba(255,255,255,0.72)", border: "1px solid var(--border-glass)" }}
     >
       <div className="flex items-center gap-1 min-w-0">
         <p className="font-medium text-obs-text truncate">{source?.title || edge.source_node_id || "origem"}</p>
@@ -792,7 +800,10 @@ function KnowledgeDetail({
       {kb && (kb.conteudo || "").trim() && (
         <div>
           <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1">Conteúdo</p>
-          <pre className="text-[11px] text-obs-subtle whitespace-pre-wrap break-words bg-white/4 border border-white/8 rounded-md p-2 leading-relaxed font-mono max-h-56 overflow-y-auto">
+          <pre
+            className="text-[11px] text-obs-subtle whitespace-pre-wrap break-words rounded-md p-2 leading-relaxed font-mono max-h-56 overflow-y-auto"
+            style={{ background: "rgba(255,255,255,0.72)", border: "1px solid var(--border-glass)" }}
+          >
             {kb.conteudo}
           </pre>
         </div>
@@ -805,7 +816,7 @@ function KnowledgeDetail({
             {facts.map((f) => (
               <span
                 key={f}
-                className="rounded border border-black/10 bg-white/60 px-1.5 py-0.5 text-[10px] text-obs-subtle"
+                className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-obs-subtle [background:rgba(255,255,255,0.7)]"
               >
                 {f}
               </span>
@@ -856,7 +867,8 @@ function KnowledgeDetail({
             return (
               <div
                 key={`out-${relationIdentity(e)}`}
-                className="rounded-md border border-white/8 bg-white/3 px-2 py-1.5"
+                className="rounded-md px-2 py-1.5"
+                style={{ background: "rgba(255,255,255,0.72)", border: "1px solid var(--border-glass)" }}
               >
                 <div className="flex items-center gap-1 text-[11px] text-obs-text min-w-0">
                   <span className="text-[10px] text-obs-faint">→</span>
@@ -879,7 +891,8 @@ function KnowledgeDetail({
             return (
               <div
                 key={`in-${relationIdentity(e)}`}
-                className="rounded-md border border-white/8 bg-white/3 px-2 py-1.5"
+                className="rounded-md px-2 py-1.5"
+                style={{ background: "rgba(255,255,255,0.72)", border: "1px solid var(--border-glass)" }}
               >
                 <div className="flex items-center gap-1 text-[11px] text-obs-text min-w-0">
                   <span className="text-[10px] text-obs-faint">←</span>
@@ -1116,6 +1129,9 @@ export function MessagesLayout({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
   const [pausing, setPausing] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [knowledge, setKnowledge] = useState<ChatContext | null>(null);
@@ -1126,32 +1142,49 @@ export function MessagesLayout({
   const previousLastMessageIdRef = useRef<string | null>(null);
   const selectedIdRef = useRef<number | null>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
+  const loadLeadsRequestRef = useRef(0);
+  const loadMessagesRequestRef = useRef(0);
+  const loadKnowledgeRequestRef = useRef(0);
 
   useEffect(() => {
     setPersonaFilterId(window.localStorage.getItem("ai-brain-persona-id") || "");
     const onPersonaChange = (event: Event) => {
       const detail = (event as CustomEvent<{ id?: string }>).detail;
       setPersonaFilterId(detail?.id || window.localStorage.getItem("ai-brain-persona-id") || "");
-      setSelectedId(null);
-      setMessages([]);
-      setKnowledge(null);
+      selectedIdRef.current = null;
+      setSelectedId((current) => (current !== null ? null : current));
+      setMessages((current) => (current.length > 0 ? [] : current));
+      setKnowledge((current) => (current !== null ? null : current));
+      setMessagesError(null);
+      setKnowledgeError(null);
+      setSendError(null);
     };
     window.addEventListener("ai-brain-persona-change", onPersonaChange);
     return () => window.removeEventListener("ai-brain-persona-change", onPersonaChange);
   }, []);
 
-  const loadLeads = useCallback(() => {
+  const loadLeads = useCallback(async () => {
+    const requestId = ++loadLeadsRequestRef.current;
     setLoadingLeads(true);
-    Promise.all([
-      api.leads(200, 0, personaFilterId || undefined),
-      api.conversations(168, personaFilterId || undefined),
-    ])
-      .then(([leadRows, convRows]) => {
-        setLeads(leadRows as Lead[]);
-        setConversations(convRows as ConversationSummary[]);
-      })
-      .catch(console.error)
-      .finally(() => setLoadingLeads(false));
+    setLoadError(null);
+    try {
+      const [leadRows, convRows] = await Promise.all([
+        api.leads(200, 0, personaFilterId || undefined),
+        api.conversations(168, personaFilterId || undefined),
+      ]);
+      if (loadLeadsRequestRef.current !== requestId) return;
+      setLeads(leadRows as Lead[]);
+      setConversations(convRows as ConversationSummary[]);
+    } catch (error) {
+      if (loadLeadsRequestRef.current !== requestId) return;
+      setLeads([]);
+      setConversations([]);
+      setLoadError(getErrorMessage(error, "Falha ao carregar leads e conversas."));
+    } finally {
+      if (loadLeadsRequestRef.current === requestId) {
+        setLoadingLeads(false);
+      }
+    }
   }, [personaFilterId]);
 
   useEffect(() => { loadLeads(); }, [loadLeads]);
@@ -1220,6 +1253,7 @@ export function MessagesLayout({
               if (selectedIdRef.current !== id) return;
               setMessages(sortMessages(msgRows as Message[]));
               setConversations(convRows as ConversationSummary[]);
+              setMessagesError(null);
             } catch {
               /* realtime refresh is best-effort */
             }
@@ -1239,27 +1273,40 @@ export function MessagesLayout({
   }, [selectedId, personaFilterId]);
 
   const openLead = useCallback((lead: Lead) => {
-    if (selectedIdRef.current === lead.id) return;
-    setSelectedId(lead.id);
-    setMessages([]);
-    setKnowledge(null);
+    let changed = false;
+    setSelectedId((current) => {
+      if (current === lead.id) return current;
+      changed = true;
+      return lead.id;
+    });
+    if (!changed) return;
+    selectedIdRef.current = lead.id;
+    setMessages((current) => (current.length > 0 ? [] : current));
+    setKnowledge((current) => (current !== null ? null : current));
     previousLastMessageIdRef.current = null;
     stickToBottomRef.current = true;
-    setLoadingMsgs(true);
     setDraft("");
     setSendError(null);
-    api.messagesByRef(lead.id)
-      .then((rows) => setMessages(sortMessages(rows as Message[])))
-      .catch(console.error)
-      .finally(() => setLoadingMsgs(false));
+    setMessagesError(null);
+    setKnowledgeError(null);
     setTimeout(() => draftRef.current?.focus(), 80);
   }, []);
 
   useEffect(() => {
     if (!initialLeadId || loadingLeads || selectedId === initialLeadId) return;
     const lead = leads.find((l) => l.id === initialLeadId);
-    if (lead) openLead(lead);
-  }, [initialLeadId, loadingLeads, leads, openLead, selectedId]);
+    if (!lead) return;
+    if (personaFilterId && lead.persona_id !== personaFilterId) {
+      selectedIdRef.current = null;
+      setSelectedId((current) => (current !== null ? null : current));
+      setMessages((current) => (current.length > 0 ? [] : current));
+      setKnowledge((current) => (current !== null ? null : current));
+      setMessagesError("A lead desta rota nao pertence ao filtro de persona atual.");
+      setKnowledgeError(null);
+      return;
+    }
+    openLead(lead);
+  }, [initialLeadId, loadingLeads, leads, openLead, personaFilterId, selectedId]);
 
   // Knowledge sidebar: refetch context when lead changes or when the last
   // client message changes (so detected products/campaigns stay in sync).
@@ -1281,26 +1328,81 @@ export function MessagesLayout({
   const selectedLeadInterest = selectedLead?.interesse_produto || undefined;
 
   useEffect(() => {
-    if (selectedLead && personaFilterId && selectedLead.persona_id !== personaFilterId) {
-      setSelectedId(null);
-      setMessages([]);
-      setKnowledge(null);
+    if (!selectedLead || !personaFilterId) return;
+    if (selectedLead.persona_id !== personaFilterId) {
+      selectedIdRef.current = null;
+      setSelectedId((current) => (current !== null ? null : current));
+      setMessages((current) => (current.length > 0 ? [] : current));
+      setKnowledge((current) => (current !== null ? null : current));
+      setMessagesError((current) => current || "Selecao limpa porque a lead nao pertence ao filtro de persona atual.");
+      setKnowledgeError(null);
+      setSendError(null);
     }
-  }, [selectedLead, personaFilterId]);
+  }, [personaFilterId, selectedLead?.id, selectedLead?.persona_id]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setLoadingMsgs(false);
+      setMessagesError(null);
+      setMessages((current) => (current.length > 0 ? [] : current));
+      return;
+    }
+
+    const requestId = ++loadMessagesRequestRef.current;
+    let cancelled = false;
+
+    setLoadingMsgs(true);
+    setMessagesError(null);
+
+    api.messagesByRef(selectedId)
+      .then((rows) => {
+        if (cancelled || loadMessagesRequestRef.current !== requestId || selectedIdRef.current !== selectedId) return;
+        setMessages(sortMessages(rows as Message[]));
+      })
+      .catch((error) => {
+        if (cancelled || loadMessagesRequestRef.current !== requestId || selectedIdRef.current !== selectedId) return;
+        setMessages((current) => (current.length > 0 ? [] : current));
+        setMessagesError(getErrorMessage(error, "Falha ao carregar a conversa."));
+      })
+      .finally(() => {
+        if (cancelled || loadMessagesRequestRef.current !== requestId || selectedIdRef.current !== selectedId) return;
+        setLoadingMsgs(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
 
   useEffect(() => {
     if (!selectedId || !selectedLead) {
-      setKnowledge(null);
+      setKnowledge((current) => (current !== null ? null : current));
+      setKnowledgeLoading(false);
+      setKnowledgeError(null);
       return;
     }
+
+    const requestId = ++loadKnowledgeRequestRef.current;
     let cancelled = false;
+
     setKnowledgeLoading(true);
+    setKnowledgeError(null);
     api.knowledgeChatContext(selectedId, lastClientText || selectedLeadInterest, selectedLeadPersonaId)
-      .then((ctx) => { if (!cancelled) setKnowledge(ctx); })
-      .catch(() => { if (!cancelled) setKnowledge(null); })
-      .finally(() => { if (!cancelled) setKnowledgeLoading(false); });
+      .then((ctx) => {
+        if (cancelled || loadKnowledgeRequestRef.current !== requestId || selectedIdRef.current !== selectedId) return;
+        setKnowledge(ctx);
+      })
+      .catch((error) => {
+        if (cancelled || loadKnowledgeRequestRef.current !== requestId || selectedIdRef.current !== selectedId) return;
+        setKnowledge((current) => (current !== null ? null : current));
+        setKnowledgeError(getErrorMessage(error, "Falha ao carregar o contexto de conhecimento."));
+      })
+      .finally(() => {
+        if (cancelled || loadKnowledgeRequestRef.current !== requestId || selectedIdRef.current !== selectedId) return;
+        setKnowledgeLoading(false);
+      });
     return () => { cancelled = true; };
-  }, [selectedId, !!selectedLead, lastClientText, selectedLeadInterest, selectedLeadPersonaId]);
+  }, [selectedId, selectedLead?.id, lastClientText, selectedLeadInterest, selectedLeadPersonaId]);
 
   const refreshSelectedLead = useCallback(async (id: number) => {
     try {
@@ -1359,17 +1461,17 @@ export function MessagesLayout({
     }
   }, [selectedId, pausing, leads, refreshSelectedLead]);
 
-  const filtered = leads.filter((l) => {
-    if (!search) return true;
+  const filtered = useMemo(() => {
+    if (!search) return leads;
     const q = search.toLowerCase();
-    return (
+    return leads.filter((l) => (
       (l.nome || "").toLowerCase().includes(q) ||
       (l.telefone || "").includes(q) ||
       (l.lead_id || "").includes(q) ||
       (l.stage || "").toLowerCase().includes(q) ||
       (l.interesse_produto || "").toLowerCase().includes(q)
-    );
-  });
+    ));
+  }, [leads, search]);
 
   const chatName = displayName(selectedLead);
 
@@ -1431,6 +1533,13 @@ export function MessagesLayout({
 
         {/* Lead list */}
         <div className="flex-1 overflow-y-auto">
+          {loadError && (
+            <div className="px-3 py-2">
+              <div className="rounded-md border border-red-300/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-500">
+                {loadError}
+              </div>
+            </div>
+          )}
           {loadingLeads && (
             <div className="flex items-center justify-center py-12">
               <span className="text-xs text-obs-faint">Carregando...</span>
@@ -1464,7 +1573,7 @@ export function MessagesLayout({
                   <div className="flex items-center gap-1.5 min-w-0">
                     <div
                       className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0"
-                      style={{ background: "rgba(124,111,255,0.20)", color: "#a78bfa" }}
+                      style={{ background: "rgba(124,111,255,0.20)", color: "rgb(var(--obs-violet))" }}
                     >
                       {name[0].toUpperCase()}
                     </div>
@@ -1526,7 +1635,8 @@ export function MessagesLayout({
         <button
           type="button"
           onClick={() => setIsConversationSidebarOpen((v) => !v)}
-          className="absolute left-3 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white/85 text-obs-text shadow-sm backdrop-blur transition hover:text-obs-violet"
+          className="absolute left-3 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full text-obs-text shadow-sm backdrop-blur transition hover:text-obs-violet"
+          style={{ background: "rgba(255,255,255,0.85)", border: "1px solid var(--border-glass-strong)" }}
           aria-label={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
           title={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
         >
@@ -1541,7 +1651,7 @@ export function MessagesLayout({
             <>
               <div
                 className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
-                style={{ background: "rgba(124,111,255,0.20)", color: "#a78bfa" }}
+                style={{ background: "rgba(124,111,255,0.20)", color: "rgb(var(--obs-violet))" }}
               >
                 {chatName[0].toUpperCase()}
               </div>
@@ -1575,7 +1685,7 @@ export function MessagesLayout({
               <Link
                 href={`/messages/${selectedLead.id}`}
                 title="Abrir conversa focada"
-                className="p-1.5 rounded-md text-obs-subtle hover:text-obs-violet hover:bg-white/60 transition shrink-0"
+                className="p-1.5 rounded-md text-obs-subtle hover:text-obs-violet transition shrink-0 hover:[background:rgba(255,255,255,0.6)]"
               >
                 <Maximize2 size={13} />
               </Link>
@@ -1612,7 +1722,9 @@ export function MessagesLayout({
           {!selectedLead && (
             <div className="flex flex-col items-center justify-center h-full gap-3">
               <MessageSquare size={32} className="text-obs-faint/20" />
-              <p className="text-sm text-obs-faint">Escolha um lead na lista ao lado</p>
+              <p className="text-sm text-obs-faint">
+                {messagesError || "Escolha um lead na lista ao lado"}
+              </p>
             </div>
           )}
 
@@ -1622,7 +1734,15 @@ export function MessagesLayout({
             </div>
           )}
 
-          {selectedLead && !loadingMsgs && messages.length === 0 && (
+          {selectedLead && !loadingMsgs && messagesError && (
+            <div className="flex items-center justify-center py-12">
+              <div className="max-w-sm rounded-md border border-red-300/40 bg-red-500/10 px-4 py-3 text-center text-xs text-red-500">
+                {messagesError}
+              </div>
+            </div>
+          )}
+
+          {selectedLead && !loadingMsgs && !messagesError && messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full gap-2">
               <MessageSquare size={20} className="text-obs-faint/30" />
               <p className="text-xs text-obs-faint">Nenhuma mensagem encontrada para este lead.</p>
@@ -1709,6 +1829,9 @@ export function MessagesLayout({
         >
           <Boxes size={13} className="text-obs-violet" />
           <span className="text-xs font-semibold text-obs-text">Conhecimento</span>
+          {knowledgeError && (
+            <span className="ml-auto text-[10px] text-red-500 truncate">{knowledgeError}</span>
+          )}
           {knowledge?.query_terms && knowledge.query_terms.length > 0 && (
             <span className="text-[10px] text-obs-faint truncate">
               · {knowledge.query_terms.slice(0, 3).join(", ")}

@@ -23,7 +23,7 @@ interface NodeDrawerProps {
   node: any | null;
   selectedNodes?: any[];
   onClose: () => void;
-  onUpdated?: (itemId: string) => void;
+  onUpdated?: (itemId: string) => void | Promise<any>;
   directLinks?: Array<{
     id?: string;
     direction: "in" | "out";
@@ -135,7 +135,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
       }
       setEditing(false);
       showFlash("ok");
-      onUpdated?.(d.item_id);
+      await onUpdated?.(d.item_id);
     } catch { showFlash("err"); }
     finally { setSaving(false); }
   }
@@ -146,12 +146,26 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
     try {
       if (isVault) {
         await api.validateKbEntry(d.item_id);
+        await onUpdated?.(d.item_id);
+        setFullItem((prev: any) => prev ? { ...prev, status: "ATIVO" } : prev);
       } else {
-        await api.approveItem(d.item_id, true);
+        const result = await api.approveItem(d.item_id, true);
+        const evidence = result?.evidence || {};
+        if (!evidence.knowledge_item_id || !evidence.kb_entry_id || !evidence.knowledge_node_id || !evidence.embedded_edge_id) {
+          throw new Error("Aprovacao incompleta: backend nao confirmou item, KB, node e edge Embedded.");
+        }
+        const refreshed = await onUpdated?.(d.item_id);
+        const expectedNodeId = `gn:${evidence.knowledge_node_id}`;
+        const graphNodes = Array.isArray(refreshed?.nodes) ? refreshed.nodes : [];
+        const graphEdges = Array.isArray(refreshed?.edges) ? refreshed.edges : [];
+        const nodeExists = graphNodes.some((node: any) => node?.id === expectedNodeId);
+        const embeddedEdgeExists = graphEdges.some((edge: any) => edge?.source === expectedNodeId && String(edge?.target || "").startsWith("embedded:"));
+        if (!nodeExists || !embeddedEdgeExists) {
+          throw new Error("Aprovacao parcial: o grafo nao refletiu o node aprovado conectado ao Embedded.");
+        }
+        setFullItem((prev: any) => prev ? { ...prev, ...(result?.item || {}), status: result?.item?.status || "embedded" } : result?.item || prev);
       }
-      setFullItem((prev: any) => prev ? { ...prev, status: isVault ? "ATIVO" : "embedded" } : prev);
       showFlash("ok");
-      onUpdated?.(d.item_id);
     } catch { showFlash("err"); }
     finally { setSaving(false); }
   }
@@ -163,7 +177,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
       await api.rejectItem(d.item_id);
       setFullItem((prev: any) => prev ? { ...prev, status: "rejected" } : prev);
       showFlash("ok");
-      onUpdated?.(d.item_id);
+      await onUpdated?.(d.item_id);
     } catch { showFlash("err"); }
     finally { setSaving(false); }
   }

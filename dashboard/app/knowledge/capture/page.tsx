@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   CheckCircle,
+  Code2,
   Circle,
   ClipboardList,
   FileText,
@@ -121,6 +122,189 @@ interface MissionState {
   format?: string;
   status?: string;
   evidence_items?: Array<Record<string, any>>;
+}
+
+function parseApiErrorBody(message: string): Record<string, unknown> | null {
+  // lib/api.ts throws "${status} ${path} - ${jsonBody}". Recover the JSON body.
+  const dashIdx = message.indexOf(" - ");
+  if (dashIdx < 0) return null;
+  const tail = message.slice(dashIdx + 3).trim();
+  if (!tail.startsWith("{") && !tail.startsWith("[")) return null;
+  try {
+    return JSON.parse(tail);
+  } catch {
+    return null;
+  }
+}
+
+function formatSaveError(body: Record<string, unknown> | null | undefined): string {
+  if (!body) return "Erro ao salvar.";
+  const error = (body.error as string) || (body.detail as string) || "Erro ao salvar.";
+  const violations = body.violations as string[] | undefined;
+  if (Array.isArray(violations) && violations.length > 0) {
+    return `Erro: ${error}\n- ${violations.join("\n- ")}`;
+  }
+  return `Erro: ${error}`;
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g);
+  return tokens.filter(Boolean).map((token, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (token.startsWith("`") && token.endsWith("`")) {
+      return <code key={key} className="rounded-md bg-black/30 px-1.5 py-0.5 font-mono text-[0.9em] text-obs-amber">{token.slice(1, -1)}</code>;
+    }
+    if (token.startsWith("**") && token.endsWith("**")) {
+      return <strong key={key} className="font-semibold text-white">{token.slice(2, -2)}</strong>;
+    }
+    if (token.startsWith("*") && token.endsWith("*")) {
+      return <em key={key} className="italic text-obs-text">{token.slice(1, -1)}</em>;
+    }
+    const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (linkMatch) {
+      return (
+        <a
+          key={key}
+          href={linkMatch[2]}
+          target="_blank"
+          rel="noreferrer"
+          className="text-obs-violet underline decoration-obs-violet/40 underline-offset-2 hover:text-white"
+        >
+          {linkMatch[1]}
+        </a>
+      );
+    }
+    return <Fragment key={key}>{token}</Fragment>;
+  });
+}
+
+function renderMarkdownContent(content: string): ReactNode {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const blocks: ReactNode[] = [];
+  let i = 0;
+
+  const isBlockStart = (line: string) =>
+    /^```/.test(line) ||
+    /^#{1,6}\s+/.test(line) ||
+    /^>\s?/.test(line) ||
+    /^[-*]\s+/.test(line) ||
+    /^\d+\.\s+/.test(line) ||
+    /^---+$/.test(line);
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) {
+      i += 1;
+      continue;
+    }
+    if (/^```/.test(line)) {
+      const lang = line.replace(/^```/, "").trim();
+      const codeLines: string[] = [];
+      i += 1;
+      while (i < lines.length && !/^```/.test(lines[i])) {
+        codeLines.push(lines[i]);
+        i += 1;
+      }
+      if (i < lines.length) i += 1;
+      blocks.push(
+        <div key={`code-${blocks.length}`} className="overflow-hidden rounded-xl border border-white/8 bg-[#0f1117]">
+          {lang && <div className="border-b border-white/8 px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-obs-faint">{lang}</div>}
+          <pre className="overflow-x-auto px-3.5 py-3 text-[12px] leading-6 text-obs-amber"><code>{codeLines.join("\n")}</code></pre>
+        </div>,
+      );
+      continue;
+    }
+    if (/^#{1,6}\s+/.test(line)) {
+      const match = line.match(/^(#{1,6})\s+(.*)$/);
+      const level = match?.[1].length || 1;
+      const text = match?.[2] || line;
+      const Tag = `h${Math.min(level + 1, 6)}` as keyof JSX.IntrinsicElements;
+      const className = {
+        1: "text-xl font-semibold text-white",
+        2: "text-lg font-semibold text-white",
+        3: "text-base font-semibold text-white",
+        4: "text-sm font-semibold text-white",
+        5: "text-sm font-medium text-obs-text",
+        6: "text-xs font-medium uppercase tracking-[0.18em] text-obs-faint",
+      }[level];
+      blocks.push(<Tag key={`h-${blocks.length}`} className={className}>{renderInlineMarkdown(text, `h-${blocks.length}`)}</Tag>);
+      i += 1;
+      continue;
+    }
+    if (/^---+$/.test(line.trim())) {
+      blocks.push(<div key={`hr-${blocks.length}`} className="my-1 border-t border-white/8" />);
+      i += 1;
+      continue;
+    }
+    if (/^>\s?/.test(line)) {
+      const quoteLines: string[] = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        quoteLines.push(lines[i].replace(/^>\s?/, ""));
+        i += 1;
+      }
+      blocks.push(
+        <blockquote key={`q-${blocks.length}`} className="border-l-2 border-obs-violet/40 bg-white/[0.03] px-3 py-2 text-sm italic text-obs-subtle">
+          {quoteLines.map((quoteLine, idx) => <div key={idx}>{renderInlineMarkdown(quoteLine, `q-${blocks.length}-${idx}`)}</div>)}
+        </blockquote>,
+      );
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^[-*]\s+/, ""));
+        i += 1;
+      }
+      blocks.push(
+        <ul key={`ul-${blocks.length}`} className="space-y-1.5 pl-5 text-sm text-obs-text">
+          {items.map((item, idx) => <li key={idx} className="list-disc marker:text-obs-violet">{renderInlineMarkdown(item, `ul-${blocks.length}-${idx}`)}</li>)}
+        </ul>,
+      );
+      continue;
+    }
+    if (/^\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\d+\.\s+/, ""));
+        i += 1;
+      }
+      blocks.push(
+        <ol key={`ol-${blocks.length}`} className="space-y-1.5 pl-5 text-sm text-obs-text">
+          {items.map((item, idx) => <li key={idx} className="list-decimal marker:text-obs-violet">{renderInlineMarkdown(item, `ol-${blocks.length}-${idx}`)}</li>)}
+        </ol>,
+      );
+      continue;
+    }
+
+    const paragraphLines: string[] = [];
+    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) {
+      paragraphLines.push(lines[i]);
+      i += 1;
+    }
+    blocks.push(
+      <p key={`p-${blocks.length}`} className="text-sm leading-7 text-obs-text">
+        {paragraphLines.map((paragraphLine, idx) => (
+          <Fragment key={idx}>
+            {idx > 0 && <br />}
+            {renderInlineMarkdown(paragraphLine, `p-${blocks.length}-${idx}`)}
+          </Fragment>
+        ))}
+      </p>,
+    );
+  }
+
+  return <div className="space-y-3">{blocks}</div>;
+}
+
+function MessageBody({ content, raw, role }: { content: string; raw: boolean; role: Message["role"] }) {
+  if (raw) {
+    return (
+      <pre className={`whitespace-pre-wrap break-words ${role === "system" ? "font-mono text-xs" : "font-mono text-[12px] leading-6"}`}>
+        {content}
+      </pre>
+    );
+  }
+  return <div className={role === "system" ? "text-xs leading-6" : ""}>{renderMarkdownContent(content)}</div>;
 }
 
 const DEFAULT_VARIATION_COUNTS = KNOWLEDGE_BLOCKS.reduce<Record<string, number>>((acc, block) => {
@@ -355,7 +539,9 @@ function PreflightPanel({
             className="mt-0.5 accent-obs-violet"
           />
           <span>
-            Confirmo que o modelo deve usar este plano e os {uploads.length} upload(s) da sessao como contexto. Se faltar dado, ele deve perguntar antes de propor entradas, copys ou salvar.
+            {!uploads.some((upload) => upload.source === "file")
+              ? "Sessao pronta para iniciar. Sem uploads adicionais, o plano ja entra confirmado por padrao."
+              : `Confirmo que o modelo deve usar este plano e os ${uploads.length} upload(s) da sessao como contexto. Se faltar dado, ele deve perguntar antes de propor entradas, copys ou salvar.`}
           </span>
         </label>
       </div>
@@ -436,6 +622,8 @@ function ChatPanel({
   const [friendlyError, setFriendlyError] = useState<string | null>(null);
   const [lastAttempt, setLastAttempt] = useState<string>("");
   const [missionState, setMissionState] = useState<MissionState | null>(null);
+  const [resumeSummary, setResumeSummary] = useState<string | null>(null);
+  const [showRawMarkdown, setShowRawMarkdown] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -448,8 +636,11 @@ function ChatPanel({
     try {
       const d = await api.kbIntakeStart(model, buildInitialContext(plan, uploads));
       setSessionId(d.session_id);
-      setMessages([{ role: "assistant", content: d.welcome }]);
-      setStage("chatting");
+      setMessages(d.bootstrap_message ? [{ role: "assistant", content: d.bootstrap_message }] : []);
+      setStage(d.stage || "chatting");
+      setCls(d.classification || { persona_slug: null, content_type: null, asset_type: null, asset_function: null, title: null });
+      setMissionState(d.state || null);
+      setResumeSummary(d.resume_summary || null);
       setFriendlyError(null);
     } catch (e: any) {
       setMessages((p) => [...p, { role: "system", content: `Erro: ${e?.message || "falha desconhecida"}` }]);
@@ -516,7 +707,13 @@ function ChatPanel({
         role: "system",
         content: d.ok
           ? `Salvo.\nArquivo: ${d.file_path}\nGit: ${d.git?.commit_ok ? "ok" : "falhou"} | Push: ${d.git?.push_ok ? "ok" : "falhou"}\nSupabase: ${d.sync?.new ?? 0} novos`
-          : `Erro: ${d.detail || d.error}`,
+          : formatSaveError(d),
+      }]);
+    } catch (e: any) {
+      const parsed = parseApiErrorBody(e?.message || "");
+      setMessages((p) => [...p, {
+        role: "system",
+        content: formatSaveError(parsed ?? { error: e?.message || "falha ao salvar" }),
       }]);
     } finally {
       setLoading(false);
@@ -534,6 +731,7 @@ function ChatPanel({
     setShowContent(false);
     setFriendlyError(null);
     setMissionState(null);
+    setResumeSummary(null);
   }
 
   if (stage === "idle") {
@@ -558,9 +756,23 @@ function ChatPanel({
           <span className="text-sm font-semibold">Criar</span>
           {sessionId && <span className="text-[10px] text-obs-subtle font-mono">{sessionId.slice(0, 8)}</span>}
         </div>
-        <button onClick={reset} className="text-xs text-obs-subtle hover:text-obs-text border border-white/06 px-2 py-1 rounded-md transition-colors">
-          Nova sessao
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowRawMarkdown((value) => !value)}
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 transition-colors ${
+              showRawMarkdown
+                ? "border-obs-violet/40 bg-obs-violet/12 text-obs-violet"
+                : "border-white/06 text-obs-subtle hover:text-obs-text hover:bg-white/[0.04]"
+            }`}
+            title={showRawMarkdown ? "Mostrar markdown formatado" : "Mostrar raw markdown"}
+            aria-label={showRawMarkdown ? "Mostrar markdown formatado" : "Mostrar raw markdown"}
+          >
+            <Code2 size={13} />
+          </button>
+          <button onClick={reset} className="text-xs text-obs-subtle hover:text-obs-text border border-white/06 px-2 py-1 rounded-md transition-colors">
+            Nova sessao
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
@@ -572,6 +784,12 @@ function ChatPanel({
             <p className="text-obs-faint mt-1">
               Blocos: {(missionState.knowledge_blocks || []).join(", ") || "—"} | Status: {missionState.status || "collecting"}
             </p>
+          </div>
+        )}
+        {resumeSummary && (
+          <div className="border border-obs-violet/20 bg-obs-violet/10 rounded-lg p-3 text-xs text-obs-text whitespace-pre-wrap">
+            <p className="text-obs-violet font-medium mb-1">Retomada automatica da Sofia</p>
+            {resumeSummary}
           </div>
         )}
         {friendlyError && (
@@ -595,11 +813,11 @@ function ChatPanel({
               : "bg-white/10 text-obs-text"}`}>
               {msg.role === "user" ? <User size={11} /> : <Bot size={11} />}
             </div>
-            <div className={`max-w-[82%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+            <div className={`max-w-[82%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${
               msg.role === "user" ? "bg-obs-violet/15 text-obs-text"
               : msg.role === "system" ? "bg-green-500/8 border border-green-500/20 text-green-300 font-mono text-xs"
               : "bg-obs-raised border border-white/06 text-obs-text"}`}>
-              {msg.content}
+              <MessageBody content={msg.content} raw={showRawMarkdown} role={msg.role} />
             </div>
           </div>
         ))}
@@ -968,8 +1186,16 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
     outputFormat: "raw markdown com copys em niveis de marketing hierarquizados como grafo",
     selectedBlocks: DEFAULT_SELECTED_BLOCKS,
     variationCounts: DEFAULT_VARIATION_COUNTS,
-    confirmed: false,
+    confirmed: true,
   });
+
+  useEffect(() => {
+    setPlan((prev) => {
+      const nextConfirmed = !uploads.some((upload) => upload.source === "file");
+      if (prev.confirmed === nextConfirmed) return prev;
+      return { ...prev, confirmed: nextConfirmed };
+    });
+  }, [uploads]);
 
   return (
     <div className={`flex gap-5 min-h-0 ${embedded ? "h-full" : "h-[calc(100vh-7rem)]"}`}>

@@ -4,6 +4,27 @@ from workers.base_worker import BaseWorker
 from services import n8n_client, supabase_client, sre_logger
 
 
+def _walk_values(value):
+    if isinstance(value, dict):
+        yield value
+        for nested in value.values():
+            yield from _walk_values(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _walk_values(nested)
+
+
+def _first_nested_value(payload: dict, keys: tuple[str, ...]):
+    for node in _walk_values(payload):
+        if not isinstance(node, dict):
+            continue
+        for key in keys:
+            value = node.get(key)
+            if value not in (None, "", [], {}):
+                return value
+    return None
+
+
 class N8nMirrorWorker(BaseWorker):
     name = "N8nMirrorWorker"
     interval = int(os.environ.get("N8N_MIRROR_INTERVAL", 300))
@@ -32,14 +53,26 @@ class N8nMirrorWorker(BaseWorker):
                             if run.get("error"):
                                 node_errors.append({"node": node_name, "error": run["error"]})
 
+                workflow_name = (
+                    (ex.get("workflowData") or {}).get("name")
+                    or (ex.get("workflow") or {}).get("name")
+                    or ex.get("workflowName")
+                    or _first_nested_value(ex, ("workflow_name", "workflowName"))
+                    or ""
+                )
+                lead_id = _first_nested_value(ex, ("lead_id", "leadId", "lead_ref", "leadRef"))
+                persona_id = _first_nested_value(ex, ("persona_id", "personaId"))
+
                 supabase_client.upsert_n8n_execution({
                     "n8n_id": str(ex["id"]),
-                    "workflow_name": (ex.get("workflowData") or {}).get("name") or (ex.get("workflow") or {}).get("name", ""),
+                    "workflow_name": workflow_name,
                     "status": ex.get("status", "unknown"),
                     "started_at": started,
                     "finished_at": finished,
                     "duration_ms": duration,
                     "node_errors": node_errors,
+                    "lead_id": str(lead_id) if lead_id not in (None, "") else None,
+                    "persona_id": str(persona_id) if persona_id not in (None, "") else None,
                 })
                 synced += 1
             except Exception as exc:

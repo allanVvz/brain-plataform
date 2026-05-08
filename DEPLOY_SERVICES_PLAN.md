@@ -116,7 +116,7 @@ O backend em produção deve expor, no mínimo, os seguintes endpoints para ser 
 - [ ] A aprovação de um item na fila o move para o estado `approved`/`embedded`.
 - [ ] O fluxo da Sofia/WA Validator continua funcionando (pode ser testado por último).
 
-## 8. Como conectar este repo ao AI Brain Vault em nuvem
+## 8. Como conectar este repo ao Brain AI Vault em nuvem
 
 Use `VAULT_SOURCE_MODE=github` no backend publicado. Nesse modo, o sync le o
 Vault pela API do GitHub e nao depende de clone, volume local ou caminho

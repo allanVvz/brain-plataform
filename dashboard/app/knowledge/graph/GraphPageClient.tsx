@@ -138,6 +138,7 @@ export default function GraphPageClient() {
         mode,
       });
       setData(d as GraphPayload);
+      return d as GraphPayload;
     } finally {
       setLoading(false);
     }
@@ -261,9 +262,13 @@ export default function GraphPageClient() {
       const targetNode = byId.get(targetId);
       const sourceType = String(sourceNode?.data?.node_type || sourceNode?.data?.content_type || "");
       const targetType = String(targetNode?.data?.node_type || targetNode?.data?.content_type || "");
-      const allowedRef = (id: string) => id.startsWith("gn:") || id.startsWith("persona:") || id.startsWith("embedded:");
+      const allowedRef = (id: string) => id.startsWith("gn:") || id.startsWith("ki:") || id.startsWith("persona:") || id.startsWith("embedded:");
       if (!allowedRef(sourceId) || !allowedRef(targetId)) {
         setGraphNotice({ tone: "error", text: "Conexao permitida apenas entre blocos persistidos do grafo." });
+        return;
+      }
+      if ((sourceId.startsWith("ki:") || targetId.startsWith("ki:")) && targetType !== "embedded") {
+        setGraphNotice({ tone: "error", text: "Itens pendentes so podem ser conectados diretamente ao node Embedded para aprovacao." });
         return;
       }
       const finalReceiverTypes = new Set(["gallery", "embedded"]);

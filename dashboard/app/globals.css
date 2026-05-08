@@ -150,10 +150,10 @@
   --obs-surface: 255 255 255;
   --obs-raised:  255 255 255;
 
-  /* Text */
-  --obs-text:    29 29 31;
-  --obs-subtle:  110 110 115;
-  --obs-faint:   161 161 166;
+  /* Text — darker scale for white surfaces (WCAG AA on #fff) */
+  --obs-text:    17  24  39;   /* slate-900-ish, primary text  */
+  --obs-subtle:  71  85  105;  /* slate-600, secondary labels  */
+  --obs-faint:   100 116 139;  /* slate-500, tertiary metadata */
 
   /* Accents */
   --obs-violet:  108  92 231;
@@ -263,14 +263,48 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Light-theme zinc remap (readable grays on white) ─────── */
+/* ── Light-theme remap (readable grays on white) ───────────────
+   Tailwind grays/zincs/slates were tuned for dark UI; on white
+   anything lighter than slate-500 disappears. Force them all to
+   readable values on the clean theme. */
+:root[data-theme="clean"] .text-zinc-100,
 :root[data-theme="clean"] .text-zinc-200,
-:root[data-theme="clean"] .text-zinc-300 { color: #4b5563; }
-:root[data-theme="clean"] .text-zinc-400 { color: #6b7280; }
-:root[data-theme="clean"] .text-zinc-500 { color: #6e6e73; }
-:root[data-theme="clean"] .text-zinc-600 { color: #52525b; }
+:root[data-theme="clean"] .text-zinc-300 { color: #334155; }       /* slate-700 */
+:root[data-theme="clean"] .text-zinc-400 { color: #475569; }       /* slate-600 */
+:root[data-theme="clean"] .text-zinc-500 { color: #475569; }       /* slate-600 */
+:root[data-theme="clean"] .text-zinc-600 { color: #334155; }       /* slate-700 */
+
+:root[data-theme="clean"] .text-gray-200,
+:root[data-theme="clean"] .text-gray-300 { color: #334155; }
+:root[data-theme="clean"] .text-gray-400 { color: #475569; }
+:root[data-theme="clean"] .text-gray-500 { color: #475569; }
+
+:root[data-theme="clean"] .text-slate-200,
+:root[data-theme="clean"] .text-slate-300 { color: #334155; }
+:root[data-theme="clean"] .text-slate-400 { color: #475569; }
+:root[data-theme="clean"] .text-slate-500 { color: #475569; }
+
 :root[data-theme="clean"] .placeholder\:text-zinc-400::placeholder,
-:root[data-theme="clean"] .placeholder\:text-zinc-500::placeholder { color: #9ca3af; }
+:root[data-theme="clean"] .placeholder\:text-zinc-500::placeholder,
+:root[data-theme="clean"] .placeholder-obs-faint::placeholder { color: #94a3b8; }
+
+/* Tone-down semantic accents that look fluorescent on white */
+:root[data-theme="clean"] .text-amber-300,
+:root[data-theme="clean"] .text-amber-300\/80,
+:root[data-theme="clean"] .text-amber-300\/90,
+:root[data-theme="clean"] .text-amber-200 { color: #b45309; }      /* amber-700 */
+:root[data-theme="clean"] .text-amber-400 { color: #b45309; }
+:root[data-theme="clean"] .text-emerald-300,
+:root[data-theme="clean"] .text-emerald-400 { color: #047857; }    /* emerald-700 */
+:root[data-theme="clean"] .text-emerald-500 { color: #047857; }
+:root[data-theme="clean"] .text-blue-400    { color: #1d4ed8; }    /* blue-700 */
+:root[data-theme="clean"] .text-yellow-400  { color: #b45309; }
+:root[data-theme="clean"] .text-green-400,
+:root[data-theme="clean"] .text-green-500   { color: #047857; }
+:root[data-theme="clean"] .text-red-300,
+:root[data-theme="clean"] .text-red-400     { color: #b91c1c; }
+:root[data-theme="clean"] .text-rose-400    { color: #b91c1c; }
+:root[data-theme="clean"] .text-orange-400  { color: #b45309; }
 
 /* Native form controls match theme */
 :root[data-theme="clean"] { color-scheme: light; }

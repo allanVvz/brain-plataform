@@ -101,12 +101,12 @@ export default function SyncPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Sync AI Brain</h1>
+          <h1 className="text-xl font-semibold">Sync Brain AI</h1>
           <p className="text-sm text-brain-muted mt-0.5">Escaneia o vault local e cria itens pendentes de validação</p>
         </div>
         <button onClick={triggerSync} disabled={syncing}
           className="text-sm bg-brain-accent hover:bg-brain-accent/80 disabled:opacity-50 px-5 py-2 rounded-md transition-colors font-medium">
-          {syncing ? "Sincronizando..." : "⟳ Sincronizar AI Brain"}
+          {syncing ? "Sincronizando..." : "⟳ Sincronizar Brain AI"}
         </button>
       </div>
 

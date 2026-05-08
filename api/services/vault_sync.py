@@ -380,7 +380,7 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
     if not source:
         source = supabase_client.insert_knowledge_source({
             "source_type": "vault",
-            "name": "AI Brain Vault",
+            "name": "Brain AI Vault",
             "path": source_path,
         })
 

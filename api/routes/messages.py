@@ -152,28 +152,98 @@ def send_message(body: SendMessageBody, request: Request) -> dict:
     }
 
 
+def _resolve_scope_lead_refs(
+    request: Request,
+    *,
+    persona_id: str | None = None,
+    persona_slug: str | None = None,
+    audience_id: str | None = None,
+    audience_slug: str | None = None,
+) -> tuple[str | None, list[int] | None]:
+    resolved_persona_id = persona_id
+    if not resolved_persona_id and persona_slug:
+        persona = supabase_client.get_persona(persona_slug)
+        resolved_persona_id = persona.get("id") if persona else None
+    if resolved_persona_id:
+        auth_service.assert_persona_access(request, persona_id=resolved_persona_id, persona_slug=persona_slug)
+        if audience_id or audience_slug:
+            lead_refs = supabase_client.get_lead_refs_for_audience_scope(
+                persona_id=resolved_persona_id,
+                audience_id=audience_id,
+                audience_slug=audience_slug,
+            )
+            return resolved_persona_id, lead_refs
+    return resolved_persona_id, None
+
+
 @router.get("/conversations")
-def get_conversations(request: Request, hours: int = Query(168, le=720), persona_id: str | None = Query(None)):
+def get_conversations(
+    request: Request,
+    hours: int = Query(168, le=720),
+    persona_id: str | None = Query(None),
+    persona_slug: str | None = Query(None),
+    audience_id: str | None = Query(None),
+    audience_slug: str | None = Query(None),
+):
     """
     Returns one entry per conversation (grouped by lead_ref first),
     sorted by most-recent message. Used by the Mensagens sidebar.
     """
-    if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
-        return supabase_client.get_conversations(hours=hours, persona_id=persona_id)
-    if auth_service.is_admin(auth_service.current_user(request)):
-        return supabase_client.get_conversations(hours=hours, persona_id=None)
-    rows: list[dict] = []
-    for pid in auth_service.allowed_persona_ids(request):
-        rows.extend(supabase_client.get_conversations(hours=hours, persona_id=pid))
-    rows.sort(key=lambda item: item.get("last_message_at") or item.get("created_at") or "", reverse=True)
-    return rows
+    try:
+        resolved_persona_id, lead_refs = _resolve_scope_lead_refs(
+            request,
+            persona_id=persona_id,
+            persona_slug=persona_slug,
+            audience_id=audience_id,
+            audience_slug=audience_slug,
+        )
+        if resolved_persona_id and lead_refs is not None:
+            return supabase_client.get_conversations(hours=hours, persona_id=resolved_persona_id, lead_refs=lead_refs)
+        if persona_id:
+            auth_service.assert_persona_access(request, persona_id=persona_id)
+            return supabase_client.get_conversations(hours=hours, persona_id=persona_id)
+        if auth_service.is_admin(auth_service.current_user(request)):
+            return supabase_client.get_conversations(hours=hours, persona_id=None)
+        rows: list[dict] = []
+        for pid in auth_service.allowed_persona_ids(request):
+            rows.extend(supabase_client.get_conversations(hours=hours, persona_id=pid))
+        rows.sort(key=lambda item: item.get("last_at") or item.get("created_at") or "", reverse=True)
+        return rows
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("get_conversations failed: %s", exc)
+        try:
+            from services import sre_logger
+            sre_logger.error("messages.conversations", f"failed: {exc}", exc)
+        except Exception:
+            pass
+        return []
 
 
 @router.get("/by-ref/{lead_ref}")
-def get_messages_by_ref(lead_ref: int, request: Request, limit: int = Query(200, le=500)):
+def get_messages_by_ref(
+    lead_ref: int,
+    request: Request,
+    limit: int = Query(200, le=500),
+    persona_id: str | None = Query(None),
+    persona_slug: str | None = Query(None),
+    audience_id: str | None = Query(None),
+    audience_slug: str | None = Query(None),
+):
     """Fetch messages by integer lead_ref — the canonical way."""
     lead = supabase_client.get_lead_by_ref(lead_ref)
+    resolved_persona_id, lead_refs = _resolve_scope_lead_refs(
+        request,
+        persona_id=persona_id,
+        persona_slug=persona_slug,
+        audience_id=audience_id,
+        audience_slug=audience_slug,
+    )
+    if lead_refs is not None and lead_ref not in lead_refs:
+        raise HTTPException(status_code=403, detail="Lead fora da audiencia atual.")
+    if resolved_persona_id and supabase_client.lead_has_membership(lead_ref, resolved_persona_id, audience_id):
+        return supabase_client.get_messages(str(lead_ref), limit=limit)
     if lead and lead.get("persona_id"):
         auth_service.assert_persona_access(request, persona_id=lead.get("persona_id"))
     return supabase_client.get_messages(str(lead_ref), limit=limit)
@@ -193,8 +263,20 @@ def recent_messages(
     request: Request,
     hours: int = Query(24, le=168),
     persona_id: str | None = Query(None),
+    persona_slug: str | None = Query(None),
+    audience_id: str | None = Query(None),
+    audience_slug: str | None = Query(None),
 ):
     """Returns all recent messages without status filtering."""
+    resolved_persona_id, lead_refs = _resolve_scope_lead_refs(
+        request,
+        persona_id=persona_id,
+        persona_slug=persona_slug,
+        audience_id=audience_id,
+        audience_slug=audience_slug,
+    )
+    if resolved_persona_id and lead_refs is not None:
+        return supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=resolved_persona_id, lead_refs=lead_refs)
     if persona_id:
         auth_service.assert_persona_access(request, persona_id=persona_id)
         return supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=persona_id)

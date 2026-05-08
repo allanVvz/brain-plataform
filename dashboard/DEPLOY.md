@@ -16,6 +16,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=SEU_SUPABASE_ANON_KEY
 Notas:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` e opcional (fallback).
 - Nao use `SUPABASE_SERVICE_KEY` no frontend.
+- Em desenvolvimento local, use `NEXT_PUBLIC_API_URL=http://localhost:8000` ou `http://127.0.0.1:8000`.
+- Valide o backend com `/health` antes de depurar a UI de mensagens.
 
 ## Variaveis no Cloud Run (backend)
 

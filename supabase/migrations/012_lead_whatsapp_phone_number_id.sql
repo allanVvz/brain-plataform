@@ -1,6 +1,6 @@
 -- 012_lead_whatsapp_phone_number_id.sql
 -- Stores the WhatsApp Business phone_number_id that owns/responds to a lead.
--- This is required for human handoff: messages sent from AI Brain to n8n need
+-- This is required for human handoff: messages sent from Brain AI to n8n need
 -- to know which WhatsApp number should send the operator reply.
 
 ALTER TABLE leads
@@ -29,7 +29,7 @@ WHERE wb.persona_id = p.id
   AND p.slug = 'tock-fatal'
   AND (wb.whatsapp_phone_number_id IS NULL OR wb.whatsapp_phone_number_id = '');
 
--- Backfill existing Tock leads so operator replies from AI Brain know which
+-- Backfill existing Tock leads so operator replies from Brain AI know which
 -- WhatsApp Business number must send the message.
 UPDATE leads l
 SET whatsapp_phone_number_id = '949967854877404'

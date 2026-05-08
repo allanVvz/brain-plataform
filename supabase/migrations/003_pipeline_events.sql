@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Brain Platform — Migration 003
+-- Brain AI Platform — Migration 003
 -- Pipeline events, enhanced knowledge validation
 -- ============================================================
 

@@ -1,4 +1,4 @@
-# AI Brain — Progresso UI/UX
+# Brain AI — Progresso UI/UX
 
 ## Concluido
 - Fase 1: tokens liquid glass, tema, hydration fix.
@@ -58,7 +58,7 @@
 - A validacao do Gallery e: conteudo conectado aparece em Assets da persona.
 
 ## Auth e Permissoes
-- O AI Brain exige login para todas as telas internas do dashboard.
+- O Brain AI exige login para todas as telas internas do dashboard.
 - A sessao deve ficar em cookie HTTP-only; logout limpa a sessao e redireciona para `/login`.
 - Senhas nunca devem ser salvas em texto puro; usar hash forte no backend.
 - Admin acessa todas as personas/clientes.
@@ -70,7 +70,7 @@
 - Criacao operacional de login via banco/script: `cd api && python scripts/create_auth_user.py --email operador@empresa.com --username operador --password <senha> --role operator --persona tock-fatal --can-edit`.
 - Admin inicial deve ser criado com envs `AI_BRAIN_SEED_ADMIN_EMAIL` e `AI_BRAIN_SEED_ADMIN_PASSWORD`, sem senha fixa em producao.
 
-# AI Brain - Deploy e Operacao
+# Brain AI - Deploy e Operacao
 
 ## Estrutura oficial
 
@@ -147,6 +147,15 @@ Backend (`api/.env`):
 
 - CI criado em `.github/workflows/ci.yml` para validar backend com Python 3.11 e frontend com Node 20 antes de push/PR.
 - Grafo passou a usar `knowledge_edges` como fonte oficial de caminhos, com soft delete em `metadata.active=false` e recriacao por drag entre handles.
+- Tema clean (claro) virou padrao com tokens RGB CSS-var; tema dark mantido via `data-theme="dark"`. `colors.white` no Tailwind virou `rgb(var(--scrim-fg)/<alpha>)` -- `text-white` se inverte, mas `bg-white/X` tambem se inverte (vira escuro no clean). Para painel sempre claro usar `style={{background:"rgba(255,255,255,X)"}}` literal.
+- PreflightPanel da captura unificou os dois selecionadores antigos em um stepper `[-][count][+]` por bloco (count=0 = fora do plano, count>=1 = no plano). FAQ default = 2.
+- Aba `/leads` consolida CRM + CSV-bulk com pill `Todos/CRM/CSV-Bulk`, badge `Origem` e botao `Iniciar conversa` por linha.
+- Aba `/leads/import` polida (lg-page-narrow, lg-card metrics, lg-table-shell, lg-badge variants, modal drawer-right).
+- Backend agora protege `ensure_lead_for_persona` contra coluna inexistente (PGRST204): aprende a coluna em runtime e refaz o INSERT sem ela. Tambem espelha `canal` em `origem` quando so `canal` foi passado.
+- Migracao `019_leads_canal_column.sql` adiciona `canal text` em `leads` (precisa ser aplicada manualmente no Supabase SQL Editor; nao ha rpc `exec_sql`).
+- Endpoint `GET /messages/conversations` agora tem try/except amplo e devolve `[]` em vez de 500 em caso de erro residual.
+- Frontend `/leads/page.tsx::originOf` checa `lead.canal || lead.origem` para detectar bulk_import (compatibilidade com leads antigos sem coluna canal).
+- Tema clean: `--obs-text=17 24 39`, `--obs-subtle=71 85 105`, `--obs-faint=100 116 139`. text-zinc/gray/slate-200..500 e text-amber/emerald/blue/yellow/red-3xx..400 remapeados para variantes escuras (slate-600/700, amber-700, emerald-700, blue-700, red-700) para legibilidade sobre fundo branco.
 - Exclusao de conexoes no grafo/arvore agora preserva o ID real `ge:*`, chama `DELETE /knowledge/graph-edges/{edge_id}` e registra logs no console e no backend se falhar.
 - Drawer do node abre por clique; expansao fica no topo direito da sidebar; modal mostra badges, titulo, resumo, conteudo, tags, relacoes e acoes no rodape.
 - Selecao multipla por caixa foi adicionada; pan do grafo fica condicionado ao atalho configuravel, inicialmente `Ctrl`, salvo em `localStorage`.

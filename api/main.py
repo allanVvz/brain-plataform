@@ -15,7 +15,7 @@ except ImportError as exc:
 load_dotenv()
 
 from middleware.auth import auth_middleware
-from routes import auth, health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, marketing
+from routes import auth, health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, marketing, audiences
 from workers.flow_validator_worker import FlowValidatorWorker
 from workers.n8n_mirror_worker import N8nMirrorWorker
 from workers.health_check_worker import HealthCheckWorker
@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
         t.cancel()
 
 
-app = FastAPI(title="AI Brain", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Brain AI", version="1.0.0", lifespan=lifespan)
 
 env = get_backend_env()
 allowed_origins = env["allowed_origins"]
@@ -78,3 +78,4 @@ app.include_router(generation.router)
 app.include_router(wa_validator.router)
 app.include_router(graph.router)
 app.include_router(marketing.router)
+app.include_router(audiences.router)

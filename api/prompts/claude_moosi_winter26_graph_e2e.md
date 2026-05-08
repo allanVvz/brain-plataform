@@ -250,7 +250,7 @@ Validar por scraping/chat:
 
 Importante:
 
-- Se o WhatsApp/n8n ainda nao estiver usando a resposta local do AI Brain, nao mascarar isso.
+- Se o WhatsApp/n8n ainda nao estiver usando a resposta local do Brain AI, nao mascarar isso.
 - Nesse caso, separar claramente:
   - PASS infraestrutura de dados/grafo/sidebar;
   - FAIL ou BLOCKED resposta final do bot por roteamento n8n.

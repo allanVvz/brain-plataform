@@ -33,6 +33,26 @@ CONTENT_LEVELS = {
 
 ALLOWED_CONTENT_TYPES = set(CONTENT_LEVELS)
 
+# Architectural rule (CLAUDE.md / README "KB vs RAG"):
+#   Grafo            = todo conhecimento (aprovado ou não).
+#   KB Validada      = todo conhecimento aprovado (kb_entries).
+#   knowledge_rag    = SOMENTE FAQ aprovado (camada vetorial dos agentes).
+# Today only "faq" qualifies; widening to other content types later is a
+# one-line change here. Keep this gate in a single helper so callers cannot
+# drift.
+RAG_ELIGIBLE_CONTENT_TYPES: set[str] = {"faq"}
+
+
+def is_rag_eligible(content_type: Optional[str]) -> bool:
+    """Return True only when this content_type is allowed into knowledge_rag.
+
+    The agents currently only retrieve FAQs from the vector layer; sending
+    other shapes (product, copy, rule, brand, tone, entity, ...) would
+    pollute retrieval and surface raw operational notes as if they were
+    user-facing answers.
+    """
+    return (content_type or "").strip().lower() in RAG_ELIGIBLE_CONTENT_TYPES
+
 
 def _slugify(value: str) -> str:
     return knowledge_graph._slugify(value)
@@ -239,6 +259,7 @@ def process_intake(
     validate: bool = False,
     parent_node_id: Optional[str] = None,
     parent_relation_type: str = "manual",
+    mirror_graph: bool = True,
 ) -> dict:
     persona = _resolve_persona(persona_id=persona_id, persona_slug=persona_slug)
     resolved_persona_id = persona["id"]
@@ -270,91 +291,105 @@ def process_intake(
         status = "validated" if validate else "pending_validation"
         now_iso = datetime.now(timezone.utc).isoformat()
         entry_metadata = {**classified["metadata"], "rag_index": (classified["metadata"] or {}).get("rag_index", "default")}
-        entry = supabase_client.upsert_knowledge_rag_entry({
-            "persona_id": resolved_persona_id,
-            "intake_id": intake.get("id"),
-            "content_type": classified["content_type"],
-            "semantic_level": classified["semantic_level"],
-            "title": classified["title"],
-            "question": classified["question"],
-            "answer": classified["answer"],
-            "content": classified["content"],
-            "summary": classified["summary"],
-            "canonical_key": classified["canonical_key"],
-            "slug": classified["slug"],
-            "status": status,
-            "tags": classified["tags"],
-            "entities": classified["entities"],
-            "products": classified["products"],
-            "campaigns": classified["campaigns"],
-            "metadata": entry_metadata,
-            "confidence": classified["confidence"],
-            "importance": classified["importance"],
-            "validated_at": now_iso if validate else None,
-        })
-
-        chunks = supabase_client.replace_knowledge_rag_chunks(
-            entry["id"],
-            resolved_persona_id,
-            [{
-                "chunk_index": 0,
-                "chunk_text": classified["content"],
-                "chunk_summary": classified["summary"],
-                "metadata": {
-                    "content_type": classified["content_type"],
-                    "canonical_key": classified["canonical_key"],
-                    "embedding_status": "pending",
-                    "rag_index": entry_metadata["rag_index"],
-                },
-            }],
-        )
-
-        mirror = knowledge_graph.bootstrap_from_item(
-            {
-                "id": entry.get("id"),
+        rag_allowed = is_rag_eligible(classified["content_type"])
+        entry: Optional[dict] = None
+        chunks: list[dict] = []
+        if rag_allowed:
+            entry = supabase_client.upsert_knowledge_rag_entry({
                 "persona_id": resolved_persona_id,
+                "intake_id": intake.get("id"),
                 "content_type": classified["content_type"],
+                "semantic_level": classified["semantic_level"],
                 "title": classified["title"],
+                "question": classified["question"],
+                "answer": classified["answer"],
                 "content": classified["content"],
-                "tags": classified["tags"],
-                "metadata": classified["metadata"],
-                "status": status,
-            },
-            frontmatter={
-                **classified["metadata"],
+                "summary": classified["summary"],
+                "canonical_key": classified["canonical_key"],
                 "slug": classified["slug"],
-                "product": classified["products"],
-                "campaigns": classified["campaigns"],
+                "status": status,
                 "tags": classified["tags"],
-            },
-            body=classified["content"],
-            persona_id=resolved_persona_id,
-            source_table="knowledge_rag_entries",
-        )
-        main_tree_edge = knowledge_graph.ensure_main_tree_connection(
-            mirror,
-            persona_id=resolved_persona_id,
-            parent_node_id=parent_node_id or (classified["metadata"] or {}).get("parent_node_id"),
-            relation_type=parent_relation_type or (classified["metadata"] or {}).get("parent_relation_type") or "manual",
-        )
-        repair = knowledge_graph.repair_primary_tree_connections(
-            resolved_persona_id,
-            [mirror.get("id")] if mirror and mirror.get("id") else None,
-        )
+                "entities": classified["entities"],
+                "products": classified["products"],
+                "campaigns": classified["campaigns"],
+                "metadata": entry_metadata,
+                "confidence": classified["confidence"],
+                "importance": classified["importance"],
+                "validated_at": now_iso if validate else None,
+            })
 
+            chunks = supabase_client.replace_knowledge_rag_chunks(
+                entry["id"],
+                resolved_persona_id,
+                [{
+                    "chunk_index": 0,
+                    "chunk_text": classified["content"],
+                    "chunk_summary": classified["summary"],
+                    "metadata": {
+                        "content_type": classified["content_type"],
+                        "canonical_key": classified["canonical_key"],
+                        "embedding_status": "pending",
+                        "rag_index": entry_metadata["rag_index"],
+                    },
+                }],
+            )
+
+        mirror = None
+        main_tree_edge = None
+        repair = None
+        if mirror_graph:
+            mirror = knowledge_graph.bootstrap_from_item(
+                {
+                    # Use the rag_entry id when we created one (so the graph
+                    # node mirrors the canonical RAG row); fall back to the
+                    # intake id when the content is not RAG-eligible so we
+                    # still get a stable graph anchor.
+                    "id": (entry or {}).get("id") or intake.get("id"),
+                    "persona_id": resolved_persona_id,
+                    "content_type": classified["content_type"],
+                    "title": classified["title"],
+                    "content": classified["content"],
+                    "tags": classified["tags"],
+                    "metadata": classified["metadata"],
+                    "status": status,
+                },
+                frontmatter={
+                    **classified["metadata"],
+                    "slug": classified["slug"],
+                    "product": classified["products"],
+                    "campaigns": classified["campaigns"],
+                    "tags": classified["tags"],
+                },
+                body=classified["content"],
+                persona_id=resolved_persona_id,
+                source_table="knowledge_rag_entries" if rag_allowed else "knowledge_intake_messages",
+            )
+            main_tree_edge = knowledge_graph.ensure_main_tree_connection(
+                mirror,
+                persona_id=resolved_persona_id,
+                parent_node_id=parent_node_id or (classified["metadata"] or {}).get("parent_node_id"),
+                relation_type=parent_relation_type or (classified["metadata"] or {}).get("parent_relation_type") or "manual",
+            )
+            repair = knowledge_graph.repair_primary_tree_connections(
+                resolved_persona_id,
+                [mirror.get("id")] if mirror and mirror.get("id") else None,
+            )
+
+        intake_status = "rag_created" if rag_allowed else "graph_only"
         supabase_client.update_knowledge_intake_message(
             intake["id"],
-            {"status": "rag_created", "processed_at": now_iso},
+            {"status": intake_status, "processed_at": now_iso},
         )
 
         return {
-            "intake": {**intake, "status": "rag_created", "processed_at": now_iso},
+            "intake": {**intake, "status": intake_status, "processed_at": now_iso},
             "classification": classified,
             "rag_entry": entry,
             "chunks": chunks,
             "graph_node": mirror,
             "main_tree_edge": main_tree_edge,
             "primary_tree_repair": repair,
+            "rag_eligible": rag_allowed,
         }
     except Exception as exc:
         if intake.get("id"):
@@ -496,8 +531,13 @@ def process_intake_plan(
     ]
     intake_rows = client.table("knowledge_intake_messages").insert(intake_payload).execute().data or []
 
+    # Only FAQ rows are eligible for the RAG layer (see is_rag_eligible).
+    # Non-FAQ rows still get graph nodes and a campaign tree; they're just
+    # invisible to the agent retrieval until promoted/converted.
     rag_payload = []
     for idx, (_, classified) in enumerate(classified_rows):
+        if not is_rag_eligible(classified["content_type"]):
+            continue
         rag_payload.append({
             "persona_id": resolved_persona_id,
             "intake_id": (intake_rows[idx] or {}).get("id") if idx < len(intake_rows) else None,
@@ -527,7 +567,7 @@ def process_intake_plan(
         .execute()
         .data
         or []
-    )
+    ) if rag_payload else []
     rag_by_key = {row.get("canonical_key"): row for row in rag_rows}
 
     chunk_payload = []
@@ -555,18 +595,32 @@ def process_intake_plan(
         ).execute()
 
     node_payload = []
-    for _, classified in classified_rows:
+    for idx, (_, classified) in enumerate(classified_rows):
         rag = rag_by_key.get(classified["canonical_key"])
+        intake_row = intake_rows[idx] if idx < len(intake_rows) else None
+        # FAQ rows mirror the RAG entry; non-FAQ rows mirror the intake
+        # message so the graph still has a stable source pointer.
+        if rag:
+            source_table = "knowledge_rag_entries"
+            source_id = rag.get("id")
+        else:
+            source_table = "knowledge_intake_messages"
+            source_id = (intake_row or {}).get("id")
         node_payload.append({
             "persona_id": resolved_persona_id,
-            "source_table": "knowledge_rag_entries",
-            "source_id": rag.get("id") if rag else None,
+            "source_table": source_table,
+            "source_id": source_id,
             "node_type": classified["content_type"],
             "slug": classified["slug"],
             "title": classified["title"],
             "summary": classified["summary"],
             "tags": classified["tags"],
-            "metadata": {**classified["metadata"], "content_type": classified["content_type"], "source_status": "validated" if validate else "pending_validation"},
+            "metadata": {
+                **classified["metadata"],
+                "content_type": classified["content_type"],
+                "source_status": "validated" if validate else "pending_validation",
+                "rag_eligible": is_rag_eligible(classified["content_type"]),
+            },
             "status": "validated" if validate else "pending",
             **knowledge_graph._hierarchy_fields(classified["content_type"], classified["metadata"], confidence=classified["confidence"]),
         })

@@ -4,7 +4,8 @@ import { getPublicApiUrl } from "@/utils/env";
 export const BASE = "/api-brain";
 export const API_URL = BASE;
 const API_ENV_ERROR = "Backend nao configurado. Defina NEXT_PUBLIC_API_URL na Vercel.";
-const API_OFFLINE_ERROR = "Backend indisponivel agora. Verifique o Cloud Run e tente novamente.";
+const API_OFFLINE_ERROR =
+  "Backend indisponivel agora. Verifique NEXT_PUBLIC_API_URL, confirme o endpoint /health e tente novamente.";
 
 function assertApiConfigured() {
   if (process.env.NODE_ENV === "production") {
@@ -75,7 +76,39 @@ export const api = {
   // Leads & Messages
   leads: (limit = 100, offset = 0, personaId?: string) =>
     req<any[]>(`/leads?limit=${limit}&offset=${offset}${personaId ? `&persona_id=${personaId}` : ""}`),
+  leadsScoped: (opts: {
+    limit?: number;
+    offset?: number;
+    personaId?: string;
+    personaSlug?: string;
+    audienceId?: string;
+    audienceSlug?: string;
+  }) => {
+    const params = new URLSearchParams();
+    params.set("limit", String(opts.limit ?? 100));
+    params.set("offset", String(opts.offset ?? 0));
+    if (opts.personaId) params.set("persona_id", opts.personaId);
+    if (opts.personaSlug) params.set("persona_slug", opts.personaSlug);
+    if (opts.audienceId) params.set("audience_id", opts.audienceId);
+    if (opts.audienceSlug) params.set("audience_slug", opts.audienceSlug);
+    return req<any[]>(`/leads?${params.toString()}`);
+  },
   lead: (id: string) => req<any>(`/leads/${id}`),
+  leadMemberships: (leadId: string | number) => req<any>(`/leads/${leadId}/memberships`),
+  moveLead: (leadRef: number, body: {
+    target_persona_id: string;
+    target_audience_id?: string;
+    target_audience_slug?: string;
+    source_audience_id?: string;
+    source_audience_slug?: string;
+  }) => req<any>(`/leads/${leadRef}/move`, { method: "POST", body: JSON.stringify(body) }),
+  shareLead: (leadRef: number, body: {
+    target_persona_id: string;
+    target_audience_id?: string;
+    target_audience_slug?: string;
+    source_audience_id?: string;
+    source_audience_slug?: string;
+  }) => req<any>(`/leads/${leadRef}/share`, { method: "POST", body: JSON.stringify(body) }),
   leadImports: (personaId?: string) =>
     req<any[]>(`/leads/imports${personaId ? `?persona_id=${personaId}` : ""}`),
   leadImport: (batchId: string) => req<any>(`/leads/imports/${encodeURIComponent(batchId)}`),
@@ -91,10 +124,55 @@ export const api = {
   resumeAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/resume-ai`, { method: "POST" }),
   messages: (leadId: string) => req<any[]>(`/messages/${leadId}`),
   messagesByRef: (leadRef: number, limit = 200) => req<any[]>(`/messages/by-ref/${leadRef}?limit=${limit}`),
+  messagesByRefScoped: (leadRef: number, opts: {
+    limit?: number;
+    personaId?: string;
+    personaSlug?: string;
+    audienceId?: string;
+    audienceSlug?: string;
+  }) => {
+    const params = new URLSearchParams();
+    params.set("limit", String(opts.limit ?? 200));
+    if (opts.personaId) params.set("persona_id", opts.personaId);
+    if (opts.personaSlug) params.set("persona_slug", opts.personaSlug);
+    if (opts.audienceId) params.set("audience_id", opts.audienceId);
+    if (opts.audienceSlug) params.set("audience_slug", opts.audienceSlug);
+    return req<any[]>(`/messages/by-ref/${leadRef}?${params.toString()}`);
+  },
   recentMessages: (hours = 24, personaId?: string) =>
     req<any[]>(`/messages?hours=${hours}${personaId ? `&persona_id=${personaId}` : ""}`),
+  recentMessagesScoped: (opts: {
+    hours?: number;
+    personaId?: string;
+    personaSlug?: string;
+    audienceId?: string;
+    audienceSlug?: string;
+  }) => {
+    const params = new URLSearchParams();
+    params.set("hours", String(opts.hours ?? 24));
+    if (opts.personaId) params.set("persona_id", opts.personaId);
+    if (opts.personaSlug) params.set("persona_slug", opts.personaSlug);
+    if (opts.audienceId) params.set("audience_id", opts.audienceId);
+    if (opts.audienceSlug) params.set("audience_slug", opts.audienceSlug);
+    return req<any[]>(`/messages?${params.toString()}`);
+  },
   conversations: (hours = 168, personaId?: string) =>
     req<any[]>(`/messages/conversations?hours=${hours}${personaId ? `&persona_id=${personaId}` : ""}`),
+  conversationsScoped: (opts: {
+    hours?: number;
+    personaId?: string;
+    personaSlug?: string;
+    audienceId?: string;
+    audienceSlug?: string;
+  }) => {
+    const params = new URLSearchParams();
+    params.set("hours", String(opts.hours ?? 168));
+    if (opts.personaId) params.set("persona_id", opts.personaId);
+    if (opts.personaSlug) params.set("persona_slug", opts.personaSlug);
+    if (opts.audienceId) params.set("audience_id", opts.audienceId);
+    if (opts.audienceSlug) params.set("audience_slug", opts.audienceSlug);
+    return req<any[]>(`/messages/conversations?${params.toString()}`);
+  },
   sendMessage: (body: { lead_ref: number; texto: string; agent_id?: string; sender_id?: string; nome?: string }) =>
     req<{ ok: boolean; message_id: string; status: string; webhook_status?: number; webhook_error?: string }>(
       "/messages/send",
@@ -108,6 +186,13 @@ export const api = {
   // Personas
   personas: () => req<any[]>("/personas"),
   persona: (slug: string) => req<any>(`/personas/${slug}`),
+  audiences: (personaId: string) => req<any[]>(`/audiences?persona_id=${encodeURIComponent(personaId)}`),
+  createAudience: (body: { persona_id: string; name: string; slug?: string; description?: string; source_type?: string }) =>
+    req<any>("/audiences", { method: "POST", body: JSON.stringify(body) }),
+  updateAudience: (audienceId: string, body: { name?: string; slug?: string; description?: string }) =>
+    req<any>(`/audiences/${encodeURIComponent(audienceId)}`, { method: "PATCH", body: JSON.stringify(body) }),
+  audienceLeads: (audienceId: string, limit = 1000, offset = 0) =>
+    req<any>(`/audiences/${encodeURIComponent(audienceId)}/leads?limit=${limit}&offset=${offset}`),
 
   // Persona Routing
   personaRouting: (slug: string) =>
@@ -219,6 +304,7 @@ export const api = {
   graphData: (personaSlug?: string, opts?: any) => {
     const params = new URLSearchParams();
     if (personaSlug) params.set("persona_slug", personaSlug);
+    if (opts?.audienceSlug) params.set("audience_slug", opts.audienceSlug);
     if (opts?.focus) params.set("focus", opts.focus);
     if (typeof opts?.max_depth === "number") params.set("max_depth", String(opts.max_depth));
     if (opts?.include_tags) params.set("include_tags", "true");

@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Brain Platform — Migration 001
+-- Brain AI Platform — Migration 001
 -- Novas tabelas para a plataforma (não toca nas existentes)
 -- ============================================================
 

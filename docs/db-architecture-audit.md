@@ -1,4 +1,4 @@
-# Auditoria de arquitetura do banco - AI Brain Dashboard
+# Auditoria de arquitetura do banco - Brain AI Dashboard
 
 Data: 2026-05-04
 
@@ -283,7 +283,7 @@ Recomendacao: virar view de compatibilidade.
 ### Fase 0 - Observabilidade sem mudanca destrutiva
 
 1. Criar uma query diaria para medir leitura/escrita por tabela via logs da API, se possivel.
-2. Separar dados "externos n8n" de dados "app AI Brain".
+2. Separar dados "externos n8n" de dados "app Brain AI".
 3. Marcar tabelas suspeitas como `deprecated` em documentacao, nao no schema.
 
 ### Fase 1 - Repositories/adapters

@@ -53,14 +53,14 @@ export default function LoginPage() {
 
   return (
     <main className="login-page">
-      <section className="login-card" aria-label="Login AI Brain">
+      <section className="login-card" aria-label="Login Brain AI">
         <div className="mb-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/50 bg-white/20 text-white shadow-lg backdrop-blur">
               <Sparkles size={20} />
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/70">AI Brain</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/70">Brain AI</p>
               <h1 className="login-title">Login</h1>
             </div>
           </div>

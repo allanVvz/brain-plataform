@@ -1,6 +1,6 @@
 # Fluxo e Hierarquia do Conhecimento
 
-Este documento descreve o fluxo atual de conhecimento do AI Brain e a hierarquia usada pelo grafo semantico. Ele reflete o estado do repositorio em 2026-04-30, principalmente as migrations `008`, `009` e `010`, os services `kb_intake_service`, `vault_sync`, `knowledge_graph` e as rotas `/knowledge`.
+Este documento descreve o fluxo atual de conhecimento do Brain AI e a hierarquia usada pelo grafo semantico. Ele reflete o estado do repositorio em 2026-04-30, principalmente as migrations `008`, `009` e `010`, os services `kb_intake_service`, `vault_sync`, `knowledge_graph` e as rotas `/knowledge`.
 
 ## Visao Geral
 
@@ -387,14 +387,14 @@ Essas views ajudam o curator a abrir propostas quando um conhecimento nao cumpre
 
 ## Relacao com n8n
 
-O n8n continua sendo fonte operacional atual para execucao de alguns fluxos. O AI Brain esta assumindo progressivamente a inteligencia.
+O n8n continua sendo fonte operacional atual para execucao de alguns fluxos. O Brain AI esta assumindo progressivamente a inteligencia.
 
 Estado conceitual:
 
 ```text
-Etapa 1: n8n executa -> AI Brain observa e aprende
-Etapa 2: AI Brain decide -> n8n executa
-Etapa 3: AI Brain executa -> n8n removido ou reduzido
+Etapa 1: n8n executa -> Brain AI observa e aprende
+Etapa 2: Brain AI decide -> n8n executa
+Etapa 3: Brain AI executa -> n8n removido ou reduzido
 ```
 
 Importante: `services/vault_sync.py` nao alimenta o n8n diretamente. Ele sincroniza vault local para `knowledge_items` e grafo semantico. Workflows n8n que usam vector store em memoria nao ficam automaticamente conectados ao vault/grafo novo.
@@ -477,7 +477,7 @@ Pendencias importantes:
 - Aplicar `010_knowledge_validation_rules.sql` no banco onde ainda nao estiver aplicada.
 - Otimizar escrita em massa de artifacts/versions para cenarios grandes.
 - Criar rota universal de detalhe, por exemplo `/knowledge/node/{id}`, com node, vizinhanca, fonte, versoes e propostas.
-- Substituir gradualmente a resposta final do n8n pela resposta local do AI Brain usando `/knowledge/chat-context`.
+- Substituir gradualmente a resposta final do n8n pela resposta local do Brain AI usando `/knowledge/chat-context`.
 
 ## Regra de Ouro
 

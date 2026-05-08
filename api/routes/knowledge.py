@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form, Req
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
-from services import auth_service, supabase_client, knowledge_graph
+from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
 from services.knowledge_rag_backfill import backfill_knowledge_rag
 from services.knowledge_rag_intake import process_intake, process_intake_plan
 from services.vault_sync import run_sync, scan_vault
@@ -327,9 +327,19 @@ class ApproveBody(BaseModel):
     agent_visibility: list = ["SDR", "Closer", "Classifier"]
 
 
+def _ensure_promotion_evidence(evidence: dict, *, require_embed: bool) -> None:
+    if not evidence.get("knowledge_item_id"):
+        raise HTTPException(502, "Approve/promote failed: missing knowledge_item_id confirmation")
+    if not evidence.get("knowledge_node_id"):
+        raise HTTPException(502, "Approve/promote failed: missing knowledge_node_id confirmation")
+    if require_embed and not evidence.get("kb_entry_id"):
+        raise HTTPException(502, "Approve/promote failed: missing kb_entry_id confirmation")
+    if require_embed and not evidence.get("embedded_edge_id"):
+        raise HTTPException(502, "Approve/promote failed: missing embedded_edge_id confirmation")
+
+
 @router.post("/queue/{item_id}/approve")
 def approve_item(item_id: str, request: Request, body: ApproveBody = ApproveBody()):
-    from datetime import datetime, timezone
     try:
         item = supabase_client.get_knowledge_item(item_id)
         if not item:
@@ -337,28 +347,28 @@ def approve_item(item_id: str, request: Request, body: ApproveBody = ApproveBody
         if not item.get("persona_id"):
             raise HTTPException(400, "Assign a persona before approving")
         auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
-
-        update_data: dict = {
-            "status": "approved",
-            "approved_at": datetime.now(timezone.utc).isoformat(),
-            "agent_visibility": body.agent_visibility,
-        }
-        supabase_client.update_knowledge_item(item_id, update_data)
-
-        if body.promote_to_kb:
-            _promote_to_kb({**item, **update_data})
-            supabase_client.update_knowledge_item(item_id, {"status": "embedded"})
+        result = knowledge_lifecycle.promote_knowledge_item(
+            item_id,
+            promote_to_kb=body.promote_to_kb,
+            agent_visibility=body.agent_visibility,
+            approval_mode="manual_validation",
+        )
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(502, f"Approve/promote failed: {exc}") from exc
 
+    updated_item = result.get("item") or supabase_client.get_knowledge_item(item_id)
+    evidence = result.get("evidence") or {}
+    _ensure_promotion_evidence(evidence, require_embed=body.promote_to_kb)
     emit("item_approved", entity_type="knowledge_item", entity_id=item_id,
-         persona_id=item.get("persona_id"),
-         payload={"title": item.get("title"), "content_type": item.get("content_type"),
-                  "promoted_to_kb": body.promote_to_kb})
+         persona_id=updated_item.get("persona_id"),
+         payload={"title": updated_item.get("title"), "content_type": updated_item.get("content_type"),
+                  "promoted_to_kb": body.promote_to_kb, "evidence": evidence})
 
-    return supabase_client.get_knowledge_item(item_id)
+    return {"ok": True, "item": updated_item, "evidence": evidence}
 
 
 class RejectBody(BaseModel):
@@ -393,62 +403,24 @@ def promote_to_kb(item_id: str, request: Request):
         if not item.get("persona_id"):
             raise HTTPException(400, "Item must have a persona assigned")
         auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
-        _promote_to_kb(item)
-        supabase_client.update_knowledge_item(item_id, {"status": "embedded"})
+        result = knowledge_lifecycle.promote_knowledge_item(
+            item_id,
+            promote_to_kb=True,
+            approval_mode="manual_validation",
+        )
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(502, f"Promote to KB failed: {exc}") from exc
+    updated_item = result.get("item") or supabase_client.get_knowledge_item(item_id)
+    evidence = result.get("evidence") or {}
+    _ensure_promotion_evidence(evidence, require_embed=True)
     emit("item_promoted_to_kb", entity_type="knowledge_item", entity_id=item_id,
-         persona_id=item.get("persona_id"),
-         payload={"title": item.get("title")})
-    return {"ok": True}
-
-
-def _promote_to_kb(item: dict) -> None:
-    import hashlib
-    kb_id = "ki_" + hashlib.md5(
-        f"{item.get('file_path', item['id'])}:{item['persona_id']}".encode()
-    ).hexdigest()[:12]
-    entry = supabase_client.upsert_kb_entry({
-        "kb_id": kb_id,
-        "persona_id": item["persona_id"],
-        "tipo": _content_type_to_tipo(item["content_type"]),
-        "categoria": item["content_type"],
-        "titulo": item["title"],
-        "conteudo": item["content"],
-        "status": "ATIVO",
-        "source": "manual",
-        "agent_visibility": item.get("agent_visibility") or ["SDR", "Closer", "Classifier"],
-        "tags": item.get("tags") or [],
-    })
-    if entry:
-        knowledge_graph.bootstrap_from_item(
-            {
-                "id": entry.get("id"),
-                "title": entry.get("titulo"),
-                "content_type": item.get("content_type"),
-                "content": entry.get("conteudo") or item.get("content"),
-                "tags": entry.get("tags") or item.get("tags") or [],
-                "status": entry.get("status") or "ATIVO",
-                "persona_id": entry.get("persona_id") or item.get("persona_id"),
-                "file_path": item.get("file_path") or entry.get("link"),
-            },
-            frontmatter=item.get("metadata") or {},
-            body=entry.get("conteudo") or item.get("content") or "",
-            persona_id=entry.get("persona_id") or item.get("persona_id"),
-            source_table="kb_entries",
-        )
-
-
-def _content_type_to_tipo(ct: str) -> str:
-    return {
-        "faq": "faq", "brand": "brand", "briefing": "briefing",
-        "product": "produto", "copy": "copy", "prompt": "prompt",
-        "rule": "regra", "tone": "tom", "competitor": "concorrente",
-        "audience": "audiencia", "campaign": "campanha",
-        "maker_material": "maker", "asset": "asset", "other": "geral",
-    }.get(ct, "geral")
+         persona_id=updated_item.get("persona_id"),
+         payload={"title": updated_item.get("title"), "evidence": evidence})
+    return {"ok": True, "item": updated_item, "evidence": evidence}
 
 
 # ── Upload / Knowledge Intake ─────────────────────────────────

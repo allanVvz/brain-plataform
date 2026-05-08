@@ -9,11 +9,12 @@ without re-deriving the ontology in JS.
 
 import logging
 from collections import deque
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 
-from services import auth_service, supabase_client
+from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
 
 router = APIRouter(prefix="/knowledge", tags=["graph"])
 logger = logging.getLogger("ai_brain.graph")
@@ -37,6 +38,19 @@ def _raw_graph_node_id(value: str) -> str:
 
 def _resolve_graph_node_ref(value: str, persona_id: Optional[str] = None) -> Optional[dict]:
     raw = (value or "").strip()
+    if raw.startswith("ki:"):
+        item = supabase_client.get_knowledge_item(raw.split(":", 1)[1])
+        if not item:
+            return None
+        return {
+            "id": f"ki:{item['id']}",
+            "node_type": "knowledge_item",
+            "persona_id": item.get("persona_id") or persona_id,
+            "source_table": "knowledge_items",
+            "source_id": item.get("id"),
+            "title": item.get("title"),
+            "metadata": item.get("metadata") or {},
+        }
     if raw.startswith("gn:"):
         return supabase_client.get_knowledge_node(raw[3:])
     if raw.startswith("persona:"):
@@ -52,12 +66,138 @@ def _resolve_graph_node_ref(value: str, persona_id: Optional[str] = None) -> Opt
     return None
 
 
+def _content_type_to_tipo(content_type: str) -> str:
+    return {
+        "faq": "faq",
+        "brand": "brand",
+        "briefing": "briefing",
+        "product": "produto",
+        "copy": "copy",
+        "prompt": "prompt",
+        "rule": "regra",
+        "tone": "tom",
+        "competitor": "concorrente",
+        "audience": "audiencia",
+        "campaign": "campanha",
+        "maker_material": "maker",
+        "asset": "asset",
+        "other": "geral",
+    }.get((content_type or "").lower(), "geral")
+
+
+def _promote_pending_item_via_graph(item_id: str, persona_id: str, metadata: dict) -> tuple[Optional[dict], Optional[dict], Optional[dict], dict]:
+    item = supabase_client.get_knowledge_item(item_id)
+    if not item:
+        raise HTTPException(404, "Knowledge item not found")
+    if not item.get("persona_id"):
+        supabase_client.update_knowledge_item(item_id, {"persona_id": persona_id})
+        item["persona_id"] = persona_id
+    if item.get("persona_id") != persona_id:
+        raise HTTPException(400, "Knowledge item belongs to another persona")
+    result = knowledge_lifecycle.promote_knowledge_item(
+        item_id,
+        promote_to_kb=True,
+        approval_mode="embedded_connection",
+        edge_metadata={
+            **(metadata or {}),
+            "created_from": (metadata or {}).get("created_from") or "graph_ui_auto_approve",
+            "direction": (metadata or {}).get("direction") or "source_to_target",
+            "auto_approved": True,
+        },
+    )
+    return (
+        result.get("item"),
+        result.get("graph_node"),
+        result.get("embedded_edge"),
+        result.get("evidence") or {},
+    )
+
+
+def _require_graph_promotion_evidence(evidence: dict) -> None:
+    required = ["knowledge_item_id", "kb_entry_id", "knowledge_node_id", "embedded_edge_id"]
+    missing = [key for key in required if not evidence.get(key)]
+    if missing:
+        raise HTTPException(502, f"Auto-approval incomplete: missing {', '.join(missing)}")
+
+
 @router.post("/graph-edges")
 def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
+    raw_source = (body.source_node_id or "").strip()
+    raw_target = (body.target_node_id or "").strip()
+    edge_persona_id = body.persona_id
+    metadata = {
+        **(body.metadata or {}),
+        "created_from": (body.metadata or {}).get("created_from") or "graph_ui",
+        "direction": (body.metadata or {}).get("direction") or "source_to_target",
+    }
+    if (raw_source.startswith("ki:") or raw_target.startswith("ki:")) and not (raw_target.startswith("embedded:") or raw_target == "embedded"):
+        raise HTTPException(400, "Pending knowledge items can only be connected directly to Embedded for approval")
+    if raw_source.startswith("ki:") and (raw_target.startswith("embedded:") or raw_target == "embedded"):
+        item_id = raw_source.split(":", 1)[1]
+        item = supabase_client.get_knowledge_item(item_id)
+        if not item:
+            raise HTTPException(404, "Knowledge item not found")
+        edge_persona_id = edge_persona_id or item.get("persona_id") or (raw_target.split(":", 1)[1] if ":" in raw_target else None)
+        if not edge_persona_id:
+            raise HTTPException(400, "persona_id is required to approve this pending item")
+        auth_service.assert_persona_access(request, persona_id=edge_persona_id)
+        approved_item, mirror_node, edge, evidence = _promote_pending_item_via_graph(item_id, edge_persona_id, metadata)
+        _require_graph_promotion_evidence(evidence)
+        supabase_client.insert_event(
+            {
+                "event_type": "knowledge_path_linked",
+                "entity_type": "knowledge_edge",
+                "entity_id": (edge or {}).get("id"),
+                "persona_id": edge_persona_id,
+                "payload": {
+                    "source_node_id": raw_source,
+                    "target_node_id": raw_target,
+                    "relation_type": "manual",
+                    "kb_entry_id": evidence.get("kb_entry_id"),
+                    "approval_mode": "embedded_connection",
+                    "source_knowledge_item_id": (approved_item or {}).get("id"),
+                    "graph_node_id": (mirror_node or {}).get("id"),
+                    "evidence": evidence,
+                },
+            },
+            source="graph.create_edge",
+        )
+        return {"ok": True, "edge": edge, "auto_approved": True, "item": approved_item, "evidence": evidence}
+
     source_node = _resolve_graph_node_ref(body.source_node_id, body.persona_id)
     target_node = _resolve_graph_node_ref(body.target_node_id, body.persona_id)
     if not source_node or not target_node:
         raise HTTPException(400, "source_node_id and target_node_id are required")
+    if target_node.get("node_type") == "embedded" and source_node.get("source_table") == "knowledge_items":
+        item_id = source_node.get("source_id")
+        if not item_id:
+            raise HTTPException(400, "Knowledge item source_id is required for Embedded approval")
+        edge_persona_id = edge_persona_id or source_node.get("persona_id") or target_node.get("persona_id")
+        if not edge_persona_id:
+            raise HTTPException(400, "persona_id is required to approve this pending item")
+        auth_service.assert_persona_access(request, persona_id=edge_persona_id)
+        approved_item, mirror_node, edge, evidence = _promote_pending_item_via_graph(item_id, edge_persona_id, metadata)
+        _require_graph_promotion_evidence(evidence)
+        supabase_client.insert_event(
+            {
+                "event_type": "knowledge_path_linked",
+                "entity_type": "knowledge_edge",
+                "entity_id": (edge or {}).get("id"),
+                "persona_id": edge_persona_id,
+                "payload": {
+                    "source_node_id": source_node.get("id"),
+                    "target_node_id": target_node.get("id"),
+                    "relation_type": "manual",
+                    "kb_entry_id": evidence.get("kb_entry_id"),
+                    "approval_mode": "embedded_connection",
+                    "source_knowledge_item_id": item_id,
+                    "graph_node_id": (mirror_node or {}).get("id"),
+                    "evidence": evidence,
+                },
+            },
+            source="graph.create_edge",
+        )
+        return {"ok": True, "edge": edge, "auto_approved": True, "item": approved_item, "evidence": evidence}
     relation_type = (body.relation_type or "manual").strip() or "manual"
     if target_node.get("node_type") == "gallery":
         relation_type = "gallery_asset"
@@ -67,14 +207,9 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
     target_id = target_node["id"]
     if source_id == target_id:
         raise HTTPException(400, "Self connections are not allowed")
-    edge_persona_id = body.persona_id or source_node.get("persona_id") or target_node.get("persona_id")
+    edge_persona_id = edge_persona_id or source_node.get("persona_id") or target_node.get("persona_id")
     if edge_persona_id:
         auth_service.assert_persona_access(request, persona_id=edge_persona_id)
-    metadata = {
-        **(body.metadata or {}),
-        "created_from": (body.metadata or {}).get("created_from") or "graph_ui",
-        "direction": (body.metadata or {}).get("direction") or "source_to_target",
-    }
     if "primary_tree" not in metadata:
         metadata["primary_tree"] = relation_type == "manual"
     try:
@@ -86,11 +221,30 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
             weight=body.weight,
             metadata=metadata,
         )
+        gallery_asset = None
+        kb_entry = None
         if edge and relation_type == "gallery_asset":
             gallery_content_node = target_node if source_node.get("node_type") == "gallery" else source_node
-            supabase_client.sync_gallery_asset_node(gallery_content_node, edge)
+            gallery_asset = supabase_client.sync_gallery_asset_node(gallery_content_node, edge)
         if edge and target_node.get("node_type") == "embedded":
-            supabase_client.sync_embedded_kb_node(source_node, edge)
+            kb_entry = supabase_client.sync_embedded_kb_node(source_node, edge)
+        if edge:
+            supabase_client.insert_event(
+                {
+                    "event_type": "knowledge_path_linked",
+                    "entity_type": "knowledge_edge",
+                    "entity_id": edge.get("id"),
+                    "persona_id": edge_persona_id,
+                    "payload": {
+                        "source_node_id": source_id,
+                        "target_node_id": target_id,
+                        "relation_type": relation_type,
+                        "gallery_asset_id": (gallery_asset or {}).get("id"),
+                        "kb_entry_id": (kb_entry or {}).get("id"),
+                    },
+                },
+                source="graph.create_edge",
+            )
     except Exception as exc:
         raise HTTPException(502, f"Could not create graph edge: {exc}") from exc
     if not edge:
@@ -539,20 +693,78 @@ def get_graph_data(
         })
         persona_node_ids_emitted.add(p["id"])
 
+    mirrored_knowledge_item_ids = {
+        str(n.get("source_id"))
+        for n in sem_nodes
+        if n.get("source_table") == "knowledge_items" and n.get("source_id")
+    }
+
     # ── Optional technical sources (ki:/kb:) ────────────────────────────
     ki_items: list[dict] = []
     kb_entries: list[dict] = []
+    try:
+        ki_items = supabase_client.get_knowledge_items(persona_id=single_persona_id, limit=500, offset=0) or []
+    except Exception:
+        ki_items = []
+    pending_graph_items = [
+        item for item in ki_items
+        if str(item.get("status") or "").lower() in {"pending", "needs_persona", "needs_category", "draft", "approved"}
+        and str(item.get("id")) not in mirrored_knowledge_item_ids
+    ]
+    pending_graph_item_ids = {item.get("id") for item in pending_graph_items}
+    for item in pending_graph_items:
+        nid = f"ki:{item['id']}"
+        persona_id = item.get("persona_id")
+        node_class = _KI_STATUS.get(item.get("status", ""), "pending")
+        content_type = item.get("content_type", "other")
+        file_type = (item.get("file_type") or "").lower()
+        nodes.append({
+            "id": nid, "type": "knowledgeNode", "position": {"x": 0, "y": 0},
+            "data": {
+                "label": item.get("title") or content_type,
+                "status": item.get("status", "pending"),
+                "content_type": content_type,
+                "file_type": file_type,
+                "file_path": item.get("file_path"),
+                "content_preview": (item.get("content") or "")[:200],
+                "nodeClass": node_class,
+                "item_id": item["id"],
+                "source": "queue",
+                "tags": item.get("tags") or [],
+                "node_type": "knowledge_item",
+                "level": nt_by_type.get("knowledge_item", {}).get("default_level", 95),
+                "importance": nt_by_type.get("knowledge_item", {}).get("default_importance", 0.40),
+                "color": nt_by_type.get("knowledge_item", {}).get("color", "#94a3b8"),
+                "icon": nt_by_type.get("knowledge_item", {}).get("icon", "inbox"),
+                "is_auxiliary": False,
+                "validated": node_class == "validated",
+            },
+        })
+        if persona_id and persona_id in persona_node_ids_emitted:
+            edges.append({
+                "id": f"e:ki-{persona_id}-{item['id']}",
+                "source": f"persona:{persona_id}", "target": nid, "type": "smoothstep",
+                "data": {
+                    "relation_type": "draft_member",
+                    "tier": "auxiliary",
+                    "weight": 0.45,
+                    "directional": True,
+                    "draft_edge": True,
+                    "primary_tree": False,
+                },
+            })
+
     if include_technical:
-        try:
-            ki_items = supabase_client.get_knowledge_items(persona_id=single_persona_id, limit=500, offset=0) or []
-        except Exception:
-            ki_items = []
         try:
             kb_entries = supabase_client.get_kb_entries(persona_id=single_persona_id, status="") or []
         except Exception:
             kb_entries = []
 
         for item in ki_items:
+            if item.get("id") in pending_graph_item_ids:
+                continue
+            if str(item.get("id")) in mirrored_knowledge_item_ids:
+                continue
             nid = f"ki:{item['id']}"
             persona_id = item.get("persona_id")
             node_class = _KI_STATUS.get(item.get("status", ""), "pending")
@@ -665,16 +877,14 @@ def get_graph_data(
         is_auxiliary = ntype in _AUXILIARY_NODE_TYPES or (level or 0) >= 90
 
         # Map semantic node_type → ReactFlow nodeClass for legacy color/shape.
+        semantic_state = knowledge_graph._validation_state(n)
         node_class = {
             "persona": "persona",
-            "product": "validated", "campaign": "validated", "brand": "validated",
-            "entity": "validated", "asset": "validated", "faq": "validated",
-            "copy": "validated", "briefing": "validated", "rule": "validated",
-            "tone": "validated", "audience": "validated",
-            "gallery": "validated", "embedded": "validated",
-            "mention": "pending", "tag": "pending",
-            "knowledge_item": "pending", "kb_entry": "validated",
-        }.get(ntype, "pending")
+            "gallery": "validated",
+            "embedded": "validated",
+            "mention": "pending",
+            "tag": "pending",
+        }.get(ntype, "validated" if semantic_state == "validated" else "pending")
 
         # focus highlights
         is_focus = bool(focus_node and n.get("id") == focus_node.get("id"))
@@ -706,7 +916,7 @@ def get_graph_data(
                 "color": registry_row.get("color"),
                 "icon": registry_row.get("icon"),
                 "is_auxiliary": is_auxiliary,
-                "validated": node_class == "validated",
+                "validated": semantic_state == "validated",
                 "is_focus": is_focus,
                 "in_focus_path": in_focus_path,
                 "graph_distance": graph_distance,

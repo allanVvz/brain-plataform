@@ -27,7 +27,12 @@
       "Bash(mkdir -p /c/Users/Alan/.claude/skills-staging)",
       "Read(//c/Users/Alan/.claude/**)",
       "Bash(git clone *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(git *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8000)",
+      "Bash(wmic process *)",
+      "PowerShell(Get-Process *)"
     ]
   },
   "hooks": {

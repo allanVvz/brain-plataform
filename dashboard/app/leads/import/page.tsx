@@ -12,6 +12,7 @@ export default function LeadImportPage() {
   const [modal, setModal] = useState<any | null>(null);
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState("");
+  const [noticeKind, setNoticeKind] = useState<"info" | "success" | "error">("info");
   const [lastCreated, setLastCreated] = useState<number | null>(null);
   const [personaId, setPersonaId] = useState("");
   const [personaName, setPersonaName] = useState("");
@@ -47,18 +48,28 @@ export default function LeadImportPage() {
     }
     setUploading(true);
     setNotice("");
+    setNoticeKind("info");
     setLastCreated(null);
     try {
       const result = await api.uploadLeadImport(file, personaId || undefined);
       await load();
+      const status = result?.status || (result?.ok === false ? "failed" : "completed");
       const stats = result?.batch?.stats || {};
       const created = Number(stats.created || 0);
       const updated = Number(stats.updated || 0);
-      setLastCreated(created + updated);
-      setNotice(
-        `Importado: ${stats.valid || 0} validos · ${stats.with_phone || 0} com celular · ${created} criados · ${updated} atualizados · ${stats.email_only || 0} somente email · ${stats.invalid || 0} invalidos.`,
-      );
+      if (status === "failed" || result?.ok === false) {
+        setNoticeKind("error");
+        setNotice(result?.error || "Importacao falhou. Verifique o CSV e tente novamente.");
+        setLastCreated(0);
+      } else {
+        setLastCreated(created + updated);
+        setNoticeKind("success");
+        setNotice(
+          `Importado: ${stats.valid || 0} validos · ${stats.with_phone || 0} com celular · ${created} criados · ${updated} atualizados · ${stats.email_only || 0} somente email · ${stats.invalid || 0} invalidos.`,
+        );
+      }
     } catch (error) {
+      setNoticeKind("error");
       setNotice(error instanceof Error ? error.message : "Nao foi possivel importar o CSV.");
     } finally {
       setUploading(false);
@@ -66,13 +77,19 @@ export default function LeadImportPage() {
     }
   }
 
+  // Card "Imports" conta apenas batches efetivos (status terminal != failed
+  // e com pelo menos 1 lead valido); falhados/orfãos viram diagnóstico, não somam.
   const totals = imports.reduce(
     (acc, item) => {
       const stats = item.stats || {};
-      acc.imports += 1;
-      acc.total += Number(stats.valid || stats.total || 0);
-      acc.withPhone += Number(stats.with_phone || 0);
-      acc.emailOnly += Number(stats.email_only || 0);
+      const valid = Number(stats.valid || 0);
+      const status = String(item.status || "completed").toLowerCase();
+      if (status === "completed" && valid > 0) {
+        acc.imports += 1;
+        acc.total += valid;
+        acc.withPhone += Number(stats.with_phone || 0);
+        acc.emailOnly += Number(stats.email_only || 0);
+      }
       return acc;
     },
     { imports: 0, total: 0, withPhone: 0, emailOnly: 0 },
@@ -86,12 +103,24 @@ export default function LeadImportPage() {
   async function deleteImport(batchId: string) {
     if (!batchId) return;
     if (!window.confirm("Excluir este grupo de leads da lista e do grafo?")) return;
-    await api.deleteLeadImport(batchId);
+    // Otimista: remove visualmente antes do round-trip; em caso de erro, recarrega.
+    const snapshot = imports;
+    setImports((prev) => prev.filter((it) => (it.batch_id || it.event_id) !== batchId));
+    if (expanded === batchId) setExpanded(null);
     if (modal?.batch?.batch_id === batchId) setModal(null);
     if (new URLSearchParams(window.location.search).get("open") === batchId) {
       window.history.replaceState(null, "", "/leads/import");
     }
-    await load();
+    try {
+      await api.deleteLeadImport(batchId);
+    } catch (error) {
+      setImports(snapshot);
+      setNoticeKind("error");
+      setNotice(error instanceof Error ? error.message : "Falha ao excluir import.");
+      return;
+    }
+    // Refresh em background para sincronizar contadores derivados.
+    load().catch(() => {});
   }
 
   return (
@@ -124,12 +153,22 @@ export default function LeadImportPage() {
       </section>
 
       {notice && (
-        <div className="lg-card flex flex-col gap-1 text-sm text-obs-text">
-          <span>{notice}</span>
-          {!!lastCreated && (
+        <div
+          className="lg-card flex flex-col gap-1 text-sm"
+          style={{
+            borderColor:
+              noticeKind === "error"
+                ? "rgb(var(--obs-rose) / 0.45)"
+                : noticeKind === "success"
+                ? "rgba(16,185,129,0.45)"
+                : "var(--border-glass)",
+          }}
+        >
+          <span className={noticeKind === "error" ? "text-obs-rose" : "text-obs-text"}>{notice}</span>
+          {noticeKind === "success" && !!lastCreated && (
             <span className="text-xs text-obs-subtle">
               {lastCreated} {lastCreated === 1 ? "lead criado/atualizado aparece" : "leads criados/atualizados aparecem"} agora em{" "}
-              <Link href="/leads" className="text-obs-violet hover:underline">Leads</Link>.
+              <Link href="/leads?audience=import" className="text-obs-violet hover:underline">Leads &middot; Import</Link>.
             </span>
           )}
         </div>
@@ -140,6 +179,9 @@ export default function LeadImportPage() {
           const batchId = item.batch_id || item.event_id;
           const stats = item.stats || {};
           const open = expanded === batchId;
+          const status = String(item.status || "completed").toLowerCase();
+          const failed = status === "failed" || (status === "completed" && Number(stats.valid || 0) === 0);
+          const errMsg = item.error || "";
           return (
             <div key={batchId} className="[border-bottom:1px_solid_var(--border-glass-soft)] last:[border-bottom:0]">
               <div className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-white/[0.04]">
@@ -148,12 +190,30 @@ export default function LeadImportPage() {
                 </button>
                 <button type="button" onClick={() => setExpanded(open ? null : batchId)} className="min-w-0 flex-1 text-left">
                   <p className="truncate text-sm font-medium text-obs-text">{item.filename || "CSV importado"}</p>
-                  <p className="mt-0.5 text-xs text-obs-faint">{item.created_at || item.finished_at || ""}</p>
+                  <p className="mt-0.5 text-xs text-obs-faint">
+                    {item.created_at || item.finished_at || ""}
+                    {failed && errMsg ? ` · ${errMsg}` : ""}
+                  </p>
                 </button>
-                <span className="text-xs text-obs-subtle">{stats.valid || 0} leads</span>
-                <span className="lg-badge lg-badge-info">{stats.with_phone || 0} celular</span>
-                <span className="lg-badge lg-badge-success">{(stats.created || 0) + (stats.updated || 0)} ok</span>
-                {!!stats.invalid && <span className="lg-badge lg-badge-error">{stats.invalid} invalidas</span>}
+                {failed ? (
+                  <>
+                    <span className="lg-badge lg-badge-error" title={errMsg || "Sem leads validos"}>
+                      <AlertCircle size={11} /> {status === "failed" ? "Falhou" : "Sem leads"}
+                    </span>
+                    {!!stats.total && (
+                      <span className="lg-badge" title={`${stats.total} linhas processadas`}>
+                        {stats.total} linhas
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xs text-obs-subtle">{stats.valid || 0} leads</span>
+                    <span className="lg-badge lg-badge-info">{stats.with_phone || 0} celular</span>
+                    <span className="lg-badge lg-badge-success">{(stats.created || 0) + (stats.updated || 0)} ok</span>
+                    {!!stats.invalid && <span className="lg-badge lg-badge-error">{stats.invalid} invalidas</span>}
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => deleteImport(batchId)}
@@ -165,6 +225,9 @@ export default function LeadImportPage() {
               </div>
               {open && (
                 <div className="px-4 py-3 [border-top:1px_solid_var(--border-glass-soft)]">
+                  {failed && errMsg && (
+                    <p className="mb-3 text-xs text-obs-rose">{errMsg}</p>
+                  )}
                   <ImportPreview rows={item.preview || []} />
                   <button
                     type="button"

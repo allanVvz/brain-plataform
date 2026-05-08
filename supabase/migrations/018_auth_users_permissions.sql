@@ -1,4 +1,4 @@
--- AI Brain auth and persona-level permissions.
+-- Brain AI auth and persona-level permissions.
 -- Supabase CLI was not available in this workspace, so this migration was
 -- created manually and should be applied with the existing deployment process.
 

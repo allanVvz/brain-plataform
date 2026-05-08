@@ -31,7 +31,7 @@ router = APIRouter(prefix="/marketing", tags=["marketing"])
 # ── Mode catalog ──────────────────────────────────────────────────────────
 # Each mode maps to a system-prompt template. The template is distilled from
 # the corresponding marketing skill (see ~/.claude/skills-staging) and adapted
-# for the AI Brain context (persona-aware, structured output).
+# for the Brain AI context (persona-aware, structured output).
 #
 # Adding a new mode is a single dict entry — no other code changes required.
 

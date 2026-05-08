@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Brain Platform — Migration 002
+-- Brain AI Platform — Migration 002
 -- Knowledge management multi-client layer
 -- ============================================================
 
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS knowledge_sources (
 
 -- Insert default vault source (global, not persona-specific)
 INSERT INTO knowledge_sources (source_type, name, path)
-VALUES ('vault', 'AI Brain Vault', 'C:\Ai-Brain\Ai-Brain')
+VALUES ('vault', 'Brain AI Vault', 'C:\Ai-Brain\Ai-Brain')
 ON CONFLICT DO NOTHING;
 
 -- ── Knowledge Items ───────────────────────────────────────────

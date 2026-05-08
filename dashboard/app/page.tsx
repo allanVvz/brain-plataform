@@ -20,6 +20,7 @@ export default function DashboardPage() {
   const [health, setHealth] = useState<any>(null);
   const [insights, setInsights] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
+  const [conversations, setConversations] = useState<any[]>([]);
   const [knowledgeCounts, setKnowledgeCounts] = useState<any>(null);
   const [pipelineMetrics, setPipelineMetrics] = useState<any>(null);
   const [running, setRunning] = useState(false);
@@ -42,7 +43,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const scopedPersonaId = personaFilterId || undefined;
-    api.leads(250, 0, scopedPersonaId).then(setLeads).catch(console.error);
+    api.leads(1000, 0, scopedPersonaId).then(setLeads).catch(console.error);
+    api.conversations(720, scopedPersonaId).then(setConversations).catch(() => setConversations([]));
     api.knowledgeCounts(scopedPersonaId).then(setKnowledgeCounts).catch(() => setKnowledgeCounts(null));
     api.pipelineMetrics(scopedPersonaId).then(setPipelineMetrics).catch(() => setPipelineMetrics(null));
   }, [personaFilterId]);
@@ -71,7 +73,7 @@ export default function DashboardPage() {
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-obs-faint">
-            AI Brain
+            Brain AI
           </p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-obs-text">
             {activeLabel}
@@ -103,6 +105,7 @@ export default function DashboardPage() {
       {activeTab === "leads" && (
         <LeadsDashboardTab
           leads={leads}
+          conversations={conversations}
         />
       )}
 

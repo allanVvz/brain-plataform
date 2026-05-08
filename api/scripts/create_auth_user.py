@@ -54,11 +54,11 @@ def grant_personas(user: dict, persona_slugs: list[str], can_edit: bool, can_man
 
 def main() -> None:
     load_dotenv(ROOT / ".env")
-    parser = argparse.ArgumentParser(description="Create or update an AI Brain login user.")
+    parser = argparse.ArgumentParser(description="Create or update an Brain AI login user.")
     parser.add_argument("--email", default=os.environ.get("AI_BRAIN_SEED_ADMIN_EMAIL"))
     parser.add_argument("--username", default=os.environ.get("AI_BRAIN_SEED_ADMIN_USERNAME"))
     parser.add_argument("--password", default=os.environ.get("AI_BRAIN_SEED_ADMIN_PASSWORD"))
-    parser.add_argument("--name", default=os.environ.get("AI_BRAIN_SEED_ADMIN_NAME") or "AI Brain Admin")
+    parser.add_argument("--name", default=os.environ.get("AI_BRAIN_SEED_ADMIN_NAME") or "Brain AI Admin")
     parser.add_argument("--role", choices=["admin", "user", "viewer", "operator"], default=os.environ.get("AI_BRAIN_SEED_ADMIN_ROLE") or "admin")
     parser.add_argument("--persona", action="append", default=[], help="Persona slug to grant. Repeat for multiple personas.")
     parser.add_argument("--can-edit", action="store_true")

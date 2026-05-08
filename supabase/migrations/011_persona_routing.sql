@@ -20,7 +20,7 @@ ALTER TABLE personas
   ADD COLUMN IF NOT EXISTS inbound_webhook_token TEXT;
 
 COMMENT ON COLUMN personas.process_mode IS
-  'internal = AI Brain classifies + replies + sends. n8n = AI Brain only persists; n8n owns the reply.';
+  'internal = Brain AI classifies + replies + sends. n8n = Brain AI only persists; n8n owns the reply.';
 COMMENT ON COLUMN personas.outbound_webhook_url IS
   'Webhook used by /messages/send to deliver human/operator replies to WhatsApp via n8n. Used in BOTH process_modes.';
 COMMENT ON COLUMN personas.inbound_webhook_token IS

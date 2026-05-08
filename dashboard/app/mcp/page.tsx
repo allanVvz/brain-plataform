@@ -50,7 +50,7 @@ export default function McpPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">MCP</h1>
-        <p className="text-sm text-brain-muted mt-1">Model Context Protocol — ferramentas disponíveis para o AI Brain</p>
+        <p className="text-sm text-brain-muted mt-1">Model Context Protocol — ferramentas disponíveis para o Brain AI</p>
       </div>
 
       <div className="grid grid-cols-2 gap-6">

@@ -32,9 +32,10 @@ async def process(
     x_webhook_token: str | None = Header(default=None, alias="X-Webhook-Token"),
 ):
     t0 = time.monotonic()
+    correlation_id = f"classifier:{event.lead_ref or event.lead_id or int(time.time() * 1000)}"
 
     # ── Gate 0: persona routing mode ─────────────────────────────────────
-    # When persona.process_mode == 'n8n', the AI Brain delegates the reply
+    # When persona.process_mode == 'n8n', the Brain AI delegates the reply
     # to n8n. We only persist the inbound message and resolve the lead so
     # the dashboard sees the conversation. n8n is responsible for replying.
     persona_routing: dict | None = None
@@ -112,7 +113,61 @@ async def process(
         }
 
     try:
+        event_emitter.emit(
+            "classifier_started",
+            entity_type="lead",
+            entity_id=str(ctx.lead.ref or ctx.lead.id or event.lead_id or ""),
+            persona_id=getattr(ctx, "persona_id", None),
+            payload={
+                "correlation_id": correlation_id,
+                "lead_ref": ctx.lead.ref,
+                "lead_id": ctx.lead.id,
+                "persona_slug": event.persona_slug or getattr(ctx, "persona_slug", None),
+                "stage": ctx.lead.stage,
+                "message_preview": (ctx.mensagem or "")[:240],
+            },
+            source="process.classifier",
+        )
         classification = classifier.classify(ctx)
+        supabase_client.insert_agent_log({
+            "lead_id": str(ctx.lead.ref or ctx.lead.id or event.lead_id or ""),
+            "agent_type": "Classifier",
+            "action": "[INFO] classifier completed",
+            "decision": json.dumps(classification, ensure_ascii=False)[:500],
+            "metadata": {
+                "level": "INFO",
+                "component": "Classifier",
+                "message": "classifier completed",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "correlation_id": correlation_id,
+                "persona_slug": event.persona_slug or getattr(ctx, "persona_slug", None),
+                "route_hint": classification.get("route_hint"),
+            },
+            "input": {
+                "lead_ref": ctx.lead.ref,
+                "lead_id": ctx.lead.id,
+                "message": ctx.mensagem,
+            },
+            "output": classification,
+        })
+        event_emitter.emit(
+            "classifier_completed",
+            entity_type="lead",
+            entity_id=str(ctx.lead.ref or ctx.lead.id or event.lead_id or ""),
+            persona_id=getattr(ctx, "persona_id", None),
+            payload={
+                "correlation_id": correlation_id,
+                "lead_ref": ctx.lead.ref,
+                "lead_id": ctx.lead.id,
+                "persona_slug": event.persona_slug or getattr(ctx, "persona_slug", None),
+                "intent": classification.get("intent"),
+                "interest_level": classification.get("interest_level"),
+                "urgency": classification.get("urgency"),
+                "fit": classification.get("fit"),
+                "route_hint": classification.get("route_hint"),
+            },
+            source="process.classifier",
+        )
     except Exception as exc:
         logger.warning("classifier failed, using SDR defaults: %s", exc)
         classification = {
@@ -124,6 +179,43 @@ async def process(
             "summary": "classifier unavailable",
             "route_hint": "SDR",
         }
+        supabase_client.insert_agent_log({
+            "lead_id": str(ctx.lead.ref or ctx.lead.id or event.lead_id or ""),
+            "agent_type": "Classifier",
+            "action": f"[ERROR] classifier failed: {str(exc)[:160]}",
+            "decision": str(exc)[:500],
+            "metadata": {
+                "level": "ERROR",
+                "component": "Classifier",
+                "message": f"classifier failed: {exc}",
+                "traceback": str(exc),
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "correlation_id": correlation_id,
+                "defaults_used": True,
+                "persona_slug": event.persona_slug or getattr(ctx, "persona_slug", None),
+            },
+            "input": {
+                "lead_ref": ctx.lead.ref,
+                "lead_id": ctx.lead.id,
+                "message": ctx.mensagem,
+            },
+            "output": classification,
+        })
+        event_emitter.emit(
+            "classifier_failed",
+            entity_type="lead",
+            entity_id=str(ctx.lead.ref or ctx.lead.id or event.lead_id or ""),
+            persona_id=getattr(ctx, "persona_id", None),
+            payload={
+                "correlation_id": correlation_id,
+                "lead_ref": ctx.lead.ref,
+                "lead_id": ctx.lead.id,
+                "persona_slug": event.persona_slug or getattr(ctx, "persona_slug", None),
+                "error": str(exc),
+                "defaults_used": True,
+            },
+            source="process.classifier",
+        )
     ctx.classification = classification
 
     score, tags, funnel_stage = decision_engine.compute_score(ctx)

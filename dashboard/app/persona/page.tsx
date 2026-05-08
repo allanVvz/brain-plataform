@@ -148,12 +148,46 @@ export default function PersonaPage() {
   useEffect(() => {
     api.personas().then((list) => {
       setPersonas(list);
-      if (list.length > 0) selectPersona(list[0]);
+      if (list.length === 0) return;
+      const stored = (typeof window !== "undefined"
+        ? window.localStorage.getItem("ai-brain-persona-slug")
+        : "") || "";
+      const match = stored ? list.find((p) => p.slug === stored) : null;
+      selectPersona(match || list[0]);
     }).finally(() => setLoading(false));
   }, []);
 
+  // Top-bar Cliente filter and the persona page must stay in sync.
+  // Header dispatches `ai-brain-persona-change`; we react to it and adopt the slug.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPersonaChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ slug?: string; id?: string }>).detail;
+      const slug = detail?.slug || "";
+      if (!slug) return;
+      if (selected?.slug === slug) return;
+      const next = personas.find((p) => p.slug === slug);
+      if (next) selectPersona(next);
+    };
+    window.addEventListener("ai-brain-persona-change", onPersonaChange);
+    return () => window.removeEventListener("ai-brain-persona-change", onPersonaChange);
+  }, [personas, selected?.slug]);
+
   async function selectPersona(p: Persona) {
     setSelected(p);
+    // Mirror Cliente=Persona business rule: any in-page persona switch
+    // must propagate to the top-bar via the same channel AppShell uses.
+    if (typeof window !== "undefined") {
+      const currentSlug = window.localStorage.getItem("ai-brain-persona-slug");
+      const currentId = window.localStorage.getItem("ai-brain-persona-id");
+      if (currentSlug !== p.slug || currentId !== p.id) {
+        window.localStorage.setItem("ai-brain-persona-slug", p.slug);
+        window.localStorage.setItem("ai-brain-persona-id", p.id);
+        window.dispatchEvent(new CustomEvent("ai-brain-persona-change", {
+          detail: { slug: p.slug, id: p.id },
+        }));
+      }
+    }
     setBrand(null);
     setBindings([]);
     setKbCount(null);
@@ -428,7 +462,7 @@ export default function PersonaPage() {
                     className="mt-0.5 accent-brain-accent"
                   />
                   <div>
-                    <p className="text-sm">Processar internamente <span className="text-xs text-brain-muted">(AI Brain)</span></p>
+                    <p className="text-sm">Processar internamente <span className="text-xs text-brain-muted">(Brain AI)</span></p>
                     <p className="text-xs text-brain-muted">
                       Classifica, decide rota, gera resposta e envia via outbound webhook.
                     </p>
@@ -447,7 +481,7 @@ export default function PersonaPage() {
                   <div>
                     <p className="text-sm">Processar via n8n</p>
                     <p className="text-xs text-brain-muted">
-                      AI Brain só persiste a inbound. n8n é responsável pela resposta. Operador continua usando outbound webhook.
+                      Brain AI só persiste a inbound. n8n é responsável pela resposta. Operador continua usando outbound webhook.
                     </p>
                   </div>
                 </label>
@@ -553,7 +587,7 @@ export default function PersonaPage() {
                   <div>
                     <p className="text-xs text-brain-muted">Token de entrada n8n</p>
                     <p className="text-[11px] text-brain-muted">
-                      Envie em <code className="text-brain-accent">X-Webhook-Token</code> quando o n8n chamar o AI Brain.
+                      Envie em <code className="text-brain-accent">X-Webhook-Token</code> quando o n8n chamar o Brain AI.
                     </p>
                   </div>
                   <button
