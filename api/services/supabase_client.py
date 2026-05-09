@@ -2,9 +2,10 @@ import os
 import re
 import time
 import unicodedata
+import json
 from datetime import datetime, timezone
 from supabase import create_client, Client
-from typing import Optional
+from typing import Any, Optional
 
 _client: Optional[Client] = None
 _TRANSIENT_ERROR_MARKERS = (
@@ -1219,7 +1220,11 @@ def get_knowledge_node_for_source(
         )
         if persona_id:
             q = q.eq("persona_id", persona_id)
-        return _one(q.maybe_single())
+        rows = _q(q.order("created_at", desc=True).limit(5))
+        for row in rows:
+            if row.get("status") != "deleted":
+                return row
+        return rows[0] if rows else None
     except Exception as exc:
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True
@@ -1988,6 +1993,14 @@ def insert_health_snapshot(data: dict) -> None:
     get_client().table("system_health").insert(data).execute()
 
 
+def ping_supabase() -> tuple[bool, Optional[str]]:
+    try:
+        _execute_with_retry(get_client().table("app_users").select("id").limit(1))
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
 def get_health_history(limit: int = 30) -> list:
     rows = _q(
         get_client().table("system_health")
@@ -2030,6 +2043,49 @@ def get_integration_statuses(persona_id: Optional[str] = None) -> list:
             seen.add(key)
             result.append(row)
     return result
+
+
+def list_user_integration_connections(user_id: str) -> list[dict[str, Any]]:
+    if not user_id:
+        return []
+    return _q(
+        get_client()
+        .table("user_integration_connections")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("service")
+    )
+
+
+def get_user_integration_connection(user_id: str, service: str) -> Optional[dict[str, Any]]:
+    if not user_id or not service:
+        return None
+    rows = _q(
+        get_client()
+        .table("user_integration_connections")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("service", service)
+        .limit(1)
+    )
+    return rows[0] if rows else None
+
+
+def upsert_user_integration_connection(data: dict[str, Any]) -> Optional[dict[str, Any]]:
+    payload = dict(data or {})
+    now_iso = datetime.now(timezone.utc).isoformat()
+    payload.setdefault("config_json", {})
+    payload["updated_at"] = now_iso
+    payload.setdefault("created_at", now_iso)
+    result = _execute_with_retry(
+        get_client()
+        .table("user_integration_connections")
+        .upsert(payload, on_conflict="user_id,service")
+    )
+    rows = result.data or []
+    if rows:
+        return rows[0]
+    return get_user_integration_connection(payload.get("user_id"), payload.get("service"))
 
 
 # ── Personas ───────────────────────────────────────────────────────────────
@@ -2158,6 +2214,21 @@ def _log_kb_entry_write_failure(stage: str, payload: dict, exc: Exception) -> No
         pass
 
 
+_MISSING_COLUMN_RE = re.compile(r"Could not find the '([^']+)' column of '([^']+)'")
+
+
+def _drop_missing_kb_entry_column(payload: dict, exc: Exception) -> tuple[dict, Optional[str]]:
+    match = _MISSING_COLUMN_RE.search(str(exc))
+    if not match:
+        return payload, None
+    column_name, table_name = match.groups()
+    if table_name != "kb_entries" or column_name not in payload:
+        return payload, None
+    sanitized = dict(payload)
+    sanitized.pop(column_name, None)
+    return sanitized, column_name
+
+
 def upsert_kb_entry(data: dict) -> dict:
     payload = dict(data or {})
     kb_id = payload.get("kb_id")
@@ -2171,6 +2242,15 @@ def upsert_kb_entry(data: dict) -> dict:
     except Exception as exc:
         last_exc = exc
         _log_kb_entry_write_failure("upsert", payload, exc)
+        payload, dropped_column = _drop_missing_kb_entry_column(payload, exc)
+        if dropped_column:
+            try:
+                result = _execute_with_retry(get_client().table("kb_entries").upsert(payload, on_conflict="kb_id,persona_id"))
+                rows = result.data or []
+                return rows[0] if rows else (_find_kb_entry_by_key(kb_id, persona_id) or {})
+            except Exception as retry_exc:
+                last_exc = retry_exc
+                _log_kb_entry_write_failure(f"upsert-without-{dropped_column}", payload, retry_exc)
 
     fallback_payload = dict(payload)
     if fallback_payload.get("source") == "graph_embed":
@@ -2232,8 +2312,15 @@ def get_kb_entries_by_ids(ids: list) -> dict:
 
 def update_kb_entry(entry_id: str, data: dict) -> None:
     from datetime import datetime, timezone
-    data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    _execute_with_retry(get_client().table("kb_entries").update(data).eq("id", entry_id))
+    payload = dict(data or {})
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        _execute_with_retry(get_client().table("kb_entries").update(payload).eq("id", entry_id))
+    except Exception as exc:
+        payload, dropped_column = _drop_missing_kb_entry_column(payload, exc)
+        if not dropped_column:
+            raise
+        _execute_with_retry(get_client().table("kb_entries").update(payload).eq("id", entry_id))
 
 
 def delete_kb_entry(entry_id: str) -> bool:

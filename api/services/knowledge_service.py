@@ -8,15 +8,23 @@ from typing import Optional
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
 
-def _get_sheet():
-    creds_path = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "secrets/google-service-account.json")
-    creds = Credentials.from_service_account_file(creds_path, scopes=_SCOPES)
+def _get_sheet(service_account_json: Optional[str] = None):
+    if service_account_json:
+        creds = Credentials.from_service_account_info(json.loads(service_account_json), scopes=_SCOPES)
+    else:
+        creds_path = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "secrets/google-service-account.json")
+        creds = Credentials.from_service_account_file(creds_path, scopes=_SCOPES)
     return gspread.authorize(creds)
 
 
-def sync_from_sheets(persona_id: str, spreadsheet_id: Optional[str] = None) -> int:
+def sync_from_sheets(
+    persona_id: str,
+    spreadsheet_id: Optional[str] = None,
+    *,
+    service_account_json: Optional[str] = None,
+) -> int:
     sid = spreadsheet_id or os.environ["KB_SPREADSHEET_ID"]
-    gc = _get_sheet()
+    gc = _get_sheet(service_account_json=service_account_json)
     sheet = gc.open_by_key(sid).worksheet("FAQ")
     rows = sheet.get_all_records()
 

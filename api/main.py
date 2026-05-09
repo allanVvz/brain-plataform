@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from utils.env import get_backend_env, validate_backend_env
+from utils.tls import configure_trust_store
 
 try:
     from fastapi import FastAPI
@@ -13,6 +14,7 @@ except ImportError as exc:
     ) from exc
 
 load_dotenv()
+configure_trust_store()
 
 from middleware.auth import auth_middleware
 from routes import auth, health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, marketing, audiences
@@ -34,13 +36,19 @@ async def lifespan(app: FastAPI):
         logger.error(msg)
         raise RuntimeError(msg)
     logger.info("Backend env validation OK.")
-    workers = [
-        FlowValidatorWorker(),
-        N8nMirrorWorker(),
-        HealthCheckWorker(),
-        KbSyncWorker(),
-    ]
-    tasks = [asyncio.create_task(w.start()) for w in workers]
+    env = get_backend_env()
+    tasks: list[asyncio.Task] = []
+    if env["run_embedded_workers"]:
+        workers = [
+            FlowValidatorWorker(),
+            N8nMirrorWorker(),
+            HealthCheckWorker(),
+            KbSyncWorker(),
+        ]
+        tasks = [asyncio.create_task(w.start()) for w in workers]
+        logger.warning("RUN_EMBEDDED_WORKERS enabled; background workers started inside API process.")
+    else:
+        logger.info("RUN_EMBEDDED_WORKERS disabled; API booting without background workers.")
     yield
     for t in tasks:
         t.cancel()

@@ -5,6 +5,7 @@ import os
 import time
 import httpx
 from typing import Optional
+from utils.tls import get_ca_bundle_path
 
 
 def _headers() -> dict:
@@ -31,7 +32,7 @@ def send_to_webhook(
         sig = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
         headers["X-Hub-Signature-256"] = f"sha256={sig}"
         headers["X-Timestamp"] = str(int(time.time()))
-    with httpx.Client(timeout=timeout) as client:
+    with httpx.Client(timeout=timeout, verify=get_ca_bundle_path()) as client:
         resp = client.post(url, content=body, headers=headers)
         return resp.status_code, (resp.text or "")[:300]
 
@@ -47,21 +48,21 @@ def get_executions(limit: int = 100, status: Optional[str] = None, workflow_id: 
     if workflow_id:
         params["workflowId"] = workflow_id
 
-    with httpx.Client(timeout=15) as client:
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
         response = client.get(f"{_base()}/api/v1/executions", headers=_headers(), params=params)
         response.raise_for_status()
         return response.json().get("data", [])
 
 
 def get_execution(execution_id: str) -> dict:
-    with httpx.Client(timeout=15) as client:
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
         response = client.get(f"{_base()}/api/v1/executions/{execution_id}", headers=_headers())
         response.raise_for_status()
         return response.json()
 
 
 def get_workflows() -> list:
-    with httpx.Client(timeout=15) as client:
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
         response = client.get(f"{_base()}/api/v1/workflows", headers=_headers())
         response.raise_for_status()
         return response.json().get("data", [])
@@ -69,7 +70,7 @@ def get_workflows() -> list:
 
 def ping() -> tuple[bool, int]:
     try:
-        with httpx.Client(timeout=5) as client:
+        with httpx.Client(timeout=5, verify=get_ca_bundle_path()) as client:
             import time
             t0 = time.monotonic()
             response = client.get(f"{_base()}/api/v1/workflows", headers=_headers())

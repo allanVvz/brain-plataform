@@ -203,7 +203,29 @@ export const api = {
     req<any>(`/personas/${slug}/routing/test`,{ method: "POST", body: "{}" }),
 
   // Integrations & Logs
-  integrations: (personaId?: string) => req<any[]>(`/integrations${personaId ? `?persona_id=${personaId}` : ""}`),
+  integrations: () => req<any[]>("/integrations/user"),
+  integrationCatalog: () => req<any[]>("/integrations/catalog"),
+  updateUserIntegration: (
+    service: string,
+    body: {
+      enabled: boolean;
+      service_account_json?: string | Record<string, any>;
+      spreadsheet_id?: string;
+      api_key?: string;
+      base_id?: string;
+    },
+  ) => req<any>(`/integrations/user/${encodeURIComponent(service)}`, { method: "PUT", body: JSON.stringify(body) }),
+  validateUserIntegration: (
+    service: string,
+    body?: {
+      service_account_json?: string | Record<string, any>;
+      spreadsheet_id?: string;
+      api_key?: string;
+      base_id?: string;
+    },
+  ) => req<any>(`/integrations/user/${encodeURIComponent(service)}/validate`, { method: "POST", body: JSON.stringify(body || {}) }),
+  deleteUserIntegrationCredentials: (service: string) =>
+    req<any>(`/integrations/user/${encodeURIComponent(service)}/credentials`, { method: "DELETE" }),
   n8nLogs: (limit = 100, status?: string) => req<any[]>(`/logs/n8n?limit=${limit}${status ? `&status=${status}` : ""}`),
   agentLogs: (leadId?: string, limit = 50) => req<any[]>(`/logs/agents?limit=${limit}${leadId ? `&lead_id=${leadId}` : ""}`),
 

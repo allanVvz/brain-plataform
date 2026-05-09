@@ -6,6 +6,8 @@ from services import auth_service
 PUBLIC_EXACT_PATHS = {
     "/",
     "/health",
+    "/health/live",
+    "/health/ready",
     "/health/score",
     "/auth/login",
     "/auth/logout",

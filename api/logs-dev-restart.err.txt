@@ -1,0 +1,10 @@
+C:\Users\Alan\Documents\repositorios\ai-brain\api\routes\knowledge.py:19: UserWarning: Field name "validate" in "RagIntakeBody" shadows an attribute in parent "BaseModel"
+  class RagIntakeBody(BaseModel):
+C:\Users\Alan\Documents\repositorios\ai-brain\api\routes\knowledge.py:45: UserWarning: Field name "validate" in "RagIntakePlanBody" shadows an attribute in parent "BaseModel"
+  class RagIntakePlanBody(BaseModel):
+INFO:ai-brain.startup:CORS origins: http://localhost:3000, http://localhost:3001, http://127.0.0.1:3000
+INFO:     Started server process [10664]
+INFO:     Waiting for application startup.
+INFO:ai-brain.startup:Backend env validation OK.
+[2026-05-08T11:57:18.934022+00:00] [INFO] [FlowValidatorWorker] started — interval=900s
+[2026-05-08T11:57:30.277642+00:00] [INFO] [N8nMirrorWorker] started — interval=300s

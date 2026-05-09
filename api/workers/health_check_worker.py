@@ -3,7 +3,8 @@ import time
 import httpx
 from datetime import datetime, timezone
 from workers.base_worker import BaseWorker
-from services import supabase_client, n8n_client, sre_logger
+from services import integration_service, supabase_client, n8n_client, sre_logger
+from utils.tls import get_ca_bundle_path
 
 
 class HealthCheckWorker(BaseWorker):
@@ -14,11 +15,24 @@ class HealthCheckWorker(BaseWorker):
         checks = [
             ("supabase",  self._check_supabase),
             ("n8n",       self._check_n8n),
-            ("airtable",  self._check_airtable),
+            ("openai",    self._check_openai),
             ("anthropic", self._check_anthropic),
         ]
         results = {}
         for service, fn in checks:
+            if not integration_service.system_service_has_runtime_credentials(service):
+                results[service] = "unknown"
+                try:
+                    supabase_client.upsert_integration_status({
+                        "service": service,
+                        "status": "unknown",
+                        "response_ms": -1,
+                        "last_check": datetime.now(timezone.utc).isoformat(),
+                        "error_message": None,
+                    })
+                except Exception as exc:
+                    sre_logger.error(self.name, f"failed to persist {service} skipped health status: {exc}", exc)
+                continue
             try:
                 ok, ms = fn()
                 status = "healthy" if ok else "down"
@@ -45,23 +59,21 @@ class HealthCheckWorker(BaseWorker):
 
     def _check_supabase(self) -> tuple[bool, int]:
         t0 = time.monotonic()
-        supabase_client.get_personas()
-        return True, int((time.monotonic() - t0) * 1000)
+        ok, _ = supabase_client.ping_supabase()
+        return ok, int((time.monotonic() - t0) * 1000)
 
     def _check_n8n(self) -> tuple[bool, int]:
         return n8n_client.ping()
 
-    def _check_airtable(self) -> tuple[bool, int]:
-        airtable_key = os.environ.get("AIRTABLE_API_KEY", "")
-        base_id = os.environ.get("AIRTABLE_BASE_ID", "")
-        if not airtable_key or not base_id:
+    def _check_openai(self) -> tuple[bool, int]:
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
             return False, -1
         t0 = time.monotonic()
-        with httpx.Client(timeout=5) as client:
+        with httpx.Client(timeout=5, verify=get_ca_bundle_path()) as client:
             r = client.get(
-                f"https://api.airtable.com/v0/{base_id}/Leads",
-                headers={"Authorization": f"Bearer {airtable_key}"},
-                params={"maxRecords": 1},
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
             )
             return r.status_code == 200, int((time.monotonic() - t0) * 1000)
 
@@ -70,7 +82,7 @@ class HealthCheckWorker(BaseWorker):
         if not api_key:
             return False, -1
         t0 = time.monotonic()
-        with httpx.Client(timeout=5) as client:
+        with httpx.Client(timeout=5, verify=get_ca_bundle_path()) as client:
             r = client.get(
                 "https://api.anthropic.com/v1/models",
                 headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},

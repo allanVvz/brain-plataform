@@ -31,6 +31,7 @@ def get_backend_env() -> dict[str, Any]:
         "supabase_url": (os.environ.get("SUPABASE_URL") or "").strip(),
         "supabase_service_key": (os.environ.get("SUPABASE_SERVICE_KEY") or "").strip(),
         "is_production": is_production_runtime(),
+        "run_embedded_workers": _bool_env("RUN_EMBEDDED_WORKERS"),
     }
 
 
