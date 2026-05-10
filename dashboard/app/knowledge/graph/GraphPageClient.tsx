@@ -265,6 +265,18 @@ export default function GraphPageClient() {
         setGraphNotice({ tone: "error", text: "Aprove o FAQ primeiro. Rascunhos cinza ainda nao podem ir para o Golden Dataset." });
         return;
       }
+      if (sourceType === "gallery" || targetType === "gallery") {
+        const assetNode = sourceType === "gallery" ? targetNode : sourceNode;
+        const assetType = String(assetNode?.data?.node_type || assetNode?.data?.content_type || "");
+        if (assetType !== "asset") {
+          setGraphNotice({ tone: "error", text: "Gallery aceita apenas assets validados." });
+          return;
+        }
+        if (assetNode?.data?.validated === false) {
+          setGraphNotice({ tone: "error", text: "Aprove o asset antes de enviar para Gallery." });
+          return;
+        }
+      }
       const finalReceiverTypes = new Set(["gallery", "embedded"]);
       const finalReceiver = finalReceiverTypes.has(targetType);
       const involvesGallery = sourceType === "gallery" || targetType === "gallery";

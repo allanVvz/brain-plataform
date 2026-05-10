@@ -143,6 +143,12 @@ Se o contexto deixar evidente uma Ãºnica persona, uma Ãºnica fonte e uma Ã�
   persona â†’ briefing â†’ campanha â†’ pÃºblico â†’ produto â†’ copy â†’ faq
 Cada elo desses precisa de pelo menos uma entry. NÃƒO pergunte "esse FAQ Ã© de qual produto?" quando sÃ³ existe um produto candidato.
 
+POLITICA DE RAMIFICACAO DO PLAN:
+Por padrao, emita `"tree_mode": "single_branch"` e `"branch_policy": "ask_before_new_branch"`.
+No primeiro prompt simples, a arvore principal deve ser unica. Para fluxo comercial/oferta, use:
+  persona -> briefing -> audience -> product -> copy -> faq
+Se houver copy no mesmo fluxo, FAQ comercial/oferta fica abaixo da copy. Use `product -> faq` somente quando o operador pedir FAQ tecnico/factual do produto ou quando nao houver copy. So use `"tree_mode": "parallel_outputs"` quando o operador pedir explicitamente galhos/outputs paralelos.
+
 ORDEM SEMÃ‚NTICA NO JSON (entries[]):
 Emita as entries SEMPRE nesta ordem semÃ¢ntica, independente de qual o operador "selecionou primeiro":
   1. brand          (se ainda nÃ£o existir)
@@ -527,13 +533,14 @@ _PREFERRED_PARENT_TYPES: dict[str, tuple[str, ...]] = {
     # Product must hang under audience whenever an audience exists in the
     # plan. Falls back to campaign/briefing/brand only when none does.
     "product": ("audience", "campaign", "briefing", "brand"),
+    "entity": ("product", "audience", "campaign", "briefing", "brand"),
     "tone": ("brand", "briefing", "campaign"),
     "rule": ("product", "campaign", "audience", "briefing", "brand"),
     "competitor": ("brand", "briefing"),
     # Per-product children prefer the product directly. Falling back to
     # audience preserves the semantic step instead of jumping to campaign.
-    "copy": ("product", "audience", "campaign", "briefing"),
-    "faq": ("product", "audience", "campaign", "briefing"),
+    "copy": ("product", "campaign"),
+    "faq": ("copy", "product"),
     "asset": ("product", "audience", "campaign", "brand"),
     "maker_material": ("product", "campaign", "brand"),
     "prompt": ("campaign", "brand", "briefing"),
@@ -662,8 +669,10 @@ def _auto_infer_parent_slugs(plan: dict) -> int:
             best = picked
             break
 
-        # Fallback: first top-level entry anywhere in plan.
-        if best is None:
+        # Fallback: first top-level entry anywhere in plan. Do not use this
+        # for commercial outputs: if a copy/FAQ cannot find product/copy
+        # context, the plan is ambiguous and must ask before saving.
+        if best is None and ctype not in {"copy", "faq"}:
             for candidate in entries:
                 if not isinstance(candidate, dict) or not candidate.get("slug"):
                     continue
@@ -786,19 +795,24 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
         parent_slug = _entry_parent_slug(entry)
         parent_entry = slug_to_entry.get(parent_slug or "")
         parent_type = _entry_type(parent_entry or {})
-        if ctype_lower == "audience" and parent_slug and parent_type not in {"campaign", "briefing", "brand"}:
+        if ctype_lower == "audience" and parent_slug and parent_type not in {"campaign", "briefing", "brand", "product", "other", ""}:
             errors.append(f"entry[{idx}] audience must stay under campaign/briefing/brand, got parent {parent_slug!r}")
         if ctype_lower == "product":
-            if audience_entries and parent_type != "audience":
-                errors.append(f"entry[{idx}] product must stay under an audience when audience branches exist")
+            if parent_slug and parent_type not in {"audience", "campaign", "briefing", "brand", "entity", "other", ""}:
+                errors.append(f"entry[{idx}] product has invalid parent {parent_slug!r}")
         if ctype_lower == "faq":
-            if parent_type != "product":
-                errors.append(f"entry[{idx}] faq must stay under a product")
+            if parent_slug and parent_type not in {"copy", "product", "audience", "campaign", "briefing", "brand", "persona", ""}:
+                errors.append(f"entry[{idx}] faq has invalid parent {parent_slug!r}")
 
     if product_entries:
         faq_count_by_product: dict[str, int] = {}
         for faq in faq_entries:
             parent_slug = _entry_parent_slug(faq)
+            if not parent_slug:
+                continue
+            parent_entry = slug_to_entry.get(parent_slug)
+            if _entry_type(parent_entry or {}) == "copy":
+                parent_slug = _entry_parent_slug(parent_entry or {})
             if parent_slug:
                 faq_count_by_product[parent_slug] = faq_count_by_product.get(parent_slug, 0) + 1
         target_faq_count = _requested_variation_count(session or {}, "faq", 2) if session else None
@@ -844,6 +858,73 @@ def _set_entry_parent_slug(entry: dict, parent_slug: Optional[str]) -> None:
         meta.pop("parent_slug", None)
 
 
+def _normalize_parent_slug_value(parent_slug: Optional[str], persona_slug: str) -> Optional[str]:
+    raw = str(parent_slug or "").strip()
+    if not raw:
+        return None
+    if raw.lower() in {"global", "root", "persona", "persona-root"}:
+        return "self"
+    if _slug_for_plan_entry(raw) == _slug_for_plan_entry(persona_slug or ""):
+        return "self"
+    return raw
+
+
+_PARALLEL_BRANCH_RE = re.compile(
+    r"\b(outputs?\s+paralelos?|galhos?\s+paralelos?|branches?\s+paralelos?|"
+    r"separ(e|ar)\s+copy\s+e\s+faq|copys?\s+e\s+faqs?\s+como\s+galhos?|"
+    r"faqs?\s+direto\s+no\s+produto|diretamente\s+abaixo\s+do\s+produto)\b",
+    re.I,
+)
+_TECHNICAL_FAQ_RE = re.compile(
+    r"\b(faq\s+t[eé]cnic[oa]|perguntas?\s+t[eé]cnicas?|d[uú]vidas?\s+t[eé]cnicas?|"
+    r"factual\s+do\s+produto|sobre\s+especifica[cç][oõ]es|especifica[cç][oõ]es\s+do\s+produto)\b",
+    re.I,
+)
+
+
+def _session_text_for_branch_policy(session: dict) -> str:
+    parts = [str(session.get("context") or "")]
+    for msg in session.get("messages") or []:
+        if isinstance(msg, dict):
+            parts.append(str(msg.get("content") or ""))
+    return "\n".join(parts)
+
+
+def _explicit_parallel_outputs_requested(session: dict) -> bool:
+    return bool(_PARALLEL_BRANCH_RE.search(_session_text_for_branch_policy(session)))
+
+
+def _technical_product_faq_requested(session: dict) -> bool:
+    return bool(_TECHNICAL_FAQ_RE.search(_session_text_for_branch_policy(session)))
+
+
+def _normalize_plan_parent_slugs(plan: dict, persona_slug: str) -> None:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    brand_slugs = {
+        str(entry.get("slug") or "").strip()
+        for entry in entries
+        if _entry_type(entry) == "brand" and entry.get("slug")
+    }
+    for entry in plan.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        meta = _entry_metadata(entry)
+        raw_parent = str(meta.get("parent_slug") or "").strip()
+        if (
+            raw_parent
+            and _entry_type(entry) != "brand"
+            and raw_parent in brand_slugs
+            and _slug_for_plan_entry(raw_parent) == _slug_for_plan_entry(persona_slug or "")
+        ):
+            normalized_parent = raw_parent
+        else:
+            normalized_parent = _normalize_parent_slug_value(raw_parent, persona_slug)
+        if normalized_parent:
+            meta["parent_slug"] = normalized_parent
+        else:
+            meta.pop("parent_slug", None)
+
+
 def _knowledge_plan_title_from_session(session: dict) -> str:
     cls = session.get("classification") or {}
     if cls.get("title"):
@@ -877,20 +958,57 @@ def _normalize_plan_entry(entry: dict) -> dict:
     normalized["content"] = content or normalized["title"]
     tags = normalized.get("tags") or []
     normalized["tags"] = [str(tag).strip() for tag in tags if str(tag).strip()]
-    normalized["metadata"] = dict(normalized.get("metadata") or {})
+    metadata = dict(normalized.get("metadata") or {})
+    ctype = normalized["content_type"]
+    if ctype == "briefing":
+        metadata.setdefault("briefing_scope", "global")
+        metadata.setdefault("governs_children", True)
+    elif ctype == "audience":
+        metadata.setdefault("audience_source", "manual")
+        metadata.setdefault("import_page_url", None)
+        metadata.setdefault("leads_page_url", None)
+        metadata.setdefault("lead_segment_id", None)
+        metadata.setdefault("crm_filters", {})
+    elif ctype == "product":
+        metadata.setdefault("product_source", "manual")
+        metadata.setdefault("product_external_id", None)
+        metadata.setdefault("product_page_url", None)
+        metadata.setdefault("price_status", "pending_validation")
+        metadata.setdefault("stock_status", "unknown")
+    elif ctype in {"entity", "other"} and str(metadata.get("entity_role") or "").strip():
+        metadata.setdefault("entity_structural", metadata.get("entity_role") in {"product_group", "audience_group", "category_group"})
+    normalized["metadata"] = metadata
     return normalized
 
 
 def _relation_type_for_parent(parent_type: str, child_type: str) -> str:
     mapping = {
+        ("persona", "brand"): "contains",
+        ("persona", "briefing"): "contains",
+        ("persona", "campaign"): "contains",
+        ("persona", "audience"): "contains",
+        ("persona", "product"): "contains",
         ("brand", "briefing"): "contains",
+        ("brand", "product"): "contains",
+        ("brand", "audience"): "contains",
         ("brand", "campaign"): "contains",
         ("briefing", "campaign"): "briefed_by",
         ("campaign", "audience"): "targets_audience",
         ("briefing", "audience"): "contains",
+        ("briefing", "product"): "contains",
+        ("product", "briefing"): "contains",
+        ("audience", "briefing"): "contains",
+        ("audience", "product"): "offers_product",
+        ("entity", "product"): "contains",
+        ("other", "product"): "contains",
+        ("brand", "entity"): "contains",
+        ("brand", "other"): "contains",
+        ("briefing", "entity"): "contains",
+        ("briefing", "other"): "contains",
         ("audience", "product"): "offers_product",
         ("product", "faq"): "answers_question",
         ("product", "copy"): "supports_copy",
+        ("copy", "faq"): "answers_question",
         ("product", "asset"): "uses_asset",
     }
     return mapping.get((parent_type, child_type), "contains")
@@ -1009,19 +1127,84 @@ def _build_links_from_parent_slugs(plan: dict) -> None:
     plan["links"] = list(deduped.values())
 
 
+def _copy_parent_slug_for_product(entries_by_slug: dict[str, dict], product_slug: str, faq: Optional[dict] = None) -> Optional[str]:
+    copies = [
+        entry
+        for entry in entries_by_slug.values()
+        if _entry_type(entry) == "copy" and _entry_parent_slug(entry) == product_slug and entry.get("slug")
+    ]
+    if not copies:
+        return None
+    if faq:
+        picked = _best_parent_by_slug(faq, copies)
+        if picked and picked.get("slug"):
+            return str(picked["slug"])
+    return str(copies[-1]["slug"])
+
+
+def _apply_single_branch_policy(plan: dict, session: dict) -> int:
+    """Default marketing path is product -> copy -> faq.
+
+    Parallel product children are only preserved when the operator explicitly
+    asked for them or the prompt asks for technical/factual product FAQ.
+    """
+    if (plan.get("tree_mode") or "single_branch") != "single_branch":
+        return 0
+    if _technical_product_faq_requested(session):
+        return 0
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+    rewrites = 0
+    for faq in [entry for entry in entries if _entry_type(entry) == "faq"]:
+        parent_slug = _entry_parent_slug(faq)
+        parent = entries_by_slug.get(parent_slug or "")
+        product_slug: Optional[str] = None
+        if _entry_type(parent or {}) == "product":
+            product_slug = str(parent_slug)
+        elif not parent_slug:
+            product = _best_parent_by_slug(faq, [entry for entry in entries if _entry_type(entry) == "product"])
+            product_slug = str(product.get("slug")) if product and product.get("slug") else None
+        if not product_slug:
+            continue
+        copy_slug = _copy_parent_slug_for_product(entries_by_slug, product_slug, faq)
+        if not copy_slug or copy_slug == parent_slug:
+            continue
+        _set_entry_parent_slug(faq, copy_slug)
+        metadata = _entry_metadata(faq)
+        metadata.setdefault("single_branch_parent_rewritten", True)
+        metadata.setdefault("previous_parent_slug", product_slug)
+        rewrites += 1
+    return rewrites
+
+
 def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
     normalized = dict(plan or {})
     normalized["source"] = str(normalized.get("source") or _source_url_from_context(str(session.get("context") or "")) or "session").strip()
     normalized["persona_slug"] = str(normalized.get("persona_slug") or (session.get("classification") or {}).get("persona_slug") or "global").strip()
     normalized["validation_policy"] = str(normalized.get("validation_policy") or "human_validation_required").strip()
+    explicit_parallel = _explicit_parallel_outputs_requested(session)
+    raw_tree_mode = str(normalized.get("tree_mode") or "").strip()
+    if raw_tree_mode not in {"single_branch", "parallel_outputs"}:
+        raw_tree_mode = "parallel_outputs" if explicit_parallel else "single_branch"
+    normalized["tree_mode"] = raw_tree_mode
+    normalized["branch_policy"] = (
+        "explicit_user_request"
+        if raw_tree_mode == "parallel_outputs" or explicit_parallel
+        else "ask_before_new_branch"
+    )
 
     entries = [_normalize_plan_entry(entry) for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
     normalized["entries"] = entries
+    _normalize_plan_parent_slugs(normalized, normalized["persona_slug"])
 
-    # Root scaffolding: briefing/campaign first, audience under campaign/briefing.
+    # Root scaffolding: persona -> brand? -> briefing -> campaign? -> audience.
+    # A briefing without brand is a valid first real node below persona; never
+    # leave it pointing to loose sentinels such as "global".
+    brands = [entry for entry in entries if _entry_type(entry) == "brand"]
     briefings = [entry for entry in entries if _entry_type(entry) == "briefing"]
     campaigns = [entry for entry in entries if _entry_type(entry) == "campaign"]
     audiences = [entry for entry in entries if _entry_type(entry) == "audience"]
+    root_brand = brands[0] if brands else None
     root_briefing = briefings[0] if briefings else None
     root_campaign = campaigns[0] if campaigns else None
 
@@ -1037,6 +1220,15 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
             "metadata": {},
         })
         entries.insert(0, root_briefing)
+
+    if root_brand and _entry_parent_slug(root_brand) in {None, "", "global", "root", "persona"}:
+        _set_entry_parent_slug(root_brand, "self")
+    briefing_parent = _entry_parent_slug(root_briefing) if root_briefing else None
+    if root_briefing and (
+        briefing_parent in {None, "", "global", "root", "persona"}
+        or (root_brand and briefing_parent == "self")
+    ):
+        _set_entry_parent_slug(root_briefing, str((root_brand or {}).get("slug") or "self"))
     if root_campaign and not _entry_parent_slug(root_campaign):
         _set_entry_parent_slug(root_campaign, root_briefing["slug"])
     for audience in audiences:
@@ -1079,16 +1271,27 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
             entries[:] = [entry for entry in entries if str(entry.get("slug")) not in remove_slugs]
             entries.extend(expanded_products)
 
-    # FAQs must live under product and replicate per audience->product branch.
+    # FAQs replicate per audience->product branch. In the default
+    # single_branch marketing policy they are rewired below copy later.
     entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
     products = [entry for entry in entries if _entry_type(entry) == "product"]
+    copies = [entry for entry in entries if _entry_type(entry) == "copy"]
+    copy_slugs = {str(copy.get("slug")) for copy in copies if copy.get("slug")}
     existing_faqs = [entry for entry in entries if _entry_type(entry) == "faq"]
-    global_templates = [entry for entry in existing_faqs if _entry_parent_slug(entry) not in entries_by_slug or _entry_type(entries_by_slug.get(_entry_parent_slug(entry), {})) != "product"]
+    global_templates = [
+        entry for entry in existing_faqs
+        if _entry_parent_slug(entry) not in entries_by_slug
+        or _entry_type(entries_by_slug.get(_entry_parent_slug(entry), {})) not in {"product", "copy"}
+    ]
     faq_count_by_product: dict[str, list[dict]] = {}
     for faq in existing_faqs:
         parent_slug = _entry_parent_slug(faq)
         if parent_slug and _entry_type(entries_by_slug.get(parent_slug, {})) == "product":
             faq_count_by_product.setdefault(parent_slug, []).append(faq)
+        elif parent_slug and _entry_type(entries_by_slug.get(parent_slug, {})) == "copy":
+            copy_parent_slug = _entry_parent_slug(entries_by_slug.get(parent_slug, {}))
+            if copy_parent_slug:
+                faq_count_by_product.setdefault(copy_parent_slug, []).append(faq)
     for product in products:
         product_slug = str(product.get("slug"))
         audience = entries_by_slug.get(_entry_parent_slug(product) or "")
@@ -1116,7 +1319,12 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
                         colors=colors,
                     )
                 else:
-                    title = template_title.replace(str(entries_by_slug.get(_entry_parent_slug(template) or "", {}).get("title") or ""), str(product.get("title") or "")).strip()
+                    previous_parent_title = str(entries_by_slug.get(_entry_parent_slug(template) or "", {}).get("title") or "")
+                    title = (
+                        template_title.replace(previous_parent_title, str(product.get("title") or "")).strip()
+                        if previous_parent_title
+                        else template_title.strip()
+                    )
                     if not title or title == template_title:
                         title = f"{template_title} â€” {product.get('title')}"
                     content = template_content or title
@@ -1153,14 +1361,15 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
         product_slugs = {str(product.get("slug")) for product in products if product.get("slug")}
         entries[:] = [
             entry for entry in entries
-            if _entry_type(entry) != "faq" or (_entry_parent_slug(entry) in product_slugs)
+            if _entry_type(entry) != "faq" or (_entry_parent_slug(entry) in product_slugs or _entry_parent_slug(entry) in copy_slugs)
         ]
 
     # Product children should never stay directly under campaign/root when audiences exist.
     entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
     for faq in [entry for entry in entries if _entry_type(entry) == "faq"]:
         parent_slug = _entry_parent_slug(faq)
-        if not parent_slug or _entry_type(entries_by_slug.get(parent_slug, {})) != "product":
+        parent_type = _entry_type(entries_by_slug.get(parent_slug, {}))
+        if not parent_slug or parent_type not in {"product", "copy"}:
             candidate_products = [product for product in products if product.get("slug")]
             best_parent = _best_parent_by_slug(faq, candidate_products)
             if best_parent is not None:
@@ -1168,6 +1377,8 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
 
     normalized["entries"] = entries
     _auto_infer_parent_slugs(normalized)
+    _apply_single_branch_policy(normalized, session)
+    _normalize_plan_parent_slugs(normalized, normalized["persona_slug"])
     _build_links_from_parent_slugs(normalized)
     return normalized
 
@@ -2664,6 +2875,10 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
 
     try:
         for payload in saved_payloads:
+            item_classification = {
+                **{k: v for k, v in cls.items() if k != "file_bytes"},
+                "content_type": payload["content_type"],
+            }
             persisted = knowledge_lifecycle.persist_pending_knowledge_item(
                 persona_slug=cls["persona_slug"],
                 title=payload["title"],
@@ -2675,7 +2890,7 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
                     **(payload.get("metadata") or {}),
                     "session_id": session_id,
                     "sync_origin": "direct_save",
-                    "classification": {k: v for k, v in cls.items() if k != "file_bytes"},
+                    "classification": item_classification,
                 },
                 tags=payload.get("tags") or [],
                 source_ref=session_id,
@@ -2821,6 +3036,15 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
         "file_path": rel_path,
         "saved_paths": [str(p) for p in saved_paths],
         "git": git_result,
+        "success": True,
+        "status": "saved_with_warnings" if not bool(git_result.get("push_ok", True)) else "saved",
+        "warnings": [
+            {
+                "stage": "git_push",
+                "message": "Knowledge saved, but git push failed.",
+                "detail": git_result.get("error"),
+            }
+        ] if not bool(git_result.get("push_ok", True)) else [],
         "sync_mode": "manual_only",
         "entries_written": len(saved_paths),
         "plan_entries": len(plan_entries),
@@ -2860,6 +3084,15 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
 
     return {
         "ok": True,
+        "success": True,
+        "status": "saved_with_warnings" if not bool(git_result.get("push_ok", True)) else "saved",
+        "warnings": [
+            {
+                "stage": "git_push",
+                "message": "Knowledge saved, but git push failed.",
+                "detail": git_result.get("error"),
+            }
+        ] if not bool(git_result.get("push_ok", True)) else [],
         "file_path": rel_path,
         "knowledge_item_ids": [item.get("id") for item in persisted_items],
         "knowledge_node_ids": [

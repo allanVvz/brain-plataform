@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 
-from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
+from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle, approved_knowledge_snapshots
 
 router = APIRouter(prefix="/knowledge", tags=["graph"])
 logger = logging.getLogger("ai_brain.graph")
@@ -94,8 +94,10 @@ def _knowledge_item_for_graph_node(node: dict) -> Optional[dict]:
 
 
 def _require_graph_promotion_evidence(evidence: dict) -> None:
-    required = ["knowledge_item_id", "kb_entry_id", "knowledge_node_id", "embedded_edge_id"]
+    required = ["knowledge_item_id", "approved_snapshot_id", "knowledge_node_id", "rag_entry_id", "embedded_edge_id"]
     missing = [key for key in required if not evidence.get(key)]
+    if not evidence.get("rag_chunk_ids"):
+        missing.append("rag_chunk_ids")
     if missing:
         raise HTTPException(502, f"Golden Dataset publication incomplete: missing {', '.join(missing)}")
 
@@ -124,6 +126,12 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
         relation_type = "gallery_asset"
     if relation_type == "gallery_asset" and "gallery" not in {source_node.get("node_type"), target_node.get("node_type")}:
         raise HTTPException(400, "gallery_asset edges must involve a Gallery node")
+    if relation_type == "gallery_asset":
+        asset_node = target_node if source_node.get("node_type") == "gallery" else source_node
+        if asset_node.get("node_type") != "asset":
+            raise HTTPException(400, "Gallery can only receive approved asset nodes")
+        if knowledge_graph._validation_state(asset_node) != "validated":
+            raise HTTPException(400, "Approve the asset before adding it to Gallery")
     source_id = source_node["id"]
     target_id = target_node["id"]
     if source_id == target_id:
@@ -142,6 +150,8 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
             raise HTTPException(400, "Approve the FAQ before publishing it to the Golden Dataset")
     if "primary_tree" not in metadata:
         metadata["primary_tree"] = relation_type == "manual"
+    if "embedded" in {source_node.get("node_type"), target_node.get("node_type")} or "gallery" in {source_node.get("node_type"), target_node.get("node_type")}:
+        metadata["primary_tree"] = False
     try:
         edge = supabase_client.upsert_knowledge_edge(
             source_node_id=source_id,
@@ -157,23 +167,25 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
             gallery_content_node = target_node if source_node.get("node_type") == "gallery" else source_node
             gallery_asset = supabase_client.sync_gallery_asset_node(gallery_content_node, edge)
         if edge and target_node.get("node_type") == "embedded":
-            publication = supabase_client.sync_embedded_kb_node(source_node, edge)
+            publication = approved_knowledge_snapshots.publish_approved_node(
+                source_node.get("id"),
+                approved_by=(auth_service.current_user(request) or {}).get("id"),
+                require_rag_for_faq=True,
+            )
         if edge:
             evidence = {}
             if publication:
-                published_item = publication.get("item") or source_item or {}
-                kb_entry = publication.get("kb_entry") or {}
-                rag_entry = publication.get("rag_entry") or {}
-                chunks = publication.get("chunks") or []
                 evidence = {
-                    "knowledge_item_id": published_item.get("id"),
-                    "kb_entry_id": kb_entry.get("id"),
-                    "knowledge_rag_entry_id": rag_entry.get("id"),
-                    "knowledge_rag_chunk_ids": [chunk.get("id") for chunk in chunks if chunk.get("id")],
+                    "knowledge_item_id": (source_item or {}).get("id"),
+                    "approved_snapshot_id": publication.get("approved_snapshot_id"),
+                    "rag_entry_id": publication.get("rag_entry_id"),
+                    "rag_chunk_ids": publication.get("rag_chunk_ids") or [],
+                    "knowledge_rag_entry_id": publication.get("rag_entry_id"),
+                    "knowledge_rag_chunk_ids": publication.get("rag_chunk_ids") or [],
                     "knowledge_node_id": source_node.get("id"),
                     "main_tree_edge_id": None,
                     "embedded_edge_id": edge.get("id"),
-                    "final_status": "embedded",
+                    "final_status": publication.get("status") or "active",
                 }
                 _require_graph_promotion_evidence(evidence)
             supabase_client.insert_event(
@@ -187,7 +199,6 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
                         "target_node_id": target_id,
                         "relation_type": relation_type,
                         "gallery_asset_id": (gallery_asset or {}).get("id"),
-                        "kb_entry_id": ((publication or {}).get("kb_entry") or {}).get("id"),
                         "golden_dataset_publication": bool(publication),
                         "evidence": evidence,
                     },
@@ -201,20 +212,22 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
     if publication:
         return {
             "ok": True,
+            "success": True,
             "edge": edge,
-            "item": publication.get("item"),
-            "kb_entry": publication.get("kb_entry"),
-            "rag_entry": publication.get("rag_entry"),
+            "publication": publication,
             "evidence": {
-                "knowledge_item_id": (publication.get("item") or {}).get("id"),
-                "kb_entry_id": ((publication.get("kb_entry") or {}).get("id")),
-                "knowledge_rag_entry_id": ((publication.get("rag_entry") or {}).get("id")),
-                "knowledge_rag_chunk_ids": [chunk.get("id") for chunk in (publication.get("chunks") or []) if chunk.get("id")],
+                "knowledge_item_id": (source_item or {}).get("id"),
+                "approved_snapshot_id": publication.get("approved_snapshot_id"),
+                "rag_entry_id": publication.get("rag_entry_id"),
+                "rag_chunk_ids": publication.get("rag_chunk_ids") or [],
+                "knowledge_rag_entry_id": publication.get("rag_entry_id"),
+                "knowledge_rag_chunk_ids": publication.get("rag_chunk_ids") or [],
                 "knowledge_node_id": source_node.get("id"),
                 "main_tree_edge_id": None,
                 "embedded_edge_id": edge.get("id"),
-                "final_status": "embedded",
+                "final_status": publication.get("status") or "active",
             },
+            **publication,
         }
     return {"ok": True, "edge": edge}
 
@@ -291,6 +304,7 @@ _STRUCTURAL_RELATIONS: set[str] = {
     "contains",
     "part_of_campaign",
     "about_product",
+    "offers_product",
     "briefed_by",
     "answers_question",
     "supports_copy",
@@ -483,11 +497,16 @@ def _compute_primary_depths(nodes: list[dict], edges: list[dict]) -> tuple[dict[
             continue
         relation = (edge.get("relation_type") or "").lower()
         meta = edge.get("metadata") or {}
-        if relation not in structural and not meta.get("primary_tree"):
+        src_node = next((n for n in nodes if n.get("id") == src), {}) or {}
+        tgt_node = next((n for n in nodes if n.get("id") == tgt), {}) or {}
+        if (src_node.get("node_type") or "").lower() in _AUXILIARY_NODE_TYPES:
+            continue
+        if (tgt_node.get("node_type") or "").lower() in {"persona", "mention", "tag"}:
+            continue
+        if meta.get("primary_tree") is not True:
             continue
         priority = 0
-        if meta.get("primary_tree"):
-            priority += 10
+        priority += 10
         if relation == "manual":
             priority += 100
         if tgt not in parent_by_child or priority >= parent_priority_by_child.get(tgt, -1):
@@ -603,6 +622,35 @@ def get_graph_data(
         e for e in sem_edges
         if e.get("source_node_id") in surviving_ids and e.get("target_node_id") in surviving_ids
     ]
+    sem_edges = [
+        e for e in sem_edges
+        if not (e.get("metadata") or {}).get("visual_hidden")
+        and not (
+            (e.get("relation_type") or "").lower() == "belongs_to_persona"
+            and (e.get("metadata") or {}).get("primary_tree") is not True
+        )
+    ]
+    if (mode or "layered") != "graph":
+        visible_tree_edges = []
+        primary_pair_seen: set[tuple[str, str]] = set()
+        relation_rank = {"offers_product": 0, "supports_copy": 1, "answers_question": 2, "contains": 3}
+        for edge in sorted(sem_edges, key=lambda e: relation_rank.get((e.get("relation_type") or "").lower(), 9)):
+            meta = edge.get("metadata") or {}
+            src_node = next((n for n in sem_nodes if n.get("id") == edge.get("source_node_id")), {}) or {}
+            tgt_node = next((n for n in sem_nodes if n.get("id") == edge.get("target_node_id")), {}) or {}
+            src_type = (src_node.get("node_type") or "").lower()
+            tgt_type = (tgt_node.get("node_type") or "").lower()
+            rt = (edge.get("relation_type") or "").lower()
+            terminal_edge = (src_type == "faq" and tgt_type == "embedded") or rt == "gallery_asset"
+            if meta.get("primary_tree") is True:
+                pair = (str(edge.get("source_node_id") or ""), str(edge.get("target_node_id") or ""))
+                if pair in primary_pair_seen:
+                    continue
+                primary_pair_seen.add(pair)
+                visible_tree_edges.append(edge)
+            elif terminal_edge:
+                visible_tree_edges.append(edge)
+        sem_edges = visible_tree_edges
     graph_depths, parent_by_child = _compute_primary_depths(sem_nodes, sem_edges)
 
     # ── Optional: focus subgraph (BFS) ──────────────────────────────────
@@ -639,6 +687,18 @@ def get_graph_data(
     current_depths, _ = _compute_primary_depths(sem_nodes, sem_edges)
     max_current_depth = max((d for d in current_depths.values() if d > 0), default=1)
     sem_nodes_by_id = {n["id"]: n for n in sem_nodes if n.get("id")}
+    try:
+        snapshot_by_node = supabase_client.list_approved_snapshots_for_nodes(list(sem_nodes_by_id.keys()))
+        rag_chunk_counts = supabase_client.count_knowledge_rag_chunks_by_entry_ids(
+            [
+                snapshot.get("rag_entry_id")
+                for snapshot in snapshot_by_node.values()
+                if snapshot.get("rag_entry_id")
+            ]
+        )
+    except Exception:
+        snapshot_by_node = {}
+        rag_chunk_counts = {}
     semantic_persona_node_ids = {n["id"] for n in sem_nodes if n.get("node_type") == "persona" and n.get("id")}
     validated_semantic_node_ids = {
         n["id"]
@@ -968,7 +1028,20 @@ def get_graph_data(
         # Map semantic node_type → ReactFlow nodeClass for legacy color/shape.
         semantic_state = knowledge_graph._validation_state(n)
         source_status = str(meta.get("source_status") or n.get("status") or "").lower()
-        publication_state = "published" if source_status == "embedded" or n.get("source_table") == "kb_entries" else "unpublished"
+        approved_snapshot = snapshot_by_node.get(n.get("id")) or {}
+        approved_snapshot_id = approved_snapshot.get("id") or meta.get("approved_snapshot_id")
+        rag_entry_id = approved_snapshot.get("rag_entry_id") or meta.get("knowledge_rag_entry_id")
+        rag_chunk_count = rag_chunk_counts.get(str(rag_entry_id or ""), 0)
+        snapshot_status = approved_snapshot.get("status") or meta.get("snapshot_status")
+        publication_state = (
+            "active"
+            if snapshot_status == "active" and rag_entry_id and rag_chunk_count > 0
+            else "published"
+            if source_status == "embedded" or n.get("source_table") == "kb_entries"
+            else "approved"
+            if approved_snapshot_id
+            else "unpublished"
+        )
         node_class = {
             "persona": "persona",
             "gallery": "validated",
@@ -1010,6 +1083,10 @@ def get_graph_data(
                 "validated": semantic_state == "validated",
                 "approval_state": source_status or semantic_state,
                 "publication_state": publication_state,
+                "approved_snapshot_id": approved_snapshot_id,
+                "rag_entry_id": rag_entry_id,
+                "rag_chunk_count": rag_chunk_count,
+                "snapshot_status": snapshot_status,
                 "path_connected_to_persona": n.get("id") in path_connected_semantic_node_ids,
                 "terminal_connected": n.get("id") in terminal_connected_semantic_node_ids,
                 "branch_complete_validated": n.get("id") in branch_complete_semantic_node_ids,

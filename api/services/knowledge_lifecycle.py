@@ -108,6 +108,10 @@ def persist_pending_knowledge_item(
         "source_ref": source_ref,
         "created_via": "kb_intake_sofia",
     }
+    merged_classification = dict(merged_metadata.get("classification") or {})
+    if merged_classification:
+        merged_classification["content_type"] = content_type
+        merged_metadata["classification"] = merged_classification
     requested_status = "pending"
     if existing and existing.get("content") == content:
         requested_status = existing.get("status") or "pending"

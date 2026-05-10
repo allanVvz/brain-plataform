@@ -1048,6 +1048,43 @@ def _primary_tree_metadata(metadata: Optional[dict]) -> dict:
     return merged
 
 
+def demote_duplicate_primary_edges_for_pair(source_node_id: str, target_node_id: str, except_relation_type: Optional[str] = None) -> int:
+    """Keep one visible primary-tree edge per source -> target pair.
+
+    Alternate relation labels can remain as lineage/semantic edges, but they
+    must not render as separate primary-tree branches.
+    """
+    if _KG_TABLES_MISSING or not source_node_id or not target_node_id:
+        return 0
+    client = get_client()
+    rows = _q(
+        client.table("knowledge_edges")
+        .select("id,relation_type,metadata")
+        .eq("source_node_id", source_node_id)
+        .eq("target_node_id", target_node_id)
+        .limit(500)
+    )
+    changed = 0
+    for row in rows:
+        if except_relation_type and (row.get("relation_type") or "").lower() == except_relation_type.lower():
+            continue
+        metadata = row.get("metadata") or {}
+        if metadata.get("primary_tree") is not True or metadata.get("active") is False:
+            continue
+        next_metadata = {
+            **metadata,
+            "primary_tree": False,
+            "visual_hidden": True,
+            "active": True,
+            "demoted_from_primary_tree": "duplicate_source_target",
+        }
+        _execute_with_retry(
+            client.table("knowledge_edges").update({"metadata": next_metadata}).eq("id", row["id"])
+        )
+        changed += 1
+    return changed
+
+
 def upsert_knowledge_edge(
     source_node_id: str,
     target_node_id: str,
@@ -1070,6 +1107,7 @@ def upsert_knowledge_edge(
         return None  # don't allow self-loops
 
     client = get_client()
+    original_relation_type = relation_type
     try:
         existing_q = (
             client.table("knowledge_edges")
@@ -1102,9 +1140,72 @@ def upsert_knowledge_edge(
 
     requested_metadata = dict(metadata or {})
     is_primary_path = requested_metadata.get("primary_tree") is True
+    if is_primary_path and (relation_type or "").lower() == "about_product":
+        try:
+            type_rows = (
+                client.table("knowledge_nodes")
+                .select("id,node_type")
+                .in_("id", [source_node_id, target_node_id])
+                .limit(2)
+                .execute()
+                .data
+                or []
+            )
+            types = {row.get("id"): (row.get("node_type") or "").lower() for row in type_rows}
+            if types.get(source_node_id) == "audience" and types.get(target_node_id) == "product":
+                requested_metadata.setdefault("canonicalized_relation_from", relation_type)
+                relation_type = "offers_product"
+                if relation_type != original_relation_type:
+                    existing_q = (
+                        client.table("knowledge_edges")
+                        .select("*")
+                        .eq("source_node_id", source_node_id)
+                        .eq("target_node_id", target_node_id)
+                        .eq("relation_type", relation_type)
+                        .limit(1)
+                        .execute()
+                    )
+                    existing = (existing_q.data or [None])[0]
+        except Exception:
+            pass
+    if is_primary_path and (relation_type or "").lower() == "belongs_to_persona":
+        try:
+            source_rows = (
+                client.table("knowledge_nodes")
+                .select("id,node_type")
+                .eq("id", source_node_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            source_type = (source_rows[0].get("node_type") if source_rows else "").lower()
+            if source_type == "persona":
+                active_parents = (
+                    client.table("knowledge_edges")
+                    .select("source_node_id,relation_type,metadata")
+                    .eq("target_node_id", target_node_id)
+                    .limit(500)
+                    .execute()
+                    .data
+                    or []
+                )
+                non_persona_primary = [
+                    edge for edge in active_parents
+                    if edge.get("source_node_id") != source_node_id
+                    and not _edge_is_inactive(edge)
+                    and (edge.get("metadata") or {}).get("primary_tree") is True
+                ]
+                if non_persona_primary:
+                    requested_metadata["primary_tree"] = False
+                    requested_metadata["visual_hidden"] = True
+                    is_primary_path = False
+        except Exception:
+            pass
 
     if is_primary_path:
         deactivate_primary_paths_for_target(target_node_id, except_source_node_id=source_node_id)
+        demote_duplicate_primary_edges_for_pair(source_node_id, target_node_id, except_relation_type=relation_type)
 
     if existing:
         update_data = {
@@ -2582,7 +2683,7 @@ def get_knowledge_item_by_path(file_path: str) -> Optional[dict]:
 KNOWLEDGE_ITEM_CONTENT_TYPES: frozenset[str] = frozenset({
     "brand", "briefing", "product", "campaign", "copy", "asset",
     "prompt", "faq", "maker_material", "tone", "competitor",
-    "audience", "rule", "other",
+    "audience", "rule", "entity", "other",
 })
 
 KNOWLEDGE_ITEM_STATUSES: frozenset[str] = frozenset({
@@ -2727,6 +2828,103 @@ def upsert_knowledge_rag_link(data: dict) -> dict:
         .upsert(data, on_conflict="source_entry_id,target_entry_id,relation_type")
     )
     return (result.data or [{}])[0]
+
+
+_APPROVED_SNAPSHOTS_MISSING = False
+
+
+def _snapshots_unavailable(exc: Exception) -> bool:
+    text = str(exc)
+    return (
+        "approved_knowledge_snapshots" in text
+        and ("PGRST205" in text or "schema cache" in text or "Could not find the table" in text or "does not exist" in text)
+    )
+
+
+def upsert_approved_knowledge_snapshot(data: dict) -> dict:
+    """Idempotently upsert an approved tree snapshot by persona/canonical_key."""
+    global _APPROVED_SNAPSHOTS_MISSING
+    if _APPROVED_SNAPSHOTS_MISSING:
+        raise RuntimeError("approved_knowledge_snapshots table is not available")
+    from datetime import datetime, timezone
+
+    payload = dict(data)
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        result = _execute_with_retry(
+            get_client()
+            .table("approved_knowledge_snapshots")
+            .upsert(payload, on_conflict="persona_id,canonical_key")
+        )
+        return (result.data or [{}])[0]
+    except Exception as exc:
+        if _snapshots_unavailable(exc):
+            _APPROVED_SNAPSHOTS_MISSING = True
+        raise
+
+
+def update_approved_knowledge_snapshot(snapshot_id: str, data: dict) -> Optional[dict]:
+    global _APPROVED_SNAPSHOTS_MISSING
+    if _APPROVED_SNAPSHOTS_MISSING or not snapshot_id or not data:
+        return None
+    try:
+        result = _execute_with_retry(
+            get_client()
+            .table("approved_knowledge_snapshots")
+            .update(data)
+            .eq("id", snapshot_id)
+        )
+        return (result.data or [data])[0]
+    except Exception as exc:
+        if _snapshots_unavailable(exc):
+            _APPROVED_SNAPSHOTS_MISSING = True
+            return None
+        raise
+
+
+def list_approved_snapshots_for_nodes(node_ids: list[str]) -> dict[str, dict]:
+    """Return the latest approved/active snapshot for each source_node_id."""
+    global _APPROVED_SNAPSHOTS_MISSING
+    if _APPROVED_SNAPSHOTS_MISSING or not node_ids:
+        return {}
+    try:
+        rows = _q(
+            get_client()
+            .table("approved_knowledge_snapshots")
+            .select("id,source_node_id,rag_entry_id,status,content_type,canonical_key,metadata,updated_at")
+            .in_("source_node_id", node_ids)
+            .order("updated_at", desc=True)
+            .limit(max(1, len(node_ids) * 3))
+        )
+    except Exception as exc:
+        if _snapshots_unavailable(exc):
+            _APPROVED_SNAPSHOTS_MISSING = True
+            return {}
+        raise
+    out: dict[str, dict] = {}
+    for row in rows:
+        sid = str(row.get("source_node_id") or "")
+        if sid and sid not in out:
+            out[sid] = row
+    return out
+
+
+def count_knowledge_rag_chunks_by_entry_ids(entry_ids: list[str]) -> dict[str, int]:
+    if not entry_ids:
+        return {}
+    rows = _q(
+        get_client()
+        .table("knowledge_rag_chunks")
+        .select("id,rag_entry_id")
+        .in_("rag_entry_id", entry_ids)
+        .limit(5000)
+    )
+    counts: dict[str, int] = {}
+    for row in rows:
+        rid = str(row.get("rag_entry_id") or "")
+        if rid:
+            counts[rid] = counts.get(rid, 0) + 1
+    return counts
 
 
 def find_knowledge_rag_entry_by_slug(

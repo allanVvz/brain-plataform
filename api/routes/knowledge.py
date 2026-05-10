@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
+from services import approved_knowledge_snapshots
 from services.knowledge_rag_backfill import backfill_knowledge_rag
 from services.knowledge_rag_intake import process_intake, process_intake_plan
 from services.vault_sync import run_sync, scan_vault
@@ -365,12 +366,47 @@ def approve_item(item_id: str, request: Request, body: ApproveBody = ApproveBody
     updated_item = result.get("item") or supabase_client.get_knowledge_item(item_id)
     evidence = result.get("evidence") or {}
     _ensure_promotion_evidence(evidence, require_embed=body.promote_to_kb)
+    publication_evidence = {}
+    try:
+        user = auth_service.current_user(request)
+        publication_evidence = approved_knowledge_snapshots.publish_approved_node(
+            evidence.get("knowledge_node_id"),
+            approved_by=user.get("id"),
+            require_rag_for_faq=True,
+        )
+    except Exception as exc:
+        partial_ids = {
+            "knowledge_item_id": evidence.get("knowledge_item_id"),
+            "source_node_id": evidence.get("knowledge_node_id"),
+            "rag_entry_id": evidence.get("knowledge_rag_entry_id"),
+            "rag_chunk_ids": evidence.get("knowledge_rag_chunk_ids") or [],
+        }
+        emit("item_approved_snapshot_failed", entity_type="knowledge_item", entity_id=item_id,
+             persona_id=updated_item.get("persona_id"),
+             payload={"title": updated_item.get("title"), "error": str(exc), "partial_ids": partial_ids})
+        return {
+            "ok": False,
+            "success": False,
+            "stage": "approved_snapshot_publication",
+            "error": str(exc),
+            "item": updated_item,
+            "evidence": evidence,
+            "partial_ids": partial_ids,
+        }
     emit("item_approved", entity_type="knowledge_item", entity_id=item_id,
          persona_id=updated_item.get("persona_id"),
          payload={"title": updated_item.get("title"), "content_type": updated_item.get("content_type"),
-                  "promoted_to_kb": body.promote_to_kb, "evidence": evidence})
+                  "promoted_to_kb": body.promote_to_kb, "evidence": evidence,
+                  "publication_evidence": publication_evidence})
 
-    return {"ok": True, "item": updated_item, "evidence": evidence}
+    merged_evidence = {**evidence, **publication_evidence}
+    return {
+        "ok": True,
+        "success": True,
+        "item": updated_item,
+        "evidence": merged_evidence,
+        **publication_evidence,
+    }
 
 
 class RejectBody(BaseModel):

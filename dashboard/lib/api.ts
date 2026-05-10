@@ -256,8 +256,13 @@ export const api = {
     req<any>(`/knowledge/queue/counts${personaId ? `?persona_id=${personaId}` : ""}`),
   updateQueueItem: (id: string, data: Record<string, any>) =>
     req<any>(`/knowledge/queue/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  approveItem: (id: string, promoteToKb = false) =>
-    req<any>(`/knowledge/queue/${id}/approve`, { method: "POST", body: JSON.stringify({ promote_to_kb: promoteToKb }) }),
+  approveItem: async (id: string, promoteToKb = false) => {
+    const result = await req<any>(`/knowledge/queue/${id}/approve`, { method: "POST", body: JSON.stringify({ promote_to_kb: promoteToKb }) });
+    if (result?.success === false) {
+      throw new Error(result?.error || `Approval failed at ${result?.stage || "unknown_stage"}`);
+    }
+    return result;
+  },
   rejectItem: (id: string, reason = "") =>
     req<any>(`/knowledge/queue/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
   deleteKnowledgeItem: (id: string) =>

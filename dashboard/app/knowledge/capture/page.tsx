@@ -351,6 +351,15 @@ function parentSlugOf(entry: KnowledgePlanEntry) {
   return typeof parentSlug === "string" && parentSlug.trim() ? parentSlug.trim() : null;
 }
 
+function normalizeParentSlug(parentSlug: string | null, personaSlug: string) {
+  if (!parentSlug) return null;
+  const raw = parentSlug.trim();
+  const normalized = slugifyPlanValue(raw);
+  if (["global", "root", "persona", "persona-root"].includes(normalized)) return "self";
+  if (personaSlug && normalized === slugifyPlanValue(personaSlug)) return "self";
+  return raw;
+}
+
 function rebuildPlanLinks(plan: KnowledgePlan): KnowledgePlan {
   const slugToType = new Map(plan.entries.map((entry) => [entry.slug, entry.content_type]));
   const links = new Map<string, KnowledgePlanLink>();
@@ -368,7 +377,8 @@ function rebuildPlanLinks(plan: KnowledgePlan): KnowledgePlan {
     links.set(key, link);
   }
   for (const entry of plan.entries) {
-    const parentSlug = parentSlugOf(entry);
+    const parentSlug = normalizeParentSlug(parentSlugOf(entry), plan.persona_slug);
+    if (parentSlug === "self") entry.metadata = { ...(entry.metadata || {}), parent_slug: "self" };
     if (!parentSlug || parentSlug === entry.slug) continue;
     const key = `${parentSlug}=>${entry.slug}`;
     links.set(key, {
@@ -971,7 +981,7 @@ function ChatPanel({
       setMessages((p) => [...p, {
         role: "system",
         content: d.ok
-          ? `Salvo.\nArquivo: ${d.file_path}\nGit: ${d.git?.commit_ok ? "ok" : "falhou"} | Push: ${d.git?.push_ok ? "ok" : "falhou"}\nSupabase: ${d.sync?.new ?? 0} novos`
+          ? `Salvo${d.status === "saved_with_warnings" ? " com avisos" : ""}.\nArquivo: ${d.file_path}\nGit: ${d.git?.commit_ok ? "ok" : "falhou"} | Push: ${d.git?.push_ok ? "ok" : "falhou"}\n${Array.isArray(d.warnings) && d.warnings.length ? `Avisos: ${d.warnings.map((w: any) => w.message || w.stage).join("; ")}\n` : ""}Supabase: ${d.sync?.new ?? 0} novos`
           : formatSaveError(d),
       }]);
       // After a successful save, silently open the knowledge graph focused
@@ -1474,7 +1484,8 @@ function GraphPreviewPanel({
   const entries = previewPlan.entries || [];
   const childrenByParent = new Map<string, KnowledgePlanEntry[]>();
   for (const entry of entries) {
-    const parentKey = parentSlugOf(entry) || "__root__";
+    const parentKeyRaw = normalizeParentSlug(parentSlugOf(entry), previewPlan.persona_slug);
+    const parentKey = !parentKeyRaw || parentKeyRaw === "self" ? "__root__" : parentKeyRaw;
     const bucket = childrenByParent.get(parentKey) || [];
     bucket.push(entry);
     childrenByParent.set(parentKey, bucket);

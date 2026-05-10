@@ -262,7 +262,16 @@ function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Nod
 // â”€â”€ Filtering by mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function filterEdgesForMode(edges: Edge[], mode: ViewMode): Edge[] {
-  return edges;
+  return edges.filter((edge) => {
+    const data = (edge.data || {}) as GraphEdgeData;
+    const metadata = (data.metadata || {}) as Record<string, unknown>;
+    if (metadata.active === false) return false;
+    if (metadata.visual_hidden === true) return false;
+    if (mode !== "graph") {
+      return data.primary_tree === true || metadata.primary_tree === true || data.embedded_edge === true || data.gallery_edge === true || (data as any).draft_terminal_edge === true;
+    }
+    return true;
+  });
 }
 
 // â”€â”€ Edge style by tier â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -89,6 +89,7 @@ _MAIN_TREE_RELATIONS = {
     "contains",
     "part_of_campaign",
     "about_product",
+    "offers_product",
     "briefed_by",
     "answers_question",
     "supports_copy",
@@ -110,16 +111,26 @@ _DEFAULT_PARENT_RELATION: dict[tuple[str, str], str] = {
     ("briefing", "product"): "contains",
     ("briefing", "copy"): "contains",
     ("briefing", "faq"): "contains",
+    ("briefing", "entity"): "contains",
     ("campaign", "audience"): "contains",
     ("campaign", "product"): "contains",
     ("campaign", "copy"): "contains",
     ("campaign", "faq"): "contains",
+    ("campaign", "briefing"): "contains",
+    ("campaign", "entity"): "contains",
     ("campaign", "asset"): "uses_asset",
-    ("audience", "product"): "about_product",
+    ("audience", "product"): "offers_product",
+    ("audience", "briefing"): "contains",
     ("audience", "copy"): "supports_copy",
     ("audience", "faq"): "answers_question",
+    ("audience", "entity"): "contains",
+    ("entity", "product"): "contains",
+    ("entity", "briefing"): "contains",
     ("product", "copy"): "supports_copy",
     ("product", "faq"): "answers_question",
+    ("copy", "faq"): "answers_question",
+    ("product", "briefing"): "contains",
+    ("product", "entity"): "contains",
     ("product", "asset"): "uses_asset",
 }
 
@@ -374,8 +385,11 @@ def ensure_main_tree_connection(
     """
     if not node or not node.get("id") or not persona_id:
         return None
+    if (node.get("node_type") or "").lower() in {"persona", "embedded", "gallery", "tag", "mention"}:
+        return None
     target_id = node["id"]
-    source_id = _normalize_uuid(parent_node_id)
+    meta = node.get("metadata") or {}
+    source_id = _normalize_uuid(parent_node_id or meta.get("resolved_parent_node_id"))
     rel = relation_type or "manual"
     if not source_id:
         persona_node = _ensure_persona_root(persona_id)
@@ -422,14 +436,17 @@ def repair_primary_tree_connections(
         return {"checked": 0, "repaired": 0, "fallback_nodes": []}
 
     ids = [n["id"] for n in nodes if n.get("id")]
-    source_edges = client.table("knowledge_edges").select("source_node_id,target_node_id,relation_type").in_("source_node_id", ids).limit(5000).execute().data or []
-    target_edges = client.table("knowledge_edges").select("source_node_id,target_node_id,relation_type").in_("target_node_id", ids).limit(5000).execute().data or []
+    source_edges = client.table("knowledge_edges").select("source_node_id,target_node_id,relation_type,metadata").in_("source_node_id", ids).limit(5000).execute().data or []
+    target_edges = client.table("knowledge_edges").select("source_node_id,target_node_id,relation_type,metadata").in_("target_node_id", ids).limit(5000).execute().data or []
     connected: set[str] = set()
     for edge in [*source_edges, *target_edges]:
+        meta = edge.get("metadata") or {}
+        if meta.get("active") is False:
+            continue
+        if meta.get("primary_tree") is not True:
+            continue
         if (edge.get("relation_type") or "") not in _MAIN_TREE_RELATIONS:
             continue
-        if edge.get("source_node_id") in ids:
-            connected.add(edge["source_node_id"])
         if edge.get("target_node_id") in ids:
             connected.add(edge["target_node_id"])
 
@@ -459,7 +476,13 @@ def _default_plan_relation(parent_type: Optional[str], child_type: Optional[str]
     child = (child_type or "").strip().lower()
     parent = (parent_type or "").strip().lower()
     if parent == "copy" and child == "faq":
+        return "answers_question"
+    if parent == "persona":
         return "contains"
+    if child == "entity" or parent == "entity":
+        return "contains"
+    if parent == "audience" and child == "product":
+        return "offers_product"
     if child == "faq":
         return "answers_question"
     if child == "copy":
@@ -478,17 +501,19 @@ def _default_plan_relation(parent_type: Optional[str], child_type: Optional[str]
 def _preferred_parent_types(child_type: Optional[str]) -> tuple[str, ...]:
     child = (child_type or "").strip().lower()
     if child == "faq":
-        return ("copy", "product", "campaign", "brand", "audience", "briefing")
+        return ("copy", "product")
     if child == "copy":
-        return ("product", "campaign", "brand", "audience", "briefing")
+        return ("product", "campaign")
     if child == "briefing":
-        return ("product", "campaign", "brand", "audience")
+        return ("product", "audience", "campaign", "brand")
     if child == "product":
-        return ("campaign", "brand", "entity")
+        return ("audience", "entity", "campaign", "briefing", "brand")
+    if child == "entity":
+        return ("product", "audience", "campaign", "briefing", "brand")
     if child in {"rule", "tone", "asset"}:
         return ("product", "campaign", "brand", "audience", "briefing")
     if child == "audience":
-        return ("campaign", "brand", "entity")
+        return ("campaign", "briefing", "brand", "entity")
     return ("product", "campaign", "brand", "audience", "briefing")
 
 
@@ -501,6 +526,13 @@ def _resolve_plan_node(
     normalized = _slugify(str(slug or ""))
     if not normalized:
         return None
+    if persona_id:
+        try:
+            persona = supabase_client.get_persona_by_id(persona_id) or {}
+        except Exception:
+            persona = {}
+        if normalized and normalized == _slugify(str(persona.get("slug") or persona.get("name") or "")):
+            normalized = "self"
     if normalized in {"self", "persona", "persona-root"}:
         return _ensure_persona_root(persona_id)
     node = nodes_by_slug.get(normalized)
@@ -570,6 +602,8 @@ def apply_plan_hierarchy(
             or supabase_client.get_knowledge_node((item.get("metadata") or {}).get("knowledge_node_id"))
         )
         if not node or not node.get("id"):
+            continue
+        if (node.get("node_type") or "").lower() in {"tag", "mention", "embedded", "gallery"}:
             continue
         entry = plan_entries[index] if index < len(plan_entries) else {}
         entry_slug = _slugify(
@@ -1144,7 +1178,8 @@ def _bootstrap_derived_subnodes(
 
     # General files related to a topic still get a small mention node. This
     # makes broad brand/tone/audience files visible without treating them as FAQ.
-    if content_type not in {"faq", "product", "asset", "copy", "campaign", "briefing"}:
+    canonical_types = {"faq", "product", "asset", "copy", "campaign", "briefing", "audience", "brand", "rule", "tone"}
+    if content_type not in canonical_types and primary_topic.get("id") != mirror.get("id"):
         mention = supabase_client.upsert_knowledge_node({
             "persona_id": persona_id,
             "source_table": source_table,
@@ -1155,7 +1190,7 @@ def _bootstrap_derived_subnodes(
             "summary": (content or mirror.get("summary") or "")[:300],
             "tags": sorted({"mention", *topic_tags}),
             "status": "validated" if validated else "pending",
-            "metadata": {**base_meta, "derived_from": "topic_mention"},
+            "metadata": {**base_meta, "derived_from": "topic_mention", "visual_hidden": True},
             **_hierarchy_fields("mention", confidence=0.55),
         })
         if mention:
@@ -1257,7 +1292,8 @@ def bootstrap_from_item(
 
         used_explicit_parent = bool(parent_node and parent_node.get("id"))
 
-        # 2b) Persona link. Always created (kept for navigation/scoping).
+        # 2b) Persona fallback. persona_id is the membership source of truth;
+        # a visual edge is only needed for the first real node below persona.
         # primary_tree=true is set ONLY when there is no explicit hierarchical
         # parent above — otherwise the depth walker would prefer the persona
         # over the real parent and the tree would look flat again.
@@ -1265,15 +1301,13 @@ def bootstrap_from_item(
             persona_node = _ensure_persona_root(persona_id)
             if persona_node:
                 supabase_client.upsert_knowledge_edge(
-                    mirror["id"], persona_node["id"], "belongs_to_persona", persona_id=persona_id,
-                )
-                supabase_client.upsert_knowledge_edge(
                     persona_node["id"],
                     mirror["id"],
                     "belongs_to_persona",
                     persona_id=persona_id,
                     metadata={
                         "primary_tree": not used_explicit_parent,
+                        "visual_hidden": used_explicit_parent,
                         "created_from": "bootstrap_from_item",
                     },
                 )
@@ -2012,3 +2046,9 @@ def _detect_intent(text: str, by_type: dict, assets: list[dict]) -> str:
     if by_type.get("faq") or by_type.get("copy") or by_type.get("kb_entry"):
         return "kb_lookup"
     return "fallback_text_search"
+    if parent == "persona":
+        return "contains"
+    if parent == "briefing" and child == "audience":
+        return "contains"
+    if parent == "audience" and child == "product":
+        return "offers_product"

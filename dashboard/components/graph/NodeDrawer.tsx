@@ -116,7 +116,8 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
     : (d.content_preview ?? "");
 
   const canEdit     = !isProtected && (isVault || isQueue);
-  const canValidate = !isProtected && !ALREADY_VALID.has(currentStatus);
+  const needsCanonicalSnapshot = isQueue && currentStatus === "approved" && !d.approved_snapshot_id;
+  const canValidate = !isProtected && (!ALREADY_VALID.has(currentStatus) || needsCanonicalSnapshot);
   const canReject   = !isProtected && isQueue && currentStatus !== "rejected";
   const canDelete   = !isProtected && String(node.id || "").startsWith("gn:") && !!onDeleteNode;
   const canPublish  = !isProtected
@@ -161,15 +162,29 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
       } else {
         const result = await api.approveItem(d.item_id, false);
         const evidence = result?.evidence || {};
-        if (!evidence.knowledge_item_id || !evidence.knowledge_node_id) {
-          throw new Error("Aprovacao incompleta: backend nao confirmou item e node semantico.");
+        const contentType = String(d.node_type || d.content_type || fullItem?.content_type || "").toLowerCase();
+        const snapshotId = result?.approved_snapshot_id || evidence.approved_snapshot_id;
+        const ragEntryId = result?.rag_entry_id || evidence.rag_entry_id;
+        const ragChunkIds = result?.rag_chunk_ids || evidence.rag_chunk_ids || [];
+        if (result?.success !== true || !snapshotId || !evidence.knowledge_item_id || !evidence.knowledge_node_id) {
+          throw new Error(result?.error || "Aprovacao incompleta: backend nao confirmou snapshot, item e node semantico.");
+        }
+        if (contentType === "faq" && (!ragEntryId || !Array.isArray(ragChunkIds) || ragChunkIds.length === 0)) {
+          throw new Error("FAQ aprovada, mas o Golden Dataset RAG nao confirmou entry e chunks.");
         }
         const refreshed = await onUpdated?.(d.item_id);
         const expectedNodeId = `gn:${evidence.knowledge_node_id}`;
         const graphNodes = Array.isArray(refreshed?.nodes) ? refreshed.nodes : [];
-        const nodeExists = graphNodes.some((node: any) => node?.id === expectedNodeId);
+        const refreshedNode = graphNodes.find((node: any) => node?.id === expectedNodeId);
+        const nodeExists = Boolean(refreshedNode);
         if (!nodeExists) {
           throw new Error("Aprovacao parcial: o grafo nao refletiu o node FAQ aprovado.");
+        }
+        if (contentType === "faq") {
+          const rd = refreshedNode?.data || {};
+          if (!rd.approved_snapshot_id || !rd.rag_entry_id || Number(rd.rag_chunk_count || 0) <= 0) {
+            throw new Error("Aprovacao parcial: graph-data nao refletiu snapshot e chunks RAG.");
+          }
         }
         setFullItem((prev: any) => prev ? { ...prev, ...(result?.item || {}), status: result?.item?.status || "approved" } : result?.item || prev);
       }
@@ -195,7 +210,8 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
         },
       });
       const evidence = result?.evidence || {};
-      if (!evidence.knowledge_item_id || !evidence.kb_entry_id || !evidence.knowledge_node_id || !evidence.embedded_edge_id) {
+      const ragChunkIds = evidence.rag_chunk_ids || evidence.knowledge_rag_chunk_ids || [];
+      if (!result?.success || !evidence.knowledge_item_id || !evidence.approved_snapshot_id || !evidence.rag_entry_id || !Array.isArray(ragChunkIds) || ragChunkIds.length === 0 || !evidence.knowledge_node_id || !evidence.embedded_edge_id) {
         throw new Error("Publicacao incompleta no Golden Dataset.");
       }
       await onUpdated?.(d.item_id);

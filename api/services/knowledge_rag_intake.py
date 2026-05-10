@@ -375,7 +375,9 @@ def process_intake(
                 [mirror.get("id")] if mirror and mirror.get("id") else None,
             )
 
-        intake_status = "rag_created" if rag_allowed else "graph_only"
+        # knowledge_intake_messages.status does not accept "graph_only".
+        # Non-RAG graph inserts should keep a standard lifecycle status.
+        intake_status = "rag_created" if rag_allowed else status
         supabase_client.update_knowledge_intake_message(
             intake["id"],
             {"status": intake_status, "processed_at": now_iso},

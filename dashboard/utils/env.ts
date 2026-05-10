@@ -3,8 +3,8 @@ function missing(name: string): never {
 }
 
 export function getPublicApiUrl(): string {
-  const url = process.env.NEXT_PUBLIC_API_URL;
-  if (!url) missing("NEXT_PUBLIC_API_URL");
+  const url = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_AI_BRAIN_URL;
+  if (!url) missing("NEXT_PUBLIC_API_URL (ou legado NEXT_PUBLIC_AI_BRAIN_URL)");
   return url;
 }
 
