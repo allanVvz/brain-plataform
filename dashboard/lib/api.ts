@@ -312,8 +312,11 @@ export const api = {
 
   // KB Intake (conversational classifier)
   kbIntakeModels: () => req<any[]>("/kb-intake/models"),
-  kbIntakeStart: (model: string, initial_context = "") =>
-    req<any>("/kb-intake/start", { method: "POST", body: JSON.stringify({ model, initial_context }) }),
+  kbIntakeStart: (model: string, initial_context = "", state?: Record<string, any>) =>
+    req<any>("/kb-intake/start", { method: "POST", body: JSON.stringify({ model, initial_context, ...(state || {}) }) }),
+  kbIntakeSession: (session_id: string) => req<any>(`/kb-intake/session/${encodeURIComponent(session_id)}`),
+  kbIntakeUpdatePlan: (session_id: string, body: { knowledge_plan: any; status?: string; last_change?: string }) =>
+    req<any>(`/kb-intake/session/${encodeURIComponent(session_id)}/plan`, { method: "PATCH", body: JSON.stringify(body) }),
   kbIntakeMessage: (session_id: string, message: string, file?: File) => {
     if (file) {
       const form = new FormData();

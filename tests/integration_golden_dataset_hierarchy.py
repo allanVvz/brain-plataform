@@ -48,22 +48,37 @@ def test_plan_without_brand_parent_slugs() -> None:
     _assert(parent("briefing-tock-fatal") == "self", "briefing without brand is direct child of persona")
     _assert(parent("publico-tock-fatal") == "briefing-tock-fatal", "audience stays under briefing")
     _assert(parent("kit-roupas-tock-fatal") == "publico-tock-fatal", "product stays under audience")
-    _assert(parent("copy-campanha-tock-fatal") == "kit-roupas-tock-fatal", "copy stays under product")
+    offer_entries = [entry for entry in normalized["entries"] if entry.get("content_type") == "offer"]
+    _assert(bool(offer_entries), "offer is created when product/FAQ contains quantity or price")
+    offer_slug = offer_entries[0]["slug"]
+    _assert(parent(offer_slug) == "kit-roupas-tock-fatal", "offer stays under product")
+    copy_entries = [entry for entry in normalized["entries"] if entry.get("content_type") == "copy"]
+    _assert(bool(copy_entries), "PLAN contains copy entries after offer normalization")
+    _assert(
+        all((entry.get("metadata") or {}).get("parent_slug") == offer_slug for entry in copy_entries),
+        "copy stays under offer when commercial offer exists",
+    )
     faq_entries = [entry for entry in normalized["entries"] if entry.get("content_type") == "faq"]
     _assert(bool(faq_entries), "PLAN contains FAQ entries after normalization")
     _assert(
-        all((entry.get("metadata") or {}).get("parent_slug") == "copy-campanha-tock-fatal" for entry in faq_entries),
+        all((entry.get("metadata") or {}).get("parent_slug") in {entry["slug"] for entry in copy_entries} for entry in faq_entries),
         "faq stays under copy in single_branch marketing flow",
     )
+    _assert(
+        not any((entry.get("metadata") or {}).get("single_branch_parent_rewritten") is True for entry in faq_entries),
+        "single_branch planner does not need parent rewrite",
+    )
+    _assert(not normalized.get("warnings"), "single_branch planner does not emit rewrite warnings")
     _assert(normalized.get("tree_mode") == "single_branch", "PLAN defaults to single_branch")
-    _assert(normalized.get("branch_policy") == "ask_before_new_branch", "PLAN asks before new branch by default")
+    _assert(normalized.get("branch_policy") == "single_branch_by_default", "PLAN defaults to single_branch_by_default")
     links = {(link["source_slug"], link["target_slug"]) for link in normalized.get("links") or []}
     _assert(("self", "briefing-tock-fatal") in links, "PLAN emits persona -> briefing link")
     _assert(("briefing-tock-fatal", "publico-tock-fatal") in links, "PLAN emits briefing -> audience link")
     _assert(("publico-tock-fatal", "kit-roupas-tock-fatal") in links, "PLAN emits audience -> product link")
-    _assert(("kit-roupas-tock-fatal", "copy-campanha-tock-fatal") in links, "PLAN emits product -> copy link")
+    _assert(("kit-roupas-tock-fatal", offer_slug) in links, "PLAN emits product -> offer link")
+    _assert(any(source == offer_slug and target in {entry["slug"] for entry in copy_entries} for source, target in links), "PLAN emits offer -> copy link")
     _assert(
-        any(source == "copy-campanha-tock-fatal" and target.startswith("faq-tock-fatal") for source, target in links),
+        any(source in {entry["slug"] for entry in copy_entries} and by_slug.get(target, {}).get("content_type") == "faq" for source, target in links),
         "PLAN emits copy -> faq link",
     )
 
@@ -224,9 +239,25 @@ def test_snapshot_hierarchy_and_chunk_context() -> None:
     _assert(path_types == ["persona", "briefing", "audience", "product", "copy", "faq"], "snapshot hierarchy is top-down without persona cycle")
     _assert(path_types.count("persona") == 1, "snapshot hierarchy contains persona only at root")
     _assert("mention" not in path_types, "mention is excluded from approved snapshot hierarchy")
+    metadata = store.snapshots[0]["metadata"]
+    branch_context = metadata.get("branch_context") or {}
+    _assert([step["node_type"] for step in branch_context.get("path", [])] == path_types, "snapshot metadata branch_context path mirrors hierarchy")
+    branch_edges = branch_context.get("edges") or []
+    _assert(len(branch_edges) == 5, "snapshot metadata branch_context carries full branch edges")
+    _assert(any(edge.get("semantic_relation") == "defines_audience" for edge in branch_edges), "branch edges carry safe semantic_relation metadata")
+    _assert(metadata.get("brand_source") == "persona_fallback", "snapshot brand context falls back to persona when no brand node exists")
+    _assert(metadata.get("briefing_context"), "snapshot metadata includes briefing context")
+    _assert(metadata.get("audience_context"), "snapshot metadata includes audience context")
+    _assert(metadata.get("product_context"), "snapshot metadata includes product context")
+    _assert(metadata.get("copy_context"), "snapshot metadata includes copy context")
+    _assert((metadata.get("faq_context") or {}).get("question"), "snapshot metadata includes FAQ question")
+    _assert((metadata.get("faq_context") or {}).get("answer"), "snapshot metadata includes FAQ answer")
     chunk_text = store.chunks[0]["chunk_text"]
     _assert("Briefing: Campanha de inverno" in chunk_text, "FAQ chunk includes briefing context")
     _assert("Publico: Empreendedoras" in chunk_text, "FAQ chunk includes audience context")
+    _assert("Copy/Oferta: Oferta do kit" in chunk_text, "FAQ chunk includes copy context")
+    _assert("Caminho da branch:" in chunk_text, "FAQ chunk includes branch path")
+    _assert("Relacoes:" in chunk_text and "defines_audience" in chunk_text, "FAQ chunk includes semantic relations")
     _assert("Briefing: Nao informado." not in chunk_text, "FAQ chunk does not lose briefing when it exists")
     _assert("Publico: Nao informado." not in chunk_text, "FAQ chunk does not lose audience when it exists")
 
@@ -246,6 +277,45 @@ def test_mentions_cannot_publish() -> None:
             raise AssertionError("mention publication should fail")
     finally:
         supabase_client.get_knowledge_node = original
+
+
+def test_incomplete_faq_snapshot_needs_review_without_rag() -> None:
+    from services import approved_knowledge_snapshots, knowledge_graph, supabase_client
+
+    store = FakeHierarchyStore()
+    store.item["content"] = "Pergunta: Qual o preco?\nResposta: Qual o preco?"
+    faq = next(node for node in store.nodes if node["id"] == "n-faq")
+    faq["summary"] = store.item["content"]
+    patched = [
+        "get_knowledge_node",
+        "get_persona_by_id",
+        "get_knowledge_item",
+        "list_all_knowledge_graph",
+        "upsert_approved_knowledge_snapshot",
+        "update_approved_knowledge_snapshot",
+        "upsert_knowledge_rag_entry",
+        "replace_knowledge_rag_chunks",
+        "update_knowledge_node",
+        "update_knowledge_item",
+        "ensure_embedded_node",
+        "upsert_knowledge_edge",
+    ]
+    originals = {name: getattr(supabase_client, name) for name in patched}
+    original_root = knowledge_graph._ensure_persona_root
+    try:
+        for name in patched:
+            setattr(supabase_client, name, getattr(store, name))
+        knowledge_graph._ensure_persona_root = lambda _pid: store.get_knowledge_node("n-persona")
+        result = approved_knowledge_snapshots.publish_approved_node("n-faq")
+    finally:
+        for name, fn in originals.items():
+            setattr(supabase_client, name, fn)
+        knowledge_graph._ensure_persona_root = original_root
+
+    _assert(result["success"] is False, "incomplete FAQ publication returns success=false")
+    _assert(result["status"] == "needs_review", "incomplete FAQ snapshot is marked needs_review")
+    _assert(not result["rag_chunk_ids"] and not store.chunks, "incomplete FAQ does not create active RAG chunks")
+    _assert("faq_answer_not_useful" in result["review_warnings"], "incomplete FAQ returns review warning")
 
 
 def test_classification_content_type_contract() -> None:
@@ -326,11 +396,13 @@ def test_branch_policy_variations() -> None:
         },
     )
     by_slug = {entry["slug"]: entry for entry in parallel["entries"]}
-    _assert(parallel.get("tree_mode") == "parallel_outputs", "explicit parallel request sets parallel_outputs")
+    _assert(parallel.get("tree_mode") == "single_branch", "PLAN keeps single_branch even when parallel output is requested")
+    _assert(parallel.get("branch_policy") == "single_branch_by_default", "PLAN keeps single_branch_by_default policy")
     parallel_faqs = [entry for entry in parallel["entries"] if entry.get("content_type") == "faq"]
+    parallel_copy_slugs = {entry["slug"] for entry in parallel["entries"] if entry.get("content_type") == "copy"}
     _assert(
-        parallel_faqs and all((entry.get("metadata") or {}).get("parent_slug") == "product-kit" for entry in parallel_faqs),
-        "parallel_outputs keeps FAQ under product",
+        parallel_faqs and all((entry.get("metadata") or {}).get("parent_slug") in parallel_copy_slugs for entry in parallel_faqs),
+        "single_branch keeps FAQ under copy",
     )
 
     ambiguous = kb_intake_service._normalize_sofia_knowledge_plan(
@@ -344,6 +416,90 @@ def test_branch_policy_variations() -> None:
     _assert(not (copy.get("metadata") or {}).get("parent_slug"), "ambiguous copy does not fall back to persona/briefing")
     violations = kb_intake_service.validate_sofia_knowledge_plan(ambiguous, session={"context": ""})
     _assert(any("requires a parent" in violation for violation in violations), "ambiguous new branch must ask before saving")
+
+    raw_bad_single_branch = {
+        "tree_mode": "single_branch",
+        "entries": [
+            {"content_type": "briefing", "slug": "briefing-venda", "title": "Briefing Venda", "content": "Venda.", "metadata": {"parent_slug": "self"}},
+            {"content_type": "audience", "slug": "audience-mulheres", "title": "Mulheres", "content": "Publico.", "metadata": {"parent_slug": "briefing-venda"}},
+            {"content_type": "product", "slug": "product-kit", "title": "Kit", "content": "Produto.", "metadata": {"parent_slug": "audience-mulheres"}},
+            {"content_type": "copy", "slug": "copy-oferta-kit", "title": "Copy Oferta", "content": "Oferta.", "metadata": {"parent_slug": "product-kit"}},
+            {"content_type": "faq", "slug": "faq-preco-kit", "title": "FAQ Preco", "content": "Pergunta: Preco?\nResposta: Validar.", "metadata": {"parent_slug": "product-kit"}},
+        ],
+        "links": [{"source_slug": "product-kit", "target_slug": "faq-preco-kit", "relation_type": "answers_question"}],
+    }
+    raw_violations = kb_intake_service.validate_sofia_knowledge_plan(raw_bad_single_branch, session={"context": ""})
+    _assert(any("faq must use copy parent" in violation for violation in raw_violations), "pre-save validation rejects product -> faq when copy exists")
+
+
+def test_multi_audience_duplicates_commercial_subbranches() -> None:
+    from services import kb_intake_service
+
+    normalized = kb_intake_service._normalize_sofia_knowledge_plan(
+        {"entries": [
+            {"content_type": "briefing", "slug": "briefing-venda", "title": "Briefing Venda", "content": "Venda."},
+            {"content_type": "audience", "slug": "audience-a", "title": "Publico A", "content": "Publico A."},
+            {"content_type": "audience", "slug": "audience-b", "title": "Publico B", "content": "Publico B."},
+            {"content_type": "product", "slug": "product-kit", "title": "Kit", "content": "Produto."},
+            {"content_type": "copy", "slug": "copy-oferta", "title": "Copy Oferta", "content": "Oferta.", "metadata": {"parent_slug": "product-kit"}},
+            {"content_type": "faq", "slug": "faq-preco", "title": "FAQ Preco", "content": "Pergunta: Preco?\nResposta: Validar.", "metadata": {"parent_slug": "product-kit"}},
+            {"content_type": "faq", "slug": "faq-promo", "title": "FAQ Promo", "content": "Pergunta: Promo?\nResposta: Validar.", "metadata": {"parent_slug": "product-kit"}},
+        ]},
+        {"classification": {"persona_slug": "tock-fatal"}, "context": "- faq: 2 variacoes"},
+    )
+    products = [entry for entry in normalized["entries"] if entry["content_type"] == "product"]
+    offers = [entry for entry in normalized["entries"] if entry["content_type"] == "offer"]
+    copies = [entry for entry in normalized["entries"] if entry["content_type"] == "copy"]
+    faqs = [entry for entry in normalized["entries"] if entry["content_type"] == "faq"]
+    product_slugs = {entry["slug"] for entry in products}
+    offer_parent_slugs = {(entry.get("metadata") or {}).get("parent_slug") for entry in offers}
+    offer_slugs = {entry["slug"] for entry in offers}
+    copy_parent_slugs = {(entry.get("metadata") or {}).get("parent_slug") for entry in copies}
+    copy_slugs = {entry["slug"] for entry in copies}
+    faq_parent_slugs = [(entry.get("metadata") or {}).get("parent_slug") for entry in faqs]
+
+    _assert(len(products) == 2, "two audiences receive product branches")
+    _assert({(entry.get("metadata") or {}).get("parent_slug") for entry in products} == {"audience-a", "audience-b"}, "products are scoped under each audience")
+    _assert(len(offers) == 2 and offer_parent_slugs == product_slugs, "each product branch receives its own offer")
+    _assert(len(copies) == 2 and copy_parent_slugs == offer_slugs, "each offer receives its own copy")
+    _assert(len(faqs) == 2 and all(parent in copy_slugs for parent in faq_parent_slugs), "faq count policy total keeps two FAQs under copies")
+    _assert(not any((entry.get("metadata") or {}).get("single_branch_parent_rewritten") for entry in faqs), "multi-audience expansion does not use parent rewrite")
+
+
+def test_multi_product_keeps_each_lower_subbranch_scoped() -> None:
+    from services import kb_intake_service
+
+    normalized = kb_intake_service._normalize_sofia_knowledge_plan(
+        {"entries": [
+            {"content_type": "briefing", "slug": "briefing-venda", "title": "Briefing Venda", "content": "Venda."},
+            {"content_type": "audience", "slug": "audience-a", "title": "Publico A", "content": "Publico A."},
+            {"content_type": "product", "slug": "product-1", "title": "Produto 1", "content": "Produto 1."},
+            {"content_type": "copy", "slug": "copy-product-1", "title": "Copy Produto 1", "content": "Copy 1.", "metadata": {"parent_slug": "product-1"}},
+            {"content_type": "faq", "slug": "faq-product-1", "title": "FAQ Produto 1", "content": "Pergunta: Produto 1?\nResposta: Validar.", "metadata": {"parent_slug": "product-1"}},
+            {"content_type": "product", "slug": "product-2", "title": "Produto 2", "content": "Produto 2."},
+            {"content_type": "copy", "slug": "copy-product-2", "title": "Copy Produto 2", "content": "Copy 2.", "metadata": {"parent_slug": "product-2"}},
+            {"content_type": "faq", "slug": "faq-product-2", "title": "FAQ Produto 2", "content": "Pergunta: Produto 2?\nResposta: Validar.", "metadata": {"parent_slug": "product-2"}},
+        ]},
+        {"classification": {"persona_slug": "tock-fatal"}, "context": "- faq: 1 variacao"},
+    )
+    by_slug = {entry["slug"]: entry for entry in normalized["entries"]}
+    _assert((by_slug["product-1"]["metadata"] or {}).get("parent_slug") == "audience-a", "product 1 stays under audience")
+    _assert((by_slug["product-2"]["metadata"] or {}).get("parent_slug") == "audience-a", "product 2 stays under audience")
+    _assert((by_slug["copy-product-1"]["metadata"] or {}).get("parent_slug") == "product-1", "copy 1 stays under product 1")
+    _assert((by_slug["copy-product-2"]["metadata"] or {}).get("parent_slug") == "product-2", "copy 2 stays under product 2")
+    scoped_faqs = [entry for entry in normalized["entries"] if entry["content_type"] == "faq"]
+    _assert(len(scoped_faqs) == 1, "faq count policy total keeps one FAQ")
+    _assert(
+        (scoped_faqs[0]["metadata"] or {}).get("parent_slug") in {"copy-product-1", "copy-product-2"},
+        "remaining FAQ stays under its scoped copy",
+    )
+
+
+def test_tag_edges_are_auxiliary_metadata() -> None:
+    knowledge_graph = (API_DIR / "services" / "knowledge_graph.py").read_text(encoding="utf-8")
+    _assert('"graph_layer": "auxiliary"' in knowledge_graph, "tag edges carry auxiliary graph_layer metadata")
+    _assert('"primary_tree": False' in knowledge_graph, "tag edges are not primary tree")
+    _assert('"visual_hidden": False' in knowledge_graph, "tag edges stay available for auxiliary display")
 
 
 def test_duplicate_primary_tree_guard_is_present() -> None:
@@ -361,12 +517,19 @@ def main() -> int:
     test_snapshot_hierarchy_and_chunk_context()
     print("\n-- Mentions --")
     test_mentions_cannot_publish()
+    print("\n-- Incomplete FAQ gate --")
+    test_incomplete_faq_snapshot_needs_review_without_rag()
     print("\n-- Classification metadata --")
     test_classification_content_type_contract()
     print("\n-- Flexible variations --")
     test_flexible_marketing_variations()
     print("\n-- Branch policy --")
     test_branch_policy_variations()
+    print("\n-- Fractal commercial expansion --")
+    test_multi_audience_duplicates_commercial_subbranches()
+    test_multi_product_keeps_each_lower_subbranch_scoped()
+    print("\n-- Auxiliary tags --")
+    test_tag_edges_are_auxiliary_metadata()
     print("\n-- Duplicate edge guard --")
     test_duplicate_primary_tree_guard_is_present()
     print("\nPASS golden dataset hierarchy validation")

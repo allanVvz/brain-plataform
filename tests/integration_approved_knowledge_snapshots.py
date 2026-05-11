@@ -189,10 +189,22 @@ def main() -> int:
     assert store.snapshots[0]["status"] == "active", store.snapshots
     assert store.rag_entries[0]["status"] == "active", store.rag_entries
     chunk = store.chunks[0]
-    assert "Marca: Marca feminina" in chunk["chunk_text"], chunk["chunk_text"]
+    metadata = store.snapshots[0]["metadata"]
+    assert metadata["branch_context"]["path"], metadata
+    assert metadata["branch_context"]["edges"], metadata
+    assert metadata["brand_context"] == "Marca feminina de venda direta.", metadata
+    assert metadata["brand_source"] == "explicit", metadata
+    assert metadata["briefing_context"], metadata
+    assert metadata["audience_context"], metadata
+    assert metadata["product_context"], metadata
+    assert metadata["faq_context"]["question"], metadata
+    assert "Marca/Persona: Tock Fatal" in chunk["chunk_text"], chunk["chunk_text"]
+    assert "Brand: Marca feminina" in chunk["chunk_text"], chunk["chunk_text"]
     assert "Briefing: Foco em modais" in chunk["chunk_text"], chunk["chunk_text"]
     assert "Publico: Revendedoras" in chunk["chunk_text"], chunk["chunk_text"]
     assert "Produto: Kit Modal 1" in chunk["chunk_text"], chunk["chunk_text"]
+    assert "Caminho da branch:" in chunk["chunk_text"], chunk["chunk_text"]
+    assert "Relacoes:" in chunk["chunk_text"], chunk["chunk_text"]
     assert chunk["metadata"]["approved_snapshot_id"] == "snapshot-1", chunk
     assert chunk["metadata"]["source_node_id"] == "n-faq", chunk
     assert chunk["metadata"]["content_type"] == "faq", chunk

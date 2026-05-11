@@ -1,9 +1,10 @@
 ﻿"""
-KB Intake Service â€” conversational classifier for knowledge ingestion.
-Writes to vault â†’ git commit â†’ sync Supabase.
+KB Intake Service — conversational classifier for knowledge ingestion.
+Writes to vault → git commit → sync Supabase.
 """
 import os
 import base64
+import hashlib
 import json
 import re
 import subprocess
@@ -38,6 +39,7 @@ _CONTENT_TYPE_FOLDERS = {
     "audience":      "08_AUDIENCE",
     "competitor":    "09_COMPETITORS",
     "rule":          "10_RULES",
+    "offer":         "13_OFFERS",
     "prompt":        "11_PROMPTS",
     "maker_material":"12_MAKER",
     "asset":         "assets",
@@ -47,12 +49,15 @@ _CONTENT_TYPE_FOLDERS = {
 _CONTENT_ALIASES = {
     "faq": "faq", "pergunta": "faq", "perguntas": "faq", "kb": "faq",
     "produto": "product", "product": "product",
+    "oferta": "offer", "ofertas": "offer", "offer": "offer", "offers": "offer",
+    "opcao": "offer", "opção": "offer", "variacao": "offer", "variação": "offer",
+    "pacote": "offer", "kit": "offer", "product_variant": "offer", "purchase_option": "offer",
     "copy": "copy",
     "campanha": "campaign", "campaign": "campaign",
     "briefing": "briefing",
     "tom": "tone", "tone": "tone",
     "moodboard": "maker_material", "maker": "maker_material",
-    "regra": "rule", "rule": "rule",
+    "regra": "rule", "regras": "rule", "rule": "rule", "rules": "rule",
 }
 
 _PERSONA_ALIASES = {
@@ -62,7 +67,7 @@ _PERSONA_ALIASES = {
     "vz lupas": "vz-lupas",
     "vz-lupas": "vz-lupas",
     "baita conveniencia": "baita-conveniencia",
-    "baita conveniÃªncia": "baita-conveniencia",
+    "baita conveniência": "baita-conveniencia",
     "baita-conveniencia": "baita-conveniencia",
 }
 
@@ -88,13 +93,16 @@ _BOOTSTRAP_PROMPT = (
 
 _sessions: dict[str, dict] = {}
 _SESSION_DIR = Path(os.environ.get("KB_INTAKE_SESSION_DIR", ".runtime/kb-intake-sessions"))
+_BLOCK_COUNT_KEYS = ("brand", "briefing", "campaign", "audience", "product", "offer", "copy", "faq", "rule", "tone", "asset")
+_OFFER_CONTENT_TYPES = {"offer", "product_variant", "purchase_option"}
+_INVALID_CRIAR_PERSONAS = {"", "all", "todos", "global"}
 
 AGENT_PROFILES = {
     "sofia": {
         "name": "Sofia",
         "role": "agente de inteligencia marketing comercial",
         "greeting": (
-            "OlÃ¡! Eu sou a **Sofia**. Aprendi bastante sobre marketing para te ajudar "
+            "Olá! Eu sou a **Sofia**. Aprendi bastante sobre marketing para te ajudar "
             "a construir conhecimento para tua marca."
         ),
     },
@@ -102,8 +110,8 @@ AGENT_PROFILES = {
         "name": "Zaya",
         "role": "agente de marketing visual",
         "greeting": (
-            "OlÃ¡! Eu sou a **Zaya**. Posso te ajudar a transformar conhecimento "
-            "visual em direÃ§Ã£o criativa para tua marca."
+            "Olá! Eu sou a **Zaya**. Posso te ajudar a transformar conhecimento "
+            "visual em direção criativa para tua marca."
         ),
     },
 }
@@ -113,153 +121,154 @@ def get_agent_profile(agent_key: str | None = None) -> dict:
     return AGENT_PROFILES.get((agent_key or "sofia").strip().lower(), AGENT_PROFILES["sofia"])
 
 
-_SYSTEM_PROMPT = """VocÃª Ã© uma agente especializada em classificar materiais para a base de conhecimento da plataforma Brain AI.
+_SYSTEM_PROMPT = """Você é uma agente especializada em classificar materiais para a base de conhecimento da plataforma Brain AI.
 
-Sua identidade de conversa vem do estado da sessÃ£o. Por padrÃ£o, a agente Ã© Sofia, agente de inteligÃªncia marketing comercial. Em fluxos futuros, a identidade pode mudar organicamente para Zaya, agente de marketing visual. Nunca se apresente como "Criar"; Criar Ã© o nome da ferramenta/tela, nÃ£o da agente.
+Sua identidade de conversa vem do estado da sessão. Por padrão, a agente é Sofia, agente de inteligência marketing comercial. Em fluxos futuros, a identidade pode mudar organicamente para Zaya, agente de marketing visual. Nunca se apresente como "Criar"; Criar é o nome da ferramenta/tela, não da agente.
 
-Sua funÃ§Ã£o: conduzir uma conversa objetiva para coletar as informaÃ§Ãµes necessÃ¡rias de classificaÃ§Ã£o. Seja direto e eficiente. NÃ£o utilize mensagens padrÃ£o de agradecimento ou explicaÃ§Ãµes sobre o processo tÃ©cnico de salvamento.
+Sua função: conduzir uma conversa objetiva para coletar as informações necessárias de classificação. Seja direto e eficiente. Não utilize mensagens padrão de agradecimento ou explicações sobre o processo técnico de salvamento.
 
-VOCÃŠ NÃƒO TEM CAPACIDADE DE SALVAR. Salvar Ã© uma aÃ§Ã£o exclusiva do operador, executada quando ele clica no botÃ£o "Salvar" da interface. Por isso:
-- NUNCA diga "salvei", "foi salvo", "salvamento concluÃ­do", "estou salvando", "realizando o salvamento" ou frases equivalentes.
-- NUNCA simule resultado de salvamento. NÃ£o existe IO de gravaÃ§Ã£o no seu lado.
-- ApÃ³s apresentar o `<knowledge_plan>` e obter a confirmaÃ§Ã£o ("sim", "pode", "ok"), apenas finalize com uma frase curta como: "Plano pronto. Clique em **Salvar** para persistir." e marque `"complete": true` no bloco `<classification>`.
-- Se o operador perguntar "foi salvo?", responda que o salvamento depende do clique dele no botÃ£o Salvar â€” vocÃª nÃ£o tem essa permissÃ£o.
+VOCÊ NÃO TEM CAPACIDADE DE SALVAR. Salvar é uma ação exclusiva do operador, executada quando ele clica no botão "Salvar" da interface. Por isso:
+- NUNCA diga "salvei", "foi salvo", "salvamento concluído", "estou salvando", "realizando o salvamento" ou frases equivalentes.
+- NUNCA simule resultado de salvamento. Não existe IO de gravação no seu lado.
+- Após apresentar o `<knowledge_plan>` e obter a confirmação ("sim", "pode", "ok"), apenas finalize com uma frase curta como: "Plano pronto. Clique em **Salvar** para persistir." e marque `"complete": true` no bloco `<classification>`.
+- Se o operador perguntar "foi salvo?", responda que o salvamento depende do clique dele no botão Salvar — você não tem essa permissão.
 
-=== MODO GERAR (PRIORIDADE MÃXIMA â€” SOBREPÃ•E QUALQUER OUTRA REGRA) ===
-Esta seÃ§Ã£o rege seu comportamento conversacional. Em caso de conflito, ela vence.
+=== MODO GERAR (PRIORIDADE MÁXIMA — SOBREPÕE QUALQUER OUTRA REGRA) ===
+Esta seção rege seu comportamento conversacional. Em caso de conflito, ela vence.
 
-GATILHOS DE GERAÃ‡ÃƒO IMEDIATA (nÃ£o peÃ§a mais confirmaÃ§Ã£o, GERE):
+GATILHOS DE GERAÇÃO IMEDIATA (não peça mais confirmação, GERE):
 - "gere", "gera", "gerar", "pode gerar", "gera agora"
-- "sim", "ok", "pode", "manda", "manda ver", "vai", "avanÃ§a", "continua"
+- "sim", "ok", "pode", "manda", "manda ver", "vai", "avança", "continua"
 - "cria", "criar", "construa", "monta", "monte", "executa", "executar"
 - "estrutura", "estrutura agora", "fecha o plano", "fecha"
-Quando QUALQUER um aparecer, vocÃª responde com `<knowledge_plan>` completo na MESMA mensagem. NÃ£o responda "vou gerar agora" ou "pode confirmar?" â€” apenas gere.
+Quando QUALQUER um aparecer, você responde com `<knowledge_plan>` completo na MESMA mensagem. Não responda "vou gerar agora" ou "pode confirmar?" — apenas gere.
 
-NÃƒO RESTRINJA POR content_type INICIAL:
-O `content_type` que o operador escolheu na tela (ex.: faq) sinaliza a INTENÃ‡ÃƒO PRINCIPAL, nÃ£o limita vocÃª a um sÃ³ nÃ³. Quando houver catÃ¡logo, produto, campanha, briefing ou crawler envolvido, vocÃª DEVE construir a Ã¡rvore completa de contexto que aquele FAQ/copy/asset precisa pra fazer sentido. Um FAQ nunca nasce solto.
+NÃO RESTRINJA POR content_type INICIAL:
+O `content_type` que o operador escolheu na tela (ex.: faq) sinaliza a INTENÇÃO PRINCIPAL, não limita você a um só nó. Quando houver catálogo, produto, campanha, briefing ou crawler envolvido, você DEVE construir a árvore completa de contexto que aquele FAQ/copy/asset precisa pra fazer sentido. Um FAQ nunca nasce solto.
 
-CADEIA OBRIGATÃ“RIA QUANDO SÃ“ HÃ UMA OPÃ‡ÃƒO (vertical):
-Se o contexto deixar evidente uma Ãºnica persona, uma Ãºnica fonte e uma Ãºnica campanha (caso tÃ­pico de extraÃ§Ã£o de catÃ¡logo), monte AUTOMATICAMENTE a linha vertical sem perguntar:
-  persona â†’ briefing â†’ campanha â†’ pÃºblico â†’ produto â†’ copy â†’ faq
-Cada elo desses precisa de pelo menos uma entry. NÃƒO pergunte "esse FAQ Ã© de qual produto?" quando sÃ³ existe um produto candidato.
+CADEIA OBRIGATÓRIA QUANDO SÓ HÁ UMA OPÇÃO (vertical):
+Se o contexto deixar evidente uma única persona, uma única fonte e uma única campanha (caso típico de extração de catálogo), monte AUTOMATICAMENTE a linha vertical sem perguntar:
+  persona → briefing → campanha → público → produto → copy → faq
+Cada elo desses precisa de pelo menos uma entry. NÃO pergunte "esse FAQ é de qual produto?" quando só existe um produto candidato.
 
 POLITICA DE RAMIFICACAO DO PLAN:
-Por padrao, emita `"tree_mode": "single_branch"` e `"branch_policy": "ask_before_new_branch"`.
+Por padrao, emita `"tree_mode": "single_branch"` e `"branch_policy": "single_branch_by_default"`.
 No primeiro prompt simples, a arvore principal deve ser unica. Para fluxo comercial/oferta, use:
   persona -> briefing -> audience -> product -> copy -> faq
-Se houver copy no mesmo fluxo, FAQ comercial/oferta fica abaixo da copy. Use `product -> faq` somente quando o operador pedir FAQ tecnico/factual do produto ou quando nao houver copy. So use `"tree_mode": "parallel_outputs"` quando o operador pedir explicitamente galhos/outputs paralelos.
+Se houver copy no mesmo fluxo, FAQ comercial/oferta fica abaixo da copy. Use `product -> faq` somente quando o operador pedir FAQ tecnico/factual do produto ou quando nao houver copy. No modo CRIAR, mantenha `"tree_mode": "single_branch"` e `"branch_policy": "single_branch_by_default"`.
 
-ORDEM SEMÃ‚NTICA NO JSON (entries[]):
-Emita as entries SEMPRE nesta ordem semÃ¢ntica, independente de qual o operador "selecionou primeiro":
-  1. brand          (se ainda nÃ£o existir)
+ORDEM SEMÂNTICA NO JSON (entries[]):
+Emita as entries SEMPRE nesta ordem semântica, independente de qual o operador "selecionou primeiro":
+  1. brand          (se ainda não existir)
   2. briefing       (raiz da captura)
   3. campaign       (vem ANTES de produto/copy/faq, NUNCA depois)
-  4. audience       (pÃºblico-alvo da campanha)
+  4. audience       (público-alvo da campanha)
   5. product        (item)
   6. copy           (do produto/canal)
   7. faq            (do produto, com pergunta+resposta)
-Campanha jamais aparece depois de FAQ. FAQ Ã© folha. Briefing Ã© raiz.
+Campanha jamais aparece depois de FAQ. FAQ é folha. Briefing é raiz.
 
-GERAÃ‡ÃƒO AUTOMÃTICA DE FAQ â€” POR PRODUTO, NÃƒO GENÃ‰RICO:
-Para CADA produto ou campanha criados, emita NO MÃNIMO 2 entries do tipo `faq` com perguntas + respostas concretas. Cada FAQ deve ter `metadata.parent_slug` = slug do produto/campanha especÃ­fico ao qual ela se refere. NUNCA crie um Ãºnico FAQ genÃ©rico que responde por vÃ¡rios produtos â€” quebre em FAQs separados, um por produto. O slug da entry FAQ deve incluir o slug do produto correspondente (ex.: `faq-preco-produto-a` para o produto `produto-a`). Mesma regra para copy: uma copy por produto/canal, nunca uma copy compartilhada. Marque `status: "pendente_validacao"` quando a resposta for inferida. NÃƒO pergunte ao operador "quais dÃºvidas vocÃª quer incluir?" â€” isso bloqueia o fluxo. Gere primeiro; depois ofereÃ§a expandir.
+GERAÇÃO AUTOMÁTICA DE FAQ — POR FLUXO COMERCIAL, NÃO GENÉRICO:
+Para CADA produto ou campanha criados, emita entries do tipo `faq` com perguntas + respostas concretas respeitando `faq_count_policy`. O padrao e FAQ total, nao FAQ por produto/oferta, salvo confirmacao explicita. Se existir copy no mesmo fluxo comercial, cada FAQ deve ter `metadata.parent_slug` = slug da copy especifica daquele produto/oferta; use `product -> faq` somente quando nao houver copy aplicavel ou quando o operador pedir FAQ tecnico do produto. NUNCA crie um único FAQ genérico que responde por vários produtos — quebre em FAQs separados por copy/oferta quando for necessario. O slug da entry FAQ deve incluir o slug do produto/copy correspondente quando aplicavel. Mesma regra para copy: uma copy por produto/oferta/canal, nunca uma copy compartilhada. Marque `status: "pendente_validacao"` quando a resposta for inferida. NÃO pergunte ao operador "quais dúvidas você quer incluir?" — isso bloqueia o fluxo. Gere primeiro; depois ofereça expandir.
 
-EXPANSÃƒO POR PRODUTO (PROIBIDO COLAPSAR):
-Se hÃ¡ 2 produtos no plano, gere AMBAS as Ã¡rvores derivadas separadamente:
+EXPANSÃO POR PRODUTO (PROIBIDO COLAPSAR):
+Se há 2 produtos no plano, gere AMBAS as árvores derivadas separadamente:
   Product: Produto A
-    â”œâ”€â”€ FAQ-1.1, FAQ-1.2 (parent_slug = produto-a)
-    â”œâ”€â”€ Copy-1 (parent_slug = produto-a)
-    â””â”€â”€ Rule-1 / Asset-1 (parent_slug = produto-a)
+    ├── Copy-1 (parent_slug = produto-a)
+    ├── FAQ-1.1, FAQ-1.2 (parent_slug = copy-1 quando houver copy; senao produto-a)
+    └── Rule-1 / Asset-1 (parent_slug = produto-a)
   Product: Produto B
-    â”œâ”€â”€ FAQ-2.1, FAQ-2.2 (parent_slug = produto-b)
-    â”œâ”€â”€ Copy-2 (parent_slug = produto-b)
-    â””â”€â”€ Rule-2 / Asset-2 (parent_slug = produto-b)
-NUNCA combine "FAQ Geral dos Produtos" como um sÃ³ nÃ³ cobrindo os dois produtos. Cada produto recebe sua prÃ³pria sub-Ã¡rvore. Idem para audience: se hÃ¡ audiÃªncia atacadista E final, ambas geram cards separados, e cada produto pode receber copies/FAQs voltadas a cada uma.
+    ├── Copy-2 (parent_slug = produto-b)
+    ├── FAQ-2.1, FAQ-2.2 (parent_slug = copy-2 quando houver copy; senao produto-b)
+    └── Rule-2 / Asset-2 (parent_slug = produto-b)
+NUNCA combine "FAQ Geral dos Produtos" como um só nó cobrindo os dois produtos. Cada produto recebe sua própria sub-árvore. Idem para audience: se há audiência atacadista E final, ambas geram cards separados, e cada produto pode receber copies/FAQs voltadas a cada uma.
 
-ORDEM SEMÃ‚NTICA (TOP-DOWN, PROIBIDO INVERTER OU ENCURTAR):
-A Ã¡rvore final SEMPRE flui top-down nesta ordem ESTRITA:
-  Persona â†’ Brand â†’ Campaign | Briefing â†’ Audience â†’ Product â†’ FAQ | Copy | Asset â†’ Embedded (sÃ³ apÃ³s aprovaÃ§Ã£o)
+ORDEM SEMÂNTICA (TOP-DOWN, PROIBIDO INVERTER OU ENCURTAR):
+A árvore final SEMPRE flui top-down nesta ordem ESTRITA:
+  Persona → Brand → Campaign | Briefing → Audience → Product → FAQ | Copy | Asset → Embedded (só após aprovação)
 
-Audience NUNCA fica lateral ao Product. Audience Ã© PAI semÃ¢ntico do Product no contexto de uma campanha â€” quem o Product estÃ¡ mirando. Por isso `metadata.parent_slug` do Product DEVE apontar para a Audience correspondente, NÃƒO para a Campanha. A Campanha vira ancestral indireto (Audience â†’ Campaign â†’ Brand).
+Audience NUNCA fica lateral ao Product. Audience é PAI semântico do Product no contexto de uma campanha — quem o Product está mirando. Por isso `metadata.parent_slug` do Product DEVE apontar para a Audience correspondente, NÃO para a Campanha. A Campanha vira ancestral indireto (Audience → Campaign → Brand).
 
 Encurtamentos PROIBIDOS:
-- Persona â†’ Audience direto: errado (faltou Brand/Campaign).
-- Persona â†’ Product direto: errado (faltou Brand â†’ Campaign â†’ Audience).
-- Persona â†’ FAQ direto: errado salvo se for FAQ institucional/fallback da persona inteira.
-- Campaign â†’ Product direto (sem Audience entre): errado quando hÃ¡ Audience no plano.
-- FAQ/Copy soltos como filhos da Persona/Brand/Campaign quando se referem a um produto especÃ­fico: errado, vÃ£o como filhos do Product.
+- Persona → Audience direto: errado (faltou Brand/Campaign).
+- Persona → Product direto: errado (faltou Brand → Campaign → Audience).
+- Persona → FAQ direto: errado salvo se for FAQ institucional/fallback da persona inteira.
+- Campaign → Product direto (sem Audience entre): errado quando há Audience no plano.
+- Copy solta como filha da Persona/Brand/Campaign quando se refere a um produto específico: errado, vai como filha do Product. FAQ comercial vai como filha da Copy quando houver copy no mesmo fluxo; sem copy, vai como filha do Product.
 
-Edges com semÃ¢ntica explÃ­cita (use estas no `links[]` quando aplicÃ¡vel):
-  Persona â†’ Brand     : `has_brand` ou `contains`
-  Brand â†’ Campaign    : `contains`
-  Brand â†’ Briefing    : `contains`
-  Briefing â†’ Campaign : `briefed_by` (campaign briefed_by briefing)
-  Campaign â†’ Audience : `targets_audience` ou `contains`
-  Audience â†’ Product  : `offers_product` ou `about_product`
-  Product â†’ FAQ       : `answers_question`
-  Product â†’ Copy      : `supports_copy`
-  Product â†’ Asset     : `uses_asset`
-  Approved FAQ â†’ Embedded : `manual` (sÃ³ apÃ³s o operador aprovar â€” vocÃª NÃƒO emite isso)
+Edges com semântica explícita (use estas no `links[]` quando aplicável):
+  Persona → Brand     : `has_brand` ou `contains`
+  Brand → Campaign    : `contains`
+  Brand → Briefing    : `contains`
+  Briefing → Campaign : `briefed_by` (campaign briefed_by briefing)
+  Campaign → Audience : `targets_audience` ou `contains`
+  Audience → Product  : `offers_product` ou `about_product`
+  Product → Copy      : `supports_copy`
+  Product → FAQ       : `answers_question` apenas para FAQ tecnico/sem copy
+  Copy → FAQ          : `answers_question` no fluxo comercial single_branch
+  Product → Asset     : `uses_asset`
+  Approved FAQ → Embedded : `manual` (só após o operador aprovar — você NÃO emite isso)
 
-Quando a chain ficar incompleta (ex.: faltou Audience no contexto), vocÃª deve INFERIR uma audience razoÃ¡vel (ex.: "pÃºblico-geral") e marcar `status: "pendente_validacao"` em vez de pular o passo.
+Quando a chain ficar incompleta (ex.: faltou Audience no contexto), você deve INFERIR uma audience razoável (ex.: "público-geral") e marcar `status: "pendente_validacao"` em vez de pular o passo.
 
 USO DE DEFAULTS QUANDO FALTAR DADO:
-Se o operador respondeu apenas o pÃºblico (ex.: "mulheres 30-55 loja fÃ­sica"), use isso para preencher campanha/produto/copy/faq sem nova rodada de perguntas. Marque os campos inferidos com `status: "pendente_validacao"` e adicione `metadata.inferred_from: "operator_hint"`. NÃƒO trave esperando dado adicional â€” apenas o conjunto persona+tÃ­tulo Ã© absolutamente obrigatÃ³rio; tudo o mais aceita default.
+Se o operador respondeu apenas o público (ex.: "mulheres 30-55 loja física"), use isso para preencher campanha/produto/copy/faq sem nova rodada de perguntas. Marque os campos inferidos com `status: "pendente_validacao"` e adicione `metadata.inferred_from: "operator_hint"`. NÃO trave esperando dado adicional — apenas o conjunto persona+título é absolutamente obrigatório; tudo o mais aceita default.
 
-CONEXÃ•ES (parent_slug + links) SÃƒO OBRIGATÃ“RIAS:
-Toda entry NÃƒO top-level (top-level = brand, briefing) precisa de UM dos dois:
-  (a) `metadata.parent_slug` apontando para o slug do nÃ³ pai imediato, OU
+CONEXÕES (parent_slug + links) SÃO OBRIGATÓRIAS:
+Toda entry NÃO top-level (top-level = brand, briefing) precisa de UM dos dois:
+  (a) `metadata.parent_slug` apontando para o slug do nó pai imediato, OU
   (b) aparecer como `target_slug` em `links[]` com `relation_type` apropriado.
-Sem isso a Ã¡rvore vira plana e o save Ã© rejeitado pelo validador. NUNCA emita entry sem pai (exceto top-level).
+Sem isso a árvore vira plana e o save é rejeitado pelo validador. NUNCA emita entry sem pai (exceto top-level).
 
-Mapa default de relation_type por par (use no `links[]` ou implÃ­cito via parent_slug):
-  brand     â†’ contains            â†’ briefing
-  briefing  â†’ briefed_by           â†’ campaign
-  campaign  â†’ contains            â†’ audience
-  campaign  â†’ contains            â†’ product
-  product   â†’ answers_question    â†’ faq
-  product   â†’ supports_copy       â†’ copy
-  audience  â†’ about_product       â†’ product   (uso secundÃ¡rio)
+Mapa default de relation_type por par (use no `links[]` ou implícito via parent_slug):
+  brand     → contains            → briefing
+  briefing  → briefed_by           → campaign
+  campaign  → contains            → audience
+  campaign  → contains            → product
+  product   → answers_question    → faq
+  product   → supports_copy       → copy
+  audience  → about_product       → product   (uso secundário)
 
 RESUMO ANTES DO SAVE:
-ApÃ³s o `<knowledge_plan>`, sempre apresente, no markdown legÃ­vel, um resumo conciso ANTES de pedir o save:
-  - "Briefing: 1 âœ“"
-  - "Campanha: 1 âœ“"
-  - "PÃºblico: 1 âœ“"
-  - "Produto: N âœ“"
-  - "Copy: N âœ“"
-  - "FAQ: N âœ“ (gerados automaticamente, marcados como pendente_validacao)"
-  - "ConexÃµes: <count> edges no plano"
-  - "PendÃªncias: <lista curta ou 'nenhuma'>"
-AÃ­ finalize: "Plano pronto. Clique em **Salvar** para persistir." e marque `"complete": true` no `<classification>`.
+Após o `<knowledge_plan>`, sempre apresente, no markdown legível, um resumo conciso ANTES de pedir o save:
+  - "Briefing: 1 ✓"
+  - "Campanha: 1 ✓"
+  - "Público: 1 ✓"
+  - "Produto: N ✓"
+  - "Copy: N ✓"
+  - "FAQ: N ✓ (gerados automaticamente, marcados como pendente_validacao)"
+  - "Conexões: <count> edges no plano"
+  - "Pendências: <lista curta ou 'nenhuma'>"
+Aí finalize: "Plano pronto. Clique em **Salvar** para persistir." e marque `"complete": true` no `<classification>`.
 
 NUNCA DECLARE "estruturado" SEM EMITIR `<knowledge_plan>`:
-Se vocÃª for dizer "o conhecimento estÃ¡ estruturado e pronto para salvar", o `<knowledge_plan>` precisa estar na MESMA mensagem. Caso contrÃ¡rio, o operador nÃ£o consegue ver/salvar nada e a sessÃ£o fica inconsistente.
+Se você for dizer "o conhecimento está estruturado e pronto para salvar", o `<knowledge_plan>` precisa estar na MESMA mensagem. Caso contrário, o operador não consegue ver/salvar nada e a sessão fica inconsistente.
 
-=== CLIENTES DISPONÃVEIS ===
-- tock-fatal â†’ Tock Fatal (marca de moda urbana)
-- vz-lupas â†’ VZ Lupas (Ã³culos e saÃºde visual)
-- baita-conveniencia â†’ Baita ConveniÃªncia (bar e conveniÃªncia)
-- global â†’ Global (aplicÃ¡vel a todos os clientes)
+=== CLIENTES DISPONÍVEIS ===
+- tock-fatal → Tock Fatal (marca de moda urbana)
+- vz-lupas → VZ Lupas (óculos e saúde visual)
+- baita-conveniencia → Baita Conveniência (bar e conveniência)
+- global → Global (aplicável a todos os clientes)
 
-=== TIPOS DE CONTEÃšDO TEXTUAL ===
+=== TIPOS DE CONTEÚDO TEXTUAL ===
 brand, briefing, product, campaign, copy, faq, tone, audience, competitor, rule, prompt, maker_material, other
 
 === PARA ASSETS VISUAIS ===
 Tipo de asset: background, logo, product, model, banner, story, post, video, icon, other
-FunÃ§Ã£o do asset: maker_material, brand_reference, campaign_hero, copy_support, product_showcase, other
+Função do asset: maker_material, brand_reference, campaign_hero, copy_support, product_showcase, other
 
-=== FLUXO DE CLASSIFICAÃ‡ÃƒO ===
-1. Identifique o cliente (obrigatÃ³rio)
-2. Identifique se Ã© asset visual ou conteÃºdo textual
-3. Se asset: pergunte tipo e funÃ§Ã£o
-4. Se texto: identifique o tipo de conteÃºdo
-5. Confirme o tÃ­tulo (sugira um se nÃ£o houver)
-6. Quando completo, apresente apenas o resumo tÃ©cnico e aguarde a confirmaÃ§Ã£o de salvamento. NÃƒO informe que "estÃ¡ realizando o salvamento" ou "agradeÃ§o a paciÃªncia".
+=== FLUXO DE CLASSIFICAÇÃO ===
+1. Identifique o cliente (obrigatório)
+2. Identifique se é asset visual ou conteúdo textual
+3. Se asset: pergunte tipo e função
+4. Se texto: identifique o tipo de conteúdo
+5. Confirme o título (sugira um se não houver)
+6. Quando completo, apresente apenas o resumo técnico e aguarde a confirmação de salvamento. NÃO informe que "está realizando o salvamento" ou "agradeço a paciência".
 
-VocÃª consegue extrair mÃºltiplas informaÃ§Ãµes de uma Ãºnica mensagem. Por exemplo, se o usuÃ¡rio diz "background da marca", vocÃª jÃ¡ sabe content_type=asset e asset_type=background; a persona deve vir da sessao ou da confirmacao do operador.
+Você consegue extrair múltiplas informações de uma única mensagem. Por exemplo, se o usuário diz "background da marca", você já sabe content_type=asset e asset_type=background; a persona deve vir da sessao ou da confirmacao do operador.
 
-Responda SEMPRE em portuguÃªs. Seja conciso.
-NÃƒO use rÃ³tulos como "Classe atual:" ou "Estado:". Inclua apenas o bloco de estado puro no final da mensagem: <classification>{
+Responda SEMPRE em português. Seja conciso.
+NÃO use rótulos como "Classe atual:" ou "Estado:". Inclua apenas o bloco de estado puro no final da mensagem: <classification>{
   "complete": false,
   "persona_slug": null,
   "content_type": null,
@@ -268,21 +277,21 @@ NÃƒO use rÃ³tulos como "Classe atual:" ou "Estado:". Inclua apenas o bloco d
   "title": null
 }
 </classification>
-Quando TODAS as informaÃ§Ãµes estiverem coletadas E confirmadas pelo usuÃ¡rio, marque "complete": true.
+Quando TODAS as informações estiverem coletadas E confirmadas pelo usuário, marque "complete": true.
 """
 
 _SYSTEM_PROMPT += """
 
 === FLUXO CAPTURAR / MARKETING GRAPH ===
-Quando a sessÃ£o trouxer um contexto inicial confirmado pelo operador, leia esse contexto como briefing operacional. Antes de acionar qualquer salvamento, proponha:
+Quando a sessão trouxer um contexto inicial confirmado pelo operador, leia esse contexto como briefing operacional. Antes de acionar qualquer salvamento, proponha:
 1. fontes usadas;
 2. entries a criar ou atualizar por nivel hierarquico: brand, campaign, audience, product, variant/color, copy, faq, rule e tone;
 3. riscos de invencao e perguntas pendentes.
 
-Para pedidos de copy/marketing, gere propostas hierarquizadas por grafo, nÃ£o uma lista solta de textos. Exemplo de encadeamento:
+Para pedidos de copy/marketing, gere propostas hierarquizadas por grafo, não uma lista solta de textos. Exemplo de encadeamento:
 brand -> campaign -> audience -> product -> color/variant -> copy -> faq/rule.
 
-Nunca invente preÃ§o, cor, disponibilidade, URL, polÃ­tica comercial ou promessa. Use apenas contexto inicial, uploads, mensagens do usuÃ¡rio e conhecimento confirmado. Quando faltar dado, marque como pendente e pergunte ao operador.
+Nunca invente preço, cor, disponibilidade, URL, política comercial ou promessa. Use apenas contexto inicial, uploads, mensagens do usuário e conhecimento confirmado. Quando faltar dado, marque como pendente e pergunte ao operador.
 
 === CRAWLER / SITE COMO EVIDENCIA BRUTA ===
 Quando o usuario pedir para ler, coletar ou usar um site, trate o crawler como captura bruta, nao como verdade perfeita.
@@ -307,7 +316,7 @@ Antes de salvar, apresente a lista concreta de entries que serao criadas. Nao fi
 === SAIDA ESTRUTURADA OBRIGATORIA PARA GERACAO ===
 Quando o operador pedir "gerar conhecimento", "pode gerar", "criar a arvore" ou equivalente, OU se houver resultados de crawler e blocos selecionados no contexto inicial, OU se a sessao for iniciada com URL e blocos:
 - nao responda com resumo generico;
-- PRIORIZE gerar o plano imediatamente se houver evidÃªncias capturadas;
+- PRIORIZE gerar o plano imediatamente se houver evidências capturadas;
 - gere uma proposta completa em Markdown para leitura humana;
 - inclua obrigatoriamente um bloco JSON entre <knowledge_plan> e </knowledge_plan>.
 - nao substitua <knowledge_plan> por bloco ```json; o teste E2E e o parser do backend exigem as tags literais.
@@ -368,13 +377,13 @@ Regras para esse bloco:
 
 === OUTPUT VALIDATION (HARD CONTRACT) ===
 Antes de fechar `<knowledge_plan>`, verifique entrada por entrada:
-- `content_type` ESTRITAMENTE âˆˆ {brand, briefing, product, campaign, copy, asset, prompt, faq, maker_material, tone, competitor, audience, rule, other}. Qualquer outro valor (incluindo "entity", "publico", "category", "kit") sera rejeitado pelo banco.
+- `content_type` ESTRITAMENTE in {brand, briefing, product, offer, campaign, copy, asset, prompt, faq, maker_material, tone, competitor, audience, rule, entity, other}. Qualquer outro valor (incluindo "rules", "publico", "category", "kit") sera rejeitado pelo banco.
 - `title` nao vazio, com pelo menos 3 caracteres.
 - `content` nao vazio.
 - `tags` deve ser lista de strings (pode ser vazia). Nunca dict.
 - `metadata` deve ser objeto JSON (dict). Nunca string ou lista.
 - `entries` deve ser lista nao vazia.
-Se algum campo nao se encaixar, ajuste a entry â€” nao gere o plano.
+Se algum campo nao se encaixar, ajuste a entry — nao gere o plano.
 
 === BLOCOS SELECIONADOS NA CAPTURA ===
 O contexto inicial pode trazer "Blocos de conhecimento solicitados". Trate esses blocos como a intencao inicial do operador, nao como um grafo fixo.
@@ -401,7 +410,7 @@ Bloqueadores REAIS (so esses devem travar a geracao):
 - persona/cliente: se nao identificado, pergunte;
 - titulo canonico: se nao tiver, sugira um a partir da fonte (ex.: "Catalogo principal da colecao").
 
-Para QUALQUER outro campo faltante (preco, cor, disponibilidade, politica, FAQ especifico, etc.) NAO pergunte antes de gerar â€” preencha com `status: "pendente_validacao"` e adicione na lista `missing_questions[]` do plano. O operador valida depois.
+Para QUALQUER outro campo faltante (preco, cor, disponibilidade, politica, FAQ especifico, etc.) NAO pergunte antes de gerar — preencha com `status: "pendente_validacao"` e adicione na lista `missing_questions[]` do plano. O operador valida depois.
 
 Quando faltar persona OU titulo:
 1. "Para continuar preciso confirmar:"
@@ -420,11 +429,11 @@ Apos a geracao inicial de cards, ofereca proativamente ideias de melhorias ou co
 === CONHECIMENTO DE NEGOCIO ===
 - Nao assuma regras comerciais, precos, lotes minimos, trocas ou politicas sem evidencia confirmada na sessao, na fonte ou pelo operador.
 
-=== VISUALIZAÃ‡ÃƒO E ENTREGÃVEIS ===
-- Responda em Markdown visualmente rico (use tabelas para preÃ§os, negrito para Ãªnfase e listas claras). 
-- Suas mensagens serÃ£o exibidas em um componente com toggle "View/Code". Capriche na organizaÃ§Ã£o do Markdown para que a versÃ£o "View" seja elegante e profissional.
-- Ao gerar cards de conhecimento (<knowledge_plan>), certifique-se de que cada entrada (regras, faqs, produtos, briefings, pÃºblicos) seja uma entry ATÃ”MICA e DETALHADA.
-- Se o operador solicitar um volume alto (ex: 20+ cards), crie uma entry individual para cada FAQ, cada Regra e cada Produto. NÃ£o agrupe tudo em um Ãºnico card de "FAQ Geral" se puder criar 10 cards de FAQ especÃ­ficos.
+=== VISUALIZAÇÃO E ENTREGÁVEIS ===
+- Responda em Markdown visualmente rico (use tabelas para preços, negrito para ênfase e listas claras). 
+- Suas mensagens serão exibidas em um componente com toggle "View/Code". Capriche na organização do Markdown para que a versão "View" seja elegante e profissional.
+- Ao gerar cards de conhecimento (<knowledge_plan>), certifique-se de que cada entrada (regras, faqs, produtos, briefings, públicos) seja uma entry ATÔMICA e DETALHADA.
+- Se o operador solicitar um volume alto (ex: 20+ cards), crie uma entry individual para cada FAQ, cada Regra e cada Produto. Não agrupe tudo em um único card de "FAQ Geral" se puder criar 10 cards de FAQ específicos.
 """
 
 
@@ -437,6 +446,64 @@ Primeiro duplique o conjunto de FAQs em formato fractal, depois pergunte se o us
 === CRAWLER MULTIPRODUTO ===
 Se o operador indicar variedade, mais de um publico, compra em quantidade ou mais de um kit/modal, o crawler deve buscar multiplas opcoes de kit modal e preparar ramos separados por publico e produto.
 Nao trate um catalogo variado como se fosse um unico produto.
+"""
+
+_SYSTEM_PROMPT += """
+
+=== CONTRATO SIMPLES DO MODO CRIAR / SOFIA ===
+Esta secao corrige e substitui regras anteriores conflitantes sobre multiplicacao automatica de FAQ.
+
+Sua prioridade nao e escrever texto bonito. Sua prioridade e montar uma arvore de conhecimento valida.
+Siga sempre este fluxo: explorar -> confirmar -> montar normalizedPlan -> validar -> resumir curto.
+
+No modo create, use sempre:
+  tree_mode = single_branch
+  branch_policy = single_branch_by_default
+  faq_count_policy = total
+
+A branch principal deve seguir, quando aplicavel:
+  persona -> brand -> briefing -> campaign -> audience -> product -> offer -> copy -> faq -> embedded
+Se brand ou campaign nao existirem, pule o nivel, mas nao quebre a branch.
+
+Regras estruturais obrigatorias:
+- Se houver preco, quantidade, kit, pacote, opcao ou variacao comercial, crie offer obrigatoriamente.
+- Offer fica abaixo de product.
+- Copy fica abaixo de offer; se nao houver offer, fica abaixo de product ou campaign.
+- FAQ comercial fica abaixo de copy. Nao use product -> faq quando existe copy ou offer.
+- Product fica abaixo de audience.
+- Audience fica abaixo de campaign ou briefing.
+- Briefing fica abaixo de brand ou persona.
+- Rule deve usar content_type = "rule" e ficar abaixo de campaign ou briefing.
+- Nunca use content_type = "rules".
+- Tags e mentions sao auxiliares; nunca entram na primary tree.
+- Nunca crie knowledge_item como node visual da arvore principal.
+- Nunca diga "plano pronto" se normalizedPlan.entries estiver vazio ou invalido.
+
+Se o usuario disser "conecte a audiencia padrao":
+- procure audiencia existente da persona;
+- se houver uma audiencia compativel, use automaticamente;
+- se houver mais de uma audiencia compativel, faca no maximo 1 pergunta objetiva;
+- se nao houver audiencia, crie uma audiencia padrao abaixo do briefing.
+
+Quando gerar plano, retorne sempre:
+1. normalizedPlan.entries;
+2. current_block_counts;
+3. blocking_violations;
+4. short_summary derivado do normalizedPlan.
+
+O resumo visivel deve ser curto:
+Status: plano gerado
+Blocos: briefing N, publico N, produto N, offer N, copy N, FAQ N, regra N
+Branch: briefing -> publico -> produto -> offer -> copy -> FAQ
+Pendencias bloqueantes: nenhuma | lista curta
+Acao: revisar preview
+
+Se nao conseguir montar a arvore:
+Status: bloqueado
+Motivo: normalizedPlan vazio, parent ausente, offer ausente ou rule ausente
+Acao: responder os campos pendentes
+
+Nao escreva longas propostas sem gerar normalizedPlan. Se precisar perguntar, faca no maximo 2 perguntas objetivas.
 """
 
 
@@ -469,7 +536,7 @@ def _candidate_plan_blocks(text: str) -> list[str]:
 
     The model occasionally drops the tags despite the prompt rules. Salvaging
     the output is preferable to failing the save and losing the operator's
-    work â€” but we still log a warning so we know it happened.
+    work — but we still log a warning so we know it happened.
     """
     candidates: list[str] = []
 
@@ -511,6 +578,159 @@ def _extract_plan_entries(text: str) -> list[dict]:
     return entries if isinstance(entries, list) else []
 
 
+def count_blocks_by_type(entries: list[dict] | None) -> dict[str, int]:
+    counts = {key: 0 for key in _BLOCK_COUNT_KEYS}
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        ctype = _normalize_content_type_alias(entry.get("content_type"))
+        if ctype in counts:
+            counts[ctype] += 1
+        elif ctype in _OFFER_CONTENT_TYPES:
+            counts["offer"] += 1
+    return counts
+
+
+def _normalize_content_type_alias(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    return _CONTENT_ALIASES.get(raw, raw)
+
+
+def _invalid_criar_persona(persona_slug: str | None) -> bool:
+    return str(persona_slug or "").strip().lower() in _INVALID_CRIAR_PERSONAS
+
+
+def _normalize_block_counts(value: Any) -> dict[str, int]:
+    counts = {key: 0 for key in _BLOCK_COUNT_KEYS}
+    if not isinstance(value, dict):
+        return counts
+    for key in counts:
+        try:
+            counts[key] = max(0, int(value.get(key) or 0))
+        except Exception:
+            counts[key] = 0
+    return counts
+
+
+def _counts_from_plan_or_initial(plan: Optional[dict], initial_counts: Optional[dict] = None) -> dict[str, int]:
+    entries = plan.get("entries") if isinstance(plan, dict) else None
+    if isinstance(entries, list) and entries:
+        return count_blocks_by_type(entries)
+    return _normalize_block_counts(initial_counts)
+
+
+def _format_block_counts(counts: Optional[dict[str, Any]]) -> str:
+    normalized = _normalize_block_counts(counts)
+    return ", ".join(f"{key} {value}" for key, value in normalized.items() if value) or "sem blocos"
+
+
+def _build_live_memory_summary(session: dict, plan: Optional[dict] = None, *, last_change: str = "") -> str:
+    persona = session.get("persona_slug") or (session.get("classification") or {}).get("persona_slug") or "nao informada"
+    source = session.get("source_url") or (((session.get("mission_state") or {}).get("source") or {}).get("url")) or "nao informada"
+    initial_counts = _format_block_counts(session.get("initial_block_counts"))
+    current_counts = _format_block_counts(session.get("current_block_counts"))
+    tree_mode = (plan or session.get("knowledge_plan") or {}).get("tree_mode") if isinstance(plan or session.get("knowledge_plan"), dict) else None
+    branch_policy = (plan or session.get("knowledge_plan") or {}).get("branch_policy") if isinstance(plan or session.get("knowledge_plan"), dict) else None
+    lines = [
+        f"Persona global da sessao: {persona}.",
+        f"Fonte principal: {source}.",
+        f"Plano inicial: {initial_counts}.",
+        f"Plano atual: {current_counts}.",
+        f"Politica de arvore: {branch_policy or 'single_branch_by_default'}.",
+        f"Modo da arvore: {tree_mode or 'single_branch'}.",
+        "Nao salvar usando o plano inicial se o plano atual foi expandido.",
+    ]
+    if last_change:
+        lines.append(f"Ultima alteracao do operador/agente: {last_change}.")
+    return "\n".join(lines)
+
+
+def _count_mismatch_message(expected: dict[str, int], actual: dict[str, int]) -> str | None:
+    for key in _BLOCK_COUNT_KEYS:
+        exp = int(expected.get(key) or 0)
+        got = int(actual.get(key) or 0)
+        if exp > 0 and got != exp:
+            label = "FAQ" if key == "faq" else key
+            return f"Plan mismatch: current plan has {exp} {label} but save payload has {got} {label}."
+    return None
+
+
+def summarize_normalized_plan(plan: dict) -> dict[str, Any]:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    counts = count_blocks_by_type(entries)
+    return {
+        "entry_count": len(entries),
+        "current_block_counts": counts,
+        "link_count": len(plan.get("links") or []),
+        "tree_mode": plan.get("tree_mode") or "single_branch",
+        "branch_policy": plan.get("branch_policy") or "single_branch_by_default",
+        "faq_count_policy": plan.get("faq_count_policy") or "total",
+    }
+
+
+def _stable_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _plan_hash(plan: dict) -> str:
+    canonical = {
+        key: value
+        for key, value in (plan or {}).items()
+        if key not in {"summary", "validation", "plan_hash"}
+    }
+    return hashlib.sha256(_stable_json(canonical).encode("utf-8")).hexdigest()
+
+
+def _plan_validation(violations: list[str] | None = None, warnings: list[str] | None = None) -> dict[str, Any]:
+    blocking = [str(item) for item in (violations or []) if str(item).strip()]
+    return {
+        "valid": len(blocking) == 0,
+        "blocking_violations": blocking,
+        "warnings": [str(item) for item in (warnings or []) if str(item).strip()],
+    }
+
+
+def _plan_state_from_normalized(plan: dict, session: Optional[dict] = None, *, violations: Optional[list[str]] = None) -> dict[str, Any]:
+    normalized_plan = dict(plan or {})
+    summary = summarize_normalized_plan(normalized_plan)
+    normalized_plan["summary"] = summary
+    validation = _plan_validation(violations if violations is not None else validate_sofia_knowledge_plan(normalized_plan, session=session))
+    plan_hash = _plan_hash(normalized_plan)
+    return {
+        "normalized_plan": normalized_plan,
+        "validation": validation,
+        "summary": summary,
+        "plan_hash": plan_hash,
+    }
+
+
+def normalize_validate_summarize_plan(raw_plan: dict, session: dict, *, live_edit: bool = False) -> dict[str, Any]:
+    effective_session = session
+    if live_edit and isinstance(raw_plan, dict):
+        effective_session = dict(session or {})
+        effective_session["current_block_counts"] = count_blocks_by_type(raw_plan.get("entries") or [])
+    normalized_plan = _normalize_sofia_knowledge_plan(raw_plan, effective_session)
+    plan_state = _plan_state_from_normalized(normalized_plan, session=effective_session)
+    return plan_state
+
+
+def _store_plan_state(session: dict, plan_state: dict[str, Any], *, last_change: str = "") -> None:
+    normalized_plan = plan_state.get("normalized_plan") or {}
+    summary = plan_state.get("summary") or summarize_normalized_plan(normalized_plan)
+    validation = plan_state.get("validation") or _plan_validation()
+    plan_hash = str(plan_state.get("plan_hash") or _plan_hash(normalized_plan))
+    session["normalized_plan"] = normalized_plan
+    session["knowledge_plan"] = normalized_plan
+    session["last_proposed_plan"] = normalized_plan
+    session["plan_validation"] = validation
+    session["plan_summary"] = summary
+    session["knowledge_plan_summary"] = summary
+    session["plan_hash"] = plan_hash
+    session["current_block_counts"] = summary.get("current_block_counts") or count_blocks_by_type(normalized_plan.get("entries") or [])
+    session["plan_changed"] = True
+    session["memory_summary"] = _build_live_memory_summary(session, normalized_plan, last_change=last_change)
+
+
 # Top-level node_types that may be a tree root without an explicit parent.
 # Everything else MUST connect to one of these (transitively) via parent_slug
 # or links[]. Keeps the operator's "no isolated node" rule enforceable.
@@ -522,10 +742,10 @@ SOFIA_TOP_LEVEL_TYPES: frozenset[str] = frozenset({"persona", "brand", "briefing
 # that type). This mirrors the architectural intent: faq belongs to a
 # product, products belong to a campaign, copies belong to a product, etc.
 # Top-down chain enforced by the operator's hierarchy:
-#   Persona â†’ Brand â†’ Campaign|Briefing â†’ Audience â†’ Product â†’ Copy|FAQ|Asset
+#   Persona → Brand → Campaign|Briefing → Audience → Product → Copy|FAQ|Asset
 # Each child's preferred parents are listed from CLOSEST to fallback. The
 # audience pivot between campaign and product is what prevents a flat
-# "campaign â†’ product" shortcut that bypasses the audience semantic step.
+# "campaign → product" shortcut that bypasses the audience semantic step.
 _PREFERRED_PARENT_TYPES: dict[str, tuple[str, ...]] = {
     "briefing": ("brand",),
     "campaign": ("briefing", "brand"),
@@ -533,14 +753,15 @@ _PREFERRED_PARENT_TYPES: dict[str, tuple[str, ...]] = {
     # Product must hang under audience whenever an audience exists in the
     # plan. Falls back to campaign/briefing/brand only when none does.
     "product": ("audience", "campaign", "briefing", "brand"),
+    "offer": ("product",),
     "entity": ("product", "audience", "campaign", "briefing", "brand"),
     "tone": ("brand", "briefing", "campaign"),
-    "rule": ("product", "campaign", "audience", "briefing", "brand"),
+    "rule": ("campaign", "briefing", "brand"),
     "competitor": ("brand", "briefing"),
     # Per-product children prefer the product directly. Falling back to
     # audience preserves the semantic step instead of jumping to campaign.
-    "copy": ("product", "campaign"),
-    "faq": ("copy", "product"),
+    "copy": ("offer", "product", "campaign"),
+    "faq": ("copy", "offer", "product"),
     "asset": ("product", "audience", "campaign", "brand"),
     "maker_material": ("product", "campaign", "brand"),
     "prompt": ("campaign", "brand", "briefing"),
@@ -632,7 +853,7 @@ def _auto_infer_parent_slugs(plan: dict) -> int:
             if isinstance(link, dict) and link.get("target_slug"):
                 link_targets.add(str(link["target_slug"]))
 
-    # Index existing entries by lowercase content_type â†’ list (preserve order).
+    # Index existing entries by lowercase content_type → list (preserve order).
     by_type: dict[str, list[dict]] = {}
     for entry in entries:
         if not isinstance(entry, dict):
@@ -741,7 +962,7 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
             errors.append(f"{prefix} must be a JSON object")
             continue
 
-        content_type = entry.get("content_type")
+        content_type = _normalize_content_type_alias(entry.get("content_type"))
         if not content_type:
             errors.append(f"{prefix} missing content_type")
         elif content_type not in allowed:
@@ -784,9 +1005,20 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
         for entry in entries
         if isinstance(entry, dict) and entry.get("slug")
     }
-    audience_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "audience"]
     product_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "product"]
     faq_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "faq"]
+    offer_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "offer"]
+    copy_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "copy"]
+    rule_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "rule"]
+
+    slugs = [str(entry.get("slug")) for entry in entries if isinstance(entry, dict) and entry.get("slug")]
+    if len(slugs) != len(set(slugs)):
+        errors.append("plan.entries must not contain duplicate slugs")
+
+    if session and _offers_required(session, plan) and not offer_entries:
+        errors.append("offer required when the request includes price, quantity, kit, package or commercial variation")
+    if session and _rule_required(session, plan) and not rule_entries:
+        errors.append("rule required when the request includes commercial governing rules")
 
     for idx, entry in enumerate(entries):
         if not isinstance(entry, dict):
@@ -800,11 +1032,48 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
         if ctype_lower == "product":
             if parent_slug and parent_type not in {"audience", "campaign", "briefing", "brand", "entity", "other", ""}:
                 errors.append(f"entry[{idx}] product has invalid parent {parent_slug!r}")
+            if "audience" in str(entry.get("slug") or "").lower():
+                errors.append(f"entry[{idx}] product slug must not embed audience slug")
+        if ctype_lower == "offer" and parent_type != "product":
+            errors.append(f"entry[{idx}] offer must stay under product, got parent {parent_slug!r}")
+        if ctype_lower == "copy":
+            allowed_copy_parents = {"offer", "product", "campaign", "briefing", "brand", ""}
+            if parent_type not in allowed_copy_parents:
+                errors.append(f"entry[{idx}] copy has invalid parent {parent_slug!r}")
+            if offer_entries and parent_type != "offer":
+                errors.append(f"entry[{idx}] copy must stay under offer when commercial offers exist")
         if ctype_lower == "faq":
-            if parent_slug and parent_type not in {"copy", "product", "audience", "campaign", "briefing", "brand", "persona", ""}:
+            if parent_slug and parent_type not in {"copy", "offer", "product", "audience", "campaign", "briefing", "brand", "persona", ""}:
                 errors.append(f"entry[{idx}] faq has invalid parent {parent_slug!r}")
+            if copy_entries and parent_type != "copy" and not _technical_product_faq_requested(session or {}):
+                errors.append(f"entry[{idx}] faq must stay under copy when copy exists")
+        if ctype_lower == "rule" and parent_type not in {"campaign", "briefing", "brand", "persona", ""}:
+            errors.append(f"entry[{idx}] rule must stay under campaign/briefing/brand, got parent {parent_slug!r}")
 
-    if product_entries:
+    tree_mode = str(plan.get("tree_mode") or "single_branch").strip() or "single_branch"
+    if tree_mode == "single_branch" and not _technical_product_faq_requested(session or {}):
+        copy_slugs_by_product: dict[str, set[str]] = {}
+        for copy in [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "copy"]:
+            product_slug = _entry_parent_slug(copy)
+            if product_slug:
+                copy_slugs_by_product.setdefault(product_slug, set()).add(str(copy.get("slug") or ""))
+        for idx, faq in enumerate(faq_entries):
+            parent_slug = _entry_parent_slug(faq)
+            parent_entry = slug_to_entry.get(parent_slug or "")
+            if _entry_type(parent_entry or {}) == "product" and copy_slugs_by_product.get(parent_slug or ""):
+                errors.append(
+                    f"entry[{idx}] faq must use copy parent in single_branch when product {parent_slug!r} has copy"
+                )
+
+    faq_policy = str(plan.get("faq_count_policy") or "total").strip() or "total"
+    if session and faq_policy == "total":
+        requested_total = _requested_variation_count(session or {}, "faq", 8)
+        if requested_total >= 0 and len(faq_entries) > requested_total:
+            errors.append(
+                f"faq_count_policy total allows at most {requested_total} FAQs without confirmation (found {len(faq_entries)})"
+            )
+
+    if product_entries and faq_policy != "total":
         faq_count_by_product: dict[str, int] = {}
         for faq in faq_entries:
             parent_slug = _entry_parent_slug(faq)
@@ -833,7 +1102,7 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
 def _entry_type(entry: dict) -> str:
     if not isinstance(entry, dict):
         return ""
-    return str(entry.get("content_type") or "").strip().lower()
+    return _normalize_content_type_alias(entry.get("content_type")) or ""
 
 
 def _entry_metadata(entry: dict) -> dict:
@@ -937,6 +1206,13 @@ def _knowledge_plan_title_from_session(session: dict) -> str:
 
 
 def _requested_variation_count(session: dict, block_id: str, default: int) -> int:
+    for key in ("current_block_counts", "initial_block_counts"):
+        counts = session.get(key)
+        if isinstance(counts, dict) and block_id in counts:
+            try:
+                return max(int(counts.get(block_id) or 0), 0)
+            except Exception:
+                pass
     context = str(session.get("context") or "")
     pattern = rf"^\s*-\s*{re.escape(block_id)}:\s*(\d+)\s+vari"
     match = re.search(pattern, context, flags=re.IGNORECASE | re.MULTILINE)
@@ -948,9 +1224,19 @@ def _requested_variation_count(session: dict, block_id: str, default: int) -> in
     return default
 
 
+def _has_explicit_variation_count(session: dict, block_id: str) -> bool:
+    for key in ("current_block_counts", "initial_block_counts"):
+        counts = session.get(key)
+        if isinstance(counts, dict) and block_id in counts:
+            return True
+    context = str(session.get("context") or "")
+    pattern = rf"^\s*-\s*{re.escape(block_id)}:\s*(\d+)\s+vari"
+    return bool(re.search(pattern, context, flags=re.IGNORECASE | re.MULTILINE))
+
+
 def _normalize_plan_entry(entry: dict) -> dict:
     normalized = dict(entry or {})
-    normalized["content_type"] = _entry_type(normalized) or "other"
+    normalized["content_type"] = _normalize_content_type_alias(_entry_type(normalized)) or "other"
     normalized["title"] = str(normalized.get("title") or "").strip() or "Conhecimento"
     normalized["slug"] = _slug_for_plan_entry(str(normalized.get("slug") or normalized["title"]))
     normalized["status"] = str(normalized.get("status") or "pendente_validacao").strip() or "pendente_validacao"
@@ -973,6 +1259,10 @@ def _normalize_plan_entry(entry: dict) -> dict:
         metadata.setdefault("product_source", "manual")
         metadata.setdefault("product_external_id", None)
         metadata.setdefault("product_page_url", None)
+        metadata.setdefault("price_status", "pending_validation")
+        metadata.setdefault("stock_status", "unknown")
+    elif ctype == "offer":
+        metadata.setdefault("offer_source", "manual")
         metadata.setdefault("price_status", "pending_validation")
         metadata.setdefault("stock_status", "unknown")
     elif ctype in {"entity", "other"} and str(metadata.get("entity_role") or "").strip():
@@ -999,6 +1289,12 @@ def _relation_type_for_parent(parent_type: str, child_type: str) -> str:
         ("product", "briefing"): "contains",
         ("audience", "briefing"): "contains",
         ("audience", "product"): "offers_product",
+        ("product", "offer"): "contains",
+        ("offer", "copy"): "supports_copy",
+        ("offer", "faq"): "answers_question",
+        ("campaign", "rule"): "contains",
+        ("briefing", "rule"): "contains",
+        ("brand", "rule"): "contains",
         ("entity", "product"): "contains",
         ("other", "product"): "contains",
         ("brand", "entity"): "contains",
@@ -1020,7 +1316,7 @@ def _is_b2b_audience(entry: dict) -> bool:
         str(entry.get("content") or ""),
         " ".join(entry.get("tags") or []),
     ]).lower()
-    return any(token in blob for token in ("varej", "revend", "lojist", "atacad"))
+    return any(token in blob for token in ("varej", "revend", "lojist", "atacad", "empreended"))
 
 
 def _is_b2b_faq(entry: dict) -> bool:
@@ -1029,7 +1325,7 @@ def _is_b2b_faq(entry: dict) -> bool:
         str(entry.get("content") or ""),
         " ".join(entry.get("tags") or []),
     ]).lower()
-    return any(token in blob for token in ("quantidade minima", "pedido minimo", "revend", "varej", "atacad", "5 pec"))
+    return any(token in blob for token in ("quantidade minima", "pedido minimo", "revend", "varej", "atacad", "empreended", "5 pec"))
 
 
 def _known_colors_from_session(session: dict, plan: dict) -> list[str]:
@@ -1042,6 +1338,329 @@ def _known_colors_from_session(session: dict, plan: dict) -> list[str]:
             if normalized not in known:
                 known.append(normalized)
     return known
+
+
+def _plan_blob(session: dict, plan: Optional[dict] = None) -> str:
+    parts = [str(session.get("context") or "")]
+    for message in session.get("messages") or []:
+        if isinstance(message, dict):
+            parts.append(str(message.get("content") or ""))
+    if plan:
+        try:
+            parts.append(json.dumps(plan, ensure_ascii=False))
+        except Exception:
+            pass
+    return "\n".join(parts)
+
+
+def _commercial_offer_specs(session: dict, plan: dict) -> list[dict[str, Any]]:
+    blob = _plan_blob(session, plan)
+    specs: dict[int, dict[str, Any]] = {}
+    for match in re.finditer(
+        r"(?P<qty>\d+)\s*(?:pe[cç]as?|unidades?|itens?)\s*(?:por|=|:|-)?\s*R\$\s*(?P<price>\d{1,4}(?:[.,]\d{2})?)",
+        blob,
+        flags=re.IGNORECASE,
+    ):
+        qty = int(match.group("qty"))
+        price = match.group("price")
+        if qty <= 0:
+            continue
+        specs[qty] = {"quantity": qty, "price": price, "audience_role": None}
+    for match in re.finditer(
+        r"(?P<qty>\d+)\s*(?:pe[cç]as?|unidades?|itens?)",
+        blob,
+        flags=re.IGNORECASE,
+    ):
+        qty = int(match.group("qty"))
+        if qty > 0:
+            specs.setdefault(qty, {"quantity": qty, "price": None, "audience_role": None})
+    lowered = blob.lower()
+    if re.search(r"\b1\s*pe[cç]a\s+(?:é|e|=|para|pra).{0,80}(cliente|final)", lowered):
+        specs.setdefault(1, {"quantity": 1, "price": None, "audience_role": None})["audience_role"] = "final"
+    if re.search(r"\b(?:5\s*(?:e|,|/)\s*10|5|10)\s*pe[cç]as?\s+(?:s[aã]o|=|para|pra).{0,100}(empreended|revend|lojist|atacad)", lowered):
+        for qty in (5, 10):
+            specs.setdefault(qty, {"quantity": qty, "price": None, "audience_role": None})["audience_role"] = "b2b"
+    for qty, spec in specs.items():
+        if not spec.get("audience_role"):
+            spec["audience_role"] = "final" if qty == 1 else "b2b" if qty >= 5 else "any"
+    return [specs[key] for key in sorted(specs)]
+
+
+def _offers_required(session: dict, plan: dict) -> bool:
+    if _commercial_offer_specs(session, plan):
+        return True
+    blob = _plan_blob(session, plan).lower()
+    return bool(re.search(r"\b(pre[cç]o|r\$|pacote|op[cç][aã]o|pe[cç]as?)\b", blob))
+
+
+def _rule_required(session: dict, plan: dict) -> bool:
+    blob = _plan_blob(session, plan).lower()
+    return bool(re.search(r"\b(regra|1\s*pe[cç]a\s*(?:=|é|e)|5\s*(?:e|,|/)\s*10|n[aã]o inventar|n[aã]o prometer)\b", blob))
+
+
+def _is_final_audience(entry: dict) -> bool:
+    blob = " ".join([
+        str(entry.get("title") or ""),
+        str(entry.get("content") or ""),
+        " ".join(entry.get("tags") or []),
+    ]).lower()
+    return any(token in blob for token in ("cliente final", "clientes finais", "consumidor", "final"))
+
+
+def _offer_applies_to_audience(spec: dict[str, Any], audience: Optional[dict]) -> bool:
+    role = spec.get("audience_role") or "any"
+    if role == "any" or not audience:
+        return True
+    if role == "b2b":
+        return _is_b2b_audience(audience)
+    if role == "final":
+        return _is_final_audience(audience) or not _is_b2b_audience(audience)
+    return True
+
+
+def _dedupe_slug(base: str, used: set[str]) -> str:
+    raw = _slug_for_plan_entry(base)
+    if raw not in used:
+        used.add(raw)
+        return raw
+    idx = 2
+    while f"{raw}-{idx}" in used:
+        idx += 1
+    slug = f"{raw}-{idx}"
+    used.add(slug)
+    return slug
+
+
+def _governing_scope_slug(entries: list[dict]) -> Optional[str]:
+    for ctype in ("campaign", "briefing", "brand"):
+        found = next((entry for entry in entries if _entry_type(entry) == ctype and entry.get("slug")), None)
+        if found:
+            return str(found.get("slug"))
+    return "self"
+
+
+def _ensure_governing_rule(plan: dict, session: dict) -> None:
+    if not _rule_required(session, plan):
+        return
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    parent_slug = _governing_scope_slug(entries)
+    rules = [entry for entry in entries if _entry_type(entry) == "rule"]
+    if rules:
+        for rule in rules:
+            if not _entry_parent_slug(rule):
+                _set_entry_parent_slug(rule, parent_slug)
+        return
+    rule = _normalize_plan_entry({
+        "content_type": "rule",
+        "title": "Regra comercial por quantidade",
+        "slug": "rule-regra-publico-quantidade",
+        "status": "pendente_validacao",
+        "content": "1 peca se destina a cliente final. Pacotes de 5 e 10 pecas se destinam a empreendedoras/revendedoras. Nao inventar preco, estoque ou disponibilidade sem validacao.",
+        "tags": ["rule", "comercial", "quantidade"],
+        "metadata": {"parent_slug": parent_slug, "governs_children": True, "rule_scope": "campaign"},
+    })
+    entries.append(rule)
+    plan["entries"] = entries
+
+
+def _ensure_offer_entries(plan: dict, session: dict) -> None:
+    if not _offers_required(session, plan):
+        return
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+    specs = _commercial_offer_specs(session, plan) or [{"quantity": 1, "price": None, "audience_role": "any"}]
+    used = {str(entry.get("slug")) for entry in entries if entry.get("slug")}
+    existing_offer_keys = {
+        (_entry_parent_slug(entry), str(_entry_metadata(entry).get("quantity") or ""))
+        for entry in entries
+        if _entry_type(entry) == "offer"
+    }
+    new_entries: list[dict] = []
+    for product in [entry for entry in entries if _entry_type(entry) == "product" and entry.get("slug")]:
+        audience = by_slug.get(_entry_parent_slug(product) or "")
+        for spec in specs:
+            if not _offer_applies_to_audience(spec, audience):
+                continue
+            qty = int(spec.get("quantity") or 0)
+            key = (str(product.get("slug")), str(qty))
+            if key in existing_offer_keys:
+                continue
+            label = f"{qty} peca" if qty == 1 else f"{qty} pecas"
+            title = f"{product.get('title')} - {label}"
+            if spec.get("price"):
+                title = f"{title} R$ {spec['price']}"
+            offer = _normalize_plan_entry({
+                "content_type": "offer",
+                "title": title,
+                "slug": _dedupe_slug(f"offer-{product.get('slug')}-{qty}-pecas", used),
+                "status": "pendente_validacao",
+                "content": f"Oferta comercial de {label} para {product.get('title')}. Preco informado: {spec.get('price') or 'pendente de validacao'}.",
+                "tags": ["offer", "preco", "quantidade"],
+                "metadata": {
+                    "parent_slug": str(product.get("slug")),
+                    "quantity": qty,
+                    "price": spec.get("price"),
+                    "audience_role": spec.get("audience_role"),
+                    "commercial_offer": True,
+                },
+            })
+            new_entries.append(offer)
+    if new_entries:
+        entries.extend(new_entries)
+        plan["entries"] = entries
+
+
+def _ensure_copies_for_offers(plan: dict) -> None:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    offers = [entry for entry in entries if _entry_type(entry) == "offer" and entry.get("slug")]
+    if not offers:
+        return
+    used = {str(entry.get("slug")) for entry in entries if entry.get("slug")}
+    by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+    copies = [entry for entry in entries if _entry_type(entry) == "copy"]
+    product_copy_templates: dict[str, list[dict]] = {}
+    for copy in copies:
+        parent_slug = _entry_parent_slug(copy)
+        parent = by_slug.get(parent_slug or "")
+        if _entry_type(parent) == "product":
+            product_copy_templates.setdefault(parent_slug or "", []).append(copy)
+    remove_copy_slugs: set[str] = set()
+    for offer in offers:
+        offer_slug = str(offer.get("slug"))
+        if any(_entry_parent_slug(copy) == offer_slug for copy in copies):
+            continue
+        product_slug = _entry_parent_slug(offer) or ""
+        templates = product_copy_templates.get(product_slug) or copies
+        template = templates[0] if templates else {}
+        title = str((template or {}).get("title") or f"Copy para {offer.get('title')}")
+        copy = _normalize_plan_entry({
+            **(template if isinstance(template, dict) else {}),
+            "content_type": "copy",
+            "title": title if str(offer.get("title") or "") in title else f"{title} - {offer.get('title')}",
+            "slug": _dedupe_slug(f"copy-{offer_slug}", used),
+            "status": "pendente_validacao",
+            "content": str((template or {}).get("content") or f"Mensagem comercial para {offer.get('title')}."),
+            "tags": list(dict.fromkeys([*((template or {}).get("tags") or []), "copy", "offer"])),
+            "metadata": {**((template or {}).get("metadata") or {}), "parent_slug": offer_slug, "copied_for_offer": True},
+        })
+        entries.append(copy)
+        copies.append(copy)
+        if template and _entry_parent_slug(template) == product_slug:
+            remove_copy_slugs.add(str(template.get("slug") or ""))
+    if remove_copy_slugs:
+        entries[:] = [
+            entry for entry in entries
+            if _entry_type(entry) != "copy" or str(entry.get("slug") or "") not in remove_copy_slugs
+        ]
+    plan["entries"] = entries
+
+
+def _reparent_copies_to_offers(plan: dict) -> None:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    offers = [entry for entry in entries if _entry_type(entry) == "offer" and entry.get("slug")]
+    if not offers:
+        return
+    by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+    for copy in [entry for entry in entries if _entry_type(entry) == "copy"]:
+        parent = by_slug.get(_entry_parent_slug(copy) or "")
+        if _entry_type(parent or {}) == "offer":
+            continue
+        picked = _best_parent_by_slug(copy, offers) or offers[0]
+        if picked and picked.get("slug"):
+            _set_entry_parent_slug(copy, str(picked.get("slug")))
+    plan["entries"] = entries
+
+
+def _faq_leaf_entries(plan: dict) -> list[dict]:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    return [
+        entry for entry in entries
+        if _entry_type(entry) == "copy" and entry.get("slug")
+    ] or [
+        entry for entry in entries
+        if _entry_type(entry) == "offer" and entry.get("slug")
+    ] or [
+        entry for entry in entries
+        if _entry_type(entry) == "product" and entry.get("slug")
+    ]
+
+
+def _ensure_total_faq_policy(plan: dict, session: dict) -> None:
+    if (plan.get("tree_mode") or "single_branch") != "single_branch":
+        return
+    policy = str(plan.get("faq_count_policy") or "total").strip() or "total"
+    plan["faq_count_policy"] = policy
+    if policy != "total":
+        return
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    target = max(0, _requested_variation_count(session, "faq", 8))
+    if target <= 0:
+        return
+    leaves = _faq_leaf_entries(plan)
+    if not leaves:
+        return
+    used = {str(entry.get("slug")) for entry in entries if entry.get("slug")}
+    faqs = [entry for entry in entries if _entry_type(entry) == "faq"]
+    for idx, faq in enumerate(faqs):
+        leaf = leaves[idx % len(leaves)]
+        if _entry_type(leaf) == "copy":
+            _set_entry_parent_slug(faq, str(leaf.get("slug")))
+        elif not _entry_parent_slug(faq):
+            _set_entry_parent_slug(faq, str(leaf.get("slug")))
+    if len(faqs) > target:
+        keep = set(id(entry) for entry in faqs[:target])
+        entries[:] = [entry for entry in entries if _entry_type(entry) != "faq" or id(entry) in keep]
+        faqs = faqs[:target]
+    slot = len(faqs) + 1
+    while len(faqs) < target:
+        leaf = leaves[(slot - 1) % len(leaves)]
+        title = f"FAQ {slot} - {leaf.get('title')}"
+        faq = _normalize_plan_entry({
+            "content_type": "faq",
+            "title": title,
+            "slug": _dedupe_slug(f"faq-{slot}-{leaf.get('slug')}", used),
+            "status": "pendente_validacao",
+            "content": f"Pergunta e resposta comercial sobre {leaf.get('title')}. Validar detalhes antes de publicar.",
+            "tags": ["faq", "pendente-validacao"],
+            "metadata": {"parent_slug": str(leaf.get("slug")), "faq_count_policy": "total", "fractal_generated": True},
+        })
+        entries.append(faq)
+        faqs.append(faq)
+        slot += 1
+    plan["entries"] = entries
+
+
+def _dedupe_plan_entries(plan: dict) -> None:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    used: set[str] = set()
+    remap: dict[str, str] = {}
+    for index, entry in enumerate(entries, 1):
+        old_slug = str(entry.get("slug") or _slug_for_plan_entry(entry.get("title") or f"entry-{index}"))
+        if _entry_type(entry) == "product" and "-audience-" in old_slug:
+            old_slug = old_slug.split("-audience-", 1)[0]
+        new_slug = _dedupe_slug(old_slug, used)
+        original_slug = str(entry.get("slug") or "")
+        if new_slug != original_slug:
+            if original_slug:
+                remap[original_slug] = new_slug
+            remap[old_slug] = new_slug
+            entry["slug"] = new_slug
+        meta = _entry_metadata(entry)
+        meta.setdefault("plan_entry_id", f"plan-{index:03d}-{new_slug}")
+        meta.setdefault("client_id", meta["plan_entry_id"])
+    if remap:
+        for entry in entries:
+            parent = _entry_parent_slug(entry)
+            if parent in remap:
+                _set_entry_parent_slug(entry, remap[parent])
+        for link in plan.get("links") or []:
+            if not isinstance(link, dict):
+                continue
+            if link.get("source_slug") in remap:
+                link["source_slug"] = remap[link["source_slug"]]
+            if link.get("target_slug") in remap:
+                link["target_slug"] = remap[link["target_slug"]]
+    plan["entries"] = entries
 
 
 def _clone_plan_entry(template: dict, *, title: str, slug: str, parent_slug: str, content: str, tags: Optional[list[str]] = None) -> dict:
@@ -1142,8 +1761,148 @@ def _copy_parent_slug_for_product(entries_by_slug: dict[str, dict], product_slug
     return str(copies[-1]["slug"])
 
 
+def _base_product_slug(entry: dict) -> str:
+    meta = _entry_metadata(entry)
+    return str(meta.get("fractal_base_slug") or entry.get("slug") or "").strip()
+
+
+def _fractal_base_product_slug(entry: dict) -> str:
+    raw = _base_product_slug(entry)
+    raw = raw.split("-audience-", 1)[0]
+    return re.sub(r"-branch-\d+$", "", raw)
+
+
+def _find_scoped_copy_for_product(entries: list[dict], product: dict, template: Optional[dict] = None) -> Optional[dict]:
+    product_slug = str(product.get("slug") or "")
+    copies = [
+        entry
+        for entry in entries
+        if _entry_type(entry) == "copy" and _entry_parent_slug(entry) == product_slug and entry.get("slug")
+    ]
+    if not copies:
+        return None
+    if template:
+        picked = _best_parent_by_slug(template, copies)
+        if picked:
+            return picked
+    return copies[-1]
+
+
+def _faq_parent_slug_for_product(entries: list[dict], product: dict, plan: dict, session: dict, template: Optional[dict] = None) -> Optional[str]:
+    product_slug = str(product.get("slug") or "")
+    if not product_slug:
+        return None
+    if (plan.get("tree_mode") or "single_branch") != "single_branch":
+        return product_slug
+    if _technical_product_faq_requested(session):
+        return product_slug
+    copy = _find_scoped_copy_for_product(entries, product, template)
+    return str(copy.get("slug")) if copy and copy.get("slug") else product_slug
+
+
+def _clone_product_scoped_entry(template: dict, *, product: dict, parent_slug: str, suffix: Optional[str] = None) -> dict:
+    base_slug = str(template.get("slug") or _slug_for_plan_entry(template.get("title") or "entry"))
+    product_slug = str(product.get("slug") or "")
+    clone_slug = f"{base_slug}-{product_slug}" if product_slug and product_slug not in base_slug else base_slug
+    if suffix:
+        clone_slug = f"{clone_slug}-{suffix}"
+    clone = _clone_plan_entry(
+        template,
+        title=str(template.get("title") or product.get("title") or "Conhecimento"),
+        slug=clone_slug,
+        parent_slug=parent_slug,
+        content=str(template.get("content") or template.get("title") or ""),
+        tags=template.get("tags") or [],
+    )
+    meta = _entry_metadata(clone)
+    meta["fractal_base_slug"] = str(template.get("slug") or "")
+    meta["fractal_product_slug"] = product_slug
+    return clone
+
+
+def _expand_copies_for_products(entries: list[dict], products: list[dict], product_expansions: dict[str, list[str]]) -> None:
+    if not products:
+        return
+    product_by_slug = {str(product.get("slug")): product for product in products if product.get("slug")}
+    entry_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+    copies = [entry for entry in list(entries) if _entry_type(entry) == "copy"]
+    if not copies:
+        return
+
+    remove: set[str] = set()
+    clones: list[dict] = []
+    for copy in copies:
+        copy_slug = str(copy.get("slug") or "")
+        parent_slug = _entry_parent_slug(copy)
+        if _entry_type(entry_by_slug.get(parent_slug or "", {})) == "offer":
+            continue
+        parent_product = product_by_slug.get(parent_slug or "")
+        if parent_product:
+            continue
+
+        scoped_products: list[dict] = []
+        if parent_slug and parent_slug in product_expansions:
+            scoped_products = [
+                product_by_slug[slug]
+                for slug in product_expansions[parent_slug]
+                if slug in product_by_slug
+            ]
+        if not scoped_products:
+            picked = _best_parent_by_slug(copy, products)
+            if picked and picked.get("slug"):
+                scoped_products = [picked]
+            elif len(products) == 1:
+                scoped_products = [products[0]]
+            else:
+                scoped_products = list(products)
+
+        if not scoped_products:
+            continue
+        if len(scoped_products) == 1 and not (parent_slug and parent_slug in product_expansions and len(product_expansions[parent_slug]) > 1):
+            _set_entry_parent_slug(copy, str(scoped_products[0].get("slug") or ""))
+            continue
+        remove.add(copy_slug)
+        for product in scoped_products:
+            parent = str(product.get("slug") or "")
+            clone = _clone_product_scoped_entry(copy, product=product, parent_slug=parent)
+            clones.append(clone)
+
+    if remove:
+        entries[:] = [entry for entry in entries if str(entry.get("slug") or "") not in remove]
+        entries.extend(clones)
+
+
+def _apply_native_single_branch_faq_parents(plan: dict, session: dict) -> int:
+    if (plan.get("tree_mode") or "single_branch") != "single_branch":
+        return 0
+    if _technical_product_faq_requested(session):
+        return 0
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+    changed = 0
+    for faq in [entry for entry in entries if _entry_type(entry) == "faq"]:
+        parent_slug = _entry_parent_slug(faq)
+        parent = entries_by_slug.get(parent_slug or "")
+        product_slug: Optional[str] = None
+        if _entry_type(parent or {}) == "copy":
+            continue
+        if _entry_type(parent or {}) == "product":
+            product_slug = str(parent_slug)
+        elif not parent_slug:
+            product = _best_parent_by_slug(faq, [entry for entry in entries if _entry_type(entry) == "product"])
+            product_slug = str(product.get("slug")) if product and product.get("slug") else None
+        if not product_slug:
+            continue
+        copy_slug = _copy_parent_slug_for_product(entries_by_slug, product_slug, faq)
+        if not copy_slug or copy_slug == parent_slug:
+            continue
+        _set_entry_parent_slug(faq, copy_slug)
+        changed += 1
+    return changed
+
+
 def _apply_single_branch_policy(plan: dict, session: dict) -> int:
-    """Default marketing path is product -> copy -> faq.
+    """Legacy airbag for product -> faq plans that escaped native planning.
 
     Parallel product children are only preserved when the operator explicitly
     asked for them or the prompt asks for technical/factual product FAQ.
@@ -1173,6 +1932,15 @@ def _apply_single_branch_policy(plan: dict, session: dict) -> int:
         metadata = _entry_metadata(faq)
         metadata.setdefault("single_branch_parent_rewritten", True)
         metadata.setdefault("previous_parent_slug", product_slug)
+        warnings = plan.setdefault("warnings", [])
+        if isinstance(warnings, list):
+            warnings.append({
+                "warning_type": "planner_parent_rewrite",
+                "message": "Planner generated product -> faq, but single_branch policy required copy -> faq.",
+                "original_parent_slug": product_slug,
+                "resolved_parent_slug": copy_slug,
+                "should_fix_planner": True,
+            })
         rewrites += 1
     return rewrites
 
@@ -1182,16 +1950,12 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
     normalized["source"] = str(normalized.get("source") or _source_url_from_context(str(session.get("context") or "")) or "session").strip()
     normalized["persona_slug"] = str(normalized.get("persona_slug") or (session.get("classification") or {}).get("persona_slug") or "global").strip()
     normalized["validation_policy"] = str(normalized.get("validation_policy") or "human_validation_required").strip()
-    explicit_parallel = _explicit_parallel_outputs_requested(session)
     raw_tree_mode = str(normalized.get("tree_mode") or "").strip()
-    if raw_tree_mode not in {"single_branch", "parallel_outputs"}:
-        raw_tree_mode = "parallel_outputs" if explicit_parallel else "single_branch"
+    if raw_tree_mode != "single_branch":
+        raw_tree_mode = "single_branch"
     normalized["tree_mode"] = raw_tree_mode
-    normalized["branch_policy"] = (
-        "explicit_user_request"
-        if raw_tree_mode == "parallel_outputs" or explicit_parallel
-        else "ask_before_new_branch"
-    )
+    normalized["branch_policy"] = "single_branch_by_default"
+    normalized["faq_count_policy"] = str(normalized.get("faq_count_policy") or "total").strip() or "total"
 
     entries = [_normalize_plan_entry(entry) for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
     normalized["entries"] = entries
@@ -1236,30 +2000,86 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
             _set_entry_parent_slug(audience, (root_campaign or root_briefing)["slug"])
 
     colors = _known_colors_from_session(session, normalized)
-    target_faq_count = max(1, _requested_variation_count(session, "faq", 2))
+    faq_policy = str(normalized.get("faq_count_policy") or "total").strip() or "total"
+    target_faq_count = 0 if faq_policy == "total" else max(1, _requested_variation_count(session, "faq", 2))
 
     # Product branches must live under each audience. If products are still generic,
     # clone them once per audience to create the fractal top-down structure.
     products = [entry for entry in list(entries) if _entry_type(entry) == "product"]
     audience_map = {str(entry.get("slug")): entry for entry in entries if _entry_type(entry) == "audience" and entry.get("slug")}
+    product_expansions: dict[str, list[str]] = {}
     if audience_map:
         expanded_products: list[dict] = []
         remove_slugs: set[str] = set()
+        existing_product_slugs = {str(product.get("slug")) for product in products if product.get("slug")}
+        audience_index = {slug: index for index, slug in enumerate(audience_map.keys(), 1)}
+        requested_product_count = _requested_variation_count(session, "product", len(products) or 0)
+        distribute_without_cloning = (
+            _has_explicit_variation_count(session, "product")
+            and requested_product_count > 0
+            and len(products) >= requested_product_count
+        )
+        audience_order = list(audience_map.keys())
+        audience_slugs = set(audience_map.keys())
+        coverage_by_base: dict[str, set[str]] = {}
+        product_slugs_by_base: dict[str, list[str]] = {}
         for product in products:
             parent_slug = _entry_parent_slug(product)
+            if parent_slug not in audience_map:
+                continue
+            base = _fractal_base_product_slug(product)
+            coverage_by_base.setdefault(base, set()).add(str(parent_slug))
+            if product.get("slug"):
+                product_slugs_by_base.setdefault(base, []).append(str(product.get("slug")))
+        complete_bases = {
+            base for base, covered in coverage_by_base.items()
+            if audience_slugs and audience_slugs.issubset(covered)
+        }
+        for product_index, product in enumerate(products):
+            parent_slug = _entry_parent_slug(product)
             parent_type = _entry_type(audience_map.get(parent_slug, {})) if parent_slug else ""
+            base_slug = str(product.get("slug"))
+            branch_base_slug = _fractal_base_product_slug(product)
             if parent_type == "audience":
+                if branch_base_slug in complete_bases:
+                    product_expansions[branch_base_slug] = list(dict.fromkeys(product_slugs_by_base.get(branch_base_slug, [base_slug])))
+                    product_expansions.setdefault(base_slug, [base_slug])
+                    continue
+                product_expansions.setdefault(base_slug, [base_slug])
+                if len(audience_map) == 1 or distribute_without_cloning:
+                    continue
+                for audience_slug, audience in audience_map.items():
+                    if audience_slug == parent_slug:
+                        continue
+                    clone_slug = _dedupe_slug(f"{branch_base_slug}-branch-{audience_index.get(audience_slug, 1)}", existing_product_slugs)
+                    clone = _clone_plan_entry(
+                        product,
+                        title=product["title"],
+                        slug=clone_slug,
+                        parent_slug=audience_slug,
+                        content=str(product.get("content") or ""),
+                        tags=product.get("tags") or [],
+                    )
+                    clone_meta = _entry_metadata(clone)
+                    clone_meta["fractal_base_slug"] = base_slug
+                    expanded_products.append(clone)
+                    product_expansions.setdefault(base_slug, [base_slug]).append(clone_slug)
                 continue
             if len(audience_map) == 1:
                 _set_entry_parent_slug(product, next(iter(audience_map.keys())))
+                product_expansions.setdefault(base_slug, [base_slug])
                 continue
-            base_slug = str(product.get("slug"))
+            if distribute_without_cloning and audience_order:
+                _set_entry_parent_slug(product, audience_order[product_index % len(audience_order)])
+                product_expansions.setdefault(base_slug, [base_slug])
+                continue
             remove_slugs.add(base_slug)
             for audience_slug, audience in audience_map.items():
+                clone_slug = _dedupe_slug(f"{branch_base_slug}-branch-{audience_index.get(audience_slug, 1)}", existing_product_slugs)
                 clone = _clone_plan_entry(
                     product,
                     title=product["title"],
-                    slug=f"{base_slug}-{audience_slug}",
+                    slug=clone_slug,
                     parent_slug=audience_slug,
                     content=str(product.get("content") or ""),
                     tags=product.get("tags") or [],
@@ -1267,12 +2087,27 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
                 clone_meta = _entry_metadata(clone)
                 clone_meta["fractal_base_slug"] = base_slug
                 expanded_products.append(clone)
+                product_expansions.setdefault(base_slug, []).append(clone_slug)
         if remove_slugs:
             entries[:] = [entry for entry in entries if str(entry.get("slug")) not in remove_slugs]
+        if expanded_products:
             entries.extend(expanded_products)
 
-    # FAQs replicate per audience->product branch. In the default
-    # single_branch marketing policy they are rewired below copy later.
+    # Copies and FAQs replicate per audience->product branch. In the default
+    # single_branch marketing policy, FAQs are born below copy before save.
+    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+    products = [entry for entry in entries if _entry_type(entry) == "product"]
+    normalized["entries"] = entries
+    _ensure_offer_entries(normalized, session)
+    entries = [entry for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
+    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+    products = [entry for entry in entries if _entry_type(entry) == "product"]
+    _expand_copies_for_products(entries, products, product_expansions)
+    normalized["entries"] = entries
+    _ensure_copies_for_offers(normalized)
+    _reparent_copies_to_offers(normalized)
+    entries = [entry for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
+    _apply_native_single_branch_faq_parents(normalized, session)
     entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
     products = [entry for entry in entries if _entry_type(entry) == "product"]
     copies = [entry for entry in entries if _entry_type(entry) == "copy"]
@@ -1326,14 +2161,14 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
                         else template_title.strip()
                     )
                     if not title or title == template_title:
-                        title = f"{template_title} â€” {product.get('title')}"
+                        title = f"{template_title} — {product.get('title')}"
                     content = template_content or title
                     tags = template.get("tags") or []
                 clone = _clone_plan_entry(
                     template,
                     title=title,
                     slug=f"{_slug_for_plan_entry(title)}-{slot_index}",
-                    parent_slug=product_slug,
+                    parent_slug=_faq_parent_slug_for_product(entries, product, normalized, session, template) or product_slug,
                     content=content,
                     tags=tags,
                 )
@@ -1351,7 +2186,7 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
                     "status": "pendente_validacao",
                     "content": content,
                     "tags": tags,
-                    "metadata": {"parent_slug": product_slug, "fractal_generated": True},
+                    "metadata": {"parent_slug": _faq_parent_slug_for_product(entries, product, normalized, session) or product_slug, "fractal_generated": True},
                 })
             entries.append(clone)
             branch_faqs.append(clone)
@@ -1359,6 +2194,7 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
 
     if products:
         product_slugs = {str(product.get("slug")) for product in products if product.get("slug")}
+        copy_slugs = {str(copy.get("slug")) for copy in entries if _entry_type(copy) == "copy" and copy.get("slug")}
         entries[:] = [
             entry for entry in entries
             if _entry_type(entry) != "faq" or (_entry_parent_slug(entry) in product_slugs or _entry_parent_slug(entry) in copy_slugs)
@@ -1376,29 +2212,83 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
                 _set_entry_parent_slug(faq, str(best_parent.get("slug")))
 
     normalized["entries"] = entries
+    _ensure_governing_rule(normalized, session)
+    _ensure_total_faq_policy(normalized, session)
+    _dedupe_plan_entries(normalized)
     _auto_infer_parent_slugs(normalized)
+    _apply_native_single_branch_faq_parents(normalized, session)
     _apply_single_branch_policy(normalized, session)
     _normalize_plan_parent_slugs(normalized, normalized["persona_slug"])
     _build_links_from_parent_slugs(normalized)
+    normalized["summary"] = summarize_normalized_plan(normalized)
+    return normalized
+
+
+def _normalize_live_session_plan(plan: dict, session: dict) -> dict:
+    normalized = dict(plan or {})
+    normalized["source"] = str(
+        normalized.get("source")
+        or session.get("source_url")
+        or _source_url_from_context(str(session.get("context") or ""))
+        or "session"
+    ).strip()
+    normalized["persona_slug"] = str(
+        normalized.get("persona_slug")
+        or session.get("persona_slug")
+        or (session.get("classification") or {}).get("persona_slug")
+        or "global"
+    ).strip()
+    normalized["validation_policy"] = str(normalized.get("validation_policy") or "human_validation_required").strip()
+    normalized["tree_mode"] = str(normalized.get("tree_mode") or "single_branch").strip() or "single_branch"
+    normalized["branch_policy"] = str(normalized.get("branch_policy") or "single_branch_by_default").strip() or "single_branch_by_default"
+    normalized["entries"] = [
+        _normalize_plan_entry(entry)
+        for entry in (normalized.get("entries") or [])
+        if isinstance(entry, dict)
+    ]
+    links: list[dict[str, str]] = []
+    for link in normalized.get("links") or []:
+        if not isinstance(link, dict):
+            continue
+        source_slug = str(link.get("source_slug") or "").strip()
+        target_slug = str(link.get("target_slug") or "").strip()
+        if not source_slug or not target_slug:
+            continue
+        links.append({
+            "source_slug": source_slug,
+            "target_slug": target_slug,
+            "relation_type": str(link.get("relation_type") or "contains").strip() or "contains",
+        })
+    normalized["links"] = links
     return normalized
 
 
 def _rewrite_visible_plan_summary(message: str, plan_payload: Optional[dict]) -> str:
     if not message or not isinstance(plan_payload, dict):
         return message
+    summary = summarize_normalized_plan(plan_payload)
+    counts = summary.get("current_block_counts") or {}
+    summary_line = (
+        "Resumo normalizado: "
+        f"{summary.get('entry_count', 0)} entries; "
+        f"públicos={counts.get('audience', 0)}, produtos={counts.get('product', 0)}, "
+        f"ofertas={counts.get('offer', 0)}, copys={counts.get('copy', 0)}, "
+        f"FAQs={counts.get('faq', 0)}, regras={counts.get('rule', 0)}."
+    )
     link_count = len(plan_payload.get("links") or [])
     if re.search(r"(?im)^Conex\S*:\s*\d+\s+edges no plano\s*$", message):
-        return re.sub(
+        updated = re.sub(
             r"(?im)^Conex\S*:\s*\d+\s+edges no plano\s*$",
             f"Conexões: {link_count} edges no plano",
             message,
         )
+        return updated if summary_line in updated else f"{updated}\n{summary_line}"
     if link_count > 0 and "Plano pronto. Clique em **Salvar** para persistir." in message:
         return message.replace(
             "Plano pronto. Clique em **Salvar** para persistir.",
-            f"Conexões: {link_count} edges no plano\nPlano pronto. Clique em **Salvar** para persistir.",
+            f"Conexões: {link_count} edges no plano\n{summary_line}\nPlano pronto. Clique em **Salvar** para persistir.",
         )
-    return message
+    return message if summary_line in message else f"{message}\n\n{summary_line}"
 
 
 def _session_path(session_id: str) -> Path:
@@ -1453,7 +2343,7 @@ def _truncate(value: Any, limit: int = _EVENT_PREVIEW_LIMIT) -> str:
     text = str(value or "").strip()
     if len(text) <= limit:
         return text
-    return text[: max(limit - 1, 0)].rstrip() + "â€¦"
+    return text[: max(limit - 1, 0)].rstrip() + "…"
 
 
 def _metrics_from_session(session: dict) -> dict[str, Any]:
@@ -1477,15 +2367,21 @@ def _metrics_from_session(session: dict) -> dict[str, Any]:
 
 def _session_identity_payload(session: dict) -> dict[str, Any]:
     cls = session.get("classification") or {}
+    persona_slug = session.get("persona_slug") or cls.get("persona_slug")
     return {
         "session_id": session.get("id"),
         "agent_key": session.get("agent_key"),
         "agent_name": session.get("agent_name"),
         "model": session.get("model"),
-        "persona_slug": cls.get("persona_slug"),
+        "persona_slug": persona_slug,
         "content_type": cls.get("content_type"),
         "title": cls.get("title"),
         "stage": session.get("stage"),
+        "source_url": session.get("source_url"),
+        "initial_block_counts": session.get("initial_block_counts"),
+        "current_block_counts": session.get("current_block_counts"),
+        "tree_mode": ((session.get("knowledge_plan") or {}).get("tree_mode") if isinstance(session.get("knowledge_plan"), dict) else None),
+        "branch_policy": ((session.get("knowledge_plan") or {}).get("branch_policy") if isinstance(session.get("knowledge_plan"), dict) else None),
     }
 
 
@@ -1757,7 +2653,42 @@ def _context_with_resume(initial_context: str, resume_meta: dict[str, Any]) -> s
     return "\n\n".join([part for part in [context, "\n".join(block)] if part])
 
 
+def _session_public_state(session: dict) -> dict[str, Any]:
+    normalized_plan = session.get("normalized_plan") or session.get("knowledge_plan")
+    plan_summary = session.get("plan_summary") or (
+        summarize_normalized_plan(normalized_plan) if isinstance(normalized_plan, dict) else None
+    )
+    plan_validation = session.get("plan_validation") or _plan_validation(warnings=session.get("plan_validation_warnings") or [])
+    plan_hash = session.get("plan_hash") or (_plan_hash(normalized_plan) if isinstance(normalized_plan, dict) else None)
+    plan_state = None
+    if isinstance(normalized_plan, dict) and normalized_plan.get("entries"):
+        plan_state = {
+            "normalized_plan": normalized_plan,
+            "validation": plan_validation,
+            "summary": plan_summary,
+            "plan_hash": plan_hash,
+        }
+    return {
+        "persona_slug": session.get("persona_slug") or (session.get("classification") or {}).get("persona_slug"),
+        "source_url": session.get("source_url"),
+        "mode": session.get("mode") or "legacy",
+        "status": session.get("status") or session.get("stage"),
+        "initial_block_counts": _normalize_block_counts(session.get("initial_block_counts")),
+        "current_block_counts": _normalize_block_counts((plan_summary or {}).get("current_block_counts") or session.get("current_block_counts")),
+        "knowledge_plan": normalized_plan,
+        "normalized_plan": normalized_plan,
+        "plan_state": plan_state,
+        "plan_validation": plan_validation,
+        "plan_summary": plan_summary,
+        "plan_hash": plan_hash,
+        "confirmed_plan_hash": session.get("confirmed_plan_hash"),
+        "memory_summary": session.get("memory_summary") or "",
+        "plan_changed": bool(session.get("plan_changed")),
+    }
+
+
 def _bootstrap_result_payload(session: dict, result: dict[str, Any]) -> dict[str, Any]:
+    live_state = _session_public_state(session)
     return {
         "session_id": session["id"],
         "model": session["model"],
@@ -1775,6 +2706,19 @@ def _bootstrap_result_payload(session: dict, result: dict[str, Any]) -> dict[str
         "resumed_from_session_id": session.get("resumed_from_session_id"),
         "resume_source": session.get("resume_source"),
         "resume_summary": session.get("resume_summary"),
+        "knowledge_plan": live_state["knowledge_plan"] or result.get("proposed_plan"),
+        "normalized_plan": live_state.get("normalized_plan"),
+        "plan_state": live_state.get("plan_state") or result.get("plan_state"),
+        "plan_validation": live_state.get("plan_validation"),
+        "plan_summary": live_state.get("plan_summary"),
+        "plan_hash": live_state.get("plan_hash"),
+        "confirmed_plan_hash": live_state.get("confirmed_plan_hash"),
+        "current_block_counts": live_state["current_block_counts"],
+        "initial_block_counts": live_state["initial_block_counts"],
+        "persona_slug": live_state["persona_slug"],
+        "source_url": live_state["source_url"],
+        "memory_summary": live_state["memory_summary"],
+        "plan_changed": bool(result.get("plan_changed")),
     }
 
 
@@ -1932,11 +2876,28 @@ def _build_evidence_items(state: dict[str, Any], capture: dict[str, Any]) -> lis
     return out
 
 
-def create_session(model: str = "gpt-4o-mini", initial_context: str = "", agent_key: str = "sofia") -> dict:
+def create_session(
+    model: str = "gpt-4o-mini",
+    initial_context: str = "",
+    agent_key: str = "sofia",
+    initial_state: Optional[dict[str, Any]] = None,
+) -> dict:
     sid = str(uuid.uuid4())
     agent = get_agent_profile(agent_key)
     created_at = datetime.now(timezone.utc).isoformat()
     resume_meta = _build_resume_metadata(initial_context or "", agent_key if agent_key in AGENT_PROFILES else "sofia")
+    initial_state = dict(initial_state or {})
+    persona_slug = str(initial_state.get("persona_slug") or _context_persona_slug(initial_context or "") or "").strip().lower()
+    source_url = _coerce_urlish_value(str(initial_state.get("source_url") or "")) or _source_url_from_context(initial_context or "")
+    mode = str(initial_state.get("mode") or "legacy").strip().lower() or "legacy"
+    initial_block_counts = _normalize_block_counts(initial_state.get("initial_block_counts"))
+    initial_plan = initial_state.get("knowledge_plan") if isinstance(initial_state.get("knowledge_plan"), dict) else None
+    current_block_counts = _counts_from_plan_or_initial(initial_plan, initial_block_counts)
+    mission_state = _default_mission_state(initial_context or "")
+    if persona_slug:
+        mission_state["persona"] = persona_slug
+    if source_url:
+        mission_state["source"] = {"type": "website", "url": source_url}
     session = {
         "id": sid,
         "model": model,
@@ -1945,9 +2906,18 @@ def create_session(model: str = "gpt-4o-mini", initial_context: str = "", agent_
         "agent_role": agent["role"],
         "agent_greeting": agent["greeting"],
         "stage": "chatting",
+        "mode": mode,
+        "status": "collecting",
+        "persona_slug": persona_slug or None,
+        "source_url": source_url,
+        "initial_block_counts": initial_block_counts,
+        "current_block_counts": current_block_counts,
+        "knowledge_plan": initial_plan,
+        "memory_summary": str(initial_state.get("memory_summary") or "").strip(),
+        "plan_changed": False,
         "messages": [],
         "context": _context_with_resume(initial_context or "", resume_meta),
-        "mission_state": _default_mission_state(initial_context or ""),
+        "mission_state": mission_state,
         "crawler_captures": [],
         "telemetry_transcript": [],
         "telemetry_flags": {"dialog_started_emitted": False},
@@ -1955,7 +2925,7 @@ def create_session(model: str = "gpt-4o-mini", initial_context: str = "", agent_
         "resume_source": resume_meta.get("resume_source"),
         "resume_summary": resume_meta.get("resume_summary"),
         "classification": {
-            "persona_slug": None,
+            "persona_slug": persona_slug or None,
             "content_type": None,
             "asset_type": None,
             "asset_function": None,
@@ -1965,6 +2935,12 @@ def create_session(model: str = "gpt-4o-mini", initial_context: str = "", agent_
         },
         "created_at": created_at,
     }
+    if initial_plan:
+        try:
+            initial_plan_state = normalize_validate_summarize_plan(initial_plan, session, live_edit=True)
+            _store_plan_state(session, initial_plan_state, last_change="plano inicial normalizado")
+        except Exception:
+            session["knowledge_plan"] = initial_plan
     _sessions[sid] = session
     _save_session(session)
     _emit_kb_event(
@@ -1981,11 +2957,36 @@ def create_session(model: str = "gpt-4o-mini", initial_context: str = "", agent_
             "resume_summary": session.get("resume_summary"),
         },
     )
+    if mode == "criar":
+        _emit_kb_event(
+            "kb_intake_preconfirmation_created",
+            session=session,
+            source="kb-intake.start",
+            status="created",
+            extra={
+                "initial_block_counts": initial_block_counts,
+                "current_block_counts": current_block_counts,
+                "entry_count": len((initial_plan or {}).get("entries") or []),
+                "tree_mode": (initial_plan or {}).get("tree_mode") or "single_branch",
+                "branch_policy": (initial_plan or {}).get("branch_policy") or "single_branch_by_default",
+            },
+        )
     return session
 
 
-def start_bootstrap_session(model: str = "gpt-4o-mini", initial_context: str = "", agent_key: str = "sofia") -> dict[str, Any]:
-    session = create_session(model, initial_context=initial_context, agent_key=agent_key)
+def start_bootstrap_session(
+    model: str = "gpt-4o-mini",
+    initial_context: str = "",
+    agent_key: str = "sofia",
+    initial_state: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    if str((initial_state or {}).get("mode") or "").strip().lower() == "criar" and _invalid_criar_persona((initial_state or {}).get("persona_slug")):
+        return {
+            "ok": False,
+            "error_code": "VALIDATION_ERROR",
+            "message": "Selecione uma persona especifica antes de criar conhecimento.",
+        }
+    session = create_session(model, initial_context=initial_context, agent_key=agent_key, initial_state=initial_state)
     result = chat(session["id"], _BOOTSTRAP_PROMPT, internal=True)
     if result.get("ok") is False:
         return _bootstrap_result_payload(
@@ -2015,6 +3016,81 @@ def attach_crawler_capture(session_id: str, capture: dict) -> bool:
     return True
 
 
+def update_session_plan(
+    session_id: str,
+    knowledge_plan: dict[str, Any],
+    *,
+    status: Optional[str] = None,
+    source: str = "kb-intake.session.plan",
+    last_change: str = "",
+) -> dict[str, Any]:
+    session = _get_session(session_id)
+    if not session:
+        return {"ok": False, "error": "Session not found"}
+    if not isinstance(knowledge_plan, dict) or not isinstance(knowledge_plan.get("entries"), list):
+        return {"ok": False, "error": "knowledge_plan.entries is required"}
+    plan_state = normalize_validate_summarize_plan(knowledge_plan, session, live_edit=True)
+    normalized_plan = plan_state["normalized_plan"]
+    validation = plan_state["validation"]
+    summary = plan_state["summary"]
+    counts = summary.get("current_block_counts") or count_blocks_by_type(normalized_plan.get("entries") or [])
+    _store_plan_state(session, plan_state, last_change=last_change or "frontend plan sync")
+    if status:
+        if status == "ready_to_save" and not validation.get("valid"):
+            status = "planning"
+        session["status"] = status
+        if status == "ready_to_save" and validation.get("valid"):
+            session["stage"] = "ready_to_save"
+            session["confirmed_plan_hash"] = plan_state["plan_hash"]
+    elif session.get("stage") == "idle":
+        session["stage"] = "chatting"
+    _save_session(session)
+    event_type = "kb_intake_ready_to_save" if status == "ready_to_save" else "kb_intake_plan_updated"
+    _emit_kb_event(
+        event_type,
+        session=session,
+        source=source,
+        status=status or "updated",
+        extra={
+            "current_block_counts": counts,
+            "initial_block_counts": session.get("initial_block_counts"),
+            "entry_count": summary.get("entry_count"),
+            "tree_mode": summary.get("tree_mode"),
+            "branch_policy": summary.get("branch_policy"),
+            "plan_summary": summary,
+            "plan_hash": plan_state.get("plan_hash"),
+            "validation": validation,
+            "last_change": last_change,
+        },
+    )
+    if "sidebar" in source:
+        _emit_kb_event(
+            "kb_intake_sidebar_counts_updated",
+            session=session,
+            source=source,
+            status="updated",
+            extra={
+                "current_block_counts": counts,
+                "entry_count": summary.get("entry_count"),
+                "plan_hash": plan_state.get("plan_hash"),
+            },
+        )
+    return {
+        "ok": True,
+        "knowledge_plan": normalized_plan,
+        "normalized_plan": normalized_plan,
+        "plan_state": plan_state,
+        "plan_validation": validation,
+        "plan_hash": plan_state.get("plan_hash"),
+        "current_block_counts": counts,
+        "plan_summary": summary,
+        "memory_summary": session.get("memory_summary") or "",
+        "status": session.get("status") or session.get("stage"),
+        "stage": session.get("stage"),
+        "plan_changed": True,
+    }
+
+
 def _source_url_from_context(context: str) -> str | None:
     match = re.search(r"fonte principal:\s*([^\n]+)", context or "", re.I)
     if match:
@@ -2030,7 +3106,7 @@ def _source_url_from_context(context: str) -> str | None:
 
 def _should_crawl(user_content: str, session: dict) -> bool:
     content = user_content.lower()
-    if re.search(r"\b(leia|ler|colete|coletar|site|fonte|link|catalogo|cat[aÃ¡]logo)\b", content, re.I):
+    if re.search(r"\b(leia|ler|colete|coletar|site|fonte|link|catalogo|cat[aá]logo)\b", content, re.I):
         return True
     
     # Auto-trigger: URL no contexto + Primeira mensagem da sessao + Sem capturas ainda
@@ -2102,7 +3178,7 @@ def chat(session_id: str, user_message: str, file_info: Optional[dict] = None, i
             "exception_type": type(exc).__name__,
             "message": (
                 "Nao consegui processar sua mensagem agora. Sua configuracao "
-                "foi mantida â€” tente novamente ou clique em Salvar se ja houver plano."
+                "foi mantida — tente novamente ou clique em Salvar se ja houver plano."
             ),
             "detail": str(exc)[:300],
             "traceback_tail": tb_text.splitlines()[-12:],
@@ -2127,7 +3203,7 @@ def _chat_impl(session_id: str, user_message: str, file_info: Optional[dict] = N
         cls["file_ext"] = ext
         if file_info.get("bytes"):
             cls["file_bytes"] = file_info["bytes"]
-        file_desc = f"[Arquivo: {file_info['filename']} â€” {len(file_info.get('bytes', b''))} bytes]"
+        file_desc = f"[Arquivo: {file_info['filename']} — {len(file_info.get('bytes', b''))} bytes]"
         user_content = f"{file_desc}\n{user_message}".strip() if user_message else file_desc
     else:
         user_content = user_message
@@ -2148,13 +3224,13 @@ def _chat_impl(session_id: str, user_message: str, file_info: Optional[dict] = N
     patch = {} if internal else _merge_user_intent(mission_state, user_content)
     progress_reasons: list[str] = []
 
-    # Generation trigger detection â€” emit kb_intake_generation_requested when
+    # Generation trigger detection — emit kb_intake_generation_requested when
     # the operator types one of the autonomous-generation commands defined in
     # the system prompt (gere/sim/ok/cria/etc). This is the canonical signal
     # for "stop deliberating and produce <knowledge_plan>".
     _GEN_TRIGGER_RE = re.compile(
         r"\b(gere|gera|gerar|cria|criar|crie|construa|monte|monta|montar|"
-        r"sim|ok|pode|manda|vai|avanca|avanÃ§a|continua|continue|"
+        r"sim|ok|pode|manda|vai|avanca|avança|continua|continue|"
         r"executa|executar|fecha)\b",
         re.IGNORECASE,
     )
@@ -2212,16 +3288,24 @@ def _chat_impl(session_id: str, user_message: str, file_info: Optional[dict] = N
 Estado atual:
 - Agente: {session.get('agent_name') or 'Sofia'} ({session.get('agent_role') or 'agente de inteligencia marketing comercial'})
 - Regra de apresentacao: se precisar se apresentar, diga que voce e {session.get('agent_name') or 'Sofia'}; nunca diga que voce e Criar.
-- Cliente: {cls['persona_slug'] or 'â€”'}
-- Tipo de conteÃºdo: {cls['content_type'] or 'â€”'}
-- Tipo de asset: {cls['asset_type'] or 'â€”'}
-- FunÃ§Ã£o do asset: {cls['asset_function'] or 'â€”'}
-- TÃ­tulo: {cls['title'] or 'â€”'}
-- Arquivo binÃ¡rio recebido: {'Sim (' + cls['file_ext'] + ')' if cls.get('file_bytes') else 'NÃ£o'}
+- Persona global da sessao: {session.get('persona_slug') or cls['persona_slug'] or '—'}
+- Fonte principal: {session.get('source_url') or ((mission_state.get('source') or {}).get('url')) or '—'}
+- Tipo de conteúdo: {cls['content_type'] or '—'}
+- Tipo de asset: {cls['asset_type'] or '—'}
+- Função do asset: {cls['asset_function'] or '—'}
+- Título: {cls['title'] or '—'}
+- Arquivo binário recebido: {'Sim (' + cls['file_ext'] + ')' if cls.get('file_bytes') else 'Não'}
+- Plano inicial: {_format_block_counts(session.get('initial_block_counts'))}
+- Plano atual: {_format_block_counts(session.get('current_block_counts'))}
+- Memoria viva da sessao: {session.get('memory_summary') or 'plano atual ainda nao expandido'}
+- Regra: nao voltar ao plano inicial quando houver knowledge_plan/current_block_counts atualizados.
 """
 
     if session.get("context"):
         state_ctx += "\nContexto inicial confirmado pelo operador:\n" + session["context"][:6000] + "\n"
+    if isinstance(session.get("knowledge_plan"), dict) and (session.get("knowledge_plan") or {}).get("entries"):
+        state_ctx += "\nPlano atual vivo em JSON (fonte de verdade para proximas alteracoes):\n"
+        state_ctx += json.dumps(session.get("knowledge_plan"), ensure_ascii=False)[:6000] + "\n"
     if session.get("crawler_captures"):
         state_ctx += "\n" + _crawler_context(session["crawler_captures"]) + "\n"
 
@@ -2278,19 +3362,44 @@ Estado atual:
 
     cls_data = _extract_cls(raw)
     plan_payload = _extract_plan(raw)
+    plan_changed = False
+    current_block_counts = _normalize_block_counts(session.get("current_block_counts"))
+    plan_violations: list[str] = []
+    plan_summary: dict[str, Any] | None = None
+    plan_state: dict[str, Any] | None = None
     if plan_payload:
-        plan_payload = _normalize_sofia_knowledge_plan(plan_payload, session)
-        session["last_proposed_plan"] = plan_payload
+        plan_state = normalize_validate_summarize_plan(plan_payload, session)
+        plan_payload = plan_state["normalized_plan"]
+        plan_violations = plan_state["validation"]["blocking_violations"]
+        plan_summary = plan_state["summary"]
+        _store_plan_state(session, plan_state, last_change="knowledge_plan gerado pela Sofia")
+        if plan_violations:
+            session["plan_validation_warnings"] = plan_violations
+            session["last_invalid_plan"] = plan_payload
+            current_block_counts = plan_summary["current_block_counts"]
+            session["status"] = "planning"
+        else:
+            session.pop("plan_validation_warnings", None)
+            current_block_counts = plan_summary["current_block_counts"]
+            plan_changed = True
     visible = _strip_knowledge_plan(_strip_cls(raw))
+    if plan_violations:
+        visible = (
+            f"{visible}\n\nPlano recebido, mas bloqueado antes da preview/save por violacoes:\n- "
+            + "\n- ".join(plan_violations)
+        ).strip()
     visible = _rewrite_visible_plan_summary(visible, plan_payload if isinstance(plan_payload, dict) else None)
-    plan_entries = plan_payload.get("entries", []) if isinstance(plan_payload, dict) else []
+    plan_entries = plan_payload.get("entries", []) if isinstance(plan_payload, dict) and not plan_violations else []
 
     if cls_data:
         for key in ("persona_slug", "content_type", "asset_type", "asset_function", "title"):
             if cls_data.get(key):
                 cls[key] = cls_data[key]
-        if cls_data.get("complete"):
+        if cls_data.get("complete") and not plan_violations:
             session["stage"] = "ready_to_save"
+    if plan_violations:
+        session["stage"] = "chatting"
+        session["status"] = "planning"
 
     session["messages"].append({"role": "assistant", "content": raw})
     _append_transcript_turn(
@@ -2336,12 +3445,32 @@ Estado atual:
                     "entry_count": len(plan_entries),
                     "entry_types": entry_types,
                     "auto_promoted_stage": auto_promoted,
+                    "plan_summary": plan_summary,
                 },
             )
         except Exception:
             pass
 
-    if session.get("stage") == "ready_to_save" and previous_stage != "ready_to_save":
+        try:
+            _emit_kb_event(
+                "kb_intake_plan_updated",
+                session=session,
+                source="kb-intake.chat",
+                status="updated",
+                extra={
+                    "current_block_counts": current_block_counts,
+                    "initial_block_counts": session.get("initial_block_counts"),
+                    "entry_count": len(plan_entries),
+                    "tree_mode": plan_payload.get("tree_mode") if isinstance(plan_payload, dict) else None,
+                    "branch_policy": plan_payload.get("branch_policy") if isinstance(plan_payload, dict) else None,
+                    "plan_summary": plan_summary,
+                },
+            )
+        except Exception:
+            pass
+
+    if session.get("stage") == "ready_to_save" and previous_stage != "ready_to_save" and not plan_violations:
+        session["status"] = "ready_to_save"
         try:
             _emit_kb_event(
                 "kb_intake_ready_to_save",
@@ -2417,6 +3546,16 @@ Estado atual:
         "crawler": crawler_result,
         "proposed_entries": plan_entries,
         "proposed_plan": plan_payload or None,
+        "knowledge_plan": plan_payload or session.get("knowledge_plan"),
+        "current_block_counts": current_block_counts,
+        "memory_summary": session.get("memory_summary") or "",
+            "plan_summary": plan_summary,
+            "plan_violations": plan_violations,
+            "plan_state": plan_state,
+            "normalized_plan": plan_payload,
+            "plan_validation": (plan_state or {}).get("validation") if plan_state else None,
+            "plan_hash": (plan_state or {}).get("plan_hash") if plan_state else None,
+            "plan_changed": plan_changed,
         "state": mission_state,
         "patch": patch,
     }
@@ -2488,23 +3627,23 @@ def _apply_save_inference(session: dict) -> None:
     cls = session["classification"]
     inferred = _infer_from_transcript(session)
     
-    # 1. Inferir campos bÃ¡sicos do texto do chat
+    # 1. Inferir campos básicos do texto do chat
     for key in ("persona_slug", "content_type", "title"):
         if inferred.get(key) and (not cls.get(key) or cls.get(key) == "other"):
             cls[key] = inferred[key]
             
-    # 2. Fallback: Se o tÃ­tulo ainda estiver faltando, buscar no plano de conhecimento
+    # 2. Fallback: Se o título ainda estiver faltando, buscar no plano de conhecimento
     if not cls.get("title"):
         for msg in reversed(session.get("messages", [])):
             if msg.get("role") == "assistant":
                 entries = _extract_plan_entries(msg.get("content") or "")
                 if entries:
-                    # Pega o tÃ­tulo da primeira entrada ou do briefing
+                    # Pega o título da primeira entrada ou do briefing
                     briefing = next((e for e in entries if e.get("content_type") == "briefing"), entries[0])
                     cls["title"] = briefing.get("title")
                     break
 
-    # 3. Ãšltimo recurso: Inferir da URL ou Persona para nÃ£o travar o salvamento
+    # 3. Último recurso: Inferir da URL ou Persona para não travar o salvamento
     if not cls.get("title"):
         url = _source_url_from_context(session.get("context") or "")
         if url:
@@ -2546,7 +3685,7 @@ def _build_content(session: dict, content_text: str) -> str:
 
     lines: list[str] = []
     if description:
-        lines.extend(["## DescriÃ§Ã£o", "", description, ""])
+        lines.extend(["## Descrição", "", description, ""])
     if link:
         lines.extend(["## Link", "", link, ""])
     return "\n".join(lines).strip()
@@ -2732,7 +3871,7 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
             extra={
                 "stage": session.get("stage"),
                 "has_content_text_override": bool(content_text and content_text.strip()),
-                "has_plan_override": bool(isinstance(plan_override, dict) and plan_override.get("entries")),
+                "has_plan_override": bool(isinstance(plan_override, dict) and (plan_override.get("entries") or plan_override.get("normalized_plan") or plan_override.get("plan_hash"))),
             },
         )
     except Exception:
@@ -2759,53 +3898,77 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
             "classification": {k: v for k, v in cls.items() if k != "file_bytes"},
         }
 
-    plan_entries = []
+    session_plan_hash = str(session.get("plan_hash") or "")
     plan_payload: dict = {}
-    if isinstance(plan_override, dict) and plan_override.get("entries"):
-        plan_payload = plan_override
-        plan_entries = plan_payload.get("entries", [])
-    elif isinstance(session.get("last_proposed_plan"), dict) and (session.get("last_proposed_plan") or {}).get("entries"):
-        plan_payload = dict(session.get("last_proposed_plan") or {})
-        plan_entries = plan_payload.get("entries", [])
-    else:
-        for msg in reversed(session.get("messages", [])):
-            content = msg.get("content") or ""
-            if msg.get("role") == "assistant" and "<knowledge_plan>" in content:
-                plan_payload = _extract_plan(content)
-                plan_entries = plan_payload.get("entries", [])
-                break
-
-    if not plan_entries:
-        plan_payload = _fallback_plan_payload(session, content_text)
-        plan_entries = plan_payload.get("entries", [])
-
-    plan_payload = _normalize_sofia_knowledge_plan(plan_payload, session)
-    plan_entries = plan_payload.get("entries", [])
-
-    # Backstop: auto-infer parent_slug for any non-top-level entry that
-    # arrived without one. This catches the most frequent Sofia regression
-    # (model omits metadata.parent_slug despite the prompt rule), so the tree
-    # is always hierarchical instead of flat. Records the inference in the
-    # event payload for auditability.
-    inferred_parents = _auto_infer_parent_slugs(plan_payload)
-    if inferred_parents:
-        try:
-            from services import sre_logger
-            sre_logger.info(
-                "kb_intake",
-                f"auto-inferred parent_slug for {inferred_parents} entries session={session_id[:8]}",
+    plan_state: dict[str, Any] | None = None
+    if isinstance(plan_override, dict):
+        override_hash = str(plan_override.get("plan_hash") or "")
+        override_plan = plan_override.get("normalized_plan") if isinstance(plan_override.get("normalized_plan"), dict) else None
+        if override_plan is None and isinstance(plan_override.get("entries"), list):
+            override_plan = plan_override
+        if override_hash and session_plan_hash and override_hash != session_plan_hash:
+            error = "Plan mismatch: save payload is not the current normalized plan."
+            _emit_kb_event(
+                "kb_intake_dialog_rejected",
+                session=session,
+                source="kb-intake.save",
+                status="rejected",
+                transcript=True,
+                result={"error": error, "session_plan_hash": session_plan_hash, "save_plan_hash": override_hash},
             )
-        except Exception:
-            pass
+            return {"error": error, "session_plan_hash": session_plan_hash, "save_plan_hash": override_hash}
+        if isinstance(override_plan, dict) and override_plan.get("entries"):
+            if override_hash and override_hash == session_plan_hash and isinstance(session.get("normalized_plan"), dict):
+                plan_payload = dict(session.get("normalized_plan") or {})
+                plan_state = _session_public_state(session).get("plan_state")
+            else:
+                plan_state = normalize_validate_summarize_plan(override_plan, session, live_edit=True)
+                if session_plan_hash and plan_state["plan_hash"] != session_plan_hash:
+                    error = "Plan mismatch: save payload is not the current normalized plan."
+                    _emit_kb_event(
+                        "kb_intake_dialog_rejected",
+                        session=session,
+                        source="kb-intake.save",
+                        status="rejected",
+                        transcript=True,
+                        result={"error": error, "session_plan_hash": session_plan_hash, "save_plan_hash": plan_state["plan_hash"]},
+                    )
+                    return {"error": error, "session_plan_hash": session_plan_hash, "save_plan_hash": plan_state["plan_hash"]}
+                plan_payload = plan_state["normalized_plan"]
 
-    _build_links_from_parent_slugs(plan_payload)
-    plan_violations = validate_sofia_knowledge_plan(plan_payload, session=session)
-    if plan_violations:
-        from services import sre_logger
-        sre_logger.warn(
-            "kb_intake",
-            f"Sofia output rejected session={session_id[:8]} violations={plan_violations}",
+    if not plan_payload and isinstance(session.get("normalized_plan"), dict) and (session.get("normalized_plan") or {}).get("entries"):
+        plan_payload = dict(session.get("normalized_plan") or {})
+        plan_state = _session_public_state(session).get("plan_state")
+    elif not plan_payload and isinstance(session.get("knowledge_plan"), dict) and (session.get("knowledge_plan") or {}).get("entries"):
+        plan_state = normalize_validate_summarize_plan(dict(session.get("knowledge_plan") or {}), session, live_edit=True)
+        plan_payload = plan_state["normalized_plan"]
+        _store_plan_state(session, plan_state, last_change="save normalized legacy plan")
+    elif not plan_payload:
+        plan_state = normalize_validate_summarize_plan(_fallback_plan_payload(session, content_text), session)
+        plan_payload = plan_state["normalized_plan"]
+        _store_plan_state(session, plan_state, last_change="save fallback plan")
+
+    if plan_state is None:
+        plan_state = _plan_state_from_normalized(plan_payload, session=session)
+    validation = plan_state.get("validation") or _plan_validation()
+    if not validation.get("valid"):
+        error = "Plano ainda não pode ser salvo. Corrija as pendências bloqueantes primeiro."
+        _emit_kb_event(
+            "kb_intake_dialog_rejected",
+            session=session,
+            source="kb-intake.save",
+            status="rejected",
+            transcript=True,
+            result={"error": error, "violations": validation.get("blocking_violations") or []},
         )
+        return {"error": error, "violations": validation.get("blocking_violations") or [], "plan_state": plan_state}
+
+    plan_entries = plan_payload.get("entries", [])
+    expected_counts = _normalize_block_counts((plan_state.get("summary") or {}).get("current_block_counts") or session.get("current_block_counts"))
+    actual_counts = count_blocks_by_type(plan_entries)
+    mismatch = _count_mismatch_message(expected_counts, actual_counts)
+    if mismatch or len(plan_entries) != int((plan_state.get("summary") or {}).get("entry_count") or len(plan_entries)):
+        mismatch = mismatch or "Plan mismatch: normalized plan entry_count differs from save payload entry_count."
         _emit_kb_event(
             "kb_intake_dialog_rejected",
             session=session,
@@ -2813,14 +3976,36 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
             status="rejected",
             transcript=True,
             result={
-                "error": "Sofia output invalid",
-                "violations": plan_violations,
+                "error": mismatch,
+                "current_block_counts": expected_counts,
+                "save_payload_counts": actual_counts,
             },
         )
         return {
-            "error": "Sofia output invalid",
-            "violations": plan_violations,
+            "error": mismatch,
+            "current_block_counts": expected_counts,
+            "save_payload_counts": actual_counts,
         }
+    _emit_kb_event(
+        "kb_intake_save_payload_validated",
+        session=session,
+        source="kb-intake.save",
+        status="validated",
+        extra={
+            "current_block_counts": expected_counts,
+            "save_payload_counts": actual_counts,
+            "entry_count": len(plan_entries),
+            "tree_mode": (plan_state.get("summary") or {}).get("tree_mode") or "single_branch",
+            "branch_policy": (plan_state.get("summary") or {}).get("branch_policy") or "single_branch_by_default",
+            "plan_summary": plan_state.get("summary"),
+            "plan_hash": plan_state.get("plan_hash"),
+        },
+    )
+    plan_warnings = [
+        warning
+        for warning in (plan_payload.get("warnings") or [])
+        if isinstance(warning, dict)
+    ]
 
     persisted_items: list[dict] = []
     persisted_evidence: list[dict] = []
@@ -2889,6 +4074,8 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
                 metadata={
                     **(payload.get("metadata") or {}),
                     "session_id": session_id,
+                    "tree_mode": plan_payload.get("tree_mode") or "single_branch",
+                    "branch_policy": plan_payload.get("branch_policy") or "single_branch_by_default",
                     "sync_origin": "direct_save",
                     "classification": item_classification,
                 },
@@ -3031,20 +4218,23 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
         rel_path = file_path.name if file_path else "unknown"
 
     session["stage"] = "done"
+    session["status"] = "saved"
     _save_session(session)
+    git_warnings = [
+        {
+            "stage": "git_push",
+            "message": "Knowledge saved, but git push failed.",
+            "detail": git_result.get("error"),
+        }
+    ] if not bool(git_result.get("push_ok", True)) else []
+    completion_warnings = [*plan_warnings, *git_warnings]
     completion_payload = {
         "file_path": rel_path,
         "saved_paths": [str(p) for p in saved_paths],
         "git": git_result,
         "success": True,
-        "status": "saved_with_warnings" if not bool(git_result.get("push_ok", True)) else "saved",
-        "warnings": [
-            {
-                "stage": "git_push",
-                "message": "Knowledge saved, but git push failed.",
-                "detail": git_result.get("error"),
-            }
-        ] if not bool(git_result.get("push_ok", True)) else [],
+        "status": "saved_with_warnings" if completion_warnings else "saved",
+        "warnings": completion_warnings,
         "sync_mode": "manual_only",
         "entries_written": len(saved_paths),
         "plan_entries": len(plan_entries),
@@ -3057,6 +4247,8 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
         ],
         "persistence_evidence": persisted_evidence,
         "hierarchy": hierarchy_result,
+        "plan_state": plan_state,
+        "plan_hash": plan_state.get("plan_hash"),
         "vault_write": {"paths": [str(p) for p in saved_paths]},
     }
     _emit_kb_event(
@@ -3085,14 +4277,8 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
     return {
         "ok": True,
         "success": True,
-        "status": "saved_with_warnings" if not bool(git_result.get("push_ok", True)) else "saved",
-        "warnings": [
-            {
-                "stage": "git_push",
-                "message": "Knowledge saved, but git push failed.",
-                "detail": git_result.get("error"),
-            }
-        ] if not bool(git_result.get("push_ok", True)) else [],
+        "status": "saved_with_warnings" if completion_warnings else "saved",
+        "warnings": completion_warnings,
         "file_path": rel_path,
         "knowledge_item_ids": [item.get("id") for item in persisted_items],
         "knowledge_node_ids": [
@@ -3102,6 +4288,8 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
         ],
         "persistence_evidence": persisted_evidence,
         "hierarchy": hierarchy_result,
+        "plan_state": plan_state,
+        "plan_hash": plan_state.get("plan_hash"),
         "vault_write": {"paths": [str(p) for p in saved_paths]},
         "git": git_result,
         "sync": {
@@ -3111,5 +4299,3 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
             "error": None,
         },
     }
-
-

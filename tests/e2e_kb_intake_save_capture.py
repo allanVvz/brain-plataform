@@ -293,6 +293,11 @@ def call_save(report: dict, session_id: str) -> dict:
         report["save_error_raw"] = str(exc)
         raise
     expect(report, result.get("ok") is True, "kb-intake/save returned ok=true", {"keys": sorted(result.keys())})
+    planner_rewrite_warnings = [
+        warning for warning in (result.get("warnings") or [])
+        if isinstance(warning, dict) and warning.get("warning_type") == "planner_parent_rewrite"
+    ]
+    expect(report, not planner_rewrite_warnings, "save did not need single_branch parent rewrite", planner_rewrite_warnings)
     item_ids = result.get("knowledge_item_ids") or [
         ev.get("knowledge_item_id") for ev in (result.get("persistence_evidence") or [])
     ]

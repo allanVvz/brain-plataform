@@ -39,7 +39,7 @@ import {
   KnowledgeViewMode,
 } from "./knowledgeGraphLayout";
 
-// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Types ──────────────────────────────────────────────────────
 
 type ViewMode = KnowledgeViewMode;
 type AppTheme = "clean" | "dark";
@@ -102,7 +102,7 @@ function themeTextColor(theme: AppTheme, translucent: boolean): string {
   return theme === "dark" ? "#ffffff" : "#111827";
 }
 
-// â”€â”€ Layout helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Layout helpers ─────────────────────────────────────────────
 
 function nodeSize(data: GraphNodeData): { w: number; h: number } {
   const importance = data.importance ?? 0.5;
@@ -116,8 +116,24 @@ function nodeSize(data: GraphNodeData): { w: number; h: number } {
 
 function nodeToRank(data: GraphNodeData): number {
   const nodeType = String(data.node_type || data.content_type || "").toLowerCase();
-  if (nodeType === "embedded") return 12;
-  if (nodeType === "gallery") return 11;
+  const topDownRank: Record<string, number> = {
+    persona: 0,
+    brand: 1,
+    briefing: 2,
+    campaign: 3,
+    audience: 4,
+    product: 5,
+    offer: 6,
+    copy: 7,
+    faq: 8,
+    asset: 8,
+    embedded: 9,
+    gallery: 9,
+    rule: 10,
+    tone: 10,
+    entity: 11,
+  };
+  if (topDownRank[nodeType] !== undefined) return topDownRank[nodeType];
   if (nodeType === "knowledge_item" || nodeType === "kb_entry") return 13;
   if (nodeType === "tag" || nodeType === "mention") return 14;
   return getVisualHierarchyRank(nodeType);
@@ -241,25 +257,26 @@ function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Nod
   if (!embeddedNodes.length && !galleryNodes.length) return mirrored;
   const galleryOffsetStart = -((galleryNodes.length - 1) * 160) / 2;
   const embeddedOffsetStart = -((embeddedNodes.length - 1) * 160) / 2;
+  const terminalShift = galleryNodes.length && embeddedNodes.length ? 90 : 0;
   let galleryIndex = 0;
   let embeddedIndex = 0;
   return mirrored.map((node) => {
     const nodeType = (node.data as GraphNodeData)?.node_type;
     if (nodeType === "gallery") {
-      const x = galleryOffsetStart + galleryIndex * 160;
+      const x = galleryOffsetStart + galleryIndex * 160 - terminalShift;
       galleryIndex += 1;
       return { ...node, position: { x, y: baseMaxY + 180 } };
     }
     if (nodeType === "embedded") {
-      const x = embeddedOffsetStart + embeddedIndex * 160;
+      const x = embeddedOffsetStart + embeddedIndex * 160 + terminalShift;
       embeddedIndex += 1;
-      return { ...node, position: { x, y: baseMaxY + 340 } };
+      return { ...node, position: { x, y: baseMaxY + 180 } };
     }
     return node;
   });
 }
 
-// â”€â”€ Filtering by mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Filtering by mode ──────────────────────────────────────────
 
 function filterEdgesForMode(edges: Edge[], mode: ViewMode): Edge[] {
   return edges.filter((edge) => {
@@ -274,7 +291,7 @@ function filterEdgesForMode(edges: Edge[], mode: ViewMode): Edge[] {
   });
 }
 
-// â”€â”€ Edge style by tier â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Edge style by tier ─────────────────────────────────────────
 
 function edgeStyle(data: GraphEdgeData | undefined, isInPath: boolean): Edge["style"] {
   const tier = data?.tier || "auxiliary";
@@ -312,7 +329,7 @@ function edgeStyle(data: GraphEdgeData | undefined, isInPath: boolean): Edge["st
   return { stroke: "var(--rf-edge)", strokeWidth: 1, strokeOpacity: 0.22, strokeDasharray: "4 4" };
 }
 
-// â”€â”€ Node component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Node component ─────────────────────────────────────────────
 
 function PersonaNode({ data, selected }: NodeProps) {
   const d = data as GraphNodeData;
@@ -454,8 +471,8 @@ function KnowledgeNode({ data, selected }: NodeProps) {
         <span className="text-[9px] uppercase tracking-wider truncate flex-1" style={{ color: labelColor }}>
           {d.node_type || d.content_type}
         </span>
-        {isVideo && <span className="text-[8px] text-obs-amber">â–¶</span>}
-        {isImage && <span className="text-[8px] text-obs-slate">â¬›</span>}
+        {isVideo && <span className="text-[8px] text-obs-amber">▶</span>}
+        {isImage && <span className="text-[8px] text-obs-slate">⬛</span>}
         {typeof d.graph_distance === "number" && d.graph_distance > 0 && (
           <span className="text-[8px] text-obs-faint">d{d.graph_distance}</span>
         )}
@@ -538,7 +555,7 @@ const edgeTypes: EdgeTypes = {
   deletable: DeletableEdge,
 };
 
-// â”€â”€ Main component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Main component ─────────────────────────────────────────────
 
 function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConnectNodes, onDeleteEdge, mode, searchQuery, focusNodeId, showAllEdges = false, branchDistance = 48 }: GraphViewProps) {
   const { fitView, getViewport, setViewport } = useReactFlow();
@@ -598,7 +615,7 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
     return ids;
   }, [activeRawEdges, focusNodeId]);
 
-  // Search filter â€” matched nodes get full opacity, others fade.
+  // Search filter — matched nodes get full opacity, others fade.
   const fold = (s: string) =>
     (s || "").toString().toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
   const q = fold(searchQuery || "");
@@ -797,5 +814,3 @@ export default function GraphView(props: GraphViewProps) {
     </ReactFlowProvider>
   );
 }
-
-

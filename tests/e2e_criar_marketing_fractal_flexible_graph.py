@@ -167,7 +167,7 @@ def marketing_plan(run_token: str) -> dict:
             },
         ],
         "tree_mode": "single_branch",
-        "branch_policy": "ask_before_new_branch",
+        "branch_policy": "single_branch_by_default",
     }
 
 
@@ -243,12 +243,19 @@ def validate_db_after_save(report: dict, session_id: str, run_token: str, person
         expect(report, item.get("persona_id") == persona_id, f"item persona scoped: {item.get('title')}")
         expect(report, meta.get("session_id") == session_id, f"item session scoped: {item.get('title')}")
         expect(report, (meta.get("classification") or {}).get("content_type") == item.get("content_type"), f"classification content_type matches item: {item.get('title')}")
+        expect(report, meta.get("single_branch_parent_rewritten") is not True, f"item did not need single_branch parent rewrite: {item.get('title')}")
 
     node_ids = [(item.get("metadata") or {}).get("knowledge_node_id") for item in items]
     node_ids = [node_id for node_id in node_ids if node_id]
     nodes = db_client().table("knowledge_nodes").select("*").in_("id", node_ids).limit(100).execute().data or []
     expect(report, len(nodes) == 6, "DB has 6 canonical graph nodes for session")
     expect(report, not any(node.get("node_type") == "mention" for node in nodes), "DB has 0 mention nodes for session")
+    for node in nodes:
+        meta = node.get("metadata") or {}
+        expect(report, meta.get("session_id") == session_id, f"node session scoped: {node.get('title')}")
+        expect(report, meta.get("created_via") == "kb_intake_sofia", f"node created_via scoped: {node.get('title')}")
+        expect(report, meta.get("tree_mode") == "single_branch", f"node tree_mode scoped: {node.get('title')}")
+        expect(report, meta.get("branch_policy") == "single_branch_by_default", f"node branch_policy scoped: {node.get('title')}")
     briefing = next(node for node in nodes if node.get("node_type") == "briefing")
     audience = next(node for node in nodes if node.get("node_type") == "audience")
     product = next(node for node in nodes if node.get("node_type") == "product")
@@ -276,6 +283,10 @@ def validate_db_after_save(report: dict, session_id: str, run_token: str, person
         expect(report, bool(edge), f"primary edge exists {pair[0]} -> {pair[1]}")
         meta = (edge or {}).get("metadata") or {}
         expect(report, meta.get("active") is True and meta.get("primary_tree") is True and meta.get("visual_hidden") is not True, "primary edge is active visible")
+        expect(report, meta.get("session_id") == session_id, "primary edge has session_id")
+        expect(report, meta.get("tree_mode") == "single_branch", "primary edge has tree_mode")
+        expect(report, meta.get("branch_policy") == "single_branch_by_default", "primary edge has branch_policy")
+        expect(report, bool(meta.get("semantic_relation")), "primary edge has semantic_relation metadata")
     forbidden = [
         (persona_root["id"], by_slug[f"produto-kit-5-pecas-modal-{run_token.lower()}"]["id"]),
         (by_slug[f"produto-kit-5-pecas-modal-{run_token.lower()}"]["id"], persona_root["id"]),
@@ -310,6 +321,17 @@ def validate_graph_data(report: dict, run_token: str) -> dict:
         expect(report, meta.get("visual_hidden") is not True, "graph-data does not return visual_hidden edges")
         if not data.get("embedded_edge") and not data.get("gallery_edge") and not data.get("draft_terminal_edge"):
             expect(report, data.get("primary_tree") is True or meta.get("primary_tree") is True, "tree graph-data edge is primary")
+    visible_primary = [
+        edge for edge in edges
+        if (edge.get("data") or {}).get("primary_tree") is True
+        or (((edge.get("data") or {}).get("metadata") or {}).get("primary_tree") is True)
+    ]
+    visible_keys = Counter(
+        (edge.get("source"), edge.get("target"), (edge.get("data") or {}).get("relation_type"))
+        for edge in visible_primary
+    )
+    duplicates = {key: count for key, count in visible_keys.items() if count > 1}
+    expect(report, not duplicates, "graph-data dedupes visible primary edges by source-target-relation_type", duplicates)
     return graph
 
 
@@ -323,16 +345,32 @@ def approve_faqs_and_validate_rag(report: dict, items: list[dict], nodes: list[d
         expect(report, bool(result.get("rag_entry_id")), "FAQ approval returns rag_entry_id")
         expect(report, bool(result.get("rag_chunk_ids")), "FAQ approval returns rag_chunk_ids")
         expect(report, bool(result.get("embedded_edge_id")), "FAQ approval materializes faq -> embedded edge")
+        approved_item = db_client().table("knowledge_items").select("*").eq("id", item["id"]).limit(1).execute().data[0]
+        expect(report, approved_item.get("status") == "approved", "approved item status is approved")
+        expect(report, approved_item.get("curation_status") == "approved", "approved item curation_status is approved")
 
         snapshot = db_client().table("approved_knowledge_snapshots").select("*").eq("id", result["approved_snapshot_id"]).limit(1).execute().data[0]
         expect(report, snapshot.get("status") == "active", "snapshot status active")
         expect(report, snapshot.get("content_type") == "faq", "snapshot content_type faq")
         root_node = db_client().table("knowledge_nodes").select("*").eq("id", snapshot.get("root_node_id")).limit(1).execute().data[0]
         expect(report, root_node.get("node_type") == "persona" and root_node.get("slug") == "self", "snapshot root_node_id is persona self")
+        approved_node = db_client().table("knowledge_nodes").select("*").eq("id", result["source_node_id"]).limit(1).execute().data[0]
+        expect(report, approved_node.get("status") == "validated", "approved FAQ node status is validated")
         path = snapshot.get("hierarchy_path") or []
         types = [step.get("node_type") for step in path]
         expect(report, types.count("persona") == 1 and types[0] == "persona", "snapshot path has persona only at root", types)
         expect(report, "briefing" in types and "audience" in types and "product" in types and "copy" in types and "faq" in types, "snapshot path contains briefing/audience/product/copy/faq", types)
+        snapshot_meta = snapshot.get("metadata") or {}
+        branch_context = snapshot_meta.get("branch_context") or {}
+        branch_types = [step.get("node_type") for step in (branch_context.get("path") or [])]
+        expect(report, branch_types == types, "snapshot metadata branch_context path mirrors hierarchy_path", branch_context)
+        branch_edges = branch_context.get("edges") or []
+        expect(report, bool(branch_edges), "snapshot metadata branch_context contains edges")
+        expect(report, any(edge.get("semantic_relation") for edge in branch_edges), "snapshot branch edges include semantic_relation")
+        for key in ("brand_context", "briefing_context", "audience_context", "product_context", "copy_context", "rules_context", "tone_context"):
+            expect(report, bool(snapshot_meta.get(key)), f"snapshot metadata includes {key}")
+        expect(report, bool((snapshot_meta.get("faq_context") or {}).get("question")), "snapshot metadata includes FAQ question")
+        expect(report, bool((snapshot_meta.get("faq_context") or {}).get("answer")), "snapshot metadata includes FAQ answer")
 
         chunks = db_client().table("knowledge_rag_chunks").select("*").eq("rag_entry_id", result["rag_entry_id"]).limit(20).execute().data or []
         expect(report, bool(chunks), "RAG chunks exist for approved FAQ")
@@ -341,7 +379,8 @@ def approve_faqs_and_validate_rag(report: dict, items: list[dict], nodes: list[d
         meta = chunk.get("metadata") or {}
         expect(report, "Briefing:" in text and "Nao informado" not in text.split("Briefing:", 1)[1].splitlines()[0], "chunk includes briefing context")
         expect(report, "Publico:" in text and "Nao informado" not in text.split("Publico:", 1)[1].splitlines()[0], "chunk includes audience context")
-        expect(report, "Produto:" in text and "Pergunta:" in text and "Resposta aprovada:" in text, "chunk includes product/question/answer")
+        for label in ("Marca/Persona:", "Brand:", "Briefing:", "Publico:", "Produto:", "Copy/Oferta:", "Pergunta:", "Resposta aprovada:", "Regras:", "Tom:", "Caminho da branch:", "Relacoes:"):
+            expect(report, label in text, f"chunk includes {label}")
         expect(report, meta.get("content_type") == "faq" and meta.get("status") == "active", "chunk metadata marks active FAQ")
 
 
@@ -386,6 +425,11 @@ def main() -> int:
         save_result = http_json("POST", "/kb-intake/save", body={"session_id": session_id, "content": ""}, timeout=300)
         expect(report, save_result.get("ok") is True and save_result.get("success") is True, "kb-intake/save returns success without false 500", save_result)
         expect(report, save_result.get("status") in {"saved", "saved_with_warnings"}, "save status is saved or saved_with_warnings", save_result.get("status"))
+        planner_rewrite_warnings = [
+            warning for warning in (save_result.get("warnings") or [])
+            if isinstance(warning, dict) and warning.get("warning_type") == "planner_parent_rewrite"
+        ]
+        expect(report, not planner_rewrite_warnings, "save did not need planner_parent_rewrite warning", planner_rewrite_warnings)
         persona_id = persona_id_for(PERSONA_SLUG)
         items, nodes, _ = validate_db_after_save(report, session_id, args.run_token, persona_id)
         validate_graph_data(report, args.run_token)

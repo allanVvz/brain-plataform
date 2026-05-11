@@ -29,7 +29,7 @@ logger = logging.getLogger("knowledge_graph")
 # The graph layer must not ship client/product-specific canonical data.
 # Product, campaign, brand and entity nodes are inferred from the current
 # knowledge item metadata/frontmatter and from nodes that already exist.
-_TOPIC_NODE_TYPES = {"product", "campaign", "brand", "entity", "persona", "audience"}
+_TOPIC_NODE_TYPES = {"product", "offer", "campaign", "brand", "entity", "persona", "audience"}
 
 # Map content_type → node_type for items mirrored into the graph.
 _CONTENT_TYPE_TO_NODE: dict[str, str] = {
@@ -42,6 +42,7 @@ _CONTENT_TYPE_TO_NODE: dict[str, str] = {
     "tone":     "tone",
     "audience": "audience",
     "entity":   "entity",
+    "offer":    "offer",
     "brand":    "brand",
     "briefing": "briefing",
     "prompt":   "rule",
@@ -72,6 +73,7 @@ _NODE_HIERARCHY_DEFAULTS: dict[str, tuple[int, float]] = {
     "audience": (20, 0.75),
     "entity": (30, 0.70),
     "product": (30, 0.85),
+    "offer": (35, 0.78),
     "tone": (40, 0.70),
     "rule": (40, 0.80),
     "copy": (40, 0.65),
@@ -96,6 +98,66 @@ _MAIN_TREE_RELATIONS = {
     "uses_asset",
     "manual",
 }
+
+_TRACEABILITY_KEYS = ("session_id", "source_ref", "created_via", "tree_mode", "branch_policy")
+
+
+_SEMANTIC_EDGE_BY_TYPES: dict[tuple[str, str], tuple[str, str]] = {
+    ("persona", "briefing"): ("contains_briefing", "Persona contem briefing"),
+    ("briefing", "audience"): ("defines_audience", "Briefing define publico"),
+    ("audience", "product"): ("offers_product", "Publico recebe oferta de produto"),
+    ("product", "offer"): ("defines_offer", "Produto define oferta"),
+    ("offer", "copy"): ("supports_copy", "Oferta sustenta copy"),
+    ("offer", "faq"): ("answers_question", "Oferta responde pergunta"),
+    ("product", "copy"): ("supports_copy", "Produto sustenta copy"),
+    ("copy", "faq"): ("answers_question", "Copy responde pergunta"),
+    ("faq", "embedded"): ("published_to_rag", "FAQ publicado no RAG"),
+}
+
+
+def traceability_metadata(*sources: Optional[dict]) -> dict:
+    """Copy flow lineage into graph JSON metadata without changing topology."""
+    out: dict = {}
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        nested = source.get("metadata")
+        if isinstance(nested, dict):
+            for key in _TRACEABILITY_KEYS:
+                if nested.get(key) is not None and out.get(key) is None:
+                    out[key] = nested.get(key)
+        for key in _TRACEABILITY_KEYS:
+            if source.get(key) is not None and out.get(key) is None:
+                out[key] = source.get(key)
+    if out:
+        out.setdefault("tree_mode", "single_branch")
+        out.setdefault("branch_policy", "single_branch_by_default")
+    return out
+
+
+def semantic_edge_metadata(
+    source_node: Optional[dict],
+    target_node: Optional[dict],
+    relation_type: str,
+    metadata: Optional[dict] = None,
+) -> dict:
+    """Add semantic labels as metadata while preserving relation_type."""
+    merged = dict(metadata or {})
+    source_type = ((source_node or {}).get("node_type") or "").lower()
+    target_type = ((target_node or {}).get("node_type") or "").lower()
+    semantic = _SEMANTIC_EDGE_BY_TYPES.get((source_type, target_type))
+    if semantic:
+        merged.setdefault("semantic_relation", semantic[0])
+        merged.setdefault("semantic_label", semantic[1])
+    elif relation_type:
+        merged.setdefault("semantic_relation", relation_type)
+    if merged.get("primary_tree") is True:
+        merged.setdefault("tree_role", "primary_branch")
+    merged.update(traceability_metadata((source_node or {}).get("metadata") or {}, (target_node or {}).get("metadata") or {}))
+    if merged.get("session_id"):
+        merged.setdefault("tree_mode", "single_branch")
+        merged.setdefault("branch_policy", "single_branch_by_default")
+    return merged
 
 
 # Default relation_type used when a parent_slug is provided but no explicit
@@ -126,6 +188,10 @@ _DEFAULT_PARENT_RELATION: dict[tuple[str, str], str] = {
     ("audience", "entity"): "contains",
     ("entity", "product"): "contains",
     ("entity", "briefing"): "contains",
+    ("product", "offer"): "contains",
+    ("offer", "copy"): "supports_copy",
+    ("offer", "faq"): "answers_question",
+    ("offer", "asset"): "uses_asset",
     ("product", "copy"): "supports_copy",
     ("product", "faq"): "answers_question",
     ("copy", "faq"): "answers_question",
@@ -224,6 +290,16 @@ def _tipo_to_node_type(tipo: str) -> str:
     return {
         "produto": "product",
         "product": "product",
+        "oferta": "offer",
+        "ofertas": "offer",
+        "offer": "offer",
+        "offers": "offer",
+        "opcao": "offer",
+        "opção": "offer",
+        "variacao": "offer",
+        "variação": "offer",
+        "product_variant": "offer",
+        "purchase_option": "offer",
         "faq": "faq",
         "copy": "copy",
         "briefing": "briefing",
@@ -318,6 +394,11 @@ def _structured_metadata(fm: dict) -> dict:
         "campaigns",
         "product",
         "products",
+        "session_id",
+        "source_ref",
+        "created_via",
+        "tree_mode",
+        "branch_policy",
     ):
         if key in fm and fm.get(key) is not None:
             out[key] = fm.get(key)
@@ -391,12 +472,19 @@ def ensure_main_tree_connection(
     meta = node.get("metadata") or {}
     source_id = _normalize_uuid(parent_node_id or meta.get("resolved_parent_node_id"))
     rel = relation_type or "manual"
+    source_node: Optional[dict] = None
     if not source_id:
         persona_node = _ensure_persona_root(persona_id)
         if not persona_node:
             return None
         source_id = persona_node["id"]
+        source_node = persona_node
         rel = "belongs_to_persona"
+    elif source_id:
+        try:
+            source_node = supabase_client.get_knowledge_node(source_id)
+        except Exception:
+            source_node = None
     if source_id == target_id:
         return None
     return supabase_client.upsert_knowledge_edge(
@@ -405,7 +493,12 @@ def ensure_main_tree_connection(
         rel,
         persona_id=persona_id,
         weight=1,
-        metadata={"primary_tree": True, "created_from": "main_tree_guard"},
+        metadata=semantic_edge_metadata(
+            source_node,
+            node,
+            rel,
+            {"primary_tree": True, "created_from": "main_tree_guard"},
+        ),
     )
 
 
@@ -1249,6 +1342,7 @@ def bootstrap_from_item(
             "source_status": source_status,
         }
         meta.update(_structured_metadata(fm))
+        meta.update(traceability_metadata(item, fm))
         meta = {k: v for k, v in meta.items() if v is not None}
 
         mirror = supabase_client.upsert_knowledge_node({
@@ -1305,11 +1399,16 @@ def bootstrap_from_item(
                     mirror["id"],
                     "belongs_to_persona",
                     persona_id=persona_id,
-                    metadata={
-                        "primary_tree": not used_explicit_parent,
-                        "visual_hidden": used_explicit_parent,
-                        "created_from": "bootstrap_from_item",
-                    },
+                    metadata=semantic_edge_metadata(
+                        persona_node,
+                        mirror,
+                        "belongs_to_persona",
+                        {
+                            "primary_tree": not used_explicit_parent,
+                            "visual_hidden": used_explicit_parent,
+                            "created_from": "bootstrap_from_item",
+                        },
+                    ),
                 )
 
         # 2c) Hierarchical parent edge (parent → mirror). Marked as the
@@ -1330,12 +1429,17 @@ def bootstrap_from_item(
                 relation,
                 persona_id=persona_id,
                 weight=1.0,
-                metadata={
-                    "primary_tree": True,
-                    "created_from": "bootstrap_parent_slug",
-                    "parent_slug": parent_node.get("slug"),
-                    "parent_type": parent_type,
-                },
+                metadata=semantic_edge_metadata(
+                    parent_node,
+                    mirror,
+                    relation,
+                    {
+                        "primary_tree": True,
+                        "created_from": "bootstrap_parent_slug",
+                        "parent_slug": parent_node.get("slug"),
+                        "parent_type": parent_type,
+                    },
+                ),
             )
 
         # 3) Tag nodes + has_tag edges.
@@ -1349,7 +1453,16 @@ def bootstrap_from_item(
             })
             if tnode:
                 supabase_client.upsert_knowledge_edge(
-                    mirror["id"], tnode["id"], "has_tag", persona_id=persona_id,
+                    mirror["id"],
+                    tnode["id"],
+                    "has_tag",
+                    persona_id=persona_id,
+                    metadata={
+                        "graph_layer": "auxiliary",
+                        "primary_tree": False,
+                        "visual_hidden": False,
+                        "created_from": "bootstrap_tags",
+                    },
                 )
 
         # 4) Explicit topic relations from frontmatter/tags plus the item's own

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any, Optional
 
 from services.catalog_crawler import crawl_catalog_url
@@ -11,6 +11,9 @@ from services.kb_intake_service import (
     save,
     AVAILABLE_MODELS,
     attach_crawler_capture,
+    update_session_plan,
+    _invalid_criar_persona,
+    _session_public_state,
 )
 
 router = APIRouter(prefix="/kb-intake", tags=["kb-intake"])
@@ -20,6 +23,12 @@ class StartBody(BaseModel):
     model: str = "gpt-4o-mini"
     initial_context: str = ""
     agent_key: str = "sofia"
+    persona_slug: Optional[str] = None
+    source_url: Optional[str] = None
+    mode: str = "legacy"
+    initial_block_counts: dict[str, int] = Field(default_factory=dict)
+    knowledge_plan: Optional[dict[str, Any]] = None
+    memory_summary: Optional[str] = None
 
 
 class MessageBody(BaseModel):
@@ -38,6 +47,12 @@ class CrawlBody(BaseModel):
     session_id: Optional[str] = None
 
 
+class PlanUpdateBody(BaseModel):
+    knowledge_plan: dict[str, Any]
+    status: Optional[str] = None
+    last_change: Optional[str] = None
+
+
 @router.get("/models")
 def list_models():
     return [{"id": k, "name": v} for k, v in AVAILABLE_MODELS.items()]
@@ -47,7 +62,17 @@ def list_models():
 def start_session(body: StartBody):
     if body.model not in AVAILABLE_MODELS:
         raise HTTPException(400, f"Modelo nao disponivel: {body.model}")
-    return start_bootstrap_session(body.model, initial_context=body.initial_context, agent_key=body.agent_key)
+    initial_state = {
+        "mode": body.mode,
+        "persona_slug": body.persona_slug,
+        "source_url": body.source_url,
+        "initial_block_counts": body.initial_block_counts,
+        "knowledge_plan": body.knowledge_plan,
+        "memory_summary": body.memory_summary,
+    }
+    if (body.mode or "").strip().lower() == "criar" and _invalid_criar_persona(body.persona_slug):
+        raise HTTPException(400, "Selecione uma persona especifica antes de criar conhecimento.")
+    return start_bootstrap_session(body.model, initial_context=body.initial_context, agent_key=body.agent_key, initial_state=initial_state)
 
 
 @router.post("/message")
@@ -196,6 +221,7 @@ def get_session_info(session_id: str):
     session = get_session(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
+    live_state = _session_public_state(session)
     return {
         "id": session["id"],
         "stage": session["stage"],
@@ -206,7 +232,22 @@ def get_session_info(session_id: str):
         "resumed_from_session_id": session.get("resumed_from_session_id"),
         "resume_source": session.get("resume_source"),
         "resume_summary": session.get("resume_summary"),
+        **live_state,
     }
+
+
+@router.patch("/session/{session_id}/plan")
+def patch_session_plan(session_id: str, body: PlanUpdateBody):
+    result = update_session_plan(
+        session_id,
+        body.knowledge_plan,
+        status=body.status,
+        source="kb-intake.sidebar",
+        last_change=body.last_change or "frontend plan sync",
+    )
+    if result.get("ok") is False:
+        raise HTTPException(400, result)
+    return result
 
 
 @router.post("/save")

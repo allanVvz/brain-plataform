@@ -72,6 +72,7 @@ def _content_type_to_tipo(content_type: str) -> str:
         "brand": "brand",
         "briefing": "briefing",
         "product": "produto",
+        "offer": "oferta",
         "copy": "copy",
         "prompt": "prompt",
         "rule": "regra",
@@ -291,6 +292,66 @@ _KB_STATUS: dict[str, str] = {
 # Auxiliary node_types: hidden by default in the UI, but data is preserved.
 _AUXILIARY_NODE_TYPES: set[str] = {"tag", "mention"}
 _TECHNICAL_NODE_TYPES: set[str] = {"knowledge_item", "kb_entry"}
+
+
+def _canonicalize_semantic_node_types(sem_nodes: list[dict], nt_by_type: dict[str, dict]) -> list[dict]:
+    """Repair legacy semantic mirrors in-memory for graph-data.
+
+    Migration 031 backfills persisted offer nodes, but graph-data should not
+    render a stale knowledge_item card in the primary tree while a database
+    still has pre-migration rows.
+    """
+    repaired: list[dict] = []
+    item_cache: dict[str, Optional[dict]] = {}
+    for node in sem_nodes:
+        next_node = dict(node)
+        source_id = next_node.get("source_id")
+        if next_node.get("source_table") == "knowledge_items" and source_id:
+            meta = dict(next_node.get("metadata") or {})
+            content_type = str(meta.get("content_type") or "").strip().lower()
+            if not content_type:
+                sid = str(source_id)
+                if sid not in item_cache:
+                    try:
+                        item_cache[sid] = supabase_client.get_knowledge_item(sid)
+                    except Exception:
+                        item_cache[sid] = None
+                content_type = str((item_cache.get(sid) or {}).get("content_type") or "").strip().lower()
+            expected = knowledge_graph._CONTENT_TYPE_TO_NODE.get(content_type)
+            current = str(next_node.get("node_type") or "").strip().lower()
+            if expected and expected != current:
+                meta.setdefault("runtime_repaired_node_type_from", current or "unknown")
+                meta["content_type"] = content_type
+                registry = nt_by_type.get(expected, {})
+                next_node["node_type"] = expected
+                next_node["metadata"] = meta
+                next_node["level"] = registry.get("default_level", next_node.get("level"))
+                next_node["importance"] = registry.get("default_importance", next_node.get("importance"))
+        repaired.append(next_node)
+    return repaired
+
+
+def _demote_auxiliary_primary_edges(sem_edges: list[dict], nodes_by_id: dict[str, dict]) -> list[dict]:
+    out: list[dict] = []
+    for edge in sem_edges:
+        src_type = str((nodes_by_id.get(edge.get("source_node_id")) or {}).get("node_type") or "").lower()
+        tgt_type = str((nodes_by_id.get(edge.get("target_node_id")) or {}).get("node_type") or "").lower()
+        if (
+            src_type in _AUXILIARY_NODE_TYPES
+            or tgt_type in _AUXILIARY_NODE_TYPES
+            or src_type in _TECHNICAL_NODE_TYPES
+            or tgt_type in _TECHNICAL_NODE_TYPES
+        ):
+            next_edge = dict(edge)
+            meta = dict(next_edge.get("metadata") or {})
+            meta["primary_tree"] = False
+            meta["graph_layer"] = "auxiliary"
+            meta["visual_hidden"] = True
+            next_edge["metadata"] = meta
+            out.append(next_edge)
+            continue
+        out.append(edge)
+    return out
 
 
 def _is_quarantined_metadata(metadata: Optional[dict]) -> bool:
@@ -609,11 +670,17 @@ def get_graph_data(
     except Exception:
         sem_nodes, sem_edges = [], []
 
+    sem_nodes = _canonicalize_semantic_node_types(sem_nodes, nt_by_type)
+    sem_nodes_by_raw_id = {n.get("id"): n for n in sem_nodes if n.get("id")}
+    sem_edges = _demote_auxiliary_primary_edges(sem_edges, sem_nodes_by_raw_id)
+
     # Apply visibility filters early (still keeps data in DB).
     if not include_tags:
         sem_nodes = [n for n in sem_nodes if n.get("node_type") != "tag"]
     if not include_mentions:
         sem_nodes = [n for n in sem_nodes if n.get("node_type") != "mention"]
+    if not include_technical:
+        sem_nodes = [n for n in sem_nodes if (n.get("node_type") or "").lower() not in _TECHNICAL_NODE_TYPES]
     sem_nodes = [n for n in sem_nodes if n.get("status") != "archived"]
     sem_nodes = [n for n in sem_nodes if not _is_quarantined_metadata(n.get("metadata"))]
 
@@ -632,7 +699,7 @@ def get_graph_data(
     ]
     if (mode or "layered") != "graph":
         visible_tree_edges = []
-        primary_pair_seen: set[tuple[str, str]] = set()
+        primary_relation_seen: set[tuple[str, str, str]] = set()
         relation_rank = {"offers_product": 0, "supports_copy": 1, "answers_question": 2, "contains": 3}
         for edge in sorted(sem_edges, key=lambda e: relation_rank.get((e.get("relation_type") or "").lower(), 9)):
             meta = edge.get("metadata") or {}
@@ -643,10 +710,14 @@ def get_graph_data(
             rt = (edge.get("relation_type") or "").lower()
             terminal_edge = (src_type == "faq" and tgt_type == "embedded") or rt == "gallery_asset"
             if meta.get("primary_tree") is True:
-                pair = (str(edge.get("source_node_id") or ""), str(edge.get("target_node_id") or ""))
-                if pair in primary_pair_seen:
+                relation_key = (
+                    str(edge.get("source_node_id") or ""),
+                    str(edge.get("target_node_id") or ""),
+                    rt,
+                )
+                if relation_key in primary_relation_seen:
                     continue
-                primary_pair_seen.add(pair)
+                primary_relation_seen.add(relation_key)
                 visible_tree_edges.append(edge)
             elif terminal_edge:
                 visible_tree_edges.append(edge)
@@ -835,7 +906,8 @@ def get_graph_data(
         ki_items = []
     pending_graph_items = [
         item for item in ki_items
-        if str(item.get("status") or "").lower() in {"pending", "needs_persona", "needs_category", "draft", "approved"}
+        if include_technical
+        and str(item.get("status") or "").lower() in {"pending", "needs_persona", "needs_category", "draft", "approved"}
         and str(item.get("id")) not in mirrored_knowledge_item_ids
         and not _is_quarantined_metadata((item.get("metadata") or {}))
     ]
@@ -1330,6 +1402,31 @@ def get_graph_data(
                 "validated": False,
             },
         })
+
+    deduped_nodes: dict[str, dict] = {}
+    for node in nodes:
+        node_id = node.get("id")
+        if node_id and node_id not in deduped_nodes:
+            deduped_nodes[node_id] = node
+    nodes = list(deduped_nodes.values())
+
+    deduped_edges: dict[str, dict] = {}
+    primary_seen: set[tuple[str, str, str]] = set()
+    for edge in edges:
+        edge_id = edge.get("id")
+        if edge_id and edge_id in deduped_edges:
+            continue
+        data = edge.get("data") or {}
+        meta = data.get("metadata") or {}
+        relation_type = str(data.get("relation_type") or "").lower()
+        if data.get("primary_tree") is True or meta.get("primary_tree") is True:
+            primary_key = (str(edge.get("source") or ""), str(edge.get("target") or ""), relation_type)
+            if primary_key in primary_seen:
+                continue
+            primary_seen.add(primary_key)
+        if edge_id:
+            deduped_edges[edge_id] = edge
+    edges = list(deduped_edges.values())
 
     total_items = len(ki_items) + len(kb_entries)
 

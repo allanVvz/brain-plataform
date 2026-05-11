@@ -4,15 +4,15 @@ import { Bot, User, Upload, Send, CheckCircle, Circle, Loader2, Save } from "luc
 import { api } from "@/lib/api";
 
 const MODELS = [
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5 â€” RÃ¡pido" },
-  { id: "claude-sonnet-4-6",         label: "Sonnet 4.6 â€” Balanceado" },
-  { id: "claude-opus-4-7",           label: "Opus 4.7 â€” MÃ¡ximo" },
+  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5 — Rápido" },
+  { id: "claude-sonnet-4-6",         label: "Sonnet 4.6 — Balanceado" },
+  { id: "claude-opus-4-7",           label: "Opus 4.7 — Máximo" },
 ];
 
 const TYPE_LABELS: Record<string, string> = {
   brand: "Brand", briefing: "Briefing", product: "Produto",
   campaign: "Campanha", copy: "Copy", faq: "FAQ", tone: "Tom de Voz",
-  audience: "PÃºblico", competitor: "Concorrente", rule: "Regra",
+  audience: "Público", competitor: "Concorrente", rule: "Regra",
   prompt: "Prompt", maker_material: "Maker", asset: "Asset Visual", other: "Outro",
 };
 
@@ -45,7 +45,7 @@ function ClassBadge({ label, value }: { label: string; value: string | null }) {
       <span className="text-xs text-brain-muted">{label}</span>
       {value
         ? <span className="text-xs font-medium text-brain-accent">{value}</span>
-        : <span className="text-xs text-brain-muted/50 italic">â€”</span>
+        : <span className="text-xs text-brain-muted/50 italic">—</span>
       }
     </div>
   );
@@ -120,7 +120,7 @@ export default function IntakePage() {
 
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: file ? `ðŸ“Ž ${file.name}${userMsg ? `\n${userMsg}` : ""}` : userMsg },
+      { role: "user", content: file ? `📎 ${file.name}${userMsg ? `\n${userMsg}` : ""}` : userMsg },
     ]);
 
     try {
@@ -149,8 +149,8 @@ export default function IntakePage() {
         {
           role: "system",
           content: data.ok
-            ? `âœ… Salvo com sucesso!\nðŸ“ ${data.file_path}\nðŸ”€ Git: ${data.git?.commit_ok ? "commitado" : "falhou"} | Push: ${data.git?.push_ok ? "ok" : "falhou"}\nðŸ—„ï¸ Supabase: ${data.sync?.new ?? 0} novos, ${data.sync?.updated ?? 0} atualizados`
-            : `âŒ Erro: ${data.detail || data.error}`,
+            ? `✅ Salvo com sucesso!\n📁 ${data.file_path}\n🔀 Git: ${data.git?.commit_ok ? "commitado" : "falhou"} | Push: ${data.git?.push_ok ? "ok" : "falhou"}\n🗄️ Supabase: ${data.sync?.new ?? 0} novos, ${data.sync?.updated ?? 0} atualizados`
+            : `❌ Erro: ${data.detail || data.error}`,
         },
       ]);
     } finally {
@@ -178,7 +178,7 @@ export default function IntakePage() {
 
   return (
     <div className="flex gap-5 h-[calc(100vh-7rem)]">
-      {/* â”€â”€ Chat panel â”€â”€ */}
+      {/* ── Chat panel ── */}
       <div className="flex-1 flex flex-col bg-brain-surface border border-brain-border rounded-xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-brain-border">
@@ -210,7 +210,7 @@ export default function IntakePage() {
                 onClick={reset}
                 className="text-xs text-brain-muted hover:text-white border border-brain-border px-2 py-1 rounded-md transition-colors"
               >
-                Nova sessÃ£o
+                Nova sessão
               </button>
             )}
           </div>
@@ -230,7 +230,7 @@ export default function IntakePage() {
               <div>
                 <p className="text-white font-medium">Criar</p>
                 <p className="text-sm text-brain-muted mt-1">
-                  Envie textos, arquivos ou conteÃºdo. O agente classificarÃ¡ e salvarÃ¡ no vault automaticamente.
+                  Envie textos, arquivos ou conteúdo. O agente classificará e salvará no vault automaticamente.
                 </p>
               </div>
               <button
@@ -239,7 +239,7 @@ export default function IntakePage() {
                 className="bg-brain-accent hover:bg-brain-accent/80 disabled:opacity-50 text-white text-sm px-6 py-2 rounded-md font-medium transition-colors flex items-center gap-2"
               >
                 {loading ? <Loader2 size={14} className="animate-spin" /> : null}
-                Iniciar sessÃ£o
+                Iniciar sessão
               </button>
             </div>
           )}
@@ -285,7 +285,7 @@ export default function IntakePage() {
               value={contentText}
               onChange={(e) => setContentText(e.target.value)}
               rows={4}
-              placeholder="Cole o conteÃºdo completo aqui (opcional â€” se nÃ£o preenchido, salva apenas com frontmatter)..."
+              placeholder="Cole o conteúdo completo aqui (opcional — se não preenchido, salva apenas com frontmatter)..."
               className="w-full bg-brain-bg border border-brain-border rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brain-accent resize-none"
             />
           </div>
@@ -299,7 +299,7 @@ export default function IntakePage() {
                 <Upload size={12} className="text-brain-accent" />
                 <span className="flex-1 truncate">{file.name}</span>
                 <button onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ""; }}
-                  className="text-brain-muted hover:text-white">âœ•</button>
+                  className="text-brain-muted hover:text-white">✕</button>
               </div>
             )}
             <div className="flex gap-2 items-end">
@@ -341,12 +341,12 @@ export default function IntakePage() {
         {stage === "ready_to_save" && (
           <div className="border-t border-brain-border bg-green-500/5 px-4 py-2.5 flex items-center gap-3">
             <CheckCircle size={14} className="text-green-400 shrink-0" />
-            <span className="text-xs text-green-400 flex-1">ClassificaÃ§Ã£o completa â€” pronto para salvar</span>
+            <span className="text-xs text-green-400 flex-1">Classificação completa — pronto para salvar</span>
             <button
               onClick={() => setShowContentInput((v) => !v)}
               className="text-xs text-brain-muted hover:text-white border border-brain-border px-2 py-1 rounded transition-colors"
             >
-              {showContentInput ? "Ocultar conteÃºdo" : "+ ConteÃºdo"}
+              {showContentInput ? "Ocultar conteúdo" : "+ Conteúdo"}
             </button>
             <button
               onClick={handleSave}
@@ -360,28 +360,28 @@ export default function IntakePage() {
         )}
       </div>
 
-      {/* â”€â”€ Classification panel â”€â”€ */}
+      {/* ── Classification panel ── */}
       <div className="w-60 shrink-0 flex flex-col gap-4">
         {/* Classification state */}
         <div className="bg-brain-surface border border-brain-border rounded-xl p-4">
-          <p className="text-[10px] uppercase tracking-widest text-brain-muted mb-3">ClassificaÃ§Ã£o</p>
+          <p className="text-[10px] uppercase tracking-widest text-brain-muted mb-3">Classificação</p>
           <div className="space-y-0">
             <ClassBadge label="Cliente" value={personaLabel(cls.persona_slug)} />
             <ClassBadge label="Tipo" value={cls.content_type ? TYPE_LABELS[cls.content_type] ?? cls.content_type : null} />
             {cls.content_type === "asset" && (
               <>
                 <ClassBadge label="Tipo de asset" value={cls.asset_type} />
-                <ClassBadge label="FunÃ§Ã£o" value={cls.asset_function} />
+                <ClassBadge label="Função" value={cls.asset_function} />
               </>
             )}
-            <ClassBadge label="TÃ­tulo" value={cls.title} />
+            <ClassBadge label="Título" value={cls.title} />
           </div>
 
           {/* Progress dots */}
           <div className="mt-4 space-y-1.5">
             <StepDot done={!!cls.persona_slug} label="Cliente definido" />
             <StepDot done={!!cls.content_type} label="Tipo classificado" />
-            <StepDot done={!!cls.title} label="TÃ­tulo confirmado" />
+            <StepDot done={!!cls.title} label="Título confirmado" />
             <StepDot done={stage === "ready_to_save" || stage === "done"} label="Pronto para salvar" />
             <StepDot done={stage === "done"} label="Salvo" />
           </div>
@@ -411,9 +411,9 @@ export default function IntakePage() {
             <p className="text-[10px] uppercase tracking-widest text-brain-muted mb-3">Como usar</p>
             <div className="space-y-2 text-xs text-brain-muted">
               <p>1. Escolha o modelo AI</p>
-              <p>2. Inicie a sessÃ£o</p>
-              <p>3. Envie texto ou faÃ§a upload de arquivo</p>
-              <p>4. Responda as perguntas de classificaÃ§Ã£o</p>
+              <p>2. Inicie a sessão</p>
+              <p>3. Envie texto ou faça upload de arquivo</p>
+              <p>4. Responda as perguntas de classificação</p>
               <p>5. Confirme e salve</p>
             </div>
             <div className="mt-3 pt-3 border-t border-brain-border space-y-1 text-[10px] text-brain-muted">

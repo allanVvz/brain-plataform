@@ -54,6 +54,7 @@ const KNOWLEDGE_BLOCKS = [
   { id: "campaign", label: "Campanha", description: "Colecoes, lancamentos, sazonalidade e angulos comerciais." },
   { id: "audience", label: "Publico", description: "Segmentos, dores, desejos, linguagem e objecoes." },
   { id: "product", label: "Produto", description: "Itens, kits, beneficios, precos, disponibilidade e atributos." },
+  { id: "offer", label: "Oferta", description: "Preco, quantidade, pacote, kit ou variacao comercial." },
   { id: "entity", label: "Entidades", description: "Cores, materiais, categorias, variantes e termos relacionados." },
   { id: "copy", label: "Copy", description: "Textos comerciais por canal, publico, etapa e oferta." },
   { id: "faq", label: "FAQ", description: "Perguntas e respostas recuperaveis pelo Golden Dataset." },
@@ -145,9 +146,122 @@ interface KnowledgePlan {
   source: string;
   persona_slug: string;
   validation_policy: string;
+  tree_mode?: string;
+  branch_policy?: string;
+  faq_count_policy?: string;
   entries: KnowledgePlanEntry[];
   links: KnowledgePlanLink[];
   missing_questions?: string[];
+}
+
+type BlockCounts = Record<string, number>;
+
+interface PlanState {
+  normalized_plan: KnowledgePlan;
+  validation: {
+    valid: boolean;
+    blocking_violations: string[];
+    warnings: string[];
+  };
+  summary: {
+    entry_count: number;
+    current_block_counts: BlockCounts;
+    link_count: number;
+    tree_mode: string;
+    branch_policy: string;
+    faq_count_policy: string;
+  };
+  plan_hash: string;
+}
+
+const COUNTED_BLOCK_IDS = ["brand", "briefing", "campaign", "audience", "product", "offer", "copy", "faq", "rule", "tone", "asset"];
+const SIDEBAR_TREE_BLOCKS = [
+  { id: "persona", label: "Persona", description: "Raiz da sessao CRIAR." },
+  ...KNOWLEDGE_BLOCKS,
+  { id: "embedded", label: "Embedded", description: "Destino RAG apos validacao de FAQ." },
+  { id: "gallery", label: "Gallery", description: "Destino visual para assets aprovados." },
+];
+
+function emptyBlockCounts(): BlockCounts {
+  return Object.fromEntries(COUNTED_BLOCK_IDS.map((id) => [id, 0]));
+}
+
+function normalizeBlockCounts(value?: Record<string, any> | null): BlockCounts {
+  const counts = emptyBlockCounts();
+  for (const key of COUNTED_BLOCK_IDS) {
+    const n = Number(value?.[key] ?? 0);
+    counts[key] = Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+  }
+  return counts;
+}
+
+function countBlocksByType(entries?: KnowledgePlanEntry[] | null): BlockCounts {
+  const counts = emptyBlockCounts();
+  for (const entry of entries || []) {
+    const type = normalizeContentTypeAlias(entry.content_type);
+    if (type in counts) counts[type] += 1;
+  }
+  return counts;
+}
+
+function normalizeContentTypeAlias(value: any) {
+  const type = repairText(String(value || "")).trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    regras: "rule",
+    rules: "rule",
+    regra: "rule",
+    ofertas: "offer",
+    oferta: "offer",
+    offers: "offer",
+    product_variant: "offer",
+    purchase_option: "offer",
+    opcao: "offer",
+    opção: "offer",
+    variacao: "offer",
+    variação: "offer",
+    pacote: "offer",
+    kit: "offer",
+  };
+  return aliases[type] || type || "other";
+}
+
+function isInvalidCriarPersona(slug?: string | null) {
+  return ["", "all", "todos", "global"].includes(String(slug || "").trim().toLowerCase());
+}
+
+function labelForBlockId(blockId: string) {
+  return SIDEBAR_TREE_BLOCKS.find((block) => block.id === blockId)?.label || blockId;
+}
+
+function createManualDraftEntry(blockId: string, index: number, personaSlug: string, currentPlan: KnowledgePlan | null): KnowledgePlanEntry {
+  const title = `${labelForBlockId(blockId)} ${index}`;
+  const slug = `${slugifyPlanValue(blockId)}-manual-${Date.now().toString(36)}-${index}`;
+  const entries = currentPlan?.entries || [];
+  const latestOf = (type: string) => [...entries].reverse().find((entry) => entry.content_type === type)?.slug;
+  const parentByType: Record<string, string | undefined> = {
+    briefing: "self",
+    campaign: latestOf("briefing"),
+    audience: latestOf("campaign") || latestOf("briefing"),
+    product: latestOf("audience"),
+    offer: latestOf("product"),
+    copy: latestOf("offer") || latestOf("product"),
+    faq: latestOf("copy") || latestOf("product"),
+    rule: latestOf("campaign") || latestOf("briefing") || latestOf("brand"),
+    tone: latestOf("brand") || latestOf("briefing"),
+    asset: latestOf("product") || latestOf("brand"),
+  };
+  return {
+    content_type: blockId,
+    title,
+    slug,
+    status: "pendente_validacao",
+    content: `${title} adicionado manualmente na sidebar para ${personaSlug || "persona"}.`,
+    tags: [blockId, "manual"],
+    metadata: {
+      parent_slug: parentByType[blockId],
+      edited_in_sidebar: true,
+    },
+  };
 }
 
 function parseApiErrorBody(message: string): Record<string, unknown> | null {
@@ -167,7 +281,9 @@ function formatChatRequestError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error || "");
   const parsed = parseApiErrorBody(message);
   const bodyMessage = typeof parsed?.message === "string" ? parsed.message : null;
+  const bodyDetail = typeof parsed?.detail === "string" ? parsed.detail : null;
   if (bodyMessage) return bodyMessage;
+  if (bodyDetail) return bodyDetail;
   if (message.includes("/kb-intake/message")) {
     return "Nao consegui processar sua mensagem agora. Sua configuracao foi mantida.";
   }
@@ -188,7 +304,7 @@ function formatSaveError(body: Record<string, unknown> | null | undefined): stri
 }
 
 function repairText(value: string) {
-  if (!value || !/[ÃÂâ]/.test(value)) return value;
+  if (!value || !/(Ã|â€|â€œ|â€�|â€˜|â€™|âˆ|â”|�)/.test(value)) return value;
   try {
     return decodeURIComponent(escape(value));
   } catch {
@@ -207,8 +323,9 @@ function slugifyPlanValue(value: string) {
 }
 
 function normalizePlanEntry(entry: any): KnowledgePlanEntry {
+  const contentType = normalizeContentTypeAlias(entry?.content_type || "other");
   return {
-    content_type: String(entry?.content_type || "other").trim().toLowerCase(),
+    content_type: contentType,
     title: repairText(String(entry?.title || "Conhecimento")).trim() || "Conhecimento",
     slug: slugifyPlanValue(String(entry?.slug || entry?.title || "item")),
     status: repairText(String(entry?.status || "pendente_validacao")).trim() || "pendente_validacao",
@@ -224,11 +341,12 @@ const PREVIEW_TYPE_RANK: Record<string, number> = {
   campaign: 3,
   audience: 4,
   product: 5,
-  copy: 6,
-  asset: 7,
-  tone: 8,
-  rule: 9,
-  faq: 10,
+  offer: 6,
+  copy: 7,
+  rule: 8,
+  asset: 9,
+  tone: 10,
+  faq: 11,
 };
 
 function sharedPlanTokens(left: string, right: string) {
@@ -264,72 +382,19 @@ function bestParentCandidate(entry: KnowledgePlanEntry, candidates: KnowledgePla
 }
 
 function normalizePreviewPlan(plan: KnowledgePlan): KnowledgePlan {
-  const entries = plan.entries.map((entry) => ({
-    ...entry,
-    metadata: { ...(entry.metadata || {}) },
-  }));
-  const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
-  const byType = (type: string) => entries.filter((entry) => entry.content_type === type);
-  const parentTypeOf = (entry: KnowledgePlanEntry) => {
-    const parent = parentSlugOf(entry);
-    return parent ? bySlug.get(parent)?.content_type || "" : "";
-  };
-  const setParent = (entry: KnowledgePlanEntry, parent: KnowledgePlanEntry | null) => {
-    if (!parent || parent.slug === entry.slug) return;
-    entry.metadata = { ...(entry.metadata || {}), parent_slug: parent.slug };
-  };
-
-  const brands = byType("brand");
-  const briefings = byType("briefing");
-  const campaigns = byType("campaign");
-  const audiences = byType("audience");
-  const products = byType("product");
-
-  for (const briefing of briefings) {
-    if (!parentSlugOf(briefing) && brands.length) setParent(briefing, bestParentCandidate(briefing, brands));
-  }
-  for (const campaign of campaigns) {
-    if (!["briefing", "brand"].includes(parentTypeOf(campaign))) {
-      setParent(campaign, bestParentCandidate(campaign, [...briefings, ...brands].filter(Boolean)));
-    }
-  }
-  for (const audience of audiences) {
-    if (!["campaign", "briefing", "brand"].includes(parentTypeOf(audience))) {
-      setParent(audience, bestParentCandidate(audience, [...campaigns, ...briefings, ...brands].filter(Boolean)));
-    }
-  }
-  for (const product of products) {
-    if (audiences.length > 0) {
-      if (parentTypeOf(product) !== "audience") {
-        setParent(product, bestParentCandidate(product, audiences));
-      }
-    } else if (!["campaign", "briefing", "brand"].includes(parentTypeOf(product))) {
-      setParent(product, bestParentCandidate(product, [...campaigns, ...briefings, ...brands].filter(Boolean)));
-    }
-  }
-  for (const entry of entries) {
-    if (!["faq", "copy", "asset", "rule", "tone", "entity", "other"].includes(entry.content_type)) continue;
-    if (products.length > 0 && parentTypeOf(entry) !== "product") {
-      setParent(entry, bestParentCandidate(entry, products));
-    }
-  }
-
-  const normalized = rebuildPlanLinks({ ...plan, entries });
-  normalized.entries.sort(
-    (a, b) =>
-      (PREVIEW_TYPE_RANK[a.content_type] || 99) - (PREVIEW_TYPE_RANK[b.content_type] || 99) ||
-      a.title.localeCompare(b.title),
-  );
-  return normalized;
+  return plan;
 }
 
 function normalizeKnowledgePlan(plan: any, personaSlug: string): KnowledgePlan | null {
   if (!plan || !Array.isArray(plan.entries) || plan.entries.length === 0) return null;
   const entries = plan.entries.map(normalizePlanEntry);
-  return normalizePreviewPlan({
+  return {
     source: String(plan.source || ""),
     persona_slug: String(plan.persona_slug || personaSlug || "global"),
     validation_policy: String(plan.validation_policy || "human_validation_required"),
+    tree_mode: String(plan.tree_mode || "single_branch"),
+    branch_policy: String(plan.branch_policy || "single_branch_by_default"),
+    faq_count_policy: String(plan.faq_count_policy || "total"),
     entries,
     links: Array.isArray(plan.links)
       ? plan.links
@@ -343,7 +408,79 @@ function normalizeKnowledgePlan(plan: any, personaSlug: string): KnowledgePlan |
     missing_questions: Array.isArray(plan.missing_questions)
       ? plan.missing_questions.map((item: any) => repairText(String(item)))
       : [],
-  });
+  };
+}
+
+function buildLocalPlanState(plan: KnowledgePlan | null, fallbackCounts?: Record<string, any> | null): PlanState | null {
+  if (!plan) return null;
+  const counts = countBlocksByType(plan.entries);
+  const summary = {
+    entry_count: plan.entries.length,
+    current_block_counts: normalizeBlockCounts(fallbackCounts || counts),
+    link_count: Array.isArray(plan.links) ? plan.links.length : 0,
+    tree_mode: String((plan as any).tree_mode || "single_branch"),
+    branch_policy: String((plan as any).branch_policy || "single_branch_by_default"),
+    faq_count_policy: String((plan as any).faq_count_policy || "total"),
+  };
+  return {
+    normalized_plan: plan,
+    validation: { valid: true, blocking_violations: [], warnings: [] },
+    summary,
+    plan_hash: String((plan as any).plan_hash || ""),
+  };
+}
+
+function normalizePlanState(raw: any, personaSlug: string): PlanState | null {
+  const source = raw?.plan_state || raw;
+  if (!source || typeof source !== "object") return null;
+  const rawPlan = source.normalized_plan || raw?.normalized_plan || raw?.knowledge_plan;
+  const normalizedPlan = normalizeKnowledgePlan(rawPlan, personaSlug);
+  if (!normalizedPlan) return null;
+  const summary = source.summary || raw?.plan_summary || {};
+  const validation = source.validation || raw?.plan_validation || {};
+  return {
+    normalized_plan: normalizedPlan,
+    validation: {
+      valid: validation.valid !== false,
+      blocking_violations: Array.isArray(validation.blocking_violations) ? validation.blocking_violations.map((item: any) => String(item)) : [],
+      warnings: Array.isArray(validation.warnings) ? validation.warnings.map((item: any) => String(item)) : [],
+    },
+    summary: {
+      entry_count: Number(summary.entry_count ?? normalizedPlan.entries.length),
+      current_block_counts: normalizeBlockCounts(summary.current_block_counts || raw?.current_block_counts || countBlocksByType(normalizedPlan.entries)),
+      link_count: Number(summary.link_count ?? normalizedPlan.links.length),
+      tree_mode: String(summary.tree_mode || (normalizedPlan as any).tree_mode || "single_branch"),
+      branch_policy: String(summary.branch_policy || (normalizedPlan as any).branch_policy || "single_branch_by_default"),
+      faq_count_policy: String(summary.faq_count_policy || (normalizedPlan as any).faq_count_policy || "total"),
+    },
+    plan_hash: String(source.plan_hash || raw?.plan_hash || ""),
+  };
+}
+
+function planStateCountsMatch(planState: PlanState | null) {
+  if (!planState) return false;
+  const actual = countBlocksByType(planState.normalized_plan.entries);
+  const expected = normalizeBlockCounts(planState.summary.current_block_counts);
+  return COUNTED_BLOCK_IDS.every((key) => Number(actual[key] || 0) === Number(expected[key] || 0))
+    && planState.normalized_plan.entries.length === Number(planState.summary.entry_count || 0);
+}
+
+function summarizePlanStateForChat(planState: PlanState): string {
+  const counts = normalizeBlockCounts(planState.summary.current_block_counts);
+  const lines = [
+    `Plano normalizado: ${planState.summary.entry_count} bloco(s).`,
+    `Resumo: briefing ${counts.briefing || 0}, campanha ${counts.campaign || 0}, publico ${counts.audience || 0}, produto ${counts.product || 0}, oferta ${counts.offer || 0}, copy ${counts.copy || 0}, FAQ ${counts.faq || 0}, regra ${counts.rule || 0}.`,
+    `Politica: ${planState.summary.tree_mode} / ${planState.summary.branch_policy}; FAQ ${planState.summary.faq_count_policy}.`,
+  ];
+  const violations = planState.validation.blocking_violations || [];
+  if (violations.length > 0) {
+    lines.push("Plano ainda nao esta pronto para salvar.");
+    lines.push("Pendencias bloqueantes:");
+    lines.push(...violations.map((violation) => `- ${repairText(violation)}`));
+  } else {
+    lines.push("Pendencias bloqueantes: nenhuma.");
+  }
+  return lines.join("\n");
 }
 
 function parentSlugOf(entry: KnowledgePlanEntry) {
@@ -361,33 +498,41 @@ function normalizeParentSlug(parentSlug: string | null, personaSlug: string) {
 }
 
 function rebuildPlanLinks(plan: KnowledgePlan): KnowledgePlan {
-  const slugToType = new Map(plan.entries.map((entry) => [entry.slug, entry.content_type]));
-  const links = new Map<string, KnowledgePlanLink>();
-  const relationFor = (parentType: string, childType: string) => {
-    if (parentType === "briefing" && childType === "campaign") return "briefed_by";
-    if (parentType === "campaign" && childType === "audience") return "targets_audience";
-    if (parentType === "audience" && childType === "product") return "offers_product";
-    if (parentType === "product" && childType === "faq") return "answers_question";
-    if (parentType === "product" && childType === "copy") return "supports_copy";
-    if (parentType === "product" && childType === "asset") return "uses_asset";
-    return "contains";
-  };
-  for (const link of plan.links || []) {
-    const key = `${link.source_slug}=>${link.target_slug}`;
-    links.set(key, link);
-  }
-  for (const entry of plan.entries) {
+  return plan;
+}
+
+function validatePreviewPlan(plan: KnowledgePlan | null | undefined): string[] {
+  if (!plan || !Array.isArray(plan.entries) || plan.entries.length === 0) return [];
+  const errors: string[] = [];
+  const entries = plan.entries;
+  const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
+  const slugs = entries.map((entry) => entry.slug).filter(Boolean);
+  if (new Set(slugs).size !== slugs.length) errors.push("Plano contem slugs duplicados.");
+  const hasOffer = entries.some((entry) => entry.content_type === "offer");
+  const hasCopy = entries.some((entry) => entry.content_type === "copy");
+  for (const entry of entries) {
     const parentSlug = normalizeParentSlug(parentSlugOf(entry), plan.persona_slug);
-    if (parentSlug === "self") entry.metadata = { ...(entry.metadata || {}), parent_slug: "self" };
-    if (!parentSlug || parentSlug === entry.slug) continue;
-    const key = `${parentSlug}=>${entry.slug}`;
-    links.set(key, {
-      source_slug: parentSlug,
-      target_slug: entry.slug,
-      relation_type: relationFor(String(slugToType.get(parentSlug) || ""), entry.content_type),
-    });
+    const parentType = parentSlug === "self" ? "persona" : parentSlug ? bySlug.get(parentSlug)?.content_type || "" : "";
+    if (entry.content_type === "product" && entry.slug.includes("audience")) {
+      errors.push(`Produto ${entry.slug} nao pode embutir audience no slug.`);
+    }
+    if (entry.content_type === "offer" && parentType !== "product") {
+      errors.push(`Oferta ${entry.slug} precisa estar abaixo de product.`);
+    }
+    if (entry.content_type === "copy") {
+      if (hasOffer && parentType !== "offer") errors.push(`Copy ${entry.slug} precisa estar abaixo de offer.`);
+      if (!hasOffer && parentType && !["product", "campaign", "briefing", "brand"].includes(parentType)) {
+        errors.push(`Copy ${entry.slug} tem parent invalido.`);
+      }
+    }
+    if (entry.content_type === "faq" && hasCopy && parentType !== "copy") {
+      errors.push(`FAQ ${entry.slug} precisa estar abaixo de copy.`);
+    }
+    if (entry.content_type === "rule" && parentType && !["campaign", "briefing", "brand", "persona"].includes(parentType)) {
+      errors.push(`Rule ${entry.slug} precisa estar abaixo de campaign/briefing/brand.`);
+    }
   }
-  return { ...plan, links: Array.from(links.values()) };
+  return errors;
 }
 
 function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
@@ -626,11 +771,13 @@ function buildInitialContext(plan: CapturePlan, uploads: SessionUpload[]) {
     "- Fazer no maximo 3 perguntas objetivas por rodada.",
     "- Os blocos selecionados sao a intencao inicial; se a conversa mudar, aceitar novos blocos e perguntar lacunas especificas.",
     "- Ao gerar, produzir diversos conhecimentos: uma proposta por bloco selecionado e uma entry por produto/FAQ/copy quando houver dados suficientes.",
-    "- Sempre criar uma estrutura de conhecimento baseada em multiplos galhos.",
+    "- O plano inicial e apenas ponto de partida; se o operador expandir para 2 publicos, 4 produtos e 8 FAQs, manter esse plano vivo.",
+    "- Sempre usar o knowledge_plan atual como fonte para salvar; nunca voltar ao plano inicial apos expansao.",
+    "- Sempre criar uma estrutura de conhecimento baseada em grafo hierarquizado.",
     "- Gerar conhecimento hierarquizado como grafo quando houver relacoes entre brand, campanha, publico, produto, entidades, copy, FAQ, regra ou tom.",
     "- Respeitar as quantidades de variacao por bloco; FAQ deve se multiplicar por conhecimento quando configurado.",
     "- Nao inventar precos, cores, disponibilidade ou URLs.",
-    "- Se nenhuma persona estiver selecionada, manter o escopo global ate o operador escolher uma persona.",
+    "- CRIAR exige persona especifica; nao usar Todos/global para criar conhecimento.",
   ].join("\n");
 }
 
@@ -681,6 +828,7 @@ function PreflightPanel({
   };
 
   const selectedCount = plan.selectedBlocks.length;
+  const personaMissing = isInvalidCriarPersona(plan.personaSlug);
 
   return (
     <div className="panel flex h-full flex-col overflow-hidden">
@@ -712,7 +860,7 @@ function PreflightPanel({
               onChange={(e) => onPersonaChange(e.target.value)}
               className="lg-input w-full text-sm"
             >
-              <option value="">Todos</option>
+              <option value="">Selecione uma persona</option>
               {personas.map((persona) => (
                 <option key={persona.slug} value={persona.slug}>
                   {persona.name}
@@ -783,6 +931,11 @@ function PreflightPanel({
           <p className="mt-2 text-[10px] text-obs-faint">
             A selecao e ponto de partida. Durante a conversa o agente pode adicionar, remover ou trocar blocos conforme o pedido mudar.
           </p>
+          {personaMissing && (
+            <p className="mt-2 text-[11px] text-obs-amber">
+              Selecione uma persona antes de criar conhecimento.
+            </p>
+          )}
         </div>
 
         {/* Confirmation */}
@@ -805,7 +958,7 @@ function PreflightPanel({
       <div className="-mx-[22px] -mb-[22px] px-5 py-4 [border-top:1px_solid_var(--border-glass-soft)]">
         <button
           onClick={onStart}
-          disabled={loading || !plan.confirmed || plan.selectedBlocks.length === 0}
+          disabled={loading || !plan.confirmed || plan.selectedBlocks.length === 0 || personaMissing}
           className="lg-btn lg-btn-primary w-full justify-center"
         >
           {loading ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
@@ -860,6 +1013,18 @@ function ChatPanel({
   onCrawlerRun,
   personas,
   onPersonaChange,
+  currentKnowledgePlan,
+  setCurrentKnowledgePlan,
+  currentBlockCounts,
+  setCurrentBlockCounts,
+  planState,
+  setPlanState,
+  confirmedPlanHash,
+  setConfirmedPlanHash,
+  sessionId,
+  setSessionId,
+  sessionStatus,
+  setSessionStatus,
 }: {
   plan: CapturePlan;
   setPlan: (next: CapturePlan) => void;
@@ -867,10 +1032,21 @@ function ChatPanel({
   onCrawlerRun: (run: CrawlerRun) => void;
   personas: Persona[];
   onPersonaChange: (slug: string) => void;
+  currentKnowledgePlan: KnowledgePlan | null;
+  setCurrentKnowledgePlan: (plan: KnowledgePlan | null) => void;
+  currentBlockCounts: BlockCounts;
+  setCurrentBlockCounts: (counts: BlockCounts) => void;
+  planState: PlanState | null;
+  setPlanState: (state: PlanState | null) => void;
+  confirmedPlanHash: string | null;
+  setConfirmedPlanHash: (hash: string | null) => void;
+  sessionId: string | null;
+  setSessionId: (id: string | null) => void;
+  sessionStatus: string;
+  setSessionStatus: (status: string) => void;
 }) {
   const router = useRouter();
   const [model, setModel] = useState("gpt-4o-mini");
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -884,31 +1060,78 @@ function ChatPanel({
   const [missionState, setMissionState] = useState<MissionState | null>(null);
   const [resumeSummary, setResumeSummary] = useState<string | null>(null);
   const [showRawMarkdown, setShowRawMarkdown] = useState(false);
-  const [draftPlan, setDraftPlan] = useState<KnowledgePlan | null>(null);
   const [planConfirmed, setPlanConfirmed] = useState(false);
   const [selectedFaqSlug, setSelectedFaqSlug] = useState<string | null>(null);
   const [selectedProductSlug, setSelectedProductSlug] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const draftPlan = planState?.normalized_plan || currentKnowledgePlan;
+  const blockingViolations = planState?.validation?.blocking_violations || [];
+  const planStateValid = Boolean(planState && planState.validation.valid && blockingViolations.length === 0 && planStateCountsMatch(planState));
+  const previewViolations = planState
+    ? [...blockingViolations, ...(!planStateCountsMatch(planState) ? ["Plan summary/counts divergem do normalizedPlan."] : [])]
+    : validatePreviewPlan(draftPlan);
+  const currentEntryCount = Number(planState?.summary?.entry_count ?? Object.values(currentBlockCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0));
+
+  function applyPlanState(nextState: PlanState | null) {
+    setPlanState(nextState);
+    setCurrentKnowledgePlan(nextState?.normalized_plan || null);
+    setCurrentBlockCounts(normalizeBlockCounts(nextState?.summary?.current_block_counts || undefined));
+    setPlanConfirmed(false);
+    setConfirmedPlanHash(null);
+    setSelectedFaqSlug(null);
+    setSelectedProductSlug(null);
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (!sessionId || stage !== "idle") return;
+    setStage(sessionStatus === "saved" ? "done" : sessionStatus || "chatting");
+    setCls((prev) => ({ ...prev, persona_slug: prev.persona_slug || plan.personaSlug || null }));
+    setMessages([{ role: "system", content: "Sessao CRIAR restaurada com o plano atual da Sofia." }]);
+  }, [sessionId, sessionStatus, stage, plan.personaSlug]);
+
+  useEffect(() => {
+    if (planState?.plan_hash && confirmedPlanHash === planState.plan_hash && planStateValid) {
+      setPlanConfirmed(true);
+    }
+  }, [confirmedPlanHash, planState?.plan_hash, planStateValid]);
+
   async function start() {
+    if (isInvalidCriarPersona(plan.personaSlug)) {
+      setFriendlyError("Selecione uma persona antes de criar conhecimento.");
+      return;
+    }
     setLoading(true);
     try {
-      const d = await api.kbIntakeStart(model, buildInitialContext(plan, uploads));
+      const d = await api.kbIntakeStart(model, buildInitialContext(plan, uploads), {
+        mode: "criar",
+        persona_slug: plan.personaSlug,
+        source_url: plan.sourceUrl,
+        initial_block_counts: normalizeBlockCounts(plan.variationCounts),
+        knowledge_plan: planState?.normalized_plan,
+      });
+      if (d?.ok === false) {
+        setFriendlyError(d?.message || "Nao consegui iniciar a conversa agora.");
+        return;
+      }
       setSessionId(d.session_id);
+      window.localStorage.setItem("active_criar_session_id", d.session_id);
       setMessages(d.bootstrap_message ? [{ role: "assistant", content: d.bootstrap_message }] : []);
       setStage(d.stage || "chatting");
+      setSessionStatus(d.status || d.stage || "chatting");
       setCls(d.classification || { persona_slug: null, content_type: null, asset_type: null, asset_function: null, title: null });
       setMissionState(d.state || null);
       setResumeSummary(d.resume_summary || null);
-      setDraftPlan(normalizeKnowledgePlan(d.proposed_plan, plan.personaSlug));
-      setPlanConfirmed(false);
-      setSelectedFaqSlug(null);
-      setSelectedProductSlug(null);
+      const nextState = normalizePlanState(d, d.persona_slug || plan.personaSlug);
+      if (nextState) {
+        applyPlanState(nextState);
+      } else {
+        setCurrentBlockCounts(normalizeBlockCounts(d.current_block_counts || plan.variationCounts));
+      }
       setFriendlyError(null);
     } catch (e: any) {
       setFriendlyError(formatChatRequestError(e));
@@ -952,18 +1175,26 @@ function ChatPanel({
         setFriendlyError(d?.message || "Nao consegui processar agora. Tente novamente.");
         return;
       }
+      setStage(d.stage);
+      setSessionStatus(d.status || d.stage || sessionStatus);
+      setCls(d.classification);
+      const nextState = normalizePlanState(d, d.classification?.persona_slug || plan.personaSlug);
       if (d.crawler) onCrawlerRun(d.crawler);
-      if ((d.message || "").trim()) {
+      if (nextState) {
+        setMessages((p) => [...p, { role: "assistant", content: summarizePlanStateForChat(nextState) }]);
+      } else if ((d.message || "").trim()) {
         setMessages((p) => [...p, { role: "assistant", content: d.message }]);
       }
-      setStage(d.stage);
-      setCls(d.classification);
-      const nextPlan = normalizeKnowledgePlan(d.proposed_plan, d.classification?.persona_slug || plan.personaSlug);
-      if (nextPlan) {
-        setDraftPlan(rebuildPlanLinks(nextPlan));
-        setPlanConfirmed(false);
-        setSelectedFaqSlug(null);
-        setSelectedProductSlug(null);
+      if (Array.isArray(d.plan_violations) && d.plan_violations.length > 0) {
+        setFriendlyError(`Plano bloqueado antes da preview:\n- ${d.plan_violations.join("\n- ")}`);
+      }
+      if (nextState) {
+        applyPlanState(nextState);
+        if (!nextState.validation.valid || nextState.validation.blocking_violations.length > 0) {
+          setFriendlyError(`Plano bloqueado antes da preview:\n- ${nextState.validation.blocking_violations.join("\n- ")}`);
+        }
+      } else if (d.current_block_counts) {
+        setCurrentBlockCounts(normalizeBlockCounts(d.current_block_counts));
       }
     } catch (e: any) {
       setFriendlyError(formatChatRequestError(e));
@@ -973,10 +1204,21 @@ function ChatPanel({
   }
 
   async function save() {
-    if (!sessionId || !draftPlan || !planConfirmed) return;
+    if (!sessionId || !planState || !planConfirmed) return;
+    if (!planStateValid || confirmedPlanHash !== planState.plan_hash) {
+      setFriendlyError(
+        "Plano ainda não pode ser salvo. Corrija as pendências bloqueantes primeiro."
+        + (previewViolations.length ? `\n- ${previewViolations.join("\n- ")}` : "")
+        + (confirmedPlanHash !== planState.plan_hash ? "\n- Plano confirmado difere do normalizedPlan atual." : "")
+      );
+      return;
+    }
     setLoading(true);
     try {
-      const d = await api.kbIntakeSave(sessionId, contentText, normalizePreviewPlan(rebuildPlanLinks(draftPlan)));
+      const d = await api.kbIntakeSave(sessionId, contentText, {
+        plan_hash: planState.plan_hash,
+        normalized_plan: planState.normalized_plan,
+      });
       setStage("done");
       setMessages((p) => [...p, {
         role: "system",
@@ -989,6 +1231,8 @@ function ChatPanel({
       // sees the hierarchical tree. Falls back to /knowledge/graph when no
       // persona is known yet.
       if (d?.ok) {
+        window.localStorage.removeItem("active_criar_session_id");
+        setSessionStatus("saved");
         const personaSlug = (cls?.persona_slug || plan.personaSlug || "").trim();
         const target = personaSlug
           ? `/knowledge/graph?persona=${encodeURIComponent(personaSlug)}&mode=semantic_tree&depth=5`
@@ -1019,18 +1263,33 @@ function ChatPanel({
     setFriendlyError(null);
     setMissionState(null);
     setResumeSummary(null);
-    setDraftPlan(null);
+    setPlanState(null);
+    setCurrentKnowledgePlan(null);
+    setCurrentBlockCounts(normalizeBlockCounts(plan.variationCounts));
+    setSessionStatus("collecting");
+    window.localStorage.removeItem("active_criar_session_id");
     setPlanConfirmed(false);
+    setConfirmedPlanHash(null);
     setSelectedFaqSlug(null);
     setSelectedProductSlug(null);
   }
 
   function updateDraftPlan(mutator: (current: KnowledgePlan) => KnowledgePlan) {
-    setDraftPlan((current) => {
-      if (!current) return current;
-      return normalizePreviewPlan(rebuildPlanLinks(mutator(current)));
-    });
+    if (!draftPlan) return;
+    const nextPlan = mutator(draftPlan);
+    setCurrentKnowledgePlan(nextPlan);
+    setCurrentBlockCounts(countBlocksByType(nextPlan.entries));
+    if (sessionId) {
+      api.kbIntakeUpdatePlan(sessionId, {
+        knowledge_plan: nextPlan,
+        last_change: "edicao manual da previa",
+      }).then((result: any) => {
+        const nextState = normalizePlanState(result, plan.personaSlug);
+        if (nextState) applyPlanState(nextState);
+      }).catch(() => {});
+    }
     setPlanConfirmed(false);
+    setConfirmedPlanHash(null);
   }
 
   function modifySelectedFaq() {
@@ -1193,7 +1452,17 @@ function ChatPanel({
             </div>
           </div>
         )}
-        {stage === "ready_to_save" && draftPlan && (
+        {stage === "ready_to_save" && draftPlan && !planStateValid && previewViolations.length > 0 && (
+          <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
+            <p className="font-semibold">Plano bloqueado antes da preview</p>
+            <div className="mt-2 space-y-1">
+              {previewViolations.map((violation, index) => (
+                <p key={`${violation}-${index}`} className="text-xs">- {violation}</p>
+              ))}
+            </div>
+          </div>
+        )}
+        {stage === "ready_to_save" && draftPlan && planStateValid && (
           <GraphPreviewPanel
             plan={draftPlan}
             confirmed={planConfirmed}
@@ -1210,7 +1479,37 @@ function ChatPanel({
             onModifyFaq={modifySelectedFaq}
             onDeleteFaq={deleteSelectedFaq}
             onAddFaq={addFaq}
-            onConfirmStructure={() => setPlanConfirmed(true)}
+            onConfirmStructure={async () => {
+              if (!sessionId || !planStateValid || !planState) {
+                setFriendlyError("Plano ainda nao pode ser confirmado. Corrija as pendencias bloqueantes primeiro.");
+                return;
+              }
+              try {
+                const result = await api.kbIntakeUpdatePlan(sessionId, {
+                  knowledge_plan: planState.normalized_plan,
+                  status: "ready_to_save",
+                  last_change: "estrutura confirmada pelo operador",
+                });
+                const nextState = normalizePlanState(result, plan.personaSlug);
+                if (!nextState || !nextState.validation.valid || !planStateCountsMatch(nextState)) {
+                  setFriendlyError("Plano ainda nao pode ser confirmado. Corrija as pendencias bloqueantes primeiro.");
+                  setPlanConfirmed(false);
+                  setConfirmedPlanHash(null);
+                  return;
+                }
+                setPlanState(nextState);
+                setCurrentKnowledgePlan(nextState.normalized_plan);
+                setCurrentBlockCounts(normalizeBlockCounts(nextState.summary.current_block_counts));
+                setConfirmedPlanHash(nextState.plan_hash);
+                setPlanConfirmed(true);
+                setSessionStatus(result.status || "ready_to_save");
+                setFriendlyError(null);
+              } catch (error: any) {
+                setFriendlyError(formatChatRequestError(error));
+                setPlanConfirmed(false);
+                setConfirmedPlanHash(null);
+              }
+            }}
             onSaveKnowledge={save}
             loading={loading}
           />
@@ -1262,10 +1561,14 @@ function ChatPanel({
       )}
 
       {stage === "ready_to_save" && (
-        <div className="sep bg-green-500/5 px-4 py-2.5 flex items-center gap-3">
-          <CheckCircle size={13} className="text-green-400 shrink-0" />
-          <span className="text-xs text-green-400 flex-1">
-            {draftPlan ? "Estrutura pronta para revisao visual" : "Estrutura ainda nao gerada. Continue a conversa para montar a arvore antes de salvar."}
+        <div className={`sep px-4 py-2.5 flex items-center gap-3 ${planStateValid ? "bg-green-500/5" : "bg-red-500/5"}`}>
+          <CheckCircle size={13} className={`${planStateValid ? "text-green-400" : "text-red-300"} shrink-0`} />
+          <span className={`text-xs flex-1 ${planStateValid ? "text-green-400" : "text-red-200"}`}>
+            {draftPlan
+              ? planStateValid
+                ? `Estrutura pronta para revisao visual (${currentEntryCount} blocos no plano atual)`
+                : `Plano ainda nao esta pronto para salvar (${currentEntryCount} blocos no plano atual)`
+              : "Estrutura ainda nao gerada. Continue a conversa para montar a arvore antes de salvar."}
           </span>
           <button onClick={() => setShowContent((v) => !v)} className="text-xs text-obs-subtle hover:text-obs-text border border-white/06 px-2 py-1 rounded transition-colors">
             {showContent ? "Ocultar" : "+ Conteudo"}
@@ -1278,7 +1581,7 @@ function ChatPanel({
           <StepDot done={!!cls.persona_slug} label="Cliente" />
           <StepDot done={!!cls.content_type} label="Tipo" />
           <StepDot done={!!cls.title} label="Titulo" />
-          <StepDot done={stage === "ready_to_save" || stage === "done"} label="Pronto" />
+          <StepDot done={(stage === "ready_to_save" && planStateValid) || stage === "done"} label="Pronto" />
         </div>
       </div>
     </div>
@@ -1480,7 +1783,7 @@ function GraphPreviewPanel({
   onSaveKnowledge: () => void;
   loading: boolean;
 }) {
-  const previewPlan = useMemo(() => normalizePreviewPlan(plan), [plan]);
+  const previewPlan = plan;
   const entries = previewPlan.entries || [];
   const childrenByParent = new Map<string, KnowledgePlanEntry[]>();
   for (const entry of entries) {
@@ -1521,7 +1824,7 @@ function GraphPreviewPanel({
               : "border-white/10 bg-white/[0.03]";
 
     return (
-      <div key={entry.slug} className={depth > 0 ? "ml-5 border-l border-white/10 pl-4" : ""}>
+      <div key={String(entry.metadata?.plan_entry_id || entry.metadata?.client_id || `${entry.content_type}-${parentSlugOf(entry) || "root"}-${entry.slug}`)} className={depth > 0 ? "ml-5 border-l border-white/10 pl-4" : ""}>
         <button
           type="button"
           onClick={() => {
@@ -1635,12 +1938,82 @@ function GraphPreviewPanel({
   );
 }
 
-function CaptureSidebar({ plan, uploads, crawlerRuns }: { plan: CapturePlan; uploads: SessionUpload[]; crawlerRuns: CrawlerRun[] }) {
+function CaptureSidebar({
+  plan,
+  uploads,
+  crawlerRuns,
+  planState,
+  currentKnowledgePlan,
+  currentBlockCounts,
+  sessionStatus,
+  onAdjustBlock,
+}: {
+  plan: CapturePlan;
+  uploads: SessionUpload[];
+  crawlerRuns: CrawlerRun[];
+  planState: PlanState | null;
+  currentKnowledgePlan: KnowledgePlan | null;
+  currentBlockCounts: BlockCounts;
+  sessionStatus: string;
+  onAdjustBlock: (blockId: string, delta: number) => void;
+}) {
   const selectedBlocks = useMemo(
     () => KNOWLEDGE_BLOCKS.filter((block) => plan.selectedBlocks.includes(block.id)),
     [plan.selectedBlocks],
   );
   const latestCrawler = crawlerRuns[0];
+  const initialCounts = normalizeBlockCounts(plan.variationCounts);
+  const blockingViolations = planState?.validation?.blocking_violations || [];
+  const liveCounts = planState
+    ? normalizeBlockCounts(planState.summary.current_block_counts)
+    : currentKnowledgePlan?.entries?.length
+      ? countBlocksByType(currentKnowledgePlan.entries)
+      : normalizeBlockCounts(currentBlockCounts);
+  const displayCounts = planState || currentKnowledgePlan?.entries?.length ? liveCounts : initialCounts;
+  const totalInitial = Object.values(initialCounts).reduce((sum, value) => sum + value, 0);
+  const totalCurrent = Number(planState?.summary?.entry_count ?? Object.values(displayCounts).reduce((sum, value) => sum + value, 0));
+  const planLabel =
+    sessionStatus === "saved" ? "Plano salvo" :
+    sessionStatus === "ready_to_save" && planState?.validation?.valid ? "Plano final confirmado" :
+    blockingViolations.length ? "Plano bloqueado" :
+    planState || currentKnowledgePlan?.entries?.length ? "Plano em construcao" :
+    "Plano inicial";
+  const createdCountFor = (id: string) => {
+    if (id === "persona") return plan.personaSlug ? 1 : 0;
+    if (id === "embedded" || id === "gallery") {
+      return (planState?.normalized_plan.entries || currentKnowledgePlan?.entries || [])
+        .filter((entry) => normalizeContentTypeAlias(entry.content_type) === id).length;
+    }
+    return displayCounts[id] || 0;
+  };
+  const expectedCountFor = (id: string) => {
+    if (id === "persona") return plan.personaSlug ? 1 : 0;
+    if (id === "offer" || id === "embedded" || id === "gallery") return initialCounts[id] || 0;
+    return initialCounts[id] || 0;
+  };
+  const statusFor = (id: string) => {
+    const expected = expectedCountFor(id);
+    const created = createdCountFor(id);
+    if (expected === 0 && created === 0) return "idle";
+    if (expected === 0 && created > 0) return "extra";
+    if (created <= 0 && expected > 0) return "missing";
+    if (created < expected) return "partial";
+    return "done";
+  };
+  const rowClassFor = (status: string) => {
+    if (status === "done") return "border-green-400/20 bg-green-500/8";
+    if (status === "partial") return "border-obs-amber/25 bg-obs-amber/10";
+    if (status === "missing") return "border-red-400/20 bg-red-500/10";
+    if (status === "extra") return "border-obs-violet/25 bg-obs-violet/10";
+    return "border-white/06 bg-obs-base";
+  };
+  const statusLabelFor = (status: string) => {
+    if (status === "done") return "criado";
+    if (status === "partial") return "parcial";
+    if (status === "missing") return "pendente";
+    if (status === "extra") return "novo/extra";
+    return "fora do plano";
+  };
 
   return (
     <aside className="w-80 shrink-0 flex flex-col glass border border-white/06 rounded-2xl overflow-hidden">
@@ -1711,16 +2084,64 @@ function CaptureSidebar({ plan, uploads, crawlerRuns }: { plan: CapturePlan; upl
           )}
         </section>
         <section>
-          <p className="text-xs font-semibold text-obs-text mb-2">Blocos selecionados</p>
-          <div className="space-y-1.5">
-            {selectedBlocks.map((block) => (
-              <div key={block.id} className="border border-white/06 bg-obs-base rounded px-2 py-1.5">
-                <p className="text-[11px] font-semibold text-obs-subtle">{block.label}</p>
-                <p className="text-[10px] text-obs-faint line-clamp-2">{block.description}</p>
-              </div>
-            ))}
-            {selectedBlocks.length === 0 && <p className="text-xs text-obs-faint">Selecione ao menos um bloco para iniciar.</p>}
+          <p className="text-xs font-semibold text-obs-text mb-2">Plano inicial</p>
+          <div className="rounded-lg border border-white/06 bg-obs-base p-2">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[11px] text-obs-subtle">Pre-confirmacao</span>
+              <span className="text-[10px] text-obs-faint">{totalInitial} bloco(s)</span>
+            </div>
+            <div className="space-y-1">
+              {SIDEBAR_TREE_BLOCKS.map((block) => (
+                <div key={`initial-${block.id}`} className="flex items-center justify-between text-[11px]">
+                  <span className="text-obs-faint">{block.label}</span>
+                  <span className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-obs-subtle">{expectedCountFor(block.id)}</span>
+                </div>
+              ))}
+            </div>
           </div>
+        </section>
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold text-obs-text">{planLabel}</p>
+            <span className="text-[10px] text-obs-violet">{totalCurrent} bloco(s)</span>
+          </div>
+          <div className="space-y-1.5">
+            {SIDEBAR_TREE_BLOCKS.map((block) => {
+              const status = statusFor(block.id);
+              const expected = expectedCountFor(block.id);
+              const created = createdCountFor(block.id);
+              const adjustable = KNOWLEDGE_BLOCKS.some((candidate) => candidate.id === block.id);
+              return (
+              <div key={block.id} className={`flex items-center gap-2 rounded border px-2 py-1.5 ${rowClassFor(status)}`}>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold text-obs-subtle truncate">{block.label}</p>
+                    <span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] font-mono text-obs-text">{expected}/{created}</span>
+                  </div>
+                  <p className="text-[10px] text-obs-faint line-clamp-1">{statusLabelFor(status)} - {block.description}</p>
+                </div>
+                {adjustable && (
+                  <Stepper
+                    value={created}
+                    onDec={() => onAdjustBlock(block.id, -1)}
+                    onInc={() => onAdjustBlock(block.id, +1)}
+                    blockId={`sidebar-${block.id}`}
+                  />
+                )}
+              </div>
+            )})}
+            {!planState && !currentKnowledgePlan && <p className="text-xs text-obs-faint">Estrutura ainda nao gerada.</p>}
+          </div>
+          {blockingViolations.length > 0 && (
+            <div className="mt-3 rounded-lg border border-red-400/20 bg-red-500/10 p-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-red-200">Pendencias bloqueantes</p>
+              <div className="mt-1 space-y-1">
+                {blockingViolations.slice(0, 4).map((violation, index) => (
+                  <p key={`${violation}-${index}`} className="text-[10px] text-red-100">- {repairText(violation)}</p>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
         <section>
           <p className="text-xs font-semibold text-obs-text mb-2">Uploads legiveis pelo agente</p>
@@ -1742,6 +2163,12 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
   const [uploads, setUploads] = useState<SessionUpload[]>([]);
   const [crawlerRuns, setCrawlerRuns] = useState<CrawlerRun[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
+  const [planState, setPlanState] = useState<PlanState | null>(null);
+  const [confirmedPlanHash, setConfirmedPlanHash] = useState<string | null>(null);
+  const [currentKnowledgePlan, setCurrentKnowledgePlan] = useState<KnowledgePlan | null>(null);
+  const [currentBlockCounts, setCurrentBlockCounts] = useState<BlockCounts>(normalizeBlockCounts(DEFAULT_VARIATION_COUNTS));
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessionStatus, setSessionStatus] = useState("collecting");
   const [plan, setPlan] = useState<CapturePlan>({
     personaSlug: "",
     objective: DEFAULT_OBJECTIVE,
@@ -1777,6 +2204,39 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
     return () => window.removeEventListener("ai-brain-persona-change", handlePersonaChange as EventListener);
   }, []);
 
+  useEffect(() => {
+    const sessionId = window.localStorage.getItem("active_criar_session_id");
+    if (!sessionId) return;
+    api.kbIntakeSession(sessionId)
+      .then((session: any) => {
+        setActiveSessionId(session.id || sessionId);
+        setSessionStatus(session.status || session.stage || "collecting");
+        const personaSlug = session.persona_slug || session.classification?.persona_slug || "";
+        const sourceUrl = session.source_url || "";
+        setPlan((prev) => ({
+          ...prev,
+          personaSlug: personaSlug || prev.personaSlug,
+          sourceUrl: sourceUrl || prev.sourceUrl,
+          variationCounts: normalizeBlockCounts(session.initial_block_counts || prev.variationCounts),
+        }));
+        const restoredState = normalizePlanState(session, personaSlug || plan.personaSlug);
+        const restoredPlan = restoredState?.normalized_plan || normalizeKnowledgePlan(session.knowledge_plan, personaSlug || plan.personaSlug);
+        setPlanState(restoredState);
+        setConfirmedPlanHash(session.confirmed_plan_hash || null);
+        setCurrentKnowledgePlan(restoredPlan);
+        setCurrentBlockCounts(normalizeBlockCounts(
+          restoredState?.summary?.current_block_counts
+          || session.current_block_counts
+          || (restoredPlan ? countBlocksByType(restoredPlan.entries) : undefined),
+        ));
+      })
+      .catch(() => {
+        window.localStorage.removeItem("active_criar_session_id");
+      });
+  // Restore once on mount; persona fallback is intentionally best-effort.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function syncPersonaSlug(nextSlug: string) {
     const selected = personas.find((persona) => persona.slug === nextSlug);
     setPlan((prev) => (prev.personaSlug === nextSlug ? prev : { ...prev, personaSlug: nextSlug }));
@@ -1803,6 +2263,67 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
     });
   }, [uploads]);
 
+  function syncCurrentPlan(nextPlan: KnowledgePlan, lastChange: string, status?: string) {
+    setCurrentKnowledgePlan(nextPlan);
+    setCurrentBlockCounts(countBlocksByType(nextPlan.entries));
+    setConfirmedPlanHash(null);
+    if (activeSessionId) {
+      api.kbIntakeUpdatePlan(activeSessionId, {
+        knowledge_plan: nextPlan,
+        status,
+        last_change: lastChange,
+      }).then((result: any) => {
+        const nextState = normalizePlanState(result, plan.personaSlug);
+        if (!nextState) return;
+        setPlanState(nextState);
+        setCurrentKnowledgePlan(nextState.normalized_plan);
+        setCurrentBlockCounts(normalizeBlockCounts(nextState.summary.current_block_counts));
+        if (status && nextState.validation.valid) {
+          setSessionStatus(result.status || status);
+          setConfirmedPlanHash(result.confirmed_plan_hash || null);
+        }
+      }).catch(() => {});
+    } else if (status) {
+      setSessionStatus(status);
+    }
+  }
+
+  function adjustSidebarBlock(blockId: string, delta: number) {
+    const activePlan = planState?.normalized_plan || currentKnowledgePlan;
+    if (!activeSessionId || !activePlan) {
+      const current = Math.max(0, Number(plan.variationCounts[blockId] || 0));
+      const next = Math.max(0, current + delta);
+      const nextSelected = next > 0
+        ? Array.from(new Set([...plan.selectedBlocks, blockId]))
+        : plan.selectedBlocks.filter((id) => id !== blockId);
+      setPlan({
+        ...plan,
+        selectedBlocks: nextSelected,
+        variationCounts: { ...plan.variationCounts, [blockId]: next },
+      });
+      setCurrentBlockCounts(normalizeBlockCounts({ ...plan.variationCounts, [blockId]: next }));
+      return;
+    }
+    const existing = countBlocksByType(activePlan.entries)[blockId] || 0;
+    if (delta < 0 && existing <= 0) return;
+    if (delta < 0) {
+      const removeIndex = [...activePlan.entries].map((entry, index) => ({ entry, index })).reverse().find((item) => item.entry.content_type === blockId)?.index;
+      if (removeIndex == null) return;
+      const removedSlug = activePlan.entries[removeIndex].slug;
+      syncCurrentPlan({
+        ...activePlan,
+        entries: activePlan.entries.filter((_, index) => index !== removeIndex),
+        links: (activePlan.links || []).filter((link) => link.source_slug !== removedSlug && link.target_slug !== removedSlug),
+      }, `sidebar removeu ${blockId}`);
+      return;
+    }
+    const nextEntry = createManualDraftEntry(blockId, existing + 1, plan.personaSlug, activePlan);
+    syncCurrentPlan({
+      ...activePlan,
+      entries: [...activePlan.entries, nextEntry],
+    }, `sidebar adicionou ${blockId}`);
+  }
+
   return (
     <div className={`flex gap-5 min-h-0 ${embedded ? "h-full" : "h-[calc(100vh-7rem)]"}`}>
       <div className="w-80 shrink-0">
@@ -1820,9 +2341,30 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
           onCrawlerRun={(run) => setCrawlerRuns((prev) => [run, ...prev].slice(0, 5))}
           personas={personas}
           onPersonaChange={syncPersonaSlug}
+          currentKnowledgePlan={currentKnowledgePlan}
+          setCurrentKnowledgePlan={setCurrentKnowledgePlan}
+          currentBlockCounts={currentBlockCounts}
+          setCurrentBlockCounts={setCurrentBlockCounts}
+          planState={planState}
+          setPlanState={setPlanState}
+          confirmedPlanHash={confirmedPlanHash}
+          setConfirmedPlanHash={setConfirmedPlanHash}
+          sessionId={activeSessionId}
+          setSessionId={setActiveSessionId}
+          sessionStatus={sessionStatus}
+          setSessionStatus={setSessionStatus}
         />
       </div>
-      <CaptureSidebar plan={plan} uploads={uploads} crawlerRuns={crawlerRuns} />
+      <CaptureSidebar
+        plan={plan}
+        uploads={uploads}
+        crawlerRuns={crawlerRuns}
+        planState={planState}
+        currentKnowledgePlan={currentKnowledgePlan}
+        currentBlockCounts={currentBlockCounts}
+        sessionStatus={sessionStatus}
+        onAdjustBlock={adjustSidebarBlock}
+      />
     </div>
   );
 }

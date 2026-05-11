@@ -1969,6 +1969,7 @@ _NODE_TYPE_REGISTRY_FALLBACK: list[dict] = [
     {"node_type": "brand",          "label": "Brand",     "default_level": 20, "default_importance": 0.90, "color": "#a78bfa", "icon": "badge",       "sort_order": 20},
     {"node_type": "campaign",       "label": "Campanha",  "default_level": 30, "default_importance": 0.80, "color": "#fb923c", "icon": "megaphone",   "sort_order": 30},
     {"node_type": "product",        "label": "Produto",   "default_level": 40, "default_importance": 0.85, "color": "#60a5fa", "icon": "box",         "sort_order": 40},
+    {"node_type": "offer",          "label": "Oferta",    "default_level": 45, "default_importance": 0.78, "color": "#38bdf8", "icon": "badge-dollar-sign", "sort_order": 45},
     {"node_type": "briefing",       "label": "Briefing",  "default_level": 50, "default_importance": 0.75, "color": "#c084fc", "icon": "file-text",   "sort_order": 50},
     {"node_type": "audience",       "label": "Audiência", "default_level": 55, "default_importance": 0.70, "color": "#f472b6", "icon": "users",       "sort_order": 55},
     {"node_type": "tone",           "label": "Tom",       "default_level": 60, "default_importance": 0.70, "color": "#22d3ee", "icon": "palette",     "sort_order": 60},
@@ -2683,7 +2684,7 @@ def get_knowledge_item_by_path(file_path: str) -> Optional[dict]:
 KNOWLEDGE_ITEM_CONTENT_TYPES: frozenset[str] = frozenset({
     "brand", "briefing", "product", "campaign", "copy", "asset",
     "prompt", "faq", "maker_material", "tone", "competitor",
-    "audience", "rule", "entity", "other",
+    "audience", "rule", "entity", "offer", "other",
 })
 
 KNOWLEDGE_ITEM_STATUSES: frozenset[str] = frozenset({

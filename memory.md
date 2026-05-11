@@ -169,3 +169,30 @@ Backend (`api/.env`):
 - Node protegido `Gallery` foi adicionado por persona em `knowledge_nodes`; conexoes `gallery_asset` ficam em `knowledge_edges` e espelham o node conectado na tabela existente `assets`.
 - `Gallery`, `Embedded` e `Persona` sao nodes protegidos: nao devem ser excluidos pela UI nem pelo endpoint de exclusao de nodes.
 - A pagina de Assets agora combina assets da fila com nodes ligados ao `Gallery`, permitindo usar o grafo como curadoria visual para criacao de midia.
+
+## Alteracoes recentes - 2026-05-11
+
+- CRIAR/Sofia agora usa `normalizedPlan` como fonte unica da verdade para resumo, sidebar, preview, confirmacao e payload de save.
+- O modo CRIAR exige persona especifica; `Todos`, `all`, `global` ou persona vazia nao iniciam criacao.
+- A sessao viva da Sofia persiste `persona_slug`, `source_url`, `initial_block_counts`, `current_block_counts`, `knowledge_plan`, `plan_state`, `plan_hash` e `memory_summary`.
+- `/kb-intake/message`, `PATCH /kb-intake/session/{id}/plan`, `GET /kb-intake/session/{id}` e `/kb-intake/save` compartilham o contrato `plan_state` com `normalized_plan`, `validation`, `summary` e `plan_hash`.
+- Save do CRIAR bloqueia plano divergente por hash e nao reconstrui payload a partir de sidebar, preview ou plano inicial.
+- Sidebar da captura compara plano esperado e plano criado, seguindo ordem hierarquica: Persona, Brand, Briefing, Campanha, Publico, Produto, Oferta, Copy, FAQ, Regras, Tom, Entidades, Assets, Embedded e Gallery.
+- Frontend da captura restaura sessao ativa via `active_criar_session_id`, atualiza contadores a partir do plano atual e bloqueia preview/save quando ha violacao bloqueante.
+- Pipeline do planner foi consolidado para arvore top-down/fractal: `persona -> brand? -> briefing -> campaign? -> audience -> product -> offer? -> copy -> faq`.
+- `faq_count_policy` padrao e `total`; o sistema nao expande automaticamente FAQ por produto/oferta sem confirmacao.
+- `offer` virou tipo oficial no CRIAR e no grafo: `knowledge_items.content_type=offer` e `knowledge_nodes.node_type=offer`.
+- Migration `031_allow_offer_content_type.sql` adiciona `offer` ao check constraint, registra `offer` no `knowledge_node_type_registry`, faz backfill de nodes legados `knowledge_item` para `offer` e demove tags/mentions/nodes tecnicos da primary tree.
+- Graph-data repara em runtime mirrors legados de offer, esconde nodes tecnicos por padrao, demove edges auxiliares da primary tree e deduplica primary edges por `(source,target,relation_type)`.
+- Tags e mentions continuam disponiveis como camada auxiliar, mas nao aparecem como primary tree por padrao.
+- Layout visual do grafo ganhou rank top-down explicito, colocando `offer` entre `product` e `copy` e mantendo `embedded`/`gallery` como destinos terminais.
+- Snapshot FAQ aprovado agora monta `branch_context` com path, edges, relation_type/semantic_relation e contextos de persona/brand/briefing/audience/product/copy/faq.
+- Chunk RAG de FAQ passa a ser gerado a partir do snapshot completo, incluindo Marca/Persona, Brand, Briefing, Publico, Produto, Copy/Oferta, Pergunta, Resposta aprovada, Regras, Tom, Caminho da branch e Relacoes.
+- Snapshot FAQ incompleto fica `needs_review`, com `n8n_ready=false`, warnings de revisao e sem chunk ativo.
+- Status de aprovacao foi alinhado: item aprovado fica `status=approved` e `curation_status=approved`; node aprovado fica `status=validated`.
+- Edge semantica usa estrategia segura: `relation_type` estrutural e preservado; semantica enriquecida fica em `metadata.semantic_relation` e `metadata.semantic_label`.
+- Nodes e edges do fluxo recebem rastreabilidade em metadata: `session_id`, `source_ref`, `created_via`, `tree_mode` e `branch_policy`.
+- Configuracoes receberam seletor de linguagem; foi criado `dashboard/lib/language.ts` para centralizar labels e reduzir texto fixo mal codificado.
+- Foram corrigidos varios textos mojibake/UTF-8 visiveis e a estrategia agora privilegia chaves/codigos estaveis com traducao no frontend.
+- Testes adicionados/ajustados: `e2e_criar_fractal_topdown_tree_integrity.py`, `e2e_criar_plan_state_consistency.py`, `e2e_criar_tockfatal_plan_mode_branch_contract.py`, `e2e_criar_visual_branch_integrity.py` e `integration_criar_live_plan_state.py`.
+- Validacoes executadas nesta rodada: `py_compile` dos servicos principais, E2Es do CRIAR, golden dataset hierarchy, live plan state e `tsc --noEmit` no dashboard. Em ambiente local sem Supabase configurado, os testes ainda logam `SUPABASE_URL` ausente ao tentar emitir eventos, mas passam.

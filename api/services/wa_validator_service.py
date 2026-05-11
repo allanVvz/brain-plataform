@@ -1,6 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
 """
-WA Validator Service â€” generates test scripts from KB, tracks validation sessions,
+WA Validator Service — generates test scripts from KB, tracks validation sessions,
 and analyses conversation gaps to feed back into KB Intake.
 """
 
@@ -26,7 +26,7 @@ _BRAIN_API_URL = os.environ.get("BRAIN_API_URL", "http://localhost:8000")
 _sessions: dict[str, dict] = {}
 _sessions_lock = threading.Lock()
 
-# â”€â”€ Bot registry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Bot registry ───────────────────────────────────────────────────────────────
 _BOT_REGISTRY: list[dict] = []
 
 
@@ -56,10 +56,10 @@ def _chat(model: str, prompt: str, max_tokens: int = 1024) -> str:
 
 _FLOWS = {
     "compra_simples": "Fluxo de compra simples: cliente pergunta sobre produto, recebe info, confirma compra.",
-    "duvida_frete": "Fluxo de dÃºvida sobre frete/entrega: cliente pergunta prazo e valor de frete.",
-    "saudacao_despedida": "Fluxo bÃ¡sico: saudaÃ§Ã£o, pergunta simples, despedida.",
-    "produto_especifico": "Fluxo de produto especÃ­fico: cliente nomeia produto, bot responde com detalhes e CTA.",
-    "reclamacao": "Fluxo de reclamaÃ§Ã£o/insatisfaÃ§Ã£o: cliente reclama, bot reconhece e escalona.",
+    "duvida_frete": "Fluxo de dúvida sobre frete/entrega: cliente pergunta prazo e valor de frete.",
+    "saudacao_despedida": "Fluxo básico: saudação, pergunta simples, despedida.",
+    "produto_especifico": "Fluxo de produto específico: cliente nomeia produto, bot responde com detalhes e CTA.",
+    "reclamacao": "Fluxo de reclamação/insatisfação: cliente reclama, bot reconhece e escalona.",
 }
 
 
@@ -106,8 +106,8 @@ def _generate_script_with_openai(
     model: str,
 ) -> dict:
     flow_desc = _FLOWS.get(flow_id, flow_id)
-    prompt = f"""VocÃª Ã© um analista de QA para um bot de vendas via WhatsApp.
-Crie um script de conversa de validaÃ§Ã£o para testar se o bot conhece bem os produtos e processos do cliente.
+    prompt = f"""Você é um analista de QA para um bot de vendas via WhatsApp.
+Crie um script de conversa de validação para testar se o bot conhece bem os produtos e processos do cliente.
 
 === CLIENTE ===
 {persona_name}
@@ -119,12 +119,12 @@ Crie um script de conversa de validaÃ§Ã£o para testar se o bot conhece bem o
 {flow_desc}
 
 Gere um script JSON com exatamente 5 a 8 mensagens que um cliente real enviaria.
-Cada mensagem deve testar se o bot conhece informaÃ§Ãµes da base de conhecimento.
+Cada mensagem deve testar se o bot conhece informações da base de conhecimento.
 Use linguagem informal e natural, como um cliente de verdade no WhatsApp.
 
-Responda APENAS com JSON vÃ¡lido nesse formato:
+Responda APENAS com JSON válido nesse formato:
 {{
-  "flow_description": "descriÃ§Ã£o do que estÃ¡ sendo testado",
+  "flow_description": "descrição do que está sendo testado",
   "expected_knowledge": ["item 1 que o bot deve saber", "item 2", ...],
   "steps": [
     {{"text": "mensagem do cliente", "wait": 15}},
@@ -132,7 +132,7 @@ Responda APENAS com JSON vÃ¡lido nesse formato:
   ]
 }}
 
-NÃ£o use markdown. JSON puro comeÃ§ando com {{."""
+Não use markdown. JSON puro começando com {{."""
 
     raw = _chat(model, prompt)
     return _extract_json(raw)
@@ -146,7 +146,7 @@ def generate_script(
 ) -> dict:
     persona = supabase_client.get_persona(persona_slug)
     if not persona:
-        raise ValueError(f"Persona nÃ£o encontrada: {persona_slug}")
+        raise ValueError(f"Persona não encontrada: {persona_slug}")
 
     persona_id = persona["id"]
     persona_name = persona.get("name", persona_slug)
@@ -201,9 +201,9 @@ def run_session(session_id: str) -> dict:
     with _sessions_lock:
         session = _sessions.get(session_id)
     if not session:
-        raise ValueError(f"SessÃ£o nÃ£o encontrada: {session_id}")
+        raise ValueError(f"Sessão não encontrada: {session_id}")
     if session["status"] == "running":
-        raise ValueError("SessÃ£o jÃ¡ estÃ¡ em execuÃ§Ã£o")
+        raise ValueError("Sessão já está em execução")
 
     script_path = os.path.join(_WA_BOT_DIR, f"_validator_script_{session_id[:8]}.json")
     output_path = os.path.join(_WA_BOT_DIR, f"_validator_output_{session_id[:8]}.json")
@@ -244,7 +244,7 @@ def run_session(session_id: str) -> dict:
 
             if not output and proc.returncode != 0:
                 final_status = "error"
-                error_msg = f"Processo encerrou com cÃ³digo {proc.returncode}.\nLog:\n{stdout_data[-2000:] if stdout_data else '(sem saÃ­da)'}"
+                error_msg = f"Processo encerrou com código {proc.returncode}.\nLog:\n{stdout_data[-2000:] if stdout_data else '(sem saída)'}"
             else:
                 final_status = output.get("status", "done")
                 error_msg = output.get("error", "")
@@ -286,7 +286,7 @@ def get_session(session_id: str) -> dict:
     with _sessions_lock:
         session = _sessions.get(session_id)
     if not session:
-        raise ValueError(f"SessÃ£o nÃ£o encontrada: {session_id}")
+        raise ValueError(f"Sessão não encontrada: {session_id}")
 
     output_path = os.path.join(_WA_BOT_DIR, f"_validator_output_{session_id[:8]}.json")
     if session["status"] in ("running", "starting") and os.path.exists(output_path):
@@ -333,7 +333,7 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
     )
     expected_str = "\n".join(f"- {e}" for e in expected)
 
-    prompt = f"""Analise esta conversa de validaÃ§Ã£o de um bot de vendas WhatsApp.
+    prompt = f"""Analise esta conversa de validação de um bot de vendas WhatsApp.
 
 === CONHECIMENTO ESPERADO ===
 {expected_str}
@@ -343,17 +343,17 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
 
 Identifique:
 1. Quais conhecimentos o bot demonstrou corretamente
-2. Quais conhecimentos estÃ£o faltando ou incorretos (gaps)
-3. RecomendaÃ§Ãµes para preencher os gaps na base de conhecimento
+2. Quais conhecimentos estão faltando ou incorretos (gaps)
+3. Recomendações para preencher os gaps na base de conhecimento
 
 Responda APENAS com JSON:
 {{
   "demonstrated": ["conhecimento 1 que o bot demonstrou", ...],
   "gaps": [
-    {{"topic": "tÃ³pico ausente", "evidence": "o bot respondeu X quando deveria saber Y", "priority": "high/medium/low"}},
+    {{"topic": "tópico ausente", "evidence": "o bot respondeu X quando deveria saber Y", "priority": "high/medium/low"}},
     ...
   ],
-  "recommendations": ["recomendaÃ§Ã£o 1 para a base de conhecimento", ...],
+  "recommendations": ["recomendação 1 para a base de conhecimento", ...],
   "overall_score": 0-100,
   "summary": "resumo de 2 linhas"
 }}"""
@@ -389,16 +389,16 @@ Responda APENAS com JSON:
 async def run_session_direct(session_id: str) -> dict:
     """
     Execute a validation session by calling the platform's own /process endpoint
-    for each script step â€” no WhatsApp connection required.
-    Each bot reply comes from the real AI pipeline (context_builder â†’ classifier
-    â†’ decision_engine â†’ SDR/CLOSER agent).
+    for each script step — no WhatsApp connection required.
+    Each bot reply comes from the real AI pipeline (context_builder → classifier
+    → decision_engine → SDR/CLOSER agent).
     """
     with _sessions_lock:
         session = _sessions.get(session_id)
     if not session:
-        raise ValueError(f"SessÃ£o nÃ£o encontrada: {session_id}")
+        raise ValueError(f"Sessão não encontrada: {session_id}")
     if session["status"] == "running":
-        raise ValueError("SessÃ£o jÃ¡ estÃ¡ em execuÃ§Ã£o")
+        raise ValueError("Sessão já está em execução")
 
     script = session.get("script", {})
     persona_slug = session.get("persona_slug", "global")
@@ -472,7 +472,7 @@ async def run_session_direct(session_id: str) -> dict:
                         if reply:
                             turn["text"] = reply
                         else:
-                            turn["text"] = "(sem resposta â€” agente nÃ£o gerou reply)"
+                            turn["text"] = "(sem resposta — agente não gerou reply)"
                             turn["timeout"] = True
                     except Exception as exc:
                         _log.error("Step %d /process call failed: %s", i, exc)

@@ -208,6 +208,7 @@ def promote_knowledge_item(
     now_iso = datetime.now(timezone.utc).isoformat()
     update_data = {
         "status": "approved",
+        "curation_status": "approved",
         "approved_at": now_iso,
         "agent_visibility": agent_visibility or item.get("agent_visibility") or ["SDR", "Closer", "Classifier"],
     }

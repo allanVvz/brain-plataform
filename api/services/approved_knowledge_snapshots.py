@@ -81,6 +81,109 @@ def _text_context(node: Optional[dict]) -> str:
     return str(node.get("summary") or node.get("title") or "").strip()
 
 
+def _context_text(node: Optional[dict], fallback: str = "") -> str:
+    value = _text_context(node)
+    return value or fallback
+
+
+def _branch_path(chain: list[dict], persona: dict) -> list[dict]:
+    out: list[dict] = []
+    for node in chain:
+        title = node.get("title")
+        if (node.get("node_type") or "").lower() == "persona":
+            title = persona.get("name") or title
+        out.append({
+            "node_id": node.get("id"),
+            "node_type": node.get("node_type"),
+            "slug": node.get("slug"),
+            "title": title,
+        })
+    return out
+
+
+def _branch_edges(chain: list[dict], path_edges: list[dict]) -> list[dict]:
+    nodes_by_id = {node.get("id"): node for node in chain if node.get("id")}
+    out: list[dict] = []
+    for edge in path_edges:
+        src = nodes_by_id.get(edge.get("source_node_id")) or {}
+        tgt = nodes_by_id.get(edge.get("target_node_id")) or {}
+        meta = edge.get("metadata") or {}
+        relation_type = edge.get("relation_type") or "resolved_parent"
+        semantic = meta.get("semantic_relation")
+        if not semantic:
+            semantic_meta = knowledge_graph.semantic_edge_metadata(src, tgt, relation_type, {})
+            semantic = semantic_meta.get("semantic_relation") or relation_type
+        out.append({
+            "source_node_id": edge.get("source_node_id"),
+            "target_node_id": edge.get("target_node_id"),
+            "source_slug": src.get("slug"),
+            "target_slug": tgt.get("slug"),
+            "relation_type": relation_type,
+            "semantic_relation": semantic,
+        })
+    return out
+
+
+def _branch_context(chain: list[dict], path_edges: list[dict], persona: dict) -> dict:
+    path = _branch_path(chain, persona)
+    root = path[0] if path else {}
+    return {
+        "tree_mode": "single_branch",
+        "branch_policy": "single_branch_by_default",
+        "root": root,
+        "path": path,
+        "edges": _branch_edges(chain, path_edges),
+    }
+
+
+def _answer_is_useful(question: str, answer: str) -> bool:
+    q = (question or "").strip().lower()
+    a = (answer or "").strip().lower()
+    if not q or not a:
+        return False
+    if q == a:
+        return False
+    stripped = a.strip(" ?!.")
+    if "?" in answer and len(stripped.split()) <= 12:
+        return False
+    return True
+
+
+def _faq_review_warnings(
+    *,
+    source_node: dict,
+    chain: list[dict],
+    branch_context: dict,
+    question: str,
+    answer: str,
+    briefing_context: str,
+    product_context: str,
+    copy_context: str,
+) -> list[str]:
+    warnings: list[str] = []
+    path = branch_context.get("path") or []
+    path_types = [(step.get("node_type") or "").lower() for step in path]
+    if not path:
+        warnings.append("hierarchy_path_empty")
+    if not path_types or path_types[0] != "persona":
+        warnings.append("persona_root_missing")
+    if len(path_types) >= 2 and path_types[1:].count("persona") > 0:
+        warnings.append("persona_repeated_in_path")
+    if len(chain) < 2:
+        warnings.append("faq_parent_missing")
+    if "briefing" in path_types and not briefing_context:
+        warnings.append("briefing_context_missing")
+    if "product" in path_types and not product_context:
+        warnings.append("product_context_missing")
+    if "copy" in path_types and not copy_context:
+        warnings.append("copy_context_missing")
+    if not _answer_is_useful(question, answer):
+        warnings.append("faq_answer_not_useful")
+    if (source_node.get("node_type") or "").lower() == "faq" and path_types and path_types[-1] != "faq":
+        warnings.append("faq_not_leaf_in_snapshot_path")
+    return warnings
+
+
 def _metadata_list(*values) -> list[str]:
     out: list[str] = []
     for value in values:
@@ -263,31 +366,32 @@ def _approved_markdown(
 
 def _faq_chunk_text(
     *,
-    brand: Optional[dict],
-    briefing: Optional[dict],
-    campaign: Optional[dict],
-    audience: Optional[dict],
-    product: Optional[dict],
-    question: str,
-    answer: str,
-    rules: list[str],
-    tone: str,
+    snapshot_metadata: dict,
 ) -> str:
+    branch_context = snapshot_metadata.get("branch_context") or {}
+    path = branch_context.get("path") or []
+    edge_parts = []
+    for edge in branch_context.get("edges") or []:
+        source = edge.get("source_slug") or edge.get("source_node_id") or "source"
+        target = edge.get("target_slug") or edge.get("target_node_id") or "target"
+        semantic = edge.get("semantic_relation") or edge.get("relation_type") or "related"
+        edge_parts.append(f"{source} {semantic} {target}")
+    brand_source = snapshot_metadata.get("brand_source") or "explicit"
+    faq_context = snapshot_metadata.get("faq_context") or {}
     lines = [
-        f"Marca: {_text_context(brand) or 'Nao informado.'}",
-        f"Briefing: {_text_context(briefing) or 'Nao informado.'}",
-        f"Publico: {_text_context(audience) or 'Nao informado.'}",
-        f"Produto: {_text_context(product) or 'Nao informado.'}",
+        f"Marca/Persona: {snapshot_metadata.get('persona_context') or 'Nao informado.'}",
+        f"Brand: {snapshot_metadata.get('brand_context') or 'Nao informado.'} Fonte: {brand_source}.",
+        f"Briefing: {snapshot_metadata.get('briefing_context') or 'Nao informado.'}",
+        f"Publico: {snapshot_metadata.get('audience_context') or 'Nao informado.'}",
+        f"Produto: {snapshot_metadata.get('product_context') or 'Nao informado.'}",
+        f"Copy/Oferta: {snapshot_metadata.get('copy_context') or 'Nao informado.'}",
+        f"Pergunta: {faq_context.get('question') or ''}",
+        f"Resposta aprovada: {faq_context.get('answer') or ''}",
+        f"Regras: {snapshot_metadata.get('rules_context') or 'Nao informado.'}",
+        f"Tom: {snapshot_metadata.get('tone_context') or 'Nao informado.'}",
+        "Caminho da branch: " + " > ".join(step.get("slug") or step.get("title") or "" for step in path if step.get("slug") or step.get("title")) + ".",
+        "Relacoes: " + "; ".join(edge_parts) + ".",
     ]
-    campaign_text = _text_context(campaign)
-    if campaign_text:
-        lines.append(f"Campanha: {campaign_text}")
-    lines.extend([
-        f"Pergunta: {question}",
-        f"Resposta aprovada: {answer}",
-        f"Regras: {' '.join(rules) if rules else 'Nao informado.'}",
-        f"Tom: {tone or 'Nao informado.'}",
-    ])
     return "\n".join(lines)
 
 
@@ -329,7 +433,20 @@ def publish_approved_node(
     if chain and chain[0].get("node_type") != "persona":
         persona_root = knowledge_graph._ensure_persona_root(persona_id)
         if persona_root:
+            previous_root = chain[0]
             chain.insert(0, persona_root)
+            path_edges.insert(0, {
+                "id": None,
+                "source_node_id": persona_root.get("id"),
+                "target_node_id": previous_root.get("id"),
+                "relation_type": "contains",
+                "metadata": {
+                    "primary_tree": True,
+                    "active": True,
+                    "created_from": "snapshot_persona_root_fallback",
+                    "semantic_relation": "contains_briefing" if previous_root.get("node_type") == "briefing" else "contains",
+                },
+            })
     root_node = chain[0] if chain else source_node
     parent_node = chain[-2] if len(chain) >= 2 else None
     brand = _first_by_type(chain, "brand")
@@ -337,25 +454,46 @@ def publish_approved_node(
     campaign = _first_by_type(chain, "campaign")
     audience = _first_by_type(chain, "audience")
     product = _first_by_type(chain, "product")
+    copy = _first_by_type(chain, "copy")
     faq = source_node if content_type == "faq" else _first_by_type(chain, "faq")
-    if content_type == "faq":
-        _validate_faq_context(
-            source_node=source_node,
-            chain=chain,
-            question=question,
-            answer=answer,
-            product=product,
-            briefing=briefing,
-            audience=audience,
-        )
 
     source_meta = source_node.get("metadata") or {}
     rules = _metadata_list(source_meta.get("rules"), source_meta.get("restrictions"))
+    rules_context = " ".join(rules).strip() or "Nao inventar preco, estoque, disponibilidade ou prazo. Confirmar com a equipe quando a informacao nao estiver validada."
     tone = str(source_meta.get("tone") or source_meta.get("voice") or "").strip()
-    hierarchy_path = _hierarchy_path(chain)
+    tone_context = tone or "Direto, acolhedor, feminino e comercial."
+    branch_context = _branch_context(chain, path_edges, persona)
+    hierarchy_path = branch_context.get("path") or _hierarchy_path(chain)
     hierarchy_summary = " -> ".join(
         f"{step.get('node_type')}:{step.get('slug') or step.get('title')}"
         for step in hierarchy_path
+    )
+    persona_context = persona.get("name") or _context_text(root_node, persona.get("slug") or "")
+    explicit_brand_context = _context_text(brand)
+    brand_context = explicit_brand_context or persona_context
+    brand_source = "explicit" if explicit_brand_context else "persona_fallback"
+    briefing_context = _context_text(briefing)
+    audience_context = _context_text(audience)
+    product_context = _context_text(product)
+    copy_context = _context_text(copy)
+    faq_context = {
+        **_node_context(faq),
+        "question": question,
+        "answer": answer,
+    } if faq else {"question": question, "answer": answer}
+    review_warnings = (
+        _faq_review_warnings(
+            source_node=source_node,
+            chain=chain,
+            branch_context=branch_context,
+            question=question,
+            answer=answer,
+            briefing_context=briefing_context,
+            product_context=product_context,
+            copy_context=copy_context,
+        )
+        if content_type == "faq"
+        else []
     )
     canonical_key = _canonical_key(persona, content_type, chain, slug)
     approved_summary = answer[:500] if content_type == "faq" and answer else (source_node.get("summary") or source_text or title)[:500]
@@ -397,19 +535,27 @@ def publish_approved_node(
         "campaign_context": _node_context(campaign),
         "audience_context": _node_context(audience),
         "product_context": _node_context(product),
-        "faq_context": {
-            **_node_context(faq),
-            "question": question,
-            "answer": answer,
-        } if faq else {},
-        "status": "approved",
+        "faq_context": faq_context,
+        "status": "needs_review" if review_warnings else "approved",
         "approved_by": approved_by,
         "approved_at": now_iso,
         "metadata": {
             "source": "graph_approval",
             "source_node_id": source_node.get("id"),
             "source_knowledge_item_id": (source_item or {}).get("id"),
-            "n8n_ready": content_type == "faq",
+            "n8n_ready": content_type == "faq" and not review_warnings,
+            "review_warnings": review_warnings,
+            "branch_context": branch_context,
+            "persona_context": persona_context,
+            "brand_context": brand_context,
+            "brand_source": brand_source,
+            "briefing_context": briefing_context,
+            "audience_context": audience_context,
+            "product_context": product_context,
+            "copy_context": copy_context,
+            "faq_context": faq_context,
+            "rules_context": rules_context,
+            "tone_context": tone_context,
         },
     })
     if not snapshot or not snapshot.get("id"):
@@ -419,18 +565,43 @@ def publish_approved_node(
     chunks: list[dict] = []
     rag_links: list[dict] = []
     embedded_edge = None
+    if content_type == "faq" and review_warnings:
+        node_meta = {
+            **source_meta,
+            "approved_snapshot_id": snapshot.get("id"),
+            "snapshot_status": "needs_review",
+            "n8n_ready": False,
+            "review_warnings": review_warnings,
+        }
+        supabase_client.update_knowledge_node(source_node["id"], {"metadata": node_meta, "status": "validated"})
+        if source_item and source_item.get("id"):
+            supabase_client.update_knowledge_item(source_item["id"], {
+                "metadata": {
+                    **(source_item.get("metadata") or {}),
+                    "approved_snapshot_id": snapshot.get("id"),
+                    "snapshot_status": "needs_review",
+                    "review_warnings": review_warnings,
+                }
+            })
+        return {
+            "success": False,
+            "approved_snapshot_id": snapshot.get("id"),
+            "source_node_id": source_node.get("id"),
+            "knowledge_node_ids": [node.get("id") for node in chain if node.get("id")],
+            "knowledge_edge_ids": [edge.get("id") for edge in path_edges if edge.get("id")],
+            "embedded_edge_id": None,
+            "rag_entry_id": None,
+            "rag_chunk_ids": [],
+            "rag_link_ids": [],
+            "status": "needs_review",
+            "warning": "FAQ snapshot incomplete; RAG publication was skipped",
+            "review_warnings": review_warnings,
+            "graph_materialized": bool(source_node.get("id")),
+            "content_type": content_type,
+            "canonical_key": canonical_key,
+        }
     if content_type == "faq":
-        chunk_text = _faq_chunk_text(
-            brand=brand,
-            briefing=briefing,
-            campaign=campaign,
-            audience=audience,
-            product=product,
-            question=question,
-            answer=answer,
-            rules=rules,
-            tone=tone,
-        )
+        chunk_text = _faq_chunk_text(snapshot_metadata=snapshot.get("metadata") or {})
         rag_entry = supabase_client.upsert_knowledge_rag_entry({
             "persona_id": persona_id,
             "artifact_id": source_node.get("artifact_id") or source_meta.get("artifact_id"),
@@ -455,6 +626,7 @@ def publish_approved_node(
                 "source_node_id": source_node.get("id"),
                 "source_knowledge_item_id": (source_item or {}).get("id"),
                 "hierarchy_path": hierarchy_path,
+                "branch_context": branch_context,
                 "status": "active",
                 "rag_index": source_meta.get("rag_index") or "default",
             },
@@ -479,6 +651,7 @@ def publish_approved_node(
                     "approved_snapshot_id": snapshot.get("id"),
                     "rag_entry_id": rag_entry.get("id"),
                     "hierarchy_path": [step.get("node_type") for step in hierarchy_path],
+                    "branch_context": branch_context,
                     "product": (product or {}).get("slug"),
                     "audience": (audience or {}).get("slug"),
                     "campaign": (campaign or {}).get("slug"),
@@ -513,6 +686,12 @@ def publish_approved_node(
                 persona_id=persona_id,
                 weight=1.0,
                 metadata={
+                    **knowledge_graph.semantic_edge_metadata(
+                        source_node,
+                        embedded_node,
+                        "manual",
+                        {},
+                    ),
                     "primary_tree": False,
                     "active": True,
                     "visual_hidden": False,
