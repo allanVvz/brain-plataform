@@ -33,8 +33,8 @@ def _plan(entries: list[dict]) -> dict:
         "source": "https://tockfatal.com",
         "persona_slug": "tock-fatal",
         "validation_policy": "human_validation_required",
-        "tree_mode": "single_branch",
-        "branch_policy": "single_branch_by_default",
+        "tree_mode": "pyramidal",
+        "branch_policy": "top_down_pyramidal",
         "entries": entries,
         "links": [],
     }
@@ -87,14 +87,14 @@ def main() -> int:
     _assert(update.get("plan_hash"), "patch returns canonical plan hash")
     _assert(update.get("plan_state", {}).get("plan_hash") == update.get("plan_hash"), "plan_state carries same hash")
     _assert(update["current_block_counts"]["audience"] == 2, "current counts audience=2")
-    _assert(update["current_block_counts"]["product"] == 4, "current counts product=4")
-    _assert(update["current_block_counts"]["faq"] == 8, "current counts faq=8")
+    _assert(update["current_block_counts"]["product"] == 8, "current counts product=8 after audience expansion")
+    _assert(update["current_block_counts"]["faq"] == 20, "current counts faq=20 as one Golden Dataset per terminal copy")
 
     restored = svc.get_session(sid) or {}
     restored_state = svc._session_public_state(restored)  # type: ignore[attr-defined]
     _assert((restored_state["knowledge_plan"] or {}).get("entries"), "get session can restore current plan")
     _assert(restored_state["plan_hash"] == update["plan_hash"], "reload state preserves current plan hash")
-    _assert(restored_state["current_block_counts"]["faq"] == 8, "reload state preserves current faq count")
+    _assert(restored_state["current_block_counts"]["faq"] == 20, "reload state preserves current faq document count")
 
     short_plan = _plan([
         _entry("briefing", "briefing-base"),
@@ -107,7 +107,7 @@ def main() -> int:
         _entry("faq", "faq-2"),
         _entry("rule", "regra-base"),
     ])
-    rejected = svc.save(sid, "", short_plan)
+    rejected = svc.save(sid, "", {"plan_hash": "stale", "normalized_plan": short_plan})
     _assert("Plan mismatch: save payload is not the current normalized plan." == rejected.get("error"), "save blocks mismatched final plan hash")
 
     counts = svc.count_blocks_by_type(expanded_entries)

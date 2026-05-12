@@ -62,15 +62,15 @@ def test_plan_without_brand_parent_slugs() -> None:
     _assert(bool(faq_entries), "PLAN contains FAQ entries after normalization")
     _assert(
         all((entry.get("metadata") or {}).get("parent_slug") in {entry["slug"] for entry in copy_entries} for entry in faq_entries),
-        "faq stays under copy in single_branch marketing flow",
+        "faq stays under copy in pyramidal marketing flow",
     )
     _assert(
         not any((entry.get("metadata") or {}).get("single_branch_parent_rewritten") is True for entry in faq_entries),
-        "single_branch planner does not need parent rewrite",
+        "pyramidal planner does not need parent rewrite",
     )
-    _assert(not normalized.get("warnings"), "single_branch planner does not emit rewrite warnings")
-    _assert(normalized.get("tree_mode") == "single_branch", "PLAN defaults to single_branch")
-    _assert(normalized.get("branch_policy") == "single_branch_by_default", "PLAN defaults to single_branch_by_default")
+    _assert(not normalized.get("warnings"), "pyramidal planner does not emit rewrite warnings")
+    _assert(normalized.get("tree_mode") == "pyramidal", "PLAN defaults to pyramidal")
+    _assert(normalized.get("branch_policy") == "top_down_pyramidal", "PLAN defaults to top_down_pyramidal")
     links = {(link["source_slug"], link["target_slug"]) for link in normalized.get("links") or []}
     _assert(("self", "briefing-tock-fatal") in links, "PLAN emits persona -> briefing link")
     _assert(("briefing-tock-fatal", "publico-tock-fatal") in links, "PLAN emits briefing -> audience link")
@@ -396,13 +396,13 @@ def test_branch_policy_variations() -> None:
         },
     )
     by_slug = {entry["slug"]: entry for entry in parallel["entries"]}
-    _assert(parallel.get("tree_mode") == "single_branch", "PLAN keeps single_branch even when parallel output is requested")
-    _assert(parallel.get("branch_policy") == "single_branch_by_default", "PLAN keeps single_branch_by_default policy")
+    _assert(parallel.get("tree_mode") == "pyramidal", "PLAN keeps pyramidal tree mode")
+    _assert(parallel.get("branch_policy") == "top_down_pyramidal", "PLAN keeps top_down_pyramidal policy")
     parallel_faqs = [entry for entry in parallel["entries"] if entry.get("content_type") == "faq"]
     parallel_copy_slugs = {entry["slug"] for entry in parallel["entries"] if entry.get("content_type") == "copy"}
     _assert(
         parallel_faqs and all((entry.get("metadata") or {}).get("parent_slug") in parallel_copy_slugs for entry in parallel_faqs),
-        "single_branch keeps FAQ under copy",
+        "pyramidal policy keeps FAQ Golden Dataset under copy",
     )
 
     ambiguous = kb_intake_service._normalize_sofia_knowledge_plan(
@@ -452,17 +452,15 @@ def test_multi_audience_duplicates_commercial_subbranches() -> None:
     copies = [entry for entry in normalized["entries"] if entry["content_type"] == "copy"]
     faqs = [entry for entry in normalized["entries"] if entry["content_type"] == "faq"]
     product_slugs = {entry["slug"] for entry in products}
-    offer_parent_slugs = {(entry.get("metadata") or {}).get("parent_slug") for entry in offers}
-    offer_slugs = {entry["slug"] for entry in offers}
     copy_parent_slugs = {(entry.get("metadata") or {}).get("parent_slug") for entry in copies}
     copy_slugs = {entry["slug"] for entry in copies}
     faq_parent_slugs = [(entry.get("metadata") or {}).get("parent_slug") for entry in faqs]
 
     _assert(len(products) == 2, "two audiences receive product branches")
     _assert({(entry.get("metadata") or {}).get("parent_slug") for entry in products} == {"audience-a", "audience-b"}, "products are scoped under each audience")
-    _assert(len(offers) == 2 and offer_parent_slugs == product_slugs, "each product branch receives its own offer")
-    _assert(len(copies) == 2 and copy_parent_slugs == offer_slugs, "each offer receives its own copy")
-    _assert(len(faqs) == 2 and all(parent in copy_slugs for parent in faq_parent_slugs), "faq count policy total keeps two FAQs under copies")
+    _assert(len(offers) == 0, "offers are not invented without commercial variation")
+    _assert(len(copies) == 2 and copy_parent_slugs == product_slugs, "each product receives its own copy")
+    _assert(len(faqs) == 2 and all(parent in copy_slugs for parent in faq_parent_slugs), "FAQ Golden Dataset creates one document under each copy")
     _assert(not any((entry.get("metadata") or {}).get("single_branch_parent_rewritten") for entry in faqs), "multi-audience expansion does not use parent rewrite")
 
 
@@ -488,18 +486,18 @@ def test_multi_product_keeps_each_lower_subbranch_scoped() -> None:
     _assert((by_slug["copy-product-1"]["metadata"] or {}).get("parent_slug") == "product-1", "copy 1 stays under product 1")
     _assert((by_slug["copy-product-2"]["metadata"] or {}).get("parent_slug") == "product-2", "copy 2 stays under product 2")
     scoped_faqs = [entry for entry in normalized["entries"] if entry["content_type"] == "faq"]
-    _assert(len(scoped_faqs) == 1, "faq count policy total keeps one FAQ")
+    _assert(len(scoped_faqs) == 2, "FAQ Golden Dataset creates one document per product copy")
     _assert(
-        (scoped_faqs[0]["metadata"] or {}).get("parent_slug") in {"copy-product-1", "copy-product-2"},
-        "remaining FAQ stays under its scoped copy",
+        {(faq["metadata"] or {}).get("parent_slug") for faq in scoped_faqs} == {"copy-product-1", "copy-product-2"},
+        "FAQ documents stay under their scoped copies",
     )
 
 
 def test_tag_edges_are_auxiliary_metadata() -> None:
     knowledge_graph = (API_DIR / "services" / "knowledge_graph.py").read_text(encoding="utf-8")
-    _assert('"graph_layer": "auxiliary"' in knowledge_graph, "tag edges carry auxiliary graph_layer metadata")
+    _assert('"graph_layer": "semantic_tags"' in knowledge_graph, "tag edges carry semantic_tags graph_layer metadata")
     _assert('"primary_tree": False' in knowledge_graph, "tag edges are not primary tree")
-    _assert('"visual_hidden": False' in knowledge_graph, "tag edges stay available for auxiliary display")
+    _assert('"visual_hidden": True' in knowledge_graph, "tag edges stay hidden from primary visual tree")
 
 
 def test_duplicate_primary_tree_guard_is_present() -> None:

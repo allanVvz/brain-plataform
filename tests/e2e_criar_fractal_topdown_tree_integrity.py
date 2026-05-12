@@ -54,8 +54,8 @@ def _raw_plan() -> dict:
         "source": "https://tockfatal.com",
         "persona_slug": "tock-fatal",
         "validation_policy": "human_validation_required",
-        "tree_mode": "single_branch",
-        "branch_policy": "single_branch_by_default",
+        "tree_mode": "pyramidal",
+        "branch_policy": "top_down_pyramidal",
         "faq_count_policy": "total",
         "entries": entries,
         "links": [],
@@ -112,10 +112,11 @@ def main() -> int:
     _assert(plan_state["validation"]["valid"] is True, "normalizedPlan is valid")
     _assert(counts == plan_state["summary"]["current_block_counts"], "summary counts match normalizedPlan")
     _assert(counts["audience"] == 2, "two audiences remain")
-    _assert(counts["product"] == 6, "six products remain without cross-duplicating")
+    _assert(counts["product"] == 12, "six products expand across two audiences")
     _assert(counts["offer"] > 0, "offers are inferred from price and quantity")
     _assert(counts["copy"] >= counts["offer"], "copy exists under offers")
-    _assert(counts["faq"] == 12, "FAQ total policy keeps twelve FAQs")
+    _assert(normalized.get("faq_count_policy") == "per_branch", "FAQ policy is Golden Dataset per branch")
+    _assert(counts["faq"] == counts["copy"], "one FAQ Golden Dataset is created per terminal copy")
     _assert(counts["rule"] >= 1, "commercial rule is created/normalized")
     _assert(knowledge_graph._CONTENT_TYPE_TO_NODE.get("offer") == "offer", "offer materializes as knowledge node type offer")
 
@@ -150,7 +151,7 @@ def main() -> int:
 
     page_source = (ROOT / "dashboard" / "app" / "knowledge" / "capture" / "page.tsx").read_text(encoding="utf-8")
     _assert("const previewPlan = plan;" in page_source, "preview uses normalizedPlan directly")
-    _assert("expected}/{created}" in page_source, "sidebar renders expected/created counts")
+    _assert("expected}/{created}" in page_source, "sidebar renders expected/created document counts")
     _assert("stage === \"ready_to_save\" && draftPlan && planStateValid" in page_source, "preview is gated by valid planState")
 
     print("PASS e2e_criar_fractal_topdown_tree_integrity")

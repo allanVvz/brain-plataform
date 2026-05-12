@@ -166,8 +166,8 @@ def marketing_plan(run_token: str) -> dict:
                 "metadata": {"parent_slug": copy},
             },
         ],
-        "tree_mode": "single_branch",
-        "branch_policy": "single_branch_by_default",
+        "tree_mode": "pyramidal",
+        "branch_policy": "top_down_pyramidal",
     }
 
 
@@ -254,8 +254,8 @@ def validate_db_after_save(report: dict, session_id: str, run_token: str, person
         meta = node.get("metadata") or {}
         expect(report, meta.get("session_id") == session_id, f"node session scoped: {node.get('title')}")
         expect(report, meta.get("created_via") == "kb_intake_sofia", f"node created_via scoped: {node.get('title')}")
-        expect(report, meta.get("tree_mode") == "single_branch", f"node tree_mode scoped: {node.get('title')}")
-        expect(report, meta.get("branch_policy") == "single_branch_by_default", f"node branch_policy scoped: {node.get('title')}")
+        expect(report, meta.get("tree_mode") == "pyramidal", f"node tree_mode scoped: {node.get('title')}")
+        expect(report, meta.get("branch_policy") == "top_down_pyramidal", f"node branch_policy scoped: {node.get('title')}")
     briefing = next(node for node in nodes if node.get("node_type") == "briefing")
     audience = next(node for node in nodes if node.get("node_type") == "audience")
     product = next(node for node in nodes if node.get("node_type") == "product")
@@ -284,8 +284,8 @@ def validate_db_after_save(report: dict, session_id: str, run_token: str, person
         meta = (edge or {}).get("metadata") or {}
         expect(report, meta.get("active") is True and meta.get("primary_tree") is True and meta.get("visual_hidden") is not True, "primary edge is active visible")
         expect(report, meta.get("session_id") == session_id, "primary edge has session_id")
-        expect(report, meta.get("tree_mode") == "single_branch", "primary edge has tree_mode")
-        expect(report, meta.get("branch_policy") == "single_branch_by_default", "primary edge has branch_policy")
+        expect(report, meta.get("tree_mode") == "pyramidal", "primary edge has tree_mode")
+        expect(report, meta.get("branch_policy") == "top_down_pyramidal", "primary edge has branch_policy")
         expect(report, bool(meta.get("semantic_relation")), "primary edge has semantic_relation metadata")
     forbidden = [
         (persona_root["id"], by_slug[f"produto-kit-5-pecas-modal-{run_token.lower()}"]["id"]),

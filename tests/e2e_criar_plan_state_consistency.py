@@ -33,8 +33,8 @@ def _raw_tockfatal_plan() -> dict:
         "source": "https://tockfatal.com",
         "persona_slug": "tock-fatal",
         "validation_policy": "human_validation_required",
-        "tree_mode": "single_branch",
-        "branch_policy": "single_branch_by_default",
+        "tree_mode": "pyramidal",
+        "branch_policy": "top_down_pyramidal",
         "faq_count_policy": "total",
         "entries": [
             _entry("briefing", "briefing-tockfatal-kits", "Briefing Tock Fatal Kits", "self"),
@@ -89,10 +89,10 @@ def main() -> int:
     _assert(plan_state["plan_hash"], "normalized plan has canonical hash")
     _assert(counts == summary_counts, "summary counts match normalized entries")
     _assert(len(entries) == plan_state["summary"]["entry_count"], "entry_count matches normalized entries")
-    _assert(normalized.get("faq_count_policy") == "total", "faq_count_policy defaults to total")
+    _assert(normalized.get("faq_count_policy") == "per_branch", "faq_count_policy defaults to Golden Dataset per branch")
     _assert(counts["offer"] >= 6, "price and quantity infer commercial offers")
     _assert(counts["rule"] >= 1, "commercial rules normalize to rule entries")
-    _assert(counts["faq"] == 6, "total FAQ policy keeps requested total")
+    _assert(counts["faq"] == counts["copy"], "one FAQ Golden Dataset is created per terminal copy")
     _assert(not any(entry.get("content_type") == "rules" for entry in entries), "rules alias normalized to rule")
     _assert(not any("-audience-" in str(entry.get("slug") or "") for entry in entries if entry.get("content_type") == "product"), "product slugs do not embed audience")
 

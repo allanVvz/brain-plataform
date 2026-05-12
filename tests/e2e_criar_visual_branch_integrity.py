@@ -66,8 +66,8 @@ def raw_plan() -> dict:
         "source": "https://tockfatal.com",
         "persona_slug": "tock-fatal",
         "validation_policy": "human_validation_required",
-        "tree_mode": "single_branch",
-        "branch_policy": "single_branch_by_default",
+        "tree_mode": "pyramidal",
+        "branch_policy": "top_down_pyramidal",
         "faq_count_policy": "total",
         "entries": [
             entry("briefing", "briefing-tock-fatal", "Briefing Tock Fatal", "self"),
@@ -144,7 +144,7 @@ def main() -> int:
 
     prompt_source = (ROOT / "api" / "services" / "kb_intake_service.py").read_text(encoding="utf-8")
     expect("explorar -> confirmar -> montar normalizedPlan -> validar -> resumir curto" in prompt_source, "Sofia prompt uses explore/confirm/normalize contract")
-    expect("faq_count_policy = total" in prompt_source, "prompt defaults FAQ policy to total")
+    expect("faq_count_policy = per_branch" in prompt_source, "prompt defaults FAQ policy to Golden Dataset per branch")
 
     print("PASS e2e_criar_visual_branch_integrity")
     return 0

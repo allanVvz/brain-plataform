@@ -61,7 +61,7 @@ Ambos tem os mesmos valores:
     raw_plan = {
         "source": "https://tockfatal.com",
         "persona_slug": "tock-fatal",
-        "tree_mode": "single_branch",
+        "tree_mode": "pyramidal",
         "entries": [
             {"content_type": "briefing", "title": "Briefing Tock Fatal", "slug": "briefing-tock-fatal", "content": "Briefing", "metadata": {}},
             {"content_type": "campaign", "title": "Campanha Kits Modal", "slug": "campaign-tockfatal-kits-modal", "content": "Campanha", "metadata": {"parent_slug": "briefing-tock-fatal"}},
@@ -87,16 +87,16 @@ Ambos tem os mesmos valores:
     by_slug = {entry["slug"]: entry for entry in entries}
 
     expect(violations == [], f"normalized plan has no violations: {violations}")
-    expect(normalized["tree_mode"] == "single_branch", "tree_mode remains single_branch")
-    expect(normalized["branch_policy"] == "single_branch_by_default", "branch_policy remains single_branch_by_default")
-    expect(normalized["faq_count_policy"] == "total", "faq_count_policy defaults to total")
+    expect(normalized["tree_mode"] == "pyramidal", "tree_mode remains pyramidal")
+    expect(normalized["branch_policy"] == "top_down_pyramidal", "branch_policy remains top_down_pyramidal")
+    expect(normalized["faq_count_policy"] == "per_branch", "faq_count_policy defaults to Golden Dataset per branch")
     expect(counts["briefing"] == 1, "one briefing")
     expect(counts["campaign"] == 1, "one campaign")
     expect(counts["audience"] == 2, "two audiences")
     expect(counts["product"] == 4, "two base products distributed across two audiences")
-    expect(counts["offer"] == 6, "offers created from 1, 5 and 10 peca quantities")
-    expect(counts["copy"] >= 6, "copy exists for every offer")
-    expect(counts["faq"] == 8, "8 FAQs remain total, not 32")
+    expect(counts["offer"] == 12, "offers are created for each product/audience quantity branch")
+    expect(counts["copy"] >= 12, "copy exists for every offer")
+    expect(counts["faq"] == counts["copy"], "one FAQ Golden Dataset is created per terminal copy")
     expect(counts["rule"] >= 1, "commercial rule exists")
     expect(all(entry["content_type"] != "rules" for entry in entries), "rules alias normalized to rule")
     expect(all("audience" not in entry["slug"] for entry in entries if entry["content_type"] == "product"), "product slug does not embed audience")
