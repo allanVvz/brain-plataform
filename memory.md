@@ -388,3 +388,38 @@ Objetivo: tornar Sofia menos rigida e mais consciente do contexto ja existente d
 Pedido subsequente do usuario: ao abrir CRIAR para uma persona, Sofia deve carregar (ou criar pendente) um card BRAND (`content_type=brand`, `node_type=brand`). Hierarquia padrao passa a ser `persona -> brand -> briefing -> ...`. Sequencia decidida: terminar verificacao do asset feature antes de iniciar brand.
 
 Correcao importante do usuario gravada como memoria: `memory.md` (raiz do repo) eh memoria **tecnica/operacional** do Claude Code e do projeto. Diretrizes de marca persistem APENAS em `knowledge_item content_type=brand` + `knowledge_node node_type=brand`. Se houver persistencia no vault, eh como card BRAND dentro de `01_BRAND/` da persona via `vault_sync`, NAO como memory.md por persona. `memory.md` so recebe nota tecnica curta sobre o card brand.
+
+## Sessao 2026-05-18 (parte 6) - Setup formal PROD vs QA
+
+### Estado final dos ambientes
+
+| Camada | PROD | QA |
+|---|---|---|
+| Branch ai-brain | `main` | `develop` |
+| Supabase project | `slyxppvghniknqofhqzt` (us-west-2) | `qhnepdcqtkjjslqqiyvp` (us-east-1, novo) |
+| Cloud Run service | `ai-brain-api` (revision 00025-pq7) | `ai-brain-api-qa` (revision 00001-8pp) |
+| Cloud Run URL | https://ai-brain-api-837167469397.us-central1.run.app | https://ai-brain-api-qa-837167469397.us-central1.run.app |
+| Frontend baita-cardapio | branch `main` -> https://baita-cardapio.vercel.app | branch `qa` -> Vercel preview |
+| Env file (gitignored) | `env.yaml` | `env.qa.yaml` |
+| Migrations aplicadas | 37 + dados reais (383 produtos, 16 categorias, 18 imagens) | 37 + seed minimo BAITA (9 categorias, 4 produtos sem assets) |
+
+### Decisoes operacionais
+
+- `main` so recebe codigo via merge fast-forward de `develop`. Deploy PROD = `gcloud run deploy ai-brain-api --source ./api --env-vars-file env.yaml`.
+- `develop` = QA. Deploy QA = `gcloud run deploy ai-brain-api-qa --source ./api --env-vars-file env.qa.yaml`. Aqui testamos antes de promover pra main.
+- `env.yaml` e `env.qa.yaml` foram movidos para fora do tracking do git (GitHub secret scanning bloqueou push com OPENAI_API_KEY). `env.yaml.example` ficou como template versionado.
+- CORS prod liberou `https://baita-cardapio.vercel.app` + `*-allanvvzs-projects.vercel.app` + `localhost:5173`. CORS QA adicionou `https://baita-cardapio-qa.vercel.app` para o branch preview do cardapio.
+- baita-cardapio repo agora tem 2 branches: `main` (prod) e `qa`. Vercel resolve `VITE_AI_BRAIN_API_URL` por scope: production -> ai-brain-api prod; preview branch `qa` -> ai-brain-api-qa.
+- gcloud SSL falhou (`SSL: CERTIFICATE_VERIFY_FAILED`) ate aplicarmos `gcloud config set auth/disable_ssl_validation True`. Em maquinas com cert chain corporativo, setar `REQUESTS_CA_BUNDLE` resolve sem desativar SSL.
+- O env.yaml de PROD inicialmente apontava para o `anon` key como SUPABASE_SERVICE_KEY -- isso fazia `/api/menu` voltar 404 "Persona not found" porque RLS bloqueava a leitura. Trocado para o JWT com `role:service_role` via `gcloud run services update --update-env-vars` (revision 00025-pq7).
+
+### Validacao em PROD
+
+- `GET /api/menu/baita-conveniencia` retorna `persona.collections[0]` com 16 categorias, 383 produtos, 1 banner editorial e 4 covers de categoria com URLs assinadas (`storage/v1/object/sign/assets-raw/...`).
+- Playwright em `https://baita-cardapio.vercel.app/cardapio/baita`: `source_live=true`, banners Lagunitas/Patagonia/Jagermeister/Suspeito carregando, zero requests falhados.
+
+### Bug-trail desta sessao
+
+- `env.yaml` ja estava commitado nos commits anteriores, mas GitHub push protection bloqueou o push do `develop` por causa do OPENAI_API_KEY na linha 3. Solucao: `git rm --cached env.yaml`, adicionar ao `.gitignore`, criar `env.yaml.example`, recommit.
+- Migration 037 contem um DO $$ block que faz seed do BAITA. No QA esse block roda tambem; criamos uma versao paralela `037b_baita_collection_seed` para registrar como migration nomeada quando rodada via MCP. A 037 (oficial) ja inclui o seed embarcado e e a fonte de verdade.
+- A SQL de 020 (lead_audience_memberships) usa `lead_id bigint` no original, mas leads em ambos projetos esta como uuid. No QA aplicamos com `lead_id uuid` (variacao adaptativa) para nao quebrar a constraint de FK.

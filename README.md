@@ -2,6 +2,30 @@
 
 A documentacao completa do fluxo, hierarquia e grafo de conhecimento esta em [`docs/knowledge-flow.md`](docs/knowledge-flow.md).
 
+## Ambientes (PROD e QA)
+
+| Camada | PROD (branch `main`) | QA (branch `develop`) |
+|---|---|---|
+| Supabase | `slyxppvghniknqofhqzt` (allanVvz's Project, us-west-2) | `qhnepdcqtkjjslqqiyvp` (ai-brain-qa, us-east-1) |
+| Cloud Run | `ai-brain-api` (us-central1) | `ai-brain-api-qa` (us-central1) |
+| API URL | https://ai-brain-api-837167469397.us-central1.run.app | https://ai-brain-api-qa-...us-central1.run.app |
+| Frontend (baita-cardapio) | https://baita-cardapio.vercel.app (branch `main` Vercel) | preview deploy (branch `qa`) |
+| Env file (local, gitignored) | `env.yaml` | `env.qa.yaml` |
+| Template versionado | `env.yaml.example` | mesmo formato, com QA URLs |
+
+Regras:
+- `main` = PROD. Toda mudanca pra prod entra por merge `develop -> main` + `gcloud run deploy ai-brain-api --source ./api --env-vars-file env.yaml`.
+- `develop` = QA. Iteracao acontece aqui. Deploy: `gcloud run deploy ai-brain-api-qa --source ./api --env-vars-file env.qa.yaml`.
+- QA Supabase comeca vazio com mesmo schema das 37 migrations. Sem dados de cliente reais ate decidirmos importar.
+- CORS: o env.yaml/env.qa.yaml liberam `https://baita-cardapio.vercel.app` (prod), `*-allanvvzs-projects.vercel.app` (Vercel previews) e `localhost:5173` (Vite local).
+- **Nunca commite `env.yaml` ou `env.qa.yaml`** — eles contem OPENAI_API_KEY e SUPABASE_SERVICE_KEY. Use o `env.yaml.example` como referencia.
+
+Deploy passo-a-passo:
+1. `cd ai-brain && python -m py_compile api/main.py api/routes/*.py api/services/*.py`
+2. `cd dashboard && npm run build`
+3. `gcloud run deploy <ai-brain-api | ai-brain-api-qa> --source ./api --region us-central1 --allow-unauthenticated --env-vars-file <env.yaml | env.qa.yaml>`
+4. Smoke: `curl -sk https://<service>/health` -> 200. `curl -sk https://<service>/api/menu/baita-conveniencia` -> 200 com `persona.collections[0].cover` apontando para `storage/v1/object/sign/...`.
+
 ## Start Local
 
 - Backend API: `cd api && uvicorn main:app --reload`
