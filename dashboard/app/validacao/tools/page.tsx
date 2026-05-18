@@ -49,7 +49,7 @@ const SECTIONS: Section[] = [
       { name: "FlowValidatorWorker",        where: "workers/flow_validator_worker.py", purpose: "Roda regras de fluxo periodicamente." },
       { name: "N8nMirrorWorker",            where: "workers/n8n_mirror_worker.py",     purpose: "Espelha execuções do n8n para Supabase." },
       { name: "HealthCheckWorker",          where: "workers/health_check_worker.py",   purpose: "Coleta health score periódico." },
-      { name: "KbSyncWorker",               where: "workers/kb_sync_worker.py",        purpose: "Sincroniza vault → knowledge_items → grafo." },
+      { name: "KbSyncWorker",               where: "workers/kb_sync_worker.py",        purpose: "Sincroniza vault → knowledge_items → Golden Dataset/grafo." },
     ],
   },
   {
@@ -60,7 +60,7 @@ const SECTIONS: Section[] = [
         notes: "Modo internal vs n8n por persona (011)." },
       { name: "/messages",                  where: "api/routes/messages.py",        purpose: "Histórico, conversas, send manual via webhook." },
       { name: "/leads",                     where: "api/routes/leads.py",           purpose: "Listagem com filtro por persona." },
-      { name: "/knowledge/*",               where: "api/routes/knowledge.py",       purpose: "Upload, queue, KB, chat-context.",
+      { name: "/knowledge/*",               where: "api/routes/knowledge.py",       purpose: "Upload, queue, Golden Dataset, chat-context.",
         notes: "Inclui /chat-context com inferência de persona pelo grafo." },
       { name: "/knowledge/graph-data",      where: "api/routes/graph.py",           purpose: "Payload do grafo (focus/depth/filters/registry)." },
       { name: "/marketing/generate",        where: "api/routes/marketing.py",       purpose: "Geração de copy via ModelRouter.",

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from services import auth_service, supabase_client
@@ -16,10 +16,20 @@ class LoginBody(BaseModel):
 
 @router.post("/login")
 def login(body: LoginBody, response: Response):
-    user = auth_service.authenticate(body.identifier, body.password)
-    session_payload = auth_service.build_session_response(user)
-    token, ttl = auth_service.create_session_token(user, remember=body.remember)
-    auth_service.set_session_cookie(response, token, ttl)
+    try:
+        user = auth_service.authenticate(body.identifier, body.password)
+        session_payload = auth_service.build_session_response(user)
+        token, ttl = auth_service.create_session_token(user, remember=body.remember)
+        auth_service.set_session_cookie(response, token, ttl)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("auth.login", f"unexpected login failure: {exc}", exc)
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Unexpected login failure.")
     try:
         supabase_client.get_client().table("app_users").update({"last_login_at": datetime.now(timezone.utc).isoformat()}).eq("id", user["id"]).execute()
     except Exception:

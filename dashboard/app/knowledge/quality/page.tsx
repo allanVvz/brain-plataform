@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api, API_URL, BASE } from "@/lib/api";
 import {
   ChevronLeft, ChevronRight,
-  CheckCircle, XCircle, Database, Loader2,
+  CheckCircle, XCircle, Loader2,
 } from "lucide-react";
 
 interface KnowledgeItem {
@@ -33,7 +33,7 @@ const STATUS_META: Record<string, { label: string; badge: string; urgent?: boole
   needs_category: { label: "Sem categoria", badge: "bg-yellow-500/10 border-yellow-500/30 text-yellow-400" },
   pending:        { label: "Pendente",       badge: "bg-white/5 border-white/10 text-obs-subtle" },
   approved:       { label: "Aprovado",       badge: "bg-green-500/10 border-green-500/30 text-green-400" },
-  embedded:       { label: "Na KB",          badge: "bg-obs-violet/10 border-obs-violet/30 text-obs-violet" },
+  embedded:       { label: "No Golden Dataset", badge: "bg-obs-violet/10 border-obs-violet/30 text-obs-violet" },
   rejected:       { label: "Rejeitado",      badge: "bg-obs-rose/10 border-obs-rose/30 text-obs-rose" },
 };
 
@@ -98,10 +98,10 @@ export default function QualityPage() {
     setItems((prev) => prev.filter((_, i) => i !== safeIdx));
   }
 
-  async function approveSingle(toKb = false) {
+  async function approveSingle() {
     if (!item) return;
     setProcessing(true);
-    try { await api.approveItem(item.id, toKb); advance(); }
+    try { await api.approveItem(item.id, false); advance(); }
     catch (e) { console.error(e); }
     finally { setProcessing(false); }
   }
@@ -110,14 +110,6 @@ export default function QualityPage() {
     if (!item) return;
     setProcessing(true);
     try { await api.rejectItem(item.id, ""); advance(); }
-    catch (e) { console.error(e); }
-    finally { setProcessing(false); }
-  }
-
-  async function promoteSingle() {
-    if (!item) return;
-    setProcessing(true);
-    try { await api.promoteToKb(item.id); advance(); }
     catch (e) { console.error(e); }
     finally { setProcessing(false); }
   }
@@ -143,7 +135,7 @@ export default function QualityPage() {
   function selectAll() { setSelected(new Set(items.map((i) => i.id))); }
   function clearSelect() { setSelected(new Set()); setBulkPersona(""); setBulkType(""); }
 
-  async function bulkApprove(toKb: boolean) {
+  async function bulkApprove() {
     if (!selectedItems.length) return;
     setProcessing(true);
     try {
@@ -156,7 +148,7 @@ export default function QualityPage() {
       }
       const approvable = selectedItems.filter((i) => i.persona_id || bulkPersona);
       for (const item of approvable) {
-        await api.approveItem(item.id, toKb);
+        await api.approveItem(item.id, false);
       }
       setItems((prev) => prev.filter((i) => !approvable.some((a) => a.id === i.id)));
       setDone((d) => d + approvable.length);
@@ -188,7 +180,7 @@ export default function QualityPage() {
       if (["INPUT","SELECT","TEXTAREA"].includes(tag)) return;
       if (e.key === "ArrowRight") { if (hasNext) setCursor((c) => c + 1); }
       if (e.key === "ArrowLeft")  { if (hasPrev) setCursor((c) => c - 1); }
-      if (e.key === "Enter" && item?.persona_id) approveSingle(true);
+      if (e.key === "Enter" && item?.persona_id) approveSingle();
       if (e.key === "r" && item)  rejectSingle();
     }
     window.addEventListener("keydown", onKey);
@@ -208,7 +200,7 @@ export default function QualityPage() {
   const needsAction   = ["pending","needs_persona","needs_category"].includes(item?.status ?? "");
   const canApprove    = needsAction && !!item?.persona_id;
   const canReject     = needsAction;
-  const canPromote    = item?.status === "approved";
+  const showPublishHint = item?.status === "approved" && item?.content_type === "faq";
 
   // ── bulk canApprove ────────────────────────────────────────
   const bulkCanApprove = selectedItems.some((i) => i.persona_id || bulkPersona);
@@ -421,18 +413,11 @@ export default function QualityPage() {
                       Rejeitar {selected.size}
                     </button>
 
-                    <button disabled={processing || !bulkCanApprove} onClick={() => bulkApprove(false)}
+                    <button disabled={processing || !bulkCanApprove} onClick={bulkApprove}
                       title={!bulkCanApprove ? "Defina um cliente para os itens sem persona" : ""}
                       className="w-full flex items-center justify-center gap-1.5 text-xs bg-obs-violet/8 border border-obs-violet/30 text-obs-violet hover:bg-obs-violet/15 px-4 py-2 rounded-lg disabled:opacity-40 transition-colors">
                       {processing ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
                       Aprovar {selected.size}
-                    </button>
-
-                    <button disabled={processing || !bulkCanApprove} onClick={() => bulkApprove(true)}
-                      title={!bulkCanApprove ? "Defina um cliente para os itens sem persona" : ""}
-                      className="w-full flex items-center justify-center gap-1.5 text-xs bg-green-500/12 border border-green-500/30 text-green-400 hover:bg-green-500/20 px-4 py-2 rounded-lg disabled:opacity-40 transition-colors font-medium">
-                      {processing ? <Loader2 size={11} className="animate-spin" /> : <Database size={11} />}
-                      Aprovar + KB {selected.size}
                     </button>
                   </div>
                 </div>
@@ -575,22 +560,15 @@ export default function QualityPage() {
                   </button>
                 )}
                 {canApprove && (
-                  <button disabled={processing} onClick={() => approveSingle(false)}
+                  <button disabled={processing} onClick={approveSingle}
                     className="flex items-center gap-1.5 text-xs bg-obs-violet/8 border border-obs-violet/30 text-obs-violet hover:bg-obs-violet/15 px-4 py-2 rounded-lg disabled:opacity-40 transition-colors">
                     {processing ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />} Aprovar
                   </button>
                 )}
-                {canApprove && (
-                  <button disabled={processing} onClick={() => approveSingle(true)} title="Enter"
-                    className="flex items-center gap-1.5 text-xs bg-green-500/12 border border-green-500/30 text-green-400 hover:bg-green-500/20 px-4 py-2 rounded-lg disabled:opacity-40 transition-colors font-medium">
-                    {processing ? <Loader2 size={11} className="animate-spin" /> : <Database size={11} />} Aprovar + KB
-                  </button>
-                )}
-                {canPromote && (
-                  <button disabled={processing} onClick={promoteSingle}
-                    className="flex items-center gap-1.5 text-xs bg-obs-violet/8 border border-obs-violet/30 text-obs-violet hover:bg-obs-violet/15 px-4 py-2 rounded-lg disabled:opacity-40 transition-colors">
-                    {processing ? <Loader2 size={11} className="animate-spin" /> : <Database size={11} />} Enviar à KB
-                  </button>
+                {showPublishHint && (
+                  <p className="text-[11px] text-obs-subtle">
+                    Publique no Golden Dataset pelo grafo, conectando o FAQ aprovado ao node Embedded.
+                  </p>
                 )}
               </div>
             </div>
@@ -650,7 +628,7 @@ export default function QualityPage() {
             <div className="flex gap-5 text-[9px] text-obs-faint font-mono justify-center pb-1">
               <span>← → navegar</span>
               <span>R rejeitar</span>
-              <span>Enter aprovar + KB</span>
+              <span>Enter aprovar</span>
               <span>☐ selecionar para bulk</span>
             </div>
           )}

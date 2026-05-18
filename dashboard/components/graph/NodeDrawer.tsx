@@ -19,6 +19,18 @@ const STATUS_BADGE: Record<string, string> = {
 
 const ALREADY_VALID = new Set(["ATIVO", "approved", "embedded"]);
 
+function formatLastModified(value: unknown): string | null {
+  if (!value) return null;
+  const date = new Date(typeof value === "number" ? value : String(value));
+  if (Number.isNaN(date.getTime())) return null;
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+}
+
 interface NodeDrawerProps {
   node: any | null;
   selectedNodes?: any[];
@@ -43,9 +55,10 @@ interface NodeDrawerProps {
   onFocusHere?: () => void;
   onDeleteNode?: (nodeId: string) => void | Promise<void>;
   onDeleteEdge?: (edgeId: string) => void | Promise<void>;
+  onSelectNode?: (nodeId: string) => void;
 }
 
-export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdated, directLinks = [], focusPath = [], onFocusHere, onDeleteNode, onDeleteEdge }: NodeDrawerProps) {
+export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdated, directLinks = [], focusPath = [], onFocusHere, onDeleteNode, onDeleteEdge, onSelectNode }: NodeDrawerProps) {
   const [editing, setEditing]     = useState(false);
   const [fullItem, setFullItem]   = useState<any>(null);
   const [fetching, setFetching]   = useState(false);
@@ -61,7 +74,11 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
 
   // Fetch full item whenever the selected node changes
   useEffect(() => {
-    if (!node || node.type === "personaNode" || !node.data?.item_id || !["vault", "queue"].includes(node.data?.source)) {
+    const graphKnowledgeItem =
+      node?.data?.source === "graph" &&
+      node?.data?.source_table === "knowledge_items" &&
+      !!node?.data?.item_id;
+    if (!node || node.type === "personaNode" || !node.data?.item_id || (!["vault", "queue"].includes(node.data?.source) && !graphKnowledgeItem)) {
       setFullItem(null);
       setEditing(false);
       return;
@@ -97,24 +114,33 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
   const isPersona  = node.type === "personaNode";
   const isProtected = isPersona || ["persona", "embedded", "gallery"].includes(String(d.node_type || "")) || d.protected === true;
   const isVault    = d.source === "vault";
-  const isQueue    = d.source === "queue";
+  const isQueue    = d.source === "queue" || (d.source === "graph" && d.source_table === "knowledge_items");
   const fileType   = (d.file_type || "").toLowerCase();
-  const isImage    = IMAGE_EXTS.has(fileType);
-  const isVideo    = VIDEO_EXTS.has(fileType);
-  const fileUrl    = d.file_path && API_URL
+  const assetUrl   = d.asset_url || d.metadata?.public_url || d.metadata?.url || d.metadata?.asset_url || null;
+  const fileUrl    = assetUrl || (d.file_path && API_URL
     ? `${API_URL}/knowledge/file?path=${encodeURIComponent(d.file_path)}`
-    : null;
+    : null);
+  const inferredExt = String(fileUrl || d.file_path || "").split("?")[0].split(".").pop()?.toLowerCase() || "";
+  const isImage    = IMAGE_EXTS.has(fileType) || IMAGE_EXTS.has(inferredExt) || d.node_type === "asset" && Boolean(fileUrl);
+  const isVideo    = VIDEO_EXTS.has(fileType) || VIDEO_EXTS.has(inferredExt);
 
   const currentStatus  = fullItem?.status ?? d.status;
   const tags: string[] = fullItem?.tags ?? d.tags ?? [];
   const displayContent = fullItem
     ? (fullItem.conteudo ?? fullItem.content ?? "")
-    : (d.content_preview ?? "");
+    : (d.markdown ?? d.metadata?.body ?? d.content_preview ?? "");
 
   const canEdit     = !isProtected && (isVault || isQueue);
-  const canValidate = !isProtected && !ALREADY_VALID.has(currentStatus);
+  const needsCanonicalSnapshot = isQueue && currentStatus === "approved" && !d.approved_snapshot_id;
+  const canValidate = !isProtected && (!ALREADY_VALID.has(currentStatus) || needsCanonicalSnapshot);
   const canReject   = !isProtected && isQueue && currentStatus !== "rejected";
   const canDelete   = !isProtected && String(node.id || "").startsWith("gn:") && !!onDeleteNode;
+  const canPublish  = !isProtected
+    && d.source === "graph"
+    && d.source_table === "knowledge_items"
+    && d.node_type === "faq"
+    && currentStatus === "approved"
+    && !!d.persona_id;
   const audiencePreview = Array.isArray(d.metadata?.preview) ? d.metadata.preview : [];
   const audienceOpenUrl = d.metadata?.open_url || (d.metadata?.lead_import_batch_id ? `/leads/import?open=${d.metadata.lead_import_batch_id}` : "");
 
@@ -149,25 +175,68 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
         await onUpdated?.(d.item_id);
         setFullItem((prev: any) => prev ? { ...prev, status: "ATIVO" } : prev);
       } else {
-        const result = await api.approveItem(d.item_id, true);
+        const result = await api.approveItem(d.item_id, false);
         const evidence = result?.evidence || {};
-        if (!evidence.knowledge_item_id || !evidence.kb_entry_id || !evidence.knowledge_node_id || !evidence.embedded_edge_id) {
-          throw new Error("Aprovacao incompleta: backend nao confirmou item, KB, node e edge Embedded.");
+        const contentType = String(d.node_type || d.content_type || fullItem?.content_type || "").toLowerCase();
+        const snapshotId = result?.approved_snapshot_id || evidence.approved_snapshot_id;
+        const ragEntryId = result?.rag_entry_id || evidence.rag_entry_id;
+        const ragChunkIds = result?.rag_chunk_ids || evidence.rag_chunk_ids || [];
+        if (result?.success !== true || !snapshotId || !evidence.knowledge_item_id || !evidence.knowledge_node_id) {
+          throw new Error(result?.error || "Aprovacao incompleta: backend nao confirmou snapshot, item e node semantico.");
+        }
+        if (contentType === "faq" && (!ragEntryId || !Array.isArray(ragChunkIds) || ragChunkIds.length === 0)) {
+          throw new Error("FAQ aprovada, mas o Golden Dataset RAG nao confirmou entry e chunks.");
         }
         const refreshed = await onUpdated?.(d.item_id);
         const expectedNodeId = `gn:${evidence.knowledge_node_id}`;
         const graphNodes = Array.isArray(refreshed?.nodes) ? refreshed.nodes : [];
-        const graphEdges = Array.isArray(refreshed?.edges) ? refreshed.edges : [];
-        const nodeExists = graphNodes.some((node: any) => node?.id === expectedNodeId);
-        const embeddedEdgeExists = graphEdges.some((edge: any) => edge?.source === expectedNodeId && String(edge?.target || "").startsWith("embedded:"));
-        if (!nodeExists || !embeddedEdgeExists) {
-          throw new Error("Aprovacao parcial: o grafo nao refletiu o node aprovado conectado ao Embedded.");
+        const refreshedNode = graphNodes.find((node: any) => node?.id === expectedNodeId);
+        const nodeExists = Boolean(refreshedNode);
+        if (!nodeExists) {
+          throw new Error("Aprovacao parcial: o grafo nao refletiu o node FAQ aprovado.");
         }
-        setFullItem((prev: any) => prev ? { ...prev, ...(result?.item || {}), status: result?.item?.status || "embedded" } : result?.item || prev);
+        if (contentType === "faq") {
+          const rd = refreshedNode?.data || {};
+          if (!rd.approved_snapshot_id || !rd.rag_entry_id || Number(rd.rag_chunk_count || 0) <= 0) {
+            throw new Error("Aprovacao parcial: graph-data nao refletiu snapshot e chunks RAG.");
+          }
+        }
+        setFullItem((prev: any) => prev ? { ...prev, ...(result?.item || {}), status: result?.item?.status || "approved" } : result?.item || prev);
       }
       showFlash("ok");
     } catch { showFlash("err"); }
     finally { setSaving(false); }
+  }
+
+  async function publish() {
+    if (!canPublish) return;
+    setSaving(true);
+    try {
+      const result = await api.createGraphEdge({
+        source_node_id: String(node.id),
+        target_node_id: `embedded:${d.persona_id}`,
+        relation_type: "manual",
+        persona_id: d.persona_id,
+        weight: 0.9,
+        metadata: {
+          created_from: "graph_drawer_publish",
+          direction: "source_to_target",
+          primary_tree: false,
+        },
+      });
+      const evidence = result?.evidence || {};
+      const ragChunkIds = evidence.rag_chunk_ids || evidence.knowledge_rag_chunk_ids || [];
+      if (!result?.success || !evidence.knowledge_item_id || !evidence.approved_snapshot_id || !evidence.rag_entry_id || !Array.isArray(ragChunkIds) || ragChunkIds.length === 0 || !evidence.knowledge_node_id || !evidence.embedded_edge_id) {
+        throw new Error("Publicacao incompleta no Golden Dataset.");
+      }
+      await onUpdated?.(d.item_id);
+      setFullItem((prev: any) => prev ? { ...prev, status: "embedded" } : prev);
+      showFlash("ok");
+    } catch {
+      showFlash("err");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function reject() {
@@ -182,6 +251,18 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
     finally { setSaving(false); }
   }
 
+  const lastModifiedRaw =
+    fullItem?.updated_at ||
+    fullItem?.modified_at ||
+    fullItem?.last_modified_at ||
+    fullItem?.created_at ||
+    d.updated_at ||
+    d.modified_at ||
+    d.last_modified_at ||
+    d.created_at ||
+    null;
+  const lastModifiedDisplay = lastModifiedRaw ? formatLastModified(lastModifiedRaw) : null;
+
   const rawSummaryItems: Array<[string, any]> = [
     ["Status", currentStatus || "active"],
     ["Tipo", d.content_type || d.node_type || "node"],
@@ -189,6 +270,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
     ["Pergunta", fullItem?.question || d.question],
     ["Resposta", fullItem?.answer || d.answer],
     ["Preço", fullItem?.metadata?.price?.display || d.metadata?.price?.display],
+    ["Última modificação", lastModifiedDisplay],
   ];
   const summaryItems = rawSummaryItems.filter(([, value]) => Boolean(value));
 
@@ -271,6 +353,10 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
 
           {d.slug && (
             <p className="text-[11px] text-obs-subtle font-mono">{d.slug}</p>
+          )}
+
+          {lastModifiedDisplay && (
+            <p className="text-[10px] text-obs-faint">Última modificação: {lastModifiedDisplay}</p>
           )}
 
           {typeof d.graph_distance === "number" && (
@@ -393,7 +479,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
                 className="w-full bg-obs-base border border-white/10 rounded-lg px-3 py-2.5 text-xs text-obs-text focus:outline-none focus:border-obs-violet/50 resize-y font-mono leading-relaxed"
               />
             ) : (
-              <pre className="text-xs text-obs-text/70 bg-obs-base rounded-lg p-3 border border-white/06 whitespace-pre-wrap overflow-y-auto max-h-48 font-mono leading-relaxed">
+              <pre className="code-surface text-xs rounded-xl p-3 whitespace-pre-wrap overflow-y-auto max-h-48 font-mono leading-6">
                 {displayContent || <span className="text-obs-faint italic">Sem conteúdo</span>}
                 {!fullItem && (displayContent?.length ?? 0) >= 200 && "…"}
               </pre>
@@ -442,6 +528,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
                   key={link.id || `${link.direction}-${link.other_id}`}
                   link={link}
                   onDelete={onDeleteEdge}
+                  onSelect={onSelectNode}
                 />
               ))}
             </div>
@@ -523,14 +610,14 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
             <button
               onClick={() => setEditing(false)}
               disabled={saving}
-              className="flex-1 py-2 text-xs rounded-lg glass border border-white/08 text-obs-subtle hover:text-obs-text transition-colors"
+              className="flex-1 py-2 text-xs font-medium rounded-xl border border-white/10 bg-white/[0.04] text-obs-subtle hover:bg-white/10 hover:border-white/20 hover:text-obs-text disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Cancelar
             </button>
             <button
               onClick={save}
               disabled={saving}
-              className="flex-1 py-2 text-xs font-medium rounded-lg bg-obs-violet/80 hover:bg-obs-violet disabled:opacity-50 text-white transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 py-2 text-xs font-medium rounded-xl border border-obs-violet/40 bg-obs-violet/20 text-obs-text shadow-sm backdrop-blur-md hover:bg-obs-violet/30 hover:border-obs-violet/60 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
             >
               {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
               Salvar
@@ -545,10 +632,21 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
               <button
                 onClick={validate}
                 disabled={saving}
-                className="w-full py-2 text-xs font-medium rounded-lg bg-green-600/80 hover:bg-green-500 disabled:opacity-50 text-white transition-colors flex items-center justify-center gap-1.5"
+                className="w-full py-2 text-xs font-medium rounded-xl border border-emerald-300/30 bg-emerald-500/15 text-emerald-50 shadow-sm shadow-emerald-500/10 backdrop-blur-md hover:bg-emerald-500/25 hover:border-emerald-300/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
               >
                 {saving ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
-                {isVault ? "Validar → ATIVO" : "Aprovar e promover à KB"}
+                {isVault ? "Validar entrada" : "Aprovar"}
+              </button>
+            )}
+
+            {canPublish && (
+              <button
+                onClick={publish}
+                disabled={saving}
+                className="w-full py-2 text-xs font-medium rounded-xl border border-obs-violet/35 bg-obs-violet/15 text-obs-text shadow-sm backdrop-blur-md hover:bg-obs-violet/25 hover:border-obs-violet/55 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
+              >
+                {saving ? <Loader2 size={11} className="animate-spin" /> : <Tag size={11} />}
+                Publicar no Golden Dataset
               </button>
             )}
 
@@ -556,7 +654,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
               <button
                 onClick={reject}
                 disabled={saving}
-                className="w-full py-2 text-xs font-medium rounded-lg bg-obs-rose/10 border border-obs-rose/30 text-obs-rose hover:bg-obs-rose/20 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+                className="w-full py-2 text-xs font-medium rounded-xl border border-obs-rose/35 bg-obs-rose/[0.14] text-obs-rose shadow-sm shadow-obs-rose/[0.08] backdrop-blur-md hover:bg-obs-rose/[0.20] hover:border-obs-rose/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
               >
                 {saving ? <Loader2 size={11} className="animate-spin" /> : <XCircle size={11} />}
                 Rejeitar
@@ -569,7 +667,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
                   if (window.confirm("Excluir este card e suas conexoes?")) onDeleteNode?.(node.id);
                 }}
                 disabled={saving}
-                className="w-full py-2 text-xs font-medium rounded-lg bg-red-500/10 border border-red-400/30 text-red-100 hover:bg-red-500/20 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+                className="w-full py-2 text-xs font-medium rounded-xl border border-red-300/35 bg-red-500/[0.18] text-red-50 shadow-sm shadow-red-500/[0.10] backdrop-blur-md hover:bg-red-500/[0.26] hover:border-red-300/55 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
               >
                 <Trash2 size={11} />
                 Excluir card
@@ -581,7 +679,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
         {isPersona && (
           <button
             onClick={onClose}
-            className="w-full py-2 text-xs rounded-lg glass border border-white/08 text-obs-subtle hover:text-obs-text transition-colors"
+            className="w-full py-2 text-xs font-medium rounded-xl border border-white/10 bg-white/[0.04] text-obs-subtle hover:bg-white/10 hover:border-white/20 hover:text-obs-text transition-colors"
           >
             Fechar
           </button>
@@ -600,7 +698,10 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
           audienceOpenUrl={audienceOpenUrl}
           onClose={() => setExpanded(false)}
           onValidate={canValidate ? validate : undefined}
+          onPublish={canPublish ? publish : undefined}
           onDelete={canDelete ? () => onDeleteNode?.(node.id) : undefined}
+          onEdit={canEdit ? () => { setEditing(true); setExpanded(false); } : undefined}
+          onSelectNode={onSelectNode ? (id) => { onSelectNode(id); setExpanded(false); } : undefined}
           saving={saving}
         />
       )}
@@ -611,6 +712,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
 function DirectLinkCard({
   link,
   onDelete,
+  onSelect,
 }: {
   link: {
     id?: string;
@@ -622,9 +724,12 @@ function DirectLinkCard({
     other_level?: number;
   };
   onDelete?: (edgeId: string) => void | Promise<void>;
+  onSelect?: (nodeId: string) => void;
 }) {
-  return (
-    <div className="rounded-lg border border-white/06 bg-white/3 px-2 py-1.5">
+  const clickable = Boolean(onSelect);
+  const openLinkedNode = () => onSelect?.(link.other_id);
+  const body = (
+    <>
       <div className="flex items-center gap-1.5 min-w-0">
         <span
           className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] uppercase ${
@@ -642,12 +747,21 @@ function DirectLinkCard({
         {onDelete && link.id?.startsWith("ge:") && (
           <button
             type="button"
-            onClick={() => onDelete(link.id!)}
-            className="ml-1 rounded border border-red-400/25 px-1 py-0.5 text-[9px] text-red-100 hover:bg-red-500/20"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(link.id!);
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="ml-1 rounded-md border border-obs-rose/35 bg-obs-rose/[0.14] px-1.5 py-0.5 text-[9px] font-medium text-obs-rose hover:bg-obs-rose/[0.20] hover:border-obs-rose/50 transition-colors"
             title="Excluir caminho"
           >
             excluir
           </button>
+        )}
+        {clickable && (
+          <span className="ml-1 shrink-0 text-obs-faint transition-colors group-hover:text-obs-text" aria-hidden>
+            →
+          </span>
         )}
       </div>
       {link.other_summary ? (
@@ -657,8 +771,31 @@ function DirectLinkCard({
       ) : (
         <p className="mt-1 text-[10px] italic text-obs-faint">Sem resumo disponível.</p>
       )}
-    </div>
+    </>
   );
+
+  const baseClasses = "group block w-full text-left rounded-lg border border-white/[0.04] bg-white/[0.025] backdrop-blur-md px-2 py-1.5 transition-all";
+
+  if (clickable) {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={openLinkedNode}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openLinkedNode();
+          }
+        }}
+        title={`Abrir ${link.other_label}`}
+        className={`${baseClasses} cursor-pointer hover:border-white/[0.09] hover:bg-white/[0.045] focus:outline-none focus:ring-2 focus:ring-white/[0.08]`}
+      >
+        {body}
+      </div>
+    );
+  }
+  return <div className={baseClasses}>{body}</div>;
 }
 
 function MultiNodeDrawer({ nodes, onClose }: { nodes: any[]; onClose: () => void }) {
@@ -762,7 +899,10 @@ function NodeExpandedModal({
   audienceOpenUrl,
   onClose,
   onValidate,
+  onPublish,
   onDelete,
+  onEdit,
+  onSelectNode,
   saving,
 }: {
   node: any;
@@ -775,40 +915,59 @@ function NodeExpandedModal({
   audienceOpenUrl?: string;
   onClose: () => void;
   onValidate?: () => void;
+  onPublish?: () => void;
   onDelete?: () => void | Promise<void>;
+  onEdit?: () => void;
+  onSelectNode?: (nodeId: string) => void;
   saving: boolean;
 }) {
   const d = node.data || {};
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-5">
-      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-white/08 bg-obs-surface shadow-2xl">
-        <div className="border-b border-white/06 px-6 py-5">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-5 backdrop-blur-sm">
+      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl glass-raised shadow-2xl shadow-black/40">
+        <div className="sticky top-0 z-10 border-b border-white/10 bg-obs-surface/70 backdrop-blur-xl px-6 py-5">
           <div className="mb-3 flex flex-wrap gap-1.5">
-            <span className={`rounded-full border px-2 py-0.5 text-[10px] ${STATUS_BADGE[d.status] || STATUS_BADGE.approved}`}>
+            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide ${STATUS_BADGE[d.status] || STATUS_BADGE.approved}`}>
               {d.validated ? "validated" : d.status || "active"}
             </span>
-            <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-obs-subtle">{d.content_type || d.node_type}</span>
-            <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-obs-subtle">{d.source || "graph"}</span>
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-obs-subtle">{d.content_type || d.node_type}</span>
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-obs-subtle">{d.source || "graph"}</span>
           </div>
           <div className="flex items-start gap-4">
-            <h2 className="min-w-0 flex-1 text-2xl font-semibold leading-tight text-white">{title}</h2>
-            <button onClick={onClose} className="rounded-lg p-2 text-obs-subtle hover:bg-white/5 hover:text-white">
-              <X size={18} />
-            </button>
+            <h2 className="min-w-0 flex-1 text-2xl font-semibold leading-tight tracking-tight text-obs-text">{title}</h2>
+            <div className="flex items-center gap-2 shrink-0">
+              {onEdit && (
+                <button
+                  onClick={onEdit}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.035] text-obs-subtle transition-colors hover:bg-white/[0.07] hover:text-obs-text"
+                  aria-label="Editar"
+                  title="Editar"
+                >
+                  <Edit2 size={14} />
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.035] text-obs-subtle transition-colors hover:bg-white/[0.07] hover:text-obs-text"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
           <div className="grid gap-2 md:grid-cols-3">
             {summaryItems.map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-white/06 bg-white/[0.03] p-3">
-                <p className="text-[10px] uppercase tracking-wide text-obs-faint">{label}</p>
-                <p className="mt-1 line-clamp-3 text-sm text-obs-text">{String(value)}</p>
+              <div key={label} className="rounded-xl border border-white/[0.05] bg-white/[0.03] backdrop-blur-md p-3 shadow-sm shadow-black/10">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-obs-faint">{label}</p>
+                <p className="mt-1 line-clamp-3 text-sm leading-6 text-obs-text">{String(value)}</p>
               </div>
             ))}
           </div>
           <section>
-            <p className="mb-2 text-[10px] uppercase tracking-wide text-obs-subtle">Conteudo</p>
-            <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/06 bg-obs-base p-4 text-sm leading-relaxed text-obs-text/80">
+            <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-obs-subtle">Conteudo</p>
+            <pre className="code-surface max-h-80 overflow-y-auto whitespace-pre-wrap rounded-xl p-4 text-sm leading-6 font-mono">
               {content || "Sem conteudo."}
             </pre>
           </section>
@@ -843,19 +1002,45 @@ function NodeExpandedModal({
           <section>
             <p className="mb-2 text-[10px] uppercase tracking-wide text-obs-subtle">Relacoes</p>
             <div className="grid gap-2 md:grid-cols-2">
-              {(directLinks || []).map((link) => <DirectLinkCard key={link.id || link.other_id} link={link} />)}
+              {(directLinks || []).map((link) => (
+                <DirectLinkCard
+                  key={link.id || link.other_id}
+                  link={link}
+                  onSelect={onSelectNode}
+                />
+              ))}
               {!directLinks?.length && <p className="text-xs text-obs-faint">Sem relacoes diretas.</p>}
             </div>
           </section>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-white/06 px-6 py-4">
+        <div className="sticky bottom-0 z-10 flex items-center justify-end gap-2 border-t border-white/10 bg-obs-surface/70 backdrop-blur-xl px-6 py-4">
           {onValidate && (
-            <button onClick={onValidate} disabled={saving} className="rounded-md bg-green-600 px-4 py-2 text-xs font-medium text-white disabled:opacity-50">
-              Validar e enviar para KB
+            <button
+              onClick={onValidate}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300/30 bg-emerald-500/15 px-4 py-2 text-xs font-medium text-emerald-50 shadow-sm shadow-emerald-500/10 backdrop-blur-md hover:bg-emerald-500/25 hover:border-emerald-300/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+              Aprovar
+            </button>
+          )}
+          {onPublish && (
+            <button
+              onClick={onPublish}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-obs-violet/35 bg-obs-violet/15 px-4 py-2 text-xs font-medium text-obs-text shadow-sm backdrop-blur-md hover:bg-obs-violet/25 hover:border-obs-violet/55 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Tag size={12} />}
+              Publicar no Golden Dataset
             </button>
           )}
           {onDelete && (
-            <button onClick={onDelete} disabled={saving} className="rounded-md border border-red-400/30 bg-red-500/10 px-4 py-2 text-xs font-medium text-red-100 disabled:opacity-50">
+            <button
+              onClick={onDelete}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-red-300/35 bg-red-500/[0.18] px-4 py-2 text-xs font-medium text-red-50 shadow-sm shadow-red-500/[0.10] backdrop-blur-md hover:bg-red-500/[0.26] hover:border-red-300/55 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              <Trash2 size={12} />
               Excluir
             </button>
           )}

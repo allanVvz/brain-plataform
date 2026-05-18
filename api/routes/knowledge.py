@@ -1,10 +1,13 @@
 import asyncio
+import mimetypes
 import os
+from datetime import datetime, timezone
 from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from typing import Optional
 from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
+from services import approved_knowledge_snapshots
 from services.knowledge_rag_backfill import backfill_knowledge_rag
 from services.knowledge_rag_intake import process_intake, process_intake_plan
 from services.vault_sync import run_sync, scan_vault
@@ -52,6 +55,39 @@ class RagIntakePlanBody(BaseModel):
     source_ref: Optional[str] = None
     submitted_by: Optional[str] = None
     validate: bool = True
+
+
+class ProductBody(BaseModel):
+    persona_id: Optional[str] = None
+    persona_slug: Optional[str] = None
+    slug: Optional[str] = None
+    title: str
+    summary: Optional[str] = None
+    tags: list[str] = []
+    status: str = "pending_validation"
+    collection_slug: Optional[str] = None
+    category_slug: Optional[str] = None
+    metadata: dict = {}
+
+
+class ProductPatchBody(BaseModel):
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    tags: Optional[list[str]] = None
+    metadata: Optional[dict] = None
+    status: Optional[str] = None
+
+
+class LinkAssetBody(BaseModel):
+    asset_id: Optional[str] = None
+    asset_node_id: Optional[str] = None
+    relation_type: str = "product_image"
+    metadata: dict = {}
+
+
+class SofiaSuggestBody(BaseModel):
+    limit: int = 12
+    min_score: float = 0.15
 
 
 @router.post("/intake")
@@ -166,6 +202,25 @@ def get_sync_logs(run_id: str, limit: int = 200):
 
 @router.get("/file")
 def serve_vault_file(path: str):
+    """Serve a file from Storage (`bucket:path`) or the local vault."""
+    if ":" in path and not path.startswith(("/", "\\")):
+        bucket, object_path = path.split(":", 1)
+        bucket = bucket.strip()
+        object_path = object_path.strip().lstrip("/\\")
+        allowed_buckets = {"assets-raw", "assets-derived", "knowledge"}
+        if bucket not in allowed_buckets or not object_path or ".." in object_path.replace("\\", "/").split("/"):
+            raise HTTPException(403, "Access denied")
+        try:
+            data = supabase_client.download_from_storage(bucket, object_path)
+        except Exception:
+            raise HTTPException(404, "File not found")
+        media_type = mimetypes.guess_type(object_path)[0] or "application/octet-stream"
+        return Response(
+            content=data,
+            media_type=media_type,
+            headers={"Cache-Control": "private, max-age=300"},
+        )
+
     """Serve a file from the vault. Only available in local mode."""
     if VAULT_SOURCE_MODE != "local":
         raise HTTPException(
@@ -347,6 +402,8 @@ def approve_item(item_id: str, request: Request, body: ApproveBody = ApproveBody
         if not item.get("persona_id"):
             raise HTTPException(400, "Assign a persona before approving")
         auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
+        if body.promote_to_kb:
+            raise HTTPException(409, "Approval and Golden Dataset publication are now separate. Approve first, then connect the approved FAQ node to Embedded in the graph.")
         result = knowledge_lifecycle.promote_knowledge_item(
             item_id,
             promote_to_kb=body.promote_to_kb,
@@ -363,12 +420,47 @@ def approve_item(item_id: str, request: Request, body: ApproveBody = ApproveBody
     updated_item = result.get("item") or supabase_client.get_knowledge_item(item_id)
     evidence = result.get("evidence") or {}
     _ensure_promotion_evidence(evidence, require_embed=body.promote_to_kb)
+    publication_evidence = {}
+    try:
+        user = auth_service.current_user(request)
+        publication_evidence = approved_knowledge_snapshots.publish_approved_node(
+            evidence.get("knowledge_node_id"),
+            approved_by=user.get("id"),
+            require_rag_for_faq=True,
+        )
+    except Exception as exc:
+        partial_ids = {
+            "knowledge_item_id": evidence.get("knowledge_item_id"),
+            "source_node_id": evidence.get("knowledge_node_id"),
+            "rag_entry_id": evidence.get("knowledge_rag_entry_id"),
+            "rag_chunk_ids": evidence.get("knowledge_rag_chunk_ids") or [],
+        }
+        emit("item_approved_snapshot_failed", entity_type="knowledge_item", entity_id=item_id,
+             persona_id=updated_item.get("persona_id"),
+             payload={"title": updated_item.get("title"), "error": str(exc), "partial_ids": partial_ids})
+        return {
+            "ok": False,
+            "success": False,
+            "stage": "approved_snapshot_publication",
+            "error": str(exc),
+            "item": updated_item,
+            "evidence": evidence,
+            "partial_ids": partial_ids,
+        }
     emit("item_approved", entity_type="knowledge_item", entity_id=item_id,
          persona_id=updated_item.get("persona_id"),
          payload={"title": updated_item.get("title"), "content_type": updated_item.get("content_type"),
-                  "promoted_to_kb": body.promote_to_kb, "evidence": evidence})
+                  "promoted_to_kb": body.promote_to_kb, "evidence": evidence,
+                  "publication_evidence": publication_evidence})
 
-    return {"ok": True, "item": updated_item, "evidence": evidence}
+    merged_evidence = {**evidence, **publication_evidence}
+    return {
+        "ok": True,
+        "success": True,
+        "item": updated_item,
+        "evidence": merged_evidence,
+        **publication_evidence,
+    }
 
 
 class RejectBody(BaseModel):
@@ -392,35 +484,42 @@ def reject_item(item_id: str, request: Request, body: RejectBody = RejectBody())
     return {"ok": True}
 
 
-@router.post("/queue/{item_id}/to-kb")
-def promote_to_kb(item_id: str, request: Request):
+@router.delete("/queue/{item_id}")
+def delete_queue_item(item_id: str, request: Request):
     try:
         item = supabase_client.get_knowledge_item(item_id)
         if not item:
             raise HTTPException(404, "Item not found")
-        if item["status"] not in ("approved", "embedded"):
-            raise HTTPException(400, "Item must be approved before promoting to KB")
-        if not item.get("persona_id"):
-            raise HTTPException(400, "Item must have a persona assigned")
-        auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
-        result = knowledge_lifecycle.promote_knowledge_item(
-            item_id,
-            promote_to_kb=True,
-            approval_mode="manual_validation",
-        )
+        if item.get("persona_id"):
+            auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
+        evidence = knowledge_lifecycle.delete_knowledge_item_cascade(item_id)
     except HTTPException:
         raise
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(502, f"Promote to KB failed: {exc}") from exc
-    updated_item = result.get("item") or supabase_client.get_knowledge_item(item_id)
-    evidence = result.get("evidence") or {}
-    _ensure_promotion_evidence(evidence, require_embed=True)
-    emit("item_promoted_to_kb", entity_type="knowledge_item", entity_id=item_id,
-         persona_id=updated_item.get("persona_id"),
-         payload={"title": updated_item.get("title"), "evidence": evidence})
-    return {"ok": True, "item": updated_item, "evidence": evidence}
+        raise HTTPException(502, f"Delete failed: {exc}") from exc
+    emit(
+        "knowledge_item_deleted",
+        entity_type="knowledge_item",
+        entity_id=item_id,
+        persona_id=item.get("persona_id"),
+        payload=evidence,
+    )
+    return {"ok": True, "evidence": evidence}
+
+
+@router.post("/queue/{item_id}/to-kb")
+def promote_to_kb(item_id: str, request: Request):
+    item = supabase_client.get_knowledge_item(item_id)
+    if not item:
+        raise HTTPException(404, "Item not found")
+    if item.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
+    raise HTTPException(
+        409,
+        "Publication now happens only through the graph: approve the FAQ first, then connect it to Embedded to publish it to the Golden Dataset.",
+    )
 
 
 # ── Upload / Knowledge Intake ─────────────────────────────────
@@ -473,10 +572,40 @@ async def upload_file(
     if persona_id:
         auth_service.assert_persona_access(request, persona_id=persona_id)
     content_bytes = await file.read()
-    try:
-        text = content_bytes.decode("utf-8")
-    except Exception:
-        raise HTTPException(400, "File must be UTF-8 text")
+    filename = file.filename or "upload"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    mime = (file.content_type or "").lower()
+    text_like = ext in {"txt", "md", "markdown", "json", "csv", "yaml", "yml"} or mime.startswith("text/") or mime in {"application/json", "application/x-yaml"}
+    if not text_like:
+        raise HTTPException(
+            415,
+            {
+                "error": "binary_upload_unsupported",
+                "message": (
+                    "Este endpoint aceita somente arquivos de texto. "
+                    "Para imagens, PDFs ou videos use /assets/upload "
+                    "(card ASSET na aba 'Asset visual / Outro')."
+                ),
+                "use_endpoint": "/assets/upload",
+                "filename": filename,
+            },
+        )
+    text = ""
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            text = content_bytes.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if not text.strip() and content_bytes:
+        raise HTTPException(
+            415,
+            {
+                "error": "text_decode_failed",
+                "message": "Nao consegui ler o arquivo como texto. Envie TXT, MD, JSON, CSV ou use /assets/upload para arquivos binarios.",
+                "filename": filename,
+            },
+        )
 
     source = supabase_client.get_or_create_manual_source()
     status = "pending"
@@ -485,15 +614,15 @@ async def upload_file(
         "source_id": source["id"],
         "status": status,
         "content_type": content_type,
-        "title": file.filename or "upload",
+        "title": filename,
         "content": text[:8000],
-        "file_type": (file.filename or "").rsplit(".", 1)[-1] if file.filename else "txt",
-        "metadata": {"original_filename": file.filename},
+        "file_type": ext or "txt",
+        "metadata": {"original_filename": filename, "mime": mime},
     })
     if item:
         knowledge_graph.bootstrap_from_item(
             item,
-            frontmatter={"original_filename": file.filename},
+            frontmatter={"original_filename": filename},
             body=text,
             persona_id=persona_id,
             source_table="knowledge_items",
@@ -579,6 +708,219 @@ def create_binding(body: BindingBody, request: Request):
     if not auth_service.is_admin(auth_service.current_user(request)):
         raise HTTPException(403, "Apenas admin pode criar bindings")
     return supabase_client.upsert_workflow_binding(body.model_dump())
+
+
+# Products / product collections live in knowledge_nodes and knowledge_edges.
+def _slugify_local(value: str) -> str:
+    return supabase_client._slugify(value)
+
+
+def _resolve_persona_scope(request: Request, persona_id: Optional[str] = None, persona_slug: Optional[str] = None) -> tuple[Optional[str], Optional[dict]]:
+    if persona_id:
+        persona = supabase_client.get_persona_by_id(persona_id)
+        if not persona:
+            raise HTTPException(404, "Persona not found")
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+        return persona_id, persona
+    if persona_slug:
+        persona = supabase_client.get_persona(persona_slug)
+        if not persona:
+            raise HTTPException(404, "Persona not found")
+        auth_service.assert_persona_access(request, persona_id=persona.get("id"), persona_slug=persona_slug)
+        return persona.get("id"), persona
+    if auth_service.is_admin(auth_service.current_user(request)):
+        return None, None
+    allowed = auth_service.allowed_persona_ids(request)
+    if len(allowed) == 1:
+        return allowed[0], supabase_client.get_persona_by_id(allowed[0])
+    raise HTTPException(400, "persona_id or persona_slug is required")
+
+
+def _compose_product_markdown(product: dict, category: Optional[dict], collection: Optional[dict], assets: list[dict]) -> str:
+    metadata = product.get("metadata") or {}
+    tags = product.get("tags") or []
+    lines = [f"# {product.get('title') or product.get('slug')}", "", product.get("summary") or "", "", "## Tags"]
+    lines.extend([f"- {tag}" for tag in tags] or ["-"])
+    lines.extend(["", "## Categoria", (category or {}).get("title") or metadata.get("category_slug") or "-", "", "## Colecao", (collection or {}).get("title") or metadata.get("collection_slug") or "-", "", "## Assets"])
+    lines.extend([f"- {a.get('title') or a.get('slug')} ({a.get('slug') or a.get('id')})" for a in assets] or ["-"])
+    lines.extend(["", "## Metadata", "```json", __import__("json").dumps(metadata, ensure_ascii=False, indent=2), "```"])
+    return "\n".join(lines).strip() + "\n"
+
+
+def _decorate_products(products: list[dict]) -> list[dict]:
+    product_ids = [p["id"] for p in products if p.get("id")]
+    edges = supabase_client.list_edges_for_nodes(product_ids, relation_types=["category_has_product", "in_category", "part_of_collection", "product_image", "product_has_asset"])
+    related_ids = set(product_ids)
+    for edge in edges:
+        related_ids.add(edge.get("source_node_id"))
+        related_ids.add(edge.get("target_node_id"))
+    nodes_by_id = {row["id"]: row for row in supabase_client.list_knowledge_nodes_by_ids(list(related_ids)) if row.get("id")}
+    out = []
+    for product in products:
+        pid = product.get("id")
+        category = None
+        collection = None
+        assets = []
+        product_edges = []
+        for edge in edges:
+            if edge.get("source_node_id") != pid and edge.get("target_node_id") != pid:
+                continue
+            product_edges.append(edge)
+            rt = edge.get("relation_type")
+            other_id = edge.get("source_node_id") if edge.get("target_node_id") == pid else edge.get("target_node_id")
+            other = nodes_by_id.get(other_id) or {}
+            if rt in {"category_has_product", "in_category"} and other.get("node_type") == "category":
+                category = other
+            elif rt == "part_of_collection" and other.get("node_type") == "product_collection":
+                collection = other
+            elif rt in {"product_image", "product_has_asset"} and other.get("node_type") == "asset":
+                assets.append(other)
+        metadata = product.get("metadata") or {}
+        first_asset_meta = (assets[0].get("metadata") or {}) if assets else {}
+        out.append({
+            **product,
+            "collection": collection,
+            "category": category,
+            "assets": assets,
+            "edges": product_edges,
+            "thumbnail": first_asset_meta.get("url") or first_asset_meta.get("file_path"),
+            "markdown": _compose_product_markdown(product, category, collection, assets),
+            "collection_slug": metadata.get("collection_slug") or (collection or {}).get("slug"),
+            "category_slug": metadata.get("category_slug") or (category or {}).get("slug"),
+        })
+    return out
+
+
+@router.get("/product-collections")
+def list_product_collections(request: Request, persona_slug: Optional[str] = Query(None), persona_id: Optional[str] = Query(None)):
+    resolved_persona_id, _ = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    return supabase_client.list_product_collection_nodes(persona_id=resolved_persona_id, node_type="product_collection")
+
+
+@router.get("/categories")
+def list_product_categories(request: Request, persona_slug: Optional[str] = Query(None), persona_id: Optional[str] = Query(None), collection_slug: Optional[str] = Query(None)):
+    resolved_persona_id, _ = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    rows = supabase_client.list_product_collection_nodes(persona_id=resolved_persona_id, node_type="category")
+    if collection_slug:
+        rows = [row for row in rows if (row.get("metadata") or {}).get("collection_slug") == collection_slug]
+    return rows
+
+
+@router.get("/products")
+def list_products(request: Request, persona_slug: Optional[str] = Query(None), persona_id: Optional[str] = Query(None), collection_slug: Optional[str] = Query(None), category_slug: Optional[str] = Query(None), status: Optional[str] = Query(None)):
+    resolved_persona_id, _ = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    products = supabase_client.list_product_nodes(persona_id=resolved_persona_id, collection_slug=collection_slug, category_slug=category_slug, status=status)
+    return _decorate_products(products)
+
+
+@router.post("/products")
+def create_product(body: ProductBody, request: Request):
+    persona_id, persona = _resolve_persona_scope(request, persona_id=body.persona_id, persona_slug=body.persona_slug)
+    if not persona_id:
+        raise HTTPException(400, "persona_id or persona_slug is required")
+    slug = _slugify_local(body.slug or body.title)
+    metadata = {**(body.metadata or {}), "persona_slug": (persona or {}).get("slug"), "collection_slug": body.collection_slug, "category_slug": body.category_slug, "source": (body.metadata or {}).get("source") or "manual", "open_url": f"/marketing/produtos?product={slug}"}
+    metadata = {k: v for k, v in metadata.items() if v is not None}
+    product = supabase_client.upsert_knowledge_node({"persona_id": persona_id, "node_type": "product", "slug": slug, "title": body.title, "summary": body.summary, "tags": body.tags or [], "metadata": metadata, "status": body.status or "pending_validation"})
+    if not product:
+        raise HTTPException(502, "Could not create product node")
+    if body.category_slug:
+        category = supabase_client.get_knowledge_node_by_slug(body.category_slug, persona_id=persona_id, node_type="category")
+        if category:
+            supabase_client.upsert_knowledge_edge(category["id"], product["id"], "category_has_product", persona_id=persona_id, weight=0.86, metadata={"primary_tree": True, "created_from": "products_api"})
+    if body.collection_slug:
+        collection = supabase_client.get_knowledge_node_by_slug(body.collection_slug, persona_id=persona_id, node_type="product_collection")
+        if collection:
+            supabase_client.upsert_knowledge_edge(product["id"], collection["id"], "part_of_collection", persona_id=persona_id, weight=0.7, metadata={"primary_tree": False, "created_from": "products_api"})
+    emit("product_node_created", entity_type="knowledge_node", entity_id=product.get("id"), persona_id=persona_id, payload={"slug": slug, "title": body.title})
+    return _decorate_products([product])[0]
+
+
+@router.get("/products/{slug}")
+def get_product(slug: str, request: Request, persona_slug: Optional[str] = Query(None), persona_id: Optional[str] = Query(None)):
+    resolved_persona_id, _ = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    product = supabase_client.get_knowledge_node_by_slug(slug, persona_id=resolved_persona_id, node_type="product")
+    if not product:
+        raise HTTPException(404, "Product not found")
+    if product.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=product.get("persona_id"))
+    return _decorate_products([product])[0]
+
+
+@router.patch("/products/{slug}")
+def update_product(slug: str, body: ProductPatchBody, request: Request, persona_slug: Optional[str] = Query(None), persona_id: Optional[str] = Query(None)):
+    resolved_persona_id, _ = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    product = supabase_client.get_knowledge_node_by_slug(slug, persona_id=resolved_persona_id, node_type="product")
+    if not product:
+        raise HTTPException(404, "Product not found")
+    auth_service.assert_persona_access(request, persona_id=product.get("persona_id"))
+    patch = body.model_dump(exclude_none=True)
+    if "metadata" in patch:
+        patch["metadata"] = {**(product.get("metadata") or {}), **(patch["metadata"] or {})}
+    updated = supabase_client.update_knowledge_node(product["id"], patch)
+    return _decorate_products([updated or {**product, **patch}])[0]
+
+
+@router.post("/products/{slug}/approve")
+def approve_product(slug: str, request: Request, persona_slug: Optional[str] = Query(None), persona_id: Optional[str] = Query(None)):
+    resolved_persona_id, _ = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    product = supabase_client.get_knowledge_node_by_slug(slug, persona_id=resolved_persona_id, node_type="product")
+    if not product:
+        raise HTTPException(404, "Product not found")
+    auth_service.assert_persona_access(request, persona_id=product.get("persona_id"))
+    metadata = {**(product.get("metadata") or {}), "validated_at": datetime.now(timezone.utc).isoformat(), "validated_by": (auth_service.current_user(request) or {}).get("id")}
+    updated = supabase_client.update_knowledge_node(product["id"], {"status": "validated", "metadata": metadata})
+    emit("product_node_approved", entity_type="knowledge_node", entity_id=product.get("id"), persona_id=product.get("persona_id"), payload={"slug": slug})
+    return {"ok": True, "product": _decorate_products([updated or product])[0]}
+
+
+def _asset_node_from_link_body(body: LinkAssetBody, persona_id: str) -> Optional[dict]:
+    if body.asset_node_id:
+        return supabase_client.get_knowledge_node(body.asset_node_id[3:] if body.asset_node_id.startswith("gn:") else body.asset_node_id)
+    if body.asset_id:
+        return supabase_client.get_knowledge_node_for_source("assets", body.asset_id, persona_id=persona_id)
+    return None
+
+
+@router.post("/products/{slug}/link-asset")
+def link_product_asset(slug: str, body: LinkAssetBody, request: Request, persona_slug: Optional[str] = Query(None), persona_id: Optional[str] = Query(None)):
+    resolved_persona_id, _ = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    product = supabase_client.get_knowledge_node_by_slug(slug, persona_id=resolved_persona_id, node_type="product")
+    if not product:
+        raise HTTPException(404, "Product not found")
+    auth_service.assert_persona_access(request, persona_id=product.get("persona_id"))
+    asset_node = _asset_node_from_link_body(body, product.get("persona_id"))
+    if not asset_node or asset_node.get("node_type") != "asset":
+        raise HTTPException(404, "Asset node not found")
+    metadata = {**(body.metadata or {}), "status": "pending_validation", "proposed_by": (body.metadata or {}).get("proposed_by") or "manual", "created_from": "product_link_asset", "primary_tree": False}
+    edge = supabase_client.upsert_knowledge_edge(asset_node["id"], product["id"], body.relation_type or "product_image", persona_id=product.get("persona_id"), weight=0.85, metadata=metadata)
+    return {"ok": True, "edge": edge, "product": _decorate_products([product])[0]}
+
+
+@router.post("/products/{slug}/sofia-suggest-images")
+def sofia_suggest_product_images(slug: str, body: SofiaSuggestBody, request: Request, persona_slug: Optional[str] = Query(None), persona_id: Optional[str] = Query(None)):
+    resolved_persona_id, _ = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    product = supabase_client.get_knowledge_node_by_slug(slug, persona_id=resolved_persona_id, node_type="product")
+    if not product:
+        raise HTTPException(404, "Product not found")
+    auth_service.assert_persona_access(request, persona_id=product.get("persona_id"))
+    assets = supabase_client.list_product_collection_nodes(persona_id=product.get("persona_id"), node_type="asset", limit=500)
+    existing_edges = supabase_client.list_edges_for_nodes([product["id"]], relation_types=["product_image", "product_has_asset"], limit=1000)
+    linked_asset_ids = {edge.get("source_node_id") if edge.get("target_node_id") == product["id"] else edge.get("target_node_id") for edge in existing_edges}
+    product_terms = {str(term).lower() for term in [product.get("slug"), product.get("title"), *(product.get("tags") or [])] if term}
+    suggestions = []
+    for asset in assets:
+        if asset.get("id") in linked_asset_ids:
+            continue
+        haystack = " ".join([str(asset.get("slug") or ""), str(asset.get("title") or ""), " ".join(asset.get("tags") or []), str((asset.get("metadata") or {}).get("original_filename") or ""), str((asset.get("metadata") or {}).get("visual_summary") or "")]).lower()
+        score = sum(1 for term in product_terms if term and term in haystack) / max(1, len(product_terms))
+        if score < body.min_score:
+            continue
+        edge = supabase_client.upsert_knowledge_edge(asset["id"], product["id"], "product_image", persona_id=product.get("persona_id"), weight=max(0.4, min(0.95, score)), metadata={"status": "pending_validation", "proposed_by": "sofia", "created_from": "sofia_suggest_images", "score": score, "primary_tree": False})
+        suggestions.append({"asset": asset, "edge": edge, "score": score})
+        if len(suggestions) >= body.limit:
+            break
+    return {"ok": True, "suggestions": suggestions}
 
 
 # ── Knowledge Graph rebuild (admin) ──────────────────────────

@@ -183,7 +183,7 @@ def test_non_faq_skips_rag():
         assert result["rag_entry"] is None, (noisy_type, result)
         assert store.entries == [], (noisy_type, store.entries)
         assert store.chunks == [], (noisy_type, store.chunks)
-        assert store.intakes[0]["status"] == "graph_only", (noisy_type, store.intakes)
+        assert store.intakes[0]["status"] == "validated", (noisy_type, store.intakes)
         # Graph mirror must STILL happen — the rule is "RAG=FAQ", not "graph=FAQ".
         assert store.graph_calls, (noisy_type, store.graph_calls)
         assert store.graph_calls[0]["source_table"] == "knowledge_intake_messages", (noisy_type, store.graph_calls)

@@ -14,5 +14,5 @@ class LeadEvent(BaseModel):
     cidade: Optional[str] = None
     cep: Optional[str] = None
     whatsapp_phone_number_id: Optional[str] = None
-    persona_slug: str = "tock-fatal"
+    persona_slug: str = "global"
     timestamp: datetime = Field(default_factory=datetime.utcnow)

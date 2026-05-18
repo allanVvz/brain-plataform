@@ -75,6 +75,58 @@ def _vault_source_label(vault_path: Optional[str] = None) -> str:
         return f"github://{cfg['owner']}/{cfg['repo']}@{cfg['branch']}{root}"
     return _local_vault_path(vault_path)
 
+
+def persona_folder_name(persona_slug: Optional[str]) -> str:
+    slug = (persona_slug or "global").strip().lower()
+    if slug == "global":
+        return "00_GLOBAL"
+    return re.sub(r"[^A-Z0-9]+", "_", slug.upper()).strip("_") or "00_GLOBAL"
+
+
+def persona_vault_dir(persona_slug: Optional[str], vault_path: Optional[str] = None) -> Path:
+    root = Path(_local_vault_path(vault_path))
+    return root / "AI-BRAIN" / "05_ENTITIES" / "CLIENTS" / persona_folder_name(persona_slug)
+
+
+def ensure_persona_vault_structure(persona_slug: Optional[str], vault_path: Optional[str] = None) -> dict[str, str]:
+    base = persona_vault_dir(persona_slug, vault_path)
+    base.mkdir(parents=True, exist_ok=True)
+    for folder in (
+        "01_BRAND",
+        "02_BRIEFING",
+        "03_PRODUCTS",
+        "04_CAMPAIGNS",
+        "05_COPY",
+        "06_FAQ",
+        "07_TONE",
+        "08_AUDIENCE",
+        "09_COMPETITORS",
+        "10_RULES",
+        "11_PROMPTS",
+        "12_MAKER",
+        "assets",
+        "00_OTHER",
+    ):
+        (base / folder).mkdir(parents=True, exist_ok=True)
+    return {
+        "persona_slug": persona_slug or "global",
+        "folder_name": base.name,
+        "path": str(base),
+    }
+
+
+def delete_vault_relative_path(file_path: Optional[str], vault_path: Optional[str] = None) -> bool:
+    if not file_path:
+        return False
+    root = Path(_local_vault_path(vault_path)).resolve()
+    target = (root / str(file_path)).resolve()
+    if not str(target).startswith(str(root)):
+        raise RuntimeError("Refusing to delete file outside vault root")
+    if not target.exists():
+        return False
+    target.unlink()
+    return True
+
 # Map vault folder names → persona slugs
 _FOLDER_TO_SLUG: dict[str, str] = {
     "BAITA_CONVENIENCIA": "baita-conveniencia",
@@ -88,6 +140,8 @@ _FOLDER_TO_SLUG: dict[str, str] = {
     "prime": "prime-higienizacao",
     "vz_lupas": "vz-lupas",
 }
+
+_SYNC_ORIGINS_CANONICAL = {"direct_save", "manual_sync"}
 
 # Folders/files to always skip
 _SKIP_DIRS = {".obsidian", ".git", "__pycache__", "node_modules", ".trash"}
@@ -129,6 +183,11 @@ def _detect_persona(path: Path, frontmatter: dict) -> Optional[str]:
         if folder.upper() in parts_upper:
             return slug
 
+    for persona in supabase_client.get_personas() or []:
+        slug = persona.get("slug")
+        if slug and persona_folder_name(slug) in parts_upper:
+            return slug
+
     # projetos/{client}/ pattern
     for i, part in enumerate(path.parts):
         if part.lower() == "projetos" and i + 1 < len(path.parts):
@@ -141,6 +200,41 @@ def _detect_persona(path: Path, frontmatter: dict) -> Optional[str]:
                 return "vz-lupas"
 
     return None
+
+
+def _canonical_sync_origin(frontmatter: dict) -> str:
+    return str(frontmatter.get("sync_origin") or "").strip().lower()
+
+
+def _created_via(frontmatter: dict) -> str:
+    return str(frontmatter.get("created_via") or "").strip().lower()
+
+
+def _is_canonical_vault_document(frontmatter: dict, content_type: str) -> bool:
+    origin = _canonical_sync_origin(frontmatter)
+    created_via = _created_via(frontmatter)
+    if origin in _SYNC_ORIGINS_CANONICAL:
+        return True
+    if created_via == "kb_intake_sofia":
+        return True
+    slug = str(frontmatter.get("slug") or "").strip()
+    parent_slug = str(frontmatter.get("parent_slug") or "").strip()
+    if not slug:
+        return False
+    if content_type in {"faq", "copy", "rule", "tone", "asset"} and not parent_slug:
+        return False
+    return False
+
+
+def _quarantine_reason(frontmatter: dict, content_type: str) -> Optional[str]:
+    if _is_canonical_vault_document(frontmatter, content_type):
+        return None
+    slug = str(frontmatter.get("slug") or "").strip()
+    if not slug:
+        return "missing_slug"
+    if content_type in {"faq", "copy", "rule", "tone", "asset"} and not str(frontmatter.get("parent_slug") or "").strip():
+        return "missing_parent_slug"
+    return "legacy_markdown"
 
 
 def _detect_content_type(path: Path, frontmatter: dict) -> str:
@@ -390,7 +484,15 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
     run = supabase_client.insert_sync_run({"source_id": source_id, "status": "running"})
     run_id = run["id"]
 
-    counts = {"found": 0, "new": 0, "updated": 0, "skipped": 0}
+    counts = {
+        "found": 0,
+        "new": 0,
+        "updated": 0,
+        "skipped": 0,
+        "imported_canonical": 0,
+        "imported_quarantined": 0,
+        "skipped_legacy": 0,
+    }
     persona_cache: dict[str, Optional[str]] = {}  # slug → id
 
     def _get_persona_id(slug: Optional[str]) -> Optional[str]:
@@ -424,6 +526,9 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
                 continue
 
             persona_id = _get_persona_id(persona_slug)
+            quarantine_reason = _quarantine_reason(fm, content_type)
+            sync_origin = "manual_sync"
+            quarantine_state = "legacy_orphaned" if quarantine_reason else None
 
             # Check if already exists
             existing = supabase_client.get_knowledge_item_by_path(rel_path)
@@ -446,6 +551,9 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
                     "needs_category": content_type == "other",
                     "source_mode": _source_mode(),
                     "vault_source": source_path,
+                    "sync_origin": sync_origin,
+                    "quarantine_state": quarantine_state,
+                    "quarantine_reason": quarantine_reason,
                 },
                 "file_path": rel_path,
                 "file_type": ext.lstrip("."),
@@ -457,17 +565,25 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
                     item_data["status"] = existing.get("status", "pending")  # preserve approval state
                     supabase_client.update_knowledge_item(existing["id"], item_data)
                     counts["updated"] += 1
-                    action = "updated"
+                    action = "updated_quarantined" if quarantine_reason else "updated"
                     item_for_graph = {**existing, **item_data}
                 else:
                     counts["skipped"] += 1
-                    action = "skipped"
+                    action = "skipped_legacy" if quarantine_reason else "skipped"
                     item_for_graph = existing
             else:
                 inserted = supabase_client.insert_knowledge_item(item_data)
                 counts["new"] += 1
-                action = "created"
+                action = "created_quarantined" if quarantine_reason else "created"
                 item_for_graph = {**item_data, **(inserted or {})}
+
+            if quarantine_reason:
+                if action.startswith("skipped"):
+                    counts["skipped_legacy"] += 1
+                else:
+                    counts["imported_quarantined"] += 1
+            elif action != "skipped":
+                counts["imported_canonical"] += 1
 
             supabase_client.insert_sync_log({
                 "run_id": run_id,
@@ -475,12 +591,13 @@ def run_sync(vault_path: str = VAULT_PATH, persona_filter: Optional[str] = None)
                 "persona_id": persona_id,
                 "action": action,
                 "content_type": content_type,
+                "error_message": quarantine_reason,
             })
 
             # Mirror into the semantic graph (knowledge_nodes/edges).
             # Defensive: never let graph maintenance break the sync.
             try:
-                if item_for_graph and item_for_graph.get("id"):
+                if item_for_graph and item_for_graph.get("id") and not quarantine_reason:
                     knowledge_graph.bootstrap_from_item(
                         item_for_graph,
                         frontmatter=fm,

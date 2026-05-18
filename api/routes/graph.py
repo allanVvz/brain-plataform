@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 
-from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
+from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle, approved_knowledge_snapshots
 
 router = APIRouter(prefix="/knowledge", tags=["graph"])
 logger = logging.getLogger("ai_brain.graph")
@@ -72,6 +72,7 @@ def _content_type_to_tipo(content_type: str) -> str:
         "brand": "brand",
         "briefing": "briefing",
         "product": "produto",
+        "offer": "oferta",
         "copy": "copy",
         "prompt": "prompt",
         "rule": "regra",
@@ -85,39 +86,21 @@ def _content_type_to_tipo(content_type: str) -> str:
     }.get((content_type or "").lower(), "geral")
 
 
-def _promote_pending_item_via_graph(item_id: str, persona_id: str, metadata: dict) -> tuple[Optional[dict], Optional[dict], Optional[dict], dict]:
-    item = supabase_client.get_knowledge_item(item_id)
-    if not item:
-        raise HTTPException(404, "Knowledge item not found")
-    if not item.get("persona_id"):
-        supabase_client.update_knowledge_item(item_id, {"persona_id": persona_id})
-        item["persona_id"] = persona_id
-    if item.get("persona_id") != persona_id:
-        raise HTTPException(400, "Knowledge item belongs to another persona")
-    result = knowledge_lifecycle.promote_knowledge_item(
-        item_id,
-        promote_to_kb=True,
-        approval_mode="embedded_connection",
-        edge_metadata={
-            **(metadata or {}),
-            "created_from": (metadata or {}).get("created_from") or "graph_ui_auto_approve",
-            "direction": (metadata or {}).get("direction") or "source_to_target",
-            "auto_approved": True,
-        },
-    )
-    return (
-        result.get("item"),
-        result.get("graph_node"),
-        result.get("embedded_edge"),
-        result.get("evidence") or {},
-    )
+def _knowledge_item_for_graph_node(node: dict) -> Optional[dict]:
+    if not node:
+        return None
+    if node.get("source_table") == "knowledge_items" and node.get("source_id"):
+        return supabase_client.get_knowledge_item(str(node.get("source_id")))
+    return None
 
 
 def _require_graph_promotion_evidence(evidence: dict) -> None:
-    required = ["knowledge_item_id", "kb_entry_id", "knowledge_node_id", "embedded_edge_id"]
+    required = ["knowledge_item_id", "approved_snapshot_id", "knowledge_node_id", "rag_entry_id", "embedded_edge_id"]
     missing = [key for key in required if not evidence.get(key)]
+    if not evidence.get("rag_chunk_ids"):
+        missing.append("rag_chunk_ids")
     if missing:
-        raise HTTPException(502, f"Auto-approval incomplete: missing {', '.join(missing)}")
+        raise HTTPException(502, f"Golden Dataset publication incomplete: missing {', '.join(missing)}")
 
 
 @router.post("/graph-edges")
@@ -131,78 +114,37 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
         "direction": (body.metadata or {}).get("direction") or "source_to_target",
     }
     if (raw_source.startswith("ki:") or raw_target.startswith("ki:")) and not (raw_target.startswith("embedded:") or raw_target == "embedded"):
-        raise HTTPException(400, "Pending knowledge items can only be connected directly to Embedded for approval")
+        raise HTTPException(400, "Pending knowledge items cannot be linked from the graph before approval")
     if raw_source.startswith("ki:") and (raw_target.startswith("embedded:") or raw_target == "embedded"):
-        item_id = raw_source.split(":", 1)[1]
-        item = supabase_client.get_knowledge_item(item_id)
-        if not item:
-            raise HTTPException(404, "Knowledge item not found")
-        edge_persona_id = edge_persona_id or item.get("persona_id") or (raw_target.split(":", 1)[1] if ":" in raw_target else None)
-        if not edge_persona_id:
-            raise HTTPException(400, "persona_id is required to approve this pending item")
-        auth_service.assert_persona_access(request, persona_id=edge_persona_id)
-        approved_item, mirror_node, edge, evidence = _promote_pending_item_via_graph(item_id, edge_persona_id, metadata)
-        _require_graph_promotion_evidence(evidence)
-        supabase_client.insert_event(
-            {
-                "event_type": "knowledge_path_linked",
-                "entity_type": "knowledge_edge",
-                "entity_id": (edge or {}).get("id"),
-                "persona_id": edge_persona_id,
-                "payload": {
-                    "source_node_id": raw_source,
-                    "target_node_id": raw_target,
-                    "relation_type": "manual",
-                    "kb_entry_id": evidence.get("kb_entry_id"),
-                    "approval_mode": "embedded_connection",
-                    "source_knowledge_item_id": (approved_item or {}).get("id"),
-                    "graph_node_id": (mirror_node or {}).get("id"),
-                    "evidence": evidence,
-                },
-            },
-            source="graph.create_edge",
-        )
-        return {"ok": True, "edge": edge, "auto_approved": True, "item": approved_item, "evidence": evidence}
+        raise HTTPException(400, "Approve the FAQ first. Publication to the Golden Dataset only works from an approved semantic FAQ node to Embedded.")
 
     source_node = _resolve_graph_node_ref(body.source_node_id, body.persona_id)
     target_node = _resolve_graph_node_ref(body.target_node_id, body.persona_id)
     if not source_node or not target_node:
         raise HTTPException(400, "source_node_id and target_node_id are required")
-    if target_node.get("node_type") == "embedded" and source_node.get("source_table") == "knowledge_items":
-        item_id = source_node.get("source_id")
-        if not item_id:
-            raise HTTPException(400, "Knowledge item source_id is required for Embedded approval")
-        edge_persona_id = edge_persona_id or source_node.get("persona_id") or target_node.get("persona_id")
-        if not edge_persona_id:
-            raise HTTPException(400, "persona_id is required to approve this pending item")
-        auth_service.assert_persona_access(request, persona_id=edge_persona_id)
-        approved_item, mirror_node, edge, evidence = _promote_pending_item_via_graph(item_id, edge_persona_id, metadata)
-        _require_graph_promotion_evidence(evidence)
-        supabase_client.insert_event(
-            {
-                "event_type": "knowledge_path_linked",
-                "entity_type": "knowledge_edge",
-                "entity_id": (edge or {}).get("id"),
-                "persona_id": edge_persona_id,
-                "payload": {
-                    "source_node_id": source_node.get("id"),
-                    "target_node_id": target_node.get("id"),
-                    "relation_type": "manual",
-                    "kb_entry_id": evidence.get("kb_entry_id"),
-                    "approval_mode": "embedded_connection",
-                    "source_knowledge_item_id": item_id,
-                    "graph_node_id": (mirror_node or {}).get("id"),
-                    "evidence": evidence,
-                },
-            },
-            source="graph.create_edge",
-        )
-        return {"ok": True, "edge": edge, "auto_approved": True, "item": approved_item, "evidence": evidence}
     relation_type = (body.relation_type or "manual").strip() or "manual"
+    source_type = str(source_node.get("node_type") or "").lower()
+    target_type = str(target_node.get("node_type") or "").lower()
+    if source_type == "faq" and target_type != "embedded":
+        raise HTTPException(400, "FAQ is a terminal node. It can only publish to Embedded; connect product, offer or copy into FAQ instead.")
+    if target_type == "faq" and relation_type == "manual":
+        relation_type = "answers_question"
     if target_node.get("node_type") == "gallery":
         relation_type = "gallery_asset"
     if relation_type == "gallery_asset" and "gallery" not in {source_node.get("node_type"), target_node.get("node_type")}:
         raise HTTPException(400, "gallery_asset edges must involve a Gallery node")
+    if relation_type == "gallery_asset":
+        asset_node = target_node if source_node.get("node_type") == "gallery" else source_node
+        if asset_node.get("node_type") != "asset":
+            raise HTTPException(400, "Gallery can only receive approved asset nodes")
+        if knowledge_graph._validation_state(asset_node) != "validated":
+            raise HTTPException(400, "Approve the asset before adding it to Gallery")
+        # Canonical direction is asset -> Gallery. Accept reverse drag gestures,
+        # but never persist gallery -> asset.
+        if source_type == "gallery" and target_type == "asset":
+            source_node, target_node = target_node, source_node
+            source_type, target_type = target_type, source_type
+            metadata["direction_normalized"] = "asset_to_gallery"
     source_id = source_node["id"]
     target_id = target_node["id"]
     if source_id == target_id:
@@ -210,8 +152,19 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
     edge_persona_id = edge_persona_id or source_node.get("persona_id") or target_node.get("persona_id")
     if edge_persona_id:
         auth_service.assert_persona_access(request, persona_id=edge_persona_id)
+    source_item = _knowledge_item_for_graph_node(source_node)
+    if target_node.get("node_type") == "embedded":
+        if source_node.get("node_type") != "faq":
+            raise HTTPException(400, "Only approved FAQ nodes can be published to the Golden Dataset")
+        if not source_item:
+            raise HTTPException(400, "Only approved FAQ nodes backed by knowledge_items can be published to the Golden Dataset")
+        source_status = str(source_item.get("status") or "").lower()
+        if source_status != "approved" and source_status != "embedded":
+            raise HTTPException(400, "Approve the FAQ before publishing it to the Golden Dataset")
     if "primary_tree" not in metadata:
         metadata["primary_tree"] = relation_type == "manual"
+    if "embedded" in {source_node.get("node_type"), target_node.get("node_type")} or "gallery" in {source_node.get("node_type"), target_node.get("node_type")}:
+        metadata["primary_tree"] = False
     try:
         edge = supabase_client.upsert_knowledge_edge(
             source_node_id=source_id,
@@ -222,13 +175,32 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
             metadata=metadata,
         )
         gallery_asset = None
-        kb_entry = None
+        publication = None
         if edge and relation_type == "gallery_asset":
             gallery_content_node = target_node if source_node.get("node_type") == "gallery" else source_node
             gallery_asset = supabase_client.sync_gallery_asset_node(gallery_content_node, edge)
         if edge and target_node.get("node_type") == "embedded":
-            kb_entry = supabase_client.sync_embedded_kb_node(source_node, edge)
+            publication = approved_knowledge_snapshots.publish_approved_node(
+                source_node.get("id"),
+                approved_by=(auth_service.current_user(request) or {}).get("id"),
+                require_rag_for_faq=True,
+            )
         if edge:
+            evidence = {}
+            if publication:
+                evidence = {
+                    "knowledge_item_id": (source_item or {}).get("id"),
+                    "approved_snapshot_id": publication.get("approved_snapshot_id"),
+                    "rag_entry_id": publication.get("rag_entry_id"),
+                    "rag_chunk_ids": publication.get("rag_chunk_ids") or [],
+                    "knowledge_rag_entry_id": publication.get("rag_entry_id"),
+                    "knowledge_rag_chunk_ids": publication.get("rag_chunk_ids") or [],
+                    "knowledge_node_id": source_node.get("id"),
+                    "main_tree_edge_id": None,
+                    "embedded_edge_id": edge.get("id"),
+                    "final_status": publication.get("status") or "active",
+                }
+                _require_graph_promotion_evidence(evidence)
             supabase_client.insert_event(
                 {
                     "event_type": "knowledge_path_linked",
@@ -240,7 +212,8 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
                         "target_node_id": target_id,
                         "relation_type": relation_type,
                         "gallery_asset_id": (gallery_asset or {}).get("id"),
-                        "kb_entry_id": (kb_entry or {}).get("id"),
+                        "golden_dataset_publication": bool(publication),
+                        "evidence": evidence,
                     },
                 },
                 source="graph.create_edge",
@@ -249,6 +222,26 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
         raise HTTPException(502, f"Could not create graph edge: {exc}") from exc
     if not edge:
         raise HTTPException(400, "Graph edge was not created")
+    if publication:
+        return {
+            "ok": True,
+            "success": True,
+            "edge": edge,
+            "publication": publication,
+            "evidence": {
+                "knowledge_item_id": (source_item or {}).get("id"),
+                "approved_snapshot_id": publication.get("approved_snapshot_id"),
+                "rag_entry_id": publication.get("rag_entry_id"),
+                "rag_chunk_ids": publication.get("rag_chunk_ids") or [],
+                "knowledge_rag_entry_id": publication.get("rag_entry_id"),
+                "knowledge_rag_chunk_ids": publication.get("rag_chunk_ids") or [],
+                "knowledge_node_id": source_node.get("id"),
+                "main_tree_edge_id": None,
+                "embedded_edge_id": edge.get("id"),
+                "final_status": publication.get("status") or "active",
+            },
+            **publication,
+        }
     return {"ok": True, "edge": edge}
 
 
@@ -276,6 +269,14 @@ def delete_graph_node(node_id: str, request: Request):
     node = supabase_client.get_knowledge_node(raw_node_id)
     if node and node.get("persona_id"):
         auth_service.assert_persona_access(request, persona_id=node.get("persona_id"))
+    if node and node.get("source_table") == "knowledge_items" and node.get("source_id"):
+        try:
+            evidence = knowledge_lifecycle.delete_knowledge_item_cascade(str(node.get("source_id")))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(502, f"Could not delete knowledge item graph node: {exc}") from exc
+        return {"ok": True, "node_id": raw_node_id, "evidence": evidence}
     try:
         ok = supabase_client.delete_knowledge_node(raw_node_id)
     except Exception as exc:
@@ -304,12 +305,115 @@ _KB_STATUS: dict[str, str] = {
 _AUXILIARY_NODE_TYPES: set[str] = {"tag", "mention"}
 _TECHNICAL_NODE_TYPES: set[str] = {"knowledge_item", "kb_entry"}
 
+
+def _canonicalize_semantic_node_types(sem_nodes: list[dict], nt_by_type: dict[str, dict]) -> list[dict]:
+    """Repair legacy semantic mirrors in-memory for graph-data.
+
+    Migration 031 backfills persisted offer nodes, but graph-data should not
+    render a stale knowledge_item card in the primary tree while a database
+    still has pre-migration rows.
+    """
+    repaired: list[dict] = []
+    item_cache: dict[str, Optional[dict]] = {}
+    for node in sem_nodes:
+        next_node = dict(node)
+        source_id = next_node.get("source_id")
+        if next_node.get("source_table") == "knowledge_items" and source_id:
+            meta = dict(next_node.get("metadata") or {})
+            content_type = str(meta.get("content_type") or "").strip().lower()
+            if not content_type:
+                sid = str(source_id)
+                if sid not in item_cache:
+                    try:
+                        item_cache[sid] = supabase_client.get_knowledge_item(sid)
+                    except Exception:
+                        item_cache[sid] = None
+                content_type = str((item_cache.get(sid) or {}).get("content_type") or "").strip().lower()
+            expected = knowledge_graph._CONTENT_TYPE_TO_NODE.get(content_type)
+            current = str(next_node.get("node_type") or "").strip().lower()
+            if expected and expected != current:
+                meta.setdefault("runtime_repaired_node_type_from", current or "unknown")
+                meta["content_type"] = content_type
+                registry = nt_by_type.get(expected, {})
+                next_node["node_type"] = expected
+                next_node["metadata"] = meta
+                next_node["level"] = registry.get("default_level", next_node.get("level"))
+                next_node["importance"] = registry.get("default_importance", next_node.get("importance"))
+        repaired.append(next_node)
+    return repaired
+
+
+def _demote_auxiliary_primary_edges(sem_edges: list[dict], nodes_by_id: dict[str, dict]) -> list[dict]:
+    out: list[dict] = []
+    for edge in sem_edges:
+        src_type = str((nodes_by_id.get(edge.get("source_node_id")) or {}).get("node_type") or "").lower()
+        tgt_type = str((nodes_by_id.get(edge.get("target_node_id")) or {}).get("node_type") or "").lower()
+        if (
+            src_type in _AUXILIARY_NODE_TYPES
+            or tgt_type in _AUXILIARY_NODE_TYPES
+            or src_type in _TECHNICAL_NODE_TYPES
+            or tgt_type in _TECHNICAL_NODE_TYPES
+        ):
+            next_edge = dict(edge)
+            meta = dict(next_edge.get("metadata") or {})
+            meta["primary_tree"] = False
+            meta["graph_layer"] = "semantic_tags" if edge.get("relation_type") == "has_tag" else "auxiliary"
+            meta["visual_hidden"] = True
+            next_edge["metadata"] = meta
+            out.append(next_edge)
+            continue
+        out.append(edge)
+    return out
+
+
+def _is_quarantined_metadata(metadata: Optional[dict]) -> bool:
+    meta = metadata or {}
+    state = str(meta.get("quarantine_state") or "").strip().lower()
+    return state in {"legacy_orphaned", "structural"}
+
+def _metadata_asset_url(metadata: Optional[dict]) -> str:
+    meta = metadata or {}
+    return str(
+        meta.get("url")
+        or meta.get("public_url")
+        or meta.get("asset_url")
+        or meta.get("file_url")
+        or ""
+    )
+
+
+def _metadata_file_type(metadata: Optional[dict]) -> str:
+    meta = metadata or {}
+    explicit = str(meta.get("file_type") or meta.get("asset_type") or "").lower()
+    if explicit in {"image", "video"}:
+        path = str(meta.get("file_path") or meta.get("storage_path") or meta.get("original_filename") or "")
+    else:
+        path = str(
+            meta.get("file_path")
+            or meta.get("storage_path")
+            or meta.get("original_filename")
+            or _metadata_asset_url(meta)
+            or ""
+        )
+    ext = path.rsplit("?", 1)[0].rsplit(".", 1)[-1].lower() if "." in path else ""
+    if ext in {"png", "jpg", "jpeg", "webp", "svg", "gif"}:
+        return ext
+    if ext in {"mp4", "mov", "webm"}:
+        return ext
+    return explicit
+
+
+def _metadata_markdown(metadata: Optional[dict], fallback: str = "") -> str:
+    meta = metadata or {}
+    return str(meta.get("markdown") or meta.get("body") or meta.get("content") or fallback or "")
+
 # Edge tier overrides — relations whose tier is fixed regardless of weight.
 _STRUCTURAL_RELATIONS: set[str] = {
     "belongs_to_persona",
     "contains",
     "part_of_campaign",
     "about_product",
+    "offers_product",
     "briefed_by",
     "answers_question",
     "supports_copy",
@@ -333,6 +437,21 @@ def _classify_relation_tier(relation_type: str, weight: float) -> str:
     if weight is not None and weight >= 0.70:
         return "strong"
     return "auxiliary"
+
+
+def _semantic_chain_to_persona(
+    node_id: str,
+    parent_by_child: dict[str, str],
+    persona_node_ids: set[str],
+) -> tuple[list[str], bool]:
+    chain: list[str] = []
+    current = node_id
+    seen: set[str] = set()
+    while current and current not in seen and len(chain) < 64:
+        seen.add(current)
+        chain.append(current)
+        current = parent_by_child.get(current)
+    return chain, bool(chain and chain[-1] in persona_node_ids)
 
 
 def _resolve_focus(focus: str, persona_id: Optional[str]) -> Optional[dict]:
@@ -487,11 +606,16 @@ def _compute_primary_depths(nodes: list[dict], edges: list[dict]) -> tuple[dict[
             continue
         relation = (edge.get("relation_type") or "").lower()
         meta = edge.get("metadata") or {}
-        if relation not in structural and not meta.get("primary_tree"):
+        src_node = next((n for n in nodes if n.get("id") == src), {}) or {}
+        tgt_node = next((n for n in nodes if n.get("id") == tgt), {}) or {}
+        if (src_node.get("node_type") or "").lower() in _AUXILIARY_NODE_TYPES:
+            continue
+        if (tgt_node.get("node_type") or "").lower() in {"persona", "mention", "tag"}:
+            continue
+        if meta.get("primary_tree") is not True:
             continue
         priority = 0
-        if meta.get("primary_tree"):
-            priority += 10
+        priority += 10
         if relation == "manual":
             priority += 100
         if tgt not in parent_by_child or priority >= parent_priority_by_child.get(tgt, -1):
@@ -594,18 +718,58 @@ def get_graph_data(
     except Exception:
         sem_nodes, sem_edges = [], []
 
+    sem_nodes = _canonicalize_semantic_node_types(sem_nodes, nt_by_type)
+    sem_nodes_by_raw_id = {n.get("id"): n for n in sem_nodes if n.get("id")}
+    sem_edges = _demote_auxiliary_primary_edges(sem_edges, sem_nodes_by_raw_id)
+
     # Apply visibility filters early (still keeps data in DB).
     if not include_tags:
         sem_nodes = [n for n in sem_nodes if n.get("node_type") != "tag"]
     if not include_mentions:
         sem_nodes = [n for n in sem_nodes if n.get("node_type") != "mention"]
+    if not include_technical:
+        sem_nodes = [n for n in sem_nodes if (n.get("node_type") or "").lower() not in _TECHNICAL_NODE_TYPES]
     sem_nodes = [n for n in sem_nodes if n.get("status") != "archived"]
+    sem_nodes = [n for n in sem_nodes if not _is_quarantined_metadata(n.get("metadata"))]
 
     surviving_ids = {n["id"] for n in sem_nodes}
     sem_edges = [
         e for e in sem_edges
         if e.get("source_node_id") in surviving_ids and e.get("target_node_id") in surviving_ids
     ]
+    sem_edges = [
+        e for e in sem_edges
+        if not (e.get("metadata") or {}).get("visual_hidden")
+        and not (
+            (e.get("relation_type") or "").lower() == "belongs_to_persona"
+            and (e.get("metadata") or {}).get("primary_tree") is not True
+        )
+    ]
+    if (mode or "layered") != "graph":
+        visible_tree_edges = []
+        primary_relation_seen: set[tuple[str, str, str]] = set()
+        relation_rank = {"offers_product": 0, "supports_copy": 1, "answers_question": 2, "contains": 3}
+        for edge in sorted(sem_edges, key=lambda e: relation_rank.get((e.get("relation_type") or "").lower(), 9)):
+            meta = edge.get("metadata") or {}
+            src_node = next((n for n in sem_nodes if n.get("id") == edge.get("source_node_id")), {}) or {}
+            tgt_node = next((n for n in sem_nodes if n.get("id") == edge.get("target_node_id")), {}) or {}
+            src_type = (src_node.get("node_type") or "").lower()
+            tgt_type = (tgt_node.get("node_type") or "").lower()
+            rt = (edge.get("relation_type") or "").lower()
+            terminal_edge = (src_type == "faq" and tgt_type == "embedded") or rt == "gallery_asset"
+            if meta.get("primary_tree") is True:
+                relation_key = (
+                    str(edge.get("source_node_id") or ""),
+                    str(edge.get("target_node_id") or ""),
+                    rt,
+                )
+                if relation_key in primary_relation_seen:
+                    continue
+                primary_relation_seen.add(relation_key)
+                visible_tree_edges.append(edge)
+            elif terminal_edge:
+                visible_tree_edges.append(edge)
+        sem_edges = visible_tree_edges
     graph_depths, parent_by_child = _compute_primary_depths(sem_nodes, sem_edges)
 
     # ── Optional: focus subgraph (BFS) ──────────────────────────────────
@@ -641,6 +805,85 @@ def get_graph_data(
 
     current_depths, _ = _compute_primary_depths(sem_nodes, sem_edges)
     max_current_depth = max((d for d in current_depths.values() if d > 0), default=1)
+    sem_nodes_by_id = {n["id"]: n for n in sem_nodes if n.get("id")}
+    try:
+        snapshot_by_node = supabase_client.list_approved_snapshots_for_nodes(list(sem_nodes_by_id.keys()))
+        rag_chunk_counts = supabase_client.count_knowledge_rag_chunks_by_entry_ids(
+            [
+                snapshot.get("rag_entry_id")
+                for snapshot in snapshot_by_node.values()
+                if snapshot.get("rag_entry_id")
+            ]
+        )
+    except Exception:
+        snapshot_by_node = {}
+        rag_chunk_counts = {}
+    semantic_persona_node_ids = {n["id"] for n in sem_nodes if n.get("node_type") == "persona" and n.get("id")}
+    validated_semantic_node_ids = {
+        n["id"]
+        for n in sem_nodes
+        if n.get("id") and (
+            (n.get("node_type") == "persona")
+            or knowledge_graph._validation_state(n) == "validated"
+        )
+    }
+    path_connected_semantic_node_ids: set[str] = set()
+    branch_complete_semantic_node_ids: set[str] = set()
+    branch_complete_edge_ids: set[str] = set()
+    terminal_connected_semantic_node_ids: set[str] = set()
+    primary_edge_by_pair: dict[tuple[str, str], str] = {}
+    for edge in sem_edges:
+        src = edge.get("source_node_id")
+        tgt = edge.get("target_node_id")
+        if not src or not tgt:
+            continue
+        relation = (edge.get("relation_type") or "").lower()
+        meta = edge.get("metadata") or {}
+        if meta.get("primary_tree") or relation in _STRUCTURAL_RELATIONS:
+            if parent_by_child.get(tgt) == src:
+                primary_edge_by_pair[(tgt, src)] = edge.get("id")
+
+    for node in sem_nodes:
+        node_id = node.get("id")
+        ntype = (node.get("node_type") or "").lower()
+        if not node_id or ntype in {"persona", "embedded", "gallery"}:
+            continue
+        chain, reaches_persona = _semantic_chain_to_persona(node_id, parent_by_child, semantic_persona_node_ids)
+        if reaches_persona:
+            path_connected_semantic_node_ids.update(chain)
+
+    for edge in sem_edges:
+        src_id = edge.get("source_node_id")
+        tgt_id = edge.get("target_node_id")
+        if not src_id or not tgt_id:
+            continue
+        src_node = sem_nodes_by_id.get(src_id) or {}
+        tgt_node = sem_nodes_by_id.get(tgt_id) or {}
+        src_type = (src_node.get("node_type") or "").lower()
+        tgt_type = (tgt_node.get("node_type") or "").lower()
+        rt = (edge.get("relation_type") or "").lower()
+        terminal_node_id: Optional[str] = None
+        if src_type == "faq" and tgt_type == "embedded":
+            terminal_node_id = src_id
+        elif rt == "gallery_asset":
+            if src_type == "gallery" and tgt_type != "gallery":
+                terminal_node_id = tgt_id
+            elif tgt_type == "gallery" and src_type != "gallery":
+                terminal_node_id = src_id
+        if not terminal_node_id:
+            continue
+        terminal_connected_semantic_node_ids.add(terminal_node_id)
+        chain, reaches_persona = _semantic_chain_to_persona(terminal_node_id, parent_by_child, semantic_persona_node_ids)
+        if not reaches_persona:
+            continue
+        if not all(node_ref in validated_semantic_node_ids for node_ref in chain):
+            continue
+        branch_complete_semantic_node_ids.update(chain)
+        branch_complete_edge_ids.add(edge.get("id"))
+        for child_id, parent_id in zip(chain, chain[1:]):
+            primary_edge_id = primary_edge_by_pair.get((child_id, parent_id))
+            if primary_edge_id:
+                branch_complete_edge_ids.add(primary_edge_id)
 
     def current_level_for(node_id: str, node_type: str) -> int:
         if node_type == "persona":
@@ -683,6 +926,9 @@ def get_graph_data(
                 "icon": nt_by_type.get("persona", {}).get("icon", "user"),
                 "is_auxiliary": False,
                 "validated": True,
+                "path_connected_to_persona": True,
+                "terminal_connected": False,
+                "branch_complete_validated": bool(branch_complete_semantic_node_ids),
                 "in_focus_path": any(
                     step.get("node_type") == "persona" and step.get("node_id") in {
                         n.get("id") for n in sem_nodes if n.get("node_type") == "persona" and n.get("persona_id") == p["id"]
@@ -708,8 +954,10 @@ def get_graph_data(
         ki_items = []
     pending_graph_items = [
         item for item in ki_items
-        if str(item.get("status") or "").lower() in {"pending", "needs_persona", "needs_category", "draft", "approved"}
+        if include_technical
+        and str(item.get("status") or "").lower() in {"pending", "needs_persona", "needs_category", "draft", "approved"}
         and str(item.get("id")) not in mirrored_knowledge_item_ids
+        and not _is_quarantined_metadata((item.get("metadata") or {}))
     ]
     pending_graph_item_ids = {item.get("id") for item in pending_graph_items}
     for item in pending_graph_items:
@@ -738,6 +986,11 @@ def get_graph_data(
                 "icon": nt_by_type.get("knowledge_item", {}).get("icon", "inbox"),
                 "is_auxiliary": False,
                 "validated": node_class == "validated",
+                "approval_state": item.get("status", "pending"),
+                "publication_state": "published" if str(item.get("status") or "").lower() == "embedded" else "unpublished",
+                "path_connected_to_persona": bool(persona_id and persona_id in persona_node_ids_emitted),
+                "terminal_connected": False,
+                "branch_complete_validated": False,
             },
         })
         if persona_id and persona_id in persona_node_ids_emitted:
@@ -790,6 +1043,11 @@ def get_graph_data(
                     "icon": nt_by_type.get("knowledge_item", {}).get("icon", "inbox"),
                     "is_auxiliary": True,
                     "validated": node_class == "validated",
+                    "approval_state": item.get("status", "pending"),
+                    "publication_state": "published" if str(item.get("status") or "").lower() == "embedded" else "unpublished",
+                    "path_connected_to_persona": bool(persona_id and persona_id in persona_node_ids_emitted),
+                    "terminal_connected": False,
+                    "branch_complete_validated": False,
                 },
             })
             if persona_id and persona_id in persona_node_ids_emitted:
@@ -827,6 +1085,11 @@ def get_graph_data(
                     "icon": nt_by_type.get("kb_entry", {}).get("icon", "database"),
                     "is_auxiliary": True,
                     "validated": node_class == "validated",
+                    "approval_state": entry.get("status", "ATIVO"),
+                    "publication_state": "published",
+                    "path_connected_to_persona": bool(persona_id and persona_id in persona_node_ids_emitted),
+                    "terminal_connected": False,
+                    "branch_complete_validated": False,
                 },
             })
             if persona_id and persona_id in persona_node_ids_emitted:
@@ -842,6 +1105,7 @@ def get_graph_data(
     sem_node_ids = {n["id"]: n for n in sem_nodes}
     semantic_persona_aliases: dict[str, str] = {}
     semantic_embedded_aliases: dict[str, str] = {}
+    semantic_gallery_aliases: dict[str, str] = {}
 
     for n in sem_nodes:
         ntype = (n.get("node_type") or "").lower()
@@ -849,6 +1113,11 @@ def get_graph_data(
             pid = n.get("persona_id") or single_persona_id
             if pid and pid in persona_node_ids_emitted:
                 semantic_embedded_aliases[n["id"]] = f"embedded:{pid}"
+            continue
+        if ntype == "gallery":
+            pid = n.get("persona_id") or single_persona_id
+            if pid and pid in persona_node_ids_emitted:
+                semantic_gallery_aliases[n["id"]] = f"gallery:{pid}"
             continue
         if ntype != "persona":
             continue
@@ -862,9 +1131,9 @@ def get_graph_data(
             # The UI already emits a stable persona root card with the real
             # filtered entity name. Skip semantic duplicates like "Persona".
             continue
-        if ntype == "embedded":
+        if ntype in {"embedded", "gallery"}:
             # The UI emits a stable Embedded destination card per persona.
-            # Semantic embedded nodes are aliases for persisted edges only.
+            # Semantic Embedded/Gallery nodes are aliases for persisted edges only.
             continue
         meta = n.get("metadata") or {}
         tags = n.get("tags") or []
@@ -878,6 +1147,21 @@ def get_graph_data(
 
         # Map semantic node_type → ReactFlow nodeClass for legacy color/shape.
         semantic_state = knowledge_graph._validation_state(n)
+        source_status = str(meta.get("source_status") or n.get("status") or "").lower()
+        approved_snapshot = snapshot_by_node.get(n.get("id")) or {}
+        approved_snapshot_id = approved_snapshot.get("id") or meta.get("approved_snapshot_id")
+        rag_entry_id = approved_snapshot.get("rag_entry_id") or meta.get("knowledge_rag_entry_id")
+        rag_chunk_count = rag_chunk_counts.get(str(rag_entry_id or ""), 0)
+        snapshot_status = approved_snapshot.get("status") or meta.get("snapshot_status")
+        publication_state = (
+            "active"
+            if snapshot_status == "active" and rag_entry_id and rag_chunk_count > 0
+            else "published"
+            if source_status == "embedded" or n.get("source_table") == "kb_entries"
+            else "approved"
+            if approved_snapshot_id
+            else "unpublished"
+        )
         node_class = {
             "persona": "persona",
             "gallery": "validated",
@@ -897,9 +1181,11 @@ def get_graph_data(
                 "label": n.get("title") or n.get("slug") or ntype,
                 "status": n.get("status") or "active",
                 "content_type": ntype,
-                "file_type": "",
-                "file_path": meta.get("file_path"),
-                "content_preview": (n.get("summary") or "")[:200],
+                "file_type": _metadata_file_type(meta),
+                "file_path": meta.get("file_path") or meta.get("storage_path"),
+                "asset_url": _metadata_asset_url(meta),
+                "content_preview": (_metadata_markdown(meta, n.get("summary") or ""))[:2000],
+                "markdown": _metadata_markdown(meta, n.get("summary") or ""),
                 "nodeClass": node_class,
                 "item_id": n.get("source_id") or n["id"],
                 "source": "graph",
@@ -917,6 +1203,15 @@ def get_graph_data(
                 "icon": registry_row.get("icon"),
                 "is_auxiliary": is_auxiliary,
                 "validated": semantic_state == "validated",
+                "approval_state": source_status or semantic_state,
+                "publication_state": publication_state,
+                "approved_snapshot_id": approved_snapshot_id,
+                "rag_entry_id": rag_entry_id,
+                "rag_chunk_count": rag_chunk_count,
+                "snapshot_status": snapshot_status,
+                "path_connected_to_persona": n.get("id") in path_connected_semantic_node_ids,
+                "terminal_connected": n.get("id") in terminal_connected_semantic_node_ids,
+                "branch_complete_validated": n.get("id") in branch_complete_semantic_node_ids,
                 "is_focus": is_focus,
                 "in_focus_path": in_focus_path,
                 "graph_distance": graph_distance,
@@ -948,16 +1243,24 @@ def get_graph_data(
         source_id = (
             semantic_persona_aliases.get(e.get("source_node_id"))
             or semantic_embedded_aliases.get(e.get("source_node_id"))
+            or semantic_gallery_aliases.get(e.get("source_node_id"))
             or f"gn:{e['source_node_id']}"
         )
         target_id = (
             semantic_persona_aliases.get(e.get("target_node_id"))
             or semantic_embedded_aliases.get(e.get("target_node_id"))
+            or semantic_gallery_aliases.get(e.get("target_node_id"))
             or f"gn:{e['target_node_id']}"
         )
         if source_id == target_id:
             continue
+        src_type = (src.get("node_type") or "").lower()
+        tgt_type = (tgt.get("node_type") or "").lower()
         rt = (e.get("relation_type") or "related").lower()
+        if "gallery" in {src_type, tgt_type} and rt != "gallery_asset":
+            continue
+        if "embedded" in {src_type, tgt_type} and "faq" not in {src_type, tgt_type}:
+            continue
         registry_rel = rt_by_type.get(rt, {})
         weight = e.get("weight")
         if weight is None:
@@ -983,9 +1286,121 @@ def get_graph_data(
                 "metadata": e.get("metadata") or {},
                 "primary_tree": bool((e.get("metadata") or {}).get("primary_tree")),
                 "gallery_edge": rt == "gallery_asset",
+                "embedded_edge": "embedded" in {src_type, tgt_type},
+                "terminal_connected": (
+                    (src_type == "faq" and tgt_type == "embedded")
+                    or (rt == "gallery_asset")
+                ),
+                "branch_complete_validated": e.get("id") in branch_complete_edge_ids,
             },
         })
         semantic_edges_count += 1
+
+    gallery_persona_ids = [
+        p["id"]
+        for p in personas
+        if p.get("id") in persona_node_ids_emitted
+    ]
+    for persona_id in gallery_persona_ids:
+        gallery_id = f"gallery:{persona_id}"
+        nodes.append({
+            "id": gallery_id,
+            "type": "knowledgeNode",
+            "position": {"x": 0, "y": 0},
+            "data": {
+                "label": "Gallery",
+                "status": "active",
+                "content_type": "asset-gallery",
+                "content_preview": "Destino protegido para assets e referencias visuais ligadas a esta persona.",
+                "nodeClass": "validated",
+                "source": "synthetic",
+                "tags": ["gallery", "assets", "visual", "default"],
+                "node_type": "gallery",
+                "slug": "gallery-default",
+                "level": 112,
+                "importance": 0.76,
+                "confidence": 1,
+                "color": "#f0abfc",
+                "icon": "images",
+                "is_auxiliary": False,
+                "validated": True,
+                "approval_state": "system",
+                "publication_state": "destination",
+                "persona_id": persona_id,
+                "path_connected_to_persona": True,
+                "terminal_connected": False,
+                "branch_complete_validated": bool(branch_complete_semantic_node_ids),
+            },
+        })
+
+    draft_terminal_edge_ids: set[str] = set()
+    connected_gallery_assets: set[str] = set()
+    connected_embedded_faqs: set[str] = set()
+    for edge in sem_edges:
+        src_id = edge.get("source_node_id")
+        tgt_id = edge.get("target_node_id")
+        if not src_id or not tgt_id:
+            continue
+        src_node = sem_nodes_by_id.get(src_id) or {}
+        tgt_node = sem_nodes_by_id.get(tgt_id) or {}
+        src_type = (src_node.get("node_type") or "").lower()
+        tgt_type = (tgt_node.get("node_type") or "").lower()
+        if src_type == "faq" and tgt_type == "embedded":
+            connected_embedded_faqs.add(src_id)
+        if (edge.get("relation_type") or "").lower() == "gallery_asset":
+            if src_type == "gallery" and tgt_type == "asset":
+                connected_gallery_assets.add(tgt_id)
+            elif tgt_type == "gallery" and src_type == "asset":
+                connected_gallery_assets.add(src_id)
+
+    for node in sem_nodes:
+        node_id = node.get("id")
+        node_type = (node.get("node_type") or "").lower()
+        persona_id = node.get("persona_id")
+        if not node_id or not persona_id:
+            continue
+        if node_type == "faq" and persona_id in persona_node_ids_emitted and node_id not in connected_embedded_faqs and include_embedded:
+            edge_id = f"draft:embedded:{node_id}"
+            if edge_id not in draft_terminal_edge_ids:
+                edges.append({
+                    "id": edge_id,
+                    "source": f"gn:{node_id}",
+                    "target": f"embedded:{persona_id}",
+                    "type": "smoothstep",
+                    "data": {
+                        "relation_type": "embedded_pending",
+                        "tier": "auxiliary",
+                        "weight": 0.55,
+                        "directional": True,
+                        "embedded_edge": True,
+                        "draft_terminal_edge": True,
+                        "terminal_connected": False,
+                        "branch_complete_validated": False,
+                        "deletable": False,
+                    },
+                })
+                draft_terminal_edge_ids.add(edge_id)
+        if node_type == "asset" and persona_id in persona_node_ids_emitted and node_id not in connected_gallery_assets:
+            edge_id = f"draft:gallery:{node_id}"
+            if edge_id not in draft_terminal_edge_ids:
+                edges.append({
+                    "id": edge_id,
+                    "source": f"gn:{node_id}",
+                    "target": f"gallery:{persona_id}",
+                    "type": "smoothstep",
+                    "data": {
+                        "relation_type": "gallery_pending",
+                        "tier": "auxiliary",
+                        "weight": 0.55,
+                        "directional": True,
+                        "gallery_edge": True,
+                        "draft_terminal_edge": True,
+                        "terminal_connected": False,
+                        "branch_complete_validated": False,
+                        "deletable": False,
+                    },
+                })
+                draft_terminal_edge_ids.add(edge_id)
 
     if include_embedded:
         embedded_persona_ids = [
@@ -1003,10 +1418,10 @@ def get_graph_data(
                     "label": "Embedded",
                     "status": "active",
                     "content_type": "rag",
-                    "content_preview": "Fonte de conhecimento enviada ao RAG do modelo.",
+                    "content_preview": "Destino protegido para FAQs publicados no Golden Dataset e enviados ao RAG do modelo.",
                     "nodeClass": "validated",
                     "source": "synthetic",
-                    "tags": ["rag", "embedded", "default"],
+                    "tags": ["rag", "embedded", "golden-dataset", "default"],
                     "node_type": "embedded",
                     "slug": "embedded-default",
                     "level": 120,
@@ -1016,6 +1431,8 @@ def get_graph_data(
                     "icon": "database",
                     "is_auxiliary": False,
                     "validated": True,
+                    "approval_state": "system",
+                    "publication_state": "destination",
                     "persona_id": persona_id,
                     "rag_index": "default",
                 },
@@ -1035,6 +1452,31 @@ def get_graph_data(
                 "validated": False,
             },
         })
+
+    deduped_nodes: dict[str, dict] = {}
+    for node in nodes:
+        node_id = node.get("id")
+        if node_id and node_id not in deduped_nodes:
+            deduped_nodes[node_id] = node
+    nodes = list(deduped_nodes.values())
+
+    deduped_edges: dict[str, dict] = {}
+    primary_seen: set[tuple[str, str, str]] = set()
+    for edge in edges:
+        edge_id = edge.get("id")
+        if edge_id and edge_id in deduped_edges:
+            continue
+        data = edge.get("data") or {}
+        meta = data.get("metadata") or {}
+        relation_type = str(data.get("relation_type") or "").lower()
+        if data.get("primary_tree") is True or meta.get("primary_tree") is True:
+            primary_key = (str(edge.get("source") or ""), str(edge.get("target") or ""), relation_type)
+            if primary_key in primary_seen:
+                continue
+            primary_seen.add(primary_key)
+        if edge_id:
+            deduped_edges[edge_id] = edge
+    edges = list(deduped_edges.values())
 
     total_items = len(ki_items) + len(kb_entries)
 

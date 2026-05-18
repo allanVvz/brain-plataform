@@ -379,11 +379,12 @@ def _link_entries(created: list[dict], graph_nodes: list[dict], graph_edges: lis
             target = product_entries.get((entry.get("persona_id"), product_slug))
             if not target or target.get("id") == entry.get("id"):
                 continue
-            rel = "answers_question" if entry.get("content_type") == "faq" else "about_product"
+            is_faq = entry.get("content_type") == "faq"
+            rel = "answers_question" if is_faq else "about_product"
             supabase_client.upsert_knowledge_rag_link({
                 "persona_id": entry.get("persona_id"),
-                "source_entry_id": entry["id"],
-                "target_entry_id": target["id"],
+                "source_entry_id": target["id"] if is_faq else entry["id"],
+                "target_entry_id": entry["id"] if is_faq else target["id"],
                 "relation_type": rel,
                 "weight": 1,
                 "confidence": 0.7,

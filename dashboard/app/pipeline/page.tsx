@@ -555,7 +555,7 @@ function KnowledgePipeline({
         {[
           { label: "Conhecimentos", value: total, icon: Boxes },
           { label: "Validados", value: validated, icon: Activity },
-          { label: "KB ativa", value: kbEntries, icon: BarChart3 },
+          { label: "Golden Dataset ativo", value: kbEntries, icon: BarChart3 },
           { label: "Atenção", value: attention, icon: Clock },
         ].map(({ label, value, icon: Icon }) => (
           <div key={label} className="rounded-xl border border-white/06 bg-white/[0.035] p-4">
@@ -656,7 +656,7 @@ function SystemPipeline({
         {[
           { label: "Atencao necessaria", value: metrics.pending_attention ?? "--", color: "text-yellow-400" },
           { label: "Aprovados hoje", value: metrics.approved_today ?? "--", color: "text-green-400" },
-          { label: "Entradas na KB", value: metrics.kb_entries ?? "--", color: "text-blue-400" },
+          { label: "Entradas no Golden Dataset", value: metrics.kb_entries ?? "--", color: "text-blue-400" },
           { label: "Assets pendentes", value: metrics.assets_pending ?? "--", color: "text-orange-400" },
           { label: "Erros 24h", value: metrics.errors_24h ?? "--", color: "text-red-400" },
         ].map(({ label, value, color }) => (

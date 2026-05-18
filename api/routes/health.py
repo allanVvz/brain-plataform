@@ -1,5 +1,7 @@
+import os
+
 from fastapi import APIRouter
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse
 from services import supabase_client
 
 router = APIRouter(tags=["health"])
@@ -12,7 +14,33 @@ def root():
 
 @router.get("/health")
 def health():
-    return {"status": "ok"}
+    return health_live()
+
+
+@router.get("/health/live")
+def health_live():
+    return {
+        "status": "ok",
+        "service": "api",
+        "workers_embedded": (os.environ.get("RUN_EMBEDDED_WORKERS") or "").strip().lower() in {"1", "true", "yes", "on"},
+    }
+
+
+@router.get("/health/ready")
+def health_ready():
+    ok, detail = supabase_client.ping_supabase()
+    payload = {
+        "status": "ready" if ok else "degraded",
+        "checks": {
+            "supabase": {
+                "ok": ok,
+                "detail": detail,
+            }
+        },
+    }
+    if ok:
+        return payload
+    return JSONResponse(payload, status_code=503)
 
 
 @router.get("/health/score")

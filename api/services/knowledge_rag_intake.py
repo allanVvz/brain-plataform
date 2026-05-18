@@ -375,7 +375,9 @@ def process_intake(
                 [mirror.get("id")] if mirror and mirror.get("id") else None,
             )
 
-        intake_status = "rag_created" if rag_allowed else "graph_only"
+        # knowledge_intake_messages.status does not accept "graph_only".
+        # Non-RAG graph inserts should keep a standard lifecycle status.
+        intake_status = "rag_created" if rag_allowed else status
         supabase_client.update_knowledge_intake_message(
             intake["id"],
             {"status": intake_status, "processed_at": now_iso},
@@ -410,14 +412,9 @@ def _entry_slug(entry: dict, classified: Optional[dict] = None) -> str:
 
 def _default_campaign_entry(persona: dict, run_token: str) -> dict:
     persona_slug = persona.get("slug") or "persona"
-    if persona_slug == "vz-lupas":
-        title = f"Campanha Oakley VZ Lupas [{run_token}]"
-        slug = f"campanha-oakley-vz-lupas-{run_token}"
-        content = "Campanha raiz para organizar publicos, produtos Oakley, beneficios, briefings e FAQs da VZ Lupas."
-    else:
-        title = f"Campanha de Conhecimento [{run_token}]"
-        slug = f"campanha-conhecimento-{persona_slug}-{run_token}"
-        content = f"Campanha raiz para organizar o conhecimento criado para {persona_slug}."
+    title = f"Campanha de Conhecimento [{run_token}]"
+    slug = f"campanha-conhecimento-{persona_slug}-{run_token}"
+    content = f"Campanha raiz para organizar o conhecimento criado para {persona_slug}."
     return {
         "content_type": "campaign",
         "slug": slug,

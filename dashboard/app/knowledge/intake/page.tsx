@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useRef, useState } from "react";
 import { Bot, User, Upload, Send, CheckCircle, Circle, Loader2, Save } from "lucide-react";
 import { api } from "@/lib/api";
@@ -16,12 +16,15 @@ const TYPE_LABELS: Record<string, string> = {
   prompt: "Prompt", maker_material: "Maker", asset: "Asset Visual", other: "Outro",
 };
 
-const CLIENT_LABELS: Record<string, string> = {
-  "tock-fatal": "Tock Fatal",
-  "vz-lupas": "VZ Lupas",
-  "baita-conveniencia": "Baita Conveniência",
-  "global": "Global",
-};
+function personaLabel(value: string | null) {
+  if (!value) return null;
+  if (value === "global") return "Global";
+  return value
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 interface Message {
   role: "user" | "assistant" | "system";
@@ -363,7 +366,7 @@ export default function IntakePage() {
         <div className="bg-brain-surface border border-brain-border rounded-xl p-4">
           <p className="text-[10px] uppercase tracking-widest text-brain-muted mb-3">Classificação</p>
           <div className="space-y-0">
-            <ClassBadge label="Cliente" value={cls.persona_slug ? CLIENT_LABELS[cls.persona_slug] ?? cls.persona_slug : null} />
+            <ClassBadge label="Cliente" value={personaLabel(cls.persona_slug)} />
             <ClassBadge label="Tipo" value={cls.content_type ? TYPE_LABELS[cls.content_type] ?? cls.content_type : null} />
             {cls.content_type === "asset" && (
               <>
@@ -423,3 +426,4 @@ export default function IntakePage() {
     </div>
   );
 }
+

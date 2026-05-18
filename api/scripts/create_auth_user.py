@@ -4,11 +4,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
 
 from services import auth_service, supabase_client
+from utils.tls import configure_trust_store
 
 
 def upsert_user(args: argparse.Namespace) -> dict:
@@ -53,7 +55,8 @@ def grant_personas(user: dict, persona_slugs: list[str], can_edit: bool, can_man
 
 
 def main() -> None:
-    load_dotenv(ROOT / ".env")
+    load_dotenv(REPO_ROOT / ".env")
+    configure_trust_store()
     parser = argparse.ArgumentParser(description="Create or update an Brain AI login user.")
     parser.add_argument("--email", default=os.environ.get("AI_BRAIN_SEED_ADMIN_EMAIL"))
     parser.add_argument("--username", default=os.environ.get("AI_BRAIN_SEED_ADMIN_USERNAME"))

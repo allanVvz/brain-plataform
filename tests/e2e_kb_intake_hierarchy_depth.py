@@ -120,15 +120,18 @@ def login(report: dict, identifier: str, password: str) -> dict:
 
 
 def hierarchical_plan(run_token: str) -> dict:
-    """6-entry plan with explicit parent_slug chain.
+    """6-entry plan with explicit parent_slug chain following the canonical
+    top-down order required by the operator:
 
-    Topology:
-        brand (top)
-        └── campaign
-            ├── audience          (sibling leaf)
-            └── product
-                ├── copy          (sibling leaf)
-                └── faq           (deepest leaf — 4 hops from persona)
+        brand (top, level 1)
+        └── campaign  (level 2)
+            └── audience  (level 3 — pivot between campaign and product)
+                └── product  (level 4)
+                    ├── copy  (level 5)
+                    └── faq   (level 5 — deepest leaf, 5 hops from persona)
+
+    Audience is the parent of product, NOT a sibling. This is what the
+    new chain validation expects.
     """
     brand_slug = f"tock-fatal-brand-{run_token}"
     campaign_slug = f"tock-fatal-modal-2026-{run_token}"
@@ -171,7 +174,10 @@ def hierarchical_plan(run_token: str) -> dict:
             "status": "confirmado",
             "content": "Blusa canelada de modal, 9 cores. Preco unitario R$ 59,90.",
             "tags": [run_token, "product"],
-            "metadata": {"parent_slug": campaign_slug, "parent_type": "campaign"},
+            # Audience is the semantic parent of product (the public the
+            # product targets within this campaign). Campaign is reachable
+            # via the audience ancestor chain.
+            "metadata": {"parent_slug": audience_slug, "parent_type": "audience"},
         },
         {
             "content_type": "copy",
@@ -202,14 +208,14 @@ def hierarchical_plan(run_token: str) -> dict:
         "entries": entries,
         "links": [
             {"source_slug": brand_slug, "target_slug": campaign_slug, "relation_type": "contains"},
-            {"source_slug": campaign_slug, "target_slug": audience_slug, "relation_type": "contains"},
-            {"source_slug": campaign_slug, "target_slug": product_slug, "relation_type": "contains"},
+            {"source_slug": campaign_slug, "target_slug": audience_slug, "relation_type": "targets_audience"},
+            {"source_slug": audience_slug, "target_slug": product_slug, "relation_type": "offers_product"},
             {"source_slug": product_slug, "target_slug": copy_slug, "relation_type": "supports_copy"},
             {"source_slug": product_slug, "target_slug": faq_slug, "relation_type": "answers_question"},
         ],
         "missing_questions": [],
         "_expected_deepest_chain": [
-            "persona", brand_slug, campaign_slug, product_slug, faq_slug,
+            "persona", brand_slug, campaign_slug, audience_slug, product_slug, faq_slug,
         ],
     }
 
@@ -367,12 +373,95 @@ def render_path(path: list[dict]) -> str:
     return " ".join(parts)
 
 
+def assert_chain_order(path: list[dict], expected_chain: list[str]) -> tuple[bool, str]:
+    """Verify the path visits each expected type in order.
+
+    Each entry of `expected_chain` is either a node_type (str) or a
+    '|'-separated list of acceptable alternatives (e.g. "campaign|briefing").
+    Walks the path linearly: for each expected type, advances through the
+    path until that type is encountered. Returns (ok, reason).
+    """
+    types_seen = [step.get("node_type") for step in path]
+    cursor = 0
+    for expected in expected_chain:
+        alts = set(expected.split("|"))
+        found = False
+        while cursor < len(types_seen):
+            if types_seen[cursor] in alts:
+                cursor += 1
+                found = True
+                break
+            cursor += 1
+        if not found:
+            return False, (
+                f"expected node_type {expected!r} not found in remaining path "
+                f"(types seen: {types_seen})"
+            )
+    return True, "chain ok"
+
+
+def collect_token_subgraph(graph: dict, run_token: str):
+    """Return (nodes_by_id, children, parents_by_child) walking only
+    PRIMARY edges among nodes that carry run_token (or are personas).
+    `parents_by_child[node_id]` = list of parent_ids of that node.
+    """
+    raw_nodes = graph.get("nodes") or []
+    raw_edges = graph.get("edges") or []
+    nodes_by_id: dict[str, dict] = {}
+    for n in raw_nodes:
+        nid = n.get("id")
+        if not nid:
+            continue
+        data = n.get("data") or {}
+        node = {
+            "id": nid,
+            "node_type": data.get("node_type") or data.get("nodeClass") or n.get("type"),
+            "slug": data.get("slug") or n.get("slug") or "",
+            "title": data.get("title") or n.get("title") or "",
+            "raw": n,
+        }
+        nodes_by_id[nid] = node
+
+    children: dict[str, list[tuple[str, str]]] = {}
+    parents_by_child: dict[str, list[tuple[str, str]]] = {}
+    for e in raw_edges:
+        src = e.get("source") or e.get("source_node_id")
+        tgt = e.get("target") or e.get("target_node_id")
+        if not src or not tgt or src not in nodes_by_id or tgt not in nodes_by_id:
+            continue
+        rel = (e.get("relation_type") or e.get("label") or "").lower()
+        meta = e.get("metadata") or e.get("data") or {}
+        is_primary = bool(meta.get("primary_tree")) if isinstance(meta, dict) else False
+        if rel not in PRIMARY_RELATIONS and not is_primary:
+            continue
+        children.setdefault(src, []).append((tgt, rel))
+        parents_by_child.setdefault(tgt, []).append((src, rel))
+    return nodes_by_id, children, parents_by_child
+
+
+def has_ancestor_type(node_id: str, ancestor_type: str, parents_by_child: dict, nodes_by_id: dict, max_depth: int = 8) -> bool:
+    """Walk parents upward; True if any ancestor has the given node_type."""
+    seen: set[str] = set()
+    stack: deque[tuple[str, int]] = deque([(node_id, 0)])
+    while stack:
+        current, d = stack.popleft()
+        if current in seen or d > max_depth:
+            continue
+        seen.add(current)
+        for parent_id, _ in parents_by_child.get(current, []):
+            parent_node = nodes_by_id.get(parent_id) or {}
+            if parent_node.get("node_type") == ancestor_type:
+                return True
+            stack.append((parent_id, d + 1))
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-token", default=os.environ.get("RUN_TOKEN") or datetime.now(timezone.utc).strftime("e2ehier%Y%m%d%H%M%S"))
     parser.add_argument("--model", default=os.environ.get("LLM_MODEL", "gpt-4o-mini"))
-    parser.add_argument("--min-depth", type=int, default=int(os.environ.get("MIN_DEPTH", "4")),
-                        help="Minimum acceptable hops from persona to deepest leaf (default 4 = 5 nodes)")
+    parser.add_argument("--min-depth", type=int, default=int(os.environ.get("MIN_DEPTH", "5")),
+                        help="Minimum acceptable hops from persona to deepest leaf (default 5 = persona→brand→campaign→audience→product→faq)")
     parser.add_argument("--admin-email",
                         default=os.environ.get("ADMIN_EMAIL") or os.environ.get("AI_BRAIN_SEED_ADMIN_EMAIL"))
     parser.add_argument("--admin-password",
@@ -441,9 +530,56 @@ def main() -> int:
                f"deepest path has at least {args.min_depth} hops (got {depth})",
                {"path": rendered, "by_type_in_path": [p.get("node_type") for p in path]})
 
+        # ── Semantic chain validation: types must appear in the canonical
+        # top-down order persona → brand → campaign|briefing → audience →
+        # product → faq|copy|asset. Walking the deepest path is enough to
+        # prove the chain exists; per-node parent checks below catch the
+        # "lateral audience / FAQ outside product" regression.
+        expected_chain = ["persona", "brand", "campaign|briefing", "audience", "product", "faq|copy|asset"]
+        chain_ok, chain_reason = assert_chain_order(path, expected_chain)
+        report["chain_validation"] = {
+            "expected": expected_chain,
+            "ok": chain_ok,
+            "reason": chain_reason,
+            "types_in_path": [p.get("node_type") for p in path],
+        }
+        expect(report, chain_ok,
+               f"deepest path follows canonical type order: {' → '.join(expected_chain)}",
+               report["chain_validation"])
+
+        # Per-node ancestor checks: every product token-node must trace back
+        # through an audience; every faq/copy of a product must trace back
+        # through a product. This catches the case where `audience` exists in
+        # the graph but is a SIBLING of product instead of its parent.
+        nodes_by_id, _children_map, parents_by_child = collect_token_subgraph(graph, run_token)
+        token_nodes_per_type: dict[str, list[dict]] = {}
+        for n in nodes_by_id.values():
+            blob = json.dumps(n["raw"], ensure_ascii=False)
+            if run_token not in blob:
+                continue
+            ntype = n.get("node_type") or "unknown"
+            token_nodes_per_type.setdefault(ntype, []).append(n)
+
+        product_audience_failures: list[dict] = []
+        for prod in token_nodes_per_type.get("product", []):
+            if not has_ancestor_type(prod["id"], "audience", parents_by_child, nodes_by_id):
+                product_audience_failures.append({"slug": prod.get("slug"), "title": prod.get("title")})
+        expect(report, not product_audience_failures,
+               "every product has an audience ancestor (audience is parent, not sibling)",
+               {"failures": product_audience_failures})
+
+        leaf_product_failures: list[dict] = []
+        for leaf_type in ("faq", "copy", "asset"):
+            for leaf in token_nodes_per_type.get(leaf_type, []):
+                if not has_ancestor_type(leaf["id"], "product", parents_by_child, nodes_by_id):
+                    leaf_product_failures.append({"type": leaf_type, "slug": leaf.get("slug"), "title": leaf.get("title")})
+        expect(report, not leaf_product_failures,
+               "every faq/copy/asset has a product ancestor (no product-less leaves)",
+               {"failures": leaf_product_failures})
+
         report["ok"] = True
         report.pop("error", None)
-        print(f"\nPASS e2e-kb-intake-hierarchy-depth (depth={depth}). Report: {report_path}")
+        print(f"\nPASS e2e-kb-intake-hierarchy-depth (depth={depth}, chain_ok={chain_ok}). Report: {report_path}")
         return 0
     except Exception as exc:
         report["ok"] = False

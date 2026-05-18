@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import {
@@ -76,7 +76,7 @@ export default function WaValidatorPage() {
   const [activeSession, setActiveSession] = useState<Session | null>(null);
 
   // form state — bot is the primary selector (replaces persona + contact)
-  const [selectedBotId, setSelectedBotId] = useState("sofia-tock-fatal");
+  const [selectedBotId, setSelectedBotId] = useState("");
   const [flowId, setFlowId] = useState("");
   // default to gpt-4o-mini so generate works before models endpoint resolves
   const [model, setModel] = useState("gpt-4o-mini");
@@ -94,8 +94,7 @@ export default function WaValidatorPage() {
   useEffect(() => {
     api.waBots().then((bs) => {
       setBots(bs);
-      // Pre-select Sofia; fall back to first bot
-      if (!bs.find((b: any) => b.id === "sofia-tock-fatal") && bs.length > 0) {
+      if (bs.length > 0) {
         setSelectedBotId(bs[0].id);
       }
     }).catch(() => {});
@@ -140,11 +139,11 @@ export default function WaValidatorPage() {
   }, [activeSession?.id, activeSession?.status]);
 
   const selectedBot = bots.find((b) => b.id === selectedBotId) || {
-    id: "sofia-tock-fatal",
-    bot_name: "Sofia",
-    label: "Sofia — Tock Fatal",
-    persona_slug: "tock-fatal",
-    description: "Agente de vendas principal do Tock Fatal",
+    id: "",
+    bot_name: "Bot",
+    label: "Bot dinamico",
+    persona_slug: "global",
+    description: "Selecione um bot carregado do banco.",
   };
 
   async function handleGenerate() {
@@ -241,14 +240,14 @@ export default function WaValidatorPage() {
             <label className="text-[11px] text-brain-muted uppercase tracking-wide">Bot / Agente</label>
             <div className="space-y-1.5">
               {bots.length === 0 ? (
-                // Default Sofia card while bots load
+                // Placeholder card while bots load
                 <button
                   className="w-full text-left px-3 py-2 rounded-lg border text-xs bg-brain-accent/15 border-brain-accent/40 text-brain-accent"
                 >
                   <div className="font-semibold flex items-center gap-1.5">
-                    <Bot size={11} /> Sofia — Tock Fatal
+                    <Bot size={11} /> Carregando bots
                   </div>
-                  <div className="text-[10px] mt-0.5 opacity-70">Agente de vendas principal</div>
+                  <div className="text-[10px] mt-0.5 opacity-70">Aguardando configuracao dinamica</div>
                 </button>
               ) : (
                 bots.map((b) => {
@@ -495,7 +494,7 @@ export default function WaValidatorPage() {
         )}
       </div>
 
-      {/* ── Right panel: KB gaps & insights ──────────────── */}
+      {/* ── Right panel: Golden Dataset gaps & insights ──────────────── */}
       <div className="w-72 shrink-0 flex flex-col gap-4">
         {expected.length > 0 && (
           <div className="bg-brain-surface border border-brain-border rounded-xl p-4">
@@ -554,7 +553,7 @@ export default function WaValidatorPage() {
 
             {(insights.recommendations ?? []).length > 0 && (
               <div>
-                <p className="text-[10px] text-brain-muted uppercase tracking-widest mb-2">Recomendações KB</p>
+                <p className="text-[10px] text-brain-muted uppercase tracking-widest mb-2">Recomendações Golden Dataset</p>
                 <ul className="space-y-1">
                   {insights.recommendations.map((r, i) => (
                     <li key={i} className="text-xs text-brain-muted flex items-start gap-1.5">
@@ -570,7 +569,7 @@ export default function WaValidatorPage() {
           <div className="flex-1 bg-brain-surface border border-brain-border rounded-xl p-4 flex items-center justify-center">
             <p className="text-xs text-brain-muted text-center">
               {isDone
-                ? "Clique em «Analisar Gaps» para identificar lacunas na KB."
+                ? "Clique em «Analisar Gaps» para identificar lacunas no Golden Dataset."
                 : "Execute um teste para ver os insights."}
             </p>
           </div>
@@ -579,3 +578,4 @@ export default function WaValidatorPage() {
     </div>
   );
 }
+

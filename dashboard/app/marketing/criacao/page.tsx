@@ -104,7 +104,7 @@ export default function CriacaoPage() {
         type="button"
         onClick={() => setActiveTool(key)}
         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${
-          active ? "bg-obs-violet/15 text-obs-violet" : "text-obs-subtle hover:text-obs-text hover:bg-white/05"
+          active ? "bg-obs-violet/15 text-obs-violet" : "text-obs-subtle hover:text-obs-text hover:bg-obs-surface/70"
         }`}
       >
         <Icon size={13} />
@@ -116,14 +116,13 @@ export default function CriacaoPage() {
   return (
     <div className="flex flex-col h-[calc(100vh-6rem)] gap-3 overflow-hidden">
       <div
-        className="shrink-0 flex items-center justify-between rounded-xl px-4 py-3"
-        style={{ border: "1px solid rgba(255,255,255,0.07)", background: "rgba(14,17,24,0.80)" }}
+        className="shrink-0 flex items-center justify-between rounded-xl px-4 py-3 glass-raised"
       >
         <div>
-          <p className="text-sm font-semibold text-white">Criar</p>
+          <p className="text-sm font-semibold text-obs-text">Criar</p>
           <p className="text-[10px] text-obs-faint">Ferramentas de marketing e captura de conhecimento</p>
         </div>
-        <div className="flex items-center gap-1 rounded-lg bg-obs-base border border-white/06 p-1">
+        <div className="flex items-center gap-1 rounded-lg p-1 bg-obs-surface/55" style={{ border: "1px solid var(--border-glass)" }}>
           {toolButton("criar", "Criar", MessageCircle)}
           {toolButton("gerar", "Gerar copy", Sparkles)}
           {toolButton("criativos", "Criativos", Sparkles)}
@@ -142,13 +141,12 @@ export default function CriacaoPage() {
         <div className="flex-1 min-h-0 flex gap-4 overflow-hidden">
       {/* ── Left: mode picker ─────────────────────────── */}
       <aside
-        className="w-60 shrink-0 flex flex-col rounded-xl overflow-hidden"
-        style={{ border: "1px solid rgba(255,255,255,0.07)", background: "rgba(14,17,24,0.80)" }}
+        className="w-60 shrink-0 flex flex-col rounded-xl overflow-hidden glass-raised"
       >
-        <div className="px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+        <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--border-glass)" }}>
           <div className="flex items-center gap-2">
             <Sparkles size={13} className="text-obs-violet" />
-            <span className="text-xs font-semibold text-white">Modos de criação</span>
+            <span className="text-xs font-semibold text-obs-text">Modos de criação</span>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto py-1">
@@ -166,7 +164,7 @@ export default function CriacaoPage() {
               >
                 <ChevronRight size={11} className={`mt-0.5 shrink-0 ${active ? "text-obs-violet" : "text-obs-faint"}`} />
                 <div className="min-w-0">
-                  <p className={`text-xs font-medium truncate ${active ? "text-white" : "text-obs-subtle"}`}>{m.label}</p>
+                  <p className={`text-xs font-medium truncate ${active ? "text-obs-text" : "text-obs-subtle"}`}>{m.label}</p>
                   <p className="text-[10px] text-obs-faint line-clamp-2 mt-0.5">{m.description}</p>
                 </div>
               </button>
@@ -177,12 +175,11 @@ export default function CriacaoPage() {
 
       {/* ── Center: form ────────────────────────────── */}
       <div
-        className="w-[420px] shrink-0 flex flex-col rounded-xl overflow-hidden"
-        style={{ border: "1px solid rgba(255,255,255,0.07)", background: "rgba(14,17,24,0.80)" }}
+        className="w-[420px] shrink-0 flex flex-col rounded-xl overflow-hidden glass-raised"
       >
-        <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+        <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border-glass)" }}>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-white truncate">{selectedMode?.label || "—"}</p>
+            <p className="text-xs font-semibold text-obs-text truncate">{selectedMode?.label || "—"}</p>
             <p className="text-[10px] text-obs-faint truncate">
               {personaId ? "persona ativa" : "sem persona — selecione no topo"}
             </p>
@@ -190,7 +187,8 @@ export default function CriacaoPage() {
           <select
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            className="text-[10px] bg-obs-base border border-white/10 rounded px-1.5 py-0.5 text-obs-subtle focus:outline-none"
+            className="text-[10px] bg-obs-surface/70 rounded px-1.5 py-0.5 text-obs-subtle focus:outline-none"
+            style={{ border: "1px solid var(--border-glass)" }}
             title="Modelo (OpenAI cascade + Anthropic fallback)"
           >
             {Object.entries(availableModels).map(([id, label]) => (
@@ -213,7 +211,7 @@ export default function CriacaoPage() {
           )}
         </div>
 
-        <div className="p-3" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+        <div className="p-3" style={{ borderTop: "1px solid var(--border-glass)" }}>
           <button
             onClick={onGenerate}
             disabled={!canGenerate}
@@ -228,15 +226,14 @@ export default function CriacaoPage() {
 
       {/* ── Right: result ───────────────────────────── */}
       <div
-        className="flex-1 flex flex-col rounded-xl overflow-hidden"
-        style={{ border: "1px solid rgba(255,255,255,0.07)", background: "rgba(14,17,24,0.80)" }}
+        className="flex-1 flex flex-col rounded-xl overflow-hidden glass-raised"
       >
-        <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-          <span className="text-xs font-semibold text-white">Resultado</span>
+        <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border-glass)" }}>
+          <span className="text-xs font-semibold text-obs-text">Resultado</span>
           {content && (
             <button
               onClick={onCopy}
-              className="flex items-center gap-1 text-[11px] text-obs-subtle hover:text-white transition"
+              className="flex items-center gap-1 text-[11px] text-obs-subtle hover:text-obs-text transition"
             >
               {copied ? <Check size={11} className="text-emerald-400" /> : <CopyIcon size={11} />}
               {copied ? "copiado" : "copiar"}
@@ -287,13 +284,15 @@ function FieldInput({
           onChange={(e) => onChange(e.target.value)}
           placeholder={spec.placeholder}
           rows={3}
-          className="w-full bg-obs-base border border-white/10 rounded px-2 py-1.5 text-xs text-obs-text placeholder-obs-faint focus:outline-none focus:border-obs-violet/50 resize-y"
+          className="w-full bg-obs-surface/70 rounded px-2 py-1.5 text-xs text-obs-text placeholder-obs-faint focus:outline-none focus:border-obs-violet/50 resize-y"
+          style={{ border: "1px solid var(--border-glass)" }}
         />
       ) : spec.type === "select" ? (
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-obs-base border border-white/10 rounded px-2 py-1.5 text-xs text-obs-text focus:outline-none focus:border-obs-violet/50"
+          className="w-full bg-obs-surface/70 rounded px-2 py-1.5 text-xs text-obs-text focus:outline-none focus:border-obs-violet/50"
+          style={{ border: "1px solid var(--border-glass)" }}
         >
           <option value="">— escolha —</option>
           {(spec.options || []).map((o) => (
@@ -306,7 +305,8 @@ function FieldInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={spec.placeholder}
-          className="w-full bg-obs-base border border-white/10 rounded px-2 py-1.5 text-xs text-obs-text placeholder-obs-faint focus:outline-none focus:border-obs-violet/50"
+          className="w-full bg-obs-surface/70 rounded px-2 py-1.5 text-xs text-obs-text placeholder-obs-faint focus:outline-none focus:border-obs-violet/50"
+          style={{ border: "1px solid var(--border-glass)" }}
         />
       )}
     </div>

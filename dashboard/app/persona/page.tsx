@@ -504,7 +504,7 @@ export default function PersonaPage() {
             {/* Quick stats */}
             <div className="bg-brain-surface border border-brain-border rounded-xl p-4 space-y-3">
               <p className="text-xs text-brain-muted uppercase tracking-wide">Resumo</p>
-              <Stat label="Entradas na KB" value={kbCount ?? "—"} />
+              <Stat label="Entradas no Golden Dataset" value={kbCount ?? "—"} />
               <Stat label="Fluxos n8n" value={bindings.length} />
             </div>
 
@@ -526,7 +526,7 @@ export default function PersonaPage() {
             {/* Quick links */}
             <div className="bg-brain-surface border border-brain-border rounded-xl p-4 space-y-1">
               <p className="text-xs text-brain-muted uppercase tracking-wide mb-2">Ações rápidas</p>
-              <a href={`/kb?persona_id=${selected.id}`} className="block text-xs text-brain-accent hover:underline py-0.5">→ Ver KB</a>
+              <a href={`/kb?persona_id=${selected.id}`} className="block text-xs text-brain-accent hover:underline py-0.5">→ Ver Golden Dataset</a>
               <a href="/knowledge/sync" className="block text-xs text-brain-accent hover:underline py-0.5">→ Sincronizar Vault</a>
               <a href={`/knowledge/validate?persona=${selected.id}`} className="block text-xs text-brain-accent hover:underline py-0.5">→ Validar itens pendentes</a>
               <a href="/knowledge/upload" className="block text-xs text-brain-accent hover:underline py-0.5">→ Upload de conhecimento</a>

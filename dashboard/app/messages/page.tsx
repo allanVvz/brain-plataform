@@ -1056,7 +1056,7 @@ function KnowledgeSidebar({
         {campaigns.map((n) => <NodePill key={scopedKey("campaign", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
       </KnowledgeSection>
 
-      <KnowledgeSection icon={<Database size={11} />} title="Base ativa" count={activeKb.length}>
+      <KnowledgeSection icon={<Database size={11} />} title="Golden Dataset ativo" count={activeKb.length}>
         {activeKb.map((e) => <KbCard key={scopedKey("active-kb", kbEntryIdentity(e))} entry={e} active={isActiveKb(e)} onSelect={selectKb} />)}
       </KnowledgeSection>
 

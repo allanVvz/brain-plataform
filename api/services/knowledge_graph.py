@@ -29,7 +29,7 @@ logger = logging.getLogger("knowledge_graph")
 # The graph layer must not ship client/product-specific canonical data.
 # Product, campaign, brand and entity nodes are inferred from the current
 # knowledge item metadata/frontmatter and from nodes that already exist.
-_TOPIC_NODE_TYPES = {"product", "campaign", "brand", "entity", "persona", "audience"}
+_TOPIC_NODE_TYPES = {"product", "offer", "campaign", "brand", "entity", "persona", "audience"}
 
 # Map content_type → node_type for items mirrored into the graph.
 _CONTENT_TYPE_TO_NODE: dict[str, str] = {
@@ -42,6 +42,7 @@ _CONTENT_TYPE_TO_NODE: dict[str, str] = {
     "tone":     "tone",
     "audience": "audience",
     "entity":   "entity",
+    "offer":    "offer",
     "brand":    "brand",
     "briefing": "briefing",
     "prompt":   "rule",
@@ -54,19 +55,31 @@ _KNOWN_ROLES = {"sdr", "closer", "followup", "maker", "classifier"}
 _VALIDATED_ITEM_STATUSES = {"approved", "embedded", "ativo", "active", "validated"}
 _PENDING_ITEM_STATUSES = {"pending", "needs_persona", "needs_category", "draft"}
 
+# Hierarchy levels for graph layout. Mirrors the operator-facing tree:
+#   Persona (0)
+#     ├── Briefing / Brand / Campaign (10 — top of any capture)
+#     │       └── Audience (20)
+#     │             └── Product / Entity (30)
+#     │                   ├── Copy / FAQ / Asset (40)
+#     │                   ├── Tone / Rule (40 — sibling concerns)
+#     │                   └── Embedded RAG (50, only after approval)
+# Importance scales independently of level so primary types (briefing,
+# product) rank above utility nodes (tag, mention).
 _NODE_HIERARCHY_DEFAULTS: dict[str, tuple[int, float]] = {
     "persona": (0, 1.00),
-    "entity": (10, 0.95),
-    "brand": (20, 0.90),
-    "campaign": (30, 0.80),
-    "product": (40, 0.85),
-    "briefing": (50, 0.75),
-    "audience": (55, 0.70),
-    "copy": (58, 0.84),
-    "tone": (62, 0.70),
-    "rule": (66, 0.80),
-    "faq": (74, 0.64),
-    "asset": (80, 0.55),
+    "briefing": (10, 0.85),
+    "brand": (10, 0.90),
+    "campaign": (10, 0.80),
+    "audience": (20, 0.75),
+    "entity": (30, 0.70),
+    "product": (30, 0.85),
+    "offer": (35, 0.78),
+    "tone": (40, 0.70),
+    "rule": (40, 0.80),
+    "copy": (40, 0.65),
+    "faq": (40, 0.45),
+    "asset": (40, 0.55),
+    "embedded": (50, 0.95),
     "tag": (90, 0.30),
     "mention": (92, 0.25),
     "knowledge_item": (95, 0.40),
@@ -78,12 +91,75 @@ _MAIN_TREE_RELATIONS = {
     "contains",
     "part_of_campaign",
     "about_product",
+    "offers_product",
     "briefed_by",
     "answers_question",
     "supports_copy",
     "uses_asset",
     "manual",
 }
+
+_TRACEABILITY_KEYS = ("session_id", "source_ref", "created_via", "tree_mode", "branch_policy")
+
+
+_SEMANTIC_EDGE_BY_TYPES: dict[tuple[str, str], tuple[str, str]] = {
+    ("persona", "briefing"): ("contains_briefing", "Persona contem briefing"),
+    ("briefing", "audience"): ("defines_audience", "Briefing define publico"),
+    ("audience", "product"): ("offers_product", "Publico recebe oferta de produto"),
+    ("product", "offer"): ("defines_offer", "Produto define oferta"),
+    ("product", "faq"): ("answers_question", "Produto responde pergunta"),
+    ("offer", "copy"): ("supports_copy", "Oferta sustenta copy"),
+    ("offer", "faq"): ("answers_question", "Oferta responde pergunta"),
+    ("product", "copy"): ("supports_copy", "Produto sustenta copy"),
+    ("copy", "faq"): ("answers_question", "Copy responde pergunta"),
+    ("rule", "faq"): ("answers_question", "Regra orienta FAQ"),
+    ("faq", "embedded"): ("published_to_rag", "FAQ publicado no RAG"),
+}
+
+
+def traceability_metadata(*sources: Optional[dict]) -> dict:
+    """Copy flow lineage into graph JSON metadata without changing topology."""
+    out: dict = {}
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        nested = source.get("metadata")
+        if isinstance(nested, dict):
+            for key in _TRACEABILITY_KEYS:
+                if nested.get(key) is not None and out.get(key) is None:
+                    out[key] = nested.get(key)
+        for key in _TRACEABILITY_KEYS:
+            if source.get(key) is not None and out.get(key) is None:
+                out[key] = source.get(key)
+    if out:
+        out.setdefault("tree_mode", "pyramidal")
+        out.setdefault("branch_policy", "top_down_pyramidal")
+    return out
+
+
+def semantic_edge_metadata(
+    source_node: Optional[dict],
+    target_node: Optional[dict],
+    relation_type: str,
+    metadata: Optional[dict] = None,
+) -> dict:
+    """Add semantic labels as metadata while preserving relation_type."""
+    merged = dict(metadata or {})
+    source_type = ((source_node or {}).get("node_type") or "").lower()
+    target_type = ((target_node or {}).get("node_type") or "").lower()
+    semantic = _SEMANTIC_EDGE_BY_TYPES.get((source_type, target_type))
+    if semantic:
+        merged.setdefault("semantic_relation", semantic[0])
+        merged.setdefault("semantic_label", semantic[1])
+    elif relation_type:
+        merged.setdefault("semantic_relation", relation_type)
+    if merged.get("primary_tree") is True:
+        merged.setdefault("tree_role", "primary_branch")
+    merged.update(traceability_metadata((source_node or {}).get("metadata") or {}, (target_node or {}).get("metadata") or {}))
+    if merged.get("session_id"):
+        merged.setdefault("tree_mode", "pyramidal")
+        merged.setdefault("branch_policy", "top_down_pyramidal")
+    return merged
 
 
 # Default relation_type used when a parent_slug is provided but no explicit
@@ -99,16 +175,31 @@ _DEFAULT_PARENT_RELATION: dict[tuple[str, str], str] = {
     ("briefing", "product"): "contains",
     ("briefing", "copy"): "contains",
     ("briefing", "faq"): "contains",
+    ("briefing", "entity"): "contains",
     ("campaign", "audience"): "contains",
     ("campaign", "product"): "contains",
     ("campaign", "copy"): "contains",
     ("campaign", "faq"): "contains",
+    ("campaign", "briefing"): "contains",
+    ("campaign", "entity"): "contains",
     ("campaign", "asset"): "uses_asset",
-    ("audience", "product"): "about_product",
+    ("audience", "product"): "offers_product",
+    ("audience", "briefing"): "contains",
     ("audience", "copy"): "supports_copy",
     ("audience", "faq"): "answers_question",
+    ("audience", "entity"): "contains",
+    ("entity", "product"): "contains",
+    ("entity", "briefing"): "contains",
+    ("product", "offer"): "contains",
+    ("offer", "copy"): "supports_copy",
+    ("offer", "faq"): "answers_question",
+    ("offer", "asset"): "uses_asset",
     ("product", "copy"): "supports_copy",
     ("product", "faq"): "answers_question",
+    ("copy", "faq"): "answers_question",
+    ("rule", "faq"): "answers_question",
+    ("product", "briefing"): "contains",
+    ("product", "entity"): "contains",
     ("product", "asset"): "uses_asset",
 }
 
@@ -202,6 +293,16 @@ def _tipo_to_node_type(tipo: str) -> str:
     return {
         "produto": "product",
         "product": "product",
+        "oferta": "offer",
+        "ofertas": "offer",
+        "offer": "offer",
+        "offers": "offer",
+        "opcao": "offer",
+        "opção": "offer",
+        "variacao": "offer",
+        "variação": "offer",
+        "product_variant": "offer",
+        "purchase_option": "offer",
         "faq": "faq",
         "copy": "copy",
         "briefing": "briefing",
@@ -296,6 +397,11 @@ def _structured_metadata(fm: dict) -> dict:
         "campaigns",
         "product",
         "products",
+        "session_id",
+        "source_ref",
+        "created_via",
+        "tree_mode",
+        "branch_policy",
     ):
         if key in fm and fm.get(key) is not None:
             out[key] = fm.get(key)
@@ -363,15 +469,25 @@ def ensure_main_tree_connection(
     """
     if not node or not node.get("id") or not persona_id:
         return None
+    if (node.get("node_type") or "").lower() in {"persona", "embedded", "gallery", "tag", "mention"}:
+        return None
     target_id = node["id"]
-    source_id = _normalize_uuid(parent_node_id)
+    meta = node.get("metadata") or {}
+    source_id = _normalize_uuid(parent_node_id or meta.get("resolved_parent_node_id"))
     rel = relation_type or "manual"
+    source_node: Optional[dict] = None
     if not source_id:
         persona_node = _ensure_persona_root(persona_id)
         if not persona_node:
             return None
         source_id = persona_node["id"]
+        source_node = persona_node
         rel = "belongs_to_persona"
+    elif source_id:
+        try:
+            source_node = supabase_client.get_knowledge_node(source_id)
+        except Exception:
+            source_node = None
     if source_id == target_id:
         return None
     return supabase_client.upsert_knowledge_edge(
@@ -380,7 +496,12 @@ def ensure_main_tree_connection(
         rel,
         persona_id=persona_id,
         weight=1,
-        metadata={"primary_tree": True, "created_from": "main_tree_guard"},
+        metadata=semantic_edge_metadata(
+            source_node,
+            node,
+            rel,
+            {"primary_tree": True, "created_from": "main_tree_guard"},
+        ),
     )
 
 
@@ -403,19 +524,25 @@ def repair_primary_tree_connections(
             return {"checked": 0, "repaired": 0, "fallback_nodes": []}
         query = query.in_("id", ids)
     nodes = query.limit(5000).execute().data or []
-    nodes = [n for n in nodes if n.get("node_type") != "persona"]
+    nodes = [
+        n for n in nodes
+        if n.get("node_type") not in {"persona", "embedded", "gallery", "tag", "mention"}
+    ]
     if not nodes:
         return {"checked": 0, "repaired": 0, "fallback_nodes": []}
 
     ids = [n["id"] for n in nodes if n.get("id")]
-    source_edges = client.table("knowledge_edges").select("source_node_id,target_node_id,relation_type").in_("source_node_id", ids).limit(5000).execute().data or []
-    target_edges = client.table("knowledge_edges").select("source_node_id,target_node_id,relation_type").in_("target_node_id", ids).limit(5000).execute().data or []
+    source_edges = client.table("knowledge_edges").select("source_node_id,target_node_id,relation_type,metadata").in_("source_node_id", ids).limit(5000).execute().data or []
+    target_edges = client.table("knowledge_edges").select("source_node_id,target_node_id,relation_type,metadata").in_("target_node_id", ids).limit(5000).execute().data or []
     connected: set[str] = set()
     for edge in [*source_edges, *target_edges]:
+        meta = edge.get("metadata") or {}
+        if meta.get("active") is False:
+            continue
+        if meta.get("primary_tree") is not True:
+            continue
         if (edge.get("relation_type") or "") not in _MAIN_TREE_RELATIONS:
             continue
-        if edge.get("source_node_id") in ids:
-            connected.add(edge["source_node_id"])
         if edge.get("target_node_id") in ids:
             connected.add(edge["target_node_id"])
 
@@ -445,7 +572,13 @@ def _default_plan_relation(parent_type: Optional[str], child_type: Optional[str]
     child = (child_type or "").strip().lower()
     parent = (parent_type or "").strip().lower()
     if parent == "copy" and child == "faq":
+        return "answers_question"
+    if parent == "persona":
         return "contains"
+    if child == "entity" or parent == "entity":
+        return "contains"
+    if parent == "audience" and child == "product":
+        return "offers_product"
     if child == "faq":
         return "answers_question"
     if child == "copy":
@@ -464,17 +597,19 @@ def _default_plan_relation(parent_type: Optional[str], child_type: Optional[str]
 def _preferred_parent_types(child_type: Optional[str]) -> tuple[str, ...]:
     child = (child_type or "").strip().lower()
     if child == "faq":
-        return ("copy", "product", "campaign", "brand", "audience", "briefing")
+        return ("copy", "offer", "product")
     if child == "copy":
-        return ("product", "campaign", "brand", "audience", "briefing")
+        return ("product", "campaign")
     if child == "briefing":
-        return ("product", "campaign", "brand", "audience")
+        return ("product", "audience", "campaign", "brand")
     if child == "product":
-        return ("campaign", "brand", "entity")
+        return ("audience", "entity", "campaign", "briefing", "brand")
+    if child == "entity":
+        return ("product", "audience", "campaign", "briefing", "brand")
     if child in {"rule", "tone", "asset"}:
         return ("product", "campaign", "brand", "audience", "briefing")
     if child == "audience":
-        return ("campaign", "brand", "entity")
+        return ("campaign", "briefing", "brand", "entity")
     return ("product", "campaign", "brand", "audience", "briefing")
 
 
@@ -487,6 +622,13 @@ def _resolve_plan_node(
     normalized = _slugify(str(slug or ""))
     if not normalized:
         return None
+    if persona_id:
+        try:
+            persona = supabase_client.get_persona_by_id(persona_id) or {}
+        except Exception:
+            persona = {}
+        if normalized and normalized == _slugify(str(persona.get("slug") or persona.get("name") or "")):
+            normalized = "self"
     if normalized in {"self", "persona", "persona-root"}:
         return _ensure_persona_root(persona_id)
     node = nodes_by_slug.get(normalized)
@@ -496,6 +638,40 @@ def _resolve_plan_node(
     if node:
         nodes_by_slug[normalized] = node
     return node
+
+
+def _candidate_parent_slugs_from_entry(
+    *,
+    entry: dict,
+    item: dict,
+    node: dict,
+) -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+    metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+    tags = entry.get("tags") or item.get("tags") or []
+    if node.get("node_type") == "faq":
+        for raw_tag in tags:
+            tag_slug = _slugify(str(raw_tag or ""))
+            if tag_slug:
+                candidates.append(("product", tag_slug))
+    topic_relations = _topic_relations_for_item(
+        {
+            "title": entry.get("title") or item.get("title"),
+            "content_type": entry.get("content_type") or item.get("content_type"),
+            "tags": tags,
+        },
+        metadata or {},
+        node.get("node_type") or "",
+    )
+    candidates.extend(topic_relations)
+    seen: set[tuple[str, str]] = set()
+    deduped: list[tuple[str, str]] = []
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
 
 
 def apply_plan_hierarchy(
@@ -522,6 +698,8 @@ def apply_plan_hierarchy(
             or supabase_client.get_knowledge_node((item.get("metadata") or {}).get("knowledge_node_id"))
         )
         if not node or not node.get("id"):
+            continue
+        if (node.get("node_type") or "").lower() in {"tag", "mention", "embedded", "gallery"}:
             continue
         entry = plan_entries[index] if index < len(plan_entries) else {}
         entry_slug = _slugify(
@@ -570,41 +748,70 @@ def apply_plan_hierarchy(
             or None
         )
         parent_node = _resolve_plan_node(slug=parent_slug, persona_id=persona_id, nodes_by_slug=nodes_by_slug)
+        resolution_mode = "explicit_plan" if parent_slug else "deterministic_fallback"
+        quarantine_reason = None
+        if parent_slug and not parent_node:
+            resolution_mode = "quarantined"
+            quarantine_reason = "missing_explicit_parent"
         if not parent_node:
-            topic_relations = _topic_relations_for_item(
-                {
-                    "title": entry.get("title") or (report["item"] or {}).get("title"),
-                    "content_type": entry.get("content_type") or (report["item"] or {}).get("content_type"),
-                    "tags": entry.get("tags") or (report["item"] or {}).get("tags") or [],
-                },
-                metadata or {},
-                node.get("node_type") or "",
+            candidate_pairs = _candidate_parent_slugs_from_entry(
+                entry=entry,
+                item=report["item"] or {},
+                node=node,
             )
             for preferred_type in _preferred_parent_types(node.get("node_type")):
-                candidate = next((slug for ntype, slug in topic_relations if ntype == preferred_type), None)
-                if not candidate:
+                candidate_slugs = [
+                    slug for ntype, slug in candidate_pairs
+                    if ntype == preferred_type and slug
+                ]
+                candidate_slugs = [slug for slug in dict.fromkeys(candidate_slugs) if slug != child_slug]
+                if len(candidate_slugs) > 1:
+                    resolution_mode = "quarantined"
+                    quarantine_reason = f"ambiguous_{preferred_type}_parent"
+                    break
+                if not candidate_slugs:
                     continue
+                candidate = candidate_slugs[0]
                 parent_node = _resolve_plan_node(slug=candidate, persona_id=persona_id, nodes_by_slug=nodes_by_slug)
                 if parent_node and parent_node.get("id") != node.get("id"):
                     parent_slug = candidate
+                    resolution_mode = "deterministic_fallback"
                     break
+            if resolution_mode == "quarantined":
+                parent_node = None
         relation_type = (
             (explicit or {}).get("relation_type")
             or _default_plan_relation((parent_node or {}).get("node_type"), node.get("node_type"))
         )
-        edge = ensure_main_tree_connection(
-            node,
-            persona_id=persona_id,
-            parent_node_id=(parent_node or {}).get("id"),
-            relation_type=relation_type,
-        )
+        edge = None
+        if resolution_mode != "quarantined":
+            edge = ensure_main_tree_connection(
+                node,
+                persona_id=persona_id,
+                parent_node_id=(parent_node or {}).get("id"),
+                relation_type=relation_type,
+            )
+        node_meta = {
+            **(node.get("metadata") or {}),
+            "resolution_mode": resolution_mode,
+            "quarantine_state": "structural" if resolution_mode == "quarantined" else None,
+            "quarantine_reason": quarantine_reason,
+            "resolved_parent_slug": parent_slug if resolution_mode != "quarantined" else None,
+            "resolved_parent_node_id": (parent_node or {}).get("id") if resolution_mode != "quarantined" else None,
+        }
+        node_meta = {k: v for k, v in node_meta.items() if v is not None}
+        supabase_client.update_knowledge_node(node.get("id"), {"metadata": node_meta})
         report["main_tree_edge"] = edge
         report["parent_node_id"] = (parent_node or {}).get("id")
         report["parent_slug"] = parent_slug or ("self" if not parent_node else None)
+        report["resolution_mode"] = resolution_mode
+        report["quarantine_reason"] = quarantine_reason
         if parent_slug and not parent_node:
             missing_links.append({
                 "target_slug": child_slug,
                 "missing_parent_slug": parent_slug,
+                "resolution_mode": resolution_mode,
+                "quarantine_reason": quarantine_reason,
             })
         elif edge and edge.get("id") and parent_node:
             resolved_links += 1
@@ -618,6 +825,8 @@ def apply_plan_hierarchy(
                 "parent_slug": report.get("parent_slug"),
                 "parent_node_id": report.get("parent_node_id"),
                 "main_tree_edge_id": ((report.get("main_tree_edge") or {}).get("id")),
+                "resolution_mode": report.get("resolution_mode"),
+                "quarantine_reason": report.get("quarantine_reason"),
             }
             for report in items_report
         ],
@@ -844,6 +1053,10 @@ def _explicit_relations_from_frontmatter(fm: dict) -> list[tuple[str, str]]:
         "campaigns": "campaign",
         "product": "product",
         "products": "product",
+        "offer": "offer",
+        "offers": "offer",
+        "copy": "copy",
+        "copies": "copy",
         "brand": "brand",
         "brands": "brand",
         "entity": "entity",
@@ -864,7 +1077,7 @@ def _explicit_relations_from_frontmatter(fm: dict) -> list[tuple[str, str]]:
             continue
         ntype, slug = tag.split(":", 1)
         ntype = ntype.strip().lower()
-        if ntype in _TOPIC_NODE_TYPES and slug.strip():
+        if ntype in (_TOPIC_NODE_TYPES | {"copy"}) and slug.strip():
             rel.append((ntype, _slugify(slug)))
 
     dedup: list[tuple[str, str]] = []
@@ -889,7 +1102,7 @@ def _topic_relations_for_item(item: dict, fm: dict, node_type: str) -> list[tupl
         if ":" not in tag:
             continue
         ntype, slug = tag.split(":", 1)
-        if ntype in _TOPIC_NODE_TYPES and slug:
+        if ntype in (_TOPIC_NODE_TYPES | {"copy"}) and slug:
             rel.append((ntype, _slugify(slug)))
 
     dedup: list[tuple[str, str]] = []
@@ -1065,7 +1278,8 @@ def _bootstrap_derived_subnodes(
 
     # General files related to a topic still get a small mention node. This
     # makes broad brand/tone/audience files visible without treating them as FAQ.
-    if content_type not in {"faq", "product", "asset", "copy", "campaign", "briefing"}:
+    canonical_types = {"faq", "product", "asset", "copy", "campaign", "briefing", "audience", "brand", "rule", "tone"}
+    if content_type not in canonical_types and primary_topic.get("id") != mirror.get("id"):
         mention = supabase_client.upsert_knowledge_node({
             "persona_id": persona_id,
             "source_table": source_table,
@@ -1076,7 +1290,7 @@ def _bootstrap_derived_subnodes(
             "summary": (content or mirror.get("summary") or "")[:300],
             "tags": sorted({"mention", *topic_tags}),
             "status": "validated" if validated else "pending",
-            "metadata": {**base_meta, "derived_from": "topic_mention"},
+            "metadata": {**base_meta, "derived_from": "topic_mention", "visual_hidden": True},
             **_hierarchy_fields("mention", confidence=0.55),
         })
         if mention:
@@ -1135,6 +1349,7 @@ def bootstrap_from_item(
             "source_status": source_status,
         }
         meta.update(_structured_metadata(fm))
+        meta.update(traceability_metadata(item, fm))
         meta = {k: v for k, v in meta.items() if v is not None}
 
         mirror = supabase_client.upsert_knowledge_node({
@@ -1178,7 +1393,8 @@ def bootstrap_from_item(
 
         used_explicit_parent = bool(parent_node and parent_node.get("id"))
 
-        # 2b) Persona link. Always created (kept for navigation/scoping).
+        # 2b) Persona fallback. persona_id is the membership source of truth;
+        # a visual edge is only needed for the first real node below persona.
         # primary_tree=true is set ONLY when there is no explicit hierarchical
         # parent above — otherwise the depth walker would prefer the persona
         # over the real parent and the tree would look flat again.
@@ -1186,17 +1402,20 @@ def bootstrap_from_item(
             persona_node = _ensure_persona_root(persona_id)
             if persona_node:
                 supabase_client.upsert_knowledge_edge(
-                    mirror["id"], persona_node["id"], "belongs_to_persona", persona_id=persona_id,
-                )
-                supabase_client.upsert_knowledge_edge(
                     persona_node["id"],
                     mirror["id"],
                     "belongs_to_persona",
                     persona_id=persona_id,
-                    metadata={
-                        "primary_tree": not used_explicit_parent,
-                        "created_from": "bootstrap_from_item",
-                    },
+                    metadata=semantic_edge_metadata(
+                        persona_node,
+                        mirror,
+                        "belongs_to_persona",
+                        {
+                            "primary_tree": not used_explicit_parent,
+                            "visual_hidden": used_explicit_parent,
+                            "created_from": "bootstrap_from_item",
+                        },
+                    ),
                 )
 
         # 2c) Hierarchical parent edge (parent → mirror). Marked as the
@@ -1217,12 +1436,17 @@ def bootstrap_from_item(
                 relation,
                 persona_id=persona_id,
                 weight=1.0,
-                metadata={
-                    "primary_tree": True,
-                    "created_from": "bootstrap_parent_slug",
-                    "parent_slug": parent_node.get("slug"),
-                    "parent_type": parent_type,
-                },
+                metadata=semantic_edge_metadata(
+                    parent_node,
+                    mirror,
+                    relation,
+                    {
+                        "primary_tree": True,
+                        "created_from": "bootstrap_parent_slug",
+                        "parent_slug": parent_node.get("slug"),
+                        "parent_type": parent_type,
+                    },
+                ),
             )
 
         # 3) Tag nodes + has_tag edges.
@@ -1236,7 +1460,16 @@ def bootstrap_from_item(
             })
             if tnode:
                 supabase_client.upsert_knowledge_edge(
-                    mirror["id"], tnode["id"], "has_tag", persona_id=persona_id,
+                    mirror["id"],
+                    tnode["id"],
+                    "has_tag",
+                    persona_id=persona_id,
+                    metadata={
+                        "graph_layer": "semantic_tags",
+                        "primary_tree": False,
+                        "visual_hidden": True,
+                        "created_from": "bootstrap_tags",
+                    },
                 )
 
         # 4) Explicit topic relations from frontmatter/tags plus the item's own
@@ -1244,11 +1477,8 @@ def bootstrap_from_item(
         related: list[tuple[str, str]] = _topic_relations_for_item(item, fm, node_type)
 
         # 6) For each related (type, slug), upsert node + connect with the right edge.
-        # Relation choice depends on the source item's content_type:
-        #   asset  → product=uses_asset (inverted), campaign=supports_campaign
-        #   faq    → product/campaign = answers_question
-        #   copy   → product/campaign = supports_copy
-        #   other  → product=about_product, campaign=part_of_campaign
+        # FAQ is terminal in commercial branches: topic nodes point into FAQ.
+        # The only valid outgoing FAQ edge is publication to Embedded.
         related_nodes: dict[tuple[str, str], dict] = {}
         for ntype, rslug in related:
             related_title = _relation_title(ntype, rslug, item, fm)
@@ -1287,8 +1517,23 @@ def bootstrap_from_item(
                         target["id"], mirror["id"], "uses_asset", persona_id=persona_id,
                     )
                     continue
-            elif content_type == "faq" and ntype in ("product", "campaign"):
-                relation = "answers_question"
+            elif content_type == "faq" and ntype in {"product", "offer", "copy", "campaign", "audience", "brand", "entity"}:
+                supabase_client.upsert_knowledge_edge(
+                    target["id"],
+                    mirror["id"],
+                    "answers_question",
+                    persona_id=persona_id,
+                    metadata=semantic_edge_metadata(
+                        target,
+                        mirror,
+                        "answers_question",
+                        {
+                            "primary_tree": False,
+                            "created_from": "bootstrap_faq_reference",
+                        },
+                    ),
+                )
+                continue
             elif content_type == "copy" and ntype in ("product", "campaign"):
                 relation = "supports_copy"
 
@@ -1933,3 +2178,9 @@ def _detect_intent(text: str, by_type: dict, assets: list[dict]) -> str:
     if by_type.get("faq") or by_type.get("copy") or by_type.get("kb_entry"):
         return "kb_lookup"
     return "fallback_text_search"
+    if parent == "persona":
+        return "contains"
+    if parent == "briefing" and child == "audience":
+        return "contains"
+    if parent == "audience" and child == "product":
+        return "offers_product"

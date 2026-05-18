@@ -65,43 +65,73 @@ def _safe_user(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _execute_auth_query(query, *, operation: str):
+    try:
+        return supabase_client._execute_with_retry(query)
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("auth_service", f"{operation} failed: {exc}", exc)
+        except Exception:
+            pass
+        raise HTTPException(status_code=503, detail="Auth backend unavailable.")
+
+
 def get_user_by_identifier(identifier: str) -> Optional[dict[str, Any]]:
     ident = (identifier or "").strip().lower()
     if not ident:
         return None
     client = supabase_client.get_client()
     fields = "id,email,username,password_hash,name,role,is_active"
-    result = client.table("app_users").select(fields).eq("email", ident).limit(1).execute()
+    result = _execute_auth_query(
+        client.table("app_users").select(fields).eq("email", ident).limit(1),
+        operation="lookup app_users by email",
+    )
     rows = result.data or []
     if rows:
         return rows[0]
-    result = client.table("app_users").select(fields).eq("username", ident).limit(1).execute()
+    result = _execute_auth_query(
+        client.table("app_users").select(fields).eq("username", ident).limit(1),
+        operation="lookup app_users by username",
+    )
     rows = result.data or []
     return rows[0] if rows else None
 
 
 def get_user_by_id(user_id: str) -> Optional[dict[str, Any]]:
-    result = (
+    result = _execute_auth_query(
         supabase_client.get_client()
         .table("app_users")
         .select("id,email,username,name,role,is_active")
         .eq("id", user_id)
-        .maybe_single()
-        .execute()
+        .maybe_single(),
+        operation="lookup app_users by id",
     )
     return result.data
 
 
 def get_user_access(user_id: str) -> list[dict[str, Any]]:
-    result = (
+    result = _execute_auth_query(
         supabase_client.get_client()
         .table("user_persona_access")
         .select("id,user_id,client_id,persona_id,persona_slug,can_view,can_edit,can_manage")
         .eq("user_id", user_id)
-        .eq("can_view", True)
-        .execute()
+        .eq("can_view", True),
+        operation="lookup user_persona_access",
     )
     return result.data or []
+
+
+def get_auth_personas() -> list[dict[str, Any]]:
+    try:
+        return supabase_client.get_personas() or []
+    except Exception as exc:
+        try:
+            from services import sre_logger
+            sre_logger.error("auth_service", f"lookup personas during login failed: {exc}", exc)
+        except Exception:
+            pass
+        raise HTTPException(status_code=503, detail="Auth persona catalog unavailable.")
 
 
 def get_session_payload(token: str) -> Optional[dict[str, Any]]:
@@ -205,7 +235,7 @@ def filter_personas_for_user(user: dict[str, Any], personas: list[dict[str, Any]
 
 
 def build_session_response(user: dict[str, Any]) -> dict[str, Any]:
-    personas = supabase_client.get_personas() or []
+    personas = get_auth_personas()
     access = [] if is_admin(user) else get_user_access(user["id"])
     visible_personas = filter_personas_for_user(user, personas, access)
     if not is_admin(user) and not visible_personas:

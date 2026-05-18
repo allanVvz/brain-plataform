@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 WA Validator Service — generates test scripts from KB, tracks validation sessions,
 and analyses conversation gaps to feed back into KB Intake.
@@ -27,16 +27,7 @@ _sessions: dict[str, dict] = {}
 _sessions_lock = threading.Lock()
 
 # ── Bot registry ───────────────────────────────────────────────────────────────
-# Static entries are merged with dynamic personas from the DB at runtime.
-_BOT_REGISTRY: list[dict] = [
-    {
-        "id": "sofia-tock-fatal",
-        "bot_name": "Sofia",
-        "label": "Sofia — Tock Fatal",
-        "persona_slug": "tock-fatal",
-        "description": "Agente de vendas principal do Tock Fatal",
-    },
-]
+_BOT_REGISTRY: list[dict] = []
 
 
 def bots() -> list:
@@ -410,7 +401,7 @@ async def run_session_direct(session_id: str) -> dict:
         raise ValueError("Sessão já está em execução")
 
     script = session.get("script", {})
-    persona_slug = session.get("persona_slug", "tock-fatal")
+    persona_slug = session.get("persona_slug", "global")
     steps = script.get("steps", [])
     # Use a stable, readable lead_id for test messages in Supabase
     test_lead_id = f"validator_{session_id[:8]}"

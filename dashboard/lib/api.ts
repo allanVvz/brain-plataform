@@ -55,7 +55,16 @@ async function reqForm<T>(path: string, form: FormData): Promise<T> {
     throw new Error(API_OFFLINE_ERROR);
   }
   if (res.status === 503) throw new Error(API_OFFLINE_ERROR);
-  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail || body);
+    } catch {
+      detail = await res.text().catch(() => "");
+    }
+    throw new Error(`${res.status} ${path}${detail ? ` - ${detail}` : ""}`);
+  }
   return res.json();
 }
 
@@ -203,7 +212,29 @@ export const api = {
     req<any>(`/personas/${slug}/routing/test`,{ method: "POST", body: "{}" }),
 
   // Integrations & Logs
-  integrations: (personaId?: string) => req<any[]>(`/integrations${personaId ? `?persona_id=${personaId}` : ""}`),
+  integrations: () => req<any[]>("/integrations/user"),
+  integrationCatalog: () => req<any[]>("/integrations/catalog"),
+  updateUserIntegration: (
+    service: string,
+    body: {
+      enabled: boolean;
+      service_account_json?: string | Record<string, any>;
+      spreadsheet_id?: string;
+      api_key?: string;
+      base_id?: string;
+    },
+  ) => req<any>(`/integrations/user/${encodeURIComponent(service)}`, { method: "PUT", body: JSON.stringify(body) }),
+  validateUserIntegration: (
+    service: string,
+    body?: {
+      service_account_json?: string | Record<string, any>;
+      spreadsheet_id?: string;
+      api_key?: string;
+      base_id?: string;
+    },
+  ) => req<any>(`/integrations/user/${encodeURIComponent(service)}/validate`, { method: "POST", body: JSON.stringify(body || {}) }),
+  deleteUserIntegrationCredentials: (service: string) =>
+    req<any>(`/integrations/user/${encodeURIComponent(service)}/credentials`, { method: "DELETE" }),
   n8nLogs: (limit = 100, status?: string) => req<any[]>(`/logs/n8n?limit=${limit}${status ? `&status=${status}` : ""}`),
   agentLogs: (leadId?: string, limit = 50) => req<any[]>(`/logs/agents?limit=${limit}${leadId ? `&lead_id=${leadId}` : ""}`),
 
@@ -230,14 +261,118 @@ export const api = {
   },
   galleryAssets: (personaId?: string) =>
     req<any[]>(`/knowledge/gallery-assets${personaId ? `?persona_id=${personaId}` : ""}`),
+  productCollections: (opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any[]>(`/knowledge/product-collections${qs ? `?${qs}` : ""}`);
+  },
+  productCategories: (opts?: { persona_id?: string; persona_slug?: string; collection_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    if (opts?.collection_slug) params.set("collection_slug", opts.collection_slug);
+    const qs = params.toString();
+    return req<any[]>(`/knowledge/categories${qs ? `?${qs}` : ""}`);
+  },
+  products: (opts?: { persona_id?: string; persona_slug?: string; collection_slug?: string; category_slug?: string; status?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    if (opts?.collection_slug) params.set("collection_slug", opts.collection_slug);
+    if (opts?.category_slug) params.set("category_slug", opts.category_slug);
+    if (opts?.status) params.set("status", opts.status);
+    const qs = params.toString();
+    return req<any[]>(`/knowledge/products${qs ? `?${qs}` : ""}`);
+  },
+  menuPayload: (personaSlug: string, opts?: { collection_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.collection_slug) params.set("collection_slug", opts.collection_slug);
+    const qs = params.toString();
+    return req<any>(`/api/menu/${encodeURIComponent(personaSlug)}${qs ? `?${qs}` : ""}`);
+  },
+  createProduct: (body: any) =>
+    req<any>("/knowledge/products", { method: "POST", body: JSON.stringify(body) }),
+  product: (slug: string, opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any>(`/knowledge/products/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`);
+  },
+  updateProduct: (slug: string, body: any, opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any>(`/knowledge/products/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`, { method: "PATCH", body: JSON.stringify(body) });
+  },
+  approveProduct: (slug: string, opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any>(`/knowledge/products/${encodeURIComponent(slug)}/approve${qs ? `?${qs}` : ""}`, { method: "POST", body: "{}" });
+  },
+  linkProductAsset: (slug: string, body: any, opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any>(`/knowledge/products/${encodeURIComponent(slug)}/link-asset${qs ? `?${qs}` : ""}`, { method: "POST", body: JSON.stringify(body) });
+  },
+  sofiaSuggestProductImages: (slug: string, body: any, opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any>(`/knowledge/products/${encodeURIComponent(slug)}/sofia-suggest-images${qs ? `?${qs}` : ""}`, { method: "POST", body: JSON.stringify(body || {}) });
+  },
+
+  // Assets (card upload pipeline)
+  assetUpload: (
+    file: File,
+    body: { persona_id: string; branch_hint: string; asset_function?: string; persona_slug?: string },
+  ) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("persona_id", body.persona_id);
+    form.append("branch_hint", body.branch_hint);
+    if (body.asset_function) form.append("asset_function", body.asset_function);
+    if (body.persona_slug) form.append("persona_slug", body.persona_slug);
+    return reqForm<any>("/assets/upload", form);
+  },
+  assetList: (opts?: { persona_id?: string; upload_context?: string; status?: string; limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.upload_context) params.set("upload_context", opts.upload_context);
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.offset) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    return req<any[]>(`/assets${qs ? `?${qs}` : ""}`);
+  },
+  assetGet: (id: string) => req<any>(`/assets/${encodeURIComponent(id)}`),
+  assetConnect: (id: string, body: { parent_node_id: string; relation_type?: string }) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/connect`, { method: "POST", body: JSON.stringify(body) }),
+  assetEnsureGallery: (id: string) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/ensure-gallery`, { method: "POST", body: "{}" }),
   knowledgeCounts: (personaId?: string) =>
     req<any>(`/knowledge/queue/counts${personaId ? `?persona_id=${personaId}` : ""}`),
   updateQueueItem: (id: string, data: Record<string, any>) =>
     req<any>(`/knowledge/queue/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  approveItem: (id: string, promoteToKb = false) =>
-    req<any>(`/knowledge/queue/${id}/approve`, { method: "POST", body: JSON.stringify({ promote_to_kb: promoteToKb }) }),
+  approveItem: async (id: string, promoteToKb = false) => {
+    const result = await req<any>(`/knowledge/queue/${id}/approve`, { method: "POST", body: JSON.stringify({ promote_to_kb: promoteToKb }) });
+    if (result?.success === false) {
+      throw new Error(result?.error || `Approval failed at ${result?.stage || "unknown_stage"}`);
+    }
+    return result;
+  },
   rejectItem: (id: string, reason = "") =>
     req<any>(`/knowledge/queue/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
+  deleteKnowledgeItem: (id: string) =>
+    req<any>(`/knowledge/queue/${id}`, { method: "DELETE" }),
   promoteToKb: (id: string) => req<any>(`/knowledge/queue/${id}/to-kb`, { method: "POST" }),
 
   // Knowledge — Upload
@@ -283,8 +418,11 @@ export const api = {
 
   // KB Intake (conversational classifier)
   kbIntakeModels: () => req<any[]>("/kb-intake/models"),
-  kbIntakeStart: (model: string, initial_context = "") =>
-    req<any>("/kb-intake/start", { method: "POST", body: JSON.stringify({ model, initial_context }) }),
+  kbIntakeStart: (model: string, initial_context = "", state?: Record<string, any>) =>
+    req<any>("/kb-intake/start", { method: "POST", body: JSON.stringify({ model, initial_context, ...(state || {}) }) }),
+  kbIntakeSession: (session_id: string) => req<any>(`/kb-intake/session/${encodeURIComponent(session_id)}`),
+  kbIntakeUpdatePlan: (session_id: string, body: { knowledge_plan: any; status?: string; last_change?: string }) =>
+    req<any>(`/kb-intake/session/${encodeURIComponent(session_id)}/plan`, { method: "PATCH", body: JSON.stringify(body) }),
   kbIntakeMessage: (session_id: string, message: string, file?: File) => {
     if (file) {
       const form = new FormData();
@@ -295,8 +433,8 @@ export const api = {
     }
     return req<any>("/kb-intake/message", { method: "POST", body: JSON.stringify({ session_id, message }) });
   },
-  kbIntakeSave: (session_id: string, content = "") =>
-    req<any>("/kb-intake/save", { method: "POST", body: JSON.stringify({ session_id, content }) }),
+  kbIntakeSave: (session_id: string, content = "", plan_override?: any) =>
+    req<any>("/kb-intake/save", { method: "POST", body: JSON.stringify({ session_id, content, plan_override }) }),
   kbIntakeCrawlPreview: (url: string, session_id?: string) =>
     req<any>("/kb-intake/crawl-preview", { method: "POST", body: JSON.stringify({ url, session_id }) }),
 

@@ -2,6 +2,12 @@
 
 A documentacao completa do fluxo, hierarquia e grafo de conhecimento esta em [`docs/knowledge-flow.md`](docs/knowledge-flow.md).
 
+## Start Local
+
+- Backend API: `cd api && uvicorn main:app --reload`
+- Workers: `cd api && python -m workers.runner --all`
+- Worker unico: `cd api && python -m workers.runner --worker health_check`
+
 ---
 
 ## Regra de negocio: Cliente = Persona
