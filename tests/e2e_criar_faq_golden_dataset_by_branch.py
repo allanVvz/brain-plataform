@@ -34,7 +34,7 @@ def entry(content_type: str, slug: str, title: str, parent_slug: str, content: s
 def make_session(block_counts: dict[str, int]) -> dict:
     session = svc.create_session(
         model="gpt-4o-mini",
-        initial_context="Criar FAQ Golden Dataset por galho terminal, sem explodir perguntas em cards.",
+        initial_context="Criar FAQ de atendimento agrupado, sem explodir perguntas em cards.",
         initial_state={
             "mode": "criar",
             "persona_slug": "persona-generica",
@@ -78,6 +78,9 @@ def question_titles(markdown: str) -> list[str]:
 def assert_real_faq_body(markdown: str) -> None:
     expect("Use o contexto deste galho para responder" not in markdown, "FAQ answers are final text, not generation instructions")
     expect("(9)" not in markdown and "(10)" not in markdown, "FAQ questions do not repeat with numeric suffixes")
+    lowered = markdown.lower()
+    for forbidden in ["arvore", "árvore", "grafo", "galho", "node", "branch", "regra", "estrutura", "conhecimento conectado"]:
+        expect(forbidden not in lowered, f"FAQ does not expose internal term {forbidden}")
     titles = question_titles(markdown)
     expect(len(titles) == len(set(titles)), "FAQ questions are unique")
 
@@ -91,8 +94,8 @@ def test_simple_tree() -> None:
     ], {"briefing": 1, "audience": 1, "product": 1, "copy": 1, "faq": 1})
     faqs = faq_entries(plan)
     expect(len(faqs) == 1, "simple tree creates one FAQ document", len(faqs))
-    expect(faqs[0]["metadata"]["question_count"] == 10, "simple tree has ten questions", faqs[0]["metadata"])
-    expect(question_headings(faqs[0]["content"]) == 10, "simple tree markdown has ten question headings")
+    expect(faqs[0]["metadata"]["question_count"] == 11, "simple tree has grouped questions", faqs[0]["metadata"])
+    expect(question_headings(faqs[0]["content"]) == 11, "simple tree markdown has grouped question headings")
     assert_real_faq_body(faqs[0]["content"])
 
 
@@ -128,9 +131,9 @@ def test_multiple_branches_do_not_explode() -> None:
     plan = normalize(entries, {"briefing": 1, "audience": 2, "product": 2, "offer": 0, "copy": 1, "faq": 1})
     faqs = faq_entries(plan)
     total_questions = sum(int((faq.get("metadata") or {}).get("question_count") or 0) for faq in faqs)
-    expect(len(faqs) == 4, "four terminal copies create four FAQ documents", len(faqs))
-    expect(total_questions == 48, "questions stay inside FAQ documents", total_questions)
-    expect(all(question_headings(faq["content"]) == 12 for faq in faqs), "each branch document has twelve questions")
+    expect(len(faqs) == 1, "multiple branches create one grouped FAQ document", len(faqs))
+    expect(total_questions == 18, "questions stay inside grouped FAQ document", total_questions)
+    expect(all(question_headings(faq["content"]) == 18 for faq in faqs), "grouped document has capped question set")
     expect(len(faqs) != total_questions, "questions did not become FAQ cards", {"faqs": len(faqs), "questions": total_questions})
 
 

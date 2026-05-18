@@ -104,8 +104,8 @@ def main() -> int:
     expect(counts["rule"] >= 1, "commercial rule is generated")
     expect(all(item.get("content_type") != "rules" for item in entries), "rules alias is normalized to rule")
     assert_chain(entries, "offer", "product")
-    assert_chain(entries, "copy", "offer")
-    assert_chain(entries, "faq", "copy")
+    assert_chain(entries, "copy", "product")
+    assert_chain(entries, "faq", "rule")
 
     by_slug = {str(item.get("slug")): item for item in entries if item.get("slug")}
     for rule in [item for item in entries if item.get("content_type") == "rule"]:
@@ -144,7 +144,7 @@ def main() -> int:
 
     prompt_source = (ROOT / "api" / "services" / "kb_intake_service.py").read_text(encoding="utf-8")
     expect("explorar -> confirmar -> montar normalizedPlan -> validar -> resumir curto" in prompt_source, "Sofia prompt uses explore/confirm/normalize contract")
-    expect("faq_count_policy = per_branch" in prompt_source, "prompt defaults FAQ policy to Golden Dataset per branch")
+    expect("faq_count_policy = grouped" in prompt_source, "prompt defaults FAQ policy to grouped markdown")
 
     print("PASS e2e_criar_visual_branch_integrity")
     return 0

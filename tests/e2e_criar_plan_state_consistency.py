@@ -89,10 +89,10 @@ def main() -> int:
     _assert(plan_state["plan_hash"], "normalized plan has canonical hash")
     _assert(counts == summary_counts, "summary counts match normalized entries")
     _assert(len(entries) == plan_state["summary"]["entry_count"], "entry_count matches normalized entries")
-    _assert(normalized.get("faq_count_policy") == "per_branch", "faq_count_policy defaults to Golden Dataset per branch")
+    _assert(normalized.get("faq_count_policy") == "grouped", "faq_count_policy defaults to grouped FAQ")
     _assert(counts["offer"] >= 6, "price and quantity infer commercial offers")
     _assert(counts["rule"] >= 1, "commercial rules normalize to rule entries")
-    _assert(counts["faq"] == counts["copy"], "one FAQ Golden Dataset is created per terminal copy")
+    _assert(counts["faq"] == 1, "one grouped FAQ is created")
     _assert(not any(entry.get("content_type") == "rules" for entry in entries), "rules alias normalized to rule")
     _assert(not any("-audience-" in str(entry.get("slug") or "") for entry in entries if entry.get("content_type") == "product"), "product slugs do not embed audience")
 
@@ -105,10 +105,9 @@ def main() -> int:
     offer_exists = counts["offer"] > 0
     for copy in [entry for entry in entries if entry["content_type"] == "copy"]:
         parent_type = by_slug.get(_parent(copy), {}).get("content_type")
-        if offer_exists:
-            _assert(parent_type == "offer", "copy stays below offer when offers exist")
+        _assert(parent_type in {"product", "offer", "campaign"}, "copy stays grouped under product context")
     for faq in [entry for entry in entries if entry["content_type"] == "faq"]:
-        _assert(by_slug.get(_parent(faq), {}).get("content_type") == "copy", "FAQ stays below copy")
+        _assert(by_slug.get(_parent(faq), {}).get("content_type") == "rule", "FAQ stays below rule")
 
     update = svc.update_session_plan(session["id"], normalized, status="ready_to_save", last_change="e2e normalized plan")
     _assert(update["plan_hash"] == plan_state["plan_hash"], "PATCH stores the same canonical plan hash")

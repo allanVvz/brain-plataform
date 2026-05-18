@@ -114,9 +114,9 @@ def main() -> int:
     _assert(counts["audience"] == 2, "two audiences remain")
     _assert(counts["product"] == 12, "six products expand across two audiences")
     _assert(counts["offer"] > 0, "offers are inferred from price and quantity")
-    _assert(counts["copy"] >= counts["offer"], "copy exists under offers")
-    _assert(normalized.get("faq_count_policy") == "per_branch", "FAQ policy is Golden Dataset per branch")
-    _assert(counts["faq"] == counts["copy"], "one FAQ Golden Dataset is created per terminal copy")
+    _assert(counts["copy"] == counts["product"], "copy is grouped per audience/product context")
+    _assert(normalized.get("faq_count_policy") == "grouped", "FAQ policy is grouped markdown")
+    _assert(counts["faq"] == 1, "one grouped FAQ is created")
     _assert(counts["rule"] >= 1, "commercial rule is created/normalized")
     _assert(knowledge_graph._CONTENT_TYPE_TO_NODE.get("offer") == "offer", "offer materializes as knowledge node type offer")
 
@@ -126,17 +126,18 @@ def main() -> int:
     for offer in [entry for entry in entries if entry.get("content_type") == "offer"]:
         _assert(by_slug.get(_parent(offer), {}).get("content_type") == "product", "offer is below product")
     for copy in [entry for entry in entries if entry.get("content_type") == "copy"]:
-        _assert(by_slug.get(_parent(copy), {}).get("content_type") == "offer", "copy is below offer")
+        _assert(by_slug.get(_parent(copy), {}).get("content_type") == "product", "copy is below product context")
     for faq in [entry for entry in entries if entry.get("content_type") == "faq"]:
-        _assert(by_slug.get(_parent(faq), {}).get("content_type") == "copy", "FAQ is below copy")
+        _assert(by_slug.get(_parent(faq), {}).get("content_type") == "rule", "FAQ is below rule")
     for rule in [entry for entry in entries if entry.get("content_type") == "rule"]:
         _assert(by_slug.get(_parent(rule), {}).get("content_type") in {"campaign", "briefing", "brand"}, "rule is under governing scope")
 
     extra_copy_plan = {**normalized, "entries": [*entries, _entry("copy", "copy-extra", "Copy extra sem parent")]}
     extra_copy_state = svc.normalize_validate_summarize_plan(extra_copy_plan, session)
-    extra_copy = next(entry for entry in extra_copy_state["normalized_plan"]["entries"] if entry.get("title") == "Copy extra sem parent")
     _assert(extra_copy_state["validation"]["valid"] is True, "extra copy is normalized instead of staying loose")
-    _assert(extra_copy.get("metadata", {}).get("parent_slug"), "extra copy receives a parent")
+    extra_copy = next((entry for entry in extra_copy_state["normalized_plan"]["entries"] if entry.get("title") == "Copy extra sem parent"), None)
+    if extra_copy is not None:
+        _assert(extra_copy.get("metadata", {}).get("parent_slug"), "extra copy receives a parent")
 
     extra_offer_plan = {**normalized, "entries": [*entries, _entry("offer", "offer-extra", "Oferta extra sem parent")]}
     extra_offer_state = svc.normalize_validate_summarize_plan(extra_offer_plan, session)

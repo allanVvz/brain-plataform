@@ -89,14 +89,14 @@ Ambos tem os mesmos valores:
     expect(violations == [], f"normalized plan has no violations: {violations}")
     expect(normalized["tree_mode"] == "pyramidal", "tree_mode remains pyramidal")
     expect(normalized["branch_policy"] == "top_down_pyramidal", "branch_policy remains top_down_pyramidal")
-    expect(normalized["faq_count_policy"] == "per_branch", "faq_count_policy defaults to Golden Dataset per branch")
+    expect(normalized["faq_count_policy"] == "grouped", "faq_count_policy defaults to one grouped FAQ")
     expect(counts["briefing"] == 1, "one briefing")
     expect(counts["campaign"] == 1, "one campaign")
     expect(counts["audience"] == 2, "two audiences")
     expect(counts["product"] == 4, "two base products distributed across two audiences")
-    expect(counts["offer"] == 12, "offers are created for each product/audience quantity branch")
-    expect(counts["copy"] >= 12, "copy exists for every offer")
-    expect(counts["faq"] == counts["copy"], "one FAQ Golden Dataset is created per terminal copy")
+    expect(counts["offer"] == 6, "offers are distributed by audience/product quantity")
+    expect(counts["copy"] == 4, "copy is grouped once per audience/product context")
+    expect(counts["faq"] == 1, "one grouped FAQ markdown is created")
     expect(counts["rule"] >= 1, "commercial rule exists")
     expect(all(entry["content_type"] != "rules" for entry in entries), "rules alias normalized to rule")
     expect(all("audience" not in entry["slug"] for entry in entries if entry["content_type"] == "product"), "product slug does not embed audience")
@@ -111,11 +111,14 @@ Ambos tem os mesmos valores:
 
     for copy in [entry for entry in entries if entry["content_type"] == "copy"]:
         parent = by_slug.get(parent_slug(copy))
-        expect(parent and parent["content_type"] == "offer", f"copy {copy['slug']} is below offer")
+        expect(parent and parent["content_type"] == "product", f"copy {copy['slug']} is grouped below product")
 
     for faq in [entry for entry in entries if entry["content_type"] == "faq"]:
         parent = by_slug.get(parent_slug(faq))
-        expect(parent and parent["content_type"] == "copy", f"faq {faq['slug']} is below copy")
+        expect(parent and parent["content_type"] == "rule", f"faq {faq['slug']} is below rule")
+        lowered = str(faq.get("content") or "").lower()
+        for forbidden in ["arvore", "árvore", "grafo", "galho", "node", "branch", "regra", "estrutura", "conhecimento conectado"]:
+            expect(forbidden not in lowered, f"faq markdown does not expose internal term {forbidden}")
 
     expect(summary["current_block_counts"] == svc.count_blocks_by_type(entries), "summary matches normalized plan counts")
     expect(len(normalized.get("links") or []) > 0, "links are built only after valid normalization")

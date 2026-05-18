@@ -55,14 +55,14 @@ def test_plan_without_brand_parent_slugs() -> None:
     copy_entries = [entry for entry in normalized["entries"] if entry.get("content_type") == "copy"]
     _assert(bool(copy_entries), "PLAN contains copy entries after offer normalization")
     _assert(
-        all((entry.get("metadata") or {}).get("parent_slug") == offer_slug for entry in copy_entries),
-        "copy stays under offer when commercial offer exists",
+        all((entry.get("metadata") or {}).get("parent_slug") == "kit-roupas-tock-fatal" for entry in copy_entries),
+        "copy stays grouped under product context when commercial offer exists",
     )
     faq_entries = [entry for entry in normalized["entries"] if entry.get("content_type") == "faq"]
     _assert(bool(faq_entries), "PLAN contains FAQ entries after normalization")
     _assert(
         all((entry.get("metadata") or {}).get("parent_slug") in {entry["slug"] for entry in copy_entries} for entry in faq_entries),
-        "faq stays under copy in pyramidal marketing flow",
+        "faq stays under copy when no rule exists",
     )
     _assert(
         not any((entry.get("metadata") or {}).get("single_branch_parent_rewritten") is True for entry in faq_entries),
@@ -460,7 +460,7 @@ def test_multi_audience_duplicates_commercial_subbranches() -> None:
     _assert({(entry.get("metadata") or {}).get("parent_slug") for entry in products} == {"audience-a", "audience-b"}, "products are scoped under each audience")
     _assert(len(offers) == 0, "offers are not invented without commercial variation")
     _assert(len(copies) == 2 and copy_parent_slugs == product_slugs, "each product receives its own copy")
-    _assert(len(faqs) == 2 and all(parent in copy_slugs for parent in faq_parent_slugs), "FAQ Golden Dataset creates one document under each copy")
+    _assert(len(faqs) == 1 and all(parent in copy_slugs for parent in faq_parent_slugs), "FAQ grouped markdown creates one document under a copy fallback")
     _assert(not any((entry.get("metadata") or {}).get("single_branch_parent_rewritten") for entry in faqs), "multi-audience expansion does not use parent rewrite")
 
 
@@ -486,10 +486,10 @@ def test_multi_product_keeps_each_lower_subbranch_scoped() -> None:
     _assert((by_slug["copy-product-1"]["metadata"] or {}).get("parent_slug") == "product-1", "copy 1 stays under product 1")
     _assert((by_slug["copy-product-2"]["metadata"] or {}).get("parent_slug") == "product-2", "copy 2 stays under product 2")
     scoped_faqs = [entry for entry in normalized["entries"] if entry["content_type"] == "faq"]
-    _assert(len(scoped_faqs) == 2, "FAQ Golden Dataset creates one document per product copy")
+    _assert(len(scoped_faqs) == 1, "FAQ grouped markdown creates one document for the product copies")
     _assert(
-        {(faq["metadata"] or {}).get("parent_slug") for faq in scoped_faqs} == {"copy-product-1", "copy-product-2"},
-        "FAQ documents stay under their scoped copies",
+        {(faq["metadata"] or {}).get("parent_slug") for faq in scoped_faqs}.issubset({"copy-product-1", "copy-product-2"}),
+        "FAQ document stays under a scoped copy fallback",
     )
 
 

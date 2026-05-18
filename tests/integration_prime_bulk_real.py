@@ -236,7 +236,7 @@ def generate_scenario(product_count: int, copy_count: int, faq_count: int) -> di
     for copy in copies:
         edges.append((copy["slug"], "supports_copy", copy["metadata"]["product_slug"]))
     for faq in faqs:
-        edges.append((faq["slug"], "answers_question", faq["metadata"]["product_slug"]))
+        edges.append((faq["metadata"]["product_slug"], "answers_question", faq["slug"]))
 
     return {
         "persona": {

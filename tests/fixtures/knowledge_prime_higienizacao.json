@@ -152,8 +152,8 @@
     {"src_slug": "plano-dia-inteiro", "src_type": "product", "relation_type": "same_topic_as", "tgt_slug": "higienizacao-sofas", "tgt_type": "product"},
     {"src_slug": "regra-precos-prime", "src_type": "rule", "relation_type": "about_product", "tgt_slug": "higienizacao-cadeiras", "tgt_type": "product"},
     {"src_slug": "regra-precos-prime", "src_type": "rule", "relation_type": "about_product", "tgt_slug": "higienizacao-sofas", "tgt_type": "product"},
-    {"src_slug": "faq-precos-prime-higienizacao", "src_type": "faq", "relation_type": "answers_question", "tgt_slug": "higienizacao-cadeiras", "tgt_type": "product"},
-    {"src_slug": "faq-precos-prime-higienizacao", "src_type": "faq", "relation_type": "answers_question", "tgt_slug": "higienizacao-sofas", "tgt_type": "product"},
+    {"src_slug": "higienizacao-cadeiras", "src_type": "product", "relation_type": "answers_question", "tgt_slug": "faq-precos-prime-higienizacao", "tgt_type": "faq"},
+    {"src_slug": "higienizacao-sofas", "src_type": "product", "relation_type": "answers_question", "tgt_slug": "faq-precos-prime-higienizacao", "tgt_type": "faq"},
     {"src_slug": "copy-prime-higienizacao-regional", "src_type": "copy", "relation_type": "supports_copy", "tgt_slug": "higienizacao-sofas", "tgt_type": "product"}
   ],
   "test_messages": [

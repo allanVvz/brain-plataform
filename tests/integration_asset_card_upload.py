@@ -83,6 +83,45 @@ class FakeStore:
         for a in self.assets_inserted:
             if a["id"] == asset_id: a.update(deepcopy(patch))
         return deepcopy(next((a for a in self.assets_inserted if a["id"] == asset_id), {}))
+    def get_asset(self, asset_id):
+        return deepcopy(next((a for a in self.assets_inserted if a["id"] == asset_id), {}))
+    def update_asset_graph_refs(self, asset_id, *, knowledge_node_id=None, gallery_edge_id=None, parent_node_id=None, parent_edge_id=None):
+        patch = {
+            "knowledge_node_id": knowledge_node_id,
+            "gallery_edge_id": gallery_edge_id,
+            "parent_node_id": parent_node_id,
+            "parent_edge_id": parent_edge_id,
+        }
+        patch = {k: v for k, v in patch.items() if v is not None}
+        self.asset_updates.append({"id": asset_id, "patch": deepcopy(patch)})
+        for a in self.assets_inserted:
+            if a["id"] == asset_id:
+                a.update(deepcopy(patch))
+                graph_meta = dict((a.get("metadata") or {}).get("graph") or {})
+                graph_meta.update(patch)
+                a.setdefault("metadata", {})["graph"] = graph_meta
+        return deepcopy(next((a for a in self.assets_inserted if a["id"] == asset_id), {}))
+    def get_knowledge_node_for_source(self, source_table, source_id, persona_id=None):
+        for n in self.knowledge_nodes:
+            if n.get("source_table") == source_table and str(n.get("source_id")) == str(source_id):
+                return deepcopy(n)
+        return None
+    def upsert_knowledge_node(self, data):
+        node = {
+            "id": f"n-asset-{len(self.knowledge_nodes)+1}",
+            "persona_id": data.get("persona_id"),
+            "node_type": data.get("node_type"),
+            "slug": data.get("slug"),
+            "title": data.get("title"),
+            "summary": data.get("summary"),
+            "tags": data.get("tags") or [],
+            "metadata": data.get("metadata") or {},
+            "status": data.get("status") or "active",
+            "source_table": data.get("source_table"),
+            "source_id": data.get("source_id"),
+        }
+        self.knowledge_nodes.append(node)
+        return deepcopy(node)
     def ensure_gallery_node(self, persona_id): return deepcopy(self.gallery)
     def upsert_knowledge_edge(self, source_node_id, target_node_id, relation_type, persona_id=None, weight=1, metadata=None):
         row = {
@@ -130,7 +169,9 @@ def with_store(store: FakeStore, **kwargs):
         "get_persona_by_id", "get_persona", "get_knowledge_node",
         "get_knowledge_node_by_slug", "upload_to_storage", "insert_asset",
         "insert_asset_reading", "get_or_create_manual_source", "insert_knowledge_item",
-        "update_asset", "ensure_gallery_node", "upsert_knowledge_edge",
+        "update_asset", "get_asset", "update_asset_graph_refs",
+        "get_knowledge_node_for_source", "upsert_knowledge_node",
+        "ensure_gallery_node", "upsert_knowledge_edge",
     ]
     sb_orig = {n: getattr(supabase_client, n) for n in patched_sb}
     kg_orig = knowledge_graph.bootstrap_from_item
