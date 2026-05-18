@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 import subprocess
+import time
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
@@ -51,7 +52,8 @@ _CONTENT_ALIASES = {
     "produto": "product", "product": "product",
     "oferta": "offer", "ofertas": "offer", "offer": "offer", "offers": "offer",
     "opcao": "offer", "opção": "offer", "variacao": "offer", "variação": "offer",
-    "pacote": "offer", "kit": "offer", "product_variant": "offer", "purchase_option": "offer",
+    "pacote": "offer", "plano": "offer", "assinatura": "offer", "bundle": "offer", "combo": "offer",
+    "product_variant": "offer", "purchase_option": "offer",
     "copy": "copy",
     "campanha": "campaign", "campaign": "campaign",
     "briefing": "briefing",
@@ -60,23 +62,8 @@ _CONTENT_ALIASES = {
     "regra": "rule", "regras": "rule", "rule": "rule", "rules": "rule",
 }
 
-_PERSONA_ALIASES = {
-    "tock fatal": "tock-fatal",
-    "tock-fatal": "tock-fatal",
-    "tock_fatal": "tock-fatal",
-    "vz lupas": "vz-lupas",
-    "vz-lupas": "vz-lupas",
-    "baita conveniencia": "baita-conveniencia",
-    "baita conveniência": "baita-conveniencia",
-    "baita-conveniencia": "baita-conveniencia",
-}
-
-_PERSONA_DOMAINS = {
-    "tockfatal.com": "tock-fatal",
-    "www.tockfatal.com": "tock-fatal",
-    "vzlupas.com": "vz-lupas",
-    "www.vzlupas.com": "vz-lupas",
-}
+_PERSONA_ALIASES: dict[str, str] = {}
+_PERSONA_DOMAINS: dict[str, str] = {}
 
 _ASSET_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".mp4", ".pdf", ".ai", ".psd"}
 _EVENT_PREVIEW_LIMIT = 280
@@ -148,14 +135,16 @@ O `content_type` que o operador escolheu na tela (ex.: faq) sinaliza a INTENÇÃ
 
 CADEIA OBRIGATÓRIA QUANDO SÓ HÁ UMA OPÇÃO (vertical):
 Se o contexto deixar evidente uma única persona, uma única fonte e uma única campanha (caso típico de extração de catálogo), monte AUTOMATICAMENTE a linha vertical sem perguntar:
-  persona → briefing → campanha → público → produto → copy → faq
+  persona → briefing → campanha → público → produto → offer → copy → rule → faq
 Cada elo desses precisa de pelo menos uma entry. NÃO pergunte "esse FAQ é de qual produto?" quando só existe um produto candidato.
 
-POLITICA DE RAMIFICACAO DO PLAN:
-Por padrao, emita `"tree_mode": "single_branch"` e `"branch_policy": "single_branch_by_default"`.
-No primeiro prompt simples, a arvore principal deve ser unica. Para fluxo comercial/oferta, use:
-  persona -> briefing -> audience -> product -> copy -> faq
-Se houver copy no mesmo fluxo, FAQ comercial/oferta fica abaixo da copy. Use `product -> faq` somente quando o operador pedir FAQ tecnico/factual do produto ou quando nao houver copy. No modo CRIAR, mantenha `"tree_mode": "single_branch"` e `"branch_policy": "single_branch_by_default"`.
+POLITICA DE ARVORE PIRAMIDAL DO PLAN:
+Por padrao, emita `"tree_mode": "pyramidal"` e `"branch_policy": "top_down_pyramidal"`.
+A arvore principal deve seguir esta ordem preferencial, pulando apenas niveis ausentes:
+  persona -> brand -> briefing -> campaign -> audience -> product -> offer -> copy -> rule -> faq
+Se nao houver variacao comercial, use:
+  persona -> briefing -> audience -> product -> copy -> rule -> faq
+FAQ comercial fica abaixo da rule quando houver rule. Quando houver offer, agrupe as offers do mesmo product/audience e gere 1 copy por product/audience, salvo pedido explicito de copy por oferta. Nao deixe copy, FAQ, offer, rule, tag ou knowledge_item como card solto na arvore principal.
 
 ORDEM SEMÂNTICA NO JSON (entries[]):
 Emita as entries SEMPRE nesta ordem semântica, independente de qual o operador "selecionou primeiro":
@@ -164,37 +153,43 @@ Emita as entries SEMPRE nesta ordem semântica, independente de qual o operador 
   3. campaign       (vem ANTES de produto/copy/faq, NUNCA depois)
   4. audience       (público-alvo da campanha)
   5. product        (item)
-  6. copy           (do produto/canal)
-  7. faq            (do produto, com pergunta+resposta)
+  6. offer          (condicao comercial)
+  7. copy           (do produto/publico)
+  8. rule           (orientacao comercial antes do FAQ)
+  9. faq            (markdown agrupado)
 Campanha jamais aparece depois de FAQ. FAQ é folha. Briefing é raiz.
 
-GERAÇÃO AUTOMÁTICA DE FAQ — POR FLUXO COMERCIAL, NÃO GENÉRICO:
-Para CADA produto ou campanha criados, emita entries do tipo `faq` com perguntas + respostas concretas respeitando `faq_count_policy`. O padrao e FAQ total, nao FAQ por produto/oferta, salvo confirmacao explicita. Se existir copy no mesmo fluxo comercial, cada FAQ deve ter `metadata.parent_slug` = slug da copy especifica daquele produto/oferta; use `product -> faq` somente quando nao houver copy aplicavel ou quando o operador pedir FAQ tecnico do produto. NUNCA crie um único FAQ genérico que responde por vários produtos — quebre em FAQs separados por copy/oferta quando for necessario. O slug da entry FAQ deve incluir o slug do produto/copy correspondente quando aplicavel. Mesma regra para copy: uma copy por produto/oferta/canal, nunca uma copy compartilhada. Marque `status: "pendente_validacao"` quando a resposta for inferida. NÃO pergunte ao operador "quais dúvidas você quer incluir?" — isso bloqueia o fluxo. Gere primeiro; depois ofereça expandir.
+GERAÇÃO AUTOMÁTICA DE FAQ — FAQ AGRUPADO:
+Emita 1 entry `faq` em Markdown agrupado por campanha/contexto comercial. Parent do FAQ: rule; se nao houver rule, copy; se nao houver copy, offer; se nao houver offer/copy, product. O Markdown deve soar como atendimento real de WhatsApp. NUNCA exponha termos internos como arvore, grafo, galho, node, branch, regra, estrutura ou conhecimento conectado.
 
 EXPANSÃO POR PRODUTO (PROIBIDO COLAPSAR):
 Se há 2 produtos no plano, gere AMBAS as árvores derivadas separadamente:
   Product: Produto A
+    ├── Offers agrupadas
     ├── Copy-1 (parent_slug = produto-a)
-    ├── FAQ-1.1, FAQ-1.2 (parent_slug = copy-1 quando houver copy; senao produto-a)
-    └── Rule-1 / Asset-1 (parent_slug = produto-a)
+    └── Asset-1 (parent_slug = produto-a)
   Product: Produto B
+    ├── Offers agrupadas
     ├── Copy-2 (parent_slug = produto-b)
-    ├── FAQ-2.1, FAQ-2.2 (parent_slug = copy-2 quando houver copy; senao produto-b)
-    └── Rule-2 / Asset-2 (parent_slug = produto-b)
-NUNCA combine "FAQ Geral dos Produtos" como um só nó cobrindo os dois produtos. Cada produto recebe sua própria sub-árvore. Idem para audience: se há audiência atacadista E final, ambas geram cards separados, e cada produto pode receber copies/FAQs voltadas a cada uma.
+    └── Asset-2 (parent_slug = produto-b)
+Use 1 rule geral antes de 1 FAQ agrupado em Markdown. Cada produto/audience recebe sua copy contextual; FAQ nao multiplica por copy por padrao.
 
 ORDEM SEMÂNTICA (TOP-DOWN, PROIBIDO INVERTER OU ENCURTAR):
-A árvore final SEMPRE flui top-down nesta ordem ESTRITA:
-  Persona → Brand → Campaign | Briefing → Audience → Product → FAQ | Copy | Asset → Embedded (só após aprovação)
+A árvore final SEMPRE flui top-down nesta ordem preferencial:
+  Persona → Brand → Briefing → Campaign → Audience → Product → Offer → Copy → FAQ → Embedded (só após aprovação)
 
 Audience NUNCA fica lateral ao Product. Audience é PAI semântico do Product no contexto de uma campanha — quem o Product está mirando. Por isso `metadata.parent_slug` do Product DEVE apontar para a Audience correspondente, NÃO para a Campanha. A Campanha vira ancestral indireto (Audience → Campaign → Brand).
 
-Encurtamentos PROIBIDOS:
-- Persona → Audience direto: errado (faltou Brand/Campaign).
-- Persona → Product direto: errado (faltou Brand → Campaign → Audience).
-- Persona → FAQ direto: errado salvo se for FAQ institucional/fallback da persona inteira.
-- Campaign → Product direto (sem Audience entre): errado quando há Audience no plano.
-- Copy solta como filha da Persona/Brand/Campaign quando se refere a um produto específico: errado, vai como filha do Product. FAQ comercial vai como filha da Copy quando houver copy no mesmo fluxo; sem copy, vai como filha do Product.
+Encurtamentos PROIBIDOS na arvore principal:
+- Persona → FAQ.
+- Persona → Product.
+- Product → FAQ quando existe copy/offer.
+- Copy solta.
+- FAQ solta.
+- Offer solta.
+- Rule solta.
+- Tag como card principal.
+- knowledge_item como card principal.
 
 Edges com semântica explícita (use estas no `links[]` quando aplicável):
   Persona → Brand     : `has_brand` ou `contains`
@@ -204,10 +199,11 @@ Edges com semântica explícita (use estas no `links[]` quando aplicável):
   Campaign → Audience : `targets_audience` ou `contains`
   Audience → Product  : `offers_product` ou `about_product`
   Product → Copy      : `supports_copy`
-  Product → FAQ       : `answers_question` apenas para FAQ tecnico/sem copy
-  Copy → FAQ          : `answers_question` no fluxo comercial single_branch
+  Product → FAQ       : evite; use apenas quando nao houver copy/offer e a FAQ for tecnica/factual
+  Copy → FAQ          : `answers_question` no fluxo comercial piramidal
   Product → Asset     : `uses_asset`
   Approved FAQ → Embedded : `manual` (só após o operador aprovar — você NÃO emite isso)
+  Approved Asset → Gallery : `gallery_asset` (só após o operador aprovar — você NÃO emite isso)
 
 Quando a chain ficar incompleta (ex.: faltou Audience no contexto), você deve INFERIR uma audience razoável (ex.: "público-geral") e marcar `status: "pendente_validacao"` em vez de pular o passo.
 
@@ -230,25 +226,16 @@ Mapa default de relation_type por par (use no `links[]` ou implícito via parent
   audience  → about_product       → product   (uso secundário)
 
 RESUMO ANTES DO SAVE:
-Após o `<knowledge_plan>`, sempre apresente, no markdown legível, um resumo conciso ANTES de pedir o save:
-  - "Briefing: 1 ✓"
-  - "Campanha: 1 ✓"
-  - "Público: 1 ✓"
-  - "Produto: N ✓"
-  - "Copy: N ✓"
-  - "FAQ: N ✓ (gerados automaticamente, marcados como pendente_validacao)"
-  - "Conexões: <count> edges no plano"
-  - "Pendências: <lista curta ou 'nenhuma'>"
-Aí finalize: "Plano pronto. Clique em **Salvar** para persistir." e marque `"complete": true` no `<classification>`.
+Após o `<knowledge_plan>`, responda curto, sempre derivado do normalizedPlan:
+Status: plano gerado
+Resumo: briefing N, público N, produto N, oferta N, copy N, FAQ N, asset N, regra N
+Política: árvore piramidal; FAQ por copy; Asset por parent
+Pendências bloqueantes: nenhuma
+Ação: revisar preview
+Se o plano estiver vazio, diga: "Estrutura ainda não gerada." Nunca diga "Plano pronto" sem entries.
 
 NUNCA DECLARE "estruturado" SEM EMITIR `<knowledge_plan>`:
 Se você for dizer "o conhecimento está estruturado e pronto para salvar", o `<knowledge_plan>` precisa estar na MESMA mensagem. Caso contrário, o operador não consegue ver/salvar nada e a sessão fica inconsistente.
-
-=== CLIENTES DISPONÍVEIS ===
-- tock-fatal → Tock Fatal (marca de moda urbana)
-- vz-lupas → VZ Lupas (óculos e saúde visual)
-- baita-conveniencia → Baita Conveniência (bar e conveniência)
-- global → Global (aplicável a todos os clientes)
 
 === TIPOS DE CONTEÚDO TEXTUAL ===
 brand, briefing, product, campaign, copy, faq, tone, audience, competitor, rule, prompt, maker_material, other
@@ -300,16 +287,16 @@ O crawler pode falhar por HTML inconsistente, JavaScript, imagem, dados duplicad
 Se houver resultado do crawler no estado da sessao:
 - cite a confianca e os avisos tecnicos;
 - use candidatos extraidos como rascunho/evidencia, nao como conhecimento ativo;
-- quando preco, cor, kit, disponibilidade ou atributo estiver ausente, pergunte de forma objetiva ou marque como pendente;
+- quando preco, cor, condicao comercial, disponibilidade ou atributo estiver ausente, pergunte de forma objetiva ou marque como pendente;
 - nao diga "li todos os produtos" se o crawler trouxe confianca baixa/media ou candidatos incompletos;
 - proponha uma arvore de conhecimento com status por entry: confirmado, inferido, pendente_validacao.
 
 Ao final da coleta, gere varios conhecimentos, um para cada bloco selecionado pelo operador. Exemplo minimo quando os blocos forem briefing, audience, product, copy e faq:
 1. briefing: fonte, escopo, riscos do crawler e regras de validacao;
-2. audience: revendedoras e clientes finais, com dores/objetivos/criterios de preco;
-3. product: uma entry por produto candidato, usando o titulo do produto quando disponivel. Cor, tamanho, kit, material e preco vao em `metadata` ou `tags` do product, nunca como content_type proprio;
+2. audience: segmentos comerciais, com dores/objetivos/criterios de compra;
+3. product: uma entry por produto candidato, usando o titulo do produto quando disponivel. Cor, tamanho, material e preco vao em `metadata` ou `tags` do product, nunca como content_type proprio;
 4. copy: copys separadas por publico/canal quando houver informacao suficiente;
-5. faq: perguntas e respostas recuperaveis sobre preco, cores, kits, varejo e atacado.
+5. faq: perguntas e respostas recuperaveis sobre condicoes comerciais, atributos confirmados, uso e objecoes.
 
 Antes de salvar, apresente a lista concreta de entries que serao criadas. Nao finalize com um resumo generico.
 
@@ -370,14 +357,14 @@ Regras para esse bloco:
 - nao encerre um plano que pediu 3 produtos com apenas 2 products;
 - se os blocos incluirem audience, gere publicos concretos, nao "publico geral";
 - se os blocos incluirem copy, gere copies concretas e use a ferramenta mental de geracao de copy;
-- se os blocos incluirem faq, gere perguntas e respostas recuperaveis;
-- se o operador pediu FAQ sobre preco, cores e kits, gere no minimo 2 FAQs: uma para preco/kits e outra para cores;
+- se os blocos incluirem faq, gere perguntas e respostas recuperaveis, realistas e contextualizadas ao parent direto;
+- se o operador pediu FAQ sobre condicoes comerciais, atributos ou objecoes, gere FAQs separadas por parent direto;
 - `links` e opcional somente quando todas as entries ja trouxerem `metadata.parent_slug`;
 - campos desconhecidos devem ficar como pendente_validacao, nao bloquear a arvore inteira.
 
 === OUTPUT VALIDATION (HARD CONTRACT) ===
 Antes de fechar `<knowledge_plan>`, verifique entrada por entrada:
-- `content_type` ESTRITAMENTE in {brand, briefing, product, offer, campaign, copy, asset, prompt, faq, maker_material, tone, competitor, audience, rule, entity, other}. Qualquer outro valor (incluindo "rules", "publico", "category", "kit") sera rejeitado pelo banco.
+- `content_type` ESTRITAMENTE in {brand, briefing, product, offer, campaign, copy, asset, prompt, faq, maker_material, tone, competitor, audience, rule, entity, other}. Qualquer outro valor (incluindo "rules", "publico" ou "category") sera rejeitado pelo banco.
 - `title` nao vazio, com pelo menos 3 caracteres.
 - `content` nao vazio.
 - `tags` deve ser lista de strings (pode ser vazia). Nunca dict.
@@ -439,12 +426,13 @@ Apos a geracao inicial de cards, ofereca proativamente ideias de melhorias ou co
 
 _SYSTEM_PROMPT += """
 
-=== REGRA FRACTAL OBRIGATORIA ===
-Sempre que houver N FAQs iniciais, cada Product dentro de cada Audience deve receber N FAQs por padrao.
-Primeiro duplique o conjunto de FAQs em formato fractal, depois pergunte se o usuario deseja modificar, excluir ou adicionar FAQs antes de salvar.
+=== REGRA DE FAQ GOLDEN DATASET OBRIGATORIA ===
+FAQ configurado nao significa quantidade de cards. Significa habilitar 1 documento FAQ agrupado em Markdown por contexto comercial.
+O documento FAQ deve conter perguntas internas de atendimento real, sem termos internos de grafo.
+Perguntas internas nunca viram cards individuais.
 
 === CRAWLER MULTIPRODUTO ===
-Se o operador indicar variedade, mais de um publico, compra em quantidade ou mais de um kit/modal, o crawler deve buscar multiplas opcoes de kit modal e preparar ramos separados por publico e produto.
+Se o operador indicar variedade, mais de um publico, compra em quantidade ou mais de uma opcao comercial, o crawler deve preparar ramos separados por publico, produto e oferta quando houver dados.
 Nao trate um catalogo variado como se fosse um unico produto.
 """
 
@@ -457,19 +445,24 @@ Sua prioridade nao e escrever texto bonito. Sua prioridade e montar uma arvore d
 Siga sempre este fluxo: explorar -> confirmar -> montar normalizedPlan -> validar -> resumir curto.
 
 No modo create, use sempre:
-  tree_mode = single_branch
-  branch_policy = single_branch_by_default
-  faq_count_policy = total
+  tree_mode = pyramidal
+  branch_policy = top_down_pyramidal
+  faq_count_policy = grouped
+  faq_parent_type = rule
+  asset_count_policy = per_parent
+  copy_policy = per_product_context
+Use faq_count_policy = total somente se estiver importando um plano legado ja aprovado; para CRIAR novo, normalize para grouped.
 
 A branch principal deve seguir, quando aplicavel:
-  persona -> brand -> briefing -> campaign -> audience -> product -> offer -> copy -> faq -> embedded
+  persona -> brand -> briefing -> campaign -> audience -> product -> offer -> copy -> rule -> faq -> embedded
 Se brand ou campaign nao existirem, pule o nivel, mas nao quebre a branch.
 
 Regras estruturais obrigatorias:
-- Se houver preco, quantidade, kit, pacote, opcao ou variacao comercial, crie offer obrigatoriamente.
+- Se houver preco diferente, quantidade diferente, pacote, plano, assinatura, bundle, combo, categoria de oferta, opcao de compra, versao de compra, condicao comercial ou variacao comercial, crie offer obrigatoriamente.
 - Offer fica abaixo de product.
-- Copy fica abaixo de offer; se nao houver offer, fica abaixo de product ou campaign.
-- FAQ comercial fica abaixo de copy. Nao use product -> faq quando existe copy ou offer.
+- Copy fica agrupada por product/audience por padrao; use offer como parent so se o operador pedir copies diferentes por oferta.
+- Rule e o ultimo node estrutural antes do FAQ.
+- FAQ comercial fica abaixo de rule quando houver rule. Nao multiplique FAQ por copy por padrao.
 - Product fica abaixo de audience.
 - Audience fica abaixo de campaign ou briefing.
 - Briefing fica abaixo de brand ou persona.
@@ -487,14 +480,19 @@ Se o usuario disser "conecte a audiencia padrao":
 
 Quando gerar plano, retorne sempre:
 1. normalizedPlan.entries;
-2. current_block_counts;
-3. blocking_violations;
-4. short_summary derivado do normalizedPlan.
+2. primary_tree_edges;
+3. secondary_semantic_edges;
+4. rag_edges;
+5. asset_gallery_edges;
+6. debug_edges;
+7. current_block_counts;
+8. blocking_violations;
+9. short_summary derivado do normalizedPlan.
 
 O resumo visivel deve ser curto:
 Status: plano gerado
 Blocos: briefing N, publico N, produto N, offer N, copy N, FAQ N, regra N
-Branch: briefing -> publico -> produto -> offer -> copy -> FAQ
+Politica: arvore piramidal; FAQ agrupado por rule; Asset por parent
 Pendencias bloqueantes: nenhuma | lista curta
 Acao: revisar preview
 
@@ -636,8 +634,8 @@ def _build_live_memory_summary(session: dict, plan: Optional[dict] = None, *, la
         f"Fonte principal: {source}.",
         f"Plano inicial: {initial_counts}.",
         f"Plano atual: {current_counts}.",
-        f"Politica de arvore: {branch_policy or 'single_branch_by_default'}.",
-        f"Modo da arvore: {tree_mode or 'single_branch'}.",
+        f"Politica de arvore: {branch_policy or 'top_down_pyramidal'}.",
+        f"Modo da arvore: {tree_mode or 'pyramidal'}.",
         "Nao salvar usando o plano inicial se o plano atual foi expandido.",
     ]
     if last_change:
@@ -655,6 +653,114 @@ def _count_mismatch_message(expected: dict[str, int], actual: dict[str, int]) ->
     return None
 
 
+def _explicit_total_count_requested(session: Optional[dict], block_id: str) -> bool:
+    text = _session_text_for_branch_policy(session or {})
+    label = "faq" if block_id == "faq" else "asset"
+    return bool(re.search(rf"\b{label}s?\s+(?:total|no total|totais)\b|\b(?:usar|use)\s+\d+\s+{label}s?\s+no\s+total\b", text, re.I))
+
+
+def _normalize_count_policy(plan: dict, session: Optional[dict], block_id: str) -> str:
+    key = f"{block_id}_count_policy"
+    raw = str(plan.get(key) or "").strip().lower()
+    if block_id == "faq" and raw in {"grouped", "single_grouped", "grouped_markdown"}:
+        return "grouped"
+    if block_id == "faq" and raw in {"per_branch", "golden_dataset_per_branch"}:
+        return "per_branch"
+    if raw == "total" or _explicit_total_count_requested(session, block_id):
+        return "total"
+    if block_id == "faq":
+        return "grouped"
+    return "per_parent"
+
+
+def _direct_parent_type_for(plan: dict, block_id: str) -> str:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    types = {_entry_type(entry) for entry in entries}
+    if block_id == "faq":
+        return str(plan.get("faq_parent_type") or ("rule" if "rule" in types else "copy" if "copy" in types else "offer" if "offer" in types else "product")).strip() or "rule"
+    if block_id == "asset":
+        return str(plan.get("asset_parent_type") or ("product" if "product" in types else "campaign" if "campaign" in types else "briefing")).strip() or "product"
+    return "product"
+
+
+def _direct_parents_for(plan: dict, block_id: str) -> list[dict]:
+    parent_type = _direct_parent_type_for(plan, block_id)
+    return [
+        entry for entry in (plan.get("entries") or [])
+        if isinstance(entry, dict) and _entry_type(entry) == parent_type and entry.get("slug")
+    ]
+
+
+def _entry_count_under_parents(plan: dict, child_type: str, parents: list[dict]) -> int:
+    parent_slugs = {str(parent.get("slug")) for parent in parents if parent.get("slug")}
+    return sum(
+        1 for entry in (plan.get("entries") or [])
+        if isinstance(entry, dict)
+        and _entry_type(entry) == child_type
+        and (_entry_parent_slug(entry) or "") in parent_slugs
+    )
+
+
+def _faq_golden_dataset_questions_by_slug(plan: dict) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for entry in (plan.get("entries") or []):
+        if not isinstance(entry, dict) or _entry_type(entry) != "faq":
+            continue
+        meta = _entry_metadata(entry)
+        slug = str(entry.get("slug") or "")
+        if slug:
+            out[slug] = max(0, int(meta.get("question_count") or 0))
+    return out
+
+
+def _faq_golden_dataset_question_total(plan: dict) -> int:
+    return sum(_faq_golden_dataset_questions_by_slug(plan).values())
+
+
+def _expansion_summary(plan: dict, session: Optional[dict] = None) -> dict[str, dict[str, Any]]:
+    faq_policy = _normalize_count_policy(plan, session, "faq")
+    asset_policy = _normalize_count_policy(plan, session, "asset")
+    faq_per_parent = max(0, int(plan.get("faq_count_per_parent") or 1))
+    asset_per_parent = max(0, int(plan.get("asset_count_per_parent") or _requested_variation_count(session or {}, "asset", 0)))
+    faq_parents = _direct_parents_for(plan, "faq") if faq_policy in {"per_parent", "per_branch"} else []
+    asset_parents = _direct_parents_for(plan, "asset") if asset_policy == "per_parent" else []
+    faq_created = count_blocks_by_type(plan.get("entries") or []).get("faq", 0)
+    asset_created = count_blocks_by_type(plan.get("entries") or []).get("asset", 0)
+    faq_questions = _faq_golden_dataset_question_total(plan)
+    faq_expected = (
+        max(0, int(plan.get("faq_total_count") or _requested_variation_count(session or {}, "faq", faq_created)))
+        if faq_policy == "total"
+        else 1 if faq_policy == "grouped" and (faq_created > 0 or _requested_variation_count(session or {}, "faq", 0) > 0)
+        else len(faq_parents)
+    )
+    asset_expected = (
+        max(0, int(plan.get("asset_total_count") or _requested_variation_count(session or {}, "asset", asset_created)))
+        if asset_policy == "total"
+        else len(asset_parents) * asset_per_parent
+    )
+    return {
+        "faq": {
+            "count_policy": faq_policy,
+            "parent_type": _direct_parent_type_for(plan, "faq"),
+            "count_per_parent": faq_per_parent,
+            "configured": faq_per_parent if faq_policy == "per_parent" else faq_expected,
+            "expected": faq_expected,
+            "created": faq_created,
+            "terminal_branches": len(faq_parents),
+            "questions_total": faq_questions,
+            "questions_per_document": _faq_golden_dataset_questions_by_slug(plan),
+        },
+        "asset": {
+            "count_policy": asset_policy,
+            "parent_type": _direct_parent_type_for(plan, "asset"),
+            "count_per_parent": asset_per_parent,
+            "configured": asset_per_parent if asset_policy == "per_parent" else asset_expected,
+            "expected": asset_expected,
+            "created": asset_created,
+        },
+    }
+
+
 def summarize_normalized_plan(plan: dict) -> dict[str, Any]:
     entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
     counts = count_blocks_by_type(entries)
@@ -662,9 +768,13 @@ def summarize_normalized_plan(plan: dict) -> dict[str, Any]:
         "entry_count": len(entries),
         "current_block_counts": counts,
         "link_count": len(plan.get("links") or []),
-        "tree_mode": plan.get("tree_mode") or "single_branch",
-        "branch_policy": plan.get("branch_policy") or "single_branch_by_default",
-        "faq_count_policy": plan.get("faq_count_policy") or "total",
+        "tree_mode": plan.get("tree_mode") or "pyramidal",
+        "branch_policy": plan.get("branch_policy") or "top_down_pyramidal",
+        "faq_count_policy": plan.get("faq_count_policy") or "grouped",
+        "faq_parent_type": plan.get("faq_parent_type") or "rule",
+        "asset_count_policy": plan.get("asset_count_policy") or "per_parent",
+        "copy_policy": plan.get("copy_policy") or "per_product_context",
+        "expansion": _expansion_summary(plan),
     }
 
 
@@ -690,18 +800,56 @@ def _plan_validation(violations: list[str] | None = None, warnings: list[str] | 
     }
 
 
+def _leaf_alert_warnings(plan: dict) -> list[str]:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    child_parent_slugs = {_entry_parent_slug(entry) for entry in entries if _entry_parent_slug(entry)}
+    link_sources = {
+        str(link.get("source_slug"))
+        for link in (plan.get("links") or [])
+        if isinstance(link, dict) and link.get("source_slug") and link.get("target_slug")
+    }
+    warnings: list[str] = []
+    # FAQ is terminal-valid in the plan: after human approval it is connected
+    # to the persona's Embedded node automatically, so the plan itself must not
+    # treat a pending FAQ as a structural error.
+    terminal_ok = {"asset", "embedded", "gallery", "faq"}
+    for entry in entries:
+        slug = str(entry.get("slug") or "").strip()
+        ctype = _entry_type(entry)
+        if not slug or ctype in terminal_ok:
+            continue
+        has_child = slug in child_parent_slugs or slug in link_sources
+        if has_child:
+            continue
+        title = str(entry.get("title") or slug).strip()
+        if ctype == "rule":
+            warnings.append(
+                f"O node RULE ficou sem saida: {title}. Deseja conectar RULE antes do FAQ, transformar em orientacao global da campanha ou manter como pendencia?"
+            )
+        else:
+            warnings.append(
+                f"O node {ctype or 'desconhecido'} ficou sem saida: {title}. Deseja conectar, transformar em orientacao global ou manter como pendencia?"
+            )
+    return warnings
+
+
 def _plan_state_from_normalized(plan: dict, session: Optional[dict] = None, *, violations: Optional[list[str]] = None) -> dict[str, Any]:
     normalized_plan = dict(plan or {})
     summary = summarize_normalized_plan(normalized_plan)
     normalized_plan["summary"] = summary
-    validation = _plan_validation(violations if violations is not None else validate_sofia_knowledge_plan(normalized_plan, session=session))
+    resolved_violations = violations if violations is not None else validate_sofia_knowledge_plan(normalized_plan, session=session)
+    validation = _plan_validation(resolved_violations, _leaf_alert_warnings(normalized_plan))
     plan_hash = _plan_hash(normalized_plan)
-    return {
+    diagnostic = build_plan_diagnostic(normalized_plan, session, validation["blocking_violations"]) if validation["blocking_violations"] else None
+    state: dict[str, Any] = {
         "normalized_plan": normalized_plan,
         "validation": validation,
         "summary": summary,
         "plan_hash": plan_hash,
     }
+    if diagnostic is not None:
+        state["diagnostic"] = diagnostic
+    return state
 
 
 def normalize_validate_summarize_plan(raw_plan: dict, session: dict, *, live_edit: bool = False) -> dict[str, Any]:
@@ -760,8 +908,8 @@ _PREFERRED_PARENT_TYPES: dict[str, tuple[str, ...]] = {
     "competitor": ("brand", "briefing"),
     # Per-product children prefer the product directly. Falling back to
     # audience preserves the semantic step instead of jumping to campaign.
-    "copy": ("offer", "product", "campaign"),
-    "faq": ("copy", "offer", "product"),
+    "copy": ("product", "offer", "campaign"),
+    "faq": ("rule", "copy", "offer", "product"),
     "asset": ("product", "audience", "campaign", "brand"),
     "maker_material": ("product", "campaign", "brand"),
     "prompt": ("campaign", "brand", "briefing"),
@@ -1006,7 +1154,9 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
         if isinstance(entry, dict) and entry.get("slug")
     }
     product_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "product"]
+    audience_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "audience"]
     faq_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "faq"]
+    asset_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "asset"]
     offer_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "offer"]
     copy_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "copy"]
     rule_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "rule"]
@@ -1016,7 +1166,7 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
         errors.append("plan.entries must not contain duplicate slugs")
 
     if session and _offers_required(session, plan) and not offer_entries:
-        errors.append("offer required when the request includes price, quantity, kit, package or commercial variation")
+        errors.append("offer required when the request includes price, quantity, package, plan, subscription, purchase option or commercial variation")
     if session and _rule_required(session, plan) and not rule_entries:
         errors.append("rule required when the request includes commercial governing rules")
 
@@ -1027,30 +1177,37 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
         parent_slug = _entry_parent_slug(entry)
         parent_entry = slug_to_entry.get(parent_slug or "")
         parent_type = _entry_type(parent_entry or {})
-        if ctype_lower == "audience" and parent_slug and parent_type not in {"campaign", "briefing", "brand", "product", "other", ""}:
+        if ctype_lower in {"tag", "knowledge_item", "kb_entry", "mention"}:
+            errors.append(f"entry[{idx}] {ctype_lower} cannot be a primary tree card")
+        if ctype_lower == "audience" and parent_slug and parent_type not in {"campaign", "briefing", "brand", ""}:
             errors.append(f"entry[{idx}] audience must stay under campaign/briefing/brand, got parent {parent_slug!r}")
         if ctype_lower == "product":
-            if parent_slug and parent_type not in {"audience", "campaign", "briefing", "brand", "entity", "other", ""}:
+            if audience_entries and parent_type != "audience":
+                errors.append(f"entry[{idx}] product must stay under audience when audience exists")
+            elif parent_slug and parent_type not in {"audience", "campaign", "briefing", "brand", ""}:
                 errors.append(f"entry[{idx}] product has invalid parent {parent_slug!r}")
             if "audience" in str(entry.get("slug") or "").lower():
                 errors.append(f"entry[{idx}] product slug must not embed audience slug")
         if ctype_lower == "offer" and parent_type != "product":
             errors.append(f"entry[{idx}] offer must stay under product, got parent {parent_slug!r}")
         if ctype_lower == "copy":
-            allowed_copy_parents = {"offer", "product", "campaign", "briefing", "brand", ""}
+            allowed_copy_parents = {"offer", "product", "campaign", ""}
             if parent_type not in allowed_copy_parents:
                 errors.append(f"entry[{idx}] copy has invalid parent {parent_slug!r}")
-            if offer_entries and parent_type != "offer":
-                errors.append(f"entry[{idx}] copy must stay under offer when commercial offers exist")
+            if offer_entries and parent_type == "offer" and not _explicit_copy_per_offer_requested(session or {}):
+                errors.append(f"entry[{idx}] copy must stay grouped by product/audience by default; use offer parent only when copy per offer is explicit")
         if ctype_lower == "faq":
-            if parent_slug and parent_type not in {"copy", "offer", "product", "audience", "campaign", "briefing", "brand", "persona", ""}:
+            allowed_faq_parents = {"rule", "copy", "offer"}
+            if not copy_entries and not offer_entries:
+                allowed_faq_parents.add("product")
+            if parent_type not in allowed_faq_parents:
                 errors.append(f"entry[{idx}] faq has invalid parent {parent_slug!r}")
-            if copy_entries and parent_type != "copy" and not _technical_product_faq_requested(session or {}):
-                errors.append(f"entry[{idx}] faq must stay under copy when copy exists")
+            if rule_entries and parent_type != "rule":
+                errors.append(f"entry[{idx}] faq must stay under rule when rule exists")
         if ctype_lower == "rule" and parent_type not in {"campaign", "briefing", "brand", "persona", ""}:
             errors.append(f"entry[{idx}] rule must stay under campaign/briefing/brand, got parent {parent_slug!r}")
 
-    tree_mode = str(plan.get("tree_mode") or "single_branch").strip() or "single_branch"
+    tree_mode = str(plan.get("tree_mode") or "pyramidal").strip() or "pyramidal"
     if tree_mode == "single_branch" and not _technical_product_faq_requested(session or {}):
         copy_slugs_by_product: dict[str, set[str]] = {}
         for copy in [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "copy"]:
@@ -1065,7 +1222,36 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
                     f"entry[{idx}] faq must use copy parent in single_branch when product {parent_slug!r} has copy"
                 )
 
-    faq_policy = str(plan.get("faq_count_policy") or "total").strip() or "total"
+    parent_by_child = {
+        str(entry.get("slug")): _entry_parent_slug(entry)
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("slug")
+    }
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict) or not entry.get("slug"):
+            continue
+        ctype = _entry_type(entry)
+        if ctype in SOFIA_TOP_LEVEL_TYPES:
+            continue
+        current = str(entry.get("slug"))
+        seen: set[str] = set()
+        reaches_persona = False
+        for _ in range(64):
+            parent = parent_by_child.get(current)
+            if not parent:
+                break
+            if parent == "self":
+                reaches_persona = True
+                break
+            if parent in seen:
+                errors.append(f"entry[{idx}] cycle detected in parent chain")
+                break
+            seen.add(parent)
+            current = parent
+        if not reaches_persona:
+            errors.append(f"entry[{idx}] has no complete path to persona")
+
+    faq_policy = str(plan.get("faq_count_policy") or "per_branch").strip() or "per_branch"
     if session and faq_policy == "total":
         requested_total = _requested_variation_count(session or {}, "faq", 8)
         if requested_total >= 0 and len(faq_entries) > requested_total:
@@ -1073,30 +1259,839 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
                 f"faq_count_policy total allows at most {requested_total} FAQs without confirmation (found {len(faq_entries)})"
             )
 
-    if product_entries and faq_policy != "total":
-        faq_count_by_product: dict[str, int] = {}
-        for faq in faq_entries:
-            parent_slug = _entry_parent_slug(faq)
-            if not parent_slug:
-                continue
-            parent_entry = slug_to_entry.get(parent_slug)
-            if _entry_type(parent_entry or {}) == "copy":
-                parent_slug = _entry_parent_slug(parent_entry or {})
-            if parent_slug:
-                faq_count_by_product[parent_slug] = faq_count_by_product.get(parent_slug, 0) + 1
-        target_faq_count = _requested_variation_count(session or {}, "faq", 2) if session else None
-        for entry in product_entries:
-            product_slug = str(entry.get("slug") or "")
-            branch_count = faq_count_by_product.get(product_slug, 0)
-            if target_faq_count is not None and branch_count < target_faq_count:
-                errors.append(
-                    f"product {product_slug!r} must receive at least {target_faq_count} FAQs in the fractal plan (found {branch_count})"
-                )
+    expansion = _expansion_summary(plan, session)
+    faq_expansion = expansion.get("faq") or {}
+    if faq_policy != "total" and int(faq_expansion.get("created") or 0) < int(faq_expansion.get("expected") or 0):
+        errors.append(
+            f"FAQ Golden Dataset incomplete: expected {faq_expansion.get('expected')} FAQ documents by terminal {faq_expansion.get('parent_type')}, "
+            f"created {faq_expansion.get('created')}"
+        )
+    asset_expansion = expansion.get("asset") or {}
+    if int(asset_expansion.get("expected") or 0) > 0 and int(asset_expansion.get("created") or 0) < int(asset_expansion.get("expected") or 0):
+        errors.append(
+            f"Asset expansion incomplete: expected {asset_expansion.get('expected')} Asset by {asset_expansion.get('parent_type')} "
+            f"({asset_expansion.get('count_per_parent')} per parent), created {asset_expansion.get('created')}"
+        )
 
     if len(entries) > 1 and not (plan.get("links") or []):
         errors.append("plan.links must not be empty when the hierarchy already contains clear parent/child relations")
 
     return errors
+
+
+# --------------------------------------------------------------------------- #
+# Plan diagnostic — agrupador de violacoes + grafo visual                     #
+# --------------------------------------------------------------------------- #
+#
+# When the planner emits blocking_violations, the UI used to show a long flat
+# list. build_plan_diagnostic() classifies every entry (valid / error / cycle
+# / orphan), groups violations by root cause and produces markdown questions
+# that the operator can answer to repair the plan. The dashboard renders this
+# structure as a colored graph; the backend keeps the data source of truth.
+
+_DIAGNOSTIC_KIND_TITLES = {
+    "cycle": "Ciclo na cadeia de pais",
+    "no_path_to_persona": "Caminho incompleto ate a persona",
+    "offer_under_product": "Oferta com parent invalido",
+    "audience_parent": "Publico com parent invalido",
+    "product_under_audience": "Produto fora de audience",
+    "product_invalid_parent": "Produto com parent invalido",
+    "copy_parent": "Copy com parent invalido",
+    "faq_parent": "FAQ com parent invalido",
+    "rule_parent": "Regra com parent invalido",
+    "invalid_primary_tree_type": "Tipo nao permitido na arvore principal",
+    "duplicate_slug": "Slugs duplicados no plano",
+    "missing_parent_slug": "Entrada sem parent obrigatorio",
+    "faq_expansion_incomplete": "FAQ Golden Dataset incompleto",
+    "asset_expansion_incomplete": "Asset expansion incompleto",
+    "offer_missing": "Oferta exigida e ausente",
+    "rule_missing": "Regra comercial exigida e ausente",
+    "links_missing": "Plano sem links explicitos",
+    "other": "Outras pendencias",
+}
+
+_DIAGNOSTIC_KIND_DESCRIPTIONS = {
+    "cycle": "Uma ou mais entradas apontam para parent que volta a propria entrada ou para um descendente, formando ciclo. A arvore deixa de ter raiz valida.",
+    "no_path_to_persona": "Existem entradas cuja cadeia de pais nao termina na persona. Sao galhos soltos no grafo.",
+    "offer_under_product": "Oferta precisa ficar diretamente abaixo de um produto. Encontramos oferta(s) com parent diferente.",
+    "audience_parent": "Audience deve ficar abaixo de campaign, briefing ou brand.",
+    "product_under_audience": "Quando ha audience no plano, todo produto deve ficar abaixo dela.",
+    "product_invalid_parent": "Produto deve ficar abaixo de audience, campaign, briefing ou brand.",
+    "copy_parent": "Copy deve ficar agrupada no contexto produto/publico por padrao; use oferta como parent apenas quando pedido explicitamente.",
+    "faq_parent": "FAQ agrupado deve ficar abaixo de rule. Sem rule, use copy, offer ou produto como fallback.",
+    "rule_parent": "Regra comercial deve ficar abaixo de campaign, briefing, brand ou persona.",
+    "invalid_primary_tree_type": "Tipos auxiliares (tag, mention, knowledge_item, kb_entry) nao podem estar na arvore principal.",
+    "duplicate_slug": "O mesmo slug aparece em mais de uma entrada do plano.",
+    "missing_parent_slug": "Entrada sem persona/brand/briefing precisa declarar metadata.parent_slug ou aparecer em links[].",
+    "faq_expansion_incomplete": "O numero de FAQs gerados ficou abaixo do esperado pela politica de expansao.",
+    "asset_expansion_incomplete": "O numero de assets gerados ficou abaixo do esperado pela politica de expansao.",
+    "offer_missing": "A sessao indica preco, kit, plano ou variacao comercial mas nenhuma oferta foi criada.",
+    "rule_missing": "A sessao indica regras comerciais (prazo, troca, pagamento) mas nenhuma regra foi criada.",
+    "links_missing": "Plano tem mais de uma entrada mas nao declarou links explicitos entre elas.",
+    "other": "Outras pendencias reportadas pelo validador.",
+}
+
+_DIAGNOSTIC_KIND_REPAIRS = {
+    "cycle": "Reabra as entradas afetadas e corrija metadata.parent_slug para apontar para um node real acima na hierarquia (persona/brand/briefing/campaign/audience/product).",
+    "no_path_to_persona": "Conecte o galho ate a persona reescrevendo metadata.parent_slug das entradas afetadas (a cadeia precisa chegar em persona/self).",
+    "offer_under_product": "Escolha o produto correto como parent da oferta (metadata.parent_slug aponta para um slug de product).",
+    "audience_parent": "Aponte o audience para campaign, briefing ou brand existente.",
+    "product_under_audience": "Coloque os produtos abaixo da audience presente no plano.",
+    "product_invalid_parent": "Reaponte os produtos para audience, campaign, briefing ou brand.",
+    "copy_parent": "Reaponte as copies para o produto/contexto comercial; use oferta como parent apenas quando o operador pedir copy por oferta.",
+    "faq_parent": "Reaponte o FAQ agrupado para a rule estrutural; sem rule, use copy, offer ou produto como fallback.",
+    "rule_parent": "Aponte as regras para campaign, briefing, brand ou persona.",
+    "invalid_primary_tree_type": "Remova esses tipos da arvore principal; tags/mentions ficam em camada auxiliar.",
+    "duplicate_slug": "Renomeie um dos slugs duplicados.",
+    "missing_parent_slug": "Declare metadata.parent_slug ou adicione a entrada em links[].",
+    "faq_expansion_incomplete": "Confirme a politica de expansao FAQ ou aumente o numero de copies/produtos terminais.",
+    "asset_expansion_incomplete": "Confirme a politica de assets ou ajuste count_per_parent.",
+    "offer_missing": "Adicione pelo menos uma oferta abaixo de cada produto.",
+    "rule_missing": "Adicione pelo menos uma regra abaixo de campaign/briefing/brand.",
+    "links_missing": "Declare os links pai/filho em plan.links para refletir a hierarquia.",
+    "other": "Revise as mensagens cruas listadas para entender a pendencia.",
+}
+
+
+def _diagnostic_classify_violation(message: str) -> tuple[str, Optional[int]]:
+    """Map a raw violation string to (kind, entry_index)."""
+    if not isinstance(message, str):
+        return "other", None
+    idx_match = re.match(r"entry\[(\d+)\]\s+(.*)", message)
+    affected_idx = int(idx_match.group(1)) if idx_match else None
+    if "cycle detected in parent chain" in message:
+        return "cycle", affected_idx
+    if "has no complete path to persona" in message:
+        return "no_path_to_persona", affected_idx
+    if "offer must stay under product" in message:
+        return "offer_under_product", affected_idx
+    if "audience must stay under" in message:
+        return "audience_parent", affected_idx
+    if "product must stay under audience" in message:
+        return "product_under_audience", affected_idx
+    if "product has invalid parent" in message or "product slug must not embed audience slug" in message:
+        return "product_invalid_parent", affected_idx
+    if "copy has invalid parent" in message or "copy must stay under offer" in message:
+        return "copy_parent", affected_idx
+    if "faq has invalid parent" in message or "faq must stay under copy" in message or "faq must use copy parent" in message:
+        return "faq_parent", affected_idx
+    if "rule must stay under" in message:
+        return "rule_parent", affected_idx
+    if "cannot be a primary tree card" in message:
+        return "invalid_primary_tree_type", affected_idx
+    if "duplicate slugs" in message:
+        return "duplicate_slug", None
+    if "requires a parent" in message:
+        return "missing_parent_slug", affected_idx
+    if "FAQ Golden Dataset incomplete" in message:
+        return "faq_expansion_incomplete", None
+    if "Asset expansion incomplete" in message:
+        return "asset_expansion_incomplete", None
+    if "offer required" in message:
+        return "offer_missing", None
+    if "rule required" in message:
+        return "rule_missing", None
+    if "links must not be empty" in message:
+        return "links_missing", None
+    return "other", affected_idx
+
+
+def _diagnostic_expected_parents(ctype: str, *, has_audience: bool, has_offer: bool, has_copy: bool) -> list[str]:
+    if ctype in {"persona", "brand", "briefing"}:
+        return []
+    if ctype == "campaign":
+        return ["brand", "briefing", "persona"]
+    if ctype == "audience":
+        return ["campaign", "briefing", "brand"]
+    if ctype == "product":
+        if has_audience:
+            return ["audience"]
+        return ["audience", "campaign", "briefing", "brand"]
+    if ctype == "offer":
+        return ["product"]
+    if ctype == "copy":
+        return ["product", "offer", "campaign"]
+    if ctype == "faq":
+        return ["rule", "copy", "offer", "product"]
+    if ctype == "rule":
+        return ["campaign", "briefing", "brand", "persona"]
+    if ctype == "tone":
+        return ["brand", "briefing", "persona"]
+    if ctype == "asset":
+        return ["product", "offer", "copy", "faq", "brand", "campaign", "audience"]
+    return []
+
+
+def _diagnostic_walk_parent_chain(
+    start_slug: str,
+    parent_by_child: dict[str, Optional[str]],
+) -> tuple[bool, bool, list[str]]:
+    """Return (reaches_persona, has_cycle, visited_path)."""
+    current = start_slug
+    seen: set[str] = set()
+    path: list[str] = []
+    for _ in range(64):
+        parent = parent_by_child.get(current)
+        if not parent:
+            return False, False, path
+        if parent == "self":
+            return True, False, path
+        if parent == current or parent in seen:
+            return False, True, path
+        seen.add(parent)
+        path.append(parent)
+        current = parent
+    return False, True, path
+
+
+def _diagnostic_entry_title(entry: dict) -> str:
+    if not isinstance(entry, dict):
+        return ""
+    title = entry.get("title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    slug = entry.get("slug")
+    return str(slug).strip() if slug else ""
+
+
+def _diagnostic_questions_markdown(
+    plan: dict,
+    nodes: list[dict],
+    root_causes: list[dict],
+    by_kind: dict[str, dict],
+) -> str:
+    questions: list[str] = []
+
+    offer_problems = [n for n in nodes if n["type"] == "offer" and n["status"] in {"error", "orphan", "cycle"}]
+    product_nodes = [n for n in nodes if n["type"] == "product" and n.get("slug")]
+    for offer in offer_problems:
+        product_options = ", ".join(f"`{p['slug']}`" for p in product_nodes) or "nenhum produto disponivel"
+        questions.append(
+            f"A oferta `entry[{offer['entry_index']}]` (slug `{offer['slug'] or '?'}`) pertence a qual produto? "
+            f"Opcoes: {product_options}."
+        )
+
+    if "no_path_to_persona" in by_kind or "cycle" in by_kind:
+        orphan_or_cycle = [n for n in nodes if n["status"] in {"orphan", "cycle"}]
+        if orphan_or_cycle:
+            questions.append(
+                "As entradas com ciclo ou sem caminho ate a persona devem ser reorganizadas como "
+                "`persona -> brand -> briefing -> campaign -> audience -> product -> offer -> copy -> rule -> faq`?"
+            )
+
+    if "offer_under_product" in by_kind:
+        questions.append(
+            "As ofertas devem ser distribuidas entre os produtos existentes ou todas pertencem a um unico produto?"
+        )
+
+    if "copy_parent" in by_kind:
+        questions.append("As copies devem ser agrupadas por produto/publico ou o operador pediu uma copy por oferta?")
+
+    if "faq_parent" in by_kind or "faq_expansion_incomplete" in by_kind:
+        questions.append("O FAQ agrupado deve ficar depois da rule estrutural antes de publicar?")
+
+    campaign_slugs = [n["slug"] for n in nodes if n["type"] == "campaign" and n.get("slug")]
+    if campaign_slugs and ("offer_under_product" in by_kind or "no_path_to_persona" in by_kind):
+        questions.append(
+            f"A(s) campanha(s) {', '.join('`' + s + '`' for s in campaign_slugs)} devem ser apenas contexto geral acima dos produtos?"
+        )
+
+    questions.append(
+        "Deseja que o sistema regenere o plano automaticamente seguindo a arvore "
+        "`campaign -> audience -> product -> offer -> copy -> rule -> faq`?"
+    )
+
+    if not questions:
+        return ""
+
+    lines = ["## Perguntas para corrigir o plano", ""]
+    for idx, q in enumerate(questions, 1):
+        lines.append(f"{idx}. {q}")
+    return "\n".join(lines)
+
+
+def _diagnostic_persona_existing(session: Optional[dict]) -> dict[str, list[dict[str, str]]]:
+    """Surface existing persona nodes (campaign/audience/product/asset/faq/copy/offer/rule)
+    so Sofia questions can offer concrete options keyed to real slugs/titles instead of
+    asking the operator to invent answers."""
+    if not isinstance(session, dict):
+        return {}
+    persona_context = session.get("persona_context")
+    if not isinstance(persona_context, dict):
+        return {}
+    out: dict[str, list[dict[str, str]]] = {}
+    for ntype, rows in persona_context.items():
+        if not isinstance(rows, list):
+            continue
+        bucket: list[dict[str, str]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            slug = row.get("slug")
+            if not slug:
+                continue
+            bucket.append({
+                "slug": str(slug),
+                "title": str(row.get("title") or slug),
+            })
+        if bucket:
+            out[str(ntype)] = bucket
+    return out
+
+
+def _diagnostic_humanize_type(ctype: Optional[str]) -> str:
+    table = {
+        "persona": "persona",
+        "brand": "marca",
+        "briefing": "briefing",
+        "campaign": "campanha",
+        "audience": "publico",
+        "product": "produto",
+        "offer": "oferta",
+        "copy": "copy",
+        "faq": "FAQ",
+        "rule": "regra comercial",
+        "asset": "asset visual",
+        "tone": "tom de voz",
+    }
+    return table.get(str(ctype or ""), str(ctype or "entrada"))
+
+
+def _diagnostic_entry_label(node: Optional[dict]) -> str:
+    if not isinstance(node, dict):
+        return "entrada"
+    title = (node.get("title") or "").strip()
+    if title:
+        return title
+    slug = (node.get("slug") or "").strip()
+    if slug:
+        return slug
+    return f"entry[{node.get('entry_index')}]"
+
+
+def _sofia_options_for_parent_choice(
+    affected_node: dict,
+    plan_nodes: list[dict],
+    existing: dict[str, list[dict[str, str]]],
+    expected_types: list[str],
+) -> list[dict[str, Any]]:
+    """Build options listing concrete candidate parents in the plan and persona
+    snapshot. Always closes with "manter pendente"."""
+    options: list[dict[str, Any]] = []
+    seen_slugs: set[str] = set()
+    for ptype in expected_types:
+        # Candidates already in the plan
+        for cand in plan_nodes:
+            if cand["type"] != ptype:
+                continue
+            slug = cand.get("slug") or ""
+            if not slug or slug in seen_slugs:
+                continue
+            seen_slugs.add(slug)
+            options.append({
+                "label": f"Conectar em {_diagnostic_humanize_type(ptype)} {cand.get('title') or slug}",
+                "action": "set_parent_slug",
+                "payload": {
+                    "entry_index": affected_node.get("entry_index"),
+                    "parent_slug": slug,
+                    "parent_type": ptype,
+                    "source": "plan",
+                },
+            })
+        # Candidates from persona snapshot
+        for cand in existing.get(ptype, []):
+            slug = cand.get("slug") or ""
+            if not slug or slug in seen_slugs:
+                continue
+            seen_slugs.add(slug)
+            options.append({
+                "label": f"Conectar em {_diagnostic_humanize_type(ptype)} existente \"{cand.get('title') or slug}\"",
+                "action": "set_parent_slug",
+                "payload": {
+                    "entry_index": affected_node.get("entry_index"),
+                    "parent_slug": slug,
+                    "parent_type": ptype,
+                    "source": "persona",
+                },
+            })
+    options.append({
+        "label": "Manter como pendencia para validar depois",
+        "action": "mark_pending",
+        "payload": {"entry_index": affected_node.get("entry_index")},
+    })
+    return options
+
+
+def _sofia_questions_from_diagnostic(
+    plan: dict,
+    session: Optional[dict],
+    nodes: list[dict],
+    by_kind: dict[str, dict],
+) -> list[dict[str, Any]]:
+    """Translate technical blocking violations into operator-facing questions.
+
+    Each returned entry contains: kind, technical_error, human_summary,
+    probable_cause, question, options[], severity, plus optional affected node
+    metadata. The list is intended to be the primary surface in the diagnostic
+    modal; raw `root_causes[].raw_messages` stays available for debugging."""
+    existing = _diagnostic_persona_existing(session)
+    nodes_by_index: dict[int, dict] = {int(n.get("entry_index", -1)): n for n in nodes if isinstance(n, dict)}
+    questions: list[dict[str, Any]] = []
+
+    for kind, bucket in by_kind.items():
+        raw_messages: list[str] = list(bucket.get("raw_messages") or [])
+        affected_idxs: list[int] = list(bucket.get("affected_entry_indexes") or [])
+
+        if kind == "no_path_to_persona":
+            for idx in affected_idxs:
+                node = nodes_by_index.get(idx)
+                if not node:
+                    continue
+                expected = node.get("expected_parent_types") or []
+                ntype = node.get("type") or ""
+                label = _diagnostic_entry_label(node)
+                if ntype == "rule":
+                    human = f"A regra comercial \"{label}\" ficou fora do caminho principal da persona."
+                    cause = "A regra nao tem parent declarado entre campaign, briefing, brand ou persona."
+                    question = f"Onde devo aplicar a regra \"{label}\"?"
+                elif ntype == "faq":
+                    human = f"O FAQ \"{label}\" ficou sem conexao clara com a campanha confirmada."
+                    cause = "FAQ precisa pertencer a rule, copy, offer ou produto para chegar na persona."
+                    question = f"Esse FAQ deve responder sobre qual parte da campanha?"
+                elif ntype == "copy":
+                    human = f"A copy \"{label}\" ficou sem destino comercial."
+                    cause = "Copy precisa apontar para produto, oferta ou campanha."
+                    question = f"Em qual contexto a copy \"{label}\" deve aparecer?"
+                elif ntype == "offer":
+                    human = f"A oferta \"{label}\" nao esta ligada a um produto."
+                    cause = "Toda oferta precisa de um produto pai."
+                    question = f"A oferta \"{label}\" pertence a qual produto?"
+                elif ntype == "asset":
+                    human = f"O asset \"{label}\" nao esta conectado em nenhum lugar do plano."
+                    cause = "Asset precisa pertencer a produto, oferta, copy, FAQ, campanha ou audience."
+                    question = f"Em qual node devo conectar o asset \"{label}\"?"
+                else:
+                    human = f"A entrada \"{label}\" ({_diagnostic_humanize_type(ntype)}) ficou fora do caminho principal."
+                    cause = "A cadeia de pais nao chega ate a persona."
+                    question = f"Em qual node a entrada \"{label}\" deve ficar conectada?"
+                tech = next(
+                    (m for m in raw_messages if isinstance(m, str) and f"entry[{idx}]" in m),
+                    raw_messages[0] if raw_messages else "",
+                )
+                questions.append({
+                    "kind": kind,
+                    "technical_error": tech,
+                    "affected_entry_index": idx,
+                    "affected_title": label,
+                    "affected_type": ntype,
+                    "severity": "blocking",
+                    "human_summary": human,
+                    "probable_cause": cause,
+                    "question": question,
+                    "options": _sofia_options_for_parent_choice(node, nodes, existing, expected),
+                })
+            continue
+
+        if kind == "asset_expansion_incomplete":
+            expansion = _expansion_summary(plan, session) if isinstance(plan, dict) else {}
+            asset_info = expansion.get("asset") or {}
+            expected_count = int(asset_info.get("expected") or 0)
+            created_count = int(asset_info.get("created") or 0)
+            existing_assets = existing.get("asset", [])
+            options: list[dict[str, Any]] = []
+            for cand in existing_assets[:4]:
+                options.append({
+                    "label": f"Conectar asset existente \"{cand.get('title') or cand['slug']}\" a campanha",
+                    "action": "attach_existing_asset",
+                    "payload": {"slug": cand["slug"], "scope": "campaign"},
+                })
+                options.append({
+                    "label": f"Conectar asset existente \"{cand.get('title') or cand['slug']}\" ao produto",
+                    "action": "attach_existing_asset",
+                    "payload": {"slug": cand["slug"], "scope": "product"},
+                })
+            options.append({
+                "label": "Enviar um novo asset agora",
+                "action": "upload_asset",
+                "payload": {},
+            })
+            options.append({
+                "label": "Seguir sem asset neste plano",
+                "action": "drop_asset_requirement",
+                "payload": {},
+            })
+            human = (
+                f"O plano esperava {expected_count} asset visual"
+                + ("(s)" if expected_count != 1 else "")
+                + f", mas {created_count} foi/foram conectado(s)."
+            )
+            questions.append({
+                "kind": kind,
+                "technical_error": raw_messages[0] if raw_messages else "",
+                "severity": "blocking",
+                "human_summary": "A Sofia esperava um asset visual para este plano, mas nenhum asset foi conectado.",
+                "probable_cause": human,
+                "question": "Quer conectar o asset visual existente a campanha ou seguir sem asset?",
+                "options": options,
+            })
+            continue
+
+        if kind == "faq_expansion_incomplete":
+            expansion = _expansion_summary(plan, session) if isinstance(plan, dict) else {}
+            faq_info = expansion.get("faq") or {}
+            expected_count = int(faq_info.get("expected") or 0)
+            created_count = int(faq_info.get("created") or 0)
+            questions.append({
+                "kind": kind,
+                "technical_error": raw_messages[0] if raw_messages else "",
+                "severity": "blocking",
+                "human_summary": "O conjunto de FAQs esperado pelo Golden Dataset ainda nao esta completo.",
+                "probable_cause": f"O plano espera {expected_count} FAQ(s) mas tem {created_count}.",
+                "question": "Quer que a Sofia gere os FAQs faltantes a partir das copies/produtos terminais?",
+                "options": [
+                    {
+                        "label": "Sim, gerar FAQs faltantes automaticamente",
+                        "action": "regenerate_missing_faqs",
+                        "payload": {},
+                    },
+                    {
+                        "label": "Reduzir o numero esperado de FAQs",
+                        "action": "lower_faq_target",
+                        "payload": {"new_target": created_count},
+                    },
+                    {
+                        "label": "Seguir sem completar o Golden Dataset",
+                        "action": "drop_faq_target",
+                        "payload": {},
+                    },
+                ],
+            })
+            continue
+
+        if kind == "offer_missing":
+            product_nodes = [n for n in nodes if n.get("type") == "product"]
+            options = []
+            for p in product_nodes:
+                options.append({
+                    "label": f"Criar oferta abaixo de {_diagnostic_entry_label(p)}",
+                    "action": "create_offer",
+                    "payload": {"product_slug": p.get("slug")},
+                })
+            options.append({
+                "label": "Seguir sem oferta neste plano",
+                "action": "drop_offer_requirement",
+                "payload": {},
+            })
+            questions.append({
+                "kind": kind,
+                "technical_error": raw_messages[0] if raw_messages else "",
+                "severity": "blocking",
+                "human_summary": "A sessao indicou preco/kit/variacao mas nenhuma oferta foi criada.",
+                "probable_cause": "Quando o briefing menciona preco, kit ou plano, a Sofia espera ao menos uma oferta.",
+                "question": "Quer criar uma oferta agora?",
+                "options": options,
+            })
+            continue
+
+        if kind == "rule_missing":
+            questions.append({
+                "kind": kind,
+                "technical_error": raw_messages[0] if raw_messages else "",
+                "severity": "blocking",
+                "human_summary": "A sessao indicou regras comerciais (prazo, troca, pagamento) mas nenhuma regra foi criada.",
+                "probable_cause": "Quando o briefing menciona regras comerciais, a Sofia espera ao menos uma regra acima.",
+                "question": "Quer criar a regra comercial agora?",
+                "options": [
+                    {"label": "Criar regra abaixo da campanha", "action": "create_rule", "payload": {"scope": "campaign"}},
+                    {"label": "Criar regra abaixo do briefing", "action": "create_rule", "payload": {"scope": "briefing"}},
+                    {"label": "Seguir sem regra neste plano", "action": "drop_rule_requirement", "payload": {}},
+                ],
+            })
+            continue
+
+        if kind in {"offer_under_product", "audience_parent", "product_under_audience",
+                    "product_invalid_parent", "copy_parent", "faq_parent", "rule_parent"}:
+            for idx in affected_idxs:
+                node = nodes_by_index.get(idx)
+                if not node:
+                    continue
+                expected = node.get("expected_parent_types") or []
+                label = _diagnostic_entry_label(node)
+                ntype = node.get("type") or ""
+                tech = next(
+                    (m for m in raw_messages if isinstance(m, str) and f"entry[{idx}]" in m),
+                    raw_messages[0] if raw_messages else "",
+                )
+                questions.append({
+                    "kind": kind,
+                    "technical_error": tech,
+                    "affected_entry_index": idx,
+                    "affected_title": label,
+                    "affected_type": ntype,
+                    "severity": "blocking",
+                    "human_summary": f"\"{label}\" esta abaixo de um node que nao e permitido.",
+                    "probable_cause": f"{_diagnostic_humanize_type(ntype)} so pode pertencer a {', '.join(expected) or 'um node estrutural'}.",
+                    "question": f"Em qual node \"{label}\" deve ficar?",
+                    "options": _sofia_options_for_parent_choice(node, nodes, existing, expected),
+                })
+            continue
+
+        if kind == "cycle":
+            for idx in affected_idxs:
+                node = nodes_by_index.get(idx)
+                if not node:
+                    continue
+                expected = node.get("expected_parent_types") or []
+                label = _diagnostic_entry_label(node)
+                tech = next(
+                    (m for m in raw_messages if isinstance(m, str) and f"entry[{idx}]" in m),
+                    raw_messages[0] if raw_messages else "",
+                )
+                questions.append({
+                    "kind": kind,
+                    "technical_error": tech,
+                    "affected_entry_index": idx,
+                    "affected_title": label,
+                    "affected_type": node.get("type") or "",
+                    "severity": "blocking",
+                    "human_summary": f"\"{label}\" esta apontando para um pai que volta para ela mesma (ciclo).",
+                    "probable_cause": "A cadeia metadata.parent_slug formou um loop.",
+                    "question": f"Para qual node \"{label}\" deve apontar?",
+                    "options": _sofia_options_for_parent_choice(node, nodes, existing, expected),
+                })
+            continue
+
+        if kind == "missing_parent_slug":
+            for idx in affected_idxs:
+                node = nodes_by_index.get(idx)
+                if not node:
+                    continue
+                expected = node.get("expected_parent_types") or []
+                label = _diagnostic_entry_label(node)
+                tech = next(
+                    (m for m in raw_messages if isinstance(m, str) and f"entry[{idx}]" in m),
+                    raw_messages[0] if raw_messages else "",
+                )
+                questions.append({
+                    "kind": kind,
+                    "technical_error": tech,
+                    "affected_entry_index": idx,
+                    "affected_title": label,
+                    "affected_type": node.get("type") or "",
+                    "severity": "blocking",
+                    "human_summary": f"\"{label}\" foi criada sem indicar de onde ela vem.",
+                    "probable_cause": "Falta declarar metadata.parent_slug ou aparecer em links[].",
+                    "question": f"De qual node \"{label}\" depende?",
+                    "options": _sofia_options_for_parent_choice(node, nodes, existing, expected),
+                })
+            continue
+
+        if kind == "duplicate_slug":
+            questions.append({
+                "kind": kind,
+                "technical_error": raw_messages[0] if raw_messages else "",
+                "severity": "blocking",
+                "human_summary": "Duas ou mais entradas estao usando o mesmo slug.",
+                "probable_cause": "Slugs precisam ser unicos dentro do plano.",
+                "question": "Quer que a Sofia gere slugs unicos automaticamente?",
+                "options": [
+                    {"label": "Sim, regerar slugs duplicados", "action": "regenerate_slugs", "payload": {}},
+                    {"label": "Editar manualmente no plano", "action": "open_plan_editor", "payload": {}},
+                ],
+            })
+            continue
+
+        # Fallback: keep technical message visible but wrap in a generic question
+        questions.append({
+            "kind": kind,
+            "technical_error": raw_messages[0] if raw_messages else "",
+            "severity": "blocking",
+            "human_summary": bucket.get("description") or "O validador identificou uma pendencia que precisa de decisao.",
+            "probable_cause": bucket.get("description") or "",
+            "question": "Como deseja resolver essa pendencia?",
+            "options": [
+                {"label": "Editar plano manualmente", "action": "open_plan_editor", "payload": {}},
+                {"label": "Manter como pendencia", "action": "mark_pending", "payload": {}},
+            ],
+        })
+
+    return questions
+
+
+def _sofia_questions_markdown(sofia_questions: list[dict[str, Any]]) -> str:
+    """Render Sofia questions as markdown so the modal can keep the legacy
+    `questions_markdown` field useful when it is the only surface available."""
+    if not sofia_questions:
+        return ""
+    lines = ["## O que falta decidir", ""]
+    for idx, q in enumerate(sofia_questions, 1):
+        lines.append(f"### {idx}. {q.get('human_summary') or q.get('question') or ''}")
+        question_text = q.get("question") or ""
+        if question_text:
+            lines.append("")
+            lines.append(question_text)
+        options = q.get("options") or []
+        if options:
+            lines.append("")
+            for opt in options:
+                label = opt.get("label") or ""
+                if label:
+                    lines.append(f"- {label}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def build_plan_diagnostic(
+    plan: dict,
+    session: Optional[dict],
+    violations: list[str],
+) -> Optional[dict[str, Any]]:
+    """Build a structured diagnostic for a blocked plan.
+
+    Returns None when there are no blocking violations or no entries to classify.
+    The shape is documented in dashboard/app/knowledge/capture/page.tsx (PlanState.diagnostic).
+    """
+    if not violations:
+        return None
+    if not isinstance(plan, dict):
+        return None
+    entries = plan.get("entries") or []
+    if not isinstance(entries, list):
+        return None
+
+    slug_to_entry: dict[str, dict] = {}
+    parent_by_child: dict[str, Optional[str]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        slug = entry.get("slug")
+        if not slug:
+            continue
+        slug_to_entry[str(slug)] = entry
+        parent_by_child[str(slug)] = _entry_parent_slug(entry)
+
+    has_audience = any(_entry_type(e) == "audience" for e in entries if isinstance(e, dict))
+    has_offer = any(_entry_type(e) == "offer" for e in entries if isinstance(e, dict))
+    has_copy = any(_entry_type(e) == "copy" for e in entries if isinstance(e, dict))
+
+    # Group violations first so we can attach raw messages to nodes.
+    by_kind: dict[str, dict] = {}
+    for violation in violations:
+        kind, affected_idx = _diagnostic_classify_violation(violation)
+        bucket = by_kind.setdefault(kind, {
+            "kind": kind,
+            "title": _DIAGNOSTIC_KIND_TITLES.get(kind, kind),
+            "description": _DIAGNOSTIC_KIND_DESCRIPTIONS.get(kind, ""),
+            "affected_entry_indexes": [],
+            "raw_messages": [],
+            "suggested_repair": _DIAGNOSTIC_KIND_REPAIRS.get(kind, ""),
+        })
+        if affected_idx is not None and affected_idx not in bucket["affected_entry_indexes"]:
+            bucket["affected_entry_indexes"].append(affected_idx)
+        bucket["raw_messages"].append(violation)
+
+    issues_by_index: dict[int, list[str]] = {}
+    for bucket in by_kind.values():
+        for idx in bucket["affected_entry_indexes"]:
+            issues_by_index.setdefault(idx, []).append(bucket["title"])
+
+    nodes: list[dict[str, Any]] = []
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        ctype = _entry_type(entry)
+        parent_slug = _entry_parent_slug(entry)
+        parent_entry = slug_to_entry.get(parent_slug or "")
+        parent_type = _entry_type(parent_entry) if parent_entry else None
+        expected = _diagnostic_expected_parents(
+            ctype,
+            has_audience=has_audience,
+            has_offer=has_offer,
+            has_copy=has_copy,
+        )
+
+        status = "valid"
+        node_issues: list[str] = list(issues_by_index.get(idx, []))
+        slug_value = str(entry.get("slug") or "")
+        is_top_level = ctype in SOFIA_TOP_LEVEL_TYPES
+
+        reaches_persona = is_top_level
+        has_cycle = False
+        chain_path: list[str] = []
+        if slug_value:
+            reaches_persona, has_cycle, chain_path = _diagnostic_walk_parent_chain(slug_value, parent_by_child)
+            if is_top_level:
+                # top-level types do not need to walk further
+                reaches_persona = True
+
+        parent_is_persona_ref = parent_slug == "self"
+        if has_cycle:
+            status = "cycle"
+        elif not is_top_level and not reaches_persona:
+            status = "orphan"
+        elif expected and parent_type and parent_type not in expected:
+            status = "error"
+        elif expected and not parent_entry and not is_top_level and not parent_is_persona_ref:
+            status = "error"
+            node_issues.append("Sem parent declarado")
+        elif idx in issues_by_index:
+            status = "warning"
+
+        suggested_action: Optional[str] = None
+        if status == "error" and expected:
+            suggested_action = f"Escolher parent do tipo {expected[0]}"
+        elif status == "cycle":
+            suggested_action = "Quebrar o ciclo: aponte parent_slug para um node real acima"
+        elif status == "orphan":
+            suggested_action = "Reconectar entrada ate a persona"
+        elif status == "warning":
+            suggested_action = "Revisar pendencia relacionada"
+
+        nodes.append({
+            "entry_index": idx,
+            "slug": slug_value,
+            "title": _diagnostic_entry_title(entry),
+            "type": ctype,
+            "parent_slug": parent_slug,
+            "parent_type": parent_type,
+            "expected_parent_types": expected,
+            "status": status,
+            "issues": node_issues,
+            "suggested_action": suggested_action,
+            "chain_path": chain_path,
+        })
+
+    root_causes = list(by_kind.values())
+    summary = {
+        "entry_count": len(nodes),
+        "blocked_count": len(violations),
+        "cycle_count": sum(1 for n in nodes if n["status"] == "cycle"),
+        "orphan_count": sum(1 for n in nodes if n["status"] == "orphan"),
+        "error_count": sum(1 for n in nodes if n["status"] == "error"),
+        "warning_count": sum(1 for n in nodes if n["status"] == "warning"),
+        "valid_count": sum(1 for n in nodes if n["status"] == "valid"),
+        "root_cause_count": len(root_causes),
+    }
+    sofia_questions = _sofia_questions_from_diagnostic(plan, session, nodes, by_kind)
+    # Primary markdown surface = Sofia translation. The legacy generic
+    # markdown is kept as a fallback when Sofia could not produce any
+    # question (e.g. unknown violation kinds).
+    questions_markdown = _sofia_questions_markdown(sofia_questions) or _diagnostic_questions_markdown(
+        plan, nodes, root_causes, by_kind
+    )
+
+    return {
+        "blocked": True,
+        "summary": summary,
+        "nodes": nodes,
+        "root_causes": root_causes,
+        "sofia_questions": sofia_questions,
+        "questions_markdown": questions_markdown,
+        "repair_suggestion": (
+            "Arvore sugerida: persona -> brand -> briefing -> campaign -> audience -> "
+            "product -> offer -> copy -> faq"
+        ),
+    }
 
 
 def _entry_type(entry: dict) -> str:
@@ -1206,13 +2201,12 @@ def _knowledge_plan_title_from_session(session: dict) -> str:
 
 
 def _requested_variation_count(session: dict, block_id: str, default: int) -> int:
-    for key in ("current_block_counts", "initial_block_counts"):
-        counts = session.get(key)
-        if isinstance(counts, dict) and block_id in counts:
-            try:
-                return max(int(counts.get(block_id) or 0), 0)
-            except Exception:
-                pass
+    counts = session.get("initial_block_counts")
+    if isinstance(counts, dict) and block_id in counts:
+        try:
+            return max(int(counts.get(block_id) or 0), 0)
+        except Exception:
+            pass
     context = str(session.get("context") or "")
     pattern = rf"^\s*-\s*{re.escape(block_id)}:\s*(\d+)\s+vari"
     match = re.search(pattern, context, flags=re.IGNORECASE | re.MULTILINE)
@@ -1225,10 +2219,9 @@ def _requested_variation_count(session: dict, block_id: str, default: int) -> in
 
 
 def _has_explicit_variation_count(session: dict, block_id: str) -> bool:
-    for key in ("current_block_counts", "initial_block_counts"):
-        counts = session.get(key)
-        if isinstance(counts, dict) and block_id in counts:
-            return True
+    counts = session.get("initial_block_counts")
+    if isinstance(counts, dict) and block_id in counts:
+        return True
     context = str(session.get("context") or "")
     pattern = rf"^\s*-\s*{re.escape(block_id)}:\s*(\d+)\s+vari"
     return bool(re.search(pattern, context, flags=re.IGNORECASE | re.MULTILINE))
@@ -1295,6 +2288,7 @@ def _relation_type_for_parent(parent_type: str, child_type: str) -> str:
         ("campaign", "rule"): "contains",
         ("briefing", "rule"): "contains",
         ("brand", "rule"): "contains",
+        ("rule", "faq"): "answers_question",
         ("entity", "product"): "contains",
         ("other", "product"): "contains",
         ("brand", "entity"): "contains",
@@ -1325,7 +2319,7 @@ def _is_b2b_faq(entry: dict) -> bool:
         str(entry.get("content") or ""),
         " ".join(entry.get("tags") or []),
     ]).lower()
-    return any(token in blob for token in ("quantidade minima", "pedido minimo", "revend", "varej", "atacad", "empreended", "5 pec"))
+    return any(token in blob for token in ("quantidade minima", "pedido minimo", "revend", "varej", "atacad"))
 
 
 def _known_colors_from_session(session: dict, plan: dict) -> list[str]:
@@ -1375,27 +2369,44 @@ def _commercial_offer_specs(session: dict, plan: dict) -> list[dict[str, Any]]:
         if qty > 0:
             specs.setdefault(qty, {"quantity": qty, "price": None, "audience_role": None})
     lowered = blob.lower()
-    if re.search(r"\b1\s*pe[cç]a\s+(?:é|e|=|para|pra).{0,80}(cliente|final)", lowered):
-        specs.setdefault(1, {"quantity": 1, "price": None, "audience_role": None})["audience_role"] = "final"
-    if re.search(r"\b(?:5\s*(?:e|,|/)\s*10|5|10)\s*pe[cç]as?\s+(?:s[aã]o|=|para|pra).{0,100}(empreended|revend|lojist|atacad)", lowered):
-        for qty in (5, 10):
-            specs.setdefault(qty, {"quantity": qty, "price": None, "audience_role": None})["audience_role"] = "b2b"
     for qty, spec in specs.items():
+        spec.setdefault("label", f"{qty} unidade" if qty == 1 else f"{qty} unidades")
         if not spec.get("audience_role"):
-            spec["audience_role"] = "final" if qty == 1 else "b2b" if qty >= 5 else "any"
+            if qty == 1 and re.search(r"\b(?:1\s*(?:pe[cç]a|unidade).*?(?:cliente|publico|p[uú]blico)\s+final|(?:cliente|publico|p[uú]blico)\s+final.*?1\s*(?:pe[cç]a|unidade))\b", lowered, re.I):
+                spec["audience_role"] = "final"
+            elif qty >= 5 and re.search(r"\b(?:5|10)\s*(?:pe[cç]as?|unidades?)?.*?(?:empreended|revend|atacad|lojist)|(?:empreended|revend|atacad|lojist).*?(?:5|10)\s*(?:pe[cç]as?|unidades?)?\b", lowered, re.I):
+                spec["audience_role"] = "b2b"
+            else:
+                spec["audience_role"] = "any"
     return [specs[key] for key in sorted(specs)]
 
 
+def _explicit_copy_per_offer_requested(session: dict) -> bool:
+    blob = _plan_blob(session).lower()
+    return bool(re.search(
+        r"\b(?:copy|copies|copys?)\s+(?:diferentes?\s+)?(?:para\s+)?cada\s+oferta\b|"
+        r"\buma\s+copy\s+por\s+oferta\b|"
+        r"\bcopy_policy\s*[:=]\s*per_offer\b",
+        blob,
+        re.I,
+    ))
+
+
 def _offers_required(session: dict, plan: dict) -> bool:
-    if _commercial_offer_specs(session, plan):
+    if _requested_variation_count(session, "offer", 0) > 0:
+        return True
+    specs = _commercial_offer_specs(session, plan)
+    if specs:
         return True
     blob = _plan_blob(session, plan).lower()
-    return bool(re.search(r"\b(pre[cç]o|r\$|pacote|op[cç][aã]o|pe[cç]as?)\b", blob))
+    return bool(re.search(r"\b(pre[cç]o\s+diferente|quantidade\s+diferente|pacote|plano\s+(?:comercial|de\s+assinatura|de\s+compra)|assinatura|bundle|combo|op[cç][aã]o\s+de\s+compra|vers[aã]o\s+de\s+compra|condi[cç][aã]o\s+comercial\s+(?:especifica|diferente|propria)|varia[cç][aã]o\s+comercial|categoria\s+de\s+oferta)\b", blob))
 
 
 def _rule_required(session: dict, plan: dict) -> bool:
+    if _requested_variation_count(session, "rule", 0) > 0:
+        return True
     blob = _plan_blob(session, plan).lower()
-    return bool(re.search(r"\b(regra|1\s*pe[cç]a\s*(?:=|é|e)|5\s*(?:e|,|/)\s*10|n[aã]o inventar|n[aã]o prometer)\b", blob))
+    return bool(re.search(r"\b(regra\s+comercial\s+obrigatoria|politica\s+comercial\s+obrigatoria|n[aã]o inventar|n[aã]o prometer)\b", blob))
 
 
 def _is_final_audience(entry: dict) -> bool:
@@ -1449,15 +2460,19 @@ def _ensure_governing_rule(plan: dict, session: dict) -> None:
         for rule in rules:
             if not _entry_parent_slug(rule):
                 _set_entry_parent_slug(rule, parent_slug)
+            meta = _entry_metadata(rule)
+            meta.setdefault("governs_children", True)
+            meta.setdefault("rule_scope", "campaign")
+            meta.setdefault("structural_before_faq", True)
         return
     rule = _normalize_plan_entry({
         "content_type": "rule",
-        "title": "Regra comercial por quantidade",
-        "slug": "rule-regra-publico-quantidade",
+        "title": "Regra comercial pendente de validacao",
+        "slug": "rule-regra-comercial-pendente",
         "status": "pendente_validacao",
-        "content": "1 peca se destina a cliente final. Pacotes de 5 e 10 pecas se destinam a empreendedoras/revendedoras. Nao inventar preco, estoque ou disponibilidade sem validacao.",
-        "tags": ["rule", "comercial", "quantidade"],
-        "metadata": {"parent_slug": parent_slug, "governs_children": True, "rule_scope": "campaign"},
+        "content": "Consolidar a regra comercial confirmada pelo operador ou pela fonte. Nao inventar preco, estoque, prazo, disponibilidade, lote minimo ou condicao comercial sem validacao.",
+        "tags": ["rule", "comercial", "pending-validation"],
+        "metadata": {"parent_slug": parent_slug, "governs_children": True, "rule_scope": "campaign", "structural_before_faq": True},
     })
     entries.append(rule)
     plan["entries"] = entries
@@ -1468,10 +2483,16 @@ def _ensure_offer_entries(plan: dict, session: dict) -> None:
         return
     entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
     by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
-    specs = _commercial_offer_specs(session, plan) or [{"quantity": 1, "price": None, "audience_role": "any"}]
+    requested_offer_count = max(0, _requested_variation_count(session, "offer", 0))
+    specs = _commercial_offer_specs(session, plan)
+    if not specs:
+        specs = [{"label": f"opcao comercial {idx}", "quantity": None, "price": None, "audience_role": "any"} for idx in range(1, max(1, requested_offer_count) + 1)]
+    elif requested_offer_count > len(specs):
+        for idx in range(len(specs) + 1, requested_offer_count + 1):
+            specs.append({"label": f"opcao comercial {idx}", "quantity": None, "price": None, "audience_role": "any"})
     used = {str(entry.get("slug")) for entry in entries if entry.get("slug")}
     existing_offer_keys = {
-        (_entry_parent_slug(entry), str(_entry_metadata(entry).get("quantity") or ""))
+        (_entry_parent_slug(entry), str(_entry_metadata(entry).get("offer_key") or _entry_metadata(entry).get("quantity") or "generic"))
         for entry in entries
         if _entry_type(entry) == "offer"
     }
@@ -1481,25 +2502,27 @@ def _ensure_offer_entries(plan: dict, session: dict) -> None:
         for spec in specs:
             if not _offer_applies_to_audience(spec, audience):
                 continue
-            qty = int(spec.get("quantity") or 0)
-            key = (str(product.get("slug")), str(qty))
+            qty = spec.get("quantity")
+            offer_key = str(qty if qty is not None else spec.get("label") or "generic")
+            key = (str(product.get("slug")), offer_key)
             if key in existing_offer_keys:
                 continue
-            label = f"{qty} peca" if qty == 1 else f"{qty} pecas"
+            label = str(spec.get("label") or "opcao comercial")
             title = f"{product.get('title')} - {label}"
             if spec.get("price"):
                 title = f"{title} R$ {spec['price']}"
             offer = _normalize_plan_entry({
                 "content_type": "offer",
                 "title": title,
-                "slug": _dedupe_slug(f"offer-{product.get('slug')}-{qty}-pecas", used),
+                "slug": _dedupe_slug(f"offer-{product.get('slug')}-{label}", used),
                 "status": "pendente_validacao",
-                "content": f"Oferta comercial de {label} para {product.get('title')}. Preco informado: {spec.get('price') or 'pendente de validacao'}.",
-                "tags": ["offer", "preco", "quantidade"],
+                "content": f"Oferta comercial {label} para {product.get('title')}. Preco informado: {spec.get('price') or 'pendente de validacao'}.",
+                "tags": ["offer", "commercial", "pending-validation"],
                 "metadata": {
                     "parent_slug": str(product.get("slug")),
                     "quantity": qty,
                     "price": spec.get("price"),
+                    "offer_key": offer_key,
                     "audience_role": spec.get("audience_role"),
                     "commercial_offer": True,
                 },
@@ -1510,28 +2533,91 @@ def _ensure_offer_entries(plan: dict, session: dict) -> None:
         plan["entries"] = entries
 
 
-def _ensure_copies_for_offers(plan: dict) -> None:
+def _ensure_copies_for_offers(plan: dict, session: Optional[dict] = None) -> None:
     entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
     offers = [entry for entry in entries if _entry_type(entry) == "offer" and entry.get("slug")]
     if not offers:
         return
+    if _explicit_copy_per_offer_requested(session or {}):
+        _ensure_copies_per_explicit_offer(plan)
+        return
     used = {str(entry.get("slug")) for entry in entries if entry.get("slug")}
     by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
     copies = [entry for entry in entries if _entry_type(entry) == "copy"]
-    product_copy_templates: dict[str, list[dict]] = {}
+    offers_by_product: dict[str, list[dict]] = {}
+    for offer in offers:
+        product_slug = _entry_parent_slug(offer) or ""
+        if product_slug:
+            offers_by_product.setdefault(product_slug, []).append(offer)
+
+    copies_by_product: dict[str, list[dict]] = {}
+    offer_copy_templates: dict[str, list[dict]] = {}
     for copy in copies:
         parent_slug = _entry_parent_slug(copy)
         parent = by_slug.get(parent_slug or "")
         if _entry_type(parent) == "product":
-            product_copy_templates.setdefault(parent_slug or "", []).append(copy)
+            copies_by_product.setdefault(parent_slug or "", []).append(copy)
+        elif _entry_type(parent) == "offer":
+            product_slug = _entry_parent_slug(parent) or ""
+            if product_slug:
+                offer_copy_templates.setdefault(product_slug, []).append(copy)
+
     remove_copy_slugs: set[str] = set()
+    for product_slug, product_offers in offers_by_product.items():
+        existing = copies_by_product.get(product_slug) or []
+        templates = existing or offer_copy_templates.get(product_slug) or copies
+        template = templates[0] if templates else {}
+        product = by_slug.get(product_slug) or {}
+        grouped_offer_slugs = [str(offer.get("slug")) for offer in product_offers if offer.get("slug")]
+        if existing:
+            keep = existing[0]
+            meta = _entry_metadata(keep)
+            meta["parent_slug"] = product_slug
+            meta["copy_policy"] = "per_product_context"
+            meta["grouped_offer_slugs"] = grouped_offer_slugs
+            meta["grouped_offer_count"] = len(grouped_offer_slugs)
+            for extra in existing[1:]:
+                remove_copy_slugs.add(str(extra.get("slug") or ""))
+        else:
+            title = str((template or {}).get("title") or f"Copy para {product.get('title') or product_slug}")
+            copy = _normalize_plan_entry({
+                **(template if isinstance(template, dict) else {}),
+                "content_type": "copy",
+                "title": title,
+                "slug": _dedupe_slug(f"copy-{product_slug}", used),
+                "status": "pendente_validacao",
+                "content": str((template or {}).get("content") or f"Mensagem comercial para {product.get('title') or product_slug}, considerando as ofertas agrupadas do contexto."),
+                "tags": list(dict.fromkeys([*((template or {}).get("tags") or []), "copy", "product-context"])),
+                "metadata": {
+                    **((template or {}).get("metadata") or {}),
+                    "parent_slug": product_slug,
+                    "copy_policy": "per_product_context",
+                    "grouped_offer_slugs": grouped_offer_slugs,
+                    "grouped_offer_count": len(grouped_offer_slugs),
+                },
+            })
+            entries.append(copy)
+            copies.append(copy)
+        for offer_copy in offer_copy_templates.get(product_slug, []):
+            remove_copy_slugs.add(str(offer_copy.get("slug") or ""))
+    if remove_copy_slugs:
+        entries[:] = [
+            entry for entry in entries
+            if _entry_type(entry) != "copy" or str(entry.get("slug") or "") not in remove_copy_slugs
+        ]
+    plan["entries"] = entries
+
+
+def _ensure_copies_per_explicit_offer(plan: dict) -> None:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    offers = [entry for entry in entries if _entry_type(entry) == "offer" and entry.get("slug")]
+    used = {str(entry.get("slug")) for entry in entries if entry.get("slug")}
+    copies = [entry for entry in entries if _entry_type(entry) == "copy"]
     for offer in offers:
         offer_slug = str(offer.get("slug"))
         if any(_entry_parent_slug(copy) == offer_slug for copy in copies):
             continue
-        product_slug = _entry_parent_slug(offer) or ""
-        templates = product_copy_templates.get(product_slug) or copies
-        template = templates[0] if templates else {}
+        template = copies[0] if copies else {}
         title = str((template or {}).get("title") or f"Copy para {offer.get('title')}")
         copy = _normalize_plan_entry({
             **(template if isinstance(template, dict) else {}),
@@ -1541,21 +2627,16 @@ def _ensure_copies_for_offers(plan: dict) -> None:
             "status": "pendente_validacao",
             "content": str((template or {}).get("content") or f"Mensagem comercial para {offer.get('title')}."),
             "tags": list(dict.fromkeys([*((template or {}).get("tags") or []), "copy", "offer"])),
-            "metadata": {**((template or {}).get("metadata") or {}), "parent_slug": offer_slug, "copied_for_offer": True},
+            "metadata": {**((template or {}).get("metadata") or {}), "parent_slug": offer_slug, "copy_policy": "per_offer", "copied_for_offer": True},
         })
         entries.append(copy)
         copies.append(copy)
-        if template and _entry_parent_slug(template) == product_slug:
-            remove_copy_slugs.add(str(template.get("slug") or ""))
-    if remove_copy_slugs:
-        entries[:] = [
-            entry for entry in entries
-            if _entry_type(entry) != "copy" or str(entry.get("slug") or "") not in remove_copy_slugs
-        ]
     plan["entries"] = entries
 
 
-def _reparent_copies_to_offers(plan: dict) -> None:
+def _reparent_copies_to_offers(plan: dict, session: Optional[dict] = None) -> None:
+    if not _explicit_copy_per_offer_requested(session or {}):
+        return
     entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
     offers = [entry for entry in entries if _entry_type(entry) == "offer" and entry.get("slug")]
     if not offers:
@@ -1585,49 +2666,333 @@ def _faq_leaf_entries(plan: dict) -> list[dict]:
     ]
 
 
-def _ensure_total_faq_policy(plan: dict, session: dict) -> None:
-    if (plan.get("tree_mode") or "single_branch") != "single_branch":
-        return
-    policy = str(plan.get("faq_count_policy") or "total").strip() or "total"
-    plan["faq_count_policy"] = policy
-    if policy != "total":
+def _branch_chain_to_parent(parent: dict, entries_by_slug: dict[str, dict]) -> list[dict]:
+    chain: list[dict] = []
+    current = parent
+    seen: set[str] = set()
+    while current and current.get("slug") and str(current.get("slug")) not in seen and len(chain) < 16:
+        current_slug = str(current.get("slug"))
+        seen.add(current_slug)
+        chain.append(current)
+        current = entries_by_slug.get(_entry_parent_slug(current) or "")
+    return list(reversed(chain))
+
+
+def _entry_context_line(label: str, entry: Optional[dict]) -> str:
+    if not entry:
+        return f"- {label}: nao informado"
+    title = str(entry.get("title") or "").strip() or str(entry.get("slug") or "").strip()
+    content = re.sub(r"\s+", " ", str(entry.get("content") or "")).strip()
+    if len(content) > 220:
+        content = content[:217].rstrip() + "..."
+    return f"- {label}: {title}" + (f" - {content}" if content else "")
+
+
+def _branch_entries_by_type(branch_chain: list[dict]) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for entry in branch_chain:
+        ctype = _entry_type(entry)
+        if ctype and ctype not in out:
+            out[ctype] = entry
+    return out
+
+
+def _branch_semantic_tags(branch_chain: list[dict]) -> list[str]:
+    tags: list[str] = []
+    for entry in branch_chain:
+        tags.extend(str(tag).strip() for tag in (entry.get("tags") or []) if str(tag).strip())
+        ctype = _entry_type(entry)
+        if ctype:
+            tags.append(ctype)
+    return list(dict.fromkeys(tags))[:24]
+
+
+def build_faq_markdown_from_branch(payload: dict[str, Any]) -> dict[str, Any]:
+    branch_path = payload.get("source_branch_path") or []
+    entries = [item for item in branch_path if isinstance(item, dict)]
+    by_type: dict[str, list[dict]] = {}
+    for item in entries:
+        ctype = str(item.get("content_type") or item.get("node_type") or "")
+        if ctype:
+            by_type.setdefault(ctype, []).append(item)
+    terminal = branch_path[-1] if branch_path else {}
+    terminal_title = str(terminal.get("title") or terminal.get("slug") or "atendimento").strip()
+    question_count = max(8, int(payload.get("question_count") or 8))
+    tags = [str(tag).strip() for tag in (payload.get("semantic_tags") or []) if str(tag).strip()]
+
+    def text_of(entry: Optional[dict], field: str, fallback: str = "") -> str:
+        return re.sub(r"\s+", " ", str((entry or {}).get(field) or fallback)).strip()
+
+    def compact(value: str, fallback: str = "informacao pendente de validacao") -> str:
+        value = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not value:
+            return fallback
+        value = re.sub(r"\b(arvore|árvore|grafo|galho|node|branch|regra|estrutura|conhecimento conectado)\b", "informacao", value, flags=re.I)
+        return value if len(value) <= 260 else value[:257].rstrip() + "..."
+
+    def commercial_facts(*items: Optional[dict], pattern: str) -> list[str]:
+        blob = " ".join(
+            str((entry or {}).get("content") or "") + " " + str((entry or {}).get("title") or "")
+            for entry in items
+            if entry
+        )
+        return list(dict.fromkeys(match.group(0) for match in re.finditer(pattern, blob, flags=re.IGNORECASE)))
+
+    audiences = by_type.get("audience") or []
+    products = by_type.get("product") or ([terminal] if terminal else [])
+    offers = by_type.get("offer") or []
+    copies = by_type.get("copy") or []
+    briefings = by_type.get("briefing") or []
+    campaigns = by_type.get("campaign") or []
+    rules = [compact(str(rule), "") for rule in (payload.get("rules") or []) if str(rule).strip()]
+
+    audience_titles = [text_of(item, "title") for item in audiences if text_of(item, "title")]
+    product_titles = [text_of(item, "title") for item in products if text_of(item, "title")]
+    offer_titles = [text_of(item, "title") for item in offers if text_of(item, "title")]
+    copy_context = compact(" ".join(text_of(item, "content") for item in copies), "")
+    briefing_context = compact(" ".join(text_of(item, "content") for item in [*briefings, *campaigns]), "")
+    prices = commercial_facts(*products, *offers, *briefings, *campaigns, pattern=r"R\$\s*\d{1,6}(?:[.,]\d{2})?")
+    quantities = commercial_facts(*offers, *products, *briefings, *campaigns, pattern=r"\b\d+\s*(?:pe[cç]as?|unidades?)\b")
+    has_b2b = any(_is_b2b_audience(item) for item in audiences) or any(re.search(r"revend|empreend|atacad|lojist", text_of(item, "content") + " " + text_of(item, "title"), re.I) for item in audiences)
+    has_final = any(_is_final_audience(item) for item in audiences)
+
+    product_label = ", ".join(product_titles[:4]) or "os produtos"
+    audience_label = ", ".join(audience_titles[:4]) or "cada perfil de cliente"
+    offer_label = "; ".join(offer_titles[:6]) or ("; ".join(quantities[:6]) if quantities else "opcoes comerciais confirmadas pelo atendimento")
+    price_label = ", ".join(prices[:6]) if prices else "valores a confirmar com a equipe"
+    commercial_limits = "; ".join(rules[:2]) or "a equipe confirma valores, estoque, disponibilidade e condicoes antes de finalizar"
+
+    question_templates: list[tuple[str, str]] = [
+        ("catalog", "Quais produtos estao disponiveis?"),
+        ("audience", "Esse kit e indicado para quem quer revender?"),
+        ("final", "Posso comprar apenas uma peca para uso proprio?"),
+        ("quantity", "Quais opcoes de quantidade eu posso pedir?"),
+        ("price", "Quais valores posso considerar?"),
+        ("stock", "Tem estoque e prazo de envio confirmados?"),
+        ("benefit", "Por que esse produto pode ser uma boa opcao?"),
+        ("order", "Como faco para fechar o pedido?"),
+        ("compare", "Qual kit combina melhor comigo?"),
+        ("payment", "As condicoes de pagamento ja estao definidas?"),
+        ("support", "Posso tirar duvidas pelo WhatsApp antes de comprar?"),
+        ("limits", "O que precisa ser confirmado antes de finalizar?"),
+    ]
+
+    def answer_for(kind: str) -> str:
+        if kind == "catalog":
+            return f"No momento, o atendimento trabalha com {product_label}. A equipe confirma disponibilidade, cores, tamanhos e valores antes de fechar o pedido."
+        if kind == "audience":
+            if has_b2b:
+                return f"Sim. Esse kit pode ser uma boa opcao para quem quer revender, porque permite comprar em maior quantidade e montar uma oferta com apelo comercial. Antes de fechar, a equipe confirma {price_label} e as condicoes atuais."
+            return "Pode ser indicado para revenda se houver quantidade e condicoes comerciais confirmadas pela equipe."
+        if kind == "final":
+            if has_final or any("1" in item for item in quantities):
+                return "Sim. Quando houver opcao de 1 peca, ela e indicada para cliente final ou para quem quer experimentar antes de comprar mais unidades."
+            return "A compra de unidade avulsa precisa ser confirmada com o atendimento, junto com valor e disponibilidade."
+        if kind == "quantity":
+            return f"As opcoes registradas sao: {offer_label}. O atendimento confirma qual opcao esta disponivel para {audience_label}."
+        if kind == "benefit":
+            return f"O principal e apresentar {product_label} de forma simples, destacando moda feminina, tecido modal, fabricacao propria e preco acessivel quando esses pontos estiverem confirmados."
+        if kind == "price":
+            return f"Os valores citados sao {price_label}. Como valores podem variar por quantidade, disponibilidade e condicao comercial, a equipe confirma antes de enviar a resposta final."
+        if kind == "stock":
+            return "Estoque, prazo e disponibilidade precisam ser verificados no momento do atendimento. A resposta segura e dizer que a equipe vai confirmar antes de concluir o pedido."
+        if kind == "order":
+            return "A cliente pode informar o kit desejado, quantidade e perfil da compra. Depois disso, a equipe confirma valor, disponibilidade, forma de pagamento e proximo passo."
+        if kind == "compare":
+            return f"A melhor opcao depende do objetivo da compra. Para uso proprio, uma unidade costuma ser suficiente; para revenda, kits maiores podem fazer mais sentido quando disponiveis."
+        if kind == "payment":
+            return "As condicoes de pagamento devem ser confirmadas pela equipe antes de responder, principalmente quando houver kit, desconto por quantidade ou pedido para revenda."
+        if kind == "support":
+            return "Sim. O WhatsApp pode tirar duvidas sobre produtos, quantidades, valores e disponibilidade antes da cliente decidir."
+        if kind == "limits":
+            return f"Antes de finalizar, confirme: {commercial_limits}. Evite prometer preco fechado, estoque, prazo, desconto ou disponibilidade sem checagem."
+        return f"Use uma resposta curta e natural. {copy_context or briefing_context or 'Confirme os detalhes comerciais antes de orientar a compra.'}"
+
+    lines = [
+        f"# FAQ de atendimento - {terminal_title}",
+        "",
+        "## Referencia de atendimento",
+        f"- Publico: {audience_label}",
+        f"- Produtos: {product_label}",
+        f"- Opcoes comerciais: {offer_label}",
+        f"- Valores: {price_label}",
+        f"- Confirmar antes de fechar: {commercial_limits}",
+        "",
+        "## Tags",
+    ]
+    lines.extend([f"- {tag}" for tag in tags] or ["- faq", "- golden-dataset"])
+    lines.extend(["", "## Perguntas e respostas"])
+    for idx in range(1, question_count + 1):
+        if idx <= len(question_templates):
+            kind, question = question_templates[idx - 1]
+        else:
+            kind = "limits"
+            question = f"O que mais devo confirmar antes de responder a cliente {idx}?"
+        lines.extend(["", f"### {idx}. {question}", "", f"**Resposta:** {answer_for(kind)}"])
+    body = "\n".join(lines).strip()
+    branch_slug = str(terminal.get("slug") or _slug_for_plan_entry(terminal_title))
+    body = re.sub(r"\b(arvore|árvore|grafo|galho|node|branch|regra|estrutura|conhecimento conectado)\b", "informacao", body, flags=re.I)
+    return {
+        "content_type": "faq",
+        "title": f"FAQ de atendimento - {terminal_title}",
+        "slug": f"faq-golden-dataset-{branch_slug}",
+        "body_markdown": body,
+        "question_count": question_count,
+        "source_branch_path": branch_path,
+        "status": "pendente_validacao",
+    }
+
+
+def _build_faq_golden_dataset_entry(parent: dict, entries_by_slug: dict[str, dict], used: set[str], session: dict) -> dict:
+    branch_chain = _branch_chain_to_parent(parent, entries_by_slug)
+    by_type = _branch_entries_by_type(branch_chain)
+    persona_slug = str((session.get("persona_slug") or (session.get("classification") or {}).get("persona_slug") or "persona")).strip()
+    persona = {
+        "content_type": "persona",
+        "slug": persona_slug,
+        "title": persona_slug,
+        "content": f"Persona {persona_slug}",
+    }
+    source_branch_path = [
+        {"content_type": "persona", "slug": persona_slug, "title": persona_slug, "content": f"Persona {persona_slug}"},
+        *[
+            {
+                "content_type": _entry_type(entry),
+                "slug": entry.get("slug"),
+                "title": entry.get("title"),
+                "content": entry.get("content"),
+            }
+            for entry in branch_chain
+        ],
+    ]
+    question_count = max(2, len(source_branch_path) * 2)
+    tags = _branch_semantic_tags(branch_chain)
+    rules = [
+        str(entry.get("content") or entry.get("title") or "")
+        for entry in entries_by_slug.values()
+        if _entry_type(entry) == "rule"
+    ]
+    generated = build_faq_markdown_from_branch({
+        "persona": persona,
+        "brand": by_type.get("brand"),
+        "briefing": by_type.get("briefing"),
+        "campaign": by_type.get("campaign"),
+        "audience": by_type.get("audience"),
+        "product": by_type.get("product"),
+        "offer": by_type.get("offer"),
+        "copy": by_type.get("copy"),
+        "rules": rules,
+        "semantic_tags": tags,
+        "question_count": question_count,
+        "language": "pt-BR",
+        "output_format": "markdown",
+        "source_branch_path": source_branch_path,
+    })
+    return _normalize_plan_entry({
+        "content_type": "faq",
+        "title": generated["title"],
+        "slug": _dedupe_slug(generated["slug"], used),
+        "status": generated["status"],
+        "content": generated["body_markdown"],
+        "tags": list(dict.fromkeys(["faq", "golden-dataset", *tags])),
+        "metadata": {
+            "parent_slug": str(parent.get("slug")),
+            "faq_document_type": "golden_dataset",
+            "golden_dataset": True,
+            "question_count": generated["question_count"],
+            "source_branch_path": generated["source_branch_path"],
+            "terminal_parent_type": _entry_type(parent),
+            "terminal_parent_slug": parent.get("slug"),
+            "pending_validation": True,
+        },
+    })
+
+
+def _build_grouped_faq_golden_dataset_entry(parent: dict, entries: list[dict], used: set[str], session: dict) -> dict:
+    persona_slug = str((session.get("persona_slug") or (session.get("classification") or {}).get("persona_slug") or "persona")).strip()
+    source_context = [
+        {"content_type": "persona", "slug": persona_slug, "title": persona_slug, "content": f"Persona {persona_slug}"},
+        *[
+            {
+                "content_type": _entry_type(entry),
+                "slug": entry.get("slug"),
+                "title": entry.get("title"),
+                "content": entry.get("content"),
+            }
+            for entry in entries
+            if _entry_type(entry) != "faq"
+        ],
+    ]
+    tags = _branch_semantic_tags([entry for entry in entries if _entry_type(entry) != "faq"])
+    rules = [
+        str(entry.get("content") or entry.get("title") or "")
+        for entry in entries
+        if _entry_type(entry) == "rule"
+    ]
+    question_count = max(8, min(18, len(source_context) + 6))
+    generated = build_faq_markdown_from_branch({
+        "persona": source_context[0],
+        "rules": rules,
+        "semantic_tags": tags,
+        "question_count": question_count,
+        "language": "pt-BR",
+        "output_format": "markdown",
+        "source_branch_path": source_context,
+    })
+    return _normalize_plan_entry({
+        "content_type": "faq",
+        "title": generated["title"],
+        "slug": _dedupe_slug("faq-atendimento-agrupado", used),
+        "status": generated["status"],
+        "content": generated["body_markdown"],
+        "tags": list(dict.fromkeys(["faq", "golden-dataset", "grouped", *tags]))[:24],
+        "metadata": {
+            "parent_slug": str(parent.get("slug")),
+            "faq_document_type": "grouped_markdown",
+            "golden_dataset": True,
+            "grouped_faq": True,
+            "question_count": generated["question_count"],
+            "source_context_slugs": [str(entry.get("slug")) for entry in entries if entry.get("slug") and _entry_type(entry) != "faq"],
+            "terminal_parent_type": _entry_type(parent),
+            "terminal_parent_slug": parent.get("slug"),
+            "pending_validation": True,
+        },
+    })
+
+
+def _terminal_faq_parents(entries: list[dict]) -> list[dict]:
+    rules = [entry for entry in entries if _entry_type(entry) == "rule" and entry.get("slug")]
+    if rules:
+        return rules[:1]
+    copies = [entry for entry in entries if _entry_type(entry) == "copy" and entry.get("slug")]
+    if copies:
+        return copies[:1]
+    offers = [entry for entry in entries if _entry_type(entry) == "offer" and entry.get("slug")]
+    if offers:
+        return offers[:1]
+    return [entry for entry in entries if _entry_type(entry) == "product" and entry.get("slug")][:1]
+
+
+def _ensure_faq_golden_datasets_by_branch(plan: dict, session: dict) -> None:
+    if _requested_variation_count(session, "faq", 0) <= 0 and not any(_entry_type(entry) == "faq" for entry in (plan.get("entries") or [])):
         return
     entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
-    target = max(0, _requested_variation_count(session, "faq", 8))
-    if target <= 0:
+    non_faq_entries = [entry for entry in entries if _entry_type(entry) != "faq"]
+    entries_by_slug = {str(entry.get("slug")): entry for entry in non_faq_entries if entry.get("slug")}
+    parents = _terminal_faq_parents(non_faq_entries)
+    if not parents:
+        plan["entries"] = non_faq_entries
         return
-    leaves = _faq_leaf_entries(plan)
-    if not leaves:
-        return
-    used = {str(entry.get("slug")) for entry in entries if entry.get("slug")}
-    faqs = [entry for entry in entries if _entry_type(entry) == "faq"]
-    for idx, faq in enumerate(faqs):
-        leaf = leaves[idx % len(leaves)]
-        if _entry_type(leaf) == "copy":
-            _set_entry_parent_slug(faq, str(leaf.get("slug")))
-        elif not _entry_parent_slug(faq):
-            _set_entry_parent_slug(faq, str(leaf.get("slug")))
-    if len(faqs) > target:
-        keep = set(id(entry) for entry in faqs[:target])
-        entries[:] = [entry for entry in entries if _entry_type(entry) != "faq" or id(entry) in keep]
-        faqs = faqs[:target]
-    slot = len(faqs) + 1
-    while len(faqs) < target:
-        leaf = leaves[(slot - 1) % len(leaves)]
-        title = f"FAQ {slot} - {leaf.get('title')}"
-        faq = _normalize_plan_entry({
-            "content_type": "faq",
-            "title": title,
-            "slug": _dedupe_slug(f"faq-{slot}-{leaf.get('slug')}", used),
-            "status": "pendente_validacao",
-            "content": f"Pergunta e resposta comercial sobre {leaf.get('title')}. Validar detalhes antes de publicar.",
-            "tags": ["faq", "pendente-validacao"],
-            "metadata": {"parent_slug": str(leaf.get("slug")), "faq_count_policy": "total", "fractal_generated": True},
-        })
-        entries.append(faq)
-        faqs.append(faq)
-        slot += 1
-    plan["entries"] = entries
+    used = {str(entry.get("slug")) for entry in non_faq_entries if entry.get("slug")}
+    faq_entries = [_build_grouped_faq_golden_dataset_entry(parents[0], non_faq_entries, used, session)]
+    plan["entries"] = [*non_faq_entries, *faq_entries]
+    plan["faq_count_policy"] = "grouped"
+    plan["faq_parent_type"] = _entry_type(parents[0]) if parents else "copy"
+    plan["faq_count_per_parent"] = 1
+
+
+def _ensure_faqs_per_parent(plan: dict, session: dict) -> None:
+    _ensure_faq_golden_datasets_by_branch(plan, session)
 
 
 def _dedupe_plan_entries(plan: dict) -> None:
@@ -1672,46 +3037,9 @@ def _clone_plan_entry(template: dict, *, title: str, slug: str, parent_slug: str
     clone["tags"] = [str(tag).strip() for tag in (tags or clone.get("tags") or []) if str(tag).strip()]
     metadata = dict(clone.get("metadata") or {})
     metadata["parent_slug"] = parent_slug
-    metadata["fractal_generated"] = True
+    metadata["branch_generated"] = True
     clone["metadata"] = metadata
     return clone
-
-
-def _default_faq_payload(*, audience: dict, product: dict, slot_index: int, colors: list[str]) -> tuple[str, str, list[str]]:
-    product_title = str(product.get("title") or "Produto")
-    audience_title = str(audience.get("title") or "")
-    color_text = ", ".join(colors) if colors else "as cores disponiveis"
-    if _is_b2b_audience(audience):
-        defaults = [
-            (
-                f"Quantidade minima para revenda de {product_title}",
-                f"Para {audience_title or 'revendedores'}, {product_title} segue a regra comercial de pedido minimo para revenda. "
-                "Use a validacao humana para confirmar o lote minimo e destaque a regra vigente somente quando ela estiver confirmada na fonte ou pelo operador.",
-                ["faq", "revenda", "pedido-minimo"],
-            ),
-            (
-                f"Cores, preco e politica do pedido de {product_title}",
-                f"Para {audience_title or 'revendedores'}, confirme cores disponiveis, faixa de preco e politica comercial de {product_title}. "
-                f"As cores citadas ate agora sao {color_text}. Mantenha a resposta como pendente_validacao ate revisar a fonte final.",
-                ["faq", "revenda", "pedido"],
-            ),
-        ]
-    else:
-        defaults = [
-            (
-                f"Cores disponiveis de {product_title}",
-                f"Para {audience_title or 'clientes finais'}, explique quais cores estao disponiveis para {product_title}. "
-                f"Use {color_text} como referencia inicial e marque qualquer variacao adicional como pendente_validacao.",
-                ["faq", "cores", "cliente-final"],
-            ),
-            (
-                f"Preco, conforto e beneficios de {product_title}",
-                f"Para {audience_title or 'clientes finais'}, responda como {product_title} combina preco, conforto, uso e beneficios. "
-                "Nao invente valores finais; sinalize como pendente_validacao quando a fonte nao confirmar.",
-                ["faq", "beneficios", "cliente-final"],
-            ),
-        ]
-    return defaults[(slot_index - 1) % len(defaults)]
 
 
 def _build_links_from_parent_slugs(plan: dict) -> None:
@@ -1732,6 +3060,8 @@ def _build_links_from_parent_slugs(plan: dict) -> None:
                 slug_to_type.get(source_slug, ""),
                 slug_to_type.get(target_slug, ""),
             ),
+            **({"graph_layer": link.get("graph_layer")} if link.get("graph_layer") else {}),
+            **({"primary_tree": link.get("primary_tree")} if "primary_tree" in link else {}),
         }
     for entry in entries:
         source_slug = _entry_parent_slug(entry)
@@ -1746,19 +3076,84 @@ def _build_links_from_parent_slugs(plan: dict) -> None:
     plan["links"] = list(deduped.values())
 
 
-def _copy_parent_slug_for_product(entries_by_slug: dict[str, dict], product_slug: str, faq: Optional[dict] = None) -> Optional[str]:
-    copies = [
-        entry
-        for entry in entries_by_slug.values()
-        if _entry_type(entry) == "copy" and _entry_parent_slug(entry) == product_slug and entry.get("slug")
-    ]
-    if not copies:
-        return None
-    if faq:
-        picked = _best_parent_by_slug(faq, copies)
-        if picked and picked.get("slug"):
-            return str(picked["slug"])
-    return str(copies[-1]["slug"])
+def _add_grouped_commercial_flow_links(plan: dict) -> None:
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    rules = [entry for entry in entries if _entry_type(entry) == "rule" and entry.get("slug")]
+    rule_slug = str(rules[0].get("slug")) if rules else ""
+    deduped: dict[tuple[str, str], dict] = {}
+    for link in plan.get("links") or []:
+        if not isinstance(link, dict):
+            continue
+        source_slug = str(link.get("source_slug") or "").strip()
+        target_slug = str(link.get("target_slug") or "").strip()
+        if source_slug and target_slug:
+            deduped[(source_slug, target_slug)] = link
+    for copy in [entry for entry in entries if _entry_type(entry) == "copy" and entry.get("slug")]:
+        copy_slug = str(copy.get("slug"))
+        for offer_slug in _entry_metadata(copy).get("grouped_offer_slugs") or []:
+            offer_slug = str(offer_slug or "").strip()
+            if not offer_slug or (offer_slug, copy_slug) in deduped:
+                continue
+            deduped[(offer_slug, copy_slug)] = {
+                "source_slug": offer_slug,
+                "target_slug": copy_slug,
+                "relation_type": "supports_copy",
+                "graph_layer": "commercial_grouping",
+                "primary_tree": False,
+            }
+        if rule_slug and (copy_slug, rule_slug) not in deduped:
+            deduped[(copy_slug, rule_slug)] = {
+                "source_slug": copy_slug,
+                "target_slug": rule_slug,
+                "relation_type": "contains",
+                "graph_layer": "commercial_grouping",
+                "primary_tree": False,
+            }
+    plan["links"] = list(deduped.values())
+
+
+def _separate_plan_edges(plan: dict) -> None:
+    primary_edges = []
+    secondary_edges: list[dict[str, Any]] = []
+    for link in plan.get("links") or []:
+        if not isinstance(link, dict):
+            continue
+        edge = {
+            "source_slug": str(link.get("source_slug") or "").strip(),
+            "target_slug": str(link.get("target_slug") or "").strip(),
+            "relation_type": str(link.get("relation_type") or "contains").strip() or "contains",
+            "graph_layer": str(link.get("graph_layer") or "primary_tree"),
+            "primary_tree": bool(link.get("primary_tree", True)),
+        }
+        if not edge["source_slug"] or not edge["target_slug"]:
+            continue
+        if edge["primary_tree"]:
+            primary_edges.append(edge)
+        else:
+            secondary_edges.append(edge)
+    for entry in plan.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        slug = str(entry.get("slug") or "").strip()
+        if not slug:
+            continue
+        for tag in entry.get("tags") or []:
+            tag_slug = _slug_for_plan_entry(str(tag))
+            if not tag_slug:
+                continue
+            secondary_edges.append({
+                "source_slug": slug,
+                "target_slug": f"tag-{tag_slug}",
+                "relation_type": "has_tag",
+                "graph_layer": "semantic_tags",
+                "primary_tree": False,
+                "visual_hidden": True,
+            })
+    plan["primary_tree_edges"] = primary_edges
+    plan["secondary_semantic_edges"] = secondary_edges
+    plan.setdefault("rag_edges", [])
+    plan.setdefault("asset_gallery_edges", [])
+    plan.setdefault("debug_edges", [])
 
 
 def _base_product_slug(entry: dict) -> str:
@@ -1770,34 +3165,6 @@ def _fractal_base_product_slug(entry: dict) -> str:
     raw = _base_product_slug(entry)
     raw = raw.split("-audience-", 1)[0]
     return re.sub(r"-branch-\d+$", "", raw)
-
-
-def _find_scoped_copy_for_product(entries: list[dict], product: dict, template: Optional[dict] = None) -> Optional[dict]:
-    product_slug = str(product.get("slug") or "")
-    copies = [
-        entry
-        for entry in entries
-        if _entry_type(entry) == "copy" and _entry_parent_slug(entry) == product_slug and entry.get("slug")
-    ]
-    if not copies:
-        return None
-    if template:
-        picked = _best_parent_by_slug(template, copies)
-        if picked:
-            return picked
-    return copies[-1]
-
-
-def _faq_parent_slug_for_product(entries: list[dict], product: dict, plan: dict, session: dict, template: Optional[dict] = None) -> Optional[str]:
-    product_slug = str(product.get("slug") or "")
-    if not product_slug:
-        return None
-    if (plan.get("tree_mode") or "single_branch") != "single_branch":
-        return product_slug
-    if _technical_product_faq_requested(session):
-        return product_slug
-    copy = _find_scoped_copy_for_product(entries, product, template)
-    return str(copy.get("slug")) if copy and copy.get("slug") else product_slug
 
 
 def _clone_product_scoped_entry(template: dict, *, product: dict, parent_slug: str, suffix: Optional[str] = None) -> dict:
@@ -1872,90 +3239,30 @@ def _expand_copies_for_products(entries: list[dict], products: list[dict], produ
         entries.extend(clones)
 
 
-def _apply_native_single_branch_faq_parents(plan: dict, session: dict) -> int:
-    if (plan.get("tree_mode") or "single_branch") != "single_branch":
-        return 0
-    if _technical_product_faq_requested(session):
-        return 0
-    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
-    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
-    changed = 0
-    for faq in [entry for entry in entries if _entry_type(entry) == "faq"]:
-        parent_slug = _entry_parent_slug(faq)
-        parent = entries_by_slug.get(parent_slug or "")
-        product_slug: Optional[str] = None
-        if _entry_type(parent or {}) == "copy":
-            continue
-        if _entry_type(parent or {}) == "product":
-            product_slug = str(parent_slug)
-        elif not parent_slug:
-            product = _best_parent_by_slug(faq, [entry for entry in entries if _entry_type(entry) == "product"])
-            product_slug = str(product.get("slug")) if product and product.get("slug") else None
-        if not product_slug:
-            continue
-        copy_slug = _copy_parent_slug_for_product(entries_by_slug, product_slug, faq)
-        if not copy_slug or copy_slug == parent_slug:
-            continue
-        _set_entry_parent_slug(faq, copy_slug)
-        changed += 1
-    return changed
-
-
-def _apply_single_branch_policy(plan: dict, session: dict) -> int:
-    """Legacy airbag for product -> faq plans that escaped native planning.
-
-    Parallel product children are only preserved when the operator explicitly
-    asked for them or the prompt asks for technical/factual product FAQ.
-    """
-    if (plan.get("tree_mode") or "single_branch") != "single_branch":
-        return 0
-    if _technical_product_faq_requested(session):
-        return 0
-    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
-    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
-    rewrites = 0
-    for faq in [entry for entry in entries if _entry_type(entry) == "faq"]:
-        parent_slug = _entry_parent_slug(faq)
-        parent = entries_by_slug.get(parent_slug or "")
-        product_slug: Optional[str] = None
-        if _entry_type(parent or {}) == "product":
-            product_slug = str(parent_slug)
-        elif not parent_slug:
-            product = _best_parent_by_slug(faq, [entry for entry in entries if _entry_type(entry) == "product"])
-            product_slug = str(product.get("slug")) if product and product.get("slug") else None
-        if not product_slug:
-            continue
-        copy_slug = _copy_parent_slug_for_product(entries_by_slug, product_slug, faq)
-        if not copy_slug or copy_slug == parent_slug:
-            continue
-        _set_entry_parent_slug(faq, copy_slug)
-        metadata = _entry_metadata(faq)
-        metadata.setdefault("single_branch_parent_rewritten", True)
-        metadata.setdefault("previous_parent_slug", product_slug)
-        warnings = plan.setdefault("warnings", [])
-        if isinstance(warnings, list):
-            warnings.append({
-                "warning_type": "planner_parent_rewrite",
-                "message": "Planner generated product -> faq, but single_branch policy required copy -> faq.",
-                "original_parent_slug": product_slug,
-                "resolved_parent_slug": copy_slug,
-                "should_fix_planner": True,
-            })
-        rewrites += 1
-    return rewrites
-
-
 def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
     normalized = dict(plan or {})
     normalized["source"] = str(normalized.get("source") or _source_url_from_context(str(session.get("context") or "")) or "session").strip()
     normalized["persona_slug"] = str(normalized.get("persona_slug") or (session.get("classification") or {}).get("persona_slug") or "global").strip()
     normalized["validation_policy"] = str(normalized.get("validation_policy") or "human_validation_required").strip()
     raw_tree_mode = str(normalized.get("tree_mode") or "").strip()
-    if raw_tree_mode != "single_branch":
-        raw_tree_mode = "single_branch"
+    if raw_tree_mode not in {"pyramidal", "single_branch"}:
+        raw_tree_mode = "pyramidal"
+    if raw_tree_mode == "single_branch":
+        raw_tree_mode = "pyramidal"
     normalized["tree_mode"] = raw_tree_mode
-    normalized["branch_policy"] = "single_branch_by_default"
-    normalized["faq_count_policy"] = str(normalized.get("faq_count_policy") or "total").strip() or "total"
+    normalized["branch_policy"] = "top_down_pyramidal"
+    normalized["faq_count_policy"] = _normalize_count_policy(normalized, session, "faq")
+    if normalized["faq_count_policy"] == "per_branch":
+        normalized["faq_count_policy"] = "grouped"
+    normalized["faq_parent_type"] = str(normalized.get("faq_parent_type") or "rule").strip() or "rule"
+    normalized["faq_count_per_parent"] = max(0, int(normalized.get("faq_count_per_parent") or 1))
+    normalized["asset_count_policy"] = _normalize_count_policy(normalized, session, "asset")
+    normalized["asset_parent_type"] = str(normalized.get("asset_parent_type") or "product").strip() or "product"
+    normalized["asset_count_per_parent"] = max(0, int(normalized.get("asset_count_per_parent") or _requested_variation_count(session, "asset", 0)))
+    default_copy_policy = "per_offer" if _explicit_copy_per_offer_requested(session) else "per_product_context"
+    normalized["copy_policy"] = str(normalized.get("copy_policy") or default_copy_policy).strip() or default_copy_policy
+    if normalized["copy_policy"] == "per_offer" and not _explicit_copy_per_offer_requested(session):
+        normalized["copy_policy"] = "per_product_context"
 
     entries = [_normalize_plan_entry(entry) for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
     normalized["entries"] = entries
@@ -1999,10 +3306,6 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
         if not _entry_parent_slug(audience):
             _set_entry_parent_slug(audience, (root_campaign or root_briefing)["slug"])
 
-    colors = _known_colors_from_session(session, normalized)
-    faq_policy = str(normalized.get("faq_count_policy") or "total").strip() or "total"
-    target_faq_count = 0 if faq_policy == "total" else max(1, _requested_variation_count(session, "faq", 2))
-
     # Product branches must live under each audience. If products are still generic,
     # clone them once per audience to create the fractal top-down structure.
     products = [entry for entry in list(entries) if _entry_type(entry) == "product"]
@@ -2013,12 +3316,7 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
         remove_slugs: set[str] = set()
         existing_product_slugs = {str(product.get("slug")) for product in products if product.get("slug")}
         audience_index = {slug: index for index, slug in enumerate(audience_map.keys(), 1)}
-        requested_product_count = _requested_variation_count(session, "product", len(products) or 0)
-        distribute_without_cloning = (
-            _has_explicit_variation_count(session, "product")
-            and requested_product_count > 0
-            and len(products) >= requested_product_count
-        )
+        distribute_without_cloning = False
         audience_order = list(audience_map.keys())
         audience_slugs = set(audience_map.keys())
         coverage_by_base: dict[str, set[str]] = {}
@@ -2093,8 +3391,8 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
         if expanded_products:
             entries.extend(expanded_products)
 
-    # Copies and FAQs replicate per audience->product branch. In the default
-    # single_branch marketing policy, FAQs are born below copy before save.
+    # Copies are grouped per audience->product context by default. FAQ is a
+    # single grouped markdown document and sits after the governing rule.
     entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
     products = [entry for entry in entries if _entry_type(entry) == "product"]
     normalized["entries"] = entries
@@ -2104,122 +3402,20 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
     products = [entry for entry in entries if _entry_type(entry) == "product"]
     _expand_copies_for_products(entries, products, product_expansions)
     normalized["entries"] = entries
-    _ensure_copies_for_offers(normalized)
-    _reparent_copies_to_offers(normalized)
+    _ensure_copies_for_offers(normalized, session)
+    _reparent_copies_to_offers(normalized, session)
     entries = [entry for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
-    _apply_native_single_branch_faq_parents(normalized, session)
     entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
-    products = [entry for entry in entries if _entry_type(entry) == "product"]
-    copies = [entry for entry in entries if _entry_type(entry) == "copy"]
-    copy_slugs = {str(copy.get("slug")) for copy in copies if copy.get("slug")}
-    existing_faqs = [entry for entry in entries if _entry_type(entry) == "faq"]
-    global_templates = [
-        entry for entry in existing_faqs
-        if _entry_parent_slug(entry) not in entries_by_slug
-        or _entry_type(entries_by_slug.get(_entry_parent_slug(entry), {})) not in {"product", "copy"}
-    ]
-    faq_count_by_product: dict[str, list[dict]] = {}
-    for faq in existing_faqs:
-        parent_slug = _entry_parent_slug(faq)
-        if parent_slug and _entry_type(entries_by_slug.get(parent_slug, {})) == "product":
-            faq_count_by_product.setdefault(parent_slug, []).append(faq)
-        elif parent_slug and _entry_type(entries_by_slug.get(parent_slug, {})) == "copy":
-            copy_parent_slug = _entry_parent_slug(entries_by_slug.get(parent_slug, {}))
-            if copy_parent_slug:
-                faq_count_by_product.setdefault(copy_parent_slug, []).append(faq)
-    for product in products:
-        product_slug = str(product.get("slug"))
-        audience = entries_by_slug.get(_entry_parent_slug(product) or "")
-        branch_faqs = faq_count_by_product.setdefault(product_slug, [])
-        templates = list(branch_faqs)
-        if not templates:
-            audience_slug = str((audience or {}).get("slug") or "")
-            audience_templates = []
-            for candidate in existing_faqs:
-                candidate_parent = entries_by_slug.get(_entry_parent_slug(candidate) or "")
-                if _entry_type(candidate_parent) == "audience" and str(candidate_parent.get("slug")) == audience_slug:
-                    audience_templates.append(candidate)
-            templates = audience_templates or global_templates
-        slot_index = len(branch_faqs) + 1
-        while len(branch_faqs) < target_faq_count:
-            if templates:
-                template = templates[(slot_index - 1) % len(templates)]
-                template_title = str(template.get("title") or "")
-                template_content = str(template.get("content") or "")
-                if audience and not _is_b2b_audience(audience) and _is_b2b_faq(template):
-                    title, content, tags = _default_faq_payload(
-                        audience=audience,
-                        product=product,
-                        slot_index=slot_index,
-                        colors=colors,
-                    )
-                else:
-                    previous_parent_title = str(entries_by_slug.get(_entry_parent_slug(template) or "", {}).get("title") or "")
-                    title = (
-                        template_title.replace(previous_parent_title, str(product.get("title") or "")).strip()
-                        if previous_parent_title
-                        else template_title.strip()
-                    )
-                    if not title or title == template_title:
-                        title = f"{template_title} — {product.get('title')}"
-                    content = template_content or title
-                    tags = template.get("tags") or []
-                clone = _clone_plan_entry(
-                    template,
-                    title=title,
-                    slug=f"{_slug_for_plan_entry(title)}-{slot_index}",
-                    parent_slug=_faq_parent_slug_for_product(entries, product, normalized, session, template) or product_slug,
-                    content=content,
-                    tags=tags,
-                )
-            else:
-                title, content, tags = _default_faq_payload(
-                    audience=audience or {"title": ""},
-                    product=product,
-                    slot_index=slot_index,
-                    colors=colors,
-                )
-                clone = _normalize_plan_entry({
-                    "content_type": "faq",
-                    "title": title,
-                    "slug": f"{_slug_for_plan_entry(title)}-{slot_index}",
-                    "status": "pendente_validacao",
-                    "content": content,
-                    "tags": tags,
-                    "metadata": {"parent_slug": _faq_parent_slug_for_product(entries, product, normalized, session) or product_slug, "fractal_generated": True},
-                })
-            entries.append(clone)
-            branch_faqs.append(clone)
-            slot_index += 1
-
-    if products:
-        product_slugs = {str(product.get("slug")) for product in products if product.get("slug")}
-        copy_slugs = {str(copy.get("slug")) for copy in entries if _entry_type(copy) == "copy" and copy.get("slug")}
-        entries[:] = [
-            entry for entry in entries
-            if _entry_type(entry) != "faq" or (_entry_parent_slug(entry) in product_slugs or _entry_parent_slug(entry) in copy_slugs)
-        ]
-
-    # Product children should never stay directly under campaign/root when audiences exist.
-    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
-    for faq in [entry for entry in entries if _entry_type(entry) == "faq"]:
-        parent_slug = _entry_parent_slug(faq)
-        parent_type = _entry_type(entries_by_slug.get(parent_slug, {}))
-        if not parent_slug or parent_type not in {"product", "copy"}:
-            candidate_products = [product for product in products if product.get("slug")]
-            best_parent = _best_parent_by_slug(faq, candidate_products)
-            if best_parent is not None:
-                _set_entry_parent_slug(faq, str(best_parent.get("slug")))
 
     normalized["entries"] = entries
     _ensure_governing_rule(normalized, session)
-    _ensure_total_faq_policy(normalized, session)
+    _ensure_faqs_per_parent(normalized, session)
     _dedupe_plan_entries(normalized)
     _auto_infer_parent_slugs(normalized)
-    _apply_native_single_branch_faq_parents(normalized, session)
-    _apply_single_branch_policy(normalized, session)
     _normalize_plan_parent_slugs(normalized, normalized["persona_slug"])
     _build_links_from_parent_slugs(normalized)
+    _add_grouped_commercial_flow_links(normalized)
+    _separate_plan_edges(normalized)
     normalized["summary"] = summarize_normalized_plan(normalized)
     return normalized
 
@@ -2239,8 +3435,20 @@ def _normalize_live_session_plan(plan: dict, session: dict) -> dict:
         or "global"
     ).strip()
     normalized["validation_policy"] = str(normalized.get("validation_policy") or "human_validation_required").strip()
-    normalized["tree_mode"] = str(normalized.get("tree_mode") or "single_branch").strip() or "single_branch"
-    normalized["branch_policy"] = str(normalized.get("branch_policy") or "single_branch_by_default").strip() or "single_branch_by_default"
+    normalized["tree_mode"] = str(normalized.get("tree_mode") or "pyramidal").strip() or "pyramidal"
+    normalized["branch_policy"] = str(normalized.get("branch_policy") or "top_down_pyramidal").strip() or "top_down_pyramidal"
+    normalized["faq_count_policy"] = _normalize_count_policy(normalized, session, "faq")
+    if normalized["faq_count_policy"] == "per_branch":
+        normalized["faq_count_policy"] = "grouped"
+    normalized["faq_parent_type"] = str(normalized.get("faq_parent_type") or "rule").strip() or "rule"
+    normalized["faq_count_per_parent"] = max(0, int(normalized.get("faq_count_per_parent") or 1))
+    normalized["asset_count_policy"] = _normalize_count_policy(normalized, session, "asset")
+    normalized["asset_parent_type"] = str(normalized.get("asset_parent_type") or "product").strip() or "product"
+    normalized["asset_count_per_parent"] = max(0, int(normalized.get("asset_count_per_parent") or _requested_variation_count(session, "asset", 0)))
+    default_copy_policy = "per_offer" if _explicit_copy_per_offer_requested(session) else "per_product_context"
+    normalized["copy_policy"] = str(normalized.get("copy_policy") or default_copy_policy).strip() or default_copy_policy
+    if normalized["copy_policy"] == "per_offer" and not _explicit_copy_per_offer_requested(session):
+        normalized["copy_policy"] = "per_product_context"
     normalized["entries"] = [
         _normalize_plan_entry(entry)
         for entry in (normalized.get("entries") or [])
@@ -2266,15 +3474,29 @@ def _normalize_live_session_plan(plan: dict, session: dict) -> dict:
 def _rewrite_visible_plan_summary(message: str, plan_payload: Optional[dict]) -> str:
     if not message or not isinstance(plan_payload, dict):
         return message
+    if "entries" not in plan_payload:
+        return message
     summary = summarize_normalized_plan(plan_payload)
     counts = summary.get("current_block_counts") or {}
-    summary_line = (
-        "Resumo normalizado: "
-        f"{summary.get('entry_count', 0)} entries; "
-        f"públicos={counts.get('audience', 0)}, produtos={counts.get('product', 0)}, "
-        f"ofertas={counts.get('offer', 0)}, copys={counts.get('copy', 0)}, "
-        f"FAQs={counts.get('faq', 0)}, regras={counts.get('rule', 0)}."
-    )
+    if not plan_payload.get("entries"):
+        return "Status: bloqueado\nMotivo: Estrutura ainda não gerada.\nAção: corrigir branch ou responder campo pendente."
+    expansion = _expansion_summary(plan_payload)
+    faq = expansion.get("faq") or {}
+    asset = expansion.get("asset") or {}
+    summary_line = "\n".join([
+        "Status: plano gerado",
+        (
+            f"Resumo: briefing {counts.get('briefing', 0)}, público {counts.get('audience', 0)}, "
+            f"produto {counts.get('product', 0)}, oferta {counts.get('offer', 0)}, copy {counts.get('copy', 0)}, "
+            f"FAQ {counts.get('faq', 0)}, asset {counts.get('asset', 0)}, regra {counts.get('rule', 0)}"
+        ),
+        (
+            f"Política: árvore piramidal; FAQ por {faq.get('parent_type') or 'copy'}; "
+            f"Asset por {asset.get('parent_type') or 'parent'}"
+        ),
+        "Pendências bloqueantes: nenhuma",
+        "Ação: revisar preview",
+    ])
     link_count = len(plan_payload.get("links") or [])
     if re.search(r"(?im)^Conex\S*:\s*\d+\s+edges no plano\s*$", message):
         updated = re.sub(
@@ -2283,12 +3505,9 @@ def _rewrite_visible_plan_summary(message: str, plan_payload: Optional[dict]) ->
             message,
         )
         return updated if summary_line in updated else f"{updated}\n{summary_line}"
-    if link_count > 0 and "Plano pronto. Clique em **Salvar** para persistir." in message:
-        return message.replace(
-            "Plano pronto. Clique em **Salvar** para persistir.",
-            f"Conexões: {link_count} edges no plano\n{summary_line}\nPlano pronto. Clique em **Salvar** para persistir.",
-        )
-    return message if summary_line in message else f"{message}\n\n{summary_line}"
+    if "Plano pronto. Clique em **Salvar** para persistir." in message:
+        return re.sub(r"(?s)Plano pronto\. Clique em \*\*Salvar\*\* para persistir\.", summary_line, message)
+    return summary_line
 
 
 def _session_path(session_id: str) -> Path:
@@ -2654,6 +3873,7 @@ def _context_with_resume(initial_context: str, resume_meta: dict[str, Any]) -> s
 
 
 def _session_public_state(session: dict) -> dict[str, Any]:
+    prune_unpersisted_asset_readings(session)
     normalized_plan = session.get("normalized_plan") or session.get("knowledge_plan")
     plan_summary = session.get("plan_summary") or (
         summarize_normalized_plan(normalized_plan) if isinstance(normalized_plan, dict) else None
@@ -2670,6 +3890,7 @@ def _session_public_state(session: dict) -> dict[str, Any]:
         }
     return {
         "persona_slug": session.get("persona_slug") or (session.get("classification") or {}).get("persona_slug"),
+        "persona_id": session.get("persona_id") or ((session.get("mission_state") or {}).get("persona_id")),
         "source_url": session.get("source_url"),
         "mode": session.get("mode") or "legacy",
         "status": session.get("status") or session.get("stage"),
@@ -2684,6 +3905,10 @@ def _session_public_state(session: dict) -> dict[str, Any]:
         "confirmed_plan_hash": session.get("confirmed_plan_hash"),
         "memory_summary": session.get("memory_summary") or "",
         "plan_changed": bool(session.get("plan_changed")),
+        "asset_readings": session.get("asset_readings") or [],
+        "asset_readings_pruned": int(session.get("asset_readings_pruned") or 0),
+        "pre_init_review": session.get("pre_init_review") or None,
+        "persona_context": session.get("persona_context") or None,
     }
 
 
@@ -2716,9 +3941,201 @@ def _bootstrap_result_payload(session: dict, result: dict[str, Any]) -> dict[str
         "current_block_counts": live_state["current_block_counts"],
         "initial_block_counts": live_state["initial_block_counts"],
         "persona_slug": live_state["persona_slug"],
+        "persona_id": live_state.get("persona_id"),
         "source_url": live_state["source_url"],
         "memory_summary": live_state["memory_summary"],
         "plan_changed": bool(result.get("plan_changed")),
+        "bootstrap_llm": bool(result.get("bootstrap_llm", True)),
+        "timings_ms": result.get("timings_ms") or {},
+        "pre_init_review": live_state.get("pre_init_review"),
+    }
+
+
+def _resolve_session_persona(persona_slug_or_id: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    raw = str(persona_slug_or_id or "").strip()
+    if not raw:
+        return None, None
+    try:
+        if len(raw) == 36 and raw.count("-") == 4:
+            persona = supabase_client.get_persona_by_id(raw) or {}
+        else:
+            persona = supabase_client.get_persona(raw) or {}
+        return persona.get("id") or (raw if len(raw) == 36 and raw.count("-") == 4 else None), persona.get("slug") or raw
+    except Exception:
+        return (raw if len(raw) == 36 and raw.count("-") == 4 else None), raw
+
+
+def _deterministic_bootstrap_message(session: dict) -> str:
+    counts = _format_block_counts(session.get("current_block_counts"))
+    persona = session.get("persona_slug") or "persona selecionada"
+    source = session.get("source_url") or "fonte ainda nao informada"
+    return (
+        f"Sessao da Sofia iniciada para {persona}. "
+        f"Plano atual: {counts}. "
+        f"Fonte: {source}. "
+        "Pode anexar arquivos ou enviar a proxima instrucao."
+    )
+
+
+_PRE_INIT_NODE_TYPES = (
+    "brand",
+    "briefing",
+    "campaign",
+    "audience",
+    "product",
+    "offer",
+    "copy",
+    "rule",
+    "asset",
+    "faq",
+)
+
+
+def _load_persona_context(persona_id: Optional[str]) -> dict[str, list[dict]]:
+    """Snapshot existing canonical nodes for a persona so the pre-init review
+    can recommend reuse instead of asking Sofia to generate duplicates.
+
+    Returns a dict keyed by node_type containing compact dicts. Safe to call
+    with persona_id=None (returns empty buckets) and resilient to Supabase
+    being unavailable (returns empty buckets in CI/offline)."""
+    buckets: dict[str, list[dict]] = {ntype: [] for ntype in _PRE_INIT_NODE_TYPES}
+    if not persona_id:
+        return buckets
+    try:
+        rows = supabase_client.list_knowledge_nodes_by_type(
+            list(_PRE_INIT_NODE_TYPES),
+            persona_id=persona_id,
+            limit=400,
+        ) or []
+    except Exception:
+        return buckets
+    for row in rows:
+        ntype = str(row.get("node_type") or "").lower()
+        if ntype not in buckets:
+            continue
+        buckets[ntype].append({
+            "id": row.get("id"),
+            "slug": row.get("slug"),
+            "title": row.get("title"),
+            "tags": row.get("tags") or [],
+            "metadata": row.get("metadata") or {},
+        })
+    return buckets
+
+
+def build_pre_initialization_review(
+    session: dict,
+    *,
+    persona_context: Optional[dict[str, list[dict]]] = None,
+    classification: Optional[dict] = None,
+) -> dict[str, Any]:
+    """Inspect the persona context and produce a /tree-reference style payload
+    that recommends reuse for audience/product/campaign/asset before Sofia
+    generates new branches.
+
+    Output shape mirrors the contract documented in CLAUDE.md:
+        {
+          "persona_context_loaded": bool,
+          "existing_nodes_found": { brand[], briefing[], campaign[], audience[],
+                                    product[], offer[], copy[], rule[],
+                                    asset[], faq[] },
+          "recommended_connections": [{type, target_slug, target_title, reason}],
+          "new_nodes_needed": [{type, reason}],
+          "questions": [string]
+        }
+    """
+    persona_context = persona_context or _load_persona_context(session.get("persona_id"))
+    classification = classification or session.get("classification") or {}
+    initial_counts = _normalize_block_counts(session.get("initial_block_counts"))
+    plan = session.get("knowledge_plan") if isinstance(session.get("knowledge_plan"), dict) else None
+    plan_counts = count_blocks_by_type((plan or {}).get("entries") or []) if plan else {}
+
+    existing_nodes_found = {
+        ntype: [
+            {"slug": item.get("slug"), "title": item.get("title")}
+            for item in items
+            if item.get("slug")
+        ]
+        for ntype, items in (persona_context or {}).items()
+    }
+    has_any_context = any(existing_nodes_found.get(ntype) for ntype in _PRE_INIT_NODE_TYPES)
+    recommended: list[dict[str, Any]] = []
+    new_nodes_needed: list[dict[str, Any]] = []
+    questions: list[str] = []
+
+    # Audience reuse: if the persona already has audience nodes and the plan
+    # has no explicit audience yet, suggest reusing instead of cloning.
+    existing_audiences = existing_nodes_found.get("audience") or []
+    plan_has_audience = int(plan_counts.get("audience") or 0) > 0
+    requested_audience = int(initial_counts.get("audience") or 0) > 0
+    if existing_audiences and not plan_has_audience:
+        for audience in existing_audiences[:3]:
+            recommended.append({
+                "type": "audience",
+                "target_slug": audience.get("slug"),
+                "target_title": audience.get("title"),
+                "reason": "audience ja existente para esta persona",
+            })
+        if requested_audience:
+            questions.append(
+                f"Encontrei audiencia ja descrita: {existing_audiences[0].get('title')}. "
+                "Deseja conectar nela ou criar uma nova segmentacao?"
+            )
+        else:
+            questions.append(
+                f"A audiencia existente '{existing_audiences[0].get('title')}' atende esta captura ou precisa de nova segmentacao?"
+            )
+
+    # Campaign reuse: same idea.
+    existing_campaigns = existing_nodes_found.get("campaign") or []
+    plan_has_campaign = int(plan_counts.get("campaign") or 0) > 0
+    if existing_campaigns and not plan_has_campaign:
+        recommended.append({
+            "type": "campaign",
+            "target_slug": existing_campaigns[0].get("slug"),
+            "target_title": existing_campaigns[0].get("title"),
+            "reason": "campanha ja cadastrada nesta persona",
+        })
+        questions.append(
+            f"Esta captura deve entrar na campanha existente '{existing_campaigns[0].get('title')}' ou e uma nova campanha?"
+        )
+
+    # Asset routing: route by classification.asset_function instead of the
+    # generic "product" default. The actual reparent happens in the planner;
+    # here we just surface the recommendation for the operator.
+    asset_function = str((classification or {}).get("asset_function") or "").lower().strip()
+    if asset_function in {"campaign_hero", "campaign_banner"}:
+        target = existing_campaigns[0] if existing_campaigns else None
+        recommended.append({
+            "type": "asset",
+            "target_slug": (target or {}).get("slug"),
+            "target_title": (target or {}).get("title"),
+            "reason": f"asset com funcao {asset_function} deve apoiar a campanha",
+            "expected_parent_type": "campaign",
+        })
+    elif asset_function in {"product_reference"}:
+        existing_products = existing_nodes_found.get("product") or []
+        target = existing_products[0] if existing_products else None
+        recommended.append({
+            "type": "asset",
+            "target_slug": (target or {}).get("slug"),
+            "target_title": (target or {}).get("title"),
+            "reason": "asset com funcao product_reference deve apoiar o produto",
+            "expected_parent_type": "product",
+        })
+
+    # New nodes needed: when the operator requested a count but there is no
+    # existing reuse target, flag it.
+    for ntype in ("brand", "briefing", "campaign"):
+        if int(initial_counts.get(ntype) or 0) > 0 and not (existing_nodes_found.get(ntype) or []):
+            new_nodes_needed.append({"type": ntype, "reason": f"persona ainda nao tem {ntype}"})
+
+    return {
+        "persona_context_loaded": bool(has_any_context),
+        "existing_nodes_found": existing_nodes_found,
+        "recommended_connections": recommended,
+        "new_nodes_needed": new_nodes_needed,
+        "questions": questions,
     }
 
 
@@ -2888,6 +4305,9 @@ def create_session(
     resume_meta = _build_resume_metadata(initial_context or "", agent_key if agent_key in AGENT_PROFILES else "sofia")
     initial_state = dict(initial_state or {})
     persona_slug = str(initial_state.get("persona_slug") or _context_persona_slug(initial_context or "") or "").strip().lower()
+    persona_id, resolved_persona_slug = _resolve_session_persona(persona_slug)
+    if resolved_persona_slug:
+        persona_slug = resolved_persona_slug
     source_url = _coerce_urlish_value(str(initial_state.get("source_url") or "")) or _source_url_from_context(initial_context or "")
     mode = str(initial_state.get("mode") or "legacy").strip().lower() or "legacy"
     initial_block_counts = _normalize_block_counts(initial_state.get("initial_block_counts"))
@@ -2896,6 +4316,9 @@ def create_session(
     mission_state = _default_mission_state(initial_context or "")
     if persona_slug:
         mission_state["persona"] = persona_slug
+        mission_state["persona_slug"] = persona_slug
+    if persona_id:
+        mission_state["persona_id"] = persona_id
     if source_url:
         mission_state["source"] = {"type": "website", "url": source_url}
     session = {
@@ -2908,6 +4331,7 @@ def create_session(
         "stage": "chatting",
         "mode": mode,
         "status": "collecting",
+        "persona_id": persona_id,
         "persona_slug": persona_slug or None,
         "source_url": source_url,
         "initial_block_counts": initial_block_counts,
@@ -2941,6 +4365,28 @@ def create_session(
             _store_plan_state(session, initial_plan_state, last_change="plano inicial normalizado")
         except Exception:
             session["knowledge_plan"] = initial_plan
+    # Pre-initialization review: load existing canonical nodes for this persona
+    # so the planner and the UI can suggest reuse instead of always creating
+    # new audience/product/campaign branches. Best-effort: failures are
+    # swallowed so an unavailable Supabase never blocks the session start.
+    if mode == "criar" and persona_id:
+        try:
+            persona_context = _load_persona_context(persona_id)
+            session["persona_context"] = persona_context
+            session["pre_init_review"] = build_pre_initialization_review(
+                session,
+                persona_context=persona_context,
+                classification=session.get("classification") or {},
+            )
+        except Exception:
+            session.setdefault("persona_context", {ntype: [] for ntype in _PRE_INIT_NODE_TYPES})
+            session.setdefault("pre_init_review", {
+                "persona_context_loaded": False,
+                "existing_nodes_found": {},
+                "recommended_connections": [],
+                "new_nodes_needed": [],
+                "questions": [],
+            })
     _sessions[sid] = session
     _save_session(session)
     _emit_kb_event(
@@ -2967,8 +4413,8 @@ def create_session(
                 "initial_block_counts": initial_block_counts,
                 "current_block_counts": current_block_counts,
                 "entry_count": len((initial_plan or {}).get("entries") or []),
-                "tree_mode": (initial_plan or {}).get("tree_mode") or "single_branch",
-                "branch_policy": (initial_plan or {}).get("branch_policy") or "single_branch_by_default",
+                "tree_mode": (initial_plan or {}).get("tree_mode") or "pyramidal",
+                "branch_policy": (initial_plan or {}).get("branch_policy") or "top_down_pyramidal",
             },
         )
     return session
@@ -2979,7 +4425,9 @@ def start_bootstrap_session(
     initial_context: str = "",
     agent_key: str = "sofia",
     initial_state: Optional[dict[str, Any]] = None,
+    bootstrap_llm: bool = True,
 ) -> dict[str, Any]:
+    started = time.perf_counter()
     if str((initial_state or {}).get("mode") or "").strip().lower() == "criar" and _invalid_criar_persona((initial_state or {}).get("persona_slug")):
         return {
             "ok": False,
@@ -2987,7 +4435,30 @@ def start_bootstrap_session(
             "message": "Selecione uma persona especifica antes de criar conhecimento.",
         }
     session = create_session(model, initial_context=initial_context, agent_key=agent_key, initial_state=initial_state)
+    if not bootstrap_llm:
+        message = _deterministic_bootstrap_message(session)
+        session["bootstrap_llm"] = False
+        _append_transcript_turn(
+            session,
+            role="assistant",
+            content=message,
+            file_attached=False,
+            extra={"response_mode": "deterministic_bootstrap"},
+        )
+        _save_session(session)
+        return _bootstrap_result_payload(
+            session,
+            {
+                "message": message,
+                "classification": {k: v for k, v in (session.get("classification") or {}).items() if k != "file_bytes"},
+                "stage": session.get("stage"),
+                "state": session.get("mission_state"),
+                "bootstrap_llm": False,
+                "timings_ms": {"start": int((time.perf_counter() - started) * 1000)},
+            },
+        )
     result = chat(session["id"], _BOOTSTRAP_PROMPT, internal=True)
+    result.setdefault("timings_ms", {})["start"] = int((time.perf_counter() - started) * 1000)
     if result.get("ok") is False:
         return _bootstrap_result_payload(
             session,
@@ -2996,6 +4467,7 @@ def start_bootstrap_session(
                 "classification": {k: v for k, v in (session.get("classification") or {}).items() if k != "file_bytes"},
                 "stage": session.get("stage"),
                 "state": session.get("mission_state"),
+                "timings_ms": result.get("timings_ms") or {},
             },
         )
     return _bootstrap_result_payload(session, result)
@@ -3014,6 +4486,73 @@ def attach_crawler_capture(session_id: str, capture: dict) -> bool:
     session["crawler_captures"] = captures[-5:]
     _save_session(session)
     return True
+
+
+def attach_reading(session_id: str, reading: dict, file_meta: Optional[dict] = None) -> bool:
+    """Append an asset_pipeline reading bundle (compact dict) to the session.
+
+    The reading is also surfaced as a short text line under
+    `session['classification']['attachments']` so Sofia/chat downstream can
+    pick it up without re-reading the asset.
+    """
+    session = _get_session(session_id)
+    if not session or not isinstance(reading, dict):
+        return False
+    readings = session.setdefault("asset_readings", [])
+    entry = {"file": file_meta or {}, "reading": reading}
+    readings.append(entry)
+    session["asset_readings"] = readings[-10:]
+
+    extracted = (reading.get("extracted_text") or "").strip()
+    visual = (reading.get("visual_summary") or "").strip()
+    if extracted or visual:
+        classification = session.setdefault("classification", {})
+        attachments = classification.setdefault("attachments", [])
+        attachments.append({
+            "filename": (file_meta or {}).get("filename") or "",
+            "kind": reading.get("kind"),
+            "extracted_text": extracted[:2000],
+            "visual_summary": visual[:400],
+            "engine": reading.get("ocr_engine"),
+        })
+        classification["attachments"] = attachments[-10:]
+
+    _save_session(session)
+    return True
+
+
+def prune_unpersisted_asset_readings(session: dict) -> int:
+    """Remove legacy Sofia readings that were never persisted to Storage/assets.
+
+    Older uploads could attach OCR/vision text to the local session even when
+    the storage write failed. That made Sofia remember an image that did not
+    exist in the assets system. A reading is considered persisted only when it
+    carries a public URL or an asset_id/storage path from the upload route.
+    """
+    if not isinstance(session, dict):
+        return 0
+    readings = session.get("asset_readings")
+    if not isinstance(readings, list) or not readings:
+        return 0
+    kept: list[dict] = []
+    pruned = 0
+    for entry in readings:
+        file_meta = (entry or {}).get("file") if isinstance(entry, dict) else {}
+        if not isinstance(file_meta, dict):
+            file_meta = {}
+        if file_meta.get("url") or file_meta.get("asset_id") or file_meta.get("storage_path"):
+            kept.append(entry)
+        else:
+            pruned += 1
+    if pruned <= 0:
+        return 0
+    session["asset_readings"] = kept
+    cls = session.setdefault("classification", {})
+    if not kept and isinstance(cls.get("attachments"), list):
+        cls["attachments"] = []
+    session["asset_readings_pruned"] = int(session.get("asset_readings_pruned") or 0) + pruned
+    _save_session(session)
+    return pruned
 
 
 def update_session_plan(
@@ -3308,6 +4847,33 @@ Estado atual:
         state_ctx += json.dumps(session.get("knowledge_plan"), ensure_ascii=False)[:6000] + "\n"
     if session.get("crawler_captures"):
         state_ctx += "\n" + _crawler_context(session["crawler_captures"]) + "\n"
+    # Pre-initialization review: surface existing canonical nodes so the
+    # planner reuses audience/product/campaign instead of cloning. The agent
+    # must ask before duplicating; treat this list as authoritative reuse
+    # candidates.
+    pre_init_review = session.get("pre_init_review") if isinstance(session.get("pre_init_review"), dict) else None
+    if pre_init_review and pre_init_review.get("persona_context_loaded"):
+        compact_existing = {
+            ntype: [item.get("slug") for item in items if item.get("slug")]
+            for ntype, items in (pre_init_review.get("existing_nodes_found") or {}).items()
+            if items
+        }
+        if compact_existing:
+            state_ctx += (
+                "\nContexto existente da persona (pre-init review): "
+                + json.dumps(compact_existing, ensure_ascii=False)[:1500]
+                + "\nRegra: antes de propor audience/product/campaign/asset, pergunte ao operador se prefere conectar ao node existente. Nao gere audience nova quando ja houver audience na lista acima.\n"
+            )
+        recs = pre_init_review.get("recommended_connections") or []
+        if recs:
+            state_ctx += (
+                "Recomendacoes de reuso: "
+                + json.dumps(recs[:6], ensure_ascii=False)[:1200]
+                + "\n"
+            )
+        qs = pre_init_review.get("questions") or []
+        if qs:
+            state_ctx += "Perguntas obrigatorias antes do plano final:\n" + "\n".join(f"- {q}" for q in qs[:4]) + "\n"
 
     try:
         router = ModelRouter()
@@ -3995,8 +5561,8 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
             "current_block_counts": expected_counts,
             "save_payload_counts": actual_counts,
             "entry_count": len(plan_entries),
-            "tree_mode": (plan_state.get("summary") or {}).get("tree_mode") or "single_branch",
-            "branch_policy": (plan_state.get("summary") or {}).get("branch_policy") or "single_branch_by_default",
+            "tree_mode": (plan_state.get("summary") or {}).get("tree_mode") or "pyramidal",
+            "branch_policy": (plan_state.get("summary") or {}).get("branch_policy") or "top_down_pyramidal",
             "plan_summary": plan_state.get("summary"),
             "plan_hash": plan_state.get("plan_hash"),
         },
@@ -4074,8 +5640,8 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
                 metadata={
                     **(payload.get("metadata") or {}),
                     "session_id": session_id,
-                    "tree_mode": plan_payload.get("tree_mode") or "single_branch",
-                    "branch_policy": plan_payload.get("branch_policy") or "single_branch_by_default",
+                    "tree_mode": plan_payload.get("tree_mode") or "pyramidal",
+                    "branch_policy": plan_payload.get("branch_policy") or "top_down_pyramidal",
                     "sync_origin": "direct_save",
                     "classification": item_classification,
                 },

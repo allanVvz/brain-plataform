@@ -77,7 +77,7 @@ _NODE_HIERARCHY_DEFAULTS: dict[str, tuple[int, float]] = {
     "tone": (40, 0.70),
     "rule": (40, 0.80),
     "copy": (40, 0.65),
-    "faq": (40, 0.65),
+    "faq": (40, 0.45),
     "asset": (40, 0.55),
     "embedded": (50, 0.95),
     "tag": (90, 0.30),
@@ -107,10 +107,12 @@ _SEMANTIC_EDGE_BY_TYPES: dict[tuple[str, str], tuple[str, str]] = {
     ("briefing", "audience"): ("defines_audience", "Briefing define publico"),
     ("audience", "product"): ("offers_product", "Publico recebe oferta de produto"),
     ("product", "offer"): ("defines_offer", "Produto define oferta"),
+    ("product", "faq"): ("answers_question", "Produto responde pergunta"),
     ("offer", "copy"): ("supports_copy", "Oferta sustenta copy"),
     ("offer", "faq"): ("answers_question", "Oferta responde pergunta"),
     ("product", "copy"): ("supports_copy", "Produto sustenta copy"),
     ("copy", "faq"): ("answers_question", "Copy responde pergunta"),
+    ("rule", "faq"): ("answers_question", "Regra orienta FAQ"),
     ("faq", "embedded"): ("published_to_rag", "FAQ publicado no RAG"),
 }
 
@@ -130,8 +132,8 @@ def traceability_metadata(*sources: Optional[dict]) -> dict:
             if source.get(key) is not None and out.get(key) is None:
                 out[key] = source.get(key)
     if out:
-        out.setdefault("tree_mode", "single_branch")
-        out.setdefault("branch_policy", "single_branch_by_default")
+        out.setdefault("tree_mode", "pyramidal")
+        out.setdefault("branch_policy", "top_down_pyramidal")
     return out
 
 
@@ -155,8 +157,8 @@ def semantic_edge_metadata(
         merged.setdefault("tree_role", "primary_branch")
     merged.update(traceability_metadata((source_node or {}).get("metadata") or {}, (target_node or {}).get("metadata") or {}))
     if merged.get("session_id"):
-        merged.setdefault("tree_mode", "single_branch")
-        merged.setdefault("branch_policy", "single_branch_by_default")
+        merged.setdefault("tree_mode", "pyramidal")
+        merged.setdefault("branch_policy", "top_down_pyramidal")
     return merged
 
 
@@ -195,6 +197,7 @@ _DEFAULT_PARENT_RELATION: dict[tuple[str, str], str] = {
     ("product", "copy"): "supports_copy",
     ("product", "faq"): "answers_question",
     ("copy", "faq"): "answers_question",
+    ("rule", "faq"): "answers_question",
     ("product", "briefing"): "contains",
     ("product", "entity"): "contains",
     ("product", "asset"): "uses_asset",
@@ -594,7 +597,7 @@ def _default_plan_relation(parent_type: Optional[str], child_type: Optional[str]
 def _preferred_parent_types(child_type: Optional[str]) -> tuple[str, ...]:
     child = (child_type or "").strip().lower()
     if child == "faq":
-        return ("copy", "product")
+        return ("copy", "offer", "product")
     if child == "copy":
         return ("product", "campaign")
     if child == "briefing":
@@ -1050,6 +1053,10 @@ def _explicit_relations_from_frontmatter(fm: dict) -> list[tuple[str, str]]:
         "campaigns": "campaign",
         "product": "product",
         "products": "product",
+        "offer": "offer",
+        "offers": "offer",
+        "copy": "copy",
+        "copies": "copy",
         "brand": "brand",
         "brands": "brand",
         "entity": "entity",
@@ -1070,7 +1077,7 @@ def _explicit_relations_from_frontmatter(fm: dict) -> list[tuple[str, str]]:
             continue
         ntype, slug = tag.split(":", 1)
         ntype = ntype.strip().lower()
-        if ntype in _TOPIC_NODE_TYPES and slug.strip():
+        if ntype in (_TOPIC_NODE_TYPES | {"copy"}) and slug.strip():
             rel.append((ntype, _slugify(slug)))
 
     dedup: list[tuple[str, str]] = []
@@ -1095,7 +1102,7 @@ def _topic_relations_for_item(item: dict, fm: dict, node_type: str) -> list[tupl
         if ":" not in tag:
             continue
         ntype, slug = tag.split(":", 1)
-        if ntype in _TOPIC_NODE_TYPES and slug:
+        if ntype in (_TOPIC_NODE_TYPES | {"copy"}) and slug:
             rel.append((ntype, _slugify(slug)))
 
     dedup: list[tuple[str, str]] = []
@@ -1458,9 +1465,9 @@ def bootstrap_from_item(
                     "has_tag",
                     persona_id=persona_id,
                     metadata={
-                        "graph_layer": "auxiliary",
+                        "graph_layer": "semantic_tags",
                         "primary_tree": False,
-                        "visual_hidden": False,
+                        "visual_hidden": True,
                         "created_from": "bootstrap_tags",
                     },
                 )
@@ -1470,11 +1477,8 @@ def bootstrap_from_item(
         related: list[tuple[str, str]] = _topic_relations_for_item(item, fm, node_type)
 
         # 6) For each related (type, slug), upsert node + connect with the right edge.
-        # Relation choice depends on the source item's content_type:
-        #   asset  → product=uses_asset (inverted), campaign=supports_campaign
-        #   faq    → product/campaign = answers_question
-        #   copy   → product/campaign = supports_copy
-        #   other  → product=about_product, campaign=part_of_campaign
+        # FAQ is terminal in commercial branches: topic nodes point into FAQ.
+        # The only valid outgoing FAQ edge is publication to Embedded.
         related_nodes: dict[tuple[str, str], dict] = {}
         for ntype, rslug in related:
             related_title = _relation_title(ntype, rslug, item, fm)
@@ -1513,8 +1517,23 @@ def bootstrap_from_item(
                         target["id"], mirror["id"], "uses_asset", persona_id=persona_id,
                     )
                     continue
-            elif content_type == "faq" and ntype in ("product", "campaign"):
-                relation = "answers_question"
+            elif content_type == "faq" and ntype in {"product", "offer", "copy", "campaign", "audience", "brand", "entity"}:
+                supabase_client.upsert_knowledge_edge(
+                    target["id"],
+                    mirror["id"],
+                    "answers_question",
+                    persona_id=persona_id,
+                    metadata=semantic_edge_metadata(
+                        target,
+                        mirror,
+                        "answers_question",
+                        {
+                            "primary_tree": False,
+                            "created_from": "bootstrap_faq_reference",
+                        },
+                    ),
+                )
+                continue
             elif content_type == "copy" and ntype in ("product", "campaign"):
                 relation = "supports_copy"
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -128,8 +129,8 @@ def _branch_context(chain: list[dict], path_edges: list[dict], persona: dict) ->
     path = _branch_path(chain, persona)
     root = path[0] if path else {}
     return {
-        "tree_mode": "single_branch",
-        "branch_policy": "single_branch_by_default",
+        "tree_mode": "pyramidal",
+        "branch_policy": "top_down_pyramidal",
         "root": root,
         "path": path,
         "edges": _branch_edges(chain, path_edges),
@@ -143,10 +144,62 @@ def _answer_is_useful(question: str, answer: str) -> bool:
         return False
     if q == a:
         return False
+    if re.search(r"R\$\s*\d", answer):
+        return True
     stripped = a.strip(" ?!.")
     if "?" in answer and len(stripped.split()) <= 12:
         return False
+    weak_phrases = (
+        "use o contexto deste galho para responder",
+        "conecte a duvida",
+        "mantenha a resposta curta",
+    )
+    if any(phrase in a for phrase in weak_phrases):
+        return False
+    if len(stripped.split()) < 8:
+        return False
     return True
+
+
+def _extract_markdown_faq_pairs(text: str) -> list[dict[str, str]]:
+    """Parse FAQ Golden Dataset markdown into canonical Q/A pairs."""
+    if not text or "###" not in text:
+        return []
+    matches = list(re.finditer(r"(?m)^###\s*(?P<num>\d+)\.\s*(?P<question>.+?)\s*$", text))
+    pairs: list[dict[str, str]] = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        block = text[start:end].strip()
+        answer_match = re.search(
+            r"(?is)(?:\*\*Resposta:\*\*|Resposta:)\s*(?P<answer>.+)",
+            block,
+        )
+        answer = answer_match.group("answer").strip() if answer_match else block
+        answer = re.sub(r"(?m)^#{1,6}\s+.*$", "", answer).strip()
+        answer = re.sub(r"\s+", " ", answer).strip()
+        question = re.sub(r"\s+", " ", match.group("question")).strip()
+        if question and answer:
+            pairs.append({
+                "index": str(len(pairs) + 1),
+                "question": question,
+                "answer": answer,
+            })
+    return pairs
+
+
+def _canonical_faq_pairs(*, source_text: str, question: str, answer: str, is_golden_dataset: bool) -> list[dict[str, str]]:
+    pairs = _extract_markdown_faq_pairs(source_text) if is_golden_dataset else []
+    if not pairs:
+        pairs = knowledge_graph._extract_faq_pairs(source_text)
+        pairs = [
+            {"index": str(idx), "question": q.strip(), "answer": a.strip()}
+            for idx, (q, a) in enumerate(pairs, 1)
+            if q.strip() and a.strip()
+        ]
+    if not pairs and (question or answer):
+        pairs = [{"index": "1", "question": question.strip(), "answer": answer.strip()}]
+    return pairs
 
 
 def _faq_review_warnings(
@@ -359,6 +412,8 @@ def _approved_markdown(
             lines.append(f"{label}: {value}")
     if content_type == "faq":
         lines.extend(["", f"Pergunta: {question}", f"Resposta aprovada: {answer}"])
+        if source_text and source_text.strip() and source_text.strip() != answer.strip():
+            lines.extend(["", "## FAQ Golden Dataset", "", source_text.strip()])
     elif source_text:
         lines.extend(["", source_text.strip()])
     return "\n".join(lines).strip()
@@ -367,6 +422,8 @@ def _approved_markdown(
 def _faq_chunk_text(
     *,
     snapshot_metadata: dict,
+    question: Optional[str] = None,
+    answer: Optional[str] = None,
 ) -> str:
     branch_context = snapshot_metadata.get("branch_context") or {}
     path = branch_context.get("path") or []
@@ -378,21 +435,64 @@ def _faq_chunk_text(
         edge_parts.append(f"{source} {semantic} {target}")
     brand_source = snapshot_metadata.get("brand_source") or "explicit"
     faq_context = snapshot_metadata.get("faq_context") or {}
+    question_text = (question or faq_context.get("question") or "").strip()
+    answer_text = (answer or faq_context.get("answer") or "").strip()
     lines = [
+        "Tipo: FAQ aprovada",
         f"Marca/Persona: {snapshot_metadata.get('persona_context') or 'Nao informado.'}",
         f"Brand: {snapshot_metadata.get('brand_context') or 'Nao informado.'} Fonte: {brand_source}.",
         f"Briefing: {snapshot_metadata.get('briefing_context') or 'Nao informado.'}",
         f"Publico: {snapshot_metadata.get('audience_context') or 'Nao informado.'}",
         f"Produto: {snapshot_metadata.get('product_context') or 'Nao informado.'}",
         f"Copy/Oferta: {snapshot_metadata.get('copy_context') or 'Nao informado.'}",
-        f"Pergunta: {faq_context.get('question') or ''}",
-        f"Resposta aprovada: {faq_context.get('answer') or ''}",
+        f"Pergunta: {question_text}",
+        f"Resposta aprovada: {answer_text}",
         f"Regras: {snapshot_metadata.get('rules_context') or 'Nao informado.'}",
         f"Tom: {snapshot_metadata.get('tone_context') or 'Nao informado.'}",
         "Caminho da branch: " + " > ".join(step.get("slug") or step.get("title") or "" for step in path if step.get("slug") or step.get("title")) + ".",
         "Relacoes: " + "; ".join(edge_parts) + ".",
     ]
     return "\n".join(lines)
+
+
+def _branch_value(branch_context: dict, node_type: str, field: str = "slug") -> Optional[str]:
+    for step in branch_context.get("path") or []:
+        if (step.get("node_type") or "").lower() == node_type:
+            value = step.get(field)
+            return str(value) if value else None
+    return None
+
+
+def _branch_session_id(chain: list[dict], source_meta: dict) -> Optional[str]:
+    if source_meta.get("session_id"):
+        return str(source_meta.get("session_id"))
+    for node in reversed(chain):
+        meta = node.get("metadata") or {}
+        if meta.get("session_id"):
+            return str(meta.get("session_id"))
+    return None
+
+
+def _rules_list(rules_context: str) -> list[str]:
+    base = [
+        "nao inventar preco",
+        "nao inventar desconto",
+        "nao inventar estoque",
+        "nao inventar frete",
+        "nao inventar prazo",
+        "nao inventar disponibilidade",
+        "nao inventar condicao comercial",
+    ]
+    extra = [part.strip() for part in re.split(r"[.;\n]", rules_context or "") if part.strip()]
+    return list(dict.fromkeys([*base, *extra]))[:16]
+
+
+def _faq_summary(question: str, answer: str, product: Optional[dict]) -> str:
+    product_title = (product or {}).get("title") or (product or {}).get("slug") or "produto"
+    text = re.sub(r"\s+", " ", answer or "").strip()
+    if len(text) > 180:
+        text = text[:177].rstrip() + "..."
+    return f"FAQ sobre {product_title}: {question} Resposta: {text}"
 
 
 def _source_item_for_node(node: dict) -> Optional[dict]:
@@ -458,8 +558,10 @@ def publish_approved_node(
     faq = source_node if content_type == "faq" else _first_by_type(chain, "faq")
 
     source_meta = source_node.get("metadata") or {}
+    is_golden_dataset_faq = bool(source_meta.get("golden_dataset") or source_meta.get("faq_document_type") == "golden_dataset")
+    session_id = _branch_session_id(chain, source_meta)
     rules = _metadata_list(source_meta.get("rules"), source_meta.get("restrictions"))
-    rules_context = " ".join(rules).strip() or "Nao inventar preco, estoque, disponibilidade ou prazo. Confirmar com a equipe quando a informacao nao estiver validada."
+    rules_context = " ".join(rules).strip() or "Nao inventar preco, desconto, estoque, frete, prazo, disponibilidade ou condicao comercial sem validacao."
     tone = str(source_meta.get("tone") or source_meta.get("voice") or "").strip()
     tone_context = tone or "Direto, acolhedor, feminino e comercial."
     branch_context = _branch_context(chain, path_edges, persona)
@@ -481,22 +583,37 @@ def publish_approved_node(
         "question": question,
         "answer": answer,
     } if faq else {"question": question, "answer": answer}
+    canonical_faq_pairs = _canonical_faq_pairs(
+        source_text=source_text,
+        question=question,
+        answer=answer,
+        is_golden_dataset=is_golden_dataset_faq,
+    ) if content_type == "faq" else []
+    if canonical_faq_pairs:
+        question = canonical_faq_pairs[0]["question"]
+        answer = canonical_faq_pairs[0]["answer"]
+        faq_context["question"] = question
+        faq_context["answer"] = answer
+    pair_warnings: list[str] = []
+    for pair in canonical_faq_pairs:
+        if not _answer_is_useful(pair.get("question") or "", pair.get("answer") or ""):
+            pair_warnings.append(f"faq_pair_{pair.get('index')}_answer_not_useful")
     review_warnings = (
         _faq_review_warnings(
             source_node=source_node,
             chain=chain,
             branch_context=branch_context,
-            question=question,
-            answer=answer,
+            question=(canonical_faq_pairs[0]["question"] if canonical_faq_pairs else question),
+            answer=(canonical_faq_pairs[0]["answer"] if canonical_faq_pairs else answer),
             briefing_context=briefing_context,
             product_context=product_context,
             copy_context=copy_context,
-        )
+        ) + pair_warnings
         if content_type == "faq"
         else []
     )
     canonical_key = _canonical_key(persona, content_type, chain, slug)
-    approved_summary = answer[:500] if content_type == "faq" and answer else (source_node.get("summary") or source_text or title)[:500]
+    approved_summary = (answer or source_text)[:500] if content_type == "faq" and (answer or source_text) else (source_node.get("summary") or source_text or title)[:500]
     approved_markdown = _approved_markdown(
         title=title,
         content_type=content_type,
@@ -520,6 +637,9 @@ def publish_approved_node(
         "source_table": source_node.get("source_table") or "knowledge_nodes",
         "source_id": source_node.get("source_id") or source_node.get("id"),
         "artifact_id": source_node.get("artifact_id") or source_meta.get("artifact_id"),
+        "session_id": session_id,
+        "tree_mode": branch_context.get("tree_mode") or "pyramidal",
+        "branch_policy": branch_context.get("branch_policy") or "top_down_pyramidal",
         "content_type": content_type,
         "title": title,
         "slug": slug,
@@ -542,6 +662,9 @@ def publish_approved_node(
         "metadata": {
             "source": "graph_approval",
             "source_node_id": source_node.get("id"),
+            "session_id": session_id,
+            "tree_mode": branch_context.get("tree_mode") or "pyramidal",
+            "branch_policy": branch_context.get("branch_policy") or "top_down_pyramidal",
             "source_knowledge_item_id": (source_item or {}).get("id"),
             "n8n_ready": content_type == "faq" and not review_warnings,
             "review_warnings": review_warnings,
@@ -554,6 +677,8 @@ def publish_approved_node(
             "product_context": product_context,
             "copy_context": copy_context,
             "faq_context": faq_context,
+            "body_markdown": source_text if content_type == "faq" and is_golden_dataset_faq else "",
+            "question_count": source_meta.get("question_count"),
             "rules_context": rules_context,
             "tone_context": tone_context,
         },
@@ -562,6 +687,7 @@ def publish_approved_node(
         raise RuntimeError("Approved snapshot was not created")
 
     rag_entry = None
+    rag_entries: list[dict] = []
     chunks: list[dict] = []
     rag_links: list[dict] = []
     embedded_edge = None
@@ -591,6 +717,7 @@ def publish_approved_node(
             "knowledge_edge_ids": [edge.get("id") for edge in path_edges if edge.get("id")],
             "embedded_edge_id": None,
             "rag_entry_id": None,
+            "rag_entry_ids": [],
             "rag_chunk_ids": [],
             "rag_link_ids": [],
             "status": "needs_review",
@@ -601,68 +728,111 @@ def publish_approved_node(
             "canonical_key": canonical_key,
         }
     if content_type == "faq":
-        chunk_text = _faq_chunk_text(snapshot_metadata=snapshot.get("metadata") or {})
-        rag_entry = supabase_client.upsert_knowledge_rag_entry({
-            "persona_id": persona_id,
-            "artifact_id": source_node.get("artifact_id") or source_meta.get("artifact_id"),
-            "content_type": "faq",
-            "semantic_level": int(source_node.get("level") or 75),
-            "title": title,
-            "question": question,
-            "answer": answer,
-            "content": approved_markdown,
-            "summary": approved_summary,
-            "canonical_key": canonical_key,
-            "slug": slug,
-            "status": "active",
-            "tags": sorted(set((source_node.get("tags") or []) + ["faq", "approved", "n8n-ready"])),
-            "entities": [],
-            "products": [product.get("slug")] if product else [],
-            "campaigns": [campaign.get("slug")] if campaign else [],
-            "metadata": {
+        if not snapshot or not snapshot.get("id"):
+            raise RuntimeError("Cannot create RAG entries without an approved snapshot")
+        if not canonical_faq_pairs:
+            raise RuntimeError("FAQ approved, but no canonical question/answer pairs were found")
+        snapshot_meta = snapshot.get("metadata") or {}
+        branch_types = [step.get("node_type") for step in hierarchy_path if step.get("node_type")]
+        branch_slugs = [step.get("slug") for step in hierarchy_path if step.get("slug")]
+        for pair in canonical_faq_pairs:
+            pair_question = pair["question"]
+            pair_answer = pair["answer"]
+            pair_index = int(pair.get("index") or len(rag_entries) + 1)
+            pair_slug = _slugify(f"{slug}-{pair_index}-{pair_question}")[:140]
+            pair_canonical_key = f"{canonical_key}/q-{pair_index}-{pair_slug}"
+            pair_title = pair_question if len(pair_question) <= 120 else pair_question[:117].rstrip() + "..."
+            pair_summary = _faq_summary(pair_question, pair_answer, product)
+            pair_metadata = {
                 **source_meta,
                 "source": "approved_knowledge_snapshots",
+                "snapshot_id": snapshot.get("id"),
                 "approved_snapshot_id": snapshot.get("id"),
+                "source_snapshot_id": snapshot.get("id"),
                 "source_node_id": source_node.get("id"),
                 "source_knowledge_item_id": (source_item or {}).get("id"),
+                "session_id": session_id,
+                "tree_mode": branch_context.get("tree_mode") or "pyramidal",
+                "branch_policy": branch_context.get("branch_policy") or "top_down_pyramidal",
                 "hierarchy_path": hierarchy_path,
                 "branch_context": branch_context,
                 "status": "active",
                 "rag_index": source_meta.get("rag_index") or "default",
-            },
-            "confidence": float(source_node.get("confidence") or 0.85),
-            "importance": float(source_node.get("importance") or 0.75),
-            "validated_at": now_iso,
-        })
-        if not rag_entry or not rag_entry.get("id"):
-            raise RuntimeError("RAG entry was not created for approved FAQ")
-        chunks = supabase_client.replace_knowledge_rag_chunks(
-            rag_entry["id"],
-            persona_id,
-            [{
-                "chunk_index": 0,
-                "chunk_text": chunk_text,
-                "chunk_summary": approved_summary[:280],
-                "metadata": {
-                    "persona_slug": persona.get("slug"),
-                    "content_type": "faq",
-                    "source": "approved_knowledge_snapshots",
-                    "source_node_id": source_node.get("id"),
-                    "approved_snapshot_id": snapshot.get("id"),
-                    "rag_entry_id": rag_entry.get("id"),
-                    "hierarchy_path": [step.get("node_type") for step in hierarchy_path],
-                    "branch_context": branch_context,
-                    "product": (product or {}).get("slug"),
-                    "audience": (audience or {}).get("slug"),
-                    "campaign": (campaign or {}).get("slug"),
-                    "status": "active",
-                    "question": question,
-                    "answer": answer,
-                },
-            }],
-        )
-        if require_rag_for_faq and not chunks:
-            raise RuntimeError("FAQ approved, but no RAG chunk was created")
+                "faq_pair_index": pair_index,
+                "faq_document_slug": slug,
+                "question": pair_question,
+                "answer": pair_answer,
+            }
+            rag_entry = supabase_client.upsert_knowledge_rag_entry({
+                "persona_id": persona_id,
+                "artifact_id": source_node.get("artifact_id") or source_meta.get("artifact_id"),
+                "source_snapshot_id": snapshot.get("id"),
+                "source_node_id": source_node.get("id"),
+                "session_id": session_id,
+                "content_type": "faq",
+                "semantic_level": int(source_node.get("level") or 75),
+                "title": pair_title,
+                "question": pair_question,
+                "answer": pair_answer,
+                "content": pair_answer,
+                "summary": pair_summary,
+                "canonical_key": pair_canonical_key,
+                "slug": pair_slug,
+                "status": "active",
+                "tags": sorted(set((source_node.get("tags") or []) + ["faq", "approved", "n8n-ready"])),
+                "entities": [],
+                "products": [product.get("slug")] if product else [],
+                "campaigns": [campaign.get("slug")] if campaign else [],
+                "metadata": pair_metadata,
+                "confidence": float(source_node.get("confidence") or 0.85),
+                "importance": float(source_node.get("importance") or 0.75),
+                "validated_at": now_iso,
+            })
+            if not rag_entry or not rag_entry.get("id"):
+                raise RuntimeError("RAG entry was not created for approved FAQ pair")
+            rag_entries.append(rag_entry)
+            chunk_text = _faq_chunk_text(snapshot_metadata=snapshot_meta, question=pair_question, answer=pair_answer)
+            chunk_rows = supabase_client.replace_knowledge_rag_chunks(
+                rag_entry["id"],
+                persona_id,
+                [{
+                    "chunk_index": 0,
+                    "chunk_text": chunk_text,
+                    "chunk_summary": pair_summary[:280],
+                    "metadata": {
+                        "persona_slug": persona.get("slug"),
+                        "content_type": "faq",
+                        "status": "active",
+                        "source": "approved_knowledge_snapshots",
+                        "snapshot_id": snapshot.get("id"),
+                        "approved_snapshot_id": snapshot.get("id"),
+                        "source_snapshot_id": snapshot.get("id"),
+                        "rag_entry_id": rag_entry.get("id"),
+                        "source_node_id": source_node.get("id"),
+                        "session_id": session_id,
+                        "tree_mode": branch_context.get("tree_mode") or "pyramidal",
+                        "branch_policy": branch_context.get("branch_policy") or "top_down_pyramidal",
+                        "hierarchy_path": branch_slugs,
+                        "branch_types": branch_types,
+                        "branch_context": branch_context,
+                        "audience_slug": _branch_value(branch_context, "audience"),
+                        "product_slug": _branch_value(branch_context, "product"),
+                        "offer_slug": _branch_value(branch_context, "offer"),
+                        "copy_slug": _branch_value(branch_context, "copy"),
+                        "faq_slug": _branch_value(branch_context, "faq") or source_node.get("slug"),
+                        "rules": _rules_list(rules_context),
+                        "chunk_status": "pending_embedding",
+                        "ready_for_production": False,
+                        "question": pair_question,
+                        "answer": pair_answer,
+                        "faq_pair_index": pair_index,
+                    },
+                }],
+            )
+            if require_rag_for_faq and not chunk_rows:
+                raise RuntimeError("FAQ approved, but no RAG chunk was created")
+            chunks.extend(chunk_rows)
+        rag_entry = rag_entries[0] if rag_entries else None
         snapshot = supabase_client.update_approved_knowledge_snapshot(
             snapshot["id"],
             {
@@ -671,7 +841,9 @@ def publish_approved_node(
                 "metadata": {
                     **(snapshot.get("metadata") or {}),
                     "rag_entry_id": rag_entry.get("id"),
+                    "rag_entry_ids": [entry.get("id") for entry in rag_entries if entry.get("id")],
                     "rag_chunk_ids": [chunk.get("id") for chunk in chunks if chunk.get("id")],
+                    "canonical_faq_count": len(rag_entries),
                     "n8n_ready": True,
                 },
                 "updated_at": now_iso,
@@ -705,6 +877,7 @@ def publish_approved_node(
         **source_meta,
         "approved_snapshot_id": snapshot.get("id"),
         "knowledge_rag_entry_id": (rag_entry or {}).get("id"),
+        "knowledge_rag_entry_ids": [entry.get("id") for entry in rag_entries if entry.get("id")],
         "knowledge_rag_chunk_ids": [chunk.get("id") for chunk in chunks if chunk.get("id")],
         "snapshot_status": snapshot.get("status"),
         "n8n_ready": bool(chunks) if content_type == "faq" else False,
@@ -716,6 +889,7 @@ def publish_approved_node(
                 **(source_item.get("metadata") or {}),
                 "approved_snapshot_id": snapshot.get("id"),
                 "knowledge_rag_entry_id": (rag_entry or {}).get("id"),
+                "knowledge_rag_entry_ids": [entry.get("id") for entry in rag_entries if entry.get("id")],
                 "knowledge_rag_chunk_ids": [chunk.get("id") for chunk in chunks if chunk.get("id")],
             }
         })
@@ -728,6 +902,7 @@ def publish_approved_node(
         "knowledge_edge_ids": [edge.get("id") for edge in path_edges if edge.get("id")] + ([embedded_edge.get("id")] if embedded_edge and embedded_edge.get("id") else []),
         "embedded_edge_id": (embedded_edge or {}).get("id"),
         "rag_entry_id": (rag_entry or {}).get("id"),
+        "rag_entry_ids": [entry.get("id") for entry in rag_entries if entry.get("id")],
         "rag_chunk_ids": [chunk.get("id") for chunk in chunks if chunk.get("id")],
         "rag_link_ids": [link.get("id") for link in rag_links if link.get("id")],
         "status": "active" if content_type == "faq" else "approved",
