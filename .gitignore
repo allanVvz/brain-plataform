@@ -15,6 +15,9 @@ build/
 api/.env
 dashboard/.env
 dashboard/.env.local
+env.yaml
+env.qa.yaml
+env*.local
 secrets/
 *.pem
 *.key
