@@ -41,6 +41,12 @@ Thumbs.db
 # Local browser/e2e artifacts
 .test-browser-profile/
 test-artifacts/
+baita-cardapio-dom.html
+chrome-stderr.txt
+chrome-stdout.txt
+dashboard/dev-server*.log
+dashboard/dev-server*.err.log
+api/logs-dev*.txt
 
 # AI context / generated data
 GEMINI.md
