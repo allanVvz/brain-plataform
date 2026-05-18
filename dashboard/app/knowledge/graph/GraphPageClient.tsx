@@ -265,6 +265,10 @@ export default function GraphPageClient() {
         setGraphNotice({ tone: "error", text: "Aprove o FAQ primeiro. Rascunhos cinza ainda nao podem ir para o Golden Dataset." });
         return;
       }
+      if (sourceType === "faq" && targetType !== "embedded") {
+        setGraphNotice({ tone: "error", text: "FAQ e destino final. Conecte produto, oferta ou copy para o FAQ; FAQ so publica no Embedded." });
+        return;
+      }
       if (sourceType === "gallery" || targetType === "gallery") {
         const assetNode = sourceType === "gallery" ? targetNode : sourceNode;
         const assetType = String(assetNode?.data?.node_type || assetNode?.data?.content_type || "");
@@ -280,7 +284,7 @@ export default function GraphPageClient() {
       const finalReceiverTypes = new Set(["gallery", "embedded"]);
       const finalReceiver = finalReceiverTypes.has(targetType);
       const involvesGallery = sourceType === "gallery" || targetType === "gallery";
-      const relationType = targetType === "gallery" ? "gallery_asset" : "manual";
+      const relationType = targetType === "gallery" ? "gallery_asset" : targetType === "faq" ? "answers_question" : "manual";
       try {
         setGraphNotice(null);
         await api.createGraphEdge({
@@ -644,6 +648,13 @@ export default function GraphPageClient() {
           onFocusHere={() => selectedNode && onFocusNode(selectedNode)}
           onDeleteNode={handleDeleteNode}
           onDeleteEdge={handleDeleteEdge}
+          onSelectNode={(nodeId) => {
+            const next = (data?.nodes || []).find((n) => n.id === nodeId);
+            if (next) {
+              setSelectedNode(next);
+              setSelectedNodes([next]);
+            }
+          }}
         />
 
         <button

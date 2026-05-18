@@ -22,6 +22,8 @@ import {
   User,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import IntakeReadingPanel from "@/components/capture/IntakeReadingPanel";
+import BlockedPlanDiagnosticModal from "@/components/capture/BlockedPlanDiagnosticModal";
 
 const MODELS = [
   { id: "gpt-4o-mini", label: "GPT-4o Mini - rapido" },
@@ -53,8 +55,8 @@ const KNOWLEDGE_BLOCKS = [
   { id: "briefing", label: "Briefing", description: "Contexto bruto, objetivo, fonte e restricoes da captura." },
   { id: "campaign", label: "Campanha", description: "Colecoes, lancamentos, sazonalidade e angulos comerciais." },
   { id: "audience", label: "Publico", description: "Segmentos, dores, desejos, linguagem e objecoes." },
-  { id: "product", label: "Produto", description: "Itens, kits, beneficios, precos, disponibilidade e atributos." },
-  { id: "offer", label: "Oferta", description: "Preco, quantidade, pacote, kit ou variacao comercial." },
+  { id: "product", label: "Produto", description: "Itens, beneficios, precos, disponibilidade e atributos." },
+  { id: "offer", label: "Oferta", description: "Preco, quantidade, pacote, plano ou variacao comercial." },
   { id: "entity", label: "Entidades", description: "Cores, materiais, categorias, variantes e termos relacionados." },
   { id: "copy", label: "Copy", description: "Textos comerciais por canal, publico, etapa e oferta." },
   { id: "faq", label: "FAQ", description: "Perguntas e respostas recuperaveis pelo Golden Dataset." },
@@ -89,7 +91,7 @@ interface SessionUpload {
   title: string;
   content_type: string;
   persona_id?: string;
-  source: "text" | "file";
+  source: "text" | "file" | "session_attach";
   file_name?: string;
   preview: string;
   knowledge_item_id?: string;
@@ -149,12 +151,32 @@ interface KnowledgePlan {
   tree_mode?: string;
   branch_policy?: string;
   faq_count_policy?: string;
+  faq_parent_type?: string;
+  faq_count_per_parent?: number;
+  asset_count_policy?: string;
+  asset_parent_type?: string;
+  asset_count_per_parent?: number;
+  copy_policy?: string;
   entries: KnowledgePlanEntry[];
   links: KnowledgePlanLink[];
+  primary_tree_edges?: KnowledgePlanLink[];
+  secondary_semantic_edges?: Array<Record<string, any>>;
+  rag_edges?: Array<Record<string, any>>;
+  asset_gallery_edges?: Array<Record<string, any>>;
+  debug_edges?: Array<Record<string, any>>;
   missing_questions?: string[];
 }
 
 type BlockCounts = Record<string, number>;
+
+import type {
+  PlanDiagnostic,
+  PlanDiagnosticNode,
+  PlanDiagnosticNodeStatus,
+  PlanDiagnosticRootCause,
+  SofiaQuestion,
+  SofiaQuestionOption,
+} from "@/components/capture/diagnosticTypes";
 
 interface PlanState {
   normalized_plan: KnowledgePlan;
@@ -170,8 +192,23 @@ interface PlanState {
     tree_mode: string;
     branch_policy: string;
     faq_count_policy: string;
+    faq_parent_type?: string;
+    asset_count_policy?: string;
+    copy_policy?: string;
+    expansion?: Record<string, {
+      count_policy: string;
+      parent_type: string;
+      count_per_parent: number;
+      configured: number;
+      expected: number;
+      created: number;
+      terminal_branches?: number;
+      questions_total?: number;
+      questions_per_document?: Record<string, number>;
+    }>;
   };
   plan_hash: string;
+  diagnostic?: PlanDiagnostic | null;
 }
 
 const COUNTED_BLOCK_IDS = ["brand", "briefing", "campaign", "audience", "product", "offer", "copy", "faq", "rule", "tone", "asset"];
@@ -204,6 +241,50 @@ function countBlocksByType(entries?: KnowledgePlanEntry[] | null): BlockCounts {
   return counts;
 }
 
+function planEntriesOfType(plan: KnowledgePlan | null | undefined, type: string) {
+  return (plan?.entries || []).filter((entry) => normalizeContentTypeAlias(entry.content_type) === type);
+}
+
+function buildExpansionSummary(plan: KnowledgePlan | null | undefined) {
+  const counts = countBlocksByType(plan?.entries || []);
+  const parentTypeFor = (blockId: "faq" | "asset") => {
+    if (blockId === "faq") return plan?.faq_parent_type || (counts.rule ? "rule" : counts.copy ? "copy" : counts.offer ? "offer" : "product");
+    return plan?.asset_parent_type || "product";
+  };
+  const parentCountFor = (blockId: "faq" | "asset") => planEntriesOfType(plan, parentTypeFor(blockId)).length;
+  const faqPolicy = plan?.faq_count_policy || "grouped";
+  const assetPolicy = plan?.asset_count_policy || "per_parent";
+  const faqPerParent = Math.max(0, Number(plan?.faq_count_per_parent ?? 1));
+  const assetPerParent = Math.max(0, Number(plan?.asset_count_per_parent ?? 0));
+  return {
+    faq: {
+      count_policy: faqPolicy,
+      parent_type: parentTypeFor("faq"),
+      count_per_parent: faqPerParent,
+      configured: faqPolicy === "total" ? counts.faq : faqPolicy === "grouped" ? 1 : faqPerParent,
+      expected: faqPolicy === "total" ? counts.faq : faqPolicy === "grouped" ? Math.min(1, Math.max(1, counts.faq)) : parentCountFor("faq"),
+      created: counts.faq,
+      terminal_branches: parentCountFor("faq"),
+      questions_total: (plan?.entries || [])
+        .filter((entry) => normalizeContentTypeAlias(entry.content_type) === "faq")
+        .reduce((sum, entry) => sum + Number(entry.metadata?.question_count || 0), 0),
+      questions_per_document: Object.fromEntries(
+        (plan?.entries || [])
+          .filter((entry) => normalizeContentTypeAlias(entry.content_type) === "faq")
+          .map((entry) => [entry.slug, Number(entry.metadata?.question_count || 0)])
+      ),
+    },
+    asset: {
+      count_policy: assetPolicy,
+      parent_type: parentTypeFor("asset"),
+      count_per_parent: assetPerParent,
+      configured: assetPolicy === "total" ? counts.asset : assetPerParent,
+      expected: assetPolicy === "total" ? counts.asset : parentCountFor("asset") * assetPerParent,
+      created: counts.asset,
+    },
+  };
+}
+
 function normalizeContentTypeAlias(value: any) {
   const type = repairText(String(value || "")).trim().toLowerCase();
   const aliases: Record<string, string> = {
@@ -220,7 +301,10 @@ function normalizeContentTypeAlias(value: any) {
     variacao: "offer",
     variação: "offer",
     pacote: "offer",
-    kit: "offer",
+    plano: "offer",
+    assinatura: "offer",
+    bundle: "offer",
+    combo: "offer",
   };
   return aliases[type] || type || "other";
 }
@@ -392,9 +476,15 @@ function normalizeKnowledgePlan(plan: any, personaSlug: string): KnowledgePlan |
     source: String(plan.source || ""),
     persona_slug: String(plan.persona_slug || personaSlug || "global"),
     validation_policy: String(plan.validation_policy || "human_validation_required"),
-    tree_mode: String(plan.tree_mode || "single_branch"),
-    branch_policy: String(plan.branch_policy || "single_branch_by_default"),
-    faq_count_policy: String(plan.faq_count_policy || "total"),
+    tree_mode: String(plan.tree_mode || "pyramidal"),
+    branch_policy: String(plan.branch_policy || "top_down_pyramidal"),
+    faq_count_policy: String(plan.faq_count_policy || "grouped"),
+    faq_parent_type: String(plan.faq_parent_type || "rule"),
+    faq_count_per_parent: Number(plan.faq_count_per_parent ?? 1),
+    asset_count_policy: String(plan.asset_count_policy || "per_parent"),
+    asset_parent_type: String(plan.asset_parent_type || "product"),
+    asset_count_per_parent: Number(plan.asset_count_per_parent ?? 0),
+    copy_policy: String(plan.copy_policy || "per_product_context"),
     entries,
     links: Array.isArray(plan.links)
       ? plan.links
@@ -408,6 +498,11 @@ function normalizeKnowledgePlan(plan: any, personaSlug: string): KnowledgePlan |
     missing_questions: Array.isArray(plan.missing_questions)
       ? plan.missing_questions.map((item: any) => repairText(String(item)))
       : [],
+    primary_tree_edges: Array.isArray(plan.primary_tree_edges) ? plan.primary_tree_edges : [],
+    secondary_semantic_edges: Array.isArray(plan.secondary_semantic_edges) ? plan.secondary_semantic_edges : [],
+    rag_edges: Array.isArray(plan.rag_edges) ? plan.rag_edges : [],
+    asset_gallery_edges: Array.isArray(plan.asset_gallery_edges) ? plan.asset_gallery_edges : [],
+    debug_edges: Array.isArray(plan.debug_edges) ? plan.debug_edges : [],
   };
 }
 
@@ -418,15 +513,20 @@ function buildLocalPlanState(plan: KnowledgePlan | null, fallbackCounts?: Record
     entry_count: plan.entries.length,
     current_block_counts: normalizeBlockCounts(fallbackCounts || counts),
     link_count: Array.isArray(plan.links) ? plan.links.length : 0,
-    tree_mode: String((plan as any).tree_mode || "single_branch"),
-    branch_policy: String((plan as any).branch_policy || "single_branch_by_default"),
-    faq_count_policy: String((plan as any).faq_count_policy || "total"),
+    tree_mode: String((plan as any).tree_mode || "pyramidal"),
+    branch_policy: String((plan as any).branch_policy || "top_down_pyramidal"),
+    faq_count_policy: String((plan as any).faq_count_policy || "grouped"),
+    faq_parent_type: String((plan as any).faq_parent_type || "copy"),
+    asset_count_policy: String((plan as any).asset_count_policy || "per_parent"),
+    copy_policy: String((plan as any).copy_policy || "per_product_context"),
+    expansion: buildExpansionSummary(plan),
   };
   return {
     normalized_plan: plan,
     validation: { valid: true, blocking_violations: [], warnings: [] },
     summary,
     plan_hash: String((plan as any).plan_hash || ""),
+    diagnostic: null,
   };
 }
 
@@ -449,11 +549,75 @@ function normalizePlanState(raw: any, personaSlug: string): PlanState | null {
       entry_count: Number(summary.entry_count ?? normalizedPlan.entries.length),
       current_block_counts: normalizeBlockCounts(summary.current_block_counts || raw?.current_block_counts || countBlocksByType(normalizedPlan.entries)),
       link_count: Number(summary.link_count ?? normalizedPlan.links.length),
-      tree_mode: String(summary.tree_mode || (normalizedPlan as any).tree_mode || "single_branch"),
-      branch_policy: String(summary.branch_policy || (normalizedPlan as any).branch_policy || "single_branch_by_default"),
-      faq_count_policy: String(summary.faq_count_policy || (normalizedPlan as any).faq_count_policy || "total"),
+      tree_mode: String(summary.tree_mode || (normalizedPlan as any).tree_mode || "pyramidal"),
+      branch_policy: String(summary.branch_policy || (normalizedPlan as any).branch_policy || "top_down_pyramidal"),
+      faq_count_policy: String(summary.faq_count_policy || (normalizedPlan as any).faq_count_policy || "grouped"),
+      faq_parent_type: String(summary.faq_parent_type || (normalizedPlan as any).faq_parent_type || "copy"),
+      asset_count_policy: String(summary.asset_count_policy || (normalizedPlan as any).asset_count_policy || "per_parent"),
+      copy_policy: String(summary.copy_policy || (normalizedPlan as any).copy_policy || "per_product_context"),
+      expansion: summary.expansion || buildExpansionSummary(normalizedPlan),
     },
     plan_hash: String(source.plan_hash || raw?.plan_hash || ""),
+    diagnostic: normalizePlanDiagnostic(source.diagnostic ?? raw?.diagnostic ?? null),
+  };
+}
+
+function normalizePlanDiagnostic(raw: any): PlanDiagnostic | null {
+  if (!raw || typeof raw !== "object") return null;
+  const summary = raw.summary || {};
+  const nodes = Array.isArray(raw.nodes) ? raw.nodes : [];
+  const rootCauses = Array.isArray(raw.root_causes) ? raw.root_causes : [];
+  return {
+    blocked: Boolean(raw.blocked),
+    summary: {
+      entry_count: Number(summary.entry_count ?? 0),
+      blocked_count: Number(summary.blocked_count ?? 0),
+      cycle_count: Number(summary.cycle_count ?? 0),
+      orphan_count: Number(summary.orphan_count ?? 0),
+      error_count: Number(summary.error_count ?? 0),
+      warning_count: Number(summary.warning_count ?? 0),
+      valid_count: Number(summary.valid_count ?? 0),
+      root_cause_count: Number(summary.root_cause_count ?? 0),
+    },
+    nodes: nodes.map((node: any): PlanDiagnosticNode => ({
+      entry_index: Number(node?.entry_index ?? -1),
+      slug: String(node?.slug || ""),
+      title: String(node?.title || ""),
+      type: String(node?.type || ""),
+      parent_slug: node?.parent_slug ? String(node.parent_slug) : null,
+      parent_type: node?.parent_type ? String(node.parent_type) : null,
+      expected_parent_types: Array.isArray(node?.expected_parent_types) ? node.expected_parent_types.map((x: any) => String(x)) : [],
+      status: ((["valid","warning","error","cycle","orphan"] as PlanDiagnosticNodeStatus[]).includes(node?.status) ? node.status : "warning") as PlanDiagnosticNodeStatus,
+      issues: Array.isArray(node?.issues) ? node.issues.map((x: any) => String(x)) : [],
+      suggested_action: node?.suggested_action ? String(node.suggested_action) : null,
+      chain_path: Array.isArray(node?.chain_path) ? node.chain_path.map((x: any) => String(x)) : [],
+    })),
+    root_causes: rootCauses.map((rc: any): PlanDiagnosticRootCause => ({
+      kind: String(rc?.kind || "other"),
+      title: String(rc?.title || ""),
+      description: String(rc?.description || ""),
+      affected_entry_indexes: Array.isArray(rc?.affected_entry_indexes) ? rc.affected_entry_indexes.map((x: any) => Number(x)) : [],
+      raw_messages: Array.isArray(rc?.raw_messages) ? rc.raw_messages.map((x: any) => String(x)) : [],
+      suggested_repair: String(rc?.suggested_repair || ""),
+    })),
+    sofia_questions: (Array.isArray(raw.sofia_questions) ? raw.sofia_questions : []).map((q: any): SofiaQuestion => ({
+      kind: String(q?.kind || "other"),
+      technical_error: String(q?.technical_error || ""),
+      affected_entry_index: typeof q?.affected_entry_index === "number" ? q.affected_entry_index : undefined,
+      affected_title: q?.affected_title ? String(q.affected_title) : undefined,
+      affected_type: q?.affected_type ? String(q.affected_type) : undefined,
+      human_summary: String(q?.human_summary || ""),
+      probable_cause: String(q?.probable_cause || ""),
+      question: String(q?.question || ""),
+      options: (Array.isArray(q?.options) ? q.options : []).map((opt: any): SofiaQuestionOption => ({
+        label: String(opt?.label || ""),
+        action: String(opt?.action || ""),
+        payload: opt?.payload && typeof opt.payload === "object" ? opt.payload : undefined,
+      })),
+      severity: (q?.severity === "warning" || q?.severity === "info") ? q.severity : "blocking",
+    })),
+    questions_markdown: String(raw.questions_markdown || ""),
+    repair_suggestion: String(raw.repair_suggestion || ""),
   };
 }
 
@@ -468,18 +632,20 @@ function planStateCountsMatch(planState: PlanState | null) {
 function summarizePlanStateForChat(planState: PlanState): string {
   const counts = normalizeBlockCounts(planState.summary.current_block_counts);
   const lines = [
-    `Plano normalizado: ${planState.summary.entry_count} bloco(s).`,
-    `Resumo: briefing ${counts.briefing || 0}, campanha ${counts.campaign || 0}, publico ${counts.audience || 0}, produto ${counts.product || 0}, oferta ${counts.offer || 0}, copy ${counts.copy || 0}, FAQ ${counts.faq || 0}, regra ${counts.rule || 0}.`,
-    `Politica: ${planState.summary.tree_mode} / ${planState.summary.branch_policy}; FAQ ${planState.summary.faq_count_policy}.`,
+    planState.summary.entry_count > 0 ? "Status: plano gerado" : "Status: bloqueado",
+    planState.summary.entry_count > 0
+      ? `Resumo: briefing ${counts.briefing || 0}, publico ${counts.audience || 0}, produto ${counts.product || 0}, oferta ${counts.offer || 0}, copy ${counts.copy || 0}, FAQ ${counts.faq || 0}, asset ${counts.asset || 0}, regra ${counts.rule || 0}.`
+      : "Motivo: Estrutura ainda nao gerada.",
+    `Politica: arvore piramidal; FAQ agrupado por ${planState.summary.faq_parent_type || "rule"}; Asset por parent.`,
   ];
   const violations = planState.validation.blocking_violations || [];
   if (violations.length > 0) {
-    lines.push("Plano ainda nao esta pronto para salvar.");
     lines.push("Pendencias bloqueantes:");
     lines.push(...violations.map((violation) => `- ${repairText(violation)}`));
   } else {
     lines.push("Pendencias bloqueantes: nenhuma.");
   }
+  lines.push(planState.summary.entry_count > 0 ? "Acao: revisar preview." : "Acao: responder campo pendente ou corrigir branch.");
   return lines.join("\n");
 }
 
@@ -502,7 +668,7 @@ function rebuildPlanLinks(plan: KnowledgePlan): KnowledgePlan {
 }
 
 function validatePreviewPlan(plan: KnowledgePlan | null | undefined): string[] {
-  if (!plan || !Array.isArray(plan.entries) || plan.entries.length === 0) return [];
+  if (!plan || !Array.isArray(plan.entries) || plan.entries.length === 0) return ["Estrutura ainda nao gerada."];
   const errors: string[] = [];
   const entries = plan.entries;
   const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
@@ -510,27 +676,69 @@ function validatePreviewPlan(plan: KnowledgePlan | null | undefined): string[] {
   if (new Set(slugs).size !== slugs.length) errors.push("Plano contem slugs duplicados.");
   const hasOffer = entries.some((entry) => entry.content_type === "offer");
   const hasCopy = entries.some((entry) => entry.content_type === "copy");
+  const hasAudience = entries.some((entry) => entry.content_type === "audience");
+  const hasRule = entries.some((entry) => entry.content_type === "rule");
+  const parentByChild = new Map(entries.map((entry) => [entry.slug, normalizeParentSlug(parentSlugOf(entry), plan.persona_slug)]));
   for (const entry of entries) {
     const parentSlug = normalizeParentSlug(parentSlugOf(entry), plan.persona_slug);
     const parentType = parentSlug === "self" ? "persona" : parentSlug ? bySlug.get(parentSlug)?.content_type || "" : "";
+    if (["tag", "knowledge_item", "kb_entry", "mention"].includes(entry.content_type)) {
+      errors.push(`${entry.content_type} nao pode aparecer como card principal.`);
+    }
+    if (!["brand", "briefing"].includes(entry.content_type)) {
+      let current = entry.slug;
+      let reachesPersona = false;
+      const seen = new Set<string>();
+      for (let i = 0; i < 64; i += 1) {
+        const parent = parentByChild.get(current);
+        if (!parent) break;
+        if (parent === "self") {
+          reachesPersona = true;
+          break;
+        }
+        if (seen.has(parent)) {
+          errors.push(`Ciclo detectado no caminho de ${entry.slug}.`);
+          break;
+        }
+        seen.add(parent);
+        current = parent;
+      }
+      if (!reachesPersona) errors.push(`${entry.slug} nao tem caminho completo ate persona.`);
+    }
     if (entry.content_type === "product" && entry.slug.includes("audience")) {
       errors.push(`Produto ${entry.slug} nao pode embutir audience no slug.`);
+    }
+    if (entry.content_type === "audience" && parentType && !["campaign", "briefing", "brand", "persona"].includes(parentType)) {
+      errors.push(`Publico ${entry.slug} precisa estar abaixo de briefing/campaign.`);
+    }
+    if (entry.content_type === "product" && hasAudience && parentType !== "audience") {
+      errors.push(`Produto ${entry.slug} precisa estar abaixo de audience.`);
     }
     if (entry.content_type === "offer" && parentType !== "product") {
       errors.push(`Oferta ${entry.slug} precisa estar abaixo de product.`);
     }
     if (entry.content_type === "copy") {
-      if (hasOffer && parentType !== "offer") errors.push(`Copy ${entry.slug} precisa estar abaixo de offer.`);
-      if (!hasOffer && parentType && !["product", "campaign", "briefing", "brand"].includes(parentType)) {
+      if (hasOffer && parentType === "offer" && plan.copy_policy !== "per_offer") errors.push(`Copy ${entry.slug} deve ficar agrupada por product/publico por padrao.`);
+      if (parentType && !["product", "offer", "campaign", "briefing", "brand"].includes(parentType)) {
         errors.push(`Copy ${entry.slug} tem parent invalido.`);
       }
     }
-    if (entry.content_type === "faq" && hasCopy && parentType !== "copy") {
-      errors.push(`FAQ ${entry.slug} precisa estar abaixo de copy.`);
+    if (entry.content_type === "faq" && hasRule && parentType !== "rule") {
+      errors.push(`FAQ ${entry.slug} precisa estar abaixo de rule.`);
+    }
+    if (entry.content_type === "faq" && !["rule", "copy", "offer", "product"].includes(parentType)) {
+      errors.push(`FAQ ${entry.slug} precisa estar abaixo de rule, copy, offer ou product.`);
     }
     if (entry.content_type === "rule" && parentType && !["campaign", "briefing", "brand", "persona"].includes(parentType)) {
       errors.push(`Rule ${entry.slug} precisa estar abaixo de campaign/briefing/brand.`);
     }
+  }
+  const expansion = buildExpansionSummary(plan);
+  if (expansion.faq.count_policy !== "total" && expansion.faq.created < expansion.faq.expected) {
+    errors.push(`FAQ insuficiente: esperado ${expansion.faq.expected}, criado ${expansion.faq.created}.`);
+  }
+  if (expansion.asset.expected > 0 && expansion.asset.created < expansion.asset.expected) {
+    errors.push(`Asset insuficiente: esperado ${expansion.asset.expected}, criado ${expansion.asset.created}.`);
   }
   return errors;
 }
@@ -759,7 +967,7 @@ function buildInitialContext(plan: CapturePlan, uploads: SessionUpload[]) {
     selectedBlockText,
     "",
     "## Variacoes por atributo",
-    variationBlock || "- usar 1 variacao por bloco; FAQ padrao 2.",
+    variationBlock || "- usar 1 variacao por bloco; FAQ padrao 2 por parent direto.",
     "",
     "## Uploads manuais da sessao",
     uploadBlock,
@@ -773,9 +981,12 @@ function buildInitialContext(plan: CapturePlan, uploads: SessionUpload[]) {
     "- Ao gerar, produzir diversos conhecimentos: uma proposta por bloco selecionado e uma entry por produto/FAQ/copy quando houver dados suficientes.",
     "- O plano inicial e apenas ponto de partida; se o operador expandir para 2 publicos, 4 produtos e 8 FAQs, manter esse plano vivo.",
     "- Sempre usar o knowledge_plan atual como fonte para salvar; nunca voltar ao plano inicial apos expansao.",
-    "- Sempre criar uma estrutura de conhecimento baseada em grafo hierarquizado.",
-    "- Gerar conhecimento hierarquizado como grafo quando houver relacoes entre brand, campanha, publico, produto, entidades, copy, FAQ, regra ou tom.",
-    "- Respeitar as quantidades de variacao por bloco; FAQ deve se multiplicar por conhecimento quando configurado.",
+    "- Sempre criar uma estrutura de conhecimento em arvore piramidal, nao uma lista de cards soltos.",
+    "- Gerar conhecimento hierarquizado como grafo quando houver relacoes entre brand, briefing, campanha, publico, produto, oferta, copy, FAQ, regra, asset ou tom.",
+    "- FAQ deve ser um Markdown agrupado de atendimento real, sem expor termos internos do grafo.",
+    "- RULE fica antes de FAQ: copy -> rule -> faq quando houver orientacao comercial geral.",
+    "- normalizedPlan deve usar faq_count_policy=grouped, faq_parent_type=rule, asset_count_policy=per_parent e copy_policy=per_product_context por padrao.",
+    "- Separar primary_tree_edges de secondary_semantic_edges; tags nunca entram na primary_tree.",
     "- Nao inventar precos, cores, disponibilidade ou URLs.",
     "- CRIAR exige persona especifica; nao usar Todos/global para criar conhecimento.",
   ].join("\n");
@@ -897,12 +1108,18 @@ function PreflightPanel({
             {KNOWLEDGE_BLOCKS.map((block) => {
               const count = blockCount(block.id);
               const selected = count > 0;
+              const expansionBlock = block.id === "faq" || block.id === "asset";
+              const selectedClass = expansionBlock
+                ? block.id === "faq"
+                  ? "bg-violet-500/12 [border:1px_solid_rgb(167_139_250/0.42)]"
+                  : "bg-amber-500/12 [border:1px_solid_rgb(245_158_11/0.42)]"
+                : "bg-obs-violet/10 [border:1px_solid_rgb(var(--obs-violet)/0.28)]";
               return (
                 <div
                   key={block.id}
                   className={`flex items-start gap-3 rounded-xl px-3 py-2.5 transition-colors ${
                     selected
-                      ? "bg-obs-violet/10 [border:1px_solid_rgb(var(--obs-violet)/0.28)]"
+                      ? selectedClass
                       : "bg-white/[0.025] [border:1px_solid_var(--border-glass)]"
                   }`}
                 >
@@ -921,7 +1138,11 @@ function PreflightPanel({
                     </div>
                     <p className="mt-0.5 text-[11px] leading-snug text-obs-subtle">{block.description}</p>
                     <p className="mt-1 text-[10px] text-obs-faint">
-                      {selected ? "Selecionado no plano atual" : "Fora do plano atual"}
+                      {expansionBlock && selected
+                        ? block.id === "faq"
+                          ? `${count} habilita FAQ agrupado`
+                          : `${count} por parent direto | expansao por parent`
+                        : selected ? "Selecionado no plano atual" : "Fora do plano atual"}
                     </p>
                   </div>
                 </div>
@@ -1011,6 +1232,7 @@ function ChatPanel({
   setPlan,
   uploads,
   onCrawlerRun,
+  onAssetReading,
   personas,
   onPersonaChange,
   currentKnowledgePlan,
@@ -1030,6 +1252,7 @@ function ChatPanel({
   setPlan: (next: CapturePlan) => void;
   uploads: SessionUpload[];
   onCrawlerRun: (run: CrawlerRun) => void;
+  onAssetReading: (reading: any) => void;
   personas: Persona[];
   onPersonaChange: (slug: string) => void;
   currentKnowledgePlan: KnowledgePlan | null;
@@ -1056,6 +1279,7 @@ function ChatPanel({
   const [contentText, setContentText] = useState("");
   const [showContent, setShowContent] = useState(false);
   const [friendlyError, setFriendlyError] = useState<string | null>(null);
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
   const [lastAttempt, setLastAttempt] = useState<string>("");
   const [missionState, setMissionState] = useState<MissionState | null>(null);
   const [resumeSummary, setResumeSummary] = useState<string | null>(null);
@@ -1151,15 +1375,23 @@ function ChatPanel({
     try {
       let d: any;
       if (file) {
-        const form = new FormData();
-        form.append("session_id", sessionId);
-        form.append("message", userMsg);
-        form.append("file", file);
         d = await api.kbIntakeMessage(sessionId, userMsg, file || undefined);
         setFile(null);
         if (fileRef.current) fileRef.current.value = "";
       } else {
         d = await api.kbIntakeMessage(sessionId, userMsg);
+      }
+      if (d?.reset_session) {
+        window.localStorage.removeItem("active_criar_session_id");
+        setSessionId(null);
+        setSessionStatus("collecting");
+        setStage("idle");
+        applyPlanState(null);
+        setMissionState(null);
+        setResumeSummary(null);
+        setMessages([{ role: "system", content: d.message || "Sessao reiniciada porque o arquivo nao foi persistido nos assets." }]);
+        setFriendlyError(d.message || "Arquivo nao persistido. Inicie uma nova sessao da Sofia.");
+        return;
       }
       if (d?.state) {
         setMissionState(d.state);
@@ -1180,18 +1412,30 @@ function ChatPanel({
       setCls(d.classification);
       const nextState = normalizePlanState(d, d.classification?.persona_slug || plan.personaSlug);
       if (d.crawler) onCrawlerRun(d.crawler);
+      if (d.asset_reading) {
+        onAssetReading({
+          filename: file?.name || d.asset_reading?.rename?.filename || "upload",
+          size: file?.size,
+          mime: file?.type,
+          url: d.file_url || null,
+          reading: d.asset_reading,
+        });
+      }
       if (nextState) {
         setMessages((p) => [...p, { role: "assistant", content: summarizePlanStateForChat(nextState) }]);
       } else if ((d.message || "").trim()) {
         setMessages((p) => [...p, { role: "assistant", content: d.message }]);
       }
       if (Array.isArray(d.plan_violations) && d.plan_violations.length > 0) {
-        setFriendlyError(`Plano bloqueado antes da preview:\n- ${d.plan_violations.join("\n- ")}`);
+        setFriendlyError("Plano bloqueado antes da preview. Abra o diagnostico para responder as perguntas da Sofia.");
       }
       if (nextState) {
         applyPlanState(nextState);
         if (!nextState.validation.valid || nextState.validation.blocking_violations.length > 0) {
-          setFriendlyError(`Plano bloqueado antes da preview:\n- ${nextState.validation.blocking_violations.join("\n- ")}`);
+          setFriendlyError("Plano bloqueado antes da preview. Abra o diagnostico para responder as perguntas da Sofia.");
+          if (nextState.diagnostic) {
+            setDiagnosticOpen(true);
+          }
         }
       } else if (d.current_block_counts) {
         setCurrentBlockCounts(normalizeBlockCounts(d.current_block_counts));
@@ -1453,13 +1697,36 @@ function ChatPanel({
           </div>
         )}
         {stage === "ready_to_save" && draftPlan && !planStateValid && previewViolations.length > 0 && (
-          <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
-            <p className="font-semibold">Plano bloqueado antes da preview</p>
-            <div className="mt-2 space-y-1">
-              {previewViolations.map((violation, index) => (
-                <p key={`${violation}-${index}`} className="text-xs">- {violation}</p>
-              ))}
+          <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-800">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold">Plano bloqueado antes da preview</p>
+                <p className="text-xs text-red-700">
+                  {planState?.diagnostic
+                    ? `${planState.diagnostic.summary.root_cause_count} causa(s) raiz; ${planState.diagnostic.summary.error_count} erro(s), ${planState.diagnostic.summary.cycle_count} ciclo(s), ${planState.diagnostic.summary.orphan_count} orfa(s).`
+                    : `${previewViolations.length} violacao(oes) reportadas pelo validador.`}
+                </p>
+              </div>
+              {planState?.diagnostic && (
+                <button
+                  type="button"
+                  onClick={() => setDiagnosticOpen(true)}
+                  className="rounded-md border border-red-400/40 bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-500/25"
+                >
+                  Ver diagnostico visual
+                </button>
+              )}
             </div>
+            {!planState?.diagnostic && (
+              <div className="mt-2 space-y-1">
+                {previewViolations.slice(0, 4).map((violation, index) => (
+                  <p key={`${violation}-${index}`} className="text-xs">- {violation}</p>
+                ))}
+                {previewViolations.length > 4 && (
+                  <p className="text-xs text-red-700">... +{previewViolations.length - 4} pendencia(s)</p>
+                )}
+              </div>
+            )}
           </div>
         )}
         {stage === "ready_to_save" && draftPlan && planStateValid && (
@@ -1584,6 +1851,13 @@ function ChatPanel({
           <StepDot done={(stage === "ready_to_save" && planStateValid) || stage === "done"} label="Pronto" />
         </div>
       </div>
+      {diagnosticOpen && planState?.diagnostic && (
+        <BlockedPlanDiagnosticModal
+          diagnostic={planState.diagnostic}
+          onClose={() => setDiagnosticOpen(false)}
+          onEdit={() => setShowContent(true)}
+        />
+      )}
     </div>
   );
 }
@@ -1592,10 +1866,20 @@ function UploadPanel({
   uploads,
   onUploaded,
   onRemoveUpload,
+  sessionId,
+  personaSlug,
+  ensureSession,
+  onAssetReading,
+  onResetSession,
 }: {
   uploads: SessionUpload[];
   onUploaded: (upload: SessionUpload) => void;
   onRemoveUpload: (id: string) => void;
+  sessionId: string | null;
+  personaSlug?: string;
+  ensureSession?: (personaSlug?: string) => Promise<string | null>;
+  onAssetReading?: (reading: any) => void;
+  onResetSession?: (message?: string) => void;
 }) {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [mode, setMode] = useState<"text" | "file">("file");
@@ -1605,6 +1889,7 @@ function UploadPanel({
   const [contentType, setContentType] = useState("other");
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1616,6 +1901,7 @@ function UploadPanel({
   }, []);
 
   function chooseFile(f: File | null) {
+    setError("");
     setFile(f);
     if (f && !title) setTitle(f.name.replace(/\.[^.]+$/, ""));
   }
@@ -1623,15 +1909,54 @@ function UploadPanel({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+    setError("");
     try {
       let row: any;
       let preview = "";
+      let uploadSource: "file" | "text" | "session_attach" = mode;
+      let assetReading: any = null;
       if (mode === "text") {
         row = await api.uploadText({ title, content, persona_id: personaId || undefined, content_type: contentType });
         preview = content.slice(0, 1200);
       } else if (file) {
-        preview = await file.text().catch(() => `[arquivo ${file.name}]`);
-        row = await api.uploadFile(file, personaId || undefined, contentType);
+        // Sidebar file upload now goes through /kb-intake/upload so the asset
+        // pipeline, Storage persistence, asset row, and Sofia reading stay in sync.
+        let effectiveSessionId = sessionId;
+        if (!effectiveSessionId && ensureSession) {
+          const personaFromSelect = personas.find((p) => p.id === personaId)?.slug;
+          const slugForStart = (personaFromSelect || personaSlug || "").trim();
+          if (!slugForStart) {
+            throw new Error("Selecione uma persona para a Sofia poder ler este arquivo.");
+          }
+          effectiveSessionId = await ensureSession(slugForStart);
+          if (!effectiveSessionId) {
+            throw new Error("Nao consegui iniciar a sessao da Sofia automaticamente. Verifique a persona selecionada.");
+          }
+        }
+        if (!effectiveSessionId) {
+          throw new Error("Selecione uma persona para a Sofia poder ler este arquivo.");
+        }
+        const result = await api.kbIntakeMessage(effectiveSessionId, "", file);
+        if (result?.reset_session || result?.ok === false) {
+          const message = result?.message || "Nao consegui persistir o arquivo. A sessao foi reiniciada.";
+          onResetSession?.(message);
+          throw new Error(message);
+        }
+        row = result;
+        uploadSource = "session_attach";
+        assetReading = result?.asset_reading || null;
+        const extracted = (assetReading?.extracted_text || "").trim();
+        const visual = (assetReading?.visual_summary || "").trim();
+        preview = extracted || visual || `[arquivo ${file.name}]`;
+        if (assetReading && onAssetReading) {
+          onAssetReading({
+            filename: file.name,
+            size: file.size,
+            mime: file.type,
+            url: result?.file_url || null,
+            reading: assetReading,
+          });
+        }
       }
       if (row) {
         onUploaded({
@@ -1639,16 +1964,24 @@ function UploadPanel({
           title: row.title || row.titulo || title || file?.name || "upload",
           content_type: row.content_type || contentType,
           persona_id: personaId || undefined,
-          source: mode,
+          source: uploadSource,
           file_name: file?.name,
           preview: preview.slice(0, 1600),
-          knowledge_item_id: row.id,
+          knowledge_item_id: row.id || row.asset_id,
         });
       }
       setTitle("");
       setContent("");
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
+    } catch (err: any) {
+      const message = err?.message || "Falha ao enviar arquivo.";
+      // Translate the legacy 415 from /knowledge/upload/file in case it ever surfaces.
+      if (message.includes("binary_upload_unsupported") || message.toLowerCase().includes("utf-8")) {
+        setError("Arquivos binarios precisam de uma sessao ativa para serem lidos pela Sofia.");
+      } else {
+        setError(message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -1679,18 +2012,30 @@ function UploadPanel({
           </div>
 
           {mode === "file" ? (
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => { e.preventDefault(); chooseFile(e.dataTransfer.files[0] || null); }}
-              onClick={() => fileRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-5 text-center transition-colors cursor-pointer ${
-                file ? "border-obs-violet/50 bg-obs-violet/5" : "border-white/10 hover:border-white/20"
-              }`}
-            >
-              <FileText size={20} className="mx-auto text-obs-violet mb-2" />
-              <p className="text-xs text-obs-subtle truncate">{file ? file.name : "Arraste ou clique"}</p>
-              <input ref={fileRef} type="file" className="hidden" accept=".md,.txt,.json" onChange={(e) => chooseFile(e.target.files?.[0] || null)} />
-            </div>
+            <>
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); chooseFile(e.dataTransfer.files[0] || null); }}
+                onClick={() => fileRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-5 text-center transition-colors cursor-pointer ${
+                  file ? "border-obs-violet/50 bg-obs-violet/5" : "border-white/10 hover:border-white/20"
+                }`}
+              >
+                <FileText size={20} className="mx-auto text-obs-violet mb-2" />
+                <p className="text-xs text-obs-subtle truncate">{file ? file.name : "Arraste ou clique"}</p>
+                <input ref={fileRef} type="file" className="hidden" accept="image/*,video/*,application/pdf,.md,.markdown,.txt,.json,.csv,.yaml,.yml,text/*,application/json" onChange={(e) => chooseFile(e.target.files?.[0] || null)} />
+              </div>
+              {!sessionId && (
+                <p className="text-[11px] text-obs-amber bg-obs-amber/10 border border-obs-amber/25 rounded px-2 py-1.5">
+                  Selecione uma persona e envie: a sessao da Sofia comeca automaticamente, o arquivo entra na memoria do agente e o save no grafo acontece quando voce salvar o plano.
+                </p>
+              )}
+              {sessionId && (
+                <p className="text-[10px] text-obs-faint">
+                  O arquivo passa pelo pipeline (OCR/visual) e fica como contexto da Sofia. Nada e gravado no grafo ate voce salvar o plano.
+                </p>
+              )}
+            </>
           ) : (
             <textarea
               required
@@ -1725,6 +2070,11 @@ function UploadPanel({
           >
             {submitting ? "Enviando..." : "Enviar para validacao"}
           </button>
+          {error && (
+            <p className="rounded-lg border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-200">
+              {repairText(error)}
+            </p>
+          )}
         </form>
 
         <div className="mt-4 pt-4 border-t border-white/06">
@@ -1806,6 +2156,18 @@ function GraphPreviewPanel({
     : selectedProductSlug
       ? entries.find((entry) => entry.slug === selectedProductSlug)?.title
       : null;
+  const outgoingLinkSources = new Set((previewPlan.links || []).map((link) => link.source_slug).filter(Boolean));
+  // FAQ is terminal-valid until human approval. After approval it is
+  // connected to the persona Embedded node automatically, so the preview
+  // surfaces an info message about FAQ pending instead of a "no exit" alert.
+  const leafAlerts = entries
+    .filter((entry) => entry.slug && !["asset", "embedded", "gallery", "faq"].includes(entry.content_type))
+    .filter((entry) => !(childrenByParent.get(entry.slug) || []).length && !outgoingLinkSources.has(entry.slug))
+    .slice(0, 6);
+  const faqPendingTerminals = entries
+    .filter((entry) => entry.slug && entry.content_type === "faq")
+    .filter((entry) => !(childrenByParent.get(entry.slug) || []).length && !outgoingLinkSources.has(entry.slug))
+    .slice(0, 4);
 
   const renderEntry = (entry: KnowledgePlanEntry, depth = 0): ReactNode => {
     const children = childrenByParent.get(entry.slug) || [];
@@ -1821,6 +2183,8 @@ function GraphPreviewPanel({
             ? "node-product border-amber-400/25 bg-amber-400/10"
             : entry.content_type === "faq"
               ? "node-faq border-violet-400/25 bg-violet-400/10"
+              : entry.content_type === "asset"
+                ? "node-asset border-orange-400/30 bg-orange-400/10"
               : "border-white/10 bg-white/[0.03]";
 
     return (
@@ -1860,7 +2224,7 @@ function GraphPreviewPanel({
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-[10px] uppercase tracking-[0.2em] text-obs-faint">Previa visual</p>
-          <p className="text-sm font-semibold text-white">Estrutura fractal antes do save</p>
+          <p className="text-sm font-semibold text-white">Estrutura piramidal antes do save</p>
         </div>
         <span className={`rounded-full px-2.5 py-1 text-[10px] border ${confirmed ? "border-green-400/30 text-green-300 bg-green-500/10" : "border-obs-amber/25 text-obs-amber bg-obs-amber/10"}`}>
           {confirmed ? "estrutura confirmada" : "aguardando confirmacao"}
@@ -1914,6 +2278,32 @@ function GraphPreviewPanel({
         </p>
       )}
 
+      {!!leafAlerts.length && (
+        <div className="rounded-xl border border-obs-amber/20 bg-obs-amber/10 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-obs-amber mb-1">Alertas da Sofia</p>
+          <div className="space-y-1">
+            {leafAlerts.map((entry) => (
+              <p key={`leaf-${entry.slug}`} className="text-xs text-obs-text">
+                {repairText(entry.content_type.toUpperCase())} ficou sem saida: {repairText(entry.title)}. Conectar, tornar orientacao global ou manter pendente?
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!!faqPendingTerminals.length && (
+        <div className="rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-sky-300 mb-1">FAQ pendente de aprovacao</p>
+          <div className="space-y-1">
+            {faqPendingTerminals.map((entry) => (
+              <p key={`faq-pending-${entry.slug}`} className="text-xs text-obs-text">
+                FAQ {repairText(entry.title)}: terminal ate aprovacao. Apos aprovado, sera conectado automaticamente ao Embedded da persona.
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="space-y-3">
         <div className="node-card node-persona rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3">
           <p className="text-[10px] uppercase tracking-[0.18em] text-obs-faint">persona</p>
@@ -1942,6 +2332,7 @@ function CaptureSidebar({
   plan,
   uploads,
   crawlerRuns,
+  assetReadings,
   planState,
   currentKnowledgePlan,
   currentBlockCounts,
@@ -1951,6 +2342,7 @@ function CaptureSidebar({
   plan: CapturePlan;
   uploads: SessionUpload[];
   crawlerRuns: CrawlerRun[];
+  assetReadings: any[];
   planState: PlanState | null;
   currentKnowledgePlan: KnowledgePlan | null;
   currentBlockCounts: BlockCounts;
@@ -1970,6 +2362,7 @@ function CaptureSidebar({
       ? countBlocksByType(currentKnowledgePlan.entries)
       : normalizeBlockCounts(currentBlockCounts);
   const displayCounts = planState || currentKnowledgePlan?.entries?.length ? liveCounts : initialCounts;
+  const expansion = planState?.summary?.expansion || buildExpansionSummary(currentKnowledgePlan);
   const totalInitial = Object.values(initialCounts).reduce((sum, value) => sum + value, 0);
   const totalCurrent = Number(planState?.summary?.entry_count ?? Object.values(displayCounts).reduce((sum, value) => sum + value, 0));
   const planLabel =
@@ -1988,8 +2381,21 @@ function CaptureSidebar({
   };
   const expectedCountFor = (id: string) => {
     if (id === "persona") return plan.personaSlug ? 1 : 0;
+    if (id === "faq" && expansion?.faq) return Number(expansion.faq.expected || 0);
+    if (id === "asset" && expansion?.asset) return Number(expansion.asset.expected || 0);
     if (id === "offer" || id === "embedded" || id === "gallery") return initialCounts[id] || 0;
     return initialCounts[id] || 0;
+  };
+  const configuredLabelFor = (id: string) => {
+    if (id === "faq" && expansion?.faq) {
+      const branches = Number(expansion.faq.terminal_branches || expansion.faq.expected || 0);
+      const questions = Number(expansion.faq.questions_total || 0);
+      return `1 FAQ agrupado; contextos: ${branches || 1}; perguntas estimadas: ${questions}`;
+    }
+    if (id === "asset" && expansion?.asset) {
+      return `${expansion.asset.configured} ${expansion.asset.count_policy === "per_parent" ? `por ${expansion.asset.parent_type}` : "no total"}`;
+    }
+    return null;
   };
   const statusFor = (id: string) => {
     const expected = expectedCountFor(id);
@@ -1998,6 +2404,7 @@ function CaptureSidebar({
     if (expected === 0 && created > 0) return "extra";
     if (created <= 0 && expected > 0) return "missing";
     if (created < expected) return "partial";
+    if (created > expected) return "extra";
     return "done";
   };
   const rowClassFor = (status: string) => {
@@ -2042,6 +2449,13 @@ function CaptureSidebar({
               </div>
             ))}
           </div>
+        </section>
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold text-obs-text">Leituras na sessao</p>
+            <span className="text-[10px] text-obs-faint">{assetReadings.length} arquivo(s)</span>
+          </div>
+          <IntakeReadingPanel readings={assetReadings} />
         </section>
         <section>
           <p className="text-xs font-semibold text-obs-text mb-2">Crawler da fonte</p>
@@ -2091,7 +2505,12 @@ function CaptureSidebar({
               <span className="text-[10px] text-obs-faint">{totalInitial} bloco(s)</span>
             </div>
             <div className="space-y-1">
-              {SIDEBAR_TREE_BLOCKS.map((block) => (
+              {SIDEBAR_TREE_BLOCKS.filter((block) => {
+                // Embedded is only meaningful after a FAQ is approved; keep it
+                // hidden in the preconfirmation until there is something to show.
+                if (block.id === "embedded" && expectedCountFor("embedded") === 0 && createdCountFor("embedded") === 0) return false;
+                return true;
+              }).map((block) => (
                 <div key={`initial-${block.id}`} className="flex items-center justify-between text-[11px]">
                   <span className="text-obs-faint">{block.label}</span>
                   <span className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-obs-subtle">{expectedCountFor(block.id)}</span>
@@ -2110,15 +2529,26 @@ function CaptureSidebar({
               const status = statusFor(block.id);
               const expected = expectedCountFor(block.id);
               const created = createdCountFor(block.id);
+              // Embedded is only meaningful after a FAQ is approved. Hide the
+              // row until there is at least one embedded node or one expected.
+              if (block.id === "embedded" && expected === 0 && created === 0) return null;
+              const configured = configuredLabelFor(block.id);
               const adjustable = KNOWLEDGE_BLOCKS.some((candidate) => candidate.id === block.id);
+              const expansionBlock = block.id === "faq" || block.id === "asset";
               return (
-              <div key={block.id} className={`flex items-center gap-2 rounded border px-2 py-1.5 ${rowClassFor(status)}`}>
+              <div key={block.id} className={`flex items-center gap-2 rounded border px-2 py-1.5 ${rowClassFor(status)} ${expansionBlock ? "ring-1 ring-inset ring-white/5" : ""}`}>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[11px] font-semibold text-obs-subtle truncate">{block.label}</p>
                     <span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] font-mono text-obs-text">{expected}/{created}</span>
                   </div>
-                  <p className="text-[10px] text-obs-faint line-clamp-1">{statusLabelFor(status)} - {block.description}</p>
+                  {configured ? (
+                    <p className="text-[10px] text-obs-faint line-clamp-2">
+                      configurado: {configured}; esperado: {expected}; criado: {created}; status: {statusLabelFor(status)}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-obs-faint line-clamp-1">{statusLabelFor(status)} - {block.description}</p>
+                  )}
                 </div>
                 {adjustable && (
                   <Stepper
@@ -2162,6 +2592,7 @@ function CaptureSidebar({
 export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
   const [uploads, setUploads] = useState<SessionUpload[]>([]);
   const [crawlerRuns, setCrawlerRuns] = useState<CrawlerRun[]>([]);
+  const [assetReadings, setAssetReadings] = useState<any[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [planState, setPlanState] = useState<PlanState | null>(null);
   const [confirmedPlanHash, setConfirmedPlanHash] = useState<string | null>(null);
@@ -2178,6 +2609,24 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
     variationCounts: DEFAULT_VARIATION_COUNTS,
     confirmed: true,
   });
+
+  function resetCriarSession(message?: string) {
+    window.localStorage.removeItem("active_criar_session_id");
+    setActiveSessionId(null);
+    setSessionStatus("collecting");
+    setPlanState(null);
+    setConfirmedPlanHash(null);
+    setCurrentKnowledgePlan(null);
+    setCurrentBlockCounts(normalizeBlockCounts(plan.variationCounts));
+    setAssetReadings([]);
+    setUploads((prev) => prev.filter((upload) => upload.source !== "session_attach"));
+    if (message) {
+      setCrawlerRuns((prev) => [{
+        url: "sessao-sofia",
+        warnings: [message],
+      }, ...prev].slice(0, 5));
+    }
+  }
 
   useEffect(() => {
     const persisted = window.localStorage.getItem("ai-brain-persona-slug") || "";
@@ -2209,8 +2658,21 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
     if (!sessionId) return;
     api.kbIntakeSession(sessionId)
       .then((session: any) => {
+        if (Number(session?.asset_readings_pruned || 0) > 0 || session?.reset_session) {
+          resetCriarSession("Sessao reiniciada porque havia leitura de asset sem arquivo persistido.");
+          return;
+        }
         setActiveSessionId(session.id || sessionId);
         setSessionStatus(session.status || session.stage || "collecting");
+        if (Array.isArray(session.asset_readings)) {
+          setAssetReadings(session.asset_readings.map((entry: any) => ({
+            filename: entry?.file?.filename || entry?.reading?.rename?.filename || "upload",
+            size: entry?.file?.size,
+            mime: entry?.file?.mime,
+            url: entry?.file?.url || null,
+            reading: entry?.reading,
+          })).filter((entry: any) => entry.reading).slice(0, 10));
+        }
         const personaSlug = session.persona_slug || session.classification?.persona_slug || "";
         const sourceUrl = session.source_url || "";
         setPlan((prev) => ({
@@ -2236,6 +2698,36 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
   // Restore once on mount; persona fallback is intentionally best-effort.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function ensureSofiaSession(personaSlugHint?: string): Promise<string | null> {
+    if (activeSessionId) return activeSessionId;
+    const slug = (personaSlugHint || plan.personaSlug || "").trim();
+    if (!slug || isInvalidCriarPersona(slug)) return null;
+    try {
+      const d = await api.kbIntakeStart(MODELS[0].id, buildInitialContext({ ...plan, personaSlug: slug }, uploads), {
+        mode: "criar",
+        persona_slug: slug,
+        source_url: plan.sourceUrl,
+        initial_block_counts: normalizeBlockCounts(plan.variationCounts),
+        knowledge_plan: planState?.normalized_plan,
+        bootstrap_llm: false,
+      });
+      if (!d || d.ok === false || !d.session_id) return null;
+      setActiveSessionId(d.session_id);
+      window.localStorage.setItem("active_criar_session_id", d.session_id);
+      setSessionStatus(d.status || d.stage || "chatting");
+      const nextState = normalizePlanState(d, d.persona_slug || slug);
+      if (nextState) {
+        setPlanState(nextState);
+        setCurrentKnowledgePlan(nextState.normalized_plan);
+        setCurrentBlockCounts(normalizeBlockCounts(nextState.summary.current_block_counts));
+        setConfirmedPlanHash(d.confirmed_plan_hash || null);
+      }
+      return d.session_id;
+    } catch {
+      return null;
+    }
+  }
 
   function syncPersonaSlug(nextSlug: string) {
     const selected = personas.find((persona) => persona.slug === nextSlug);
@@ -2331,6 +2823,11 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
           uploads={uploads}
           onUploaded={(upload) => setUploads((prev) => [upload, ...prev])}
           onRemoveUpload={(id) => setUploads((prev) => prev.filter((u) => u.id !== id))}
+          sessionId={activeSessionId}
+          personaSlug={plan.personaSlug}
+          ensureSession={ensureSofiaSession}
+          onAssetReading={(reading) => setAssetReadings((prev) => [reading, ...prev].slice(0, 10))}
+          onResetSession={resetCriarSession}
         />
       </div>
       <div className="flex-1 min-w-0">
@@ -2339,6 +2836,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
           setPlan={setPlan}
           uploads={uploads}
           onCrawlerRun={(run) => setCrawlerRuns((prev) => [run, ...prev].slice(0, 5))}
+          onAssetReading={(reading) => setAssetReadings((prev) => [reading, ...prev].slice(0, 10))}
           personas={personas}
           onPersonaChange={syncPersonaSlug}
           currentKnowledgePlan={currentKnowledgePlan}
@@ -2359,6 +2857,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
         plan={plan}
         uploads={uploads}
         crawlerRuns={crawlerRuns}
+        assetReadings={assetReadings}
         planState={planState}
         currentKnowledgePlan={currentKnowledgePlan}
         currentBlockCounts={currentBlockCounts}

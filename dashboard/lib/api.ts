@@ -55,7 +55,16 @@ async function reqForm<T>(path: string, form: FormData): Promise<T> {
     throw new Error(API_OFFLINE_ERROR);
   }
   if (res.status === 503) throw new Error(API_OFFLINE_ERROR);
-  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail || body);
+    } catch {
+      detail = await res.text().catch(() => "");
+    }
+    throw new Error(`${res.status} ${path}${detail ? ` - ${detail}` : ""}`);
+  }
   return res.json();
 }
 
@@ -252,6 +261,103 @@ export const api = {
   },
   galleryAssets: (personaId?: string) =>
     req<any[]>(`/knowledge/gallery-assets${personaId ? `?persona_id=${personaId}` : ""}`),
+  productCollections: (opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any[]>(`/knowledge/product-collections${qs ? `?${qs}` : ""}`);
+  },
+  productCategories: (opts?: { persona_id?: string; persona_slug?: string; collection_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    if (opts?.collection_slug) params.set("collection_slug", opts.collection_slug);
+    const qs = params.toString();
+    return req<any[]>(`/knowledge/categories${qs ? `?${qs}` : ""}`);
+  },
+  products: (opts?: { persona_id?: string; persona_slug?: string; collection_slug?: string; category_slug?: string; status?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    if (opts?.collection_slug) params.set("collection_slug", opts.collection_slug);
+    if (opts?.category_slug) params.set("category_slug", opts.category_slug);
+    if (opts?.status) params.set("status", opts.status);
+    const qs = params.toString();
+    return req<any[]>(`/knowledge/products${qs ? `?${qs}` : ""}`);
+  },
+  menuPayload: (personaSlug: string, opts?: { collection_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.collection_slug) params.set("collection_slug", opts.collection_slug);
+    const qs = params.toString();
+    return req<any>(`/api/menu/${encodeURIComponent(personaSlug)}${qs ? `?${qs}` : ""}`);
+  },
+  createProduct: (body: any) =>
+    req<any>("/knowledge/products", { method: "POST", body: JSON.stringify(body) }),
+  product: (slug: string, opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any>(`/knowledge/products/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`);
+  },
+  updateProduct: (slug: string, body: any, opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any>(`/knowledge/products/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`, { method: "PATCH", body: JSON.stringify(body) });
+  },
+  approveProduct: (slug: string, opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any>(`/knowledge/products/${encodeURIComponent(slug)}/approve${qs ? `?${qs}` : ""}`, { method: "POST", body: "{}" });
+  },
+  linkProductAsset: (slug: string, body: any, opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any>(`/knowledge/products/${encodeURIComponent(slug)}/link-asset${qs ? `?${qs}` : ""}`, { method: "POST", body: JSON.stringify(body) });
+  },
+  sofiaSuggestProductImages: (slug: string, body: any, opts?: { persona_id?: string; persona_slug?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.persona_slug) params.set("persona_slug", opts.persona_slug);
+    const qs = params.toString();
+    return req<any>(`/knowledge/products/${encodeURIComponent(slug)}/sofia-suggest-images${qs ? `?${qs}` : ""}`, { method: "POST", body: JSON.stringify(body || {}) });
+  },
+
+  // Assets (card upload pipeline)
+  assetUpload: (
+    file: File,
+    body: { persona_id: string; branch_hint: string; asset_function?: string; persona_slug?: string },
+  ) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("persona_id", body.persona_id);
+    form.append("branch_hint", body.branch_hint);
+    if (body.asset_function) form.append("asset_function", body.asset_function);
+    if (body.persona_slug) form.append("persona_slug", body.persona_slug);
+    return reqForm<any>("/assets/upload", form);
+  },
+  assetList: (opts?: { persona_id?: string; upload_context?: string; status?: string; limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.persona_id) params.set("persona_id", opts.persona_id);
+    if (opts?.upload_context) params.set("upload_context", opts.upload_context);
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.offset) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    return req<any[]>(`/assets${qs ? `?${qs}` : ""}`);
+  },
+  assetGet: (id: string) => req<any>(`/assets/${encodeURIComponent(id)}`),
+  assetConnect: (id: string, body: { parent_node_id: string; relation_type?: string }) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/connect`, { method: "POST", body: JSON.stringify(body) }),
+  assetEnsureGallery: (id: string) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/ensure-gallery`, { method: "POST", body: "{}" }),
   knowledgeCounts: (personaId?: string) =>
     req<any>(`/knowledge/queue/counts${personaId ? `?persona_id=${personaId}` : ""}`),
   updateQueueItem: (id: string, data: Record<string, any>) =>

@@ -52,7 +52,7 @@ const EXPECTED_PARENT_TYPES: Record<string, string[]> = {
   gallery: ["copy", "faq", "asset", "background", "texture", "product", "campaign", "brand", "persona"],
   embedded: ["faq"],
   product: ["audience", "briefing", "campaign", "brand", "persona"],
-  faq: ["product", "entity", "audience", "briefing", "campaign", "brand"],
+  faq: ["rule", "copy", "offer", "product"],
   copy: ["product", "audience", "briefing", "campaign", "brand"],
   rule: ["product", "entity", "audience", "briefing", "campaign", "brand"],
   asset: ["product", "audience", "briefing", "campaign", "brand"],
@@ -159,12 +159,12 @@ function expectedTypeRank(childType: string, parentType: string): number {
 function directionBonus(childId: string, parentId: string, edge: Edge<GraphEdgeData>): number {
   const rt = relationType(edge);
   if (edge.source === childId && edge.target === parentId) {
-    if (["belongs_to", "belongs_to_persona", "part_of", "part_of_campaign", "derived_from", "briefed_by", "answers_question", "about_product", "product_of", "audience_of", "campaign_of", "brand_of"].includes(rt)) {
+    if (["belongs_to", "belongs_to_persona", "part_of", "part_of_campaign", "derived_from", "briefed_by", "about_product", "product_of", "audience_of", "campaign_of", "brand_of"].includes(rt)) {
       return 0.18;
     }
   }
   if (edge.source === parentId && edge.target === childId) {
-    if (["contains", "parent_of", "targets", "supports_copy", "supports_campaign", "defines_brand", "has_tone", "about", "about_product", "manual", "belongs_to_persona"].includes(rt)) {
+    if (["contains", "parent_of", "targets", "supports_copy", "supports_campaign", "answers_question", "defines_brand", "has_tone", "about", "about_product", "manual", "belongs_to_persona"].includes(rt)) {
       return 0.16;
     }
   }
@@ -179,7 +179,7 @@ function isExplicitPrimaryEdge(edge: Edge<GraphEdgeData>): boolean {
 
 function relationAllowsParentCandidate(childId: string, parentId: string, edge: Edge<GraphEdgeData>): boolean {
   const rt = relationType(edge);
-  if (["manual", "contains", "parent_of", "targets", "supports_copy", "supports_campaign", "defines_brand", "has_tone", "gallery_asset"].includes(rt)) {
+  if (["manual", "contains", "parent_of", "targets", "supports_copy", "supports_campaign", "answers_question", "defines_brand", "has_tone", "gallery_asset"].includes(rt)) {
     return edge.source === parentId && edge.target === childId;
   }
   if (["belongs_to", "part_of", "derived_from", "product_of", "audience_of", "campaign_of", "brand_of"].includes(rt)) {
