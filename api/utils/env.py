@@ -19,15 +19,24 @@ def is_production_runtime() -> bool:
 
 
 def get_backend_env() -> dict[str, Any]:
+    default_dev_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    configured_origins = [
+        origin.strip()
+        for origin in os.environ.get("ALLOWED_ORIGINS", ",".join(default_dev_origins)).split(",")
+        if origin.strip()
+    ]
+    if not is_production_runtime():
+        for origin in default_dev_origins:
+            if origin not in configured_origins:
+                configured_origins.append(origin)
     return {
-        "allowed_origins": [
-            origin.strip()
-            for origin in os.environ.get(
-                "ALLOWED_ORIGINS",
-                "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000",
-            ).split(",")
-            if origin.strip()
-        ],
+        "allowed_origins": configured_origins,
         "supabase_url": (os.environ.get("SUPABASE_URL") or "").strip(),
         "supabase_service_key": (os.environ.get("SUPABASE_SERVICE_KEY") or "").strip(),
         "is_production": is_production_runtime(),

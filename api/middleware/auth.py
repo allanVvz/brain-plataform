@@ -18,6 +18,8 @@ PUBLIC_EXACT_PATHS = {
 
 PUBLIC_PREFIXES = (
     "/process",
+    "/api/menu",
+    "/menu",
 )
 
 

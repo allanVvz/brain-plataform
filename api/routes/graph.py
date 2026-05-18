@@ -123,6 +123,12 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
     if not source_node or not target_node:
         raise HTTPException(400, "source_node_id and target_node_id are required")
     relation_type = (body.relation_type or "manual").strip() or "manual"
+    source_type = str(source_node.get("node_type") or "").lower()
+    target_type = str(target_node.get("node_type") or "").lower()
+    if source_type == "faq" and target_type != "embedded":
+        raise HTTPException(400, "FAQ is a terminal node. It can only publish to Embedded; connect product, offer or copy into FAQ instead.")
+    if target_type == "faq" and relation_type == "manual":
+        relation_type = "answers_question"
     if target_node.get("node_type") == "gallery":
         relation_type = "gallery_asset"
     if relation_type == "gallery_asset" and "gallery" not in {source_node.get("node_type"), target_node.get("node_type")}:
@@ -133,6 +139,12 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
             raise HTTPException(400, "Gallery can only receive approved asset nodes")
         if knowledge_graph._validation_state(asset_node) != "validated":
             raise HTTPException(400, "Approve the asset before adding it to Gallery")
+        # Canonical direction is asset -> Gallery. Accept reverse drag gestures,
+        # but never persist gallery -> asset.
+        if source_type == "gallery" and target_type == "asset":
+            source_node, target_node = target_node, source_node
+            source_type, target_type = target_type, source_type
+            metadata["direction_normalized"] = "asset_to_gallery"
     source_id = source_node["id"]
     target_id = target_node["id"]
     if source_id == target_id:
@@ -345,7 +357,7 @@ def _demote_auxiliary_primary_edges(sem_edges: list[dict], nodes_by_id: dict[str
             next_edge = dict(edge)
             meta = dict(next_edge.get("metadata") or {})
             meta["primary_tree"] = False
-            meta["graph_layer"] = "auxiliary"
+            meta["graph_layer"] = "semantic_tags" if edge.get("relation_type") == "has_tag" else "auxiliary"
             meta["visual_hidden"] = True
             next_edge["metadata"] = meta
             out.append(next_edge)
@@ -358,6 +370,42 @@ def _is_quarantined_metadata(metadata: Optional[dict]) -> bool:
     meta = metadata or {}
     state = str(meta.get("quarantine_state") or "").strip().lower()
     return state in {"legacy_orphaned", "structural"}
+
+def _metadata_asset_url(metadata: Optional[dict]) -> str:
+    meta = metadata or {}
+    return str(
+        meta.get("url")
+        or meta.get("public_url")
+        or meta.get("asset_url")
+        or meta.get("file_url")
+        or ""
+    )
+
+
+def _metadata_file_type(metadata: Optional[dict]) -> str:
+    meta = metadata or {}
+    explicit = str(meta.get("file_type") or meta.get("asset_type") or "").lower()
+    if explicit in {"image", "video"}:
+        path = str(meta.get("file_path") or meta.get("storage_path") or meta.get("original_filename") or "")
+    else:
+        path = str(
+            meta.get("file_path")
+            or meta.get("storage_path")
+            or meta.get("original_filename")
+            or _metadata_asset_url(meta)
+            or ""
+        )
+    ext = path.rsplit("?", 1)[0].rsplit(".", 1)[-1].lower() if "." in path else ""
+    if ext in {"png", "jpg", "jpeg", "webp", "svg", "gif"}:
+        return ext
+    if ext in {"mp4", "mov", "webm"}:
+        return ext
+    return explicit
+
+
+def _metadata_markdown(metadata: Optional[dict], fallback: str = "") -> str:
+    meta = metadata or {}
+    return str(meta.get("markdown") or meta.get("body") or meta.get("content") or fallback or "")
 
 # Edge tier overrides — relations whose tier is fixed regardless of weight.
 _STRUCTURAL_RELATIONS: set[str] = {
@@ -1133,9 +1181,11 @@ def get_graph_data(
                 "label": n.get("title") or n.get("slug") or ntype,
                 "status": n.get("status") or "active",
                 "content_type": ntype,
-                "file_type": "",
-                "file_path": meta.get("file_path"),
-                "content_preview": (n.get("summary") or "")[:200],
+                "file_type": _metadata_file_type(meta),
+                "file_path": meta.get("file_path") or meta.get("storage_path"),
+                "asset_url": _metadata_asset_url(meta),
+                "content_preview": (_metadata_markdown(meta, n.get("summary") or ""))[:2000],
+                "markdown": _metadata_markdown(meta, n.get("summary") or ""),
                 "nodeClass": node_class,
                 "item_id": n.get("source_id") or n["id"],
                 "source": "graph",
