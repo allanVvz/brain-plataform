@@ -3,11 +3,14 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 
+from core.landing_slots import LandingSlot, slot_for_metadata
 from services import supabase_client
 
 router = APIRouter(tags=["menu"])
+
+_MENU_CACHE_CONTROL = "public, max-age=30, s-maxage=300, stale-while-revalidate=600"
 
 
 def _meta(row: Optional[dict]) -> dict:
@@ -23,15 +26,32 @@ def _read_int(value, fallback: int = 0) -> int:
         return fallback
 
 
-def _asset_payload(asset: dict, *, asset_type: str = "image", alt: str = "") -> dict:
+def _asset_payload(
+    asset: dict,
+    *,
+    asset_type: str = "image",
+    alt: str = "",
+    edge: Optional[dict] = None,
+) -> dict:
     meta = asset.get("metadata") or {}
+    edge_meta = (edge or {}).get("metadata") or {}
+    page_binding = edge_meta.get("page_binding") or meta.get("page_binding") or {}
+    slot = slot_for_metadata(edge_meta) or slot_for_metadata(meta)
     return {
         "id": str(asset.get("id") or asset.get("knowledge_node_id") or ""),
+        "asset_id": asset.get("id"),
+        "knowledge_node_id": asset.get("knowledge_node_id"),
+        "edge_id": (edge or {}).get("id"),
         "type": asset_type,
         "url": asset.get("url") or asset.get("file_path") or meta.get("public_url") or meta.get("url") or "",
         "alt": alt or asset.get("title") or asset.get("name") or "",
-        "role": meta.get("asset_function") or meta.get("role"),
-        "section": meta.get("page_section") or (meta.get("page_binding") or {}).get("section"),
+        "role": edge_meta.get("role") or meta.get("asset_function") or meta.get("role"),
+        "section": (
+            edge_meta.get("page_section")
+            or page_binding.get("section")
+            or meta.get("page_section")
+        ),
+        "slot_key": slot.value if slot else page_binding.get("slot_key"),
         "href": meta.get("href") or meta.get("cta_url"),
         "markdown": meta.get("markdown") or meta.get("body"),
     }
@@ -56,20 +76,25 @@ def _faq_payload(node: dict) -> dict:
     }
 
 
-def _gallery_assets_by_node(persona_id: str) -> dict[str, dict]:
+def _gallery_assets_by_node(persona_id: str, cache: Optional[dict] = None) -> dict[str, dict]:
+    if cache is not None and "gallery_by_node" in cache:
+        return cache["gallery_by_node"]
     rows = supabase_client.list_gallery_assets(persona_id=persona_id, limit=500)
-    return {
+    by_node = {
         str(row.get("knowledge_node_id")): row
         for row in rows
         if row.get("knowledge_node_id") and row.get("url")
     }
+    if cache is not None:
+        cache["gallery_by_node"] = by_node
+    return by_node
 
 
-def _category_cover_assets(categories: list[dict], persona_id: str) -> dict[str, dict]:
+def _category_cover_assets(categories: list[dict], persona_id: str, cache: Optional[dict] = None) -> dict[str, dict]:
     category_ids = [row["id"] for row in categories if row.get("id")]
     if not category_ids:
         return {}
-    gallery_by_node = _gallery_assets_by_node(persona_id)
+    gallery_by_node = _gallery_assets_by_node(persona_id, cache=cache)
     edges = supabase_client.list_edges_for_nodes(
         category_ids,
         relation_types=["uses_asset", "product_has_asset", "category_has_asset"],
@@ -93,15 +118,15 @@ def _category_cover_assets(categories: list[dict], persona_id: str) -> dict[str,
         current_rank = _read_int(current_value, 9999) if current_value is not None else 9999
         rank = _read_int(meta.get("sort_order"), 0 if meta.get("role") == "category_cover" else 10)
         if category_id not in out or rank < current_rank:
-            out[category_id] = {**asset, "_rank": rank}
+            out[category_id] = {**asset, "_rank": rank, "_edge": edge}
     return out
 
 
-def _product_assets(products: list[dict], persona_id: str) -> dict[str, list[dict]]:
+def _product_assets(products: list[dict], persona_id: str, cache: Optional[dict] = None) -> dict[str, list[dict]]:
     product_ids = [row["id"] for row in products if row.get("id")]
     if not product_ids:
         return {}
-    gallery_by_node = _gallery_assets_by_node(persona_id)
+    gallery_by_node = _gallery_assets_by_node(persona_id, cache=cache)
     edges = supabase_client.list_edges_for_nodes(
         product_ids,
         relation_types=["product_image", "product_has_asset"],
@@ -118,7 +143,7 @@ def _product_assets(products: list[dict], persona_id: str) -> dict[str, list[dic
         if meta.get("active") is False:
             continue
         if product_id and asset:
-            out.setdefault(product_id, []).append(asset)
+            out.setdefault(product_id, []).append({**asset, "_edge": edge})
     return out
 
 
@@ -178,7 +203,7 @@ def _embedded_faq_ids(faq_nodes: list[dict]) -> set[str]:
     return out
 
 
-def _collection_campaign_assets(collection: dict, persona_id: str) -> list[dict]:
+def _collection_campaign_assets(collection: dict, persona_id: str, cache: Optional[dict] = None) -> list[dict]:
     collection_slug = collection.get("slug") or (_meta(collection).get("collection_slug"))
     try:
         campaigns = (
@@ -198,7 +223,7 @@ def _collection_campaign_assets(collection: dict, persona_id: str) -> list[dict]
     campaign_ids = [row["id"] for row in campaigns if row.get("id")]
     if not campaign_ids:
         return []
-    gallery_by_node = _gallery_assets_by_node(persona_id)
+    gallery_by_node = _gallery_assets_by_node(persona_id, cache=cache)
     edges = supabase_client.list_edges_for_nodes(
         campaign_ids,
         relation_types=["uses_asset", "campaign_has_asset", "supports_campaign"],
@@ -240,14 +265,22 @@ def _collection_campaign_assets(collection: dict, persona_id: str) -> list[dict]
         if not asset:
             continue
         campaign_meta = _meta(campaign_by_id.get(campaign_id))
-        page_binding = campaign_meta.get("page_binding") or {}
+        campaign_binding = campaign_meta.get("page_binding") or {}
+        edge_binding = meta.get("page_binding") or {}
+        page_binding = {**campaign_binding, **edge_binding}
         asset_meta = {
             **(asset.get("metadata") or {}),
             "asset_function": meta.get("role") or (asset.get("metadata") or {}).get("asset_function") or "campaign_hero",
             "page_section": meta.get("page_section") or page_binding.get("section"),
+            "page_binding": page_binding,
             "markdown": markdown_by_campaign.get(campaign_id),
         }
-        payload = _asset_payload({**asset, "metadata": asset_meta}, asset_type="banner", alt=page_binding.get("label") or campaign_by_id.get(campaign_id, {}).get("title") or asset.get("name") or "Campanha")
+        payload = _asset_payload(
+            {**asset, "metadata": asset_meta},
+            asset_type="banner",
+            alt=page_binding.get("label") or campaign_by_id.get(campaign_id, {}).get("title") or asset.get("name") or "Campanha",
+            edge=edge,
+        )
         out.append(payload)
         seen.add(str(asset_node_id))
     return out
@@ -324,6 +357,8 @@ def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita
     if not collection:
         raise HTTPException(404, f"Collection not found: {collection_slug}")
 
+    cache: dict = {}
+
     categories = [
         row for row in supabase_client.list_product_collection_nodes(
             persona_id=persona_id,
@@ -338,7 +373,7 @@ def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita
         limit=1000,
     )
     products_by_category: dict[str, list[dict]] = {}
-    product_assets = _product_assets(products, persona_id)
+    product_assets = _product_assets(products, persona_id, cache=cache)
     product_related, related_node_map = _related_nodes(products, ["product_has_copy", "product_has_faq"])
     all_faq_nodes = [node for node in related_node_map.values() if node.get("node_type") == "faq"]
     embedded_faq_ids = _embedded_faq_ids(all_faq_nodes)
@@ -363,17 +398,18 @@ def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita
             "copies": [_copy_payload(node) for node in copy_nodes],
             "faqs": [_faq_payload(node) for node in faq_nodes],
             "assets": [
-                _asset_payload(asset, alt=product.get("title") or "")
+                _asset_payload(asset, alt=product.get("title") or "", edge=asset.get("_edge"))
                 for asset in product_assets.get(product["id"], [])
             ],
         }
         products_by_category.setdefault(str(metadata.get("category_slug") or "sem-categoria"), []).append(product_payload)
 
-    covers = _category_cover_assets(categories, persona_id)
+    covers = _category_cover_assets(categories, persona_id, cache=cache)
     category_payloads = []
     for category in categories:
         metadata = _meta(category)
         cover_asset = covers.get(category["id"])
+        cover_edge = (cover_asset or {}).get("_edge") if cover_asset else None
         category_slug = category.get("slug") or metadata.get("category_slug") or category["id"]
         category_payloads.append({
             "id": category["id"],
@@ -382,6 +418,9 @@ def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita
             "eyebrow": metadata.get("eyebrow") or metadata.get("category_eyebrow") or "",
             "cover": (cover_asset or {}).get("url") or "",
             "cover_alt": (cover_asset or {}).get("title") or category.get("title") or category_slug,
+            "cover_asset_id": (cover_asset or {}).get("id") if cover_asset else None,
+            "cover_edge_id": (cover_edge or {}).get("id") if cover_edge else None,
+            "cover_slot_key": LandingSlot.PRODUCT_GROUP_COVER.value if cover_asset else None,
             "visible": metadata.get("visible") is not False and category.get("status") != "archived",
             "position": _read_int(metadata.get("position") or metadata.get("sort_order"), 0),
             "products": sorted(products_by_category.get(str(category_slug), []), key=lambda row: row.get("position", 0)),
@@ -394,7 +433,7 @@ def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita
         if category.get("cover"):
             collection_cover = category["cover"]
             break
-    collection_assets = _collection_campaign_assets(collection, persona_id)
+    collection_assets = _collection_campaign_assets(collection, persona_id, cache=cache)
     campaign_display_name = (
         collection_assets[0].get("alt")
         if collection_assets and collection_assets[0].get("alt")
@@ -433,14 +472,30 @@ def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita
     }
 
 
+def _menu_response(persona_slug: str, collection_slug: str, response: Response, nocache: bool) -> dict:
+    payload = build_menu_payload(persona_slug, collection_slug=collection_slug)
+    response.headers["Cache-Control"] = "no-store" if nocache else _MENU_CACHE_CONTROL
+    return payload
+
+
 @router.get("/api/menu/{persona_slug}")
-def get_api_menu(persona_slug: str, collection_slug: str = Query("cardapio-baita-v14")):
-    return build_menu_payload(persona_slug, collection_slug=collection_slug)
+def get_api_menu(
+    persona_slug: str,
+    response: Response,
+    collection_slug: str = Query("cardapio-baita-v14"),
+    nocache: int = Query(0, ge=0, le=1),
+):
+    return _menu_response(persona_slug, collection_slug, response, bool(nocache))
 
 
 @router.get("/menu/{persona_slug}")
-def get_menu(persona_slug: str, collection_slug: str = Query("cardapio-baita-v14")):
-    return build_menu_payload(persona_slug, collection_slug=collection_slug)
+def get_menu(
+    persona_slug: str,
+    response: Response,
+    collection_slug: str = Query("cardapio-baita-v14"),
+    nocache: int = Query(0, ge=0, le=1),
+):
+    return _menu_response(persona_slug, collection_slug, response, bool(nocache))
 
 
 

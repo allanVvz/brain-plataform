@@ -58,11 +58,15 @@ app = FastAPI(title="Brain AI", version="1.0.0", lifespan=lifespan)
 
 env = get_backend_env()
 allowed_origins = env["allowed_origins"]
+allowed_origin_regex = env.get("allowed_origin_regex")
 logger.info("CORS origins: %s", ", ".join(allowed_origins))
+if allowed_origin_regex:
+    logger.info("CORS origin regex: %s", allowed_origin_regex)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

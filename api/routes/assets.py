@@ -24,6 +24,13 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
+from core.landing_slots import (
+    LandingSlot,
+    edge_metadata_for_slot,
+    slot_config,
+    slot_for_key,
+    slot_for_metadata,
+)
 from services import auth_service, knowledge_graph, supabase_client
 from services.asset_pipeline import AssetPipelineContext, compose_markdown, run_pipeline
 
@@ -916,3 +923,260 @@ def connect_asset(asset_id: str, body: ConnectBody, request: Request):
         parent_edge_id=(edge or {}).get("id") if isinstance(edge, dict) else None,
     )
     return {"success": True, "edge": edge, "gallery_edge": gallery_edge}
+
+
+# ── Landing-page slot bindings ────────────────────────────────────────────
+#
+# A landing page has fixed surfaces (hero, product_group_cover,
+# campaign_footer). Binding an asset to a slot is just an upsert of a
+# knowledge_edge with metadata.page_binding.slot_key set.
+
+
+class BindSlotBody(BaseModel):
+    slot: str
+    persona_slug: Optional[str] = None
+    target_slug: Optional[str] = None      # required for product_group_cover (category slug)
+    collection_slug: Optional[str] = None  # required for hero / campaign_footer
+    position: int = 0
+    label: Optional[str] = None
+
+
+def _ensure_campaign_node_for_slot(
+    persona_id: str,
+    slot: LandingSlot,
+    collection_slug: str,
+    *,
+    label: Optional[str],
+) -> dict:
+    """Find or create a per-collection campaign node that owns hero/footer slots.
+
+    A single campaign node per (persona, collection_slug, slot) keeps the graph
+    flat: hero edges live on one campaign, footer edges on another. The node
+    carries page_binding so menu.py can serialize the binding back out.
+    """
+    cfg = slot_config(slot)
+    slug = f"landing-{slot.value}-{collection_slug}"[:60]
+    existing = supabase_client.get_knowledge_node_by_slug(
+        slug,
+        persona_id=persona_id,
+        node_type="campaign",
+    )
+    if existing:
+        return existing
+    payload = {
+        "persona_id": persona_id,
+        "node_type": "campaign",
+        "slug": slug,
+        "title": label or f"{cfg['label']} · {collection_slug}",
+        "summary": f"Landing slot '{slot.value}' for collection '{collection_slug}'.",
+        "tags": ["landing", "campaign", slot.value],
+        "metadata": {
+            "collection_slug": collection_slug,
+            "page_binding": {
+                "slot_key": slot.value,
+                "section": cfg["page_section"],
+                "label": label or cfg["label"],
+            },
+            "landing_slot": slot.value,
+            "created_via": "bind_slot",
+        },
+        "status": "active",
+        "level": 60,
+        "importance": 0.7,
+        "confidence": 1.0,
+    }
+    node = supabase_client.upsert_knowledge_node(payload)
+    if not node or not node.get("id"):
+        raise HTTPException(502, "Falha ao criar node de campanha para o slot.")
+    return node
+
+
+def _resolve_slot_parent(
+    persona_id: str,
+    slot: LandingSlot,
+    *,
+    target_slug: Optional[str],
+    collection_slug: Optional[str],
+    label: Optional[str],
+) -> dict:
+    cfg = slot_config(slot)
+    parent_type = cfg["parent_node_type"]
+    if parent_type == "category":
+        if not target_slug:
+            raise HTTPException(422, "product_group_cover precisa de target_slug (categoria).")
+        node = supabase_client.get_knowledge_node_by_slug(
+            target_slug, persona_id=persona_id, node_type="category"
+        )
+        if not node:
+            raise HTTPException(404, f"Categoria nao encontrada: {target_slug}")
+        return node
+    # hero / footer → campaign node scoped to collection
+    if not collection_slug:
+        raise HTTPException(422, f"{slot.value} precisa de collection_slug.")
+    return _ensure_campaign_node_for_slot(persona_id, slot, collection_slug, label=label)
+
+
+def _asset_connection_row(edge: dict, parent_node: dict, slot: Optional[LandingSlot]) -> dict:
+    meta = edge.get("metadata") or {}
+    binding = meta.get("page_binding") or {}
+    return {
+        "edge_id": edge.get("id"),
+        "relation_type": edge.get("relation_type"),
+        "slot_key": (slot.value if slot else binding.get("slot_key") or binding.get("section")),
+        "page_section": binding.get("section") or meta.get("page_section"),
+        "label": binding.get("label"),
+        "position": binding.get("position"),
+        "role": meta.get("role"),
+        "parent_node": {
+            "id": parent_node.get("id"),
+            "slug": parent_node.get("slug"),
+            "node_type": parent_node.get("node_type"),
+            "title": parent_node.get("title"),
+            "collection_slug": (parent_node.get("metadata") or {}).get("collection_slug"),
+        },
+    }
+
+
+@router.post("/{asset_id}/bind-slot")
+def bind_asset_to_slot(asset_id: str, body: BindSlotBody, request: Request):
+    """Upsert a knowledge_edge that binds the asset to a landing-page slot."""
+    slot = slot_for_key(body.slot)
+    if not slot:
+        raise HTTPException(422, f"Slot invalido: {body.slot}")
+
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    persona_id = asset.get("persona_id")
+    if not persona_id:
+        raise HTTPException(422, "Asset sem persona nao pode ser conectado a um slot.")
+    auth_service.assert_persona_access(request, persona_id=persona_id)
+
+    knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
+    if not knowledge_node_id:
+        raise HTTPException(409, "Asset ainda nao foi promovido para o grafo. Use ensure-gallery primeiro.")
+
+    parent = _resolve_slot_parent(
+        persona_id,
+        slot,
+        target_slug=body.target_slug,
+        collection_slug=body.collection_slug,
+        label=body.label,
+    )
+
+    cfg = slot_config(slot)
+    slot_metadata = edge_metadata_for_slot(slot, position=body.position, label=body.label)
+    edge = supabase_client.upsert_knowledge_edge(
+        parent["id"],
+        knowledge_node_id,
+        cfg["relation_type"],
+        persona_id=persona_id,
+        weight=0.85,
+        metadata={
+            "created_from": "bind_slot",
+            "primary_tree": True,
+            "direction": "branch_to_asset",
+            "parent_slug": parent.get("slug"),
+            "parent_type": parent.get("node_type"),
+            **slot_metadata,
+        },
+    )
+    if not edge or not edge.get("id"):
+        raise HTTPException(502, "Falha ao criar edge do slot.")
+
+    asset_metadata = {**(asset.get("metadata") or {}), "asset_function": cfg["asset_function"]}
+    try:
+        supabase_client.update_asset(asset_id, {"metadata": asset_metadata})
+    except Exception as exc:
+        logger.warning("update_asset metadata failed asset=%s: %s", asset_id, exc)
+
+    return {
+        "success": True,
+        "edge": edge,
+        "slot": slot.value,
+        "connection": _asset_connection_row(edge, parent, slot),
+    }
+
+
+@router.delete("/{asset_id}/bind-slot/{slot_key}")
+def unbind_asset_slot(asset_id: str, slot_key: str, request: Request, target_slug: Optional[str] = Query(None)):
+    """Soft-delete every active edge that ties this asset to the given slot.
+
+    For product_group_cover the same asset can be on multiple categories, so
+    `target_slug` narrows the unbind to a single category when provided.
+    """
+    slot = slot_for_key(slot_key)
+    if not slot:
+        raise HTTPException(422, f"Slot invalido: {slot_key}")
+
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    persona_id = asset.get("persona_id")
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+
+    knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
+    if not knowledge_node_id:
+        return {"success": True, "removed": 0}
+
+    edges = supabase_client.list_edges_for_nodes([knowledge_node_id], limit=200)
+    removed_ids: list[str] = []
+    for edge in edges:
+        if edge.get("target_node_id") != knowledge_node_id:
+            continue
+        edge_slot = slot_for_metadata(edge.get("metadata") or {})
+        if edge_slot != slot:
+            continue
+        if target_slug:
+            parent_node = supabase_client.get_knowledge_node(edge.get("source_node_id"))
+            if not parent_node or parent_node.get("slug") != target_slug:
+                continue
+        if supabase_client.delete_knowledge_edge(edge["id"]):
+            removed_ids.append(edge["id"])
+
+    return {"success": True, "removed": len(removed_ids), "edge_ids": removed_ids}
+
+
+@router.get("/{asset_id}/connections")
+def list_asset_connections(asset_id: str, request: Request):
+    """List every active landing-relevant edge incident on this asset.
+
+    Excludes gallery_asset (already reflected by graph_state.in_graph).
+    """
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    if asset.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=asset["persona_id"])
+
+    knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
+    if not knowledge_node_id:
+        return {"asset_id": asset_id, "knowledge_node_id": None, "connections": []}
+
+    edges = supabase_client.list_edges_for_nodes([knowledge_node_id], limit=500)
+    parent_ids = {
+        edge.get("source_node_id")
+        for edge in edges
+        if edge.get("target_node_id") == knowledge_node_id and edge.get("relation_type") != "gallery_asset"
+    }
+    parent_ids.discard(None)
+    parents = {row["id"]: row for row in supabase_client.list_knowledge_nodes_by_ids(list(parent_ids))}
+
+    connections: list[dict] = []
+    for edge in edges:
+        if edge.get("target_node_id") != knowledge_node_id:
+            continue
+        if edge.get("relation_type") == "gallery_asset":
+            continue
+        parent_node = parents.get(edge.get("source_node_id"))
+        if not parent_node:
+            continue
+        slot = slot_for_metadata(edge.get("metadata") or {})
+        connections.append(_asset_connection_row(edge, parent_node, slot))
+
+    return {
+        "asset_id": asset_id,
+        "knowledge_node_id": knowledge_node_id,
+        "connections": connections,
+    }
