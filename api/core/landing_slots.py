@@ -25,6 +25,7 @@ class LandingSlot(str, Enum):
     HERO = "hero"
     PRODUCT_GROUP_COVER = "product_group_cover"
     CAMPAIGN_FOOTER = "campaign_footer"
+    PRODUCT_IMAGE = "product_image"
 
 
 _SLOT_CONFIG: dict[LandingSlot, dict] = {
@@ -51,6 +52,14 @@ _SLOT_CONFIG: dict[LandingSlot, dict] = {
         "page_section": "footer",
         "asset_function": "campaign_footer",
         "needs_collection": True,
+    },
+    LandingSlot.PRODUCT_IMAGE: {
+        "label": "Imagem de produto",
+        "parent_node_type": "product",
+        "relation_type": "product_image",
+        "page_section": "product",
+        "asset_function": "product_image",
+        "needs_collection": False,
     },
 }
 

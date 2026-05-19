@@ -1001,14 +1001,14 @@ def _resolve_slot_parent(
 ) -> dict:
     cfg = slot_config(slot)
     parent_type = cfg["parent_node_type"]
-    if parent_type == "category":
+    if parent_type in {"category", "product"}:
         if not target_slug:
-            raise HTTPException(422, "product_group_cover precisa de target_slug (categoria).")
+            raise HTTPException(422, f"{slot.value} precisa de target_slug ({parent_type} slug).")
         node = supabase_client.get_knowledge_node_by_slug(
-            target_slug, persona_id=persona_id, node_type="category"
+            target_slug, persona_id=persona_id, node_type=parent_type,
         )
         if not node:
-            raise HTTPException(404, f"Categoria nao encontrada: {target_slug}")
+            raise HTTPException(404, f"{parent_type} nao encontrado: {target_slug}")
         return node
     # hero / footer → campaign node scoped to collection
     if not collection_slug:

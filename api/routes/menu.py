@@ -546,6 +546,86 @@ def list_admin_assets(persona_slug: str, response: Response):
     return [_admin_asset_payload(row) for row in rows]
 
 
+@router.get("/api/menu/{persona_slug}/admin-blocks")
+def list_admin_blocks(persona_slug: str, response: Response, collection_slug: str = Query("cardapio-baita-v14")):
+    """Configurable landing blocks for the admin UI: hero, footer, every category cover,
+    every product image. Each row carries everything the UI needs to call
+    POST /assets/{id}/bind-slot or DELETE /assets/{id}/bind-slot/{slot}.
+    """
+    payload = build_menu_payload(persona_slug, collection_slug=collection_slug)
+    persona = payload["persona"]
+    collection = persona["collections"][0]
+    blocks: list[dict] = []
+
+    hero_asset = next(
+        (a for a in collection["assets"] if a.get("slot_key") == LandingSlot.HERO.value),
+        None,
+    )
+    blocks.append({
+        "block_id": f"hero:{collection['slug']}",
+        "label": "Home Hero",
+        "where": "Topo da landing /cardapio/<persona>",
+        "slot_key": LandingSlot.HERO.value,
+        "collection_slug": collection["slug"],
+        "target_slug": None,
+        "current_asset_url": (hero_asset or {}).get("url") or collection.get("cover") or None,
+        "current_asset_id": (hero_asset or {}).get("asset_id") or (hero_asset or {}).get("id") or None,
+        "current_edge_id": (hero_asset or {}).get("edge_id"),
+    })
+
+    footer_asset = next(
+        (a for a in collection["assets"] if a.get("slot_key") == LandingSlot.CAMPAIGN_FOOTER.value),
+        None,
+    )
+    blocks.append({
+        "block_id": f"footer:{collection['slug']}",
+        "label": "Campanha de rodape",
+        "where": "Rodape da landing /cardapio/<persona>",
+        "slot_key": LandingSlot.CAMPAIGN_FOOTER.value,
+        "collection_slug": collection["slug"],
+        "target_slug": None,
+        "current_asset_url": (footer_asset or {}).get("url"),
+        "current_asset_id": (footer_asset or {}).get("asset_id") or (footer_asset or {}).get("id"),
+        "current_edge_id": (footer_asset or {}).get("edge_id"),
+    })
+
+    for category in collection["categories"]:
+        blocks.append({
+            "block_id": f"category:{category['slug']}",
+            "label": f"Categoria: {category['title']}",
+            "where": f"Card de grupo · /cardapio/{persona_slug}#category-{category['slug']}",
+            "slot_key": LandingSlot.PRODUCT_GROUP_COVER.value,
+            "collection_slug": collection["slug"],
+            "target_slug": category["slug"],
+            "current_asset_url": category.get("cover") or None,
+            "current_asset_id": category.get("cover_asset_id"),
+            "current_edge_id": category.get("cover_edge_id"),
+        })
+
+    for category in collection["categories"]:
+        for product in category.get("products", []):
+            assets = product.get("assets") or []
+            current = assets[0] if assets else {}
+            blocks.append({
+                "block_id": f"product:{product['slug']}",
+                "label": f"Produto: {product['name']}",
+                "where": f"Card de produto · {category['title']} > {product['name']}",
+                "slot_key": LandingSlot.PRODUCT_IMAGE.value,
+                "collection_slug": collection["slug"],
+                "target_slug": product["slug"],
+                "current_asset_url": current.get("url") or None,
+                "current_asset_id": current.get("asset_id") or current.get("id"),
+                "current_edge_id": current.get("edge_id"),
+            })
+
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "persona_slug": persona_slug,
+        "collection_slug": collection["slug"],
+        "blocks": blocks,
+    }
+
+
 @router.get("/api/menu/{persona_slug}/admin-connections/{asset_id}")
 def list_admin_connections(persona_slug: str, asset_id: str, response: Response):
     persona = _resolve_persona(persona_slug)

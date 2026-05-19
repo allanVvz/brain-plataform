@@ -1,3 +1,5 @@
+import os
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -22,13 +24,54 @@ PUBLIC_PREFIXES = (
     "/menu",
 )
 
+ADMIN_TOKEN_HEADER = "x-ai-brain-admin-token"
+ADMIN_TOKEN_ENV_NAMES = ("QA", "qa", "preview", "PREVIEW", "test", "TEST")
+
 
 def is_public_path(path: str) -> bool:
     return path in PUBLIC_EXACT_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
 
 
+def _admin_test_token_user(request: Request) -> dict | None:
+    """When ENVIRONMENT is qa/preview, allow a shared X-AI-BRAIN-ADMIN-TOKEN
+    header to act as the admin user. Production never accepts this path.
+
+    The token must come from the env var AI_BRAIN_ADMIN_TEST_TOKEN and is
+    compared in constant time. The token value itself is never logged.
+    """
+    env_name = (os.environ.get("ENVIRONMENT") or "").strip()
+    if env_name not in ADMIN_TOKEN_ENV_NAMES:
+        return None
+    expected = (os.environ.get("AI_BRAIN_ADMIN_TEST_TOKEN") or "").strip()
+    if not expected:
+        return None
+    presented = (request.headers.get(ADMIN_TOKEN_HEADER) or "").strip()
+    if not presented:
+        return None
+    # Constant-time compare to avoid timing leaks.
+    import hmac
+
+    if not hmac.compare_digest(presented.encode("utf-8"), expected.encode("utf-8")):
+        return None
+    return {
+        "id": "qa-admin-token",
+        "email": "qa-admin@token.local",
+        "username": "qa-admin",
+        "name": "QA Admin (token)",
+        "role": "admin",
+        "is_active": True,
+        "auth_method": "admin_test_token",
+    }
+
+
 async def auth_middleware(request: Request, call_next):
     if request.method == "OPTIONS" or is_public_path(request.url.path):
+        return await call_next(request)
+
+    token_user = _admin_test_token_user(request)
+    if token_user:
+        request.state.user = token_user
+        request.state.persona_access = []
         return await call_next(request)
 
     token = request.cookies.get(auth_service.SESSION_COOKIE)
