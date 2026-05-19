@@ -18,6 +18,8 @@ dashboard/.env.local
 env.yaml
 env.qa.yaml
 env*.local
+env*.yaml.db
+env*.yaml.local
 secrets/
 *.pem
 *.key
@@ -44,6 +46,7 @@ Thumbs.db
 # Local browser/e2e artifacts
 .test-browser-profile/
 test-artifacts/
+.smoke-tmp/
 baita-cardapio-dom.html
 chrome-stderr.txt
 chrome-stdout.txt

@@ -26,6 +26,30 @@ Deploy passo-a-passo:
 3. `gcloud run deploy <ai-brain-api | ai-brain-api-qa> --source ./api --region us-central1 --allow-unauthenticated --env-vars-file <env.yaml | env.qa.yaml>`
 4. Smoke: `curl -sk https://<service>/health` -> 200. `curl -sk https://<service>/api/menu/baita-conveniencia` -> 200 com `persona.collections[0].cover` apontando para `storage/v1/object/sign/...`.
 
+## Scripts de deploy e sync
+
+Os passos acima estao automatizados em `scripts/` e expostos como skills/agents do Claude Code:
+
+| Script | Skill | Quando usar |
+|---|---|---|
+| `scripts/smoke-check.sh <prod\|qa\|url>` | `smoke-check` | Validar /health + /api/menu em qualquer ambiente. |
+| `scripts/deploy-qa.sh` | `deploy-qa` | Build + push do Cloud Run QA a partir de `develop`. Roda smoke-check QA no fim. |
+| `scripts/deploy-prod.sh` | `deploy-prod` | Gate QA -> merge develop->main -> deploy CR PROD -> smoke-check PROD. Recusa se env.yaml tiver anon JWT. |
+| `scripts/db-fetch-prod-to-qa.sh [--apply]` | `db-fetch-prod-to-qa` | Copia tabelas de catalogo do Supabase PROD para QA (sem PII). Dry-run por padrao. |
+| `scripts/cardapio-deploy.sh <prod\|qa>` | `cardapio-deploy` | Deploy do baita-cardapio (Vercel prod ou preview alias qa). |
+
+Agents disponiveis (`.claude/agents/`):
+
+- **`release-engineer`** — coordena o fluxo completo QA -> PROD com gates explicitos. Use para "deploy to prod" / "promover".
+- **`db-sync-engineer`** — opera Supabase PROD e QA via MCP, faz fetch de dados, verifica paridade de migrations, sem nunca tocar PII.
+
+Pre-requisitos para os scripts de DB:
+- Postgres client tools (`psql`, `pg_dump`).
+- Dois arquivos gitignored com connection strings do Supabase pooler:
+  - `env.yaml.db` — `SUPABASE_DB_URL="postgresql://postgres.slyxppvghniknqofhqzt:<pass>@aws-0-us-west-1.pooler.supabase.com:5432/postgres"`
+  - `env.qa.yaml.db` — equivalente para `qhnepdcqtkjjslqqiyvp` (us-east-1).
+- Connection strings em Supabase Dashboard -> Project Settings -> Database -> Transaction pooler.
+
 ## Start Local
 
 - Backend API: `cd api && uvicorn main:app --reload`
