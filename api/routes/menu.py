@@ -498,4 +498,102 @@ def get_menu(
     return _menu_response(persona_slug, collection_slug, response, bool(nocache))
 
 
+# ── Public read-only admin views (auth-exempt, under /api/menu/*) ─────────
+#
+# The cardapio admin UI lives in the same public site as the landing page;
+# it has no AI-BRAIN session. Exposing read-only asset + connection state
+# here lets the admin grid render without auth, while writes (bind-slot,
+# unbind, ensure-gallery, delete-edge) still require a session on /assets/*.
+
+
+def _admin_asset_payload(row: dict) -> dict:
+    """Whitelist asset fields for the public admin view (no signing keys)."""
+    metadata = row.get("metadata") or {}
+    return {
+        "id": row.get("id"),
+        "persona_id": row.get("persona_id"),
+        "type": row.get("type"),
+        "name": row.get("name"),
+        "url": row.get("url"),
+        "original_filename": row.get("original_filename") or metadata.get("original_filename"),
+        "storage_bucket": row.get("storage_bucket") or metadata.get("storage_bucket"),
+        "storage_path": row.get("storage_path") or metadata.get("storage_path"),
+        "mime_type": row.get("mime_type"),
+        "file_size": row.get("file_size"),
+        "status": row.get("status"),
+        "upload_context": row.get("upload_context") or metadata.get("upload_context"),
+        "knowledge_node_id": row.get("knowledge_node_id") or metadata.get("knowledge_node_id"),
+        "gallery_edge_id": row.get("gallery_edge_id") or metadata.get("gallery_edge_id"),
+        "parent_node_id": row.get("parent_node_id") or metadata.get("parent_node_id"),
+        "parent_edge_id": row.get("parent_edge_id") or metadata.get("parent_edge_id"),
+        "graph_status": row.get("graph_status"),
+        "metadata": {
+            "asset_function": metadata.get("asset_function"),
+            "visual_summary": metadata.get("visual_summary"),
+            "extracted_text": (metadata.get("extracted_text") or "")[:600] or None,
+            "kind": metadata.get("kind"),
+            "branch_hint": metadata.get("branch_hint") or metadata.get("parent_slug"),
+            "tags": metadata.get("tags"),
+        },
+    }
+
+
+@router.get("/api/menu/{persona_slug}/admin-assets")
+def list_admin_assets(persona_slug: str, response: Response):
+    persona = _resolve_persona(persona_slug)
+    rows = supabase_client.list_assets(persona_id=persona["id"], limit=500, offset=0)
+    response.headers["Cache-Control"] = "no-store"
+    return [_admin_asset_payload(row) for row in rows]
+
+
+@router.get("/api/menu/{persona_slug}/admin-connections/{asset_id}")
+def list_admin_connections(persona_slug: str, asset_id: str, response: Response):
+    persona = _resolve_persona(persona_slug)
+    asset = supabase_client.get_asset(asset_id)
+    if not asset or asset.get("persona_id") != persona["id"]:
+        raise HTTPException(404, "Asset nao encontrado para esta persona.")
+    knowledge_node_id = (asset.get("knowledge_node_id")
+                         or (asset.get("metadata") or {}).get("knowledge_node_id"))
+    if not knowledge_node_id:
+        response.headers["Cache-Control"] = "no-store"
+        return {"asset_id": asset_id, "knowledge_node_id": None, "connections": []}
+    edges = supabase_client.list_edges_for_nodes([knowledge_node_id], limit=500)
+    parent_ids = list({
+        edge.get("source_node_id")
+        for edge in edges
+        if edge.get("target_node_id") == knowledge_node_id and edge.get("relation_type") != "gallery_asset"
+    } - {None})
+    parents = {row["id"]: row for row in supabase_client.list_knowledge_nodes_by_ids(parent_ids)}
+    out: list[dict] = []
+    for edge in edges:
+        if edge.get("target_node_id") != knowledge_node_id:
+            continue
+        if edge.get("relation_type") == "gallery_asset":
+            continue
+        parent = parents.get(edge.get("source_node_id"))
+        if not parent:
+            continue
+        meta = edge.get("metadata") or {}
+        binding = meta.get("page_binding") or {}
+        derived_slot = slot_for_metadata(meta)
+        out.append({
+            "edge_id": edge.get("id"),
+            "relation_type": edge.get("relation_type"),
+            "slot_key": binding.get("slot_key") or (derived_slot.value if derived_slot else None),
+            "page_section": binding.get("section") or meta.get("page_section"),
+            "label": binding.get("label"),
+            "position": binding.get("position"),
+            "role": meta.get("role"),
+            "parent_node": {
+                "id": parent.get("id"),
+                "slug": parent.get("slug"),
+                "node_type": parent.get("node_type"),
+                "title": parent.get("title"),
+                "collection_slug": (parent.get("metadata") or {}).get("collection_slug"),
+            },
+        })
+    response.headers["Cache-Control"] = "no-store"
+    return {"asset_id": asset_id, "knowledge_node_id": knowledge_node_id, "connections": out}
+
+
 
