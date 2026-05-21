@@ -387,6 +387,72 @@ function formatSaveError(body: Record<string, unknown> | null | undefined): stri
   return `Erro: ${error}`;
 }
 
+// Deriva o prompt que sera enviado para a Sofia quando o operador clica numa
+// opcao do diagnostico. Hoje o backend emite `action`+`payload` como contrato
+// declarativo sem handler; ate ele expor `prompt_to_sofia` direto em cada
+// opcao, este helper traduz as combinacoes conhecidas em mensagens que a
+// Sofia ja entende e devolve a opcao com `prompt_to_sofia` populado.
+function ensureSofiaOptionPrompt(question: SofiaQuestion, option: SofiaQuestionOption): SofiaQuestionOption {
+  if (option.prompt_to_sofia && option.prompt_to_sofia.trim()) return option;
+  const payload = option.payload || {};
+  const targetSlug = (payload as any).slug ? String((payload as any).slug) : "";
+  const scope = (payload as any).scope ? String((payload as any).scope) : "";
+  const productSlug = (payload as any).product_slug ? String((payload as any).product_slug) : "";
+  const newTarget = (payload as any).new_target;
+  const affectedTitle = question.affected_title || "";
+  const affectedType = question.affected_type || "";
+  const ui_hook: SofiaQuestionOption["ui_hook"] | undefined =
+    option.action === "upload_asset" ? "open_file_picker" : undefined;
+  let prompt = "";
+  switch (option.action) {
+    case "upload_asset":
+      prompt = "Vou subir um novo asset agora. Quando o upload terminar, conecte o asset a partir de session.asset_readings ao produto principal do plano usando uses_asset e marque o asset como pendente_validacao.";
+      break;
+    case "attach_existing_asset":
+      prompt = `Conecte o asset existente ${targetSlug || "(slug pendente)"} ao ${scope || "produto principal"} do plano usando relation_type=uses_asset. Atualize o normalized_plan adicionando a entry asset com metadata.parent_slug apontando para o ${scope || "produto"}.`;
+      break;
+    case "drop_asset_requirement":
+      prompt = "Remova a exigencia de asset deste plano: ajuste asset_count_policy para per_parent e asset_count_per_parent=0 no normalized_plan, mantendo as outras politicas.";
+      break;
+    case "regenerate_missing_faqs":
+      prompt = "Gere os FAQs faltantes a partir das copies/produtos terminais do plano atual, mantendo o parent_type configurado.";
+      break;
+    case "lower_faq_target":
+      prompt = `Ajuste faq_count_per_parent para ${typeof newTarget === "number" ? newTarget : 1} no normalized_plan e mantenha os FAQs ja gerados.`;
+      break;
+    case "drop_faq_target":
+      prompt = "Remova a exigencia do Golden Dataset de FAQ: faq_count_policy=total. Mantenha os FAQs ja criados.";
+      break;
+    case "create_offer":
+      prompt = `Crie uma oferta abaixo do produto ${productSlug || "principal"} com title/content concretos e parent_slug=${productSlug || "<produto principal>"}.`;
+      break;
+    case "drop_offer_requirement":
+      prompt = "Remova a exigencia de oferta deste plano e prossiga sem offers.";
+      break;
+    case "create_rule":
+      prompt = `Crie uma regra comercial abaixo do ${scope || "briefing"} com title/content concretos, marcando como pendente_validacao.`;
+      break;
+    case "drop_rule_requirement":
+      prompt = "Remova a exigencia de rule deste plano e prossiga sem rules.";
+      break;
+    case "change_parent": {
+      const newParent = (payload as any).new_parent_slug ? String((payload as any).new_parent_slug) : "";
+      const entrySlug = (payload as any).entry_slug ? String((payload as any).entry_slug) : "";
+      if (entrySlug && newParent) {
+        prompt = `Mude o metadata.parent_slug da entry ${entrySlug} para ${newParent} e atualize os links correspondentes. Re-emita o knowledge_plan completo com a correcao aplicada.`;
+      } else {
+        prompt = `Corrija o parent da entry ${affectedTitle || affectedType} para alcancar a persona. Re-emita o knowledge_plan inteiro.`;
+      }
+      break;
+    }
+    default:
+      prompt = option.label
+        ? `Aplique a opcao "${option.label}" para resolver "${question.human_summary || question.kind}". Re-emita o knowledge_plan corrigido.`
+        : `Resolva o problema "${question.human_summary || question.kind}" e re-emita o knowledge_plan corrigido.`;
+  }
+  return { ...option, prompt_to_sofia: prompt, ui_hook: option.ui_hook || ui_hook };
+}
+
 function repairText(value: string) {
   if (!value || !/(Ã|â€|â€œ|â€�|â€˜|â€™|âˆ|â”|�)/.test(value)) return value;
   try {
@@ -1287,6 +1353,7 @@ function ChatPanel({
   const [planConfirmed, setPlanConfirmed] = useState(false);
   const [selectedFaqSlug, setSelectedFaqSlug] = useState<string | null>(null);
   const [selectedProductSlug, setSelectedProductSlug] = useState<string | null>(null);
+  const [applyingSofiaAction, setApplyingSofiaAction] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const draftPlan = planState?.normalized_plan || currentKnowledgePlan;
@@ -1492,6 +1559,102 @@ function ChatPanel({
       }]);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Handler dos atalhos do modal de diagnostico. Cada opcao da SofiaQuestion
+  // vira uma mensagem para a Sofia (via /kb-intake/message). O backend cuida
+  // de mutar o plano e devolver um plan_state novo, que ja entra no estado da
+  // pagina via send(). UI hooks (ex: open_file_picker) executam efeito local
+  // antes da mensagem ser enviada.
+  async function handleSofiaAction(q: SofiaQuestion, optRaw: SofiaQuestionOption) {
+    if (!sessionId) {
+      setFriendlyError("Sessao da Sofia nao iniciada.");
+      return;
+    }
+    const opt = ensureSofiaOptionPrompt(q, optRaw);
+    const prompt = opt.prompt_to_sofia || "";
+    if (opt.ui_hook === "open_file_picker") {
+      // Fecha o modal para o operador escolher o arquivo. Depois que ele
+      // anexa, o paperclip + send() ja envia o arquivo para a Sofia.
+      setDiagnosticOpen(false);
+      setMessages((p) => [...p, {
+        role: "system",
+        content: "Selecione o asset no botao de upload do chat. Apos enviar, a Sofia conecta o asset ao produto pendente.",
+      }]);
+      fileRef.current?.click();
+      return;
+    }
+    if (!prompt) {
+      setFriendlyError("Nao consegui montar a mensagem para a Sofia. Tente digitar manualmente no chat.");
+      return;
+    }
+    setApplyingSofiaAction(true);
+    try {
+      setMessages((p) => [...p, { role: "user", content: `[atalho] ${opt.label}` }]);
+      const d: any = await api.kbIntakeMessage(sessionId, prompt);
+      if (d?.ok === false) {
+        setFriendlyError(d?.message || "A Sofia nao conseguiu aplicar o atalho agora.");
+        return;
+      }
+      if (d?.state) setMissionState(d.state);
+      setStage(d.stage || stage);
+      setSessionStatus(d.status || d.stage || sessionStatus);
+      if (d.classification) setCls(d.classification);
+      const nextState = normalizePlanState(d, d.classification?.persona_slug || plan.personaSlug);
+      if (nextState) {
+        applyPlanState(nextState);
+        if (nextState.validation.valid && nextState.validation.blocking_violations.length === 0) {
+          setDiagnosticOpen(false);
+          setFriendlyError(null);
+        } else if (nextState.diagnostic) {
+          // Mantem o modal aberto e atualizado com o diagnostico mais recente.
+          setFriendlyError("A Sofia aplicou parte do reparo; ainda ha pendencias bloqueantes.");
+        }
+      }
+      if ((d.message || "").trim()) {
+        setMessages((p) => [...p, { role: "assistant", content: d.message }]);
+      }
+    } catch (e: any) {
+      setFriendlyError(formatChatRequestError(e));
+    } finally {
+      setApplyingSofiaAction(false);
+    }
+  }
+
+  // Atalho "Regerar estrutura": pede para a Sofia reaplicar os reparos
+  // sugeridos pelo diagnostico atual em uma unica rodada.
+  async function handleSofiaRegenerate() {
+    if (!sessionId) {
+      setFriendlyError("Sessao da Sofia nao iniciada.");
+      return;
+    }
+    setApplyingSofiaAction(true);
+    try {
+      setMessages((p) => [...p, { role: "user", content: "[atalho] Regerar estrutura aplicando o diagnostico atual" }]);
+      const d: any = await api.kbIntakeMessage(
+        sessionId,
+        "Regere a arvore de conhecimento aplicando todos os reparos sugeridos pelo diagnostico atual (parent slugs, expansion policies, links). Mantenha as entries ja confirmadas e re-emita o knowledge_plan completo.",
+      );
+      if (d?.ok === false) {
+        setFriendlyError(d?.message || "A Sofia nao conseguiu regerar agora.");
+        return;
+      }
+      const nextState = normalizePlanState(d, d.classification?.persona_slug || plan.personaSlug);
+      if (nextState) {
+        applyPlanState(nextState);
+        if (nextState.validation.valid && nextState.validation.blocking_violations.length === 0) {
+          setDiagnosticOpen(false);
+          setFriendlyError(null);
+        }
+      }
+      if ((d.message || "").trim()) {
+        setMessages((p) => [...p, { role: "assistant", content: d.message }]);
+      }
+    } catch (e: any) {
+      setFriendlyError(formatChatRequestError(e));
+    } finally {
+      setApplyingSofiaAction(false);
     }
   }
 
@@ -1729,10 +1892,13 @@ function ChatPanel({
             )}
           </div>
         )}
-        {stage === "ready_to_save" && draftPlan && planStateValid && (
+        {stage === "ready_to_save" && draftPlan && (
           <GraphPreviewPanel
             plan={draftPlan}
             confirmed={planConfirmed}
+            canSave={planStateValid}
+            blockingReasons={previewViolations}
+            onOpenDiagnostic={planState?.diagnostic ? () => setDiagnosticOpen(true) : undefined}
             selectedFaqSlug={selectedFaqSlug}
             selectedProductSlug={selectedProductSlug}
             onSelectFaq={(slug) => {
@@ -1855,7 +2021,9 @@ function ChatPanel({
         <BlockedPlanDiagnosticModal
           diagnostic={planState.diagnostic}
           onClose={() => setDiagnosticOpen(false)}
-          onEdit={() => setShowContent(true)}
+          onOptionSelect={handleSofiaAction}
+          onRegenerate={handleSofiaRegenerate}
+          applyingAction={applyingSofiaAction}
         />
       )}
     </div>
@@ -2109,6 +2277,9 @@ function UploadPanel({
 function GraphPreviewPanel({
   plan,
   confirmed,
+  canSave,
+  blockingReasons,
+  onOpenDiagnostic,
   selectedFaqSlug,
   selectedProductSlug,
   onSelectFaq,
@@ -2122,6 +2293,9 @@ function GraphPreviewPanel({
 }: {
   plan: KnowledgePlan;
   confirmed: boolean;
+  canSave: boolean;
+  blockingReasons: string[];
+  onOpenDiagnostic?: () => void;
   selectedFaqSlug: string | null;
   selectedProductSlug: string | null;
   onSelectFaq: (slug: string) => void;
@@ -2226,9 +2400,20 @@ function GraphPreviewPanel({
           <p className="text-[10px] uppercase tracking-[0.2em] text-obs-faint">Previa visual</p>
           <p className="text-sm font-semibold text-white">Estrutura piramidal antes do save</p>
         </div>
-        <span className={`rounded-full px-2.5 py-1 text-[10px] border ${confirmed ? "border-green-400/30 text-green-300 bg-green-500/10" : "border-obs-amber/25 text-obs-amber bg-obs-amber/10"}`}>
-          {confirmed ? "estrutura confirmada" : "aguardando confirmacao"}
-        </span>
+        <div className="flex items-center gap-2">
+          {!canSave && onOpenDiagnostic && (
+            <button
+              type="button"
+              onClick={onOpenDiagnostic}
+              className="rounded-full border border-red-400/40 bg-red-500/15 px-2.5 py-1 text-[10px] font-semibold text-red-200 hover:bg-red-500/25"
+            >
+              {blockingReasons.length} pendencia(s) - abrir diagnostico
+            </button>
+          )}
+          <span className={`rounded-full px-2.5 py-1 text-[10px] border ${confirmed ? "border-green-400/30 text-green-300 bg-green-500/10" : canSave ? "border-obs-amber/25 text-obs-amber bg-obs-amber/10" : "border-red-400/40 text-red-200 bg-red-500/10"}`}>
+            {confirmed ? "estrutura confirmada" : canSave ? "aguardando confirmacao" : "bloqueada"}
+          </span>
+        </div>
       </div>
 
       <div className="node-actions flex flex-wrap gap-2">
@@ -2258,15 +2443,24 @@ function GraphPreviewPanel({
         <button
           type="button"
           onClick={onConfirmStructure}
-          className="rounded-lg border border-green-400/25 px-3 py-1.5 text-xs text-green-300"
+          disabled={!canSave}
+          title={canSave ? "" : `Confirme apos resolver: ${blockingReasons.slice(0, 4).join("; ")}${blockingReasons.length > 4 ? ` (+${blockingReasons.length - 4})` : ""}`}
+          className="rounded-lg border border-green-400/25 px-3 py-1.5 text-xs text-green-300 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Confirmar estrutura
         </button>
         <button
           type="button"
           onClick={onSaveKnowledge}
-          disabled={!confirmed || loading}
-          className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+          disabled={!confirmed || !canSave || loading}
+          title={
+            !canSave
+              ? `Plano bloqueado: ${blockingReasons.slice(0, 4).join("; ")}${blockingReasons.length > 4 ? ` (+${blockingReasons.length - 4})` : ""}`
+              : !confirmed
+                ? "Clique em Confirmar estrutura antes de salvar"
+                : ""
+          }
+          className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Salvar conhecimento
         </button>
