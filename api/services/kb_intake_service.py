@@ -1915,7 +1915,132 @@ def _sofia_questions_from_diagnostic(
             ],
         })
 
+    # Pos-processamento: garante que cada opcao saia com `prompt_to_sofia`
+    # populado (o front usa esse prompt para enviar a mensagem certa para a
+    # Sofia/tool). Caso o backend ainda nao expresse o prompt por opcao
+    # diretamente, derivamos a partir de action+payload.
+    for q in questions:
+        for opt in q.get("options") or []:
+            if opt.get("prompt_to_sofia"):
+                continue
+            prompt, ui_hook = _derive_sofia_option_prompt(q, opt)
+            if prompt:
+                opt["prompt_to_sofia"] = prompt
+            if ui_hook and not opt.get("ui_hook"):
+                opt["ui_hook"] = ui_hook
+
     return questions
+
+
+def _derive_sofia_option_prompt(question: dict, option: dict) -> tuple[str, Optional[str]]:
+    """Traduz action+payload de uma SofiaQuestionOption em um prompt que a
+    Sofia (via tools quando habilitadas, ou via texto livre quando nao)
+    entende como instrucao para mutar o plano.
+
+    Devolve (prompt, ui_hook?). O front ja tem um fallback local equivalente;
+    repetir aqui evita depender de versoes do front em sincronia.
+    """
+    payload = option.get("payload") or {}
+    action = str(option.get("action") or "").strip().lower()
+    target_slug = str(payload.get("slug") or "").strip()
+    scope = str(payload.get("scope") or "").strip()
+    product_slug = str(payload.get("product_slug") or "").strip()
+    new_target = payload.get("new_target")
+    affected_title = str(question.get("affected_title") or "").strip()
+    affected_type = str(question.get("affected_type") or "").strip()
+    if action == "upload_asset":
+        return (
+            "Vou subir um novo asset agora. Quando o upload terminar, conecte o asset a partir de "
+            "session.asset_readings ao produto principal do plano (tool attach_session_asset) e "
+            "marque como pendente_validacao.",
+            "open_file_picker",
+        )
+    if action == "attach_existing_asset":
+        return (
+            f"Conecte o asset existente {target_slug or '(slug pendente)'} ao "
+            f"{scope or 'produto principal'} do plano usando uses_asset (tool attach_session_asset "
+            f"se vier de session.asset_readings, senao create_node content_type=asset).",
+            None,
+        )
+    if action == "drop_asset_requirement":
+        return (
+            "Remova a exigencia de asset: chame set_expansion_policy(block='asset', "
+            "count_per_parent=0, count_policy='per_parent').",
+            None,
+        )
+    if action == "regenerate_missing_faqs":
+        return (
+            "Gere os FAQs faltantes a partir das copies/produtos terminais do plano atual usando "
+            "create_node, mantendo o faq_parent_type configurado.",
+            None,
+        )
+    if action == "lower_faq_target":
+        new_t = new_target if isinstance(new_target, int) else 1
+        return (
+            f"Chame set_expansion_policy(block='faq', count_per_parent={new_t}). Mantenha os FAQs "
+            f"ja gerados.",
+            None,
+        )
+    if action == "drop_faq_target":
+        return (
+            "Remova a exigencia do Golden Dataset de FAQ: set_expansion_policy(block='faq', "
+            "count_policy='total'). Mantenha os FAQs ja criados.",
+            None,
+        )
+    if action == "create_offer":
+        return (
+            f"Crie uma oferta abaixo do produto {product_slug or '(principal)'} usando create_node "
+            f"com content_type='offer', parent_slug='{product_slug or '<produto principal>'}', "
+            f"title/content concretos.",
+            None,
+        )
+    if action == "drop_offer_requirement":
+        return "Remova a exigencia de oferta deste plano e prossiga sem offers.", None
+    if action == "create_rule":
+        return (
+            f"Crie uma regra comercial abaixo do {scope or 'briefing'} usando create_node com "
+            f"content_type='rule' e parent_slug='{scope or 'briefing'}'.",
+            None,
+        )
+    if action == "drop_rule_requirement":
+        return "Remova a exigencia de rule deste plano e prossiga sem rules.", None
+    if action == "change_parent":
+        new_parent = str(payload.get("new_parent_slug") or "").strip()
+        entry_slug = str(payload.get("entry_slug") or "").strip()
+        if entry_slug and new_parent:
+            return (
+                f"Chame set_parent(slug='{entry_slug}', parent_slug='{new_parent}'). Re-valide "
+                f"depois com validate_plan.",
+                None,
+            )
+        return (
+            f"Corrija o parent da entry {affected_title or affected_type} para alcancar a persona "
+            f"(set_parent), depois validate_plan.",
+            None,
+        )
+    if action == "regenerate_slugs":
+        return (
+            "Re-emita o knowledge_plan com slugs unicos: identifique slugs duplicados, sufixe com "
+            "-2/-3/etc e refaca os links que apontavam para o slug antigo.",
+            None,
+        )
+    if action == "open_plan_editor":
+        return "", None
+    if action == "mark_pending":
+        return (
+            "Mantenha o item como pendente_validacao; nao bloqueie o plano. Re-emita o "
+            "knowledge_plan com o status atualizado.",
+            None,
+        )
+    # Default: usa o label da opcao como hint para a Sofia.
+    label = option.get("label") or ""
+    if label:
+        return (
+            f"Aplique a opcao \"{label}\" para resolver \"{question.get('human_summary') or question.get('kind')}\". "
+            "Use tools quando aplicavel e re-emita o knowledge_plan corrigido.",
+            None,
+        )
+    return "", None
 
 
 def _sofia_questions_markdown(sofia_questions: list[dict[str, Any]]) -> str:
@@ -4689,6 +4814,120 @@ def _crawler_context(captures: list[dict]) -> str:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Sofia tool-use loop                                                          #
+# --------------------------------------------------------------------------- #
+# Quando `SOFIA_TOOLS_ENABLED=true` (env var, default false), o chat() invoca
+# o LLM passando SOFIA_TOOLS_SCHEMA. Se o modelo responder com tool_calls,
+# despachamos cada call para `sofia_tools.dispatch_tool_call`, anexamos o
+# resultado como mensagem tool_result e re-prompamos ate o modelo encerrar
+# sem tools (ou ate atingir SOFIA_TOOLS_MAX_ITER).
+#
+# A funcao retorna (raw_text, meta_dict). meta_dict.tool_used=True indica
+# que o plano ja foi mutado pelas tools e o caller deve usar o plan_state
+# da session (e ignorar `_extract_plan(raw_text)`).
+SOFIA_TOOLS_MAX_ITER = 6
+
+
+def _sofia_tools_enabled() -> bool:
+    import os as _os
+    return (_os.environ.get("SOFIA_TOOLS_ENABLED") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _invoke_router_with_tools(
+    *,
+    router: ModelRouter,
+    session: dict,
+    system_prompt: str,
+    max_tokens: int,
+) -> tuple[str, dict[str, Any]]:
+    """Chama o ModelRouter com SOFIA_TOOLS_SCHEMA quando o flag estiver ligado.
+
+    Retorna (raw_text, meta) onde:
+      meta["tool_used"] = True quando pelo menos uma tool foi executada.
+      meta["tool_calls"] = lista cumulativa das tool_calls executadas.
+      meta["provider"] = openai | anthropic (do ultimo turno).
+    """
+    if not _sofia_tools_enabled():
+        result = router.messages_create(
+            model=session["model"],
+            messages=session["messages"],
+            system=system_prompt,
+            max_tokens=max_tokens,
+        )
+        # Quando tools=None, o router devolve string (compatibilidade).
+        return (result if isinstance(result, str) else str(result)), {"tool_used": False, "tool_calls": []}
+
+    from services.sofia_tools import SOFIA_TOOLS_SCHEMA, dispatch_tool_call
+
+    # Trabalha em uma copia da lista de mensagens para nao poluir o transcript
+    # com tool_result/tool_use raw blocks -- session["messages"] guarda a
+    # conversa de operador <-> Sofia em texto.
+    working_messages = list(session.get("messages") or [])
+    executed_calls: list[dict] = []
+    final_text = ""
+    last_provider = ""
+
+    for iteration in range(SOFIA_TOOLS_MAX_ITER):
+        response = router.messages_create(
+            model=session["model"],
+            messages=working_messages,
+            system=system_prompt,
+            max_tokens=max_tokens,
+            tools=SOFIA_TOOLS_SCHEMA,
+        )
+        if isinstance(response, str):
+            # Algum branch caiu no caminho legado (ex: provider sem suporte
+            # a tools). Devolve direto.
+            return response, {"tool_used": bool(executed_calls), "tool_calls": executed_calls, "provider": last_provider}
+        if not isinstance(response, dict):
+            return str(response), {"tool_used": bool(executed_calls), "tool_calls": executed_calls, "provider": last_provider}
+        last_provider = response.get("provider") or last_provider
+        text = str(response.get("text") or "")
+        tool_calls = response.get("tool_calls") or []
+        if not tool_calls:
+            final_text = text
+            break
+        # Anexa o assistant turn (com tool_use blocks) ao working_messages
+        # no formato do provider corrente. Para nao reproduzir aqui dois
+        # protocolos diferentes, optamos por linearizar como texto + tool
+        # results em uma user message subsequente. Isso e suficiente para
+        # OpenAI/Anthropic continuarem a conversa, porque o resultado da
+        # tool aparece como um turno de usuario com o JSON da resposta.
+        working_messages.append({"role": "assistant", "content": text or "(chamando ferramentas)"})
+        results_payload_lines: list[str] = []
+        for call in tool_calls:
+            name = call.get("name") or ""
+            args = call.get("arguments") or {}
+            result = dispatch_tool_call(session, name, args if isinstance(args, dict) else {})
+            executed_calls.append({"name": name, "arguments": args, "result": result})
+            try:
+                import json as _json
+                payload = _json.dumps(result, ensure_ascii=False, default=str)
+            except Exception:
+                payload = str(result)
+            results_payload_lines.append(f"tool_result[{name}]: {payload}")
+        working_messages.append({
+            "role": "user",
+            "content": "Resultado das tools chamadas:\n" + "\n".join(results_payload_lines)
+            + "\n\nUse o estado atualizado para continuar. Se ainda houver violacoes bloqueantes,"
+            + " chame novas tools. Quando terminar, responda em portugues com o resumo do plano e"
+            + " o bloco <classification>{...}</classification>.",
+        })
+        # Persiste o session a cada iteracao para que mutacoes feitas pelas
+        # tools sobrevivam mesmo se a proxima iteracao falhar.
+        _save_session(session)
+    else:
+        # Fim do loop por limite de iteracoes -- pega o texto da ultima resposta.
+        final_text = final_text or "Limite de iteracoes do tool-use atingido. Use o plano atual."
+
+    return final_text, {
+        "tool_used": bool(executed_calls),
+        "tool_calls": executed_calls,
+        "provider": last_provider,
+    }
+
+
 def chat(session_id: str, user_message: str, file_info: Optional[dict] = None, internal: bool = False) -> dict:
     """Public chat wrapper that NEVER raises. Any exception escaping the
     real implementation is converted into a controlled `{ok: false, ...}`
@@ -4877,10 +5116,10 @@ Estado atual:
 
     try:
         router = ModelRouter()
-        raw = router.messages_create(
-            model=session["model"],
-            messages=session["messages"],
-            system=_SYSTEM_PROMPT + "\n\n" + state_ctx,
+        raw, sofia_tools_meta = _invoke_router_with_tools(
+            router=router,
+            session=session,
+            system_prompt=_SYSTEM_PROMPT + "\n\n" + state_ctx,
             max_tokens=4000,
         )
     except ModelRouterError as exc:
@@ -4933,7 +5172,27 @@ Estado atual:
     plan_violations: list[str] = []
     plan_summary: dict[str, Any] | None = None
     plan_state: dict[str, Any] | None = None
-    if plan_payload:
+
+    # Quando o Sofia tool-use loop ja mutou o plano via sofia_tools, o
+    # session["normalized_plan"] e o plan_state mais frescos estao em
+    # session["plan_validation"] / session["plan_summary"]. Nesses casos o
+    # LLM raramente repete <knowledge_plan> -- consumimos direto da session.
+    if sofia_tools_meta.get("tool_used") and not plan_payload:
+        normalized_from_session = session.get("normalized_plan") or {}
+        if isinstance(normalized_from_session, dict) and normalized_from_session.get("entries"):
+            plan_state = {
+                "normalized_plan": normalized_from_session,
+                "validation": session.get("plan_validation") or {"valid": True, "blocking_violations": [], "warnings": []},
+                "summary": session.get("plan_summary") or summarize_normalized_plan(normalized_from_session),
+                "plan_hash": str(session.get("plan_hash") or _plan_hash(normalized_from_session)),
+            }
+            plan_payload = plan_state["normalized_plan"]
+            plan_violations = plan_state["validation"].get("blocking_violations") or []
+            plan_summary = plan_state["summary"]
+            current_block_counts = plan_summary.get("current_block_counts") or current_block_counts
+            plan_changed = not plan_violations
+            session["status"] = "planning" if plan_violations else session.get("status") or "planning"
+    if plan_payload and plan_state is None:
         plan_state = normalize_validate_summarize_plan(plan_payload, session)
         plan_payload = plan_state["normalized_plan"]
         plan_violations = plan_state["validation"]["blocking_violations"]
