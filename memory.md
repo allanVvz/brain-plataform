@@ -423,3 +423,210 @@ Correcao importante do usuario gravada como memoria: `memory.md` (raiz do repo) 
 - `env.yaml` ja estava commitado nos commits anteriores, mas GitHub push protection bloqueou o push do `develop` por causa do OPENAI_API_KEY na linha 3. Solucao: `git rm --cached env.yaml`, adicionar ao `.gitignore`, criar `env.yaml.example`, recommit.
 - Migration 037 contem um DO $$ block que faz seed do BAITA. No QA esse block roda tambem; criamos uma versao paralela `037b_baita_collection_seed` para registrar como migration nomeada quando rodada via MCP. A 037 (oficial) ja inclui o seed embarcado e e a fonte de verdade.
 - A SQL de 020 (lead_audience_memberships) usa `lead_id bigint` no original, mas leads em ambos projetos esta como uuid. No QA aplicamos com `lead_id uuid` (variacao adaptativa) para nao quebrar a constraint de FK.
+
+## Sessao 2026-05-19 - Baita camiseta QA product_image slot
+
+- Feito: espelhado para QA o asset real da camiseta da Baita encontrado em PROD (`assets.id=0ca3a939-2e49-4ae9-bcf3-81c041635495`, nome `Camiseta Branca BAITA`, origem visual `Baita-Camiseta-Branca.svg`).
+- Asset usado em QA: `assets.id=303678f1-df60-48ca-bcec-ddafd6f16206`, `knowledge_node_id=73b3a5c9-aa35-4e41-9b57-7f3a870d117c`, arquivo em `assets-raw:e023a4ef-7cb9-454f-9de2-225fe52151f3/baita-cardapio-v14/Baita-Camiseta-Branca.svg`.
+- Produto associado em QA: `knowledge_nodes.slug=camiseta-branca-baita`, titulo `Camiseta Baita`, categoria `roupas`, colecao `cardapio-baita-v14`.
+- Slot criado/restaurado: `product_image:camiseta-branca-baita`, edge `product_image` produto -> asset (`fa779596-ca37-42b5-8395-b84b876c01db`). Edge `gallery_asset` ativa (`d778b76a-e909-49fb-9993-5364e9eccc0c`).
+- Backend ajustado: `slot_for_key/slot_for_metadata` agora aceitam chaves instanciadas `product_image:<slug>`; `/api/menu` preserva `page_binding.slot_key`; `bind-slot` remove edges anteriores do mesmo slot/produto e grava `product_image:<slug>`; `unbind` remove tambem `product_has_asset` legado para que o produto fique sem imagem.
+- Endpoints/logica testados: build local de `/api/menu/baita-conveniencia?collection_slug=cardapio-baita-v14` contra Supabase QA; `admin-blocks`; `admin-connections`; fluxo direto `unbind product_image` -> payload com 0 assets -> `bind-slot` -> payload com asset e `slot_key=product_image:camiseta-branca-baita`.
+- Validacao tecnica: `python -m py_compile api/core/landing_slots.py api/routes/menu.py api/routes/assets.py scripts/sync_baita_camiseta_qa.py`; `python tests/integration_baita_cardapio_seed.py`; `python tests/integration_gallery_assets_resolution.py`.
+- Pendencias: chamada externa ao Cloud Run QA via `curl` foi bloqueada pelo ambiente de execucao; deploy/restart do backend QA ainda precisa publicar os ajustes de rota para a URL Cloud Run se ela nao estiver em reload/local.
+
+Complemento da mesma sessao:
+
+## Sessao 2026-05-20 - Assets QA: aprovado entra no catalogo, demais aparecem no AI-BRAIN
+
+### Regra consolidada
+
+- `assets.status` e status operacional do pipeline (`ready`, `reading`, `archived` etc.).
+- A elegibilidade para catalogo/cardapio vem de `assets.metadata.validation_status`.
+- Somente `metadata.validation_status='approved'` pode aparecer no catalogo publico.
+- Assets com `pending_validation`, `context_only`, `ready`, `reading` ou sem aprovacao continuam aparecendo no AI-BRAIN para revisao, mas nao no catalogo.
+- Essa separacao resolveu a confusao observada: havia assets `status=ready` que nao deveriam ir ao catalogo, e assets aprovados com preview quebrado por URL legada.
+
+### Estado Supabase QA confirmado
+
+- Projeto QA: `qhnepdcqtkjjslqqiyvp`.
+- Projeto PROD: `slyxppvghniknqofhqzt`.
+- Persona Baita QA: `e023a4ef-7cb9-454f-9de2-225fe52151f3`, slug `baita-conveniencia`.
+- Buckets QA:
+  - `assets-raw`: privado, com arquivos.
+  - `assets-derived`: privado, vazio no momento da checagem.
+- Contagem QA em `assets`:
+  - `ready + approved`: 9;
+  - `reading + context_only`: 1;
+  - `ready + context_only`: 1;
+  - `ready + pending_validation`: 2;
+  - `ready + ready`: 1;
+  - `archived` legado sem `validation_status`: 1.
+- Resultado esperado: 9 aprovados alimentam o catalogo; todos os 15 aparecem na tela de assets do AI-BRAIN.
+
+### Camiseta Baita QA
+
+- Asset ativo: `303678f1-df60-48ca-bcec-ddafd6f16206`.
+- Storage atual: `assets-raw:e023a4ef-7cb9-454f-9de2-225fe52151f3/baita-cardapio-v14/Camiseta-Branca-BAITA.png`.
+- Asset node: `73b3a5c9-aa35-4e41-9b57-7f3a870d117c`.
+- Product node: `49ae5ff3-4c31-4a46-ba72-bb0be4fbe23f`, slug `camiseta-branca-baita`, categoria `roupas`.
+- Gallery edge: `d778b76a-e909-49fb-9993-5364e9eccc0c`.
+- Edge de produto criado/garantido via API/TestClient: `e9afbfd8-d60c-4c82-ac21-dd7efff0fbe6`, `relation_type=product_image`, `slot_key=product_image:camiseta-branca-baita`.
+- A existencia do edge nao basta para catalogo: se o asset nao estiver `validation_status=approved`, o `/api/menu` deve omitir a imagem.
+
+### Mudancas de backend
+
+- `api/services/supabase_client.py`:
+  - adicionou `asset_display_url(asset_row)` como wrapper publico.
+  - Storage e fonte de verdade para preview: assina `storage_bucket/storage_path`; `assets.url` fica so como fallback legado.
+  - `list_gallery_assets` calcula status efetivo usando `metadata.validation_status` antes de `assets.status`, preservando filtro de aprovacao para o menu.
+- `api/routes/menu.py`:
+  - `_admin_asset_payload` agora retorna `url` e `display_url` assinadas via `asset_display_url`.
+  - O catalogo continua filtrando gallery assets por status efetivo `approved`.
+- `api/routes/assets.py`:
+  - `/assets` passou a devolver payload normalizado com `display_url`, `workflow_status` e `approval_status`.
+  - `list_assets_route` usa o payload normalizado tanto com `ensure_graph=true` quanto `false`.
+  - `bind_asset_to_slot`, `rebind_asset_path`, `unbind_asset_slot`, `validate_asset_path_route`, `delete_asset_route`, `approve_asset_route` e `reject_asset_route` emitem eventos de fluxo.
+  - Eventos novos/importantes: `asset_slot_bound`, `asset_slot_bind_failed`, `asset_slot_metadata_update_failed`, `asset_path_rebound`, `asset_path_rebind_failed`, `asset_path_validated`, `asset_slot_unbound`, `asset_deleted_graph_edges_removed`, `asset_approved`, `asset_rejected`.
+- `api/routes/graph.py`:
+  - delecao de edge agora emite `graph_edge_deleted` ou `graph_edge_delete_failed`.
+- `api/routes/knowledge.py`:
+  - `link_product_asset` registra `removed_edge_ids` quando remove edge antigo e emite `product_asset_linked`.
+
+### Mudancas no dashboard
+
+- `dashboard/app/knowledge/assets/page.tsx`:
+  - assets agora sao carregados diretamente de `api.assetList`, sem depender de queue/gallery para enxergar nao aprovados.
+  - cada item diferencia `workflow_status` de `approval_status`.
+  - `effectiveStatus` prioriza aprovacao real (`approved`, `rejected`, `pending_validation`, `context_only`) e usa workflow (`ready`, `reading`) quando nao ha aprovacao final.
+  - preview usa `metadata.preview_url || display_url || url`.
+  - filtros adicionados/ajustados para `Ready` e `Lendo`.
+  - `pending` agrupa `pending_validation`, `pending`, `ready`, `reading`.
+
+### Validacao
+
+- `python -m py_compile api/services/supabase_client.py api/routes/menu.py api/routes/assets.py api/routes/graph.py api/routes/knowledge.py` passou.
+- `npm.cmd run build` em `dashboard/` passou.
+- Checagem direta via Supabase MCP confirmou os counts de QA.
+- Checagem local com helper `supabase_client.list_assets(...)` contra `env.qa.yaml` retornou 15 assets da persona Baita e `missing_display_url=0`.
+
+### Pendencias operacionais
+
+- Publicar/reiniciar Cloud Run QA se ainda estiver servindo codigo antigo.
+- Revalidar no navegador depois do deploy:
+  - `/knowledge/assets` mostra os 15 assets da persona Baita;
+  - assets nao aprovados aparecem no AI-BRAIN com status correto;
+  - catalogo mostra apenas aprovados;
+  - previews usam URLs assinadas de Storage.
+- Arquivos alterados no repo `baita-cardapio`: `src/services/menu-api.ts`, `src/pages/AdminCardapioPage.tsx`, `src/pages/AdminCardapioPage.test.tsx`, `src/utils/asset-connections.ts`, `src/utils/asset-connections.test.ts`.
+- Regra final de vinculo unico: `POST /assets/{id}/bind-slot` para `product_image:<slug>` remove edges `product_image` anteriores do mesmo produto e tambem `product_has_asset` conflitante; `DELETE /assets/{id}/bind-slot/product_image:<slug>?target_slug=<slug>` remove a imagem do payload do produto.
+- Token QA local: `baita-cardapio/.env.local` deve ter `AI_BRAIN_PROXY_TARGET=http://localhost:8001` e `AI_BRAIN_ADMIN_TEST_TOKEN=<valor de env.qa.yaml>`. Reiniciar o Vite depois de alterar `.env.local`; o proxy injeta `X-AI-BRAIN-ADMIN-TOKEN` em `POST/PUT/PATCH/DELETE`.
+- Validacao HTTP real local: `DELETE http://localhost:5173/assets-api/303678f1-df60-48ca-bcec-ddafd6f16206/bind-slot/product_image%3Acamiseta-branca-baita?target_slug=camiseta-branca-baita` deixou `asset_count=0`; `POST http://localhost:5173/assets-api/303678f1-df60-48ca-bcec-ddafd6f16206/bind-slot` com slot `product_image:camiseta-branca-baita` restaurou `asset_count=1`.
+- `/api/menu/baita-conveniencia?collection_slug=cardapio-baita-v14&nocache=1` via `localhost:5173` retorna `Camiseta Baita` com `asset_id=303678f1-df60-48ca-bcec-ddafd6f16206`, URL assinada de `assets-raw`, e `slot_key=product_image:camiseta-branca-baita`.
+- Configuracoes: `GET /api/menu/baita-conveniencia/admin-blocks` retorna bloco `Produto — Camiseta Baita` com `slot_instance_key=product_image:camiseta-branca-baita`, imagem atual e edge `fa779596-ca37-42b5-8395-b84b876c01db`.
+- Assets UI: markdown visual em `buildAssetMarkdown` agora emite `# Asset — <nome>`, imagem `assets-raw:<path>`, slots conectados e mapa com `asset → product_image:<slug> → card do produto ... no catálogo Baita`.
+- Validacao frontend: `npm.cmd test -- --run src/services/menu-api.test.ts src/pages/AdminCardapioPage.test.tsx src/utils/asset-connections.test.ts src/utils/product-visuals.test.ts` passou (13 testes). `agent-browser` e Playwright nao estavam disponiveis; Chrome/Edge headless nao geraram screenshot neste ambiente, entao a verificacao visual automatizada ficou limitada a HTTP/DOM/API e testes de componentes.
+
+## Sessao 2026-05-20 - Auditoria do grafo + amarrar pipeline de upload
+
+### Feature de observabilidade (commitavel)
+- Helper novo `api/services/audit_helpers.py`: `summarize_diff(before, after, keys?)` retorna `{changed:{...{before,after}}, unchanged_count}` (shallow, JSON-normalize). `current_actor(request)` extrai `{user_id,email,role}` via `request.state.user` sem nunca raise.
+- `api/services/supabase_client.py`: nova `list_system_events(entity_type, event_types, persona_id, entity_id, since, search, limit)` para alimentar a tela de auditoria; usa `.in_()` para event_types e `.ilike()` para search no payload.
+- `api/routes/logs.py`: novo `GET /logs/audit` admin-only com filtros (entity_type, event_type CSV, persona_id, entity_id, since ISO, search, limit max 500).
+- `api/routes/assets.py`: `connect_asset` agora emite `asset_connected` com `actor/before/after/diff/context` e `asset_connect_rejected_gallery` quando o guard dispara; `update_asset_route` emite `asset_updated` com diff de `type/asset_function/kind`. Reaproveita helper `_log_asset_flow` existente.
+- `api/routes/graph.py`: `delete_graph_node` emite `graph_node_deleted` em sucesso (com `strategy=knowledge_item_cascade|direct` e `before_snapshot`) e `graph_node_delete_failed` em cada caminho de erro com `reason`; `create_graph_edge` ganhou `graph_edge_create_failed` no `except` da linha 222 e tambem quando o upsert retorna nada.
+- `api/routes/knowledge.py`: PATCH `/queue/{id}` emite `knowledge_item_updated`; PATCH `/products/{slug}` emite `product_node_updated`; PUT `/brand/{persona_id}` emite `brand_profile_updated`. Todos com actor/before/after/diff.
+- `supabase/migrations/038_system_events_audit_index.sql`: 3 indices em `system_events` -- `(entity_type, created_at DESC)`, `(event_type, created_at DESC)` e parcial `(persona_id, created_at DESC) WHERE persona_id IS NOT NULL`.
+- `dashboard/lib/api.ts`: nova `auditLogs({entity_type, event_type, persona_id, entity_id, since, search, limit})`.
+- `dashboard/app/logs/page.tsx`: 3 abas (`audit` padrao, `agents`, `n8n`). Aba audit tem toolbar com select de entidade, event_type (derivado do response), persona (via `api.personas()`), janela temporal (24h/7d/30d/sempre) e busca livre. Tabela com linhas expansiveis mostrando `diff` colorido (vermelho/verde), contexto e payload completo collapsavel.
+
+### Amarrar pipeline /assets/upload (commitavel)
+- Diagnostico inicial: usuario reportou `502 /assets/upload` com `StorageApiError: Bucket not found`. Migration 033 cria os buckets via `INSERT INTO storage.buckets ... ON CONFLICT DO NOTHING`, mas no QA esse INSERT silenciosamente nao executou (provavelmente falta de grant storage-admin no migration runner). Fallback antigo no codigo tentava bucket `knowledge` que nao existe no QA (era legado de PROD).
+- Fix backend (`api/services/supabase_client.py`): nova `ensure_bucket(name, public=False)` idempotente. Lista buckets via SDK e cria o que faltar; trata `409/already exists` como sucesso; loga via `sre_logger.warn` sem raise.
+- Fix backend (`api/main.py`): lifespan hook do FastAPI chama `ensure_bucket("assets-raw")` e `ensure_bucket("assets-derived")` em todo boot; loga `ready` ou `MISSING (uploads will 503)`.
+- Fix backend (`api/routes/assets.py::_upload_asset_impl`): substituiu `except Exception` mudo por captura tipada:
+  - `Bucket not found` -> tenta self-heal via `ensure_bucket`; se falhar devolve **503 `storage_bucket_missing`** com mensagem orientando rodar migration 033 ou `scripts/ensure_qa_buckets.py`.
+  - `InvalidKey/Invalid key` -> **422 `invalid_storage_key`** com mensagem explicando que precisa de letras/numeros/hifens/pontos/sublinhados.
+  - Outros erros: mantem fallback legado para bucket `knowledge`.
+- **Causa raiz real do 502 persistente**: o filename do upload era `0 - Capa - BAITA - LAYOUT - Cardapio Atualização.png` com espacos + acento (`ç`). Supabase Storage rejeita com `400 InvalidKey`, mas o exception_type comum (`StorageApiError`) fez parecer que era "Bucket not found" novamente.
+- Fix: novo helper `_safe_storage_filename(fname)` em `api/routes/assets.py` slugifica stem + extensao reusando `knowledge_graph._slugify` (NFKD + ASCII). `original_filename` continua intacto em `assets.original_filename` e `assets.metadata` para exibicao. Storage_path agora vai como `{persona_id}/0-capa-baita-layout-cardapio-atualizacao.png`.
+- Reproducao validada contra QA Supabase real: filename cru -> `400 InvalidKey`; filename sanitizado -> upload OK com URL assinada.
+- Endpoint de diagnostico: `GET /health/storage` (publico em `api/middleware/auth.py`) retorna `{supabase_url, project_ref, buckets_visible, required, missing, ok, bucket_error}`. Permite descobrir, sem reabrir codigo, qual Supabase o backend esta atingindo e quais buckets estao visiveis para o service_role daquele projeto.
+- Script novo `scripts/ensure_qa_buckets.py`: provisiona buckets em qualquer env (`--env env.qa.yaml` padrao; aceita `env.yaml` para PROD). Idempotente. Ja rodei contra QA -- `assets-raw` e `assets-derived` agora existem em `qhnepdcqtkjjslqqiyvp`.
+
+### Estado do banco
+- QA Supabase (`qhnepdcqtkjjslqqiyvp`): migration 033 aplicada (tabelas), migration 038 aplicada (indices), buckets `assets-raw` e `assets-derived` provisionados via SDK.
+- PROD Supabase (`slyxppvghniknqofhqzt`): nao verifiquei se `assets-derived` existe. Antes do `deploy-prod`, rodar `python scripts/ensure_qa_buckets.py --env env.yaml` -- idempotente.
+
+### Validacao tecnica
+- `py_compile`: `api/main.py`, `api/routes/{assets,graph,knowledge,logs,health}.py`, `api/middleware/auth.py`, `api/services/{audit_helpers,supabase_client}.py`, `scripts/ensure_qa_buckets.py` -- todos OK.
+- `npx tsc --noEmit` no dashboard: EXIT=0.
+- `tests/test_product_approval.py`: PASS.
+- `tests/integration_asset_card_gallery_guard.py`: PASS (cobre meu novo emit `asset_connect_rejected_gallery` em `connect_asset`).
+- `tests/integration_asset_card_parent_required.py`: PASS.
+- ⚠️ `tests/integration_asset_card_upload.py`: FALHA por regressao **pre-existente** dos edits anteriores em `_upload_asset_impl` (helpers HEIC nao mockados). Meus edits nao tocam essa funcao alem do bloco de captura de exception, mas o teste ja falhava antes desta sessao. Decisao: deixar como divida tecnica ou atualizar mocks do teste numa proxima rodada.
+
+### Pendencias para commit + deploy QA
+1. Commit consolidado (sugestao: dois commits separados)
+   - **Commit A** (auditoria): `api/services/audit_helpers.py`, `api/services/supabase_client.py` (apenas `list_system_events`), `api/routes/logs.py`, `api/routes/assets.py` (apenas blocos de emit), `api/routes/graph.py`, `api/routes/knowledge.py`, `dashboard/lib/api.ts`, `dashboard/app/logs/page.tsx`, `supabase/migrations/038_system_events_audit_index.sql`.
+   - **Commit B** (storage harden): `api/services/supabase_client.py` (apenas `ensure_bucket`), `api/main.py`, `api/routes/assets.py` (apenas `_safe_storage_filename` + captura tipada), `api/routes/health.py`, `api/middleware/auth.py`, `scripts/ensure_qa_buckets.py`.
+2. Arquivos modificados na area de trabalho que NAO sao desta sessao (sessoes anteriores): `api/core/landing_slots.py`, `api/routes/menu.py`, `api/services/asset_pipeline/classifier.py`, `dashboard/app/knowledge/{assets,quality}/page.tsx`, `dashboard/components/assets/*`, `dashboard/components/products/LinkAssetDrawer.tsx`, `api/requirements.txt`, `dashboard/next-env.d.ts`, `.claude/settings.local.json`. Decisao do usuario sobre incluir ou separar.
+3. Scripts untracked das sessoes Baita: `scripts/fix_baita_*.py`, `scripts/sync_baita_*.py`, `scripts/reset_baita_*.py`, `scripts/refresh_baita_*.py`. Manter como historico ou apagar.
+4. Migration 038 ja aplicada no QA -- precisa aplicar no PROD antes do `deploy-prod` (sem isso, /logs/audit fica lento conforme cresce).
+5. Apos `deploy-qa`, smoke obrigatorio:
+   - `curl -k https://ai-brain-api-qa-837167469397.us-central1.run.app/health/storage` -> esperar `ok:true` com `buckets_visible=["assets-raw","assets-derived"]` e `supabase_url` apontando para `qhnepdcqtkjjslqqiyvp`.
+   - Upload da PNG da Baita pelo dashboard QA -> agora deve passar como `asset_uploaded` na tela /logs aba Auditoria; o asset entra como card pendente no galho escolhido.
+6. `/logs?tab=audit` precisa do GET `/logs/audit` que e admin-only; usuario logado precisa ter `role=admin` para ver.
+
+### Erros catalogados e suas solucoes (referencia rapida)
+- **`502 Bucket not found`**: bucket nao existe no Supabase apontado. Solucao: rodar `python scripts/ensure_qa_buckets.py --env env.<ambiente>.yaml`. O backend agora tambem tenta self-heal no proximo upload, mas o script e mais explicito.
+- **`502 InvalidKey` (antes mascarado como Bucket not found)**: filename com espacos/acentos. Solucao ja codada: sanitizacao automatica via `_safe_storage_filename`. UI nao precisa mudar nada -- o `original_filename` continua sendo o nome bonito; so o storage_path vai slugificado. Em caso novo, backend devolve 422 `invalid_storage_key` com mensagem clara em vez de 502 mudo.
+- **`/logs/audit` retorna 403**: usuario nao e admin. Auditoria so e visivel para `role=admin` (PII potencial em `actor.email`).
+- **Backend aponta para Supabase errado**: chamar `GET /health/storage` -- ele reporta `supabase_url` e `project_ref` atuais. Se nao bater com o esperado, conferir env vars do Cloud Run (`gcloud run services describe ai-brain-api-qa --region us-central1 --format='value(spec.template.spec.containers[0].env)'`).
+
+## Sofia/CRIAR — diagnostico modal + arquitetura gambiarra (2026-05-21)
+
+### Sintoma reportado pelo operador
+- Modal "Plano precisa de decisoes da Sofia" abre com `asset_expansion_incomplete`, mas os botoes A/B/C nao fazem nada quando clicados.
+- Subir asset pelo paperclip nao remove a violacao — mensagem volta "Asset expansion incompleto" no proximo turno.
+- As vezes a arvore aparece praticamente pronta no chat, mas o botao "Salvar conhecimento" nao surge.
+
+### Causas (todas confirmadas no codigo)
+1. **Opcoes do modal sao botoes mortos**. `dashboard/components/capture/BlockedPlanDiagnosticModal.tsx:369-374` renderiza `SofiaQuestionCard` sem passar `onOptionSelect`. O componente filho tem o callback opcional (`linha 185-194`), mas o pai nunca cabeia -> click so destaca o botao.
+2. **Os `action` strings emitidos pelo backend (`upload_asset`, `attach_existing_asset`, `drop_asset_requirement`, `drop_faq_target`, `create_offer`, `create_rule`) nao tem handler em lugar nenhum**. `api/services/kb_intake_service.py:1695-1722` cria as opcoes mas nao existe `/kb-intake/sofia-action`, nem switch dentro de `chat()`, nem aplicacao do `payload`. Contrato fingido.
+3. **Upload pelo paperclip NAO cria entry asset no `normalized_plan`**. O arquivo entra em `session.asset_readings` (`kb_intake_service.py:4501`) e em `mission_state.evidence_items`, mas e o LLM que tem que decidir, no proximo turno, inserir uma entry `content_type=asset` com `metadata.parent_slug=<produto>`. Quando ele esquece, `expansion.asset.created` continua em 0 e o validador (`_validate_plan:1269-1274`) mantem `Asset expansion incomplete` para sempre.
+4. **`GraphPreviewPanel` so renderiza se `planStateValid===true`** (`dashboard/app/knowledge/capture/page.tsx:1732`). Qualquer violacao bloqueante esconde o painel inteiro — junto com o botao "Salvar conhecimento" (linha 2271). Por isso o operador ve a estrutura no chat mas nao tem como salvar.
+5. **"Editar plano" no rodape do modal so abre o textarea de `contentText`** (`page.tsx:1858`), que e um campo de vault opcional — nao edita a arvore. `onRegenerate` nunca e passado, entao o botao "Regerar estrutura" do modal nem aparece.
+
+### Raiz arquitetural (porque essas gambiarras existem)
+- **`ModelRouter.messages_create` so faz text-in/text-out** (`api/services/model_router.py:154-192`). Sem function-calling/tool-use de provider. Toda mutacao de plano e: LLM gera texto -> regex extrai `<knowledge_plan>{json}</knowledge_plan>` em `_extract_plan` (`kb_intake_service.py:560`) com 4 fallbacks defensivos (`_candidate_plan_blocks:526`).
+- **Cada turno = regenerar o plano inteiro**. Nao existe patch incremental. O LLM regrava o JSON todo, incluindo edges, mesmo para corrigir um parent. Caro, lento, hallucination-prone.
+- **System prompt de 700+ linhas com "HARD CONTRACT" implorando o modelo a nao usar markdown fence** (`kb_intake_service.py:311-315`). E sintoma classico de falta de tools: com ferramentas estruturadas o modelo nao tem como errar o formato.
+- **Reuso proativo de nodes existentes e injetado como TEXTO** no system prompt via `pre_init_review` (`kb_intake_service.py:4854-4876`) — frase em portugues, nao tool. Fragil.
+- **Acao do operador via modal nao tem caminho de volta para o plano**: as `options[].action` sao etiquetas declarativas sem implementacao.
+
+### Plano de migracao (acordado com o operador, ordem de commit)
+1. **Front: cabear modal como visualizacao + atalhos de prompt.** `SofiaQuestionOption` passa a carregar `prompt_to_sofia` (e opcional `ui_hook` para abrir file picker). Click envia mensagem normal via `kbIntakeMessage`. `GraphPreviewPanel` exibe Save sempre (desabilitado com tooltip quando bloqueado). `onEdit` deixa de ser o textarea de vault.
+2. **Backend tools (`api/services/sofia_tools.py`)**: `create_node`, `set_parent`, `connect_nodes`, `delete_node`, `validate_plan`, `set_expansion_policy`, `attach_session_asset`, `find_existing_persona_nodes`, `suggest_connections`. `ModelRouter.messages_create` ganha parametro `tools=` e devolve `{text, tool_calls}`. `chat()` vira loop de tool-use. Flag `SOFIA_TOOLS_ENABLED` para retrocompat.
+3. **Skills compostas** (camada 2, depois): `repair.no_path_to_persona`, `repair.asset_expansion`, `synthesize.subtree_from_evidence`. Cada uma compoe N tools.
+
+### Mapa do front que sera tocado na etapa 1
+- `dashboard/components/capture/diagnosticTypes.ts`: adicionar `prompt_to_sofia: string` e `ui_hook?: "open_file_picker" | "open_asset_drawer"` em `SofiaQuestionOption`.
+- `dashboard/components/capture/BlockedPlanDiagnosticModal.tsx`: aceitar `onOptionSelect` props e propagar para `SofiaQuestionCard`. Mostrar "Regerar estrutura" quando `onRegenerate` existir.
+- `dashboard/app/knowledge/capture/page.tsx`:
+  - Wire `onOptionSelect={(q, opt) => handleSofiaAction(q, opt)}` -> chama `api.kbIntakeMessage(sessionId, opt.prompt_to_sofia)` ou aciona file picker via `ui_hook`.
+  - Wire `onRegenerate={() => api.kbIntakeMessage(sessionId, "Regere a arvore aplicando os reparos sugeridos pelo diagnostico atual")}`.
+  - Mover `GraphPreviewPanel` para sempre renderizar quando `draftPlan` existe (linha 1732); botao Save fica `disabled` em vez de oculto. Tooltip lista violacoes.
+  - Trocar `onEdit={() => setShowContent(true)}` por `onEdit={() => router.push(/knowledge/graph?...)}` ou remover ate ter tela de edicao node-a-node.
+- `dashboard/lib/api.ts`: nada novo — usar `kbIntakeMessage` existente. O backend acompanha enviando `prompt_to_sofia` ja embutido em cada opcao.
+
+### Mapa do backend que sera tocado na etapa 2
+- `api/services/kb_intake_service.py::_sofia_questions_from_diagnostic` (linha 1625+): para cada `kind`, emitir opcoes com `prompt_to_sofia` em vez de `action`. Manter `action`+`payload` por 1 release como fallback caso o front ainda nao tenha migrado.
+- Novo arquivo `api/services/sofia_tools.py`: funcoes puras sobre `session.normalized_plan` + JSON Schema export para tool-calling.
+- `api/services/model_router.py`: `messages_create(tools=None)` ganha branch que devolve `tool_calls` quando o provider responde com function-call.
+- `api/services/kb_intake_service.py::chat`: loop `while tool_calls -> aplicar -> re-prompt` (com guarda de iteracao maxima).
+
+### Decisao do operador
+- Modal vira visualizacao pura; nada de mutacao local nele.
+- Botao = atalho que dispara mensagem para Sofia, que escolhe a tool. Backend e a unica fonte da verdade.
+- Sofia ganha tools para criatividade (creative subtree expansion, proactive node reuse) deixando de regerar plano inteiro a cada turno.
