@@ -630,3 +630,50 @@ Complemento da mesma sessao:
 - Modal vira visualizacao pura; nada de mutacao local nele.
 - Botao = atalho que dispara mensagem para Sofia, que escolhe a tool. Backend e a unica fonte da verdade.
 - Sofia ganha tools para criatividade (creative subtree expansion, proactive node reuse) deixando de regerar plano inteiro a cada turno.
+
+## ALERTAS — codigo legado que NAO respeita a hierarquia do grafo (2026-05-21)
+
+Regra base do CLAUDE.md: **"Todo conhecimento adicionado DEVE aparecer no grafo. knowledge_items -> knowledge_nodes -> knowledge_edges"**. Os pontos abaixo violam isso e poluem a persistencia de memoria de marca/persona porque criam estados paralelos que nao tem reflexo em `knowledge_nodes`.
+
+### A — Brand: `brand_profiles` e ilha; nao vira knowledge_node
+- **Arquivo**: `api/routes/knowledge.py:1116-1138` (PUT `/knowledge/brand/{persona_id}`).
+- **Servico**: `api/services/supabase_client.py:3332-3336` (`upsert_brand_profile`).
+- **O que faz**: `PUT /knowledge/brand/{persona_id}` chama `supabase_client.upsert_brand_profile({persona_id, **body})` que faz `table("brand_profiles").upsert(...)` direto e emite `brand_profile_updated`. Nao chama `sync_brand_node`, nao chama `bootstrap_from_item`, nao cria nem atualiza nenhuma entry em `knowledge_nodes` com `node_type=brand`.
+- **Sintoma**: a diretriz de marca persiste apenas em `brand_profiles`; chat-context/RAG/Sofia nao "veem" a marca pelo grafo (so via SELECT direto). Quando alguem inspeciona o grafo, a persona aparece "sem brand", embora a aba Brand mostre dados.
+- **Comparativo**: `audiences` foi corrigido (`api/routes/audiences.py:67` chama `supabase_client.sync_audience_node(audience)`). Brand ficou para tras.
+- **Acao sugerida**: criar `supabase_client.sync_brand_node(brand_profile)` espelhando o padrao do audience — slug `brand-<persona_slug>`, `node_type="brand"`, `metadata` com posicionamento/promessa/tom, edge `belongs_to_persona`. Chamar em `upsert_brand` apos o upsert, e backfill via script para personas existentes.
+
+### B — Auditoria de eventos: tudo em `system_events`, sem nada no grafo
+- **Servico**: `api/services/supabase_client.py:3358-3376` (`insert_event`).
+- **O que faz**: eventos `brand_profile_updated`, `product_node_updated`, `graph_*` viajam todos por `system_events`. So leem na tela `/logs`. Nao geram edges de "produto X foi editado por usuario Y".
+- **Status**: aceito como design (auditoria != memoria). Nao mudar — mas anotar para Sofia nao tratar `system_events` como fonte de "conhecimento".
+
+### C — `kb_entries`: agora espelha, mas o codigo legado de PROD ainda escreve direto
+- **Arquivo**: `api/services/supabase_client.py:2556-2595` (`upsert_kb_entry`).
+- **Fluxo correto** (do CLAUDE.md): aprovar `knowledge_items(pending)` -> `promote_to_kb=true` -> `kb_entries(ATIVO)` -> `bootstrap_from_item(source_table="kb_entries")` -> `knowledge_nodes` -> `knowledge_edges`.
+- **Sintoma**: existem chamadas `upsert_kb_entry` em scripts/seed/imports antigos que nao chamam `bootstrap_from_item` em seguida. Resultado: `kb_entries` com rows orfas no grafo. CLAUDE.md item 11 e explicito: "kb_entries nunca deve existir sem reflexo no grafo".
+- **Acao sugerida**: auditoria — `SELECT k.id, k.kb_id, k.persona_id FROM kb_entries k LEFT JOIN knowledge_nodes n ON n.metadata->>'kb_id' = k.kb_id WHERE n.id IS NULL;`. Para cada orfao, rodar `bootstrap_from_item` retroativo. `knowledge_graph.py:933` ja tem helper `rebuild_graph` para isso.
+
+### D — `audiences`: corrigido mas nao tem garantia transacional
+- **Arquivo**: `api/routes/audiences.py:54-84`.
+- **O que faz**: chama `create_audience` (INSERT em `audiences`) seguido de `sync_audience_node`. Sao duas chamadas separadas; se a segunda falhar (rede, RLS), fica `audience` sem node — mesmo problema do brand, so que menor.
+- **Acao sugerida**: envolver em transacao via RPC Supabase ou pelo menos compensar (rollback do INSERT) quando `sync_audience_node` retornar None.
+
+### E — `assets`: sem `gallery_asset` automatico
+- **Servico**: `api/services/supabase_client.py:3564-3580` (`insert_asset`).
+- **Regra CLAUDE.md item 10**: "assets ligados ao Gallery usam `gallery_asset`".
+- **Sintoma**: criar asset via `/assets/upload` insere row em `assets` mas nao gera edge `gallery_asset` para o Gallery node da persona. So aparece no Gallery quando o operador conecta manualmente via `connect_asset`.
+- **Acao sugerida**: opcional — auto-conectar assets aprovados a `gallery-{persona_slug}` na promocao. Hoje o fluxo manual e intencional, mas para uploads automaticos (crawler/sync) o asset fica invisivel ate alguem clicar.
+
+### F — `lead_audience_memberships` x `leads.persona_id`
+- **Reference memory ja existente**: `reference_leads_schema.md` / `feedback_persona_audience_visibility.md`. Repito aqui porque toca persistencia de persona.
+- **Acao sugerida**: nada novo — usar `lead_audience_memberships` como fonte canonica em queries operacionais; `leads.persona_id` e legado.
+
+### G — Sofia: o knowledge_plan vai para `knowledge_nodes` so no save final
+- **Arquivo**: `api/services/kb_intake_service.py` (todo o pipeline `chat()` -> `save()`).
+- **Comportamento atual**: durante a conversa, o plano vive em `session.normalized_plan` (arquivo .json local). So vira `knowledge_nodes` no `POST /kb-intake/save` (que dispara `vault_sync` -> `bootstrap_from_item`).
+- **Risco**: se a sessao expirar/morrer antes do save, todo o conhecimento gerado some. **A migracao para tools (camada 2 abaixo) ajuda aqui**: cada `create_node` tool call pode persistir incrementalmente em `knowledge_nodes` com `status=draft`, eliminando o "tudo ou nada" do save.
+- **Acao sugerida (alinhada com a migracao de tools)**: tool `create_node` faz `INSERT` em `knowledge_nodes(status="draft", metadata.session_id=...)`. Save final so faz UPDATE para `status="pendente_validacao"` ou `validated`. Sofia para de regerar plano do zero a cada turno.
+
+### Resumo do impacto na memoria de marca
+A unica violacao bloqueante para "memoria de marca consistente" e a **A (brand_profiles)**. As demais sao debitos tecnicos com sintomas localizados. Se tivermos que escolher uma para corrigir antes da migracao de tools, e a A — porque toda a creative reuse que a Sofia faria via `find_existing_persona_nodes(types=["brand"])` retorna vazio hoje, mesmo com o brand cadastrado.
