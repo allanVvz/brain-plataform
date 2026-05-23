@@ -19,7 +19,9 @@ from services import knowledge_graph, supabase_client
 CONTENT_LEVELS = {
     "brand": 20,
     "campaign": 30,
+    "product_group": 35,
     "product": 40,
+    "offer": 45,
     "briefing": 50,
     "audience": 55,
     "tone": 60,
@@ -27,6 +29,7 @@ CONTENT_LEVELS = {
     "copy": 70,
     "faq": 75,
     "asset": 80,
+    "gallery": 82,
     "entity": 10,
     "general_note": 90,
 }
