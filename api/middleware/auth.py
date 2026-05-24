@@ -11,6 +11,7 @@ PUBLIC_EXACT_PATHS = {
     "/health/live",
     "/health/ready",
     "/health/score",
+    "/health/storage",
     "/auth/login",
     "/auth/logout",
     "/docs",

@@ -195,6 +195,8 @@ export const api = {
   // Personas
   personas: () => req<any[]>("/personas"),
   persona: (slug: string) => req<any>(`/personas/${slug}`),
+  updatePersonaCatalogUrl: (slug: string, catalog_url: string | null) =>
+    req<any>(`/personas/${slug}`, { method: "PATCH", body: JSON.stringify({ catalog_url }) }),
   audiences: (personaId: string) => req<any[]>(`/audiences?persona_id=${encodeURIComponent(personaId)}`),
   createAudience: (body: { persona_id: string; name: string; slug?: string; description?: string; source_type?: string }) =>
     req<any>("/audiences", { method: "POST", body: JSON.stringify(body) }),
@@ -237,6 +239,29 @@ export const api = {
     req<any>(`/integrations/user/${encodeURIComponent(service)}/credentials`, { method: "DELETE" }),
   n8nLogs: (limit = 100, status?: string) => req<any[]>(`/logs/n8n?limit=${limit}${status ? `&status=${status}` : ""}`),
   agentLogs: (leadId?: string, limit = 50) => req<any[]>(`/logs/agents?limit=${limit}${leadId ? `&lead_id=${leadId}` : ""}`),
+  auditLogs: (params: {
+    entity_type?: string;
+    event_type?: string;
+    persona_id?: string;
+    entity_id?: string;
+    since?: string;
+    search?: string;
+    limit?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.entity_type) qs.set("entity_type", params.entity_type);
+    if (params.event_type) qs.set("event_type", params.event_type);
+    if (params.persona_id) qs.set("persona_id", params.persona_id);
+    if (params.entity_id) qs.set("entity_id", params.entity_id);
+    if (params.since) qs.set("since", params.since);
+    if (params.search) qs.set("search", params.search);
+    qs.set("limit", String(params.limit ?? 200));
+    return req<any[]>(`/logs/audit?${qs.toString()}`);
+  },
+
+  // Knowledge — Canonical taxonomy (single source of truth)
+  knowledgeTaxonomy: (canonicalOnly = false) =>
+    req<any>(`/knowledge/taxonomy${canonicalOnly ? "?canonical_only=true" : ""}`),
 
   // Knowledge — Vault Sync
   knowledgePreview: () => req<any>("/knowledge/sync/preview"),
@@ -354,10 +379,96 @@ export const api = {
     return req<any[]>(`/assets${qs ? `?${qs}` : ""}`);
   },
   assetGet: (id: string) => req<any>(`/assets/${encodeURIComponent(id)}`),
+  assetUpdate: (id: string, body: { asset_type?: string | null; asset_function?: string | null }) =>
+    req<any>(`/assets/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
   assetConnect: (id: string, body: { parent_node_id: string; relation_type?: string }) =>
     req<any>(`/assets/${encodeURIComponent(id)}/connect`, { method: "POST", body: JSON.stringify(body) }),
   assetEnsureGallery: (id: string) =>
     req<any>(`/assets/${encodeURIComponent(id)}/ensure-gallery`, { method: "POST", body: "{}" }),
+  assetConnections: (id: string) =>
+    req<{
+      asset_id: string;
+      knowledge_node_id: string | null;
+      connections: Array<{
+        edge_id: string;
+        relation_type: string;
+        slot_key: string | null;
+        page_section: string | null;
+        label: string | null;
+        position: number | null;
+        role: string | null;
+        parent_node: {
+          id: string;
+          slug: string | null;
+          node_type: string | null;
+          title: string | null;
+          collection_slug: string | null;
+        };
+        slot_options: Array<{ slot_key: string; label: string }>;
+      }>;
+    }>(`/assets/${encodeURIComponent(id)}/connections`),
+  assetBindSlot: (
+    id: string,
+    body: {
+      slot: string;
+      persona_slug?: string;
+      target_slug?: string | null;
+      collection_slug?: string | null;
+      position?: number;
+      label?: string | null;
+    },
+  ) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/bind-slot`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  assetRebindPath: (
+    id: string,
+    body: {
+      slot: string;
+      persona_slug?: string;
+      target_slug?: string | null;
+      collection_slug?: string | null;
+      position?: number;
+      label?: string | null;
+      remove_existing?: boolean;
+    },
+  ) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/rebind-path`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  assetLandingTargets: (id: string) =>
+    req<{
+      asset_id: string;
+      targets: Array<{
+        slot_key: string;
+        slot_label: string;
+        parent_node_type: string;
+        target_slug: string | null;
+        collection_slug: string | null;
+        label: string;
+        node_id: string;
+      }>;
+    }>(`/assets/${encodeURIComponent(id)}/landing-targets`),
+  assetValidatePath: (id: string) =>
+    req<{ asset_id: string; ok: boolean; errors: string[]; connections: any[] }>(
+      `/assets/${encodeURIComponent(id)}/validate-path`,
+      { method: "POST", body: "{}" },
+    ),
+  assetApprove: (id: string) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/approve`, { method: "POST", body: "{}" }),
+  assetReject: (id: string) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/reject`, { method: "POST", body: "{}" }),
+  assetUnbindSlot: (id: string, slotKey: string, targetSlug?: string | null) => {
+    const qs = targetSlug ? `?target_slug=${encodeURIComponent(targetSlug)}` : "";
+    return req<{ success: boolean; removed: number; edge_ids?: string[] }>(
+      `/assets/${encodeURIComponent(id)}/bind-slot/${encodeURIComponent(slotKey)}${qs}`,
+      { method: "DELETE" },
+    );
+  },
+  assetDelete: (id: string) =>
+    req<any>(`/assets/${encodeURIComponent(id)}`, { method: "DELETE" }),
   knowledgeCounts: (personaId?: string) =>
     req<any>(`/knowledge/queue/counts${personaId ? `?persona_id=${personaId}` : ""}`),
   updateQueueItem: (id: string, data: Record<string, any>) =>

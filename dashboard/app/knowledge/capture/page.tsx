@@ -366,6 +366,9 @@ function formatChatRequestError(error: unknown): string {
   const parsed = parseApiErrorBody(message);
   const bodyMessage = typeof parsed?.message === "string" ? parsed.message : null;
   const bodyDetail = typeof parsed?.detail === "string" ? parsed.detail : null;
+  if (isKbIntakeSessionNotFound(error)) {
+    return "Sessao da Sofia nao encontrada neste backend. Limpei a sessao local; tente enviar novamente.";
+  }
   if (bodyMessage) return bodyMessage;
   if (bodyDetail) return bodyDetail;
   if (message.includes("/kb-intake/message")) {
@@ -375,6 +378,14 @@ function formatChatRequestError(error: unknown): string {
     return "Nao consegui iniciar a conversa agora. Tente novamente.";
   }
   return "Nao consegui processar agora. Tente novamente.";
+}
+
+function isKbIntakeSessionNotFound(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return (
+    (message.includes("404") && message.includes("/kb-intake/session"))
+    || (message.includes("404") && message.includes("Session not found"))
+  );
 }
 
 function formatSaveError(body: Record<string, unknown> | null | undefined): string {
@@ -1391,10 +1402,25 @@ function ChatPanel({
     }
   }, [confirmedPlanHash, planState?.plan_hash, planStateValid]);
 
-  async function start() {
+  function resetLocalSession(message?: string) {
+    window.localStorage.removeItem("active_criar_session_id");
+    setSessionId(null);
+    setSessionStatus("collecting");
+    setStage("idle");
+    applyPlanState(null);
+    setMissionState(null);
+    setResumeSummary(null);
+    setPlanConfirmed(false);
+    if (message) {
+      setMessages([{ role: "system", content: message }]);
+      setFriendlyError(message);
+    }
+  }
+
+  async function openSession(bootstrapLlm = true): Promise<string | null> {
     if (isInvalidCriarPersona(plan.personaSlug)) {
       setFriendlyError("Selecione uma persona antes de criar conhecimento.");
-      return;
+      return null;
     }
     setLoading(true);
     try {
@@ -1404,10 +1430,11 @@ function ChatPanel({
         source_url: plan.sourceUrl,
         initial_block_counts: normalizeBlockCounts(plan.variationCounts),
         knowledge_plan: planState?.normalized_plan,
+        bootstrap_llm: bootstrapLlm,
       });
       if (d?.ok === false) {
         setFriendlyError(d?.message || "Nao consegui iniciar a conversa agora.");
-        return;
+        return null;
       }
       setSessionId(d.session_id);
       window.localStorage.setItem("active_criar_session_id", d.session_id);
@@ -1424,15 +1451,26 @@ function ChatPanel({
         setCurrentBlockCounts(normalizeBlockCounts(d.current_block_counts || plan.variationCounts));
       }
       setFriendlyError(null);
+      return d.session_id || null;
     } catch (e: any) {
       setFriendlyError(formatChatRequestError(e));
+      return null;
     } finally {
       setLoading(false);
     }
   }
 
+  async function start() {
+    await openSession(true);
+  }
+
   async function send() {
-    if (!sessionId || (!input.trim() && !file)) return;
+    if (!input.trim() && !file) return;
+    let effectiveSessionId = sessionId;
+    if (!effectiveSessionId) {
+      effectiveSessionId = await openSession(false);
+      if (!effectiveSessionId) return;
+    }
     setLoading(true);
     const userMsg = input.trim();
     setLastAttempt(userMsg);
@@ -1442,22 +1480,14 @@ function ChatPanel({
     try {
       let d: any;
       if (file) {
-        d = await api.kbIntakeMessage(sessionId, userMsg, file || undefined);
+        d = await api.kbIntakeMessage(effectiveSessionId, userMsg, file || undefined);
         setFile(null);
         if (fileRef.current) fileRef.current.value = "";
       } else {
-        d = await api.kbIntakeMessage(sessionId, userMsg);
+        d = await api.kbIntakeMessage(effectiveSessionId, userMsg);
       }
       if (d?.reset_session) {
-        window.localStorage.removeItem("active_criar_session_id");
-        setSessionId(null);
-        setSessionStatus("collecting");
-        setStage("idle");
-        applyPlanState(null);
-        setMissionState(null);
-        setResumeSummary(null);
-        setMessages([{ role: "system", content: d.message || "Sessao reiniciada porque o arquivo nao foi persistido nos assets." }]);
-        setFriendlyError(d.message || "Arquivo nao persistido. Inicie uma nova sessao da Sofia.");
+        resetLocalSession(d.message || "Sessao reiniciada porque o arquivo nao foi persistido nos assets.");
         return;
       }
       if (d?.state) {
@@ -1508,6 +1538,10 @@ function ChatPanel({
         setCurrentBlockCounts(normalizeBlockCounts(d.current_block_counts));
       }
     } catch (e: any) {
+      if (isKbIntakeSessionNotFound(e)) {
+        resetLocalSession("Sessao anterior da Sofia expirou neste backend. Tente enviar novamente para iniciar uma nova conversa.");
+        return;
+      }
       setFriendlyError(formatChatRequestError(e));
     } finally {
       setLoading(false);
@@ -1568,7 +1602,8 @@ function ChatPanel({
   // pagina via send(). UI hooks (ex: open_file_picker) executam efeito local
   // antes da mensagem ser enviada.
   async function handleSofiaAction(q: SofiaQuestion, optRaw: SofiaQuestionOption) {
-    if (!sessionId) {
+    const effectiveSessionId = sessionId || await openSession(false);
+    if (!effectiveSessionId) {
       setFriendlyError("Sessao da Sofia nao iniciada.");
       return;
     }
@@ -1592,7 +1627,7 @@ function ChatPanel({
     setApplyingSofiaAction(true);
     try {
       setMessages((p) => [...p, { role: "user", content: `[atalho] ${opt.label}` }]);
-      const d: any = await api.kbIntakeMessage(sessionId, prompt);
+      const d: any = await api.kbIntakeMessage(effectiveSessionId, prompt);
       if (d?.ok === false) {
         setFriendlyError(d?.message || "A Sofia nao conseguiu aplicar o atalho agora.");
         return;
@@ -1616,6 +1651,10 @@ function ChatPanel({
         setMessages((p) => [...p, { role: "assistant", content: d.message }]);
       }
     } catch (e: any) {
+      if (isKbIntakeSessionNotFound(e)) {
+        resetLocalSession("Sessao anterior da Sofia expirou neste backend. Tente o atalho novamente para iniciar outra sessao.");
+        return;
+      }
       setFriendlyError(formatChatRequestError(e));
     } finally {
       setApplyingSofiaAction(false);
@@ -1625,7 +1664,8 @@ function ChatPanel({
   // Atalho "Regerar estrutura": pede para a Sofia reaplicar os reparos
   // sugeridos pelo diagnostico atual em uma unica rodada.
   async function handleSofiaRegenerate() {
-    if (!sessionId) {
+    const effectiveSessionId = sessionId || await openSession(false);
+    if (!effectiveSessionId) {
       setFriendlyError("Sessao da Sofia nao iniciada.");
       return;
     }
@@ -1633,7 +1673,7 @@ function ChatPanel({
     try {
       setMessages((p) => [...p, { role: "user", content: "[atalho] Regerar estrutura aplicando o diagnostico atual" }]);
       const d: any = await api.kbIntakeMessage(
-        sessionId,
+        effectiveSessionId,
         "Regere a arvore de conhecimento aplicando todos os reparos sugeridos pelo diagnostico atual (parent slugs, expansion policies, links). Mantenha as entries ja confirmadas e re-emita o knowledge_plan completo.",
       );
       if (d?.ok === false) {
@@ -1652,6 +1692,10 @@ function ChatPanel({
         setMessages((p) => [...p, { role: "assistant", content: d.message }]);
       }
     } catch (e: any) {
+      if (isKbIntakeSessionNotFound(e)) {
+        resetLocalSession("Sessao anterior da Sofia expirou neste backend. Tente regerar novamente para iniciar outra sessao.");
+        return;
+      }
       setFriendlyError(formatChatRequestError(e));
     } finally {
       setApplyingSofiaAction(false);
@@ -2886,7 +2930,11 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
           || (restoredPlan ? countBlocksByType(restoredPlan.entries) : undefined),
         ));
       })
-      .catch(() => {
+      .catch((error) => {
+        if (isKbIntakeSessionNotFound(error)) {
+          resetCriarSession("Sessao anterior da Sofia expirou neste backend. Envie uma nova mensagem para iniciar outra sessao.");
+          return;
+        }
         window.localStorage.removeItem("active_criar_session_id");
       });
   // Restore once on mount; persona fallback is intentionally best-effort.

@@ -26,6 +26,9 @@ class LandingSlot(str, Enum):
     PRODUCT_GROUP_COVER = "product_group_cover"
     CAMPAIGN_FOOTER = "campaign_footer"
     PRODUCT_IMAGE = "product_image"
+    BRAND_LOGO = "brand_logo"
+    BRAND_SECONDARY = "brand_secondary"
+    BRAND_COVER = "brand_cover"
 
 
 _SLOT_CONFIG: dict[LandingSlot, dict] = {
@@ -61,7 +64,47 @@ _SLOT_CONFIG: dict[LandingSlot, dict] = {
         "asset_function": "product_image",
         "needs_collection": False,
     },
+    LandingSlot.BRAND_LOGO: {
+        "label": "Logo da marca",
+        "parent_node_type": "brand",
+        "relation_type": "brand_has_asset",
+        "page_section": "brand",
+        "asset_function": "brand_logo",
+        "needs_collection": False,
+    },
+    LandingSlot.BRAND_SECONDARY: {
+        "label": "Asset secundario da marca",
+        "parent_node_type": "brand",
+        "relation_type": "brand_has_asset",
+        "page_section": "brand",
+        "asset_function": "brand_secondary",
+        "needs_collection": False,
+    },
+    LandingSlot.BRAND_COVER: {
+        "label": "Capa da marca",
+        "parent_node_type": "brand",
+        "relation_type": "brand_has_asset",
+        "page_section": "brand",
+        "asset_function": "brand_cover",
+        "needs_collection": False,
+    },
 }
+
+
+# Slots offered to the user when an asset is already connected to a parent of
+# the given node_type. The dashboard reads this map to render contextual
+# dropdowns; menu.py reads metadata to round-trip the binding back out.
+SLOTS_BY_PARENT_TYPE: dict[str, list[LandingSlot]] = {
+    "brand": [LandingSlot.BRAND_LOGO, LandingSlot.BRAND_SECONDARY, LandingSlot.BRAND_COVER],
+    "campaign": [LandingSlot.HERO, LandingSlot.CAMPAIGN_FOOTER],
+    "category": [LandingSlot.PRODUCT_GROUP_COVER],
+    "product": [LandingSlot.PRODUCT_IMAGE],
+}
+
+
+def slots_for_parent_type(parent_type: Optional[str]) -> list[dict]:
+    slots = SLOTS_BY_PARENT_TYPE.get((parent_type or "").lower(), [])
+    return [{"slot_key": slot.value, "label": _SLOT_CONFIG[slot]["label"]} for slot in slots]
 
 
 def slot_config(slot: LandingSlot) -> dict:
@@ -69,6 +112,7 @@ def slot_config(slot: LandingSlot) -> dict:
 
 
 def slot_for_key(slot_key: str) -> Optional[LandingSlot]:
+    slot_key = str(slot_key or "").split(":", 1)[0]
     try:
         return LandingSlot(slot_key)
     except ValueError:
@@ -96,6 +140,14 @@ def slot_for_metadata(metadata: Optional[dict]) -> Optional[LandingSlot]:
         return LandingSlot.HERO
     if role == "campaign_footer":
         return LandingSlot.CAMPAIGN_FOOTER
+    if role == "product_image":
+        return LandingSlot.PRODUCT_IMAGE
+    if role == "brand_logo":
+        return LandingSlot.BRAND_LOGO
+    if role == "brand_secondary":
+        return LandingSlot.BRAND_SECONDARY
+    if role == "brand_cover":
+        return LandingSlot.BRAND_COVER
     return None
 
 

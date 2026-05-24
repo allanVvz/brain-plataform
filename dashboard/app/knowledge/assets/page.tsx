@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { Upload, Maximize2 } from "lucide-react";
+import { Upload, Maximize2, X } from "lucide-react";
 import { api, API_URL } from "@/lib/api";
 import AssetUploadDialog from "@/components/assets/AssetUploadDialog";
 import AssetDetailModal from "@/components/assets/AssetDetailModal";
@@ -11,8 +10,10 @@ const VIDEO_EXTS = new Set(["mp4","mov","webm"]);
 
 interface KItem {
   id: string; title: string; status: string; content_type: string;
-  asset_type: string | null; file_type: string | null; file_path: string | null;
+  asset_type: string | null; asset_function?: string | null; file_type: string | null; file_path: string | null;
   persona_id: string | null; created_at: string; source?: string; url?: string | null;
+  approval_status?: string | null;
+  landing_path?: any;
 }
 interface Persona { id: string; slug: string; name: string; }
 
@@ -20,12 +21,25 @@ const STATUS_BADGE: Record<string, string> = {
   pending:        "bg-obs-amber/10 border-obs-amber/30 text-obs-amber",
   needs_persona:  "bg-obs-amber/10 border-obs-amber/30 text-obs-amber",
   needs_category: "bg-obs-amber/10 border-obs-amber/30 text-obs-amber",
+  pending_validation: "bg-obs-amber/10 border-obs-amber/30 text-obs-amber",
   approved:       "bg-green-500/10 border-green-500/30 text-green-400",
   ready:          "bg-green-500/10 border-green-500/30 text-green-400",
   reading:        "bg-obs-amber/10 border-obs-amber/30 text-obs-amber",
   embedded:       "bg-obs-violet/10 border-obs-violet/30 text-obs-violet",
   rejected:       "bg-obs-rose/10 border-obs-rose/30 text-obs-rose",
 };
+
+function effectiveStatus(row: any) {
+  const approval = approvalStatus(row);
+  if (approval === "approved" || approval === "rejected" || approval === "pending_validation" || approval === "context_only") {
+    return approval;
+  }
+  return String(row?.workflow_status || row?.status || "pending_validation").toLowerCase();
+}
+
+function approvalStatus(row: any) {
+  return String(row?.approval_status || row?.metadata?.validation_status || "").toLowerCase();
+}
 
 const FILTER_TYPES = [
   { value: "", label: "Todos" },
@@ -52,41 +66,49 @@ export default function AssetsPage() {
   async function load() {
     setLoading(true);
     try {
-      const [queueItems, galleryItems, assetRows, personasData] = await Promise.all([
-        api.knowledgeQueue("all" as any, filterPersona || undefined, "asset"),
-        api.galleryAssets(filterPersona || undefined),
+      const [assetRows, personasData] = await Promise.all([
         api.assetList({ persona_id: filterPersona || undefined, limit: 200 }),
         api.personas(),
       ]);
       const merged = new Map<string, KItem>();
-      for (const item of queueItems || []) merged.set(`queue:${item.id}`, { ...item, source: "queue" });
-      for (const item of galleryItems || []) merged.set(`gallery:${item.id}`, { ...item, source: "gallery" });
       for (const asset of assetRows || []) {
+        const status = effectiveStatus(asset);
         const original = asset.original_filename || asset.name || "";
         const ext = original.includes(".") ? original.split(".").pop()?.toLowerCase() || "" : "";
         const mimeExt = typeof asset.mime_type === "string" && asset.mime_type.includes("/")
           ? asset.mime_type.split("/").pop()?.toLowerCase() || ""
           : "";
-        const storagePath = asset.storage_bucket && asset.storage_path
+        const storagePath = asset.metadata?.preview_bucket && asset.metadata?.preview_path
+          ? `${asset.metadata.preview_bucket}:${asset.metadata.preview_path}`
+          : asset.storage_bucket && asset.storage_path
           ? `${asset.storage_bucket}:${asset.storage_path}`
           : null;
         merged.set(`asset:${asset.id}`, {
           id: asset.id,
           title: asset.name || original || "Asset",
-          status: asset.status || "ready",
+          status,
           content_type: "asset",
-          asset_type: asset.type || asset.metadata?.kind || null,
+          asset_type: asset.type || asset.metadata?.asset_type || asset.metadata?.kind || null,
+          asset_function: asset.metadata?.asset_function || asset.landing_path?.asset_function || null,
           file_type: ext || mimeExt || null,
           file_path: storagePath,
           persona_id: asset.persona_id || null,
           created_at: asset.created_at || "",
           source: "asset",
-          url: asset.url || null,
+          url: asset.metadata?.preview_url || asset.display_url || asset.url || null,
+          landing_path: asset.landing_path || null,
+          approval_status: approvalStatus(asset),
         });
       }
       setItems(Array.from(merged.values()));
       setPersonas(personasData || []);
     } finally { setLoading(false); }
+  }
+
+  async function deleteAsset(assetId: string) {
+    if (!window.confirm("Excluir este asset, o card de asset e todas as ligacoes do grafo?")) return;
+    await api.assetDelete(assetId);
+    await load();
   }
 
   useEffect(() => { load(); }, [filterPersona]);
@@ -101,7 +123,8 @@ export default function AssetsPage() {
   }
 
   const filtered = items.filter((item) => {
-    if (filterStatus && item.status !== filterStatus) return false;
+    if (filterStatus === "pending" && !["pending_validation","pending","ready","reading"].includes(item.status)) return false;
+    if (filterStatus && filterStatus !== "pending" && item.status !== filterStatus) return false;
     if (filterMedia === "image" && mediaType(item) !== "image") return false;
     if (filterMedia === "video" && mediaType(item) !== "video") return false;
     if (filterMedia === "document" && mediaType(item) !== "document") return false;
@@ -156,9 +179,11 @@ export default function AssetsPage() {
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
             className="bg-obs-base border border-white/06 rounded-lg px-2 py-1 text-xs text-obs-text focus:outline-none">
             <option value="">Todos status</option>
-            <option value="pending">Pendente</option>
+            <option value="pending">Pendentes</option>
+            <option value="pending_validation">Validacao pendente</option>
+            <option value="ready">Ready</option>
+            <option value="reading">Lendo</option>
             <option value="approved">Aprovado</option>
-            <option value="ready">Pronto</option>
             <option value="embedded">No Golden Dataset</option>
             <option value="rejected">Rejeitado</option>
           </select>
@@ -197,7 +222,7 @@ export default function AssetsPage() {
             ? `${API_URL}/knowledge/file?path=${encodeURIComponent(item.file_path)}`
             : item.url || null;
           const statusBadge = STATUS_BADGE[item.status] || "border-white/10 text-obs-subtle";
-          const isPending = ["pending","needs_persona","needs_category"].includes(item.status);
+          const isPending = ["pending","pending_validation","ready","reading","needs_persona","needs_category"].includes(item.status);
 
           return (
             <div key={`${item.source || "item"}:${item.id}`} className="glass border border-white/06 rounded-2xl overflow-hidden group hover:border-white/12 transition-all">
@@ -218,9 +243,24 @@ export default function AssetsPage() {
 
                 {/* Overlay badges */}
                 <div className="absolute top-2 left-2 right-2 flex items-start justify-between">
-                  <span className={`text-[9px] px-2 py-0.5 rounded-full border font-medium ${statusBadge}`}>
-                    {item.status}
-                  </span>
+                  <div className="flex items-center gap-1">
+                    {item.source !== "queue" && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          deleteAsset(item.id).catch(() => {});
+                        }}
+                        title="Excluir asset"
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-red-400/50 bg-black/80 text-red-100 transition-colors hover:bg-red-600 hover:text-white"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                    <span className={`text-[9px] px-2 py-0.5 rounded-full border font-medium ${statusBadge}`}>
+                      {item.status}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-1">
                     {mt === "video" && (
                       <span className="text-[9px] bg-obs-amber/80 text-obs-base px-2 py-0.5 rounded-full font-bold">▶ VIDEO</span>
@@ -262,10 +302,18 @@ export default function AssetsPage() {
                   {item.asset_type && (
                     <span className="text-[9px] text-obs-subtle bg-white/5 px-1.5 py-0.5 rounded">{item.asset_type}</span>
                   )}
+                  {item.asset_function && (
+                    <span className="text-[9px] text-obs-subtle bg-white/5 px-1.5 py-0.5 rounded">{item.asset_function}</span>
+                  )}
                   {pName(item.persona_id) && (
                     <span className="text-[9px] text-obs-violet bg-obs-violet/10 px-1.5 py-0.5 rounded">{pName(item.persona_id)}</span>
                   )}
                 </div>
+                <p className="text-[9px] text-obs-faint truncate">
+                  {item.landing_path
+                    ? `${item.landing_path.slot_label || item.landing_path.slot_key} -> ${item.landing_path.label || item.landing_path.target_slug || "destino"}`
+                    : "sem caminho de catalogo"}
+                </p>
               </div>
             </div>
           );

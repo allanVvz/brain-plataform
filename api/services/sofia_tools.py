@@ -202,34 +202,172 @@ def tool_delete_node(session: dict, **args: Any) -> dict:
     return _ok(f"removido {slug}", plan_state)
 
 
-def tool_set_expansion_policy(session: dict, **args: Any) -> dict:
-    """Ajusta as politicas de expansao do plano (faq/asset).
+def tool_set_expansion_policy(session: dict, **_args: Any) -> dict:
+    """DEPRECATED. A política de expansão piramidal foi removida.
 
-    Aceita `block` ('faq' ou 'asset') e qualquer combinacao de
-    `count_policy`, `count_per_parent`, `parent_type`.
+    Mantida como stub para não quebrar o tool-loop caso o modelo ainda
+    invoque (cache do prompt anterior, plano legado etc.). Não muta nada
+    e retorna ok=False com mensagem clara.
     """
-    block = str(args.get("block") or "").strip().lower()
-    if block not in {"faq", "asset"}:
-        return _err("block deve ser 'faq' ou 'asset'")
+    return _err(
+        "set_expansion_policy foi removida. Use generate_faq_from_branch "
+        "para FAQ e crie demais nodes apenas sob pedido do operador."
+    )
+
+
+def tool_generate_faq_from_branch(session: dict, **args: Any) -> dict:
+    """Gera entries de FAQ lendo o galho ancestral do `parent_slug` no plano + grafo.
+
+    Em modo CRIAR o galho fica no `session.normalized_plan`. Esta tool:
+      * Caminha do `parent_slug` até a persona via `metadata.parent_slug`
+        ou links primários, coletando título/content/tags.
+      * Calcula `branch_hash` (sha256 do dump canônico) para curadoria.
+      * Cria N entries `faq` placeholder com `metadata.parent_slug=parent_slug`,
+        `metadata.generate_via='branch'`, `metadata.source_branch_hash=hash`,
+        `status='pendente_validacao'`. O conteúdo real (perguntas) é
+        preenchido pelo worker da Janela 4 após salvar (ou pelo /save inline
+        quando o operador clicar Salvar).
+    """
+    import hashlib
+    import json as _json
+
+    parent_slug = str(args.get("parent_slug") or "").strip()
+    if not parent_slug:
+        return _err("parent_slug obrigatorio")
+    try:
+        max_questions = max(1, min(20, int(args.get("max_questions") or 8)))
+    except (TypeError, ValueError):
+        max_questions = 8
+
     plan = _plan_from_session(session)
-    count_policy = args.get("count_policy")
-    count_per_parent = args.get("count_per_parent")
-    parent_type = args.get("parent_type")
-    if count_policy is not None:
-        plan[f"{block}_count_policy"] = str(count_policy).strip() or plan.get(f"{block}_count_policy") or "per_parent"
-    if count_per_parent is not None:
-        try:
-            plan[f"{block}_count_per_parent"] = max(0, int(count_per_parent))
-        except (TypeError, ValueError):
-            return _err("count_per_parent deve ser int >= 0")
-    if parent_type is not None:
-        plan[f"{block}_parent_type"] = str(parent_type).strip()
-    plan_state = _commit(session, plan, last_change=f"tool:set_expansion_policy {block}")
-    summary_lines = []
-    for key in ("count_policy", "count_per_parent", "parent_type"):
-        val = plan.get(f"{block}_{key}")
-        summary_lines.append(f"{key}={val}")
-    return _ok(f"expansion {block}: {' / '.join(summary_lines)}", plan_state)
+    entries_by_slug = {
+        str(e.get("slug") or "").lower(): e
+        for e in (plan.get("entries") or [])
+        if isinstance(e, dict)
+    }
+    chain: list[dict] = []
+    seen: set[str] = set()
+    cursor = parent_slug.lower()
+    while cursor and cursor not in seen and len(chain) < 12:
+        seen.add(cursor)
+        entry = entries_by_slug.get(cursor)
+        if not entry:
+            break
+        chain.append({
+            "slug": entry.get("slug"),
+            "content_type": entry.get("content_type"),
+            "title": entry.get("title"),
+            "content": entry.get("content"),
+            "tags": entry.get("tags") or [],
+        })
+        meta = entry.get("metadata") or {}
+        next_slug = str(meta.get("parent_slug") or "").strip().lower()
+        cursor = next_slug or ""
+
+    if not chain:
+        return _err(
+            f"parent_slug '{parent_slug}' nao encontrado no plano; crie a "
+            "copy/produto primeiro antes de gerar FAQ"
+        )
+
+    branch_payload = _json.dumps(chain, ensure_ascii=False, sort_keys=True)
+    branch_hash = hashlib.sha256(branch_payload.encode("utf-8")).hexdigest()[:16]
+
+    kb = _kb()
+    parent_entry = chain[0]
+    base_title = parent_entry.get("title") or parent_entry.get("slug") or parent_slug
+    faq_title = f"FAQ — {base_title}"
+    base_slug = f"faq-{kb._slug_for_plan_entry(base_title)}"
+    slug = base_slug
+    suffix = 1
+    while _find_entry(plan, slug):
+        suffix += 1
+        slug = f"{base_slug}-{suffix}"
+
+    placeholder_md = (
+        f"<!-- FAQ placeholder gerado de generate_faq_from_branch.\n"
+        f"O conteudo real (max {max_questions} perguntas) sera preenchido pelo "
+        f"worker faq_refresh ou pelo /kb-intake/save, lendo o galho ancestral. -->\n"
+        f"## {faq_title}\n\nPerguntas serao geradas a partir do galho:\n"
+        + "\n".join(
+            f"- {c.get('content_type')}: {c.get('title')}" for c in chain
+        )
+    )
+    entry = kb._normalize_plan_entry({
+        "content_type": "faq",
+        "title": faq_title,
+        "slug": slug,
+        "status": "pendente_validacao",
+        "content": placeholder_md,
+        "tags": ["faq", "auto-from-branch"],
+        "metadata": {
+            "parent_slug": parent_slug,
+            "generate_via": "branch",
+            "source_branch_hash": branch_hash,
+            "branch_chain": [c.get("slug") for c in chain if c.get("slug")],
+            "max_questions": max_questions,
+        },
+    })
+    plan["entries"].append(entry)
+    plan_state = _commit(
+        session, plan, last_change=f"tool:generate_faq_from_branch {slug}<-{parent_slug}",
+    )
+    return _ok(
+        f"FAQ placeholder criada para o galho de {parent_slug}",
+        plan_state,
+        slug=slug,
+        branch_hash=branch_hash,
+        branch_depth=len(chain),
+    )
+
+
+def tool_validate_hierarchy(session: dict, **args: Any) -> dict:
+    """Valida que o `slug` está em um caminho canônico do grafo fractal."""
+    from services import knowledge_taxonomy
+
+    slug = str(args.get("slug") or "").strip().lower()
+    if not slug:
+        return _err("slug obrigatorio")
+    plan = _plan_from_session(session)
+    entries_by_slug = {
+        str(e.get("slug") or "").lower(): e
+        for e in (plan.get("entries") or [])
+        if isinstance(e, dict)
+    }
+    entry = entries_by_slug.get(slug)
+    if not entry:
+        return _err(f"slug {slug} nao esta no plano")
+    chain: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    cursor = slug
+    while cursor and cursor not in seen and len(chain) < 12:
+        seen.add(cursor)
+        cur_entry = entries_by_slug.get(cursor)
+        if not cur_entry:
+            break
+        ctype = knowledge_taxonomy.canonical_node_type(cur_entry.get("content_type")) or cur_entry.get("content_type")
+        chain.append((cursor, ctype or "?"))
+        meta = cur_entry.get("metadata") or {}
+        cursor = str(meta.get("parent_slug") or "").strip().lower() or ""
+    violations: list[str] = []
+    for i in range(len(chain) - 1):
+        child_slug, child_type = chain[i]
+        parent_slug, parent_type = chain[i + 1]
+        if not knowledge_taxonomy.is_primary_edge_allowed(parent_type, child_type, ""):
+            allowed = any(
+                p == parent_type and c == child_type
+                for p, c, _ in knowledge_taxonomy.PRIMARY_CHAIN
+            )
+            if not allowed:
+                violations.append(
+                    f"{parent_type} -> {child_type} nao e primary canonico (slug {child_slug})"
+                )
+    return {
+        "ok": not violations,
+        "summary": "canonical" if not violations else f"{len(violations)} violacoes",
+        "chain": [{"slug": s, "type": t} for s, t in chain],
+        "violations": violations,
+    }
 
 
 def tool_attach_session_asset(session: dict, **args: Any) -> dict:
@@ -365,10 +503,12 @@ SOFIA_TOOLS_REGISTRY: dict[str, Callable[..., dict]] = {
     "set_parent": tool_set_parent,
     "connect_nodes": tool_connect_nodes,
     "delete_node": tool_delete_node,
-    "set_expansion_policy": tool_set_expansion_policy,
+    "set_expansion_policy": tool_set_expansion_policy,  # deprecated stub
     "attach_session_asset": tool_attach_session_asset,
     "validate_plan": tool_validate_plan,
     "find_existing_persona_nodes": tool_find_existing_persona_nodes,
+    "generate_faq_from_branch": tool_generate_faq_from_branch,
+    "validate_hierarchy": tool_validate_hierarchy,
 }
 
 
@@ -434,16 +574,45 @@ SOFIA_TOOLS_SCHEMA: list[dict] = [
     },
     {
         "name": "set_expansion_policy",
-        "description": "Ajusta politicas de expansao do plano (faq/asset). Use para resolver asset_expansion_incomplete ou faq_expansion_incomplete sem inflar o plano.",
+        "description": "DEPRECATED. A politica de expansao piramidal foi removida. Nao chame esta tool — use generate_faq_from_branch para FAQ e crie os demais nodes apenas sob pedido do operador.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "block": {"type": "string", "enum": ["faq", "asset"]},
-                "count_policy": {"type": "string", "description": "per_parent | total | grouped"},
-                "count_per_parent": {"type": "integer", "minimum": 0},
-                "parent_type": {"type": "string"},
             },
             "required": ["block"],
+        },
+    },
+    {
+        "name": "generate_faq_from_branch",
+        "description": (
+            "Gera uma entry FAQ placeholder a partir do galho ancestral de `parent_slug` "
+            "(geralmente uma copy). O conteudo real e preenchido depois pela curadoria, "
+            "lendo persona -> ... -> copy em tempo real. Nao escreva perguntas a mao; "
+            "chame esta tool sempre que o operador pedir FAQ."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "parent_slug": {"type": "string", "description": "Slug do node pai (geralmente a copy)."},
+                "max_questions": {"type": "integer", "minimum": 1, "maximum": 20, "default": 8},
+            },
+            "required": ["parent_slug"],
+        },
+    },
+    {
+        "name": "validate_hierarchy",
+        "description": (
+            "Valida que o caminho ancestral do `slug` no plano segue a hierarquia "
+            "canonica do grafo fractal (persona -> brand -> briefing -> campaign -> "
+            "audience -> product_group -> product -> offer -> copy -> {faq, gallery})."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "slug": {"type": "string"},
+            },
+            "required": ["slug"],
         },
     },
     {

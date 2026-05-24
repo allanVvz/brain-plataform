@@ -36,6 +36,18 @@ async def lifespan(app: FastAPI):
         logger.error(msg)
         raise RuntimeError(msg)
     logger.info("Backend env validation OK.")
+
+    # Storage contract — /assets/upload writes to `assets-raw` and HEIC previews
+    # land in `assets-derived`. Migration 033 seeds them via SQL, but that path
+    # is fragile on fresh projects; ensure them here on every boot.
+    try:
+        from services import supabase_client
+        for bucket in ("assets-raw", "assets-derived"):
+            ok = supabase_client.ensure_bucket(bucket, public=False)
+            logger.info("Storage bucket %s: %s", bucket, "ready" if ok else "MISSING (uploads will 503)")
+    except Exception as exc:
+        logger.warning("Could not ensure storage buckets on boot: %s", exc)
+
     env = get_backend_env()
     tasks: list[asyncio.Task] = []
     if env["run_embedded_workers"]:

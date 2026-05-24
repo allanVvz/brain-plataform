@@ -15,6 +15,8 @@ from pydantic import BaseModel
 from typing import Optional
 
 from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle, approved_knowledge_snapshots
+from services.event_emitter import emit
+from services.audit_helpers import current_actor
 
 router = APIRouter(prefix="/knowledge", tags=["graph"])
 logger = logging.getLogger("ai_brain.graph")
@@ -219,8 +221,40 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
                 source="graph.create_edge",
             )
     except Exception as exc:
+        emit(
+            "graph_edge_create_failed",
+            entity_type="knowledge_edge",
+            persona_id=edge_persona_id,
+            payload={
+                "actor": current_actor(request),
+                "context": {
+                    "source_node_id": source_id,
+                    "target_node_id": target_id,
+                    "relation_type": relation_type,
+                },
+                "reason": str(exc)[:400],
+            },
+            level="error",
+            source="routes.graph",
+        )
         raise HTTPException(502, f"Could not create graph edge: {exc}") from exc
     if not edge:
+        emit(
+            "graph_edge_create_failed",
+            entity_type="knowledge_edge",
+            persona_id=edge_persona_id,
+            payload={
+                "actor": current_actor(request),
+                "context": {
+                    "source_node_id": source_id,
+                    "target_node_id": target_id,
+                    "relation_type": relation_type,
+                },
+                "reason": "upsert returned no row",
+            },
+            level="warn",
+            source="routes.graph",
+        )
         raise HTTPException(400, "Graph edge was not created")
     if publication:
         return {
@@ -258,8 +292,32 @@ def delete_graph_edge(edge_id: str, request: Request):
         raise HTTPException(502, f"Could not delete graph edge: {exc}") from exc
     if not ok:
         logger.warning("Graph edge not found for delete", extra={"edge_id": edge_id, "raw_edge_id": raw_edge_id})
+        emit(
+            "graph_edge_delete_failed",
+            entity_type="knowledge_edge",
+            entity_id=raw_edge_id,
+            persona_id=(edge or {}).get("persona_id"),
+            payload={"requested_edge_id": edge_id, "reason": "not_found"},
+            level="warn",
+            source="routes.graph",
+        )
         raise HTTPException(404, "Graph edge not found")
     logger.info("Graph edge soft-deleted", extra={"edge_id": edge_id, "raw_edge_id": raw_edge_id})
+    emit(
+        "graph_edge_deleted",
+        entity_type="knowledge_edge",
+        entity_id=raw_edge_id,
+        persona_id=(edge or {}).get("persona_id"),
+        payload={
+            "requested_edge_id": edge_id,
+            "source_node_id": (edge or {}).get("source_node_id"),
+            "target_node_id": (edge or {}).get("target_node_id"),
+            "relation_type": (edge or {}).get("relation_type"),
+            "metadata": (edge or {}).get("metadata") or {},
+        },
+        level="warn",
+        source="routes.graph",
+    )
     return {"ok": True, "edge_id": raw_edge_id}
 
 
@@ -269,20 +327,92 @@ def delete_graph_node(node_id: str, request: Request):
     node = supabase_client.get_knowledge_node(raw_node_id)
     if node and node.get("persona_id"):
         auth_service.assert_persona_access(request, persona_id=node.get("persona_id"))
+    persona_id = (node or {}).get("persona_id")
+    before_snapshot = {
+        "node_type": (node or {}).get("node_type"),
+        "slug": (node or {}).get("slug"),
+        "title": (node or {}).get("title"),
+        "status": (node or {}).get("status"),
+        "source_table": (node or {}).get("source_table"),
+        "source_id": (node or {}).get("source_id"),
+    }
+    actor = current_actor(request)
     if node and node.get("source_table") == "knowledge_items" and node.get("source_id"):
         try:
             evidence = knowledge_lifecycle.delete_knowledge_item_cascade(str(node.get("source_id")))
         except ValueError as exc:
+            emit(
+                "graph_node_delete_failed",
+                entity_type="knowledge_node",
+                entity_id=raw_node_id,
+                persona_id=persona_id,
+                payload={"actor": actor, "before": before_snapshot, "reason": str(exc)[:400], "stage": "cascade"},
+                level="warn",
+                source="routes.graph",
+            )
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
+            emit(
+                "graph_node_delete_failed",
+                entity_type="knowledge_node",
+                entity_id=raw_node_id,
+                persona_id=persona_id,
+                payload={"actor": actor, "before": before_snapshot, "reason": str(exc)[:400], "stage": "cascade"},
+                level="error",
+                source="routes.graph",
+            )
             raise HTTPException(502, f"Could not delete knowledge item graph node: {exc}") from exc
+        emit(
+            "graph_node_deleted",
+            entity_type="knowledge_node",
+            entity_id=raw_node_id,
+            persona_id=persona_id,
+            payload={
+                "actor": actor,
+                "before": before_snapshot,
+                "context": {"strategy": "knowledge_item_cascade", "evidence": evidence},
+            },
+            level="warn",
+            source="routes.graph",
+        )
         return {"ok": True, "node_id": raw_node_id, "evidence": evidence}
     try:
         ok = supabase_client.delete_knowledge_node(raw_node_id)
     except Exception as exc:
+        emit(
+            "graph_node_delete_failed",
+            entity_type="knowledge_node",
+            entity_id=raw_node_id,
+            persona_id=persona_id,
+            payload={"actor": actor, "before": before_snapshot, "reason": str(exc)[:400], "stage": "direct"},
+            level="error",
+            source="routes.graph",
+        )
         raise HTTPException(502, f"Could not delete graph node: {exc}") from exc
     if not ok:
+        emit(
+            "graph_node_delete_failed",
+            entity_type="knowledge_node",
+            entity_id=raw_node_id,
+            persona_id=persona_id,
+            payload={"actor": actor, "before": before_snapshot, "reason": "not_found", "stage": "direct"},
+            level="warn",
+            source="routes.graph",
+        )
         raise HTTPException(404, "Graph node not found")
+    emit(
+        "graph_node_deleted",
+        entity_type="knowledge_node",
+        entity_id=raw_node_id,
+        persona_id=persona_id,
+        payload={
+            "actor": actor,
+            "before": before_snapshot,
+            "context": {"strategy": "direct"},
+        },
+        level="warn",
+        source="routes.graph",
+    )
     return {"ok": True, "node_id": raw_node_id}
 
 # knowledge_items statuses → nodeClass
@@ -1148,6 +1278,14 @@ def get_graph_data(
         # Map semantic node_type → ReactFlow nodeClass for legacy color/shape.
         semantic_state = knowledge_graph._validation_state(n)
         source_status = str(meta.get("source_status") or n.get("status") or "").lower()
+        asset_validation_status = str(meta.get("validation_status") or meta.get("approval_status") or "").lower()
+        if ntype == "asset" and asset_validation_status:
+            if asset_validation_status in {"approved", "embedded", "validated"}:
+                semantic_state = "validated"
+                source_status = asset_validation_status
+            else:
+                semantic_state = "pending"
+                source_status = asset_validation_status
         approved_snapshot = snapshot_by_node.get(n.get("id")) or {}
         approved_snapshot_id = approved_snapshot.get("id") or meta.get("approved_snapshot_id")
         rag_entry_id = approved_snapshot.get("rag_entry_id") or meta.get("knowledge_rag_entry_id")
@@ -1179,7 +1317,7 @@ def get_graph_data(
             "id": nid, "type": "knowledgeNode", "position": {"x": 0, "y": 0},
             "data": {
                 "label": n.get("title") or n.get("slug") or ntype,
-                "status": n.get("status") or "active",
+                "status": source_status or n.get("status") or "active",
                 "content_type": ntype,
                 "file_type": _metadata_file_type(meta),
                 "file_path": meta.get("file_path") or meta.get("storage_path"),

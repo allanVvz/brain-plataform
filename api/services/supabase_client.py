@@ -920,7 +920,7 @@ def get_knowledge_node(node_id: str) -> Optional[dict]:
         raise
 
 
-def update_knowledge_node(node_id: str, data: dict) -> Optional[dict]:
+def update_knowledge_node(node_id: str, data: dict, *, mark_related_faqs: bool = True) -> Optional[dict]:
     global _KG_TABLES_MISSING
     if _KG_TABLES_MISSING or not node_id or not data:
         return None
@@ -935,7 +935,7 @@ def update_knowledge_node(node_id: str, data: dict) -> Optional[dict]:
             row = (client.table("knowledge_nodes").select("id,node_type,persona_id,source_id").eq("id", node_id).limit(1).execute().data or [None])[0]
         else:
             row = updated
-        if row and row.get("node_type") in {"brand", "briefing", "audience", "product", "offer", "copy", "rule"}:
+        if mark_related_faqs and row and row.get("node_type") in {"brand", "briefing", "audience", "product", "offer", "copy", "rule"}:
             _mark_persona_faqs_pending_regeneration(
                 row.get("persona_id"),
                 changed_source_id=row.get("source_id") or node_id,
@@ -2021,6 +2021,18 @@ def _storage_signed_url(bucket: str | None, path: str | None, expires_in: int = 
 def _asset_display_url(asset_row: dict) -> str:
     signed = _storage_signed_url(asset_row.get("storage_bucket"), asset_row.get("storage_path"))
     return signed or asset_row.get("url") or ""
+
+
+def asset_display_url(asset_row: dict) -> str:
+    """Return the renderable URL for an asset row.
+
+    Storage location is the source of truth. The persisted `url` column is kept
+    only as a legacy fallback because signed URLs expire and public URLs do not
+    work for private buckets.
+    """
+    return _asset_display_url(asset_row)
+
+
 def list_gallery_assets(persona_id: Optional[str] = None, limit: int = 250) -> list[dict]:
     """Return knowledge nodes connected to the protected Gallery node."""
     global _KG_TABLES_MISSING
@@ -2124,6 +2136,7 @@ def list_gallery_assets(persona_id: Optional[str] = None, limit: int = 250) -> l
             continue
 
         asset_meta = asset_row.get("metadata") or {}
+        effective_status = asset_meta.get("validation_status") or asset_row.get("status") or node.get("status") or "ready"
         original = asset_row.get("original_filename") or asset_meta.get("original_filename") or asset_row.get("name") or ""
         ext = original.rsplit(".", 1)[-1].lower() if "." in original else ""
         if not ext:
@@ -2137,7 +2150,7 @@ def list_gallery_assets(persona_id: Optional[str] = None, limit: int = 250) -> l
         out.append({
             "id": asset_row["id"],
             "title": asset_row.get("name") or original or node.get("title") or "Gallery asset",
-            "status": asset_row.get("status") or node.get("status") or "ready",
+            "status": effective_status,
             "content_type": "asset",
             "asset_type": asset_row.get("type") or asset_meta.get("kind") or metadata.get("asset_type"),
             "asset_function": asset_meta.get("asset_function") or metadata.get("asset_function") or "gallery_reference",
@@ -2885,9 +2898,12 @@ def get_knowledge_item_by_path(file_path: str) -> Optional[dict]:
 # Mirrors the CHECK constraint on knowledge_items.content_type from
 # supabase/migrations/002_knowledge_platform.sql. Keep in sync if the constraint changes.
 KNOWLEDGE_ITEM_CONTENT_TYPES: frozenset[str] = frozenset({
-    "brand", "briefing", "product", "campaign", "copy", "asset",
-    "prompt", "faq", "maker_material", "tone", "competitor",
-    "audience", "rule", "entity", "offer", "other",
+    # Canonical fractal types (migration 039 + knowledge_taxonomy).
+    "persona", "brand", "briefing", "campaign", "audience",
+    "product_group", "product", "offer", "copy", "faq", "gallery", "asset",
+    # Non-canonical but still accepted as input (kept for backwards-compat).
+    "prompt", "maker_material", "tone", "competitor",
+    "rule", "entity", "other",
 })
 
 KNOWLEDGE_ITEM_STATUSES: frozenset[str] = frozenset({
@@ -2895,6 +2911,7 @@ KNOWLEDGE_ITEM_STATUSES: frozenset[str] = frozenset({
 })
 
 _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_KNOWLEDGE_ITEMS_MISSING_COLUMNS: set[str] = set()
 
 
 def validate_knowledge_item_payload(payload: dict) -> list[str]:
@@ -2958,7 +2975,22 @@ def validate_knowledge_item_payload(payload: dict) -> list[str]:
 
 def insert_knowledge_item(data: dict) -> dict:
     data.setdefault("updated_at", __import__("datetime").datetime.utcnow().isoformat())
-    return _insert_one(get_client().table("knowledge_items").insert(data))
+    cleaned = {k: v for k, v in data.items() if k not in _KNOWLEDGE_ITEMS_MISSING_COLUMNS}
+    last_exc: Exception | None = None
+    for _ in range(4):
+        try:
+            return _insert_one(get_client().table("knowledge_items").insert(cleaned))
+        except Exception as exc:
+            missing = _missing_column_from_error(exc)
+            if not missing or missing not in cleaned:
+                last_exc = exc
+                break
+            _KNOWLEDGE_ITEMS_MISSING_COLUMNS.add(missing)
+            cleaned = {k: v for k, v in cleaned.items() if k != missing}
+            last_exc = exc
+    if last_exc:
+        raise last_exc
+    return {}
 
 
 def _mark_persona_faqs_pending_regeneration(persona_id: Optional[str], *, changed_source_id: Optional[str], now_iso: str) -> None:
@@ -3379,6 +3411,42 @@ def get_events(
     return _q(q)
 
 
+def list_system_events(
+    entity_type: Optional[str] = None,
+    event_types: Optional[list[str]] = None,
+    persona_id: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    since: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 100,
+) -> list:
+    """Audit-trail query over system_events.
+
+    Filters compose with AND. `event_types` is an OR list (uses .in_()).
+    `search` does ILIKE over payload::text — slow without an index, OK for
+    audit volumes (capped by limit). `since` expects ISO8601.
+    """
+    q = (
+        get_client().table("system_events")
+        .select("*")
+        .order("created_at", desc=True)
+        .limit(max(1, min(int(limit or 100), 500)))
+    )
+    if entity_type:
+        q = q.eq("entity_type", entity_type)
+    if event_types:
+        q = q.in_("event_type", list(event_types))
+    if persona_id:
+        q = q.eq("persona_id", persona_id)
+    if entity_id:
+        q = q.eq("entity_id", entity_id)
+    if since:
+        q = q.gte("created_at", since)
+    if search:
+        q = q.ilike("payload", f"%{search}%")
+    return _q(q)
+
+
 # â”€â”€ Pipeline Status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def get_pipeline_statuses() -> list:
@@ -3456,6 +3524,42 @@ def upload_to_storage(bucket: str, path: str, data: bytes, content_type: str = "
 def download_from_storage(bucket: str, path: str) -> bytes:
     """Download bytes from Supabase Storage using the backend service client."""
     return get_client().storage.from_(bucket).download(path)
+
+
+def ensure_bucket(name: str, public: bool = False) -> bool:
+    """Make sure a Supabase Storage bucket exists. Idempotent.
+
+    Migration 033 tries to seed `assets-raw` / `assets-derived` via
+    `INSERT INTO storage.buckets`, but the SQL path requires storage-admin
+    privileges and silently misses on fresh projects. This helper closes the
+    gap at boot time so /assets/upload never 502s on a missing bucket.
+
+    Returns True if the bucket exists (created or pre-existing), False on
+    failure. Never raises.
+    """
+    try:
+        client = get_client()
+        try:
+            existing = client.storage.list_buckets() or []
+        except Exception:
+            existing = []
+        names = {b.get("name") if isinstance(b, dict) else getattr(b, "name", None) for b in existing}
+        if name in names:
+            return True
+        client.storage.create_bucket(name, options={"public": public})
+        return True
+    except Exception as exc:
+        msg = str(exc).lower()
+        # supabase-py raises StorageApiError with statusCode=409 / "already exists"
+        # when the bucket exists but list_buckets() failed to enumerate it.
+        if "already exists" in msg or "duplicate" in msg or "409" in msg:
+            return True
+        try:
+            from services import sre_logger
+            sre_logger.warn("supabase_client", f"ensure_bucket({name}) failed: {exc}")
+        except Exception:
+            pass
+        return False
 
 
 # â”€â”€ Assets / asset_readings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -3631,5 +3735,3 @@ def get_knowledge_items_multi(
     if content_type:
         q = q.eq("content_type", content_type)
     return _q(q)
-
-

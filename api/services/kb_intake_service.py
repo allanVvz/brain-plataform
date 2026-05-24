@@ -131,81 +131,67 @@ GATILHOS DE GERAÇÃO IMEDIATA (não peça mais confirmação, GERE):
 Quando QUALQUER um aparecer, você responde com `<knowledge_plan>` completo na MESMA mensagem. Não responda "vou gerar agora" ou "pode confirmar?" — apenas gere.
 
 NÃO RESTRINJA POR content_type INICIAL:
-O `content_type` que o operador escolheu na tela (ex.: faq) sinaliza a INTENÇÃO PRINCIPAL, não limita você a um só nó. Quando houver catálogo, produto, campanha, briefing ou crawler envolvido, você DEVE construir a árvore completa de contexto que aquele FAQ/copy/asset precisa pra fazer sentido. Um FAQ nunca nasce solto.
+O `content_type` que o operador escolheu na tela sinaliza a INTENÇÃO PRINCIPAL, não limita você a um só nó. Mas você TAMBÉM NÃO infla o plano com nodes que o operador não pediu nem o galho exige. Quando ele pede 1 produto, crie 1 produto.
 
-CADEIA OBRIGATÓRIA QUANDO SÓ HÁ UMA OPÇÃO (vertical):
-Se o contexto deixar evidente uma única persona, uma única fonte e uma única campanha (caso típico de extração de catálogo), monte AUTOMATICAMENTE a linha vertical sem perguntar:
-  persona → briefing → campanha → público → produto → offer → copy → rule → faq
-Cada elo desses precisa de pelo menos uma entry. NÃO pergunte "esse FAQ é de qual produto?" quando só existe um produto candidato.
+=== HIERARQUIA FRACTAL CANÔNICA (ÚNICA VÁLIDA) ===
+A árvore principal segue exatamente esta ordem. Pule apenas níveis ausentes — nunca invente node "para preencher".
 
-POLITICA DE ARVORE PIRAMIDAL DO PLAN:
-Por padrao, emita `"tree_mode": "pyramidal"` e `"branch_policy": "top_down_pyramidal"`.
-A arvore principal deve seguir esta ordem preferencial, pulando apenas niveis ausentes:
-  persona -> brand -> briefing -> campaign -> audience -> product -> offer -> copy -> rule -> faq
-Se nao houver variacao comercial, use:
-  persona -> briefing -> audience -> product -> copy -> rule -> faq
-FAQ comercial fica abaixo da rule quando houver rule. Quando houver offer, agrupe as offers do mesmo product/audience e gere 1 copy por product/audience, salvo pedido explicito de copy por oferta. Nao deixe copy, FAQ, offer, rule, tag ou knowledge_item como card solto na arvore principal.
+  persona → brand → briefing → campaign → audience → product_group → product → offer → copy → { faq, gallery }
 
-ORDEM SEMÂNTICA NO JSON (entries[]):
-Emita as entries SEMPRE nesta ordem semântica, independente de qual o operador "selecionou primeiro":
-  1. brand          (se ainda não existir)
-  2. briefing       (raiz da captura)
-  3. campaign       (vem ANTES de produto/copy/faq, NUNCA depois)
-  4. audience       (público-alvo da campanha)
-  5. product        (item)
-  6. offer          (condicao comercial)
-  7. copy           (do produto/publico)
-  8. rule           (orientacao comercial antes do FAQ)
-  9. faq            (markdown agrupado)
-Campanha jamais aparece depois de FAQ. FAQ é folha. Briefing é raiz.
+Cardinalidade primária:
+  persona  → brand           (1:1)
+  brand    → briefing        (1:1)
+  briefing → campaign        (N:N)
+  campaign → audience        (N:N)
+  audience → product_group   (N:N)
+  product_group → product    (N:N)
+  product  → offer           (N:N)
+  offer    → copy            (N:N)
+  copy     → faq             (1:1)
+  copy     → gallery         (1:1)
 
-GERAÇÃO AUTOMÁTICA DE FAQ — FAQ AGRUPADO:
-Emita 1 entry `faq` em Markdown agrupado por campanha/contexto comercial. Parent do FAQ: rule; se nao houver rule, copy; se nao houver copy, offer; se nao houver offer/copy, product. O Markdown deve soar como atendimento real de WhatsApp. NUNCA exponha termos internos como arvore, grafo, galho, node, branch, regra, estrutura ou conhecimento conectado.
+Asset é camada LATERAL, fora da árvore principal. Asset pode conectar a qualquer node ou a outro asset, sempre via `asset_pending` (não aprovado) ou `asset_approved`. Asset NÃO entra como node da árvore canônica.
 
-EXPANSÃO POR PRODUTO (PROIBIDO COLAPSAR):
-Se há 2 produtos no plano, gere AMBAS as árvores derivadas separadamente:
-  Product: Produto A
-    ├── Offers agrupadas
-    ├── Copy-1 (parent_slug = produto-a)
-    └── Asset-1 (parent_slug = produto-a)
-  Product: Produto B
-    ├── Offers agrupadas
-    ├── Copy-2 (parent_slug = produto-b)
-    └── Asset-2 (parent_slug = produto-b)
-Use 1 rule geral antes de 1 FAQ agrupado em Markdown. Cada produto/audience recebe sua copy contextual; FAQ nao multiplica por copy por padrao.
+Tipos NÃO canônicos (use apenas quando estritamente necessário e marque `status: pendente_validacao`):
+  rule, tone, entity, tag. Eles NÃO entram na árvore primária. Se aparecerem, conecte por edge secundária.
 
-ORDEM SEMÂNTICA (TOP-DOWN, PROIBIDO INVERTER OU ENCURTAR):
-A árvore final SEMPRE flui top-down nesta ordem preferencial:
-  Persona → Brand → Briefing → Campaign → Audience → Product → Offer → Copy → FAQ → Embedded (só após aprovação)
+Relation types primários (use EXATAMENTE estes no links[]):
+  persona_has_brand, brand_has_briefing, briefing_has_campaign, campaign_has_audience,
+  audience_has_product_group, product_group_has_product, product_has_offer,
+  offer_has_copy, copy_has_faq, copy_has_gallery
 
-Audience NUNCA fica lateral ao Product. Audience é PAI semântico do Product no contexto de uma campanha — quem o Product está mirando. Por isso `metadata.parent_slug` do Product DEVE apontar para a Audience correspondente, NÃO para a Campanha. A Campanha vira ancestral indireto (Audience → Campaign → Brand).
+Qualquer edge entre nodes de tipos canônicos que NÃO use uma dessas relations é SECUNDÁRIA (`relation_type: "secondary"`). Edges secundárias podem existir entre quaisquer dois nodes e NÃO definem hierarquia.
 
-Encurtamentos PROIBIDOS na arvore principal:
-- Persona → FAQ.
-- Persona → Product.
-- Product → FAQ quando existe copy/offer.
-- Copy solta.
-- FAQ solta.
-- Offer solta.
-- Rule solta.
-- Tag como card principal.
-- knowledge_item como card principal.
+=== FAQ É EXPANSÃO DO GALHO, NÃO INVENÇÃO ===
+Você não escreve FAQ "pensando o conteúdo". Você chama a tool `generate_faq_from_branch(parent_slug)` quando o operador pedir FAQ. A tool lê o galho ancestral (persona → ... → copy) em tempo real e devolve as perguntas/respostas. Se o operador não pediu FAQ, NÃO crie FAQ por iniciativa própria.
 
-Edges com semântica explícita (use estas no `links[]` quando aplicável):
-  Persona → Brand     : `has_brand` ou `contains`
-  Brand → Campaign    : `contains`
-  Brand → Briefing    : `contains`
-  Briefing → Campaign : `briefed_by` (campaign briefed_by briefing)
-  Campaign → Audience : `targets_audience` ou `contains`
-  Audience → Product  : `offers_product` ou `about_product`
-  Product → Copy      : `supports_copy`
-  Product → FAQ       : evite; use apenas quando nao houver copy/offer e a FAQ for tecnica/factual
-  Copy → FAQ          : `answers_question` no fluxo comercial piramidal
-  Product → Asset     : `uses_asset`
-  Approved FAQ → Embedded : `manual` (só após o operador aprovar — você NÃO emite isso)
-  Approved Asset → Gallery : `gallery_asset` (só após o operador aprovar — você NÃO emite isso)
+=== GALLERY É APROVAÇÃO, NÃO GERAÇÃO ===
+Gallery é destino de assets aprovados. Você nunca gera Gallery por iniciativa: ela aparece quando há copy + asset aprovado pelo operador. Não inclua Gallery em `entries[]` em modo CRIAR.
 
-Quando a chain ficar incompleta (ex.: faltou Audience no contexto), você deve INFERIR uma audience razoável (ex.: "público-geral") e marcar `status: "pendente_validacao"` em vez de pular o passo.
+=== ASSET PENDENTE vs APROVADO ===
+Asset criado por você ou subido na sessão entra como pendente. Edge `asset_pending`. Quem aprova é o operador. Você não emite `asset_approved`.
+
+=== CONTRATO DE EXPANSÃO (LEIA COM CALMA) ===
+Você NÃO multiplica nodes para "completar" o galho. Não existe mais "FAQ Golden Dataset", "expansion incomplete", "1 copy por audience automática". Cada entry só nasce se:
+  (a) o operador pediu explicitamente, OU
+  (b) é PRÉ-REQUISITO canônico de uma entry que ele pediu (ex.: pedir um produto exige product_group ancestral; criar product_group exige audience).
+Quando o pré-requisito não está claro, INFIRA o mínimo e marque `status: pendente_validacao`. NÃO crie ramos paralelos só porque a hierarquia "comportaria mais".
+
+CONEXÕES (parent_slug + links) SÃO OBRIGATÓRIAS:
+Toda entry não top-level precisa de:
+  (a) `metadata.parent_slug` apontando para o slug do nó pai imediato canônico, OU
+  (b) aparecer como `target_slug` em `links[]` com `relation_type` canônico.
+
+REGRAS RÍGIDAS DE ANINHAMENTO (NÃO QUEBRE):
+- `product_group` SEMPRE filho de `audience` quando existir audience no plano. NUNCA com `parent_slug="self"` se houver audience.
+- `product` SEMPRE filho de `product_group`. Nunca filho direto de audience.
+- `offer` SEMPRE filho de `product`. Uma offer não pertence ao product_group nem à audience.
+- `copy` SEMPRE filho de `offer`. Não há copy direto sob product.
+- `faq` e `gallery` SEMPRE filhos de `copy`.
+
+REGRAS DE METADATA OPERACIONAL:
+- Quando o operador pedir `metadata.<chave>='<valor>'` (ex.: `test_tag='01'`, `display_price=9`, `flavors_note='consultar sabores'`), PROPAGUE esse metadata EXATAMENTE em TODAS as entries que ele referenciou. NÃO omita por achar que é redundante. NÃO converta o tipo.
+- Quando o operador pedir um sufixo padronizado no slug (ex.: `-01`), aplique o sufixo em TODAS as entries que você criar nessa sessão.
 
 USO DE DEFAULTS QUANDO FALTAR DADO:
 Se o operador respondeu apenas o público (ex.: "mulheres 30-55 loja física"), use isso para preencher campanha/produto/copy/faq sem nova rodada de perguntas. Marque os campos inferidos com `status: "pendente_validacao"` e adicione `metadata.inferred_from: "operator_hint"`. NÃO trave esperando dado adicional — apenas o conjunto persona+título é absolutamente obrigatório; tudo o mais aceita default.
@@ -216,14 +202,18 @@ Toda entry NÃO top-level (top-level = brand, briefing) precisa de UM dos dois:
   (b) aparecer como `target_slug` em `links[]` com `relation_type` apropriado.
 Sem isso a árvore vira plana e o save é rejeitado pelo validador. NUNCA emita entry sem pai (exceto top-level).
 
-Mapa default de relation_type por par (use no `links[]` ou implícito via parent_slug):
-  brand     → contains            → briefing
-  briefing  → briefed_by           → campaign
-  campaign  → contains            → audience
-  campaign  → contains            → product
-  product   → answers_question    → faq
-  product   → supports_copy       → copy
-  audience  → about_product       → product   (uso secundário)
+Mapa CANÔNICO de relation_type por par (use SEMPRE estes no `links[]`):
+  persona       → persona_has_brand          → brand
+  brand         → brand_has_briefing         → briefing
+  briefing      → briefing_has_campaign      → campaign
+  campaign      → campaign_has_audience      → audience
+  audience      → audience_has_product_group → product_group
+  product_group → product_group_has_product  → product
+  product       → product_has_offer          → offer
+  offer         → offer_has_copy             → copy
+  copy          → copy_has_faq               → faq
+  copy          → copy_has_gallery           → gallery
+Qualquer relação fora dessa lista entre nodes canônicos é SECUNDÁRIA (`relation_type: "secondary"`) e não define hierarquia.
 
 RESUMO ANTES DO SAVE:
 Após o `<knowledge_plan>`, responda curto, sempre derivado do normalizedPlan:
@@ -426,82 +416,46 @@ Apos a geracao inicial de cards, ofereca proativamente ideias de melhorias ou co
 
 _SYSTEM_PROMPT += """
 
-=== REGRA DE FAQ GOLDEN DATASET OBRIGATORIA ===
-FAQ configurado nao significa quantidade de cards. Significa habilitar 1 documento FAQ agrupado em Markdown por contexto comercial.
-O documento FAQ deve conter perguntas internas de atendimento real, sem termos internos de grafo.
-Perguntas internas nunca viram cards individuais.
+=== FAQ EM MODO CRIAR ===
+Você não escreve o conteúdo do FAQ. Quando o operador pedir FAQ, emita 1 entry `faq` placeholder com `metadata.parent_slug` apontando para o `copy` correto e `metadata.generate_via=\"branch\"`. O backend chama `generate_faq_from_branch(parent_slug)` ao salvar e preenche perguntas/respostas a partir do galho real. Marque essa entry como `status: pendente_validacao` para passar pela curadoria.
 
-=== CRAWLER MULTIPRODUTO ===
-Se o operador indicar variedade, mais de um publico, compra em quantidade ou mais de uma opcao comercial, o crawler deve preparar ramos separados por publico, produto e oferta quando houver dados.
-Nao trate um catalogo variado como se fosse um unico produto.
+=== CATÁLOGO MULTIPRODUTO ===
+Catálogo com várias categorias e dezenas/centenas de produtos: emita 1 product_group por categoria informada (não invente) e 1 product por SKU. Não tente gerar copy/offer/faq automaticamente para cada um — espere o operador pedir o galho que ele quer hoje.
 """
 
 _SYSTEM_PROMPT += """
 
-=== CONTRATO SIMPLES DO MODO CRIAR / SOFIA ===
-Esta secao corrige e substitui regras anteriores conflitantes sobre multiplicacao automatica de FAQ.
+=== CONTRATO CANÔNICO DO MODO CRIAR / SOFIA ===
+Esta seção substitui qualquer regra anterior sobre multiplicação automática de FAQ, expansão piramidal forçada ou políticas de count.
 
-Sua prioridade nao e escrever texto bonito. Sua prioridade e montar uma arvore de conhecimento valida.
-Siga sempre este fluxo: explorar -> confirmar -> montar normalizedPlan -> validar -> resumir curto.
+Você tem 8 tools determinísticas disponíveis (use-as no tool-loop sempre que estiver ligado):
+  - create_node(content_type, title, parent_slug, ...)
+  - set_parent(slug, parent_slug)
+  - connect_nodes(source_slug, target_slug, relation_type)
+  - delete_node(slug)
+  - attach_session_asset(parent_slug, reading_index, asset_function, title)
+  - validate_plan()
+  - find_existing_persona_nodes(types=[...], query="...")
+  - generate_faq_from_branch(parent_slug, max_questions=8)
 
-No modo create, use sempre:
-  tree_mode = pyramidal
-  branch_policy = top_down_pyramidal
-  faq_count_policy = grouped
-  faq_parent_type = rule
-  asset_count_policy = per_parent
-  copy_policy = per_product_context
-Use faq_count_policy = total somente se estiver importando um plano legado ja aprovado; para CRIAR novo, normalize para grouped.
+Princípios:
+1. Crie SOMENTE o que o operador pediu (mais os pré-requisitos canônicos do galho).
+2. Para FAQ, NÃO escreva o conteúdo: chame `generate_faq_from_branch(parent_slug=<slug da copy>)`. A tool lê o galho do grafo e propõe perguntas. Você só insere a entry placeholder.
+3. Para Gallery, NÃO crie por iniciativa: ela surge na aprovação de assets.
+4. Asset vai como pendente, edge `asset_pending`. Quem aprova é o operador.
+5. Antes de criar, sempre rode `find_existing_persona_nodes` para evitar duplicado.
+6. Termine sempre com `validate_plan()` antes de fechar a resposta. Se houver violações, conserte e re-valide.
 
-A branch principal deve seguir, quando aplicavel:
-  persona -> brand -> briefing -> campaign -> audience -> product -> offer -> copy -> rule -> faq -> embedded
-Se brand ou campaign nao existirem, pule o nivel, mas nao quebre a branch.
-
-Regras estruturais obrigatorias:
-- Se houver preco diferente, quantidade diferente, pacote, plano, assinatura, bundle, combo, categoria de oferta, opcao de compra, versao de compra, condicao comercial ou variacao comercial, crie offer obrigatoriamente.
-- Offer fica abaixo de product.
-- Copy fica agrupada por product/audience por padrao; use offer como parent so se o operador pedir copies diferentes por oferta.
-- Rule e o ultimo node estrutural antes do FAQ.
-- FAQ comercial fica abaixo de rule quando houver rule. Nao multiplique FAQ por copy por padrao.
-- Product fica abaixo de audience.
-- Audience fica abaixo de campaign ou briefing.
-- Briefing fica abaixo de brand ou persona.
-- Rule deve usar content_type = "rule" e ficar abaixo de campaign ou briefing.
-- Nunca use content_type = "rules".
-- Tags e mentions sao auxiliares; nunca entram na primary tree.
-- Nunca crie knowledge_item como node visual da arvore principal.
-- Nunca diga "plano pronto" se normalizedPlan.entries estiver vazio ou invalido.
-
-Se o usuario disser "conecte a audiencia padrao":
-- procure audiencia existente da persona;
-- se houver uma audiencia compativel, use automaticamente;
-- se houver mais de uma audiencia compativel, faca no maximo 1 pergunta objetiva;
-- se nao houver audiencia, crie uma audiencia padrao abaixo do briefing.
-
-Quando gerar plano, retorne sempre:
-1. normalizedPlan.entries;
-2. primary_tree_edges;
-3. secondary_semantic_edges;
-4. rag_edges;
-5. asset_gallery_edges;
-6. debug_edges;
-7. current_block_counts;
-8. blocking_violations;
-9. short_summary derivado do normalizedPlan.
-
-O resumo visivel deve ser curto:
+Resumo curto pós-plano:
 Status: plano gerado
-Blocos: briefing N, publico N, produto N, offer N, copy N, FAQ N, regra N
-Politica: arvore piramidal; FAQ agrupado por rule; Asset por parent
-Pendencias bloqueantes: nenhuma | lista curta
-Acao: revisar preview
+Blocos: brand N, briefing N, campaign N, audience N, product_group N, product N, offer N, copy N, faq N
+Pendências: lista curta ou "nenhuma"
+Ação: revisar preview no Curadoria
 
-Se nao conseguir montar a arvore:
+Se não conseguir montar:
 Status: bloqueado
-Motivo: normalizedPlan vazio, parent ausente, offer ausente ou rule ausente
-Acao: responder os campos pendentes
-
-Nao escreva longas propostas sem gerar normalizedPlan. Se precisar perguntar, faca no maximo 2 perguntas objetivas.
+Motivo: faltam dados para X
+Ação: responder os campos pendentes (máx 2 perguntas)
 """
 
 
@@ -1179,33 +1133,60 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
         parent_type = _entry_type(parent_entry or {})
         if ctype_lower in {"tag", "knowledge_item", "kb_entry", "mention"}:
             errors.append(f"entry[{idx}] {ctype_lower} cannot be a primary tree card")
-        if ctype_lower == "audience" and parent_slug and parent_type not in {"campaign", "briefing", "brand", ""}:
-            errors.append(f"entry[{idx}] audience must stay under campaign/briefing/brand, got parent {parent_slug!r}")
-        if ctype_lower == "product":
-            if audience_entries and parent_type != "audience":
-                errors.append(f"entry[{idx}] product must stay under audience when audience exists")
-            elif parent_slug and parent_type not in {"audience", "campaign", "briefing", "brand", ""}:
-                errors.append(f"entry[{idx}] product has invalid parent {parent_slug!r}")
-            if "audience" in str(entry.get("slug") or "").lower():
-                errors.append(f"entry[{idx}] product slug must not embed audience slug")
-        if ctype_lower == "offer" and parent_type != "product":
-            errors.append(f"entry[{idx}] offer must stay under product, got parent {parent_slug!r}")
-        if ctype_lower == "copy":
-            allowed_copy_parents = {"offer", "product", "campaign", ""}
-            if parent_type not in allowed_copy_parents:
-                errors.append(f"entry[{idx}] copy has invalid parent {parent_slug!r}")
-            if offer_entries and parent_type == "offer" and not _explicit_copy_per_offer_requested(session or {}):
-                errors.append(f"entry[{idx}] copy must stay grouped by product/audience by default; use offer parent only when copy per offer is explicit")
-        if ctype_lower == "faq":
-            allowed_faq_parents = {"rule", "copy", "offer"}
-            if not copy_entries and not offer_entries:
-                allowed_faq_parents.add("product")
-            if parent_type not in allowed_faq_parents:
-                errors.append(f"entry[{idx}] faq has invalid parent {parent_slug!r}")
-            if rule_entries and parent_type != "rule":
-                errors.append(f"entry[{idx}] faq must stay under rule when rule exists")
-        if ctype_lower == "rule" and parent_type not in {"campaign", "briefing", "brand", "persona", ""}:
-            errors.append(f"entry[{idx}] rule must stay under campaign/briefing/brand, got parent {parent_slug!r}")
+        if _sofia_tools_enabled():
+            # Canonical fractal validator (Janela 2). Each child has exactly one
+            # legal parent type. Persona/brand/briefing accept "self" as parent
+            # which means "directly under the persona".
+            _canonical_parent_for = {
+                "brand":         {"persona", ""},
+                "briefing":      {"brand", ""},
+                "campaign":      {"briefing", ""},
+                "audience":      {"campaign", "briefing", ""},
+                "product_group": {"audience", ""},
+                "product":       {"product_group", ""},
+                "offer":         {"product", ""},
+                "copy":          {"offer", ""},
+                "faq":           {"copy", ""},
+                "gallery":       {"copy", ""},
+                # Asset is lateral; any parent is allowed.
+            }
+            if ctype_lower in _canonical_parent_for and parent_slug not in ("self", None, ""):
+                allowed_parents = _canonical_parent_for[ctype_lower]
+                if parent_type not in allowed_parents:
+                    errors.append(
+                        f"entry[{idx}] {ctype_lower} parent must be one of "
+                        f"{sorted(allowed_parents) or ['persona']} "
+                        f"(got {parent_type or '?'} via slug {parent_slug!r})"
+                    )
+        else:
+            # Legacy validator preserved for non-canonical callers.
+            if ctype_lower == "audience" and parent_slug and parent_type not in {"campaign", "briefing", "brand", ""}:
+                errors.append(f"entry[{idx}] audience must stay under campaign/briefing/brand, got parent {parent_slug!r}")
+            if ctype_lower == "product":
+                if audience_entries and parent_type != "audience":
+                    errors.append(f"entry[{idx}] product must stay under audience when audience exists")
+                elif parent_slug and parent_type not in {"audience", "campaign", "briefing", "brand", ""}:
+                    errors.append(f"entry[{idx}] product has invalid parent {parent_slug!r}")
+                if "audience" in str(entry.get("slug") or "").lower():
+                    errors.append(f"entry[{idx}] product slug must not embed audience slug")
+            if ctype_lower == "offer" and parent_type != "product":
+                errors.append(f"entry[{idx}] offer must stay under product, got parent {parent_slug!r}")
+            if ctype_lower == "copy":
+                allowed_copy_parents = {"offer", "product", "campaign", ""}
+                if parent_type not in allowed_copy_parents:
+                    errors.append(f"entry[{idx}] copy has invalid parent {parent_slug!r}")
+                if offer_entries and parent_type == "offer" and not _explicit_copy_per_offer_requested(session or {}):
+                    errors.append(f"entry[{idx}] copy must stay grouped by product/audience by default; use offer parent only when copy per offer is explicit")
+            if ctype_lower == "faq":
+                allowed_faq_parents = {"rule", "copy", "offer"}
+                if not copy_entries and not offer_entries:
+                    allowed_faq_parents.add("product")
+                if parent_type not in allowed_faq_parents:
+                    errors.append(f"entry[{idx}] faq has invalid parent {parent_slug!r}")
+                if rule_entries and parent_type != "rule":
+                    errors.append(f"entry[{idx}] faq must stay under rule when rule exists")
+            if ctype_lower == "rule" and parent_type not in {"campaign", "briefing", "brand", "persona", ""}:
+                errors.append(f"entry[{idx}] rule must stay under campaign/briefing/brand, got parent {parent_slug!r}")
 
     tree_mode = str(plan.get("tree_mode") or "pyramidal").strip() or "pyramidal"
     if tree_mode == "single_branch" and not _technical_product_faq_requested(session or {}):
@@ -3404,39 +3385,49 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
     root_briefing = briefings[0] if briefings else None
     root_campaign = campaigns[0] if campaigns else None
 
-    if root_briefing is None:
-        title = _knowledge_plan_title_from_session(session)
-        root_briefing = _normalize_plan_entry({
-            "content_type": "briefing",
-            "title": title,
-            "slug": _slug_for_plan_entry(title),
-            "status": "pendente_validacao",
-            "content": f"Briefing operacional para {title}. Fonte principal: {normalized['source']}.",
-            "tags": ["briefing", normalized["persona_slug"]],
-            "metadata": {},
-        })
-        entries.insert(0, root_briefing)
+    # Legacy scaffolding (auto-create root briefing if missing, force campaign
+    # under briefing, etc.) only when NOT in canonical mode. With Sofia tools
+    # ON the agent is in charge of creating exactly what the operator asked.
+    if not _sofia_tools_enabled():
+        if root_briefing is None:
+            title = _knowledge_plan_title_from_session(session)
+            root_briefing = _normalize_plan_entry({
+                "content_type": "briefing",
+                "title": title,
+                "slug": _slug_for_plan_entry(title),
+                "status": "pendente_validacao",
+                "content": f"Briefing operacional para {title}. Fonte principal: {normalized['source']}.",
+                "tags": ["briefing", normalized["persona_slug"]],
+                "metadata": {},
+            })
+            entries.insert(0, root_briefing)
 
-    if root_brand and _entry_parent_slug(root_brand) in {None, "", "global", "root", "persona"}:
-        _set_entry_parent_slug(root_brand, "self")
-    briefing_parent = _entry_parent_slug(root_briefing) if root_briefing else None
-    if root_briefing and (
-        briefing_parent in {None, "", "global", "root", "persona"}
-        or (root_brand and briefing_parent == "self")
-    ):
-        _set_entry_parent_slug(root_briefing, str((root_brand or {}).get("slug") or "self"))
-    if root_campaign and not _entry_parent_slug(root_campaign):
-        _set_entry_parent_slug(root_campaign, root_briefing["slug"])
-    for audience in audiences:
-        if not _entry_parent_slug(audience):
-            _set_entry_parent_slug(audience, (root_campaign or root_briefing)["slug"])
+        if root_brand and _entry_parent_slug(root_brand) in {None, "", "global", "root", "persona"}:
+            _set_entry_parent_slug(root_brand, "self")
+        briefing_parent = _entry_parent_slug(root_briefing) if root_briefing else None
+        if root_briefing and (
+            briefing_parent in {None, "", "global", "root", "persona"}
+            or (root_brand and briefing_parent == "self")
+        ):
+            _set_entry_parent_slug(root_briefing, str((root_brand or {}).get("slug") or "self"))
+        if root_campaign and not _entry_parent_slug(root_campaign):
+            _set_entry_parent_slug(root_campaign, root_briefing["slug"])
+        for audience in audiences:
+            if not _entry_parent_slug(audience):
+                _set_entry_parent_slug(audience, (root_campaign or root_briefing)["slug"])
+
+    # Canonical mode (Janela 2) — when SOFIA_TOOLS_ENABLED is on, the agent
+    # creates everything via deterministic tools. Skip auto-expansion (product
+    # cloning per audience, copy duplication per product, automatic rule/FAQ)
+    # and let normalize stay strictly a cleanup pass.
+    canonical_mode = _sofia_tools_enabled()
 
     # Product branches must live under each audience. If products are still generic,
     # clone them once per audience to create the fractal top-down structure.
     products = [entry for entry in list(entries) if _entry_type(entry) == "product"]
     audience_map = {str(entry.get("slug")): entry for entry in entries if _entry_type(entry) == "audience" and entry.get("slug")}
     product_expansions: dict[str, list[str]] = {}
-    if audience_map:
+    if audience_map and not canonical_mode:
         expanded_products: list[dict] = []
         remove_slugs: set[str] = set()
         existing_product_slugs = {str(product.get("slug")) for product in products if product.get("slug")}
@@ -3521,25 +3512,28 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
     entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
     products = [entry for entry in entries if _entry_type(entry) == "product"]
     normalized["entries"] = entries
-    _ensure_offer_entries(normalized, session)
-    entries = [entry for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
-    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
-    products = [entry for entry in entries if _entry_type(entry) == "product"]
-    _expand_copies_for_products(entries, products, product_expansions)
-    normalized["entries"] = entries
-    _ensure_copies_for_offers(normalized, session)
-    _reparent_copies_to_offers(normalized, session)
-    entries = [entry for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
-    entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
-
-    normalized["entries"] = entries
-    _ensure_governing_rule(normalized, session)
-    _ensure_faqs_per_parent(normalized, session)
+    if not canonical_mode:
+        # Legacy expansion machinery (Janela 2 removed these on the canonical
+        # path). Kept behind the flag so non-Sofia callers keep working.
+        _ensure_offer_entries(normalized, session)
+        entries = [entry for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
+        entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+        products = [entry for entry in entries if _entry_type(entry) == "product"]
+        _expand_copies_for_products(entries, products, product_expansions)
+        normalized["entries"] = entries
+        _ensure_copies_for_offers(normalized, session)
+        _reparent_copies_to_offers(normalized, session)
+        entries = [entry for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
+        entries_by_slug = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+        normalized["entries"] = entries
+        _ensure_governing_rule(normalized, session)
+        _ensure_faqs_per_parent(normalized, session)
     _dedupe_plan_entries(normalized)
     _auto_infer_parent_slugs(normalized)
     _normalize_plan_parent_slugs(normalized, normalized["persona_slug"])
     _build_links_from_parent_slugs(normalized)
-    _add_grouped_commercial_flow_links(normalized)
+    if not canonical_mode:
+        _add_grouped_commercial_flow_links(normalized)
     _separate_plan_edges(normalized)
     normalized["summary"] = summarize_normalized_plan(normalized)
     return normalized

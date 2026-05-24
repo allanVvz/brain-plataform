@@ -9,6 +9,7 @@ class PersonaCreate(BaseModel):
     products: List[str] = []
     prompts: Dict[str, str] = {}
     config: Dict = {}
+    catalog_url: Optional[str] = None
 
 
 class PersonaUpdate(BaseModel):
@@ -17,3 +18,4 @@ class PersonaUpdate(BaseModel):
     products: Optional[List[str]] = None
     prompts: Optional[Dict[str, str]] = None
     config: Optional[Dict] = None
+    catalog_url: Optional[str] = None

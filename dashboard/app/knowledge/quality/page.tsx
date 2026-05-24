@@ -3,8 +3,9 @@ import { useEffect, useState } from "react";
 import { api, API_URL, BASE } from "@/lib/api";
 import {
   ChevronLeft, ChevronRight,
-  CheckCircle, XCircle, Loader2,
+  CheckCircle, XCircle, Loader2, Link2,
 } from "lucide-react";
+import AssetDetailModal from "@/components/assets/AssetDetailModal";
 
 interface KnowledgeItem {
   id: string; persona_id: string | null; content_type: string; title: string;
@@ -12,32 +13,35 @@ interface KnowledgeItem {
   tags: string[] | null; agent_visibility: string[] | null;
   asset_type: string | null; asset_function: string | null;
   metadata: Record<string, any>; created_at: string;
+  source?: "queue" | "asset"; asset_id?: string; url?: string | null;
 }
 interface Persona { id: string; slug: string; name: string; }
+interface LandingTarget {
+  slot_key: string;
+  slot_label: string;
+  parent_node_type: string;
+  target_slug: string | null;
+  collection_slug: string | null;
+  label: string;
+  node_id: string;
+}
 
 const TYPE_OPTIONS = [
   "brand","briefing","product","campaign","copy","asset",
   "prompt","faq","maker_material","tone","competitor","audience","rule","other",
 ];
-const ASSET_TYPES = [
-  "background","foreground","logo","product","model",
-  "banner","story","post","video","icon","other",
-];
-const ASSET_FUNCTIONS = [
-  "maker_material","brand_reference","campaign_hero","copy_support","product_showcase","other",
-];
-
 const STATUS_META: Record<string, { label: string; badge: string; urgent?: boolean }> = {
   attention:      { label: "Atenção",       badge: "bg-obs-amber/10 border-obs-amber/30 text-obs-amber", urgent: true },
   needs_persona:  { label: "Sem persona",   badge: "bg-obs-amber/10 border-obs-amber/30 text-obs-amber" },
   needs_category: { label: "Sem categoria", badge: "bg-yellow-500/10 border-yellow-500/30 text-yellow-400" },
+  pending_validation: { label: "Validar asset", badge: "bg-obs-amber/10 border-obs-amber/30 text-obs-amber", urgent: true },
   pending:        { label: "Pendente",       badge: "bg-white/5 border-white/10 text-obs-subtle" },
   approved:       { label: "Aprovado",       badge: "bg-green-500/10 border-green-500/30 text-green-400" },
   embedded:       { label: "No Golden Dataset", badge: "bg-obs-violet/10 border-obs-violet/30 text-obs-violet" },
   rejected:       { label: "Rejeitado",      badge: "bg-obs-rose/10 border-obs-rose/30 text-obs-rose" },
 };
 
-const TABS = ["attention","needs_persona","needs_category","pending","approved","embedded","rejected"];
+const TABS = ["attention","pending_validation","needs_persona","needs_category","pending","approved","embedded","rejected"];
 const IMAGE_EXTS = new Set(["png","jpg","jpeg","svg","gif","webp"]);
 const VIDEO_EXTS = new Set(["mp4","mov","webm"]);
 
@@ -47,6 +51,46 @@ function itemFileUrl(it: KnowledgeItem) {
 }
 function itemIsImg(it: KnowledgeItem) { return IMAGE_EXTS.has((it.file_type || "").toLowerCase()); }
 function itemIsVid(it: KnowledgeItem) { return VIDEO_EXTS.has((it.file_type || "").toLowerCase()); }
+function targetKey(target: LandingTarget) { return `${target.slot_key}:${target.node_id}`; }
+
+function assetEffectiveStatus(asset: any) {
+  const raw = String(asset?.metadata?.validation_status || asset?.status || "pending_validation").toLowerCase();
+  if (raw === "ready" || raw === "reading" || raw === "pending") return "pending_validation";
+  return raw;
+}
+
+function assetToQualityItem(asset: any): KnowledgeItem {
+  const original = asset.original_filename || asset.name || "";
+  const meta = asset.metadata || {};
+  const ext = original.includes(".") ? original.split(".").pop()?.toLowerCase() || "" : "";
+  const mimeExt = typeof asset.mime_type === "string" && asset.mime_type.includes("/")
+    ? asset.mime_type.split("/").pop()?.toLowerCase() || ""
+    : "";
+  const storagePath = meta.preview_bucket && meta.preview_path
+    ? `${meta.preview_bucket}:${meta.preview_path}`
+    : asset.storage_bucket && asset.storage_path
+    ? `${asset.storage_bucket}:${asset.storage_path}`
+    : null;
+  return {
+    id: `asset:${asset.id}`,
+    asset_id: asset.id,
+    source: "asset",
+    persona_id: asset.persona_id || null,
+    content_type: "asset",
+    title: asset.name || original || "Asset",
+    content: meta.visual_summary || meta.extracted_text || "",
+    status: assetEffectiveStatus(asset),
+    file_path: storagePath,
+    file_type: ext || mimeExt || null,
+    tags: meta.tags || null,
+    agent_visibility: ["private"],
+    asset_type: asset.type || meta.kind || meta.asset_type || null,
+    asset_function: meta.asset_function || null,
+    metadata: { ...meta, landing_path: asset.landing_path || meta.landing_path || null },
+    created_at: asset.created_at || "",
+    url: meta.preview_url || asset.url || null,
+  };
+}
 
 const SEL_INPUT = "bg-obs-raised border border-white/06 rounded-lg px-2.5 py-2 text-sm text-obs-text focus:outline-none focus:border-obs-violet/40 w-full";
 
@@ -66,6 +110,11 @@ export default function QualityPage() {
   const [selected,    setSelected]    = useState<Set<string>>(new Set());
   const [bulkPersona, setBulkPersona] = useState("");
   const [bulkType,    setBulkType]    = useState("");
+  const [detail, setDetail] = useState<KnowledgeItem | null>(null);
+  const [assetTargets, setAssetTargets] = useState<LandingTarget[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState("");
+  const [selectedTargetKey, setSelectedTargetKey] = useState("");
+  const [pathSaving, setPathSaving] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -73,18 +122,73 @@ export default function QualityPage() {
     setDone(0);
     setSelected(new Set());
     try {
-      const [itemsData, personasData, countsData] = await Promise.all([
+      const shouldLoadAssets =
+        (!filterType || filterType === "asset") &&
+        ["attention", "pending_validation", "pending", "all"].includes(filterStatus);
+      const [itemsData, personasData, countsData, assetRows] = await Promise.all([
         api.knowledgeQueue(filterStatus, filterPersona || undefined, filterType || undefined),
         api.personas(),
         api.knowledgeCounts(),
+        shouldLoadAssets
+          ? api.assetList({ persona_id: filterPersona || undefined, limit: 500 })
+          : Promise.resolve([]),
       ]);
-      setItems(itemsData);
+      const queueItems = (itemsData || []).map((item: KnowledgeItem) => ({ ...item, source: "queue" as const }));
+      const queueAssetIds = new Set(
+        queueItems
+          .map((item: KnowledgeItem) => item.metadata?.asset_id || item.metadata?.assetId || item.asset_id)
+          .filter(Boolean),
+      );
+      const assetItems = (assetRows || [])
+        .filter((asset: any) => {
+          const status = assetEffectiveStatus(asset);
+          if (status === "approved" || status === "embedded" || status === "rejected" || status === "archived") return false;
+          if (queueAssetIds.has(asset.id)) return false;
+          return filterStatus === "attention" || filterStatus === "pending_validation" || filterStatus === "pending" || filterStatus === "all";
+        })
+        .map(assetToQualityItem);
+      setItems([...assetItems, ...queueItems]);
       setPersonas(personasData);
-      setCounts(countsData);
+      setCounts({
+        ...(countsData || {}),
+        by_status: {
+          ...((countsData || {}).by_status || {}),
+          pending_validation: assetItems.length,
+        },
+      });
     } finally { setLoading(false); }
   }
 
   useEffect(() => { load(); }, [filterStatus, filterType, filterPersona]);
+
+  useEffect(() => {
+    setAssetTargets([]);
+    setSelectedSlot("");
+    setSelectedTargetKey("");
+    const current = items.length > 0 ? items[Math.min(cursor, Math.max(0, items.length - 1))] : null;
+    if (!current || current.source !== "asset") return;
+    let cancelled = false;
+    api.assetLandingTargets(current.asset_id || current.id.replace(/^asset:/, ""))
+      .then((payload) => {
+        if (cancelled) return;
+        const targets = payload.targets || [];
+        setAssetTargets(targets);
+        const currentPath = current.metadata?.landing_path;
+        if (currentPath?.slot_key) {
+          const slot = String(currentPath.slot_key).split(":", 1)[0];
+          setSelectedSlot(slot);
+          const match = targets.find((target: LandingTarget) => (
+            target.slot_key === slot &&
+            (target.node_id === currentPath.parent_node_id ||
+              target.target_slug === currentPath.target_slug ||
+              target.label === currentPath.label)
+          ));
+          if (match) setSelectedTargetKey(targetKey(match));
+        }
+      })
+      .catch(() => { if (!cancelled) setAssetTargets([]); });
+    return () => { cancelled = true; };
+  }, [cursor, items]);
 
   // ── single-item navigation ─────────────────────────────────
   const safeIdx    = Math.min(cursor, Math.max(0, items.length - 1));
@@ -92,6 +196,10 @@ export default function QualityPage() {
   const total      = items.length;
   const hasPrev    = safeIdx > 0;
   const hasNext    = safeIdx < total - 1;
+  const slotChoices = Array.from(
+    new Map(assetTargets.map((target) => [target.slot_key, target.slot_label])).entries(),
+  ).map(([slot_key, label]) => ({ slot_key, label }));
+  const targetChoices = assetTargets.filter((target) => target.slot_key === selectedSlot);
 
   function advance() {
     setDone((d) => d + 1);
@@ -101,7 +209,11 @@ export default function QualityPage() {
   async function approveSingle() {
     if (!item) return;
     setProcessing(true);
-    try { await api.approveItem(item.id, false); advance(); }
+    try {
+      if (item.source === "asset") await api.assetApprove(item.asset_id || item.id.replace(/^asset:/, ""));
+      else await api.approveItem(item.id, false);
+      advance();
+    }
     catch (e) { console.error(e); }
     finally { setProcessing(false); }
   }
@@ -109,15 +221,61 @@ export default function QualityPage() {
   async function rejectSingle() {
     if (!item) return;
     setProcessing(true);
-    try { await api.rejectItem(item.id, ""); advance(); }
+    try {
+      if (item.source === "asset") await api.assetReject(item.asset_id || item.id.replace(/^asset:/, ""));
+      else await api.rejectItem(item.id, "");
+      advance();
+    }
     catch (e) { console.error(e); }
     finally { setProcessing(false); }
   }
 
   async function updateSingle(data: Record<string, any>) {
     if (!item) return;
+    if (item.source === "asset") {
+      const patch: { asset_type?: string | null; asset_function?: string | null } = {};
+      if ("asset_type" in data) patch.asset_type = data.asset_type;
+      if ("asset_function" in data) patch.asset_function = data.asset_function;
+      if (!Object.keys(patch).length) return;
+      await api.assetUpdate(item.asset_id || item.id.replace(/^asset:/, ""), patch);
+      setItems((prev) => prev.map((it, i) => i === safeIdx ? { ...it, ...data } : it));
+      return;
+    }
     await api.updateQueueItem(item.id, data);
     setItems((prev) => prev.map((it, i) => i === safeIdx ? { ...it, ...data } : it));
+  }
+
+  async function applyAssetPath() {
+    if (!item || item.source !== "asset") return;
+    const target = assetTargets.find((candidate) => targetKey(candidate) === selectedTargetKey);
+    if (!target) return;
+    setPathSaving(true);
+    try {
+      const result = await api.assetRebindPath(item.asset_id || item.id.replace(/^asset:/, ""), {
+        slot: target.slot_key,
+        target_slug: target.target_slug,
+        collection_slug: target.collection_slug,
+        label: target.label,
+        remove_existing: true,
+      });
+      const landingPath = result.landing_path || {
+        slot_key: target.slot_key,
+        slot_label: target.slot_label,
+        asset_function: result.asset?.metadata?.asset_function,
+        target_slug: target.target_slug,
+        collection_slug: target.collection_slug,
+        label: target.label,
+      };
+      setItems((prev) => prev.map((it, i) => i === safeIdx ? {
+        ...it,
+        asset_function: landingPath.asset_function || it.asset_function,
+        metadata: { ...(it.metadata || {}), landing_path: landingPath },
+      } : it));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setPathSaving(false);
+    }
   }
 
   // ── multi-select actions ───────────────────────────────────
@@ -143,12 +301,17 @@ export default function QualityPage() {
       if (bulkPersona) fields.persona_id = bulkPersona;
       if (bulkType)    fields.content_type = bulkType;
       if (Object.keys(fields).length) {
-        await Promise.all(selectedItems.map((i) => api.updateQueueItem(i.id, fields)));
+        await Promise.all(selectedItems.filter((i) => i.source !== "asset").map((i) => api.updateQueueItem(i.id, fields)));
         setItems((prev) => prev.map((i) => selected.has(i.id) ? { ...i, ...fields } : i));
       }
-      const approvable = selectedItems.filter((i) => i.persona_id || bulkPersona);
+      const approvable = selectedItems.filter((i) => (
+        i.source === "asset"
+          ? Boolean(i.persona_id && i.metadata?.landing_path)
+          : Boolean(i.persona_id || bulkPersona)
+      ));
       for (const item of approvable) {
-        await api.approveItem(item.id, false);
+        if (item.source === "asset") await api.assetApprove(item.asset_id || item.id.replace(/^asset:/, ""));
+        else await api.approveItem(item.id, false);
       }
       setItems((prev) => prev.filter((i) => !approvable.some((a) => a.id === i.id)));
       setDone((d) => d + approvable.length);
@@ -161,7 +324,11 @@ export default function QualityPage() {
     if (!selectedItems.length) return;
     setProcessing(true);
     try {
-      await Promise.all(selectedItems.map((i) => api.rejectItem(i.id, "")));
+      await Promise.all(selectedItems.map((i) => (
+        i.source === "asset"
+          ? api.assetReject(i.asset_id || i.id.replace(/^asset:/, ""))
+          : api.rejectItem(i.id, "")
+      )));
       setItems((prev) => prev.filter((i) => !selected.has(i.id)));
       setDone((d) => d + selectedItems.length);
       clearSelect();
@@ -197,13 +364,18 @@ export default function QualityPage() {
   const isVid         = VIDEO_EXTS.has(ft);
   const fileUrl       = item?.file_path && API_URL ? `${API_URL}/knowledge/file?path=${encodeURIComponent(item.file_path)}` : null;
   const statusMeta    = item ? (STATUS_META[item.status] ?? { badge: "border-white/10 text-obs-subtle", label: item.status }) : null;
-  const needsAction   = ["pending","needs_persona","needs_category"].includes(item?.status ?? "");
-  const canApprove    = needsAction && !!item?.persona_id;
+  const needsAction   = ["pending","pending_validation","needs_persona","needs_category"].includes(item?.status ?? "");
+  const assetReadyForApproval = item?.source !== "asset" || Boolean(item?.metadata?.landing_path);
+  const canApprove    = needsAction && !!item?.persona_id && assetReadyForApproval;
   const canReject     = needsAction;
   const showPublishHint = item?.status === "approved" && item?.content_type === "faq";
 
   // ── bulk canApprove ────────────────────────────────────────
-  const bulkCanApprove = selectedItems.some((i) => i.persona_id || bulkPersona);
+  const bulkCanApprove = selectedItems.some((i) => (
+    i.source === "asset"
+      ? Boolean(i.persona_id && i.metadata?.landing_path)
+      : Boolean(i.persona_id || bulkPersona)
+  ));
   const bulkNeedsPersona = selectedItems.some((i) => !i.persona_id && !bulkPersona);
 
   return (
@@ -283,6 +455,17 @@ export default function QualityPage() {
       </div>
 
       {/* ── Loading ── */}
+      {detail && (
+        <AssetDetailModal
+          assetId={detail.asset_id || detail.id.replace(/^asset:/, "")}
+          initialPreviewUrl={itemFileUrl(detail) || detail.url || null}
+          mediaType={itemIsImg(detail) ? "image" : itemIsVid(detail) ? "video" : "document"}
+          fileExt={detail.file_type}
+          onClose={() => setDetail(null)}
+          onChanged={() => { setDetail(null); load(); }}
+        />
+      )}
+
       {loading && (
         <div className="flex items-center justify-center py-20">
           <Loader2 size={18} className="animate-spin text-obs-subtle" />
@@ -498,19 +681,48 @@ export default function QualityPage() {
                   {item.content_type === "asset" && (
                     <>
                       <div>
-                        <label className="text-[10px] text-obs-subtle block mb-1.5 uppercase tracking-wide">Tipo de asset</label>
-                        <select value={item.asset_type || ""} onChange={(e) => updateSingle({ asset_type: e.target.value || null })} className={SEL_INPUT}>
+                        <label className="text-[10px] text-obs-subtle block mb-1.5 uppercase tracking-wide">Tipo de asset / posicao</label>
+                        <select
+                          value={selectedSlot}
+                          onChange={(e) => {
+                            setSelectedSlot(e.target.value);
+                            setSelectedTargetKey("");
+                          }}
+                          disabled={item.source !== "asset" || pathSaving}
+                          className={SEL_INPUT}
+                        >
                           <option value="">—</option>
-                          {ASSET_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                          {slotChoices.map((slot) => <option key={slot.slot_key} value={slot.slot_key}>{slot.label}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="text-[10px] text-obs-subtle block mb-1.5 uppercase tracking-wide">Função</label>
-                        <select value={item.asset_function || ""} onChange={(e) => updateSingle({ asset_function: e.target.value || null })} className={SEL_INPUT}>
+                        <label className="text-[10px] text-obs-subtle block mb-1.5 uppercase tracking-wide">Funcao / destino</label>
+                        <select
+                          value={selectedTargetKey}
+                          onChange={(e) => setSelectedTargetKey(e.target.value)}
+                          disabled={item.source !== "asset" || !selectedSlot || pathSaving}
+                          className={SEL_INPUT}
+                        >
                           <option value="">—</option>
-                          {ASSET_FUNCTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                          {targetChoices.map((target) => <option key={targetKey(target)} value={targetKey(target)}>{target.label}</option>)}
                         </select>
                       </div>
+                      {item.source === "asset" && (
+                        <button
+                          type="button"
+                          onClick={applyAssetPath}
+                          disabled={!selectedTargetKey || pathSaving}
+                          className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-obs-violet/30 bg-obs-violet/10 px-3 py-2 text-xs font-medium text-obs-violet hover:bg-obs-violet/15"
+                        >
+                          {pathSaving ? <Loader2 size={12} className="animate-spin" /> : <Link2 size={12} />}
+                          Salvar caminho
+                        </button>
+                      )}
+                      {item.source === "asset" && !item.metadata?.landing_path && (
+                        <p className="text-[10px] text-obs-amber bg-obs-amber/5 border border-obs-amber/15 rounded-lg px-3 py-2">
+                          Defina o caminho antes de aprovar.
+                        </p>
+                      )}
                     </>
                   )}
 
@@ -564,6 +776,11 @@ export default function QualityPage() {
                     className="flex items-center gap-1.5 text-xs bg-obs-violet/8 border border-obs-violet/30 text-obs-violet hover:bg-obs-violet/15 px-4 py-2 rounded-lg disabled:opacity-40 transition-colors">
                     {processing ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />} Aprovar
                   </button>
+                )}
+                {item.source === "asset" && needsAction && !canApprove && (
+                  <p className="text-[11px] text-obs-subtle">
+                    Para aprovar, defina cliente e caminho.
+                  </p>
                 )}
                 {showPublishHint && (
                   <p className="text-[11px] text-obs-subtle">

@@ -2,9 +2,10 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "@/lib/api";
-import { Building2, Megaphone, MessageSquareText, Network, Package, RefreshCw, ScrollText, Send, Settings, Users, X } from "lucide-react";
+import { getCatalogUrlForPersona } from "@/utils/env";
+import { Building2, ExternalLink, Image as ImageIcon, Megaphone, MessageSquareText, Network, Package, RefreshCw, ScrollText, Send, Settings, Users, X } from "lucide-react";
 
-interface Persona { id: string; slug: string; name: string; tone: string; products: string[]; config: any; active: boolean; created_at: string; }
+interface Persona { id: string; slug: string; name: string; tone: string; products: string[]; config: any; active: boolean; created_at: string; catalog_url?: string | null; }
 
 interface RoutingConfig {
   slug: string;
@@ -134,6 +135,7 @@ export default function PersonaPage() {
   const [bindings, setBindings] = useState<any[]>([]);
   const [kbCount, setKbCount] = useState<number | null>(null);
   const [graphSummary, setGraphSummary] = useState<PersonaGraphSummary | null>(null);
+  const [galleryAssetCount, setGalleryAssetCount] = useState<number | null>(null);
   const [routing, setRouting] = useState<RoutingConfig | null>(null);
   const [routingBusy, setRoutingBusy] = useState(false);
   const [showWebhookDrawer, setShowWebhookDrawer] = useState(false);
@@ -192,6 +194,7 @@ export default function PersonaPage() {
     setBindings([]);
     setKbCount(null);
     setGraphSummary(null);
+    setGalleryAssetCount(null);
     setRouting(null);
     setShowWebhookDrawer(false);
     setWebhookUrl("");
@@ -199,18 +202,20 @@ export default function PersonaPage() {
     setInboundToken("");
     setRoutingMessage(null);
     setTestResult(null);
-    const [brandData, bindingsData, kbData, routingData, graphData] = await Promise.all([
+    const [brandData, bindingsData, kbData, routingData, graphData, galleryData] = await Promise.all([
       api.brandProfile(p.id).catch(() => null),
       api.workflowBindings(p.id).catch(() => []),
       api.kb(p.id).catch(() => []),
       api.personaRouting(p.slug).catch(() => null),
       api.graphData(p.slug, { include_embedded: true, mode: "semantic_tree", max_depth: 6 }).catch(() => null),
+      api.galleryAssets(p.id).catch(() => []),
     ]);
     setBrand(brandData);
     setBindings(bindingsData);
     setKbCount(Array.isArray(kbData) ? kbData.length : 0);
     setRouting(routingData);
     setGraphSummary(summarizePersonaGraph(graphData, p.products || []));
+    setGalleryAssetCount(Array.isArray(galleryData) ? galleryData.length : 0);
   }
 
   async function setProcessMode(mode: "internal" | "n8n") {
@@ -375,6 +380,18 @@ export default function PersonaPage() {
                 </div>
               )}
             </div>
+
+            <PersonaCatalogCard
+              persona={selected}
+              productCount={graphSummary?.products.length ?? 0}
+              galleryCount={galleryAssetCount}
+              onCatalogUrlSaved={(url) => {
+                setSelected((current) => current && current.slug === selected.slug
+                  ? { ...current, catalog_url: url } : current);
+                setPersonas((list) => list.map((p) => p.slug === selected.slug
+                  ? { ...p, catalog_url: url } : p));
+              }}
+            />
 
             {/* Brand Profile */}
             {brand && Object.keys(brand).length > 0 && (
@@ -645,6 +662,142 @@ export default function PersonaPage() {
           </aside>
         </div>
       )}
+    </div>
+  );
+}
+
+function PersonaCatalogCard({
+  persona,
+  productCount,
+  galleryCount,
+  onCatalogUrlSaved,
+}: {
+  persona: Persona;
+  productCount: number;
+  galleryCount: number | null;
+  onCatalogUrlSaved: (url: string | null) => void;
+}) {
+  // The persisted URL (personas.catalog_url) wins over the env fallback so each
+  // persona can point at its own cardapio deploy. Empty string saves clear the
+  // column and the env fallback is used again.
+  const fallbackUrl = getCatalogUrlForPersona(persona.slug);
+  const effectiveUrl = (persona.catalog_url && persona.catalog_url.trim()) || fallbackUrl || "";
+  const [draft, setDraft] = useState<string>(persona.catalog_url || "");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  // Reset draft when persona switches.
+  useEffect(() => {
+    setDraft(persona.catalog_url || "");
+    setMessage(null);
+  }, [persona.slug]);
+
+  const productsLinked = productCount > 0;
+  const galleryLinked = (galleryCount ?? 0) > 0;
+  const dirty = (persona.catalog_url || "") !== draft;
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    setMessage(null);
+    const trimmed = draft.trim();
+    const payload = trimmed ? trimmed : null;
+    try {
+      await api.updatePersonaCatalogUrl(persona.slug, payload);
+      onCatalogUrlSaved(payload);
+      setMessage(payload ? "URL do catalogo salva." : "URL limpa; usando fallback do env.");
+    } catch (e: any) {
+      setMessage(e?.message || "Falha ao salvar URL do catalogo.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="panel space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-obs-violet/25 bg-obs-violet/10 text-obs-violet">
+            <ExternalLink size={14} />
+          </span>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-obs-faint">
+              Catalogo publico
+            </p>
+            <p className="text-sm font-semibold text-obs-text">
+              Cardapio de {persona.name}
+            </p>
+          </div>
+        </div>
+        {effectiveUrl ? (
+          <a
+            href={effectiveUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md bg-obs-violet px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-obs-violet/90"
+          >
+            Abrir catalogo
+            <ExternalLink size={12} />
+          </a>
+        ) : (
+          <span className="lg-badge lg-badge-warning">URL nao configurada</span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        <div className="lg-card flex items-center justify-between gap-2 px-3 py-2">
+          <span className="flex items-center gap-2 text-xs text-obs-subtle">
+            <Package size={13} className="text-obs-violet" />
+            Produtos vinculados
+          </span>
+          <span className={`lg-badge ${productsLinked ? "lg-badge-success" : "lg-badge-warning"}`}>
+            {productCount}
+          </span>
+        </div>
+        <div className="lg-card flex items-center justify-between gap-2 px-3 py-2">
+          <span className="flex items-center gap-2 text-xs text-obs-subtle">
+            <ImageIcon size={13} className="text-obs-violet" />
+            Assets em Gallery
+          </span>
+          <span className={`lg-badge ${galleryLinked ? "lg-badge-success" : "lg-badge-warning"}`}>
+            {galleryCount === null ? "-" : galleryCount}
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-obs-faint block">
+          URL persistida (sobrescreve o fallback do env)
+        </label>
+        <div className="flex gap-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={fallbackUrl || "https://meu-cardapio.com/minha-persona"}
+            className="flex-1 rounded-md px-3 py-2 text-xs font-mono text-obs-text [background:rgba(255,255,255,0.58)] [border:1px_solid_var(--border-glass)] focus:outline-none focus:[border-color:var(--obs-violet)]"
+            disabled={saving}
+          />
+          <button
+            onClick={save}
+            disabled={saving || !dirty}
+            className="rounded-md bg-obs-violet px-3 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-obs-violet/90 disabled:opacity-50"
+          >
+            {saving ? "Salvando..." : "Salvar"}
+          </button>
+        </div>
+        {message && (
+          <p className="text-[11px] text-obs-faint">{message}</p>
+        )}
+        {!persona.catalog_url && fallbackUrl && (
+          <p className="text-[11px] text-obs-faint">
+            Usando fallback <code className="text-obs-violet">NEXT_PUBLIC_CARDAPIO_BASE_URL</code> -&gt; {fallbackUrl}
+          </p>
+        )}
+        {!persona.catalog_url && !fallbackUrl && (
+          <p className="text-[11px] text-obs-faint">
+            Sem URL persistida e sem fallback do env. Defina aqui ou em <code className="text-obs-violet">NEXT_PUBLIC_CARDAPIO_BASE_URL</code>.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

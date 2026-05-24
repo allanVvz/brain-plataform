@@ -12,8 +12,8 @@ from typing import Optional
 
 from .schemas import AssetKind, ClassificationResult
 
-_IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/heic", "image/gif", "image/svg+xml"}
-_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".gif", ".svg"}
+_IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/heic", "image/heif", "image/gif", "image/svg+xml"}
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif", ".gif", ".svg"}
 _VIDEO_MIMES = {"video/mp4", "video/quicktime", "video/webm"}
 _VIDEO_EXTS = {".mp4", ".mov", ".webm"}
 _PDF_MIMES = {"application/pdf"}

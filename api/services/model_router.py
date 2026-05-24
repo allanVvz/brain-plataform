@@ -22,6 +22,37 @@ from typing import Any, Optional
 
 logger = logging.getLogger("model_router")
 
+
+def _llm_insecure_ssl() -> bool:
+    """Should LLM HTTP clients skip SSL verification?
+
+    Workaround for Windows boxes where SChannel can't verify CRL revocation
+    on api.openai.com / api.anthropic.com. Turn on via env
+    `INSECURE_LLM_SSL=1` only on local/QA machines that already need
+    similar workarounds for Supabase. Production never sets this.
+    """
+    raw = (os.environ.get("INSECURE_LLM_SSL") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+_LLM_HTTP_CLIENT = None
+
+
+def _llm_http_client():
+    """Returns a shared httpx.Client honoring INSECURE_LLM_SSL, or None."""
+    global _LLM_HTTP_CLIENT
+    if _LLM_HTTP_CLIENT is not None:
+        return _LLM_HTTP_CLIENT
+    if not _llm_insecure_ssl():
+        return None
+    try:
+        import httpx
+    except Exception:
+        return None
+    _LLM_HTTP_CLIENT = httpx.Client(verify=False, timeout=120)
+    logger.warning("ModelRouter using INSECURE LLM HTTP client (SSL verify off). Do NOT set in production.")
+    return _LLM_HTTP_CLIENT
+
 # OpenAI cascade - tried in this exact order on model-not-found / permission errors
 _OPENAI_CHAIN: list[str] = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
 _OPENAI_KNOWN: frozenset[str] = frozenset(_OPENAI_CHAIN)
@@ -257,7 +288,7 @@ class ModelRouter:
             logger.warning("ModelRouter provider=openai error_type=ImportError msg=%s", exc)
             return None
 
-        client = OpenAI(api_key=self._openai_key)
+        client = OpenAI(api_key=self._openai_key, http_client=_llm_http_client())
         oai_msgs: list = []
         if system:
             oai_msgs.append({"role": "system", "content": system})
@@ -410,7 +441,7 @@ class ModelRouter:
                 "ModelRouter call provider=anthropic model=%s key=%s tools=%s",
                 target, _mask_key(self._anthropic_key), bool(tools),
             )
-            client = anthropic.Anthropic(api_key=self._anthropic_key)
+            client = anthropic.Anthropic(api_key=self._anthropic_key, http_client=_llm_http_client())
             kwargs: dict = {"model": target, "max_tokens": max_tokens, "messages": messages}
             if system:
                 kwargs["system"] = system
@@ -508,7 +539,7 @@ class ModelRouter:
 
             b64 = _b64.b64encode(file_bytes).decode("ascii")
             data_url = f"data:{mime or 'image/png'};base64,{b64}"
-            client = OpenAI(api_key=self._openai_key)
+            client = OpenAI(api_key=self._openai_key, http_client=_llm_http_client())
             resp = client.chat.completions.create(
                 model=model,
                 max_tokens=max_tokens,

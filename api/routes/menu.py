@@ -51,7 +51,7 @@ def _asset_payload(
             or page_binding.get("section")
             or meta.get("page_section")
         ),
-        "slot_key": slot.value if slot else page_binding.get("slot_key"),
+        "slot_key": page_binding.get("slot_key") or (slot.value if slot else None),
         "href": meta.get("href") or meta.get("cta_url"),
         "markdown": meta.get("markdown") or meta.get("body"),
     }
@@ -83,7 +83,10 @@ def _gallery_assets_by_node(persona_id: str, cache: Optional[dict] = None) -> di
     by_node = {
         str(row.get("knowledge_node_id")): row
         for row in rows
-        if row.get("knowledge_node_id") and row.get("url")
+        if row.get("knowledge_node_id")
+        and row.get("url")
+        and row.get("status") == "approved"
+        and (row.get("file_path") or row.get("url"))
     }
     if cache is not None:
         cache["gallery_by_node"] = by_node
@@ -219,7 +222,12 @@ def _collection_campaign_assets(collection: dict, persona_id: str, cache: Option
         )
     except Exception:
         return []
-    campaigns = [row for row in campaigns if (_meta(row).get("collection_slug") or collection_slug) == collection_slug]
+    campaigns = [
+        row for row in campaigns
+        if (_meta(row).get("collection_slug") or collection_slug) == collection_slug
+        and _meta(row).get("created_via") != "bind_slot"
+        and not _meta(row).get("landing_slot")
+    ]
     campaign_ids = [row["id"] for row in campaigns if row.get("id")]
     if not campaign_ids:
         return []
@@ -286,6 +294,83 @@ def _collection_campaign_assets(collection: dict, persona_id: str, cache: Option
     return out
 
 
+def _brand_payload(persona: dict, persona_slug: str, cache: Optional[dict] = None) -> dict:
+    """Build the persona.brand block from the graph.
+
+    Looks up the persona's brand node and any `brand_has_asset` edges. The
+    bound assets are surfaced as `brand.logo` and `brand.cover` (the cardapio
+    Brand schema only renders these two; secondary assets are returned in
+    `brand.secondary_assets` for future use)."""
+    persona_id = persona["id"]
+    fallback = {
+        "id": f"brand-{persona_slug}",
+        "slug": persona.get("slug") or persona_slug,
+        "name": persona.get("name") or persona_slug,
+        "accent_color": "#f5c518",
+    }
+    try:
+        brand_rows = (
+            supabase_client.get_client()
+            .table("knowledge_nodes")
+            .select("*")
+            .eq("persona_id", persona_id)
+            .eq("node_type", "brand")
+            .neq("status", "archived")
+            .limit(2)
+            .execute()
+            .data or []
+        )
+    except Exception:
+        return fallback
+    if not brand_rows:
+        return fallback
+    brand = brand_rows[0]
+    brand_meta = _meta(brand)
+    out = {
+        "id": brand.get("id") or fallback["id"],
+        "slug": brand.get("slug") or fallback["slug"],
+        "name": brand.get("title") or fallback["name"],
+        "accent_color": brand_meta.get("accent_color") or fallback["accent_color"],
+        # node_id is only present when a real knowledge_node backs this brand.
+        # admin-blocks uses it to decide whether to emit brand_* slot blocks.
+        "node_id": brand.get("id"),
+    }
+    gallery_by_node = _gallery_assets_by_node(persona_id, cache=cache)
+    edges = supabase_client.list_edges_for_nodes(
+        [brand["id"]],
+        relation_types=["brand_has_asset", "uses_asset"],
+        limit=200,
+    )
+    by_slot: dict[str, dict] = {}
+    secondary: list[dict] = []
+    for edge in edges:
+        if edge.get("source_node_id") != brand["id"]:
+            continue
+        meta = edge.get("metadata") or {}
+        if meta.get("active") is False:
+            continue
+        asset_node_id = edge.get("target_node_id")
+        asset = gallery_by_node.get(str(asset_node_id))
+        if not asset:
+            continue
+        slot = slot_for_metadata(meta)
+        if slot == LandingSlot.BRAND_LOGO:
+            payload = _asset_payload(asset, asset_type="logo", alt=brand.get("title") or "Logo", edge=edge)
+            by_slot[LandingSlot.BRAND_LOGO.value] = payload
+        elif slot == LandingSlot.BRAND_COVER:
+            payload = _asset_payload(asset, asset_type="cover", alt=brand.get("title") or "Cover", edge=edge)
+            by_slot[LandingSlot.BRAND_COVER.value] = payload
+        elif slot == LandingSlot.BRAND_SECONDARY:
+            secondary.append(_asset_payload(asset, asset_type="image", alt=brand.get("title") or "", edge=edge))
+    if LandingSlot.BRAND_LOGO.value in by_slot:
+        out["logo"] = by_slot[LandingSlot.BRAND_LOGO.value]
+    if LandingSlot.BRAND_COVER.value in by_slot:
+        out["cover"] = by_slot[LandingSlot.BRAND_COVER.value]
+    if secondary:
+        out["secondary_assets"] = secondary
+    return out
+
+
 def _collection_briefing(collection: dict, persona_id: str) -> dict:
     edges = supabase_client.list_edges_for_nodes(
         [collection["id"]],
@@ -318,18 +403,9 @@ def _collection_briefing(collection: dict, persona_id: str) -> dict:
 
 
 def _resolve_persona(persona_slug: str) -> dict:
-    candidates = [persona_slug]
-    if persona_slug.lower() in {"baita", "baita-conveniencia"}:
-        candidates.extend(["Baita-Conveniencia", "baita-conveniencia", "baita"])
-
-    seen: set[str] = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        persona = supabase_client.get_persona(candidate)
-        if persona:
-            return persona
+    persona = supabase_client.get_persona(persona_slug)
+    if persona:
+        return persona
 
     normalized = persona_slug.strip().lower()
     for persona in supabase_client.get_personas():
@@ -346,37 +422,117 @@ def _resolve_persona(persona_slug: str) -> dict:
     raise HTTPException(404, f"Persona not found: {persona_slug}")
 
 
-def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita-v14") -> dict:
+def _default_collection_slug(persona: dict, persona_slug: str) -> str:
+    config = persona.get("config") or {}
+    if isinstance(config, dict):
+        explicit = config.get("default_collection_slug") or config.get("collection_slug")
+        if explicit:
+            return str(explicit)
+    return f"cardapio-{persona_slug}-v1"
+
+
+def _products_by_group(products: list[dict], group_ids: list[str]) -> dict[str, list[str]]:
+    """Map product_group_id -> [product_id] using canonical edges.
+
+    Tries product_group_has_product (canonical), then legacy in_category /
+    category_has_product. Products without an edge fall back to metadata.product_group_slug
+    or metadata.category_slug matching on the caller side.
+    """
+    product_ids = [row["id"] for row in products if row.get("id")]
+    if not product_ids or not group_ids:
+        return {}
+    edges = supabase_client.list_edges_for_nodes(
+        list(set(product_ids) | set(group_ids)),
+        relation_types=["product_group_has_product", "in_category", "category_has_product", "contains"],
+        limit=5000,
+    )
+    by_group: dict[str, list[str]] = {}
+    group_set = set(group_ids)
+    product_set = set(product_ids)
+    for edge in edges:
+        if (edge.get("metadata") or {}).get("active") is False:
+            continue
+        src = edge.get("source_node_id")
+        tgt = edge.get("target_node_id")
+        group_id = src if src in group_set else (tgt if tgt in group_set else None)
+        product_id = tgt if group_id == src else (src if group_id == tgt else None)
+        if group_id and product_id in product_set:
+            by_group.setdefault(group_id, []).append(product_id)
+    return by_group
+
+
+def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None) -> dict:
     persona = _resolve_persona(persona_slug)
     persona_id = persona["id"]
+    effective_collection_slug = collection_slug or _default_collection_slug(persona, persona_slug)
+
+    # Try to find an explicit collection node. Migration 039 canonicalized
+    # product_collection -> product_group, so try the legacy alias first and
+    # then the canonical type. When no anchor node exists we still serve the
+    # persona's product_groups + products under a synthetic container so
+    # universal personas (vz-lupas, etc.) work without seeding extra rows.
     collection = supabase_client.get_knowledge_node_by_slug(
-        collection_slug,
+        effective_collection_slug,
         persona_id=persona_id,
         node_type="product_collection",
+    ) or supabase_client.get_knowledge_node_by_slug(
+        effective_collection_slug,
+        persona_id=persona_id,
+        node_type="product_group",
     )
+    synthesized_collection = False
     if not collection:
-        raise HTTPException(404, f"Collection not found: {collection_slug}")
+        if collection_slug is not None:
+            # Caller asked for a specific collection we cannot resolve.
+            raise HTTPException(404, f"Collection not found: {collection_slug}")
+        synthesized_collection = True
+        collection = {
+            "id": f"persona:{persona_id}:cardapio",
+            "slug": effective_collection_slug,
+            "title": persona.get("name") or persona_slug,
+            "metadata": {
+                "collection_type": "menu",
+                "display_name": persona.get("name") or persona_slug,
+                "synthesized": True,
+            },
+        }
 
     cache: dict = {}
 
-    categories = [
-        row for row in supabase_client.list_product_collection_nodes(
-            persona_id=persona_id,
-            node_type="category",
-            limit=500,
-        )
-        if _meta(row).get("collection_slug") == collection_slug
+    # Categories = canonical product_group nodes for this persona. When a
+    # collection_slug filter is provided AND any group carries that slug in
+    # metadata, narrow to that subset; otherwise show every product_group.
+    all_groups = supabase_client.list_product_collection_nodes(
+        persona_id=persona_id,
+        node_type="product_group",
+        limit=500,
+    )
+    filtered_groups = [
+        row for row in all_groups
+        if _meta(row).get("collection_slug") == effective_collection_slug
     ]
+    categories = filtered_groups if filtered_groups else all_groups
+
     products = supabase_client.list_product_nodes(
         persona_id=persona_id,
-        collection_slug=collection_slug,
+        collection_slug=effective_collection_slug if filtered_groups else None,
         limit=1000,
     )
+    # When no metadata.collection_slug filter narrowed the result, list every
+    # product for the persona so canonical edges can still bind them to a group.
+    if not products:
+        products = supabase_client.list_product_nodes(persona_id=persona_id, limit=1000)
     products_by_category: dict[str, list[dict]] = {}
     product_assets = _product_assets(products, persona_id, cache=cache)
-    product_related, related_node_map = _related_nodes(products, ["product_has_copy", "product_has_faq"])
+    product_related, related_node_map = _related_nodes(products, ["product_has_copy", "product_has_faq", "offer_has_copy"])
     all_faq_nodes = [node for node in related_node_map.values() if node.get("node_type") == "faq"]
     embedded_faq_ids = _embedded_faq_ids(all_faq_nodes)
+    product_to_group_id = {
+        product_id: group_id
+        for group_id, product_ids in _products_by_group(products, [row["id"] for row in categories if row.get("id")]).items()
+        for product_id in product_ids
+    }
+    categories_by_id = {row["id"]: row for row in categories if row.get("id")}
     for product in products:
         metadata = _meta(product)
         related = product_related.get(product["id"], [])
@@ -402,7 +558,20 @@ def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita
                 for asset in product_assets.get(product["id"], [])
             ],
         }
-        products_by_category.setdefault(str(metadata.get("category_slug") or "sem-categoria"), []).append(product_payload)
+        # Resolve product -> category via canonical edge first, then metadata.
+        group_id = product_to_group_id.get(product["id"])
+        category_slug: Optional[str] = None
+        if group_id and group_id in categories_by_id:
+            group_row = categories_by_id[group_id]
+            category_slug = group_row.get("slug") or _meta(group_row).get("category_slug")
+        if not category_slug:
+            category_slug = (
+                metadata.get("category_slug")
+                or metadata.get("product_group_slug")
+                or metadata.get("parent_group")
+                or "sem-categoria"
+            )
+        products_by_category.setdefault(str(category_slug), []).append(product_payload)
 
     covers = _category_cover_assets(categories, persona_id, cache=cache)
     category_payloads = []
@@ -435,14 +604,14 @@ def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita
             break
     collection_assets = _collection_campaign_assets(collection, persona_id, cache=cache)
     campaign_display_name = (
-        collection_assets[0].get("alt")
-        if collection_assets and collection_assets[0].get("alt")
-        else collection_meta.get("campaign_name")
+        collection_meta.get("campaign_name")
         or collection_meta.get("display_name")
         or collection.get("title")
         or "Cardapio"
     )
-    persona_display_name = persona.get("name") or "Baita Conveniencia"
+    persona_display_name = persona.get("name") or persona_slug
+
+    brand = _brand_payload(persona, persona_slug, cache=cache)
 
     return {
         "ok": True,
@@ -452,12 +621,7 @@ def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita
             "id": persona_id,
             "slug": persona_slug,
             "name": persona_display_name,
-            "brand": {
-                "id": f"brand-{persona_slug}",
-                "slug": "baita",
-                "name": "BAITA!",
-                "accent_color": "#f5c518",
-            },
+            "brand": brand,
             "collections": [{
                 "id": collection["id"],
                 "slug": collection.get("slug") or collection_slug,
@@ -472,7 +636,7 @@ def build_menu_payload(persona_slug: str, collection_slug: str = "cardapio-baita
     }
 
 
-def _menu_response(persona_slug: str, collection_slug: str, response: Response, nocache: bool) -> dict:
+def _menu_response(persona_slug: str, collection_slug: Optional[str], response: Response, nocache: bool) -> dict:
     payload = build_menu_payload(persona_slug, collection_slug=collection_slug)
     response.headers["Cache-Control"] = "no-store" if nocache else _MENU_CACHE_CONTROL
     return payload
@@ -482,7 +646,7 @@ def _menu_response(persona_slug: str, collection_slug: str, response: Response, 
 def get_api_menu(
     persona_slug: str,
     response: Response,
-    collection_slug: str = Query("cardapio-baita-v14"),
+    collection_slug: Optional[str] = Query(None),
     nocache: int = Query(0, ge=0, le=1),
 ):
     return _menu_response(persona_slug, collection_slug, response, bool(nocache))
@@ -492,7 +656,7 @@ def get_api_menu(
 def get_menu(
     persona_slug: str,
     response: Response,
-    collection_slug: str = Query("cardapio-baita-v14"),
+    collection_slug: Optional[str] = Query(None),
     nocache: int = Query(0, ge=0, le=1),
 ):
     return _menu_response(persona_slug, collection_slug, response, bool(nocache))
@@ -509,12 +673,14 @@ def get_menu(
 def _admin_asset_payload(row: dict) -> dict:
     """Whitelist asset fields for the public admin view (no signing keys)."""
     metadata = row.get("metadata") or {}
+    display_url = supabase_client.asset_display_url(row)
     return {
         "id": row.get("id"),
         "persona_id": row.get("persona_id"),
         "type": row.get("type"),
         "name": row.get("name"),
-        "url": row.get("url"),
+        "url": display_url,
+        "display_url": display_url,
         "original_filename": row.get("original_filename") or metadata.get("original_filename"),
         "storage_bucket": row.get("storage_bucket") or metadata.get("storage_bucket"),
         "storage_path": row.get("storage_path") or metadata.get("storage_path"),
@@ -547,7 +713,7 @@ def list_admin_assets(persona_slug: str, response: Response):
 
 
 @router.get("/api/menu/{persona_slug}/admin-blocks")
-def list_admin_blocks(persona_slug: str, response: Response, collection_slug: str = Query("cardapio-baita-v14")):
+def list_admin_blocks(persona_slug: str, response: Response, collection_slug: Optional[str] = Query(None)):
     """Configurable landing blocks for the admin UI: hero, footer, every category cover,
     every product image. Each row carries everything the UI needs to call
     POST /assets/{id}/bind-slot or DELETE /assets/{id}/bind-slot/{slot}.
@@ -555,7 +721,51 @@ def list_admin_blocks(persona_slug: str, response: Response, collection_slug: st
     payload = build_menu_payload(persona_slug, collection_slug=collection_slug)
     persona = payload["persona"]
     collection = persona["collections"][0]
+    brand = persona.get("brand") or {}
     blocks: list[dict] = []
+
+    # Only emit brand blocks when the persona actually has a knowledge_node of
+    # type 'brand'. Without it, bind-slot would fail with 404 since brand slots
+    # are resolved through that node.
+    brand_slug = brand.get("slug") if brand.get("node_id") else None
+    if brand_slug:
+        logo_asset = brand.get("logo") or {}
+        blocks.append({
+            "block_id": f"brand-logo:{brand_slug}",
+            "label": f"Logo da marca: {brand.get('name') or brand_slug}",
+            "where": "Cabecalho e badges do cardapio",
+            "slot_key": LandingSlot.BRAND_LOGO.value,
+            "collection_slug": collection["slug"],
+            "target_slug": brand_slug,
+            "current_asset_url": logo_asset.get("url") or None,
+            "current_asset_id": logo_asset.get("asset_id") or logo_asset.get("id"),
+            "current_edge_id": logo_asset.get("edge_id"),
+        })
+        cover_asset = brand.get("cover") or {}
+        blocks.append({
+            "block_id": f"brand-cover:{brand_slug}",
+            "label": f"Capa da marca: {brand.get('name') or brand_slug}",
+            "where": "Capa institucional do cardapio",
+            "slot_key": LandingSlot.BRAND_COVER.value,
+            "collection_slug": collection["slug"],
+            "target_slug": brand_slug,
+            "current_asset_url": cover_asset.get("url") or None,
+            "current_asset_id": cover_asset.get("asset_id") or cover_asset.get("id"),
+            "current_edge_id": cover_asset.get("edge_id"),
+        })
+        for index, secondary in enumerate(brand.get("secondary_assets") or []):
+            blocks.append({
+                "block_id": f"brand-secondary:{brand_slug}:{index}",
+                "label": f"Asset secundario {index + 1}",
+                "where": "Galeria de elementos de marca no cardapio",
+                "slot_key": LandingSlot.BRAND_SECONDARY.value,
+                "slot_instance_key": f"{LandingSlot.BRAND_SECONDARY.value}:{brand_slug}:{index}",
+                "collection_slug": collection["slug"],
+                "target_slug": brand_slug,
+                "current_asset_url": secondary.get("url") or None,
+                "current_asset_id": secondary.get("asset_id") or secondary.get("id"),
+                "current_edge_id": secondary.get("edge_id"),
+            })
 
     hero_asset = next(
         (a for a in collection["assets"] if a.get("slot_key") == LandingSlot.HERO.value),
@@ -608,9 +818,10 @@ def list_admin_blocks(persona_slug: str, response: Response, collection_slug: st
             current = assets[0] if assets else {}
             blocks.append({
                 "block_id": f"product:{product['slug']}",
-                "label": f"Produto: {product['name']}",
+                "label": f"Produto — {product['name']}",
                 "where": f"Card de produto · {category['title']} > {product['name']}",
                 "slot_key": LandingSlot.PRODUCT_IMAGE.value,
+                "slot_instance_key": f"{LandingSlot.PRODUCT_IMAGE.value}:{product['slug']}",
                 "collection_slug": collection["slug"],
                 "target_slug": product["slug"],
                 "current_asset_url": current.get("url") or None,
@@ -641,14 +852,15 @@ def list_admin_connections(persona_slug: str, asset_id: str, response: Response)
     parent_ids = list({
         edge.get("source_node_id")
         for edge in edges
-        if edge.get("target_node_id") == knowledge_node_id and edge.get("relation_type") != "gallery_asset"
+        if edge.get("target_node_id") == knowledge_node_id
+        and edge.get("relation_type") not in {"gallery_asset", "belongs_to_persona"}
     } - {None})
     parents = {row["id"]: row for row in supabase_client.list_knowledge_nodes_by_ids(parent_ids)}
     out: list[dict] = []
     for edge in edges:
         if edge.get("target_node_id") != knowledge_node_id:
             continue
-        if edge.get("relation_type") == "gallery_asset":
+        if edge.get("relation_type") in {"gallery_asset", "belongs_to_persona"}:
             continue
         parent = parents.get(edge.get("source_node_id"))
         if not parent:
@@ -674,6 +886,3 @@ def list_admin_connections(persona_slug: str, asset_id: str, response: Response)
         })
     response.headers["Cache-Control"] = "no-store"
     return {"asset_id": asset_id, "knowledge_node_id": knowledge_node_id, "connections": out}
-
-
-

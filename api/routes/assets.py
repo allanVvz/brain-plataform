@@ -19,6 +19,8 @@ Two distinct flows are served by this module:
 from __future__ import annotations
 
 import logging
+import io
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
@@ -30,13 +32,35 @@ from core.landing_slots import (
     slot_config,
     slot_for_key,
     slot_for_metadata,
+    slots_for_parent_type,
 )
 from services import auth_service, knowledge_graph, supabase_client
 from services.asset_pipeline import AssetPipelineContext, compose_markdown, run_pipeline
+from services.event_emitter import emit
+from services.audit_helpers import current_actor, summarize_diff
 
 logger = logging.getLogger("routes.assets")
 
 router = APIRouter(prefix="/assets", tags=["assets"])
+
+
+def _log_asset_flow(
+    event_type: str,
+    *,
+    asset_id: Optional[str] = None,
+    persona_id: Optional[str] = None,
+    payload: Optional[dict] = None,
+    level: str = "info",
+) -> None:
+    emit(
+        event_type,
+        entity_type="asset",
+        entity_id=asset_id,
+        persona_id=persona_id,
+        payload=payload or {},
+        level=level,
+        source="routes.assets",
+    )
 
 # ── Type guards (Gallery only accepts asset connections) ─────────────────
 _GALLERY_ONLY_FROM = {"asset"}
@@ -52,6 +76,87 @@ def _bundle_to_asset_type(kind: str) -> str:
     if kind in ("text", "markdown"):
         return "text"
     return "image"
+
+
+def _is_heic_file(filename: str, mime: str) -> bool:
+    value = f"{filename or ''} {mime or ''}".lower()
+    return ".heic" in value or ".heif" in value or "image/heic" in value or "image/heif" in value
+
+
+def _jpeg_preview_from_heic(content: bytes) -> Optional[bytes]:
+    try:
+        import pillow_heif  # type: ignore
+        from PIL import Image
+        pillow_heif.register_heif_opener()
+        with Image.open(io.BytesIO(content)) as image:
+            if image.mode not in {"RGB", "L"}:
+                image = image.convert("RGB")
+            out = io.BytesIO()
+            image.save(out, format="JPEG", quality=92, optimize=True)
+            return out.getvalue()
+    except Exception as exc:
+        logger.warning("HEIC preview conversion failed: %s", exc)
+        return None
+
+
+def _preview_path_for(filename: str, persona_id: str) -> str:
+    stem = (filename or "asset").rsplit("/", 1)[-1].rsplit("\\", 1)[-1].rsplit(".", 1)[0]
+    safe = knowledge_graph._slugify(stem)[:80] or "asset"
+    return f"{persona_id}/previews/{safe}.jpg"
+
+
+def _safe_storage_filename(filename: Optional[str]) -> str:
+    """Slugify a filename so Supabase Storage accepts it as an object key.
+
+    Storage rejects spaces, accents and most punctuation with `400 InvalidKey`.
+    We keep the extension as-is (lowercased) and slugify the stem. The original
+    filename is still preserved in `assets.original_filename` for display.
+    """
+    name = (filename or "upload").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if "." in name:
+        stem, _, ext = name.rpartition(".")
+        ext = ext.lower()
+    else:
+        stem, ext = name, ""
+    safe_stem = knowledge_graph._slugify(stem)[:120] or "asset"
+    safe_ext = knowledge_graph._slugify(ext) if ext else ""
+    return f"{safe_stem}.{safe_ext}" if safe_ext else safe_stem
+
+
+def _ensure_heic_preview(asset: dict) -> dict:
+    if not asset:
+        return asset
+    metadata = asset.get("metadata") or {}
+    if metadata.get("preview_path") or metadata.get("preview_url"):
+        return asset
+    filename = asset.get("original_filename") or metadata.get("original_filename") or asset.get("name") or ""
+    mime = asset.get("mime_type") or metadata.get("mime") or ""
+    if not _is_heic_file(filename, mime):
+        return asset
+    bucket = asset.get("storage_bucket") or metadata.get("storage_bucket")
+    path = asset.get("storage_path") or metadata.get("storage_path")
+    if not bucket or not path:
+        return asset
+    try:
+        raw = supabase_client.download_from_storage(bucket, path)
+        preview_bytes = _jpeg_preview_from_heic(raw)
+        if not preview_bytes:
+            return asset
+        preview_bucket = "assets-derived"
+        preview_path = _preview_path_for(filename, asset.get("persona_id") or "unassigned")
+        preview_url = supabase_client.upload_to_storage(preview_bucket, preview_path, preview_bytes, "image/jpeg")
+        updated_meta = {
+            **metadata,
+            "original_url": metadata.get("original_url") or asset.get("url"),
+            "preview_bucket": preview_bucket,
+            "preview_path": preview_path,
+            "preview_url": preview_url,
+        }
+        updated = supabase_client.update_asset(asset["id"], {"url": preview_url, "metadata": updated_meta})
+        return updated or {**asset, "url": preview_url, "metadata": updated_meta}
+    except Exception as exc:
+        logger.warning("HEIC lazy preview failed asset=%s: %s", asset.get("id"), exc)
+        return asset
 
 
 def _strip_gn_prefix(node_id: Optional[str]) -> Optional[str]:
@@ -104,6 +209,104 @@ def _asset_title(asset: dict, fallback: str = "Asset") -> str:
         or (asset.get("metadata") or {}).get("original_filename")
         or fallback
     )
+
+
+def _slot_for_asset_function(asset_function: Optional[str]) -> Optional[LandingSlot]:
+    return {
+        "brand_logo": LandingSlot.BRAND_LOGO,
+        "brand_secondary": LandingSlot.BRAND_SECONDARY,
+        "brand_cover": LandingSlot.BRAND_COVER,
+        "campaign_hero": LandingSlot.HERO,
+        "campaign_footer": LandingSlot.CAMPAIGN_FOOTER,
+        "category_cover": LandingSlot.PRODUCT_GROUP_COVER,
+        "product_image": LandingSlot.PRODUCT_IMAGE,
+        # Legacy upload labels: keep accepting them, but normalize to the real
+        # landing/cardapio functions that menu.py consumes.
+        "campaign_reference": LandingSlot.HERO,
+        "product_reference": LandingSlot.PRODUCT_IMAGE,
+        "visual_reference": None,
+        "text_reference": None,
+    }.get((asset_function or "").strip())
+
+
+def _asset_function_for_slot(slot: Optional[LandingSlot]) -> Optional[str]:
+    return slot_config(slot)["asset_function"] if slot else None
+
+
+def _effective_asset_function(asset_function: Optional[str], parent_node: dict) -> Optional[str]:
+    slot = _slot_for_asset_function(asset_function)
+    if slot:
+        return _asset_function_for_slot(slot)
+    parent_type = (parent_node.get("node_type") or "").lower()
+    return {
+        "brand": "brand_logo",
+        "campaign": "campaign_hero",
+        "product_collection": "campaign_hero",
+        "category": "category_cover",
+        "product": "product_image",
+    }.get(parent_type)
+
+
+def _bind_upload_to_landing_slot(
+    *,
+    persona_id: str,
+    parent_node: dict,
+    asset_node_id: str,
+    asset_function: Optional[str],
+) -> Optional[dict]:
+    slot = _slot_for_asset_function(asset_function)
+    if not slot:
+        return None
+    cfg = slot_config(slot)
+    parent_type = (parent_node.get("node_type") or "").lower()
+    if cfg["parent_node_type"] == "brand" and parent_type != "brand":
+        return None
+    if cfg["parent_node_type"] == "category" and parent_type != "category":
+        return None
+    if cfg["parent_node_type"] == "product" and parent_type != "product":
+        return None
+    if cfg["parent_node_type"] == "campaign":
+        collection_slug = (parent_node.get("metadata") or {}).get("collection_slug") or parent_node.get("slug")
+        if not collection_slug:
+            return None
+        parent_node = _ensure_collection_campaign_parent(
+            persona_id,
+            collection_slug,
+            label=parent_node.get("title") or parent_node.get("slug"),
+        )
+
+    removed_previous = _remove_existing_slot_edges(
+        parent=parent_node,
+        asset_node_id=asset_node_id,
+        slot=slot,
+        relation_type=cfg["relation_type"],
+    )
+    slot_metadata = edge_metadata_for_slot(slot, label=parent_node.get("title") or parent_node.get("slug"))
+    if slot == LandingSlot.PRODUCT_IMAGE:
+        binding = dict(slot_metadata.get("page_binding") or {})
+        if parent_node.get("slug"):
+            binding["slot_key"] = f"{slot.value}:{parent_node['slug']}"
+            binding["target_slug"] = parent_node["slug"]
+        slot_metadata["page_binding"] = binding
+    edge = supabase_client.upsert_knowledge_edge(
+        parent_node["id"],
+        asset_node_id,
+        cfg["relation_type"],
+        persona_id=persona_id,
+        weight=0.85,
+        metadata={
+            "created_from": "asset_upload",
+            "primary_tree": True,
+            "direction": "branch_to_asset",
+            "parent_slug": parent_node.get("slug"),
+            "parent_type": parent_node.get("node_type"),
+            **slot_metadata,
+        },
+    )
+    if not edge:
+        return None
+    edge["removed_previous_edge_ids"] = removed_previous
+    return edge
 
 
 def _ensure_asset_graph_contract(
@@ -195,6 +398,13 @@ def _ensure_asset_graph_contract(
     if not parent_edge or not parent_edge.get("id"):
         raise HTTPException(502, "Falha ao conectar branch -> asset no Graph.")
 
+    landing_edge = _bind_upload_to_landing_slot(
+        persona_id=persona_id,
+        parent_node=parent_node,
+        asset_node_id=asset_node["id"],
+        asset_function=asset_function,
+    )
+
     gallery_node = supabase_client.ensure_gallery_node(persona_id)
     if not gallery_node or not gallery_node.get("id"):
         raise HTTPException(502, "Falha ao criar node Gallery.")
@@ -222,12 +432,13 @@ def _ensure_asset_graph_contract(
         knowledge_node_id=asset_node["id"],
         gallery_edge_id=gallery_edge["id"],
         parent_node_id=parent_node["id"],
-        parent_edge_id=parent_edge["id"],
+        parent_edge_id=(landing_edge or parent_edge)["id"],
     )
 
     return {
         "asset_node": asset_node,
         "parent_edge": parent_edge,
+        "landing_edge": landing_edge,
         "gallery_node": gallery_node,
         "gallery_edge": gallery_edge,
         "asset": updated_asset or asset_row,
@@ -399,17 +610,74 @@ async def _upload_asset_impl(
     content = await file.read()
     fname = file.filename or "upload"
     mime = file.content_type or ""
+    effective_asset_function = _effective_asset_function(asset_function, parent_node)
 
     # 1) Upload to Supabase Storage.
+    # Supabase Storage rejects keys with spaces or non-ASCII characters
+    # (400 InvalidKey). Keep the original filename in the assets row
+    # (original_filename / metadata) but slug the storage path so the
+    # PUT URL is always valid.
     storage_bucket = "assets-raw"
-    storage_path = f"{persona_id}/{fname}"
+    storage_path = f"{persona_id}/{_safe_storage_filename(fname)}"
     try:
         file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
     except Exception as exc:
-        logger.warning("assets-raw upload failed, falling back to 'knowledge': %s", exc)
-        storage_bucket = "knowledge"
-        storage_path = f"assets/{persona_id}/{fname}"
-        file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
+        message = str(exc)
+        if "Bucket not found" in message or "bucket_not_found" in message.lower():
+            # Try to self-heal once before failing: maybe migration 033 didn't
+            # land or the project was bootstrapped without storage seeding.
+            healed = supabase_client.ensure_bucket(storage_bucket, public=False)
+            if healed:
+                file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
+            else:
+                logger.error("/assets/upload bucket missing and could not be created: %s", storage_bucket)
+                raise HTTPException(
+                    503,
+                    {
+                        "error": "storage_bucket_missing",
+                        "bucket": storage_bucket,
+                        "message": (
+                            f"O bucket '{storage_bucket}' nao existe no Supabase desta API. "
+                            "Aplicar migration 033_asset_upload_pipeline.sql ou rodar "
+                            "scripts/ensure_qa_buckets.py com a SERVICE_KEY do projeto."
+                        ),
+                    },
+                ) from exc
+        elif "InvalidKey" in message or "Invalid key" in message:
+            logger.error("/assets/upload InvalidKey for path=%s: %s", storage_path, message)
+            raise HTTPException(
+                422,
+                {
+                    "error": "invalid_storage_key",
+                    "storage_path": storage_path,
+                    "original_filename": fname,
+                    "message": (
+                        "Supabase Storage rejeitou o nome do arquivo. Use letras, numeros, "
+                        "hifens, pontos e sublinhados (sem espacos nem acentos)."
+                    ),
+                },
+            ) from exc
+        else:
+            logger.warning("assets-raw upload failed, falling back to 'knowledge': %s", exc)
+            storage_bucket = "knowledge"
+            storage_path = f"assets/{persona_id}/{_safe_storage_filename(fname)}"
+            file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
+
+    preview_bucket = None
+    preview_path = None
+    preview_url = None
+    if _is_heic_file(fname, mime):
+        preview_bytes = _jpeg_preview_from_heic(content)
+        if preview_bytes:
+            preview_bucket = "assets-derived"
+            preview_path = _preview_path_for(fname, persona_id)
+            try:
+                preview_url = supabase_client.upload_to_storage(preview_bucket, preview_path, preview_bytes, "image/jpeg")
+            except Exception as exc:
+                logger.warning("HEIC preview upload failed filename=%s path=%s: %s", fname, preview_path, exc)
+                preview_bucket = None
+                preview_path = None
+                preview_url = None
 
     # 2) Run the pipeline.
     ctx = AssetPipelineContext(
@@ -421,7 +689,7 @@ async def _upload_asset_impl(
         mime=mime,
         branch_hint=parent_node.get("slug"),
         branch_label=parent_node.get("title") or parent_node.get("slug"),
-        asset_function=asset_function or None,
+        asset_function=effective_asset_function,
     )
     bundle = run_pipeline(content, ctx)
 
@@ -431,12 +699,15 @@ async def _upload_asset_impl(
         "persona_id": persona_id,
         "type": asset_type,
         "name": bundle.rename.title or fname,
-        "url": file_url,
+        "url": preview_url or file_url,
         "metadata": {
             "session_id": None,
             "persona_slug": persona_slug,
             "original_filename": fname,
-            "preview_path": None,
+            "original_url": file_url,
+            "preview_bucket": preview_bucket,
+            "preview_path": preview_path,
+            "preview_url": preview_url,
             "reading_status": bundle.reading_status,
             "extracted_text": (bundle.extracted_text or "")[:8000],
             "visual_summary": bundle.visual_summary or "",
@@ -444,7 +715,7 @@ async def _upload_asset_impl(
             "upload_context": "asset_card",
             "validation_status": "pending_validation",
             "kind": bundle.classification.kind,
-            "asset_function": asset_function or bundle.rename.asset_function,
+            "asset_function": effective_asset_function or bundle.rename.asset_function,
             "branch_hint": parent_node.get("slug"),
         },
         "source": "upload",
@@ -484,14 +755,20 @@ async def _upload_asset_impl(
         "file_type": file_type,
         "file_path": f"{storage_bucket}:{storage_path}",
         "asset_type": asset_type,
-        "asset_function": asset_function or bundle.rename.asset_function,
-        "agent_visibility": "private",
+        "asset_function": effective_asset_function or bundle.rename.asset_function,
+        "agent_visibility": ["private"],
         "tags": bundle.rename.tags,
         "metadata": {
             "asset_id": asset_id,
             "storage_bucket": storage_bucket,
             "storage_path": storage_path,
+            "original_url": file_url,
+            "preview_bucket": preview_bucket,
+            "preview_path": preview_path,
+            "preview_url": preview_url,
             "asset_kind": bundle.classification.kind,
+            "asset_type": asset_type,
+            "asset_function": effective_asset_function or bundle.rename.asset_function,
             "validation_status": "pending_validation",
             "upload_context": "asset_card",
             "parent_slug": parent_node.get("slug"),
@@ -514,13 +791,14 @@ async def _upload_asset_impl(
         summary=bundle.visual_summary or bundle.extracted_text or markdown,
         slug_seed=bundle.rename.slug or fname,
         asset_type=asset_type,
-        asset_function=asset_function or bundle.rename.asset_function,
+        asset_function=effective_asset_function or bundle.rename.asset_function,
         tags=bundle.rename.tags,
         knowledge_item_id=(item or {}).get("id"),
         created_from="asset_upload",
     )
     mirror = graph["asset_node"]
     parent_edge = graph["parent_edge"]
+    landing_edge = graph.get("landing_edge")
     gallery_edge = graph["gallery_edge"]
     asset_row = graph.get("asset") or asset_row
 
@@ -545,6 +823,7 @@ async def _upload_asset_impl(
             "knowledge_item_id": (item or {}).get("id"),
             "knowledge_node_id": (mirror or {}).get("id"),
             "parent_edge_id": (parent_edge or {}).get("id") if isinstance(parent_edge, dict) else None,
+            "landing_edge_id": (landing_edge or {}).get("id") if isinstance(landing_edge, dict) else None,
             "gallery_edge_id": (gallery_edge or {}).get("id") if isinstance(gallery_edge, dict) else None,
             "parent_card_node_id": (parent_node or {}).get("id"),
             "parent_card_md_appended": parent_card_md_appended,
@@ -552,7 +831,7 @@ async def _upload_asset_impl(
             "reading_status": bundle.reading_status,
         },
         "asset_reading": bundle.to_summary(),
-        "file_url": file_url,
+        "file_url": preview_url or file_url,
     }
 
 
@@ -578,8 +857,26 @@ def list_assets_route(
         offset=offset,
     )
     if not ensure_graph:
-        return rows
-    return [_repair_asset_graph_if_possible(row) for row in rows]
+        return [_asset_list_payload(row) for row in rows]
+    repaired = [_ensure_heic_preview(_repair_asset_graph_if_possible(row)) for row in rows]
+    return [
+        {
+            **_asset_list_payload(row),
+            "landing_path": _asset_primary_landing_path(row),
+        }
+        for row in repaired
+    ]
+
+
+def _asset_list_payload(row: dict) -> dict:
+    display_url = supabase_client.asset_display_url(row)
+    return {
+        **row,
+        "url": display_url,
+        "display_url": display_url,
+        "approval_status": (row.get("metadata") or {}).get("validation_status") or row.get("approval_status"),
+        "workflow_status": row.get("status"),
+    }
 
 
 # ── GET /assets/{id} ──────────────────────────────────────────────────────
@@ -698,6 +995,7 @@ def get_asset_route(asset_id: str, request: Request):
     asset = supabase_client.get_asset(asset_id)
     if not asset:
         raise HTTPException(404, "Asset nao encontrado")
+    asset = _ensure_heic_preview(asset)
     if asset.get("persona_id"):
         auth_service.assert_persona_access(request, persona_id=asset["persona_id"])
     readings = supabase_client.list_asset_readings(asset_id)
@@ -884,15 +1182,36 @@ def connect_asset(asset_id: str, body: ConnectBody, request: Request):
     if not parent:
         raise HTTPException(404, "Parent node nao encontrado.")
 
+    previous_parent_node_id = _asset_graph_ref(asset, "parent_node_id")
+    previous_parent_edge_id = _asset_graph_ref(asset, "parent_edge_id")
+    relation_type = body.relation_type or "uses_asset"
+    actor = current_actor(request)
+
     # Guard: never let a non-asset source land directly on Gallery via this endpoint.
     if (parent.get("node_type") or "") == "gallery":
+        _log_asset_flow(
+            "asset_connect_rejected_gallery",
+            asset_id=asset_id,
+            persona_id=asset.get("persona_id"),
+            payload={
+                "actor": actor,
+                "context": {
+                    "knowledge_node_id": knowledge_node_id,
+                    "attempted_parent_node_id": parent.get("id"),
+                    "attempted_parent_slug": parent.get("slug"),
+                    "attempted_relation_type": relation_type,
+                },
+                "reason": "Gallery so aceita asset -> gallery.",
+            },
+            level="warn",
+        )
         raise HTTPException(
             422,
             {"error": "gallery_invalid_target", "message": "Gallery so aceita asset -> gallery."},
         )
 
     edge = supabase_client.upsert_knowledge_edge(
-        parent["id"], knowledge_node_id, body.relation_type or "uses_asset",
+        parent["id"], knowledge_node_id, relation_type,
         persona_id=asset.get("persona_id"),
         weight=0.8,
         metadata={"created_from": "asset_connect", "primary_tree": True},
@@ -922,6 +1241,30 @@ def connect_asset(asset_id: str, body: ConnectBody, request: Request):
         parent_node_id=parent["id"],
         parent_edge_id=(edge or {}).get("id") if isinstance(edge, dict) else None,
     )
+
+    before = {"parent_node_id": previous_parent_node_id, "parent_edge_id": previous_parent_edge_id}
+    after = {
+        "parent_node_id": parent.get("id"),
+        "parent_edge_id": (edge or {}).get("id") if isinstance(edge, dict) else None,
+    }
+    _log_asset_flow(
+        "asset_connected",
+        asset_id=asset_id,
+        persona_id=asset.get("persona_id"),
+        payload={
+            "actor": actor,
+            "before": before,
+            "after": after,
+            "diff": summarize_diff(before, after),
+            "context": {
+                "knowledge_node_id": knowledge_node_id,
+                "parent_node_type": parent.get("node_type"),
+                "parent_slug": parent.get("slug"),
+                "relation_type": relation_type,
+                "gallery_edge_id": (gallery_edge or {}).get("id") if isinstance(gallery_edge, dict) else None,
+            },
+        },
+    )
     return {"success": True, "edge": edge, "gallery_edge": gallery_edge}
 
 
@@ -939,6 +1282,56 @@ class BindSlotBody(BaseModel):
     collection_slug: Optional[str] = None  # required for hero / campaign_footer
     position: int = 0
     label: Optional[str] = None
+
+
+class RebindPathBody(BindSlotBody):
+    remove_existing: bool = True
+
+
+class AssetUpdateBody(BaseModel):
+    asset_type: Optional[str] = None
+    asset_function: Optional[str] = None
+
+
+def _validate_asset_path(asset: dict) -> dict:
+    knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
+    gallery_edge_id = _asset_graph_ref(asset, "gallery_edge_id")
+    errors: list[str] = []
+    landing_connections: list[dict] = []
+    if not knowledge_node_id:
+        errors.append("Asset sem node no grafo.")
+    if not gallery_edge_id:
+        errors.append("Asset sem edge para Gallery.")
+    if not knowledge_node_id:
+        return {"ok": False, "errors": errors, "connections": []}
+
+    edges = supabase_client.list_edges_for_nodes([knowledge_node_id], limit=500)
+    parent_ids = {
+        edge.get("source_node_id")
+        for edge in edges
+        if edge.get("target_node_id") == knowledge_node_id
+        and edge.get("relation_type") not in {"gallery_asset", "belongs_to_persona"}
+    }
+    parents = {row["id"]: row for row in supabase_client.list_knowledge_nodes_by_ids(list(parent_ids))}
+    for edge in edges:
+        if edge.get("target_node_id") != knowledge_node_id:
+            continue
+        if edge.get("relation_type") in {"gallery_asset", "belongs_to_persona"}:
+            continue
+        slot = slot_for_metadata(edge.get("metadata") or {})
+        if not slot:
+            continue
+        parent = parents.get(edge.get("source_node_id"))
+        if not parent:
+            continue
+        expected_parent_type = slot_config(slot)["parent_node_type"]
+        parent_type = (parent.get("node_type") or "").lower()
+        if parent_type == expected_parent_type:
+            landing_connections.append(_asset_connection_row(edge, parent, slot))
+
+    if not landing_connections:
+        errors.append("Asset sem caminho valido de landing/cardapio.")
+    return {"ok": not errors, "errors": errors, "connections": landing_connections}
 
 
 def _ensure_campaign_node_for_slot(
@@ -991,6 +1384,104 @@ def _ensure_campaign_node_for_slot(
     return node
 
 
+def _ensure_collection_campaign_parent(
+    persona_id: str,
+    collection_slug: str,
+    *,
+    label: Optional[str],
+) -> dict:
+    """Return the canonical campaign that owns landing slots for a collection.
+
+    `hero` and `campaign_footer` are landing slots, not graph nodes. Older
+    flows created synthetic `landing-hero-*` campaign nodes; new bindings go
+    directly under the campaign that represents the catalog/landing campaign.
+    """
+    campaign = supabase_client.get_knowledge_node_by_slug(
+        collection_slug,
+        persona_id=persona_id,
+        node_type="campaign",
+    )
+    if campaign:
+        return campaign
+
+    collection = supabase_client.get_knowledge_node_by_slug(
+        collection_slug,
+        persona_id=persona_id,
+        node_type="product_collection",
+    )
+    if not collection:
+        raise HTTPException(404, f"collection nao encontrada: {collection_slug}")
+
+    metadata = collection.get("metadata") or {}
+    campaign_label = collection.get("title") or metadata.get("display_name") or collection_slug
+    campaign_payload = {
+        "persona_id": persona_id,
+        "node_type": "campaign",
+        "slug": collection_slug,
+        "title": campaign_label,
+        "summary": collection.get("summary") or f"Campanha principal da landing/catalogo {collection_slug}.",
+        "tags": sorted(set((collection.get("tags") or []) + ["landing", "catalog", "main_campaign"])),
+        "metadata": {
+            "collection_slug": collection_slug,
+            "product_collection_node_id": collection.get("id"),
+            "campaign_role": "primary_catalog",
+            "page_binding": {
+                "section": "menu.collection",
+                "component": "cardapio",
+                "label": campaign_label,
+            },
+            "created_via": "bind_slot_campaign_parent",
+        },
+        "status": collection.get("status") or "active",
+        "level": 30,
+        "importance": 0.85,
+        "confidence": 1.0,
+    }
+    campaign = supabase_client.upsert_knowledge_node(campaign_payload)
+    if not campaign or not campaign.get("id"):
+        raise HTTPException(502, "Falha ao criar campanha principal da colecao.")
+    return campaign
+
+
+def _resolve_brand_parent(persona_id: str, target_slug: Optional[str]) -> dict:
+    """Brand slots target a brand node. If the caller did not pass target_slug
+    we accept the persona's single brand (most personas have exactly one). When
+    there is more than one brand on the persona we require the slug to be
+    explicit, since auto-picking would be ambiguous."""
+    if target_slug:
+        node = supabase_client.get_knowledge_node_by_slug(
+            target_slug, persona_id=persona_id, node_type="brand",
+        )
+        if not node:
+            raise HTTPException(404, f"brand nao encontrado: {target_slug}")
+        return node
+    try:
+        rows = (
+            supabase_client.get_client()
+            .table("knowledge_nodes")
+            .select("*")
+            .eq("persona_id", persona_id)
+            .eq("node_type", "brand")
+            .neq("status", "archived")
+            .limit(10)
+            .execute()
+            .data or []
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Falha ao localizar brand da persona: {exc}") from exc
+    if not rows:
+        raise HTTPException(
+            404,
+            "Persona sem node 'brand'. Crie um brand antes de bindar slots brand_*.",
+        )
+    if len(rows) > 1:
+        raise HTTPException(
+            409,
+            "Persona tem mais de um brand. Informe target_slug do brand desejado.",
+        )
+    return rows[0]
+
+
 def _resolve_slot_parent(
     persona_id: str,
     slot: LandingSlot,
@@ -1001,6 +1492,8 @@ def _resolve_slot_parent(
 ) -> dict:
     cfg = slot_config(slot)
     parent_type = cfg["parent_node_type"]
+    if parent_type == "brand":
+        return _resolve_brand_parent(persona_id, target_slug)
     if parent_type in {"category", "product"}:
         if not target_slug:
             raise HTTPException(422, f"{slot.value} precisa de target_slug ({parent_type} slug).")
@@ -1010,19 +1503,21 @@ def _resolve_slot_parent(
         if not node:
             raise HTTPException(404, f"{parent_type} nao encontrado: {target_slug}")
         return node
-    # hero / footer → campaign node scoped to collection
+    # hero / footer → canonical campaign for the collection. The slot lives in
+    # edge metadata; it must not materialise as a separate "hero" graph node.
     if not collection_slug:
         raise HTTPException(422, f"{slot.value} precisa de collection_slug.")
-    return _ensure_campaign_node_for_slot(persona_id, slot, collection_slug, label=label)
+    return _ensure_collection_campaign_parent(persona_id, collection_slug, label=label)
 
 
 def _asset_connection_row(edge: dict, parent_node: dict, slot: Optional[LandingSlot]) -> dict:
     meta = edge.get("metadata") or {}
     binding = meta.get("page_binding") or {}
+    parent_type = parent_node.get("node_type")
     return {
         "edge_id": edge.get("id"),
         "relation_type": edge.get("relation_type"),
-        "slot_key": (slot.value if slot else binding.get("slot_key") or binding.get("section")),
+        "slot_key": binding.get("slot_key") or (slot.value if slot else binding.get("section")),
         "page_section": binding.get("section") or meta.get("page_section"),
         "label": binding.get("label"),
         "position": binding.get("position"),
@@ -1030,11 +1525,155 @@ def _asset_connection_row(edge: dict, parent_node: dict, slot: Optional[LandingS
         "parent_node": {
             "id": parent_node.get("id"),
             "slug": parent_node.get("slug"),
-            "node_type": parent_node.get("node_type"),
+            "node_type": parent_type,
             "title": parent_node.get("title"),
             "collection_slug": (parent_node.get("metadata") or {}).get("collection_slug"),
         },
+        "slot_options": slots_for_parent_type(parent_type),
     }
+
+
+def _asset_primary_landing_path(asset: dict) -> Optional[dict]:
+    knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
+    if not knowledge_node_id:
+        return None
+    try:
+        edges = supabase_client.list_edges_for_nodes([knowledge_node_id], limit=500)
+    except Exception as exc:
+        logger.warning("asset landing path lookup failed asset=%s: %s", asset.get("id"), exc)
+        return None
+    parent_ids = [
+        edge.get("source_node_id")
+        for edge in edges
+        if edge.get("target_node_id") == knowledge_node_id
+        and edge.get("relation_type") not in {"gallery_asset", "belongs_to_persona"}
+    ]
+    parents = {row["id"]: row for row in supabase_client.list_knowledge_nodes_by_ids(parent_ids)} if parent_ids else {}
+    for edge in edges:
+        if edge.get("target_node_id") != knowledge_node_id:
+            continue
+        if edge.get("relation_type") in {"gallery_asset", "belongs_to_persona"}:
+            continue
+        parent = parents.get(edge.get("source_node_id"))
+        if not parent:
+            continue
+        slot = slot_for_metadata(edge.get("metadata") or {})
+        row = _asset_connection_row(edge, parent, slot)
+        cfg = slot_config(slot) if slot else {}
+        return {
+            "edge_id": row.get("edge_id"),
+            "slot_key": row.get("slot_key"),
+            "slot_label": cfg.get("label") or row.get("label"),
+            "asset_function": cfg.get("asset_function"),
+            "parent_node_type": row.get("parent_node", {}).get("node_type"),
+            "target_slug": row.get("parent_node", {}).get("slug"),
+            "collection_slug": row.get("parent_node", {}).get("collection_slug"),
+            "label": row.get("parent_node", {}).get("title") or row.get("parent_node", {}).get("slug"),
+        }
+    return None
+
+
+def _landing_target_row(slot: LandingSlot, node: dict, *, collection_slug: Optional[str] = None) -> dict:
+    cfg = slot_config(slot)
+    metadata = node.get("metadata") or {}
+    resolved_collection = collection_slug or metadata.get("collection_slug")
+    return {
+        "slot_key": slot.value,
+        "slot_label": cfg["label"],
+        "parent_node_type": cfg["parent_node_type"],
+        "target_slug": node.get("slug"),
+        "collection_slug": resolved_collection,
+        "label": node.get("title") or node.get("slug") or node.get("id"),
+        "node_id": node.get("id"),
+    }
+
+
+def _list_landing_targets(persona_id: str) -> list[dict]:
+    """Return concrete targets the asset can be rebound to from the preview UI."""
+    targets: list[dict] = []
+    brands = supabase_client.list_product_collection_nodes(persona_id=persona_id, node_type="brand", limit=100)
+    collections = supabase_client.list_product_collection_nodes(persona_id=persona_id, node_type="product_collection", limit=200)
+    categories = supabase_client.list_product_collection_nodes(persona_id=persona_id, node_type="category", limit=500)
+    products = supabase_client.list_product_nodes(persona_id=persona_id, limit=1000)
+
+    for brand in brands:
+        for slot in (LandingSlot.BRAND_LOGO, LandingSlot.BRAND_COVER, LandingSlot.BRAND_SECONDARY):
+            targets.append(_landing_target_row(slot, brand))
+    for collection in collections:
+        collection_slug = collection.get("slug") or (collection.get("metadata") or {}).get("collection_slug")
+        if not collection_slug:
+            continue
+        targets.append(_landing_target_row(LandingSlot.HERO, collection, collection_slug=collection_slug))
+        targets.append(_landing_target_row(LandingSlot.CAMPAIGN_FOOTER, collection, collection_slug=collection_slug))
+    for category in categories:
+        targets.append(_landing_target_row(LandingSlot.PRODUCT_GROUP_COVER, category))
+    for product in products:
+        targets.append(_landing_target_row(LandingSlot.PRODUCT_IMAGE, product))
+    return targets
+
+
+def _delete_asset_parent_edges(asset_id: str, knowledge_node_id: str) -> list[str]:
+    removed_ids: list[str] = []
+    edges = supabase_client.list_edges_for_nodes([knowledge_node_id], limit=1000)
+    for edge in edges:
+        if edge.get("target_node_id") != knowledge_node_id:
+            continue
+        if edge.get("relation_type") in {"gallery_asset", "belongs_to_persona"}:
+            continue
+        if supabase_client.delete_knowledge_edge(edge.get("id")):
+            removed_ids.append(edge["id"])
+
+    asset = supabase_client.get_asset(asset_id) or {}
+    metadata = dict(asset.get("metadata") or {})
+    graph_meta = dict(metadata.get("graph") or {})
+    metadata.pop("parent_node_id", None)
+    metadata.pop("parent_edge_id", None)
+    graph_meta.pop("parent_node_id", None)
+    graph_meta.pop("parent_edge_id", None)
+    if graph_meta:
+        metadata["graph"] = graph_meta
+    else:
+        metadata.pop("graph", None)
+    try:
+        supabase_client.update_asset(asset_id, {"metadata": metadata})
+    except Exception as exc:
+        logger.warning("clearing asset parent refs failed asset=%s: %s", asset_id, exc)
+    return removed_ids
+
+
+def _remove_existing_slot_edges(
+    *,
+    parent: dict,
+    asset_node_id: str,
+    slot: LandingSlot,
+    relation_type: str,
+) -> list[str]:
+    """Keep landing slots singleton per parent.
+
+    A product card must have one current image. Binding a new asset to the same
+    product/slot removes previous active slot edges so the menu payload cannot
+    return stale images before the new one.
+    """
+    parent_id = parent.get("id")
+    if not parent_id or not asset_node_id:
+        return []
+    removed: list[str] = []
+    edges = supabase_client.list_edges_for_nodes(
+        [parent_id],
+        relation_types=[relation_type],
+        limit=500,
+    )
+    for edge in edges:
+        if edge.get("source_node_id") != parent_id:
+            continue
+        if edge.get("target_node_id") == asset_node_id:
+            continue
+        edge_slot = slot_for_metadata(edge.get("metadata") or {})
+        if edge_slot != slot and not (slot == LandingSlot.PRODUCT_IMAGE and edge.get("relation_type") == "product_has_asset"):
+            continue
+        if supabase_client.delete_knowledge_edge(edge["id"]):
+            removed.append(edge["id"])
+    return removed
 
 
 @router.post("/{asset_id}/bind-slot")
@@ -1065,7 +1704,27 @@ def bind_asset_to_slot(asset_id: str, body: BindSlotBody, request: Request):
     )
 
     cfg = slot_config(slot)
+    removed_previous = _remove_existing_slot_edges(
+        parent=parent,
+        asset_node_id=knowledge_node_id,
+        slot=slot,
+        relation_type=cfg["relation_type"],
+    )
+    if slot == LandingSlot.PRODUCT_IMAGE:
+        removed_previous.extend(_remove_existing_slot_edges(
+            parent=parent,
+            asset_node_id=knowledge_node_id,
+            slot=slot,
+            relation_type="product_has_asset",
+        ))
     slot_metadata = edge_metadata_for_slot(slot, position=body.position, label=body.label)
+    if slot == LandingSlot.PRODUCT_IMAGE:
+        binding = dict(slot_metadata.get("page_binding") or {})
+        target = parent.get("slug") or body.target_slug
+        if target:
+            binding["slot_key"] = f"{slot.value}:{target}"
+            binding["target_slug"] = target
+        slot_metadata["page_binding"] = binding
     edge = supabase_client.upsert_knowledge_edge(
         parent["id"],
         knowledge_node_id,
@@ -1082,19 +1741,203 @@ def bind_asset_to_slot(asset_id: str, body: BindSlotBody, request: Request):
         },
     )
     if not edge or not edge.get("id"):
+        _log_asset_flow(
+            "asset_slot_bind_failed",
+            asset_id=asset_id,
+            persona_id=persona_id,
+            payload={
+                "slot": slot.value,
+                "target_slug": body.target_slug,
+                "collection_slug": body.collection_slug,
+                "reason": "edge_upsert_empty",
+            },
+            level="error",
+        )
         raise HTTPException(502, "Falha ao criar edge do slot.")
 
     asset_metadata = {**(asset.get("metadata") or {}), "asset_function": cfg["asset_function"]}
     try:
         supabase_client.update_asset(asset_id, {"metadata": asset_metadata})
+        supabase_client.update_asset_graph_refs(
+            asset_id,
+            knowledge_node_id=knowledge_node_id,
+            parent_node_id=parent["id"],
+            parent_edge_id=edge["id"],
+        )
     except Exception as exc:
         logger.warning("update_asset metadata failed asset=%s: %s", asset_id, exc)
+        _log_asset_flow(
+            "asset_slot_metadata_update_failed",
+            asset_id=asset_id,
+            persona_id=persona_id,
+            payload={"edge_id": edge.get("id"), "error": str(exc)},
+            level="warn",
+        )
+
+    _log_asset_flow(
+        "asset_slot_bound",
+        asset_id=asset_id,
+        persona_id=persona_id,
+        payload={
+            "edge_id": edge.get("id"),
+            "slot": slot.value,
+            "slot_instance_key": (edge.get("metadata") or {}).get("page_binding", {}).get("slot_key"),
+            "target_slug": parent.get("slug") or body.target_slug,
+            "parent_node_id": parent.get("id"),
+            "parent_node_type": parent.get("node_type"),
+            "removed_previous_edge_ids": removed_previous,
+            "relation_type": cfg["relation_type"],
+        },
+    )
 
     return {
         "success": True,
         "edge": edge,
         "slot": slot.value,
+        "removed_previous_edge_ids": removed_previous,
         "connection": _asset_connection_row(edge, parent, slot),
+    }
+
+
+@router.post("/{asset_id}/rebind-path")
+def rebind_asset_path(asset_id: str, body: RebindPathBody, request: Request):
+    """Replace the asset's canonical catalog path with one concrete slot target."""
+    slot = slot_for_key(body.slot)
+    if not slot:
+        raise HTTPException(422, f"Slot invalido: {body.slot}")
+
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    persona_id = asset.get("persona_id")
+    if not persona_id:
+        raise HTTPException(422, "Asset sem persona nao pode ser conectado a um caminho.")
+    auth_service.assert_persona_access(request, persona_id=persona_id)
+
+    knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
+    if not knowledge_node_id:
+        raise HTTPException(409, "Asset ainda nao foi promovido para o grafo. Use ensure-gallery primeiro.")
+
+    parent = _resolve_slot_parent(
+        persona_id,
+        slot,
+        target_slug=body.target_slug,
+        collection_slug=body.collection_slug,
+        label=body.label,
+    )
+    cfg = slot_config(slot)
+    removed_existing = _delete_asset_parent_edges(asset_id, knowledge_node_id) if body.remove_existing else []
+    removed_previous = _remove_existing_slot_edges(
+        parent=parent,
+        asset_node_id=knowledge_node_id,
+        slot=slot,
+        relation_type=cfg["relation_type"],
+    )
+    if slot == LandingSlot.PRODUCT_IMAGE:
+        removed_previous.extend(_remove_existing_slot_edges(
+            parent=parent,
+            asset_node_id=knowledge_node_id,
+            slot=slot,
+            relation_type="product_has_asset",
+        ))
+    slot_metadata = edge_metadata_for_slot(slot, position=body.position, label=body.label)
+    binding = dict(slot_metadata.get("page_binding") or {})
+    target = parent.get("slug") or body.target_slug
+    if slot == LandingSlot.PRODUCT_IMAGE and target:
+        binding["slot_key"] = f"{slot.value}:{target}"
+        binding["target_slug"] = target
+    if (parent.get("metadata") or {}).get("collection_slug"):
+        binding["collection_slug"] = (parent.get("metadata") or {}).get("collection_slug")
+    slot_metadata["page_binding"] = binding
+
+    edge = supabase_client.upsert_knowledge_edge(
+        parent["id"],
+        knowledge_node_id,
+        cfg["relation_type"],
+        persona_id=persona_id,
+        weight=0.85,
+        metadata={
+            "created_from": "rebind_path",
+            "primary_tree": True,
+            "direction": "branch_to_asset",
+            "parent_slug": parent.get("slug"),
+            "parent_type": parent.get("node_type"),
+            "status": "active",
+            **slot_metadata,
+        },
+    )
+    if not edge or not edge.get("id"):
+        _log_asset_flow(
+            "asset_path_rebind_failed",
+            asset_id=asset_id,
+            persona_id=persona_id,
+            payload={
+                "slot": slot.value,
+                "target_slug": body.target_slug,
+                "collection_slug": body.collection_slug,
+                "reason": "edge_upsert_empty",
+            },
+            level="error",
+        )
+        raise HTTPException(502, "Falha ao criar edge do caminho.")
+
+    asset_metadata = {
+        **(asset.get("metadata") or {}),
+        "asset_function": cfg["asset_function"],
+        "asset_type": asset.get("type") or (asset.get("metadata") or {}).get("asset_type") or "image",
+    }
+    updated_asset = supabase_client.update_asset(asset_id, {
+        "type": asset_metadata["asset_type"],
+        "metadata": {k: v for k, v in asset_metadata.items() if v is not None},
+    })
+    supabase_client.update_asset_graph_refs(
+        asset_id,
+        knowledge_node_id=knowledge_node_id,
+        parent_node_id=parent["id"],
+        parent_edge_id=edge["id"],
+    )
+    try:
+        node = supabase_client.get_knowledge_node(knowledge_node_id) or {}
+        supabase_client.update_knowledge_node(
+            knowledge_node_id,
+            {"metadata": {**(node.get("metadata") or {}), **asset_metadata}},
+        )
+    except Exception as exc:
+        logger.warning("rebind asset node metadata failed asset=%s node=%s: %s", asset_id, knowledge_node_id, exc)
+        _log_asset_flow(
+            "asset_node_metadata_update_failed",
+            asset_id=asset_id,
+            persona_id=persona_id,
+            payload={"edge_id": edge.get("id"), "knowledge_node_id": knowledge_node_id, "error": str(exc)},
+            level="warn",
+        )
+
+    connection = _asset_connection_row(edge, parent, slot)
+    _log_asset_flow(
+        "asset_path_rebound",
+        asset_id=asset_id,
+        persona_id=persona_id,
+        payload={
+            "edge_id": edge.get("id"),
+            "slot": slot.value,
+            "slot_instance_key": (edge.get("metadata") or {}).get("page_binding", {}).get("slot_key"),
+            "target_slug": parent.get("slug") or body.target_slug,
+            "parent_node_id": parent.get("id"),
+            "parent_node_type": parent.get("node_type"),
+            "removed_existing_edge_ids": removed_existing,
+            "removed_previous_edge_ids": removed_previous,
+            "relation_type": cfg["relation_type"],
+        },
+    )
+    return {
+        "success": True,
+        "asset": updated_asset,
+        "edge": edge,
+        "slot": slot.value,
+        "connection": connection,
+        "landing_path": _asset_primary_landing_path(updated_asset or supabase_client.get_asset(asset_id) or asset),
+        "removed_existing_edge_ids": removed_existing,
+        "removed_previous_edge_ids": removed_previous,
     }
 
 
@@ -1126,7 +1969,8 @@ def unbind_asset_slot(asset_id: str, slot_key: str, request: Request, target_slu
         if edge.get("target_node_id") != knowledge_node_id:
             continue
         edge_slot = slot_for_metadata(edge.get("metadata") or {})
-        if edge_slot != slot:
+        relation_type = edge.get("relation_type")
+        if edge_slot != slot and not (slot == LandingSlot.PRODUCT_IMAGE and relation_type == "product_has_asset"):
             continue
         if target_slug:
             parent_node = supabase_client.get_knowledge_node(edge.get("source_node_id"))
@@ -1135,6 +1979,18 @@ def unbind_asset_slot(asset_id: str, slot_key: str, request: Request, target_slu
         if supabase_client.delete_knowledge_edge(edge["id"]):
             removed_ids.append(edge["id"])
 
+    _log_asset_flow(
+        "asset_slot_unbound",
+        asset_id=asset_id,
+        persona_id=persona_id,
+        payload={
+            "slot": slot.value,
+            "requested_slot_key": slot_key,
+            "target_slug": target_slug,
+            "removed_edge_ids": removed_ids,
+            "removed_count": len(removed_ids),
+        },
+    )
     return {"success": True, "removed": len(removed_ids), "edge_ids": removed_ids}
 
 
@@ -1158,7 +2014,8 @@ def list_asset_connections(asset_id: str, request: Request):
     parent_ids = {
         edge.get("source_node_id")
         for edge in edges
-        if edge.get("target_node_id") == knowledge_node_id and edge.get("relation_type") != "gallery_asset"
+        if edge.get("target_node_id") == knowledge_node_id
+        and edge.get("relation_type") not in {"gallery_asset", "belongs_to_persona"}
     }
     parent_ids.discard(None)
     parents = {row["id"]: row for row in supabase_client.list_knowledge_nodes_by_ids(list(parent_ids))}
@@ -1167,7 +2024,7 @@ def list_asset_connections(asset_id: str, request: Request):
     for edge in edges:
         if edge.get("target_node_id") != knowledge_node_id:
             continue
-        if edge.get("relation_type") == "gallery_asset":
+        if edge.get("relation_type") in {"gallery_asset", "belongs_to_persona"}:
             continue
         parent_node = parents.get(edge.get("source_node_id"))
         if not parent_node:
@@ -1179,4 +2036,305 @@ def list_asset_connections(asset_id: str, request: Request):
         "asset_id": asset_id,
         "knowledge_node_id": knowledge_node_id,
         "connections": connections,
+    }
+
+
+@router.get("/{asset_id}/landing-targets")
+def list_asset_landing_targets(asset_id: str, request: Request):
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    persona_id = asset.get("persona_id")
+    if not persona_id:
+        return {"asset_id": asset_id, "targets": []}
+    auth_service.assert_persona_access(request, persona_id=persona_id)
+    return {"asset_id": asset_id, "targets": _list_landing_targets(persona_id)}
+
+
+@router.post("/{asset_id}/validate-path")
+def validate_asset_path_route(asset_id: str, request: Request):
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    persona_id = asset.get("persona_id")
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+    validation = _validate_asset_path(asset)
+    _log_asset_flow(
+        "asset_path_validated",
+        asset_id=asset_id,
+        persona_id=persona_id,
+        payload={
+            "ok": validation.get("ok"),
+            "errors": validation.get("errors") or [],
+            "connection_count": len(validation.get("connections") or []),
+        },
+        level="info" if validation.get("ok") else "warn",
+    )
+    return {"asset_id": asset_id, **validation}
+
+
+def _validate_asset_approval(asset: dict) -> dict:
+    validation = _validate_asset_path(asset)
+    metadata = asset.get("metadata") or {}
+    asset_type = asset.get("type") or metadata.get("asset_type") or metadata.get("kind")
+    errors = list(validation.get("errors") or [])
+    if not asset_type:
+        errors.append("Asset sem tipo definido.")
+    return {**validation, "ok": not errors, "errors": errors}
+
+
+@router.patch("/{asset_id}")
+def update_asset_route(asset_id: str, body: AssetUpdateBody, request: Request):
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    persona_id = asset.get("persona_id")
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+
+    before_metadata = dict(asset.get("metadata") or {})
+    before_view = {
+        "type": asset.get("type"),
+        "asset_type": before_metadata.get("asset_type"),
+        "asset_function": before_metadata.get("asset_function"),
+        "kind": before_metadata.get("kind"),
+    }
+
+    metadata = dict(before_metadata)
+    patch: dict = {}
+    if body.asset_type is not None:
+        asset_type = body.asset_type.strip() if isinstance(body.asset_type, str) else body.asset_type
+        patch["type"] = asset_type or None
+        metadata["asset_type"] = asset_type or None
+        metadata["kind"] = asset_type or metadata.get("kind")
+    if body.asset_function is not None:
+        asset_function = body.asset_function.strip() if isinstance(body.asset_function, str) else body.asset_function
+        metadata["asset_function"] = asset_function or None
+    patch["metadata"] = {k: v for k, v in metadata.items() if v is not None}
+    updated = supabase_client.update_asset(asset_id, patch)
+
+    node_id = _asset_graph_ref(updated or asset, "knowledge_node_id")
+    if node_id:
+        try:
+            node = supabase_client.get_knowledge_node(node_id) or {}
+            supabase_client.update_knowledge_node(
+                node_id,
+                {
+                    "metadata": {**(node.get("metadata") or {}), **patch["metadata"]},
+                    "node_type": "asset",
+                },
+            )
+        except Exception as exc:
+            logger.warning("update asset node metadata failed asset=%s node=%s: %s", asset_id, node_id, exc)
+
+    item_id = metadata.get("knowledge_item_id")
+    if item_id:
+        try:
+            item_patch = {"metadata": patch["metadata"]}
+            if body.asset_type is not None:
+                item_patch["asset_type"] = patch.get("type")
+            if body.asset_function is not None:
+                item_patch["asset_function"] = patch["metadata"].get("asset_function")
+            supabase_client.update_knowledge_item(item_id, item_patch)
+        except Exception as exc:
+            logger.warning("update asset knowledge_item metadata failed asset=%s item=%s: %s", asset_id, item_id, exc)
+
+    after_metadata = (updated or {**asset, **patch}).get("metadata") or metadata
+    after_view = {
+        "type": (updated or {**asset, **patch}).get("type"),
+        "asset_type": after_metadata.get("asset_type"),
+        "asset_function": after_metadata.get("asset_function"),
+        "kind": after_metadata.get("kind"),
+    }
+    _log_asset_flow(
+        "asset_updated",
+        asset_id=asset_id,
+        persona_id=persona_id,
+        payload={
+            "actor": current_actor(request),
+            "before": before_view,
+            "after": after_view,
+            "diff": summarize_diff(before_view, after_view),
+            "context": {
+                "knowledge_node_id": node_id,
+                "knowledge_item_id": item_id,
+            },
+        },
+    )
+
+    return {"success": True, "asset": updated or {**asset, **patch}}
+
+
+@router.post("/{asset_id}/approve")
+def approve_asset_route(asset_id: str, request: Request):
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    persona_id = asset.get("persona_id")
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+    validation = _validate_asset_approval(asset)
+    if not validation["ok"]:
+        raise HTTPException(422, {"error": "invalid_asset_path", "errors": validation["errors"]})
+
+    user = auth_service.current_user(request)
+    metadata = {
+        **(asset.get("metadata") or {}),
+        "validation_status": "approved",
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "approved_by": user.get("id"),
+    }
+    patch = {"metadata": metadata}
+    # Live DB status CHECK may not include "approved"; keep the durable approval
+    # status in metadata and leave status as ready for older schemas.
+    if (asset.get("status") or "") in {"pending", "reading", "failed", ""}:
+        patch["status"] = "ready"
+    updated = supabase_client.update_asset(asset_id, patch)
+
+    item_id = metadata.get("knowledge_item_id")
+    if item_id:
+        try:
+            supabase_client.update_knowledge_item(item_id, {"status": "approved", "metadata": metadata})
+        except Exception as exc:
+            logger.warning("approve asset knowledge_item update failed asset=%s item=%s: %s", asset_id, item_id, exc)
+
+    node_id = _asset_graph_ref(updated or asset, "knowledge_node_id")
+    if node_id:
+        try:
+            supabase_client.update_knowledge_node(node_id, {"status": "active", "metadata": metadata})
+        except Exception as exc:
+            logger.warning("approve asset node update failed asset=%s node=%s: %s", asset_id, node_id, exc)
+
+    _log_asset_flow(
+        "asset_approved",
+        asset_id=asset_id,
+        persona_id=persona_id,
+        payload={
+            "knowledge_node_id": node_id,
+            "previous_workflow_status": asset.get("status"),
+            "workflow_status": (updated or asset).get("status"),
+            "approval_status": "approved",
+            "knowledge_item_id": item_id,
+        },
+    )
+
+    return {
+        "success": True,
+        "asset": updated or {**asset, "metadata": metadata},
+        "validation": validation,
+    }
+
+
+@router.post("/{asset_id}/reject")
+def reject_asset_route(asset_id: str, request: Request):
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    persona_id = asset.get("persona_id")
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+
+    user = auth_service.current_user(request)
+    metadata = {
+        **(asset.get("metadata") or {}),
+        "validation_status": "rejected",
+        "rejected_at": datetime.now(timezone.utc).isoformat(),
+        "rejected_by": user.get("id"),
+    }
+    updated = supabase_client.update_asset(asset_id, {"status": "archived", "metadata": metadata})
+
+    item_id = metadata.get("knowledge_item_id")
+    if item_id:
+        try:
+            supabase_client.update_knowledge_item(item_id, {"status": "rejected", "metadata": metadata})
+        except Exception as exc:
+            logger.warning("reject asset knowledge_item update failed asset=%s item=%s: %s", asset_id, item_id, exc)
+
+    node_id = _asset_graph_ref(updated or asset, "knowledge_node_id")
+    if node_id:
+        try:
+            supabase_client.update_knowledge_node(node_id, {"status": "archived", "metadata": metadata})
+        except Exception as exc:
+            logger.warning("reject asset node update failed asset=%s node=%s: %s", asset_id, node_id, exc)
+
+    _log_asset_flow(
+        "asset_rejected",
+        asset_id=asset_id,
+        persona_id=persona_id,
+        payload={
+            "knowledge_node_id": node_id,
+            "previous_workflow_status": asset.get("status"),
+            "workflow_status": (updated or asset).get("status"),
+            "approval_status": "rejected",
+            "knowledge_item_id": item_id,
+        },
+    )
+
+    return {"success": True, "asset": updated or {**asset, "status": "archived", "metadata": metadata}}
+
+
+@router.delete("/{asset_id}")
+def delete_asset_route(asset_id: str, request: Request):
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    persona_id = asset.get("persona_id")
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+
+    client = supabase_client.get_client()
+    knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
+    removed_edges: list[str] = []
+    if knowledge_node_id:
+        for edge in supabase_client.list_edges_for_nodes([knowledge_node_id], limit=1000):
+            if supabase_client.delete_knowledge_edge(edge.get("id")):
+                removed_edges.append(edge["id"])
+        supabase_client.delete_knowledge_node(knowledge_node_id)
+        _log_asset_flow(
+            "asset_deleted_graph_edges_removed",
+            asset_id=asset_id,
+            persona_id=persona_id,
+            payload={
+                "knowledge_node_id": knowledge_node_id,
+                "removed_edge_ids": removed_edges,
+                "removed_count": len(removed_edges),
+            },
+            level="warn",
+        )
+
+    metadata = asset.get("metadata") or {}
+    knowledge_item_id = metadata.get("knowledge_item_id")
+    if knowledge_item_id:
+        try:
+            supabase_client.delete_knowledge_item(knowledge_item_id)
+        except Exception as exc:
+            logger.warning("delete asset knowledge_item failed asset=%s item=%s: %s", asset_id, knowledge_item_id, exc)
+
+    try:
+        supabase_client._execute_with_retry(client.table("asset_readings").delete().eq("asset_id", asset_id))
+    except Exception as exc:
+        logger.warning("delete asset_readings failed asset=%s: %s", asset_id, exc)
+
+    try:
+        supabase_client._execute_with_retry(client.table("assets").delete().eq("id", asset_id))
+    except Exception as exc:
+        raise HTTPException(502, f"Falha ao excluir asset: {exc}") from exc
+
+    bucket = asset.get("storage_bucket") or metadata.get("storage_bucket")
+    path = asset.get("storage_path") or metadata.get("storage_path")
+    storage_deleted = False
+    if bucket and path:
+        try:
+            client.storage.from_(bucket).remove([path])
+            storage_deleted = True
+        except Exception as exc:
+            logger.warning("delete asset storage failed asset=%s bucket=%s path=%s: %s", asset_id, bucket, path, exc)
+
+    return {
+        "success": True,
+        "asset_id": asset_id,
+        "knowledge_node_id": knowledge_node_id,
+        "removed_edge_ids": removed_edges,
+        "storage_deleted": storage_deleted,
     }
