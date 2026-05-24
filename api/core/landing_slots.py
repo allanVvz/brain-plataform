@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Canonical landing-page asset slots.
 
-A landing page (cardapio/baita, future cardapio/<persona>) has a fixed set of
-asset-bearing surfaces. Each surface is a *slot* with:
+A persona's catalog landing page (route /cardapio/<persona-slug> on the
+ai-brain-catalogo frontend) has a fixed set of asset-bearing surfaces.
+Each surface is a *slot* with:
 
   - a slot_key  — stable identifier consumed by the frontend
   - a parent node type — what kind of knowledge_node owns the slot

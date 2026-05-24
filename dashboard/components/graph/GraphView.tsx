@@ -115,29 +115,36 @@ function nodeSize(data: GraphNodeData): { w: number; h: number } {
 }
 
 function nodeToRank(data: GraphNodeData): number {
+  // Canonical fractal hierarchy (taxonomy migration 039 + knowledge_taxonomy.py):
+  //   persona -> brand -> briefing -> campaign -> audience
+  //           -> product_group -> product -> offer -> copy
+  //           -> {faq, gallery}
+  // Asset is a lateral layer (no specific rank — sits next to its parent).
+  // Legacy aliases (product_collection / category) collapse to product_group.
   const nodeType = String(data.node_type || data.content_type || "").toLowerCase();
   const topDownRank: Record<string, number> = {
     persona: 0,
     brand: 1,
     briefing: 2,
     campaign: 3,
-    product_collection: 4,
+    audience: 4,
+    product_group: 5,
+    product_collection: 5,
     category: 5,
     product: 6,
-    audience: 7,
-    offer: 8,
-    copy: 9,
-    faq: 10,
-    asset: 10,
-    embedded: 11,
-    gallery: 11,
-    rule: 12,
-    tone: 12,
-    entity: 13,
+    offer: 7,
+    copy: 8,
+    faq: 9,
+    gallery: 9,
+    asset: 9,
+    embedded: 10,
+    rule: 10,
+    tone: 10,
+    entity: 11,
   };
   if (topDownRank[nodeType] !== undefined) return topDownRank[nodeType];
-  if (nodeType === "knowledge_item" || nodeType === "kb_entry") return 13;
-  if (nodeType === "tag" || nodeType === "mention") return 14;
+  if (nodeType === "knowledge_item" || nodeType === "kb_entry") return 11;
+  if (nodeType === "tag" || nodeType === "mention") return 12;
   return getVisualHierarchyRank(nodeType);
 }
 

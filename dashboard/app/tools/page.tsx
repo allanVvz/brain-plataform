@@ -32,7 +32,7 @@ const INPUTS = [
 const OUTPUTS = [
   { key: "assets", label: "Assets / Gallery", desc: "Assets aprovados disponiveis para MCP e API" },
   { key: "faq", label: "FAQ Routing", desc: "FAQ como contexto de roteamento de mensagens" },
-  { key: "baita_cardapio_api", label: "Baita Cardapio API", desc: "Branch de produto para cardapio e landing page" },
+  { key: "catalogo_api", label: "Catalogo API", desc: "Branch de produto para o catalogo/landing page multi-persona" },
   { key: "figma_mcp", label: "Figma MCP", desc: "Diagramas e designs" },
   { key: "whatsapp", label: "WhatsApp", desc: "Canal de saída para leads" },
 ];

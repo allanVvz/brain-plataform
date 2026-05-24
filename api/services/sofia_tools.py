@@ -104,8 +104,62 @@ def _find_entry(plan: dict, slug: str) -> Optional[dict]:
 # Handlers                                                                    #
 # --------------------------------------------------------------------------- #
 
+def _canonical_parent_for(content_type: str) -> Optional[str]:
+    """Return the canonical parent type for a child type per the fractal hierarchy.
+    persona -> brand -> briefing -> campaign -> audience -> product_group ->
+    product -> offer -> copy -> {faq, gallery}. Asset is lateral (no parent rule)."""
+    from services import knowledge_taxonomy
+    child = knowledge_taxonomy.canonical_node_type(content_type)
+    for src, tgt, _rel in knowledge_taxonomy.PRIMARY_CHAIN:
+        if tgt == child:
+            return src
+    return None
+
+
+def _violates_hierarchy(plan: dict, content_type: str, parent_slug: Optional[str]) -> Optional[str]:
+    """Return a violation message, or None when the parent type is canonical for the child.
+
+    Asset and gallery are lateral and accept any parent. Persona is the root
+    (parent must be empty). Every other type must have a parent_slug, and that
+    parent's content_type must match PRIMARY_CHAIN. Aliases (product_collection,
+    category -> product_group) are normalized."""
+    from services import knowledge_taxonomy
+    child = knowledge_taxonomy.canonical_node_type(content_type) or content_type
+    if child == "asset":
+        return None  # lateral
+    if child == "persona":
+        if parent_slug:
+            return "persona e raiz da arvore — nao deve ter parent_slug"
+        return None
+    if not parent_slug:
+        expected = _canonical_parent_for(child)
+        return f"{child} exige parent_slug do tipo {expected}" if expected else None
+    entries_by_slug = {
+        str(e.get("slug") or "").lower(): e
+        for e in (plan.get("entries") or [])
+        if isinstance(e, dict)
+    }
+    parent_entry = entries_by_slug.get(str(parent_slug).strip().lower())
+    if not parent_entry:
+        return f"parent_slug '{parent_slug}' nao existe no plano — crie o pai antes"
+    parent_type = knowledge_taxonomy.canonical_node_type(parent_entry.get("content_type")) or parent_entry.get("content_type")
+    if not knowledge_taxonomy.is_primary_edge_allowed(parent_type, child, ""):
+        expected = _canonical_parent_for(child) or "?"
+        return (
+            f"hierarquia invalida: {parent_type} -> {child} nao e canonico "
+            f"(esperado pai {expected})"
+        )
+    return None
+
+
 def tool_create_node(session: dict, **args: Any) -> dict:
-    """Adiciona uma entry ao knowledge_plan."""
+    """Adiciona uma entry ao knowledge_plan.
+
+    Enforce canonical fractal hierarchy: persona->brand->briefing->campaign->
+    audience->product_group->product->offer->copy->{faq,gallery}. Asset is
+    lateral. Violations short-circuit with an explicit error so Sofia can
+    fix the chain before continuing — keeps the tree top-down and clean.
+    """
     kb = _kb()
     content_type = str(args.get("content_type") or "").strip().lower()
     if not content_type:
@@ -119,6 +173,16 @@ def tool_create_node(session: dict, **args: Any) -> dict:
     if _find_entry(plan, slug):
         return _err(f"ja existe entry com slug={slug}", slug=slug)
     parent_slug = args.get("parent_slug")
+    if parent_slug is not None and not str(parent_slug).strip():
+        parent_slug = None
+    violation = _violates_hierarchy(plan, content_type, parent_slug)
+    if violation:
+        return _err(
+            violation,
+            content_type=content_type,
+            parent_slug=parent_slug,
+            canonical_parent=_canonical_parent_for(content_type),
+        )
     tags = args.get("tags") or []
     metadata = args.get("metadata") or {}
     if not isinstance(metadata, dict):
@@ -141,7 +205,7 @@ def tool_create_node(session: dict, **args: Any) -> dict:
 
 
 def tool_set_parent(session: dict, **args: Any) -> dict:
-    """Atualiza metadata.parent_slug de uma entry existente."""
+    """Atualiza metadata.parent_slug de uma entry existente, validando hierarquia."""
     slug = str(args.get("slug") or "").strip()
     parent_slug = args.get("parent_slug")
     if not slug:
@@ -150,6 +214,11 @@ def tool_set_parent(session: dict, **args: Any) -> dict:
     entry = _find_entry(plan, slug)
     if not entry:
         return _err(f"entry nao encontrada: {slug}")
+    if parent_slug is not None and not str(parent_slug).strip():
+        parent_slug = None
+    violation = _violates_hierarchy(plan, str(entry.get("content_type") or ""), parent_slug)
+    if violation:
+        return _err(violation, slug=slug, parent_slug=parent_slug)
     kb = _kb()
     kb._set_entry_parent_slug(entry, str(parent_slug) if parent_slug else None)
     plan_state = _commit(session, plan, last_change=f"tool:set_parent {slug}->{parent_slug}")

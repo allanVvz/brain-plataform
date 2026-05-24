@@ -22,8 +22,11 @@ import { applyLanguage, getStoredLanguage, LANGUAGE_OPTIONS, type UiLanguage } f
 const PAN_KEY_STORAGE = "ai-brain-graph-pan-key";
 const THEME_STORAGE = "ai-brain-theme";
 const GRAPH_NODE_OPACITY_STORAGE = "ai-brain-graph-node-opacity";
-const DEFAULT_MENU_PERSONA = "baita-conveniencia";
-const MENU_COLLECTION = "cardapio-baita-v14";
+// Settings used to hardcode baita-conveniencia + cardapio-baita-v14.
+// Now reads the active persona from localStorage; collection_slug stays
+// optional so the menu endpoint derives it from persona.config.
+const PERSONA_SLUG_STORAGE = "ai-brain-persona-slug";
+const PERSONA_ID_STORAGE = "ai-brain-persona-id";
 
 type Theme = "clean" | "dark";
 
@@ -66,7 +69,7 @@ export default function SettingsPage() {
   const [apiOnline, setApiOnline] = useState(false);
   const [integrations, setIntegrations] = useState<any[]>([]);
   const [personas, setPersonas] = useState<any[]>([]);
-  const [personaSlug, setPersonaSlug] = useState(DEFAULT_MENU_PERSONA);
+  const [personaSlug, setPersonaSlug] = useState("");
   const [storedPersonaId, setStoredPersonaId] = useState("");
   const [collections, setCollections] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -81,8 +84,8 @@ export default function SettingsPage() {
     setTheme(savedTheme === "dark" ? "dark" : "clean");
     setLanguage(getStoredLanguage());
     setGraphNodeOpacity(window.localStorage.getItem(GRAPH_NODE_OPACITY_STORAGE) === "true");
-    setPersonaSlug(window.localStorage.getItem("ai-brain-persona-slug") || DEFAULT_MENU_PERSONA);
-    setStoredPersonaId(window.localStorage.getItem("ai-brain-persona-id") || "");
+    setPersonaSlug(window.localStorage.getItem(PERSONA_SLUG_STORAGE) || "");
+    setStoredPersonaId(window.localStorage.getItem(PERSONA_ID_STORAGE) || "");
   }, []);
 
   useEffect(() => {
@@ -130,9 +133,9 @@ export default function SettingsPage() {
           api.health().catch(() => null),
           api.integrations().catch(() => []),
           api.productCollections({ persona_slug: personaSlug }).catch(() => []),
-          api.productCategories({ persona_slug: personaSlug, collection_slug: MENU_COLLECTION }).catch(() => []),
-          api.products({ persona_slug: personaSlug, collection_slug: MENU_COLLECTION }).catch(() => []),
-          api.menuPayload(personaSlug, { collection_slug: MENU_COLLECTION }).catch((error) => {
+          api.productCategories({ persona_slug: personaSlug }).catch(() => []),
+          api.products({ persona_slug: personaSlug }).catch(() => []),
+          api.menuPayload(personaSlug).catch((error) => {
             setMenuError(error?.message || "Menu API indisponivel");
             return null;
           }),
@@ -186,7 +189,7 @@ export default function SettingsPage() {
           <div className="grid gap-3 sm:grid-cols-2">
             <StatusTile label="API" value={apiOnline ? "conectada" : "pendente"} ok={apiOnline} detail={formatUpdate(lastUpdate)} />
             <StatusTile label="Supabase" value={byService.supabase?.status || "unknown"} ok={byService.supabase?.status === "healthy"} detail={byService.supabase?.response_ms ? `${byService.supabase.response_ms}ms` : "sem metrica"} />
-            <StatusTile label="Colecao" value={String(countItems(collections))} ok={countItems(collections) > 0} detail={MENU_COLLECTION} />
+            <StatusTile label="Colecao" value={String(countItems(collections))} ok={countItems(collections) > 0} detail={menuPayload?.persona?.collections?.[0]?.slug || "auto (config da persona)"} />
             <StatusTile label="Menu API" value={menuConnected ? "ativa" : "erro"} ok={menuConnected} detail={menuError || `/api/menu/${personaSlug}`} />
           </div>
         </div>
@@ -232,7 +235,7 @@ export default function SettingsPage() {
       <section className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
         <div className="mb-4 flex items-center gap-2">
           <Route size={15} className="text-obs-violet" />
-          <h2 className="text-sm font-semibold text-obs-text">Integracao Baita Cardapio API</h2>
+          <h2 className="text-sm font-semibold text-obs-text">Integracao Catalogo API</h2>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <StatusTile label="Endpoint" value={`/api/menu/${personaSlug}`} ok={menuConnected} detail="publico para landing page" />

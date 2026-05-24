@@ -126,7 +126,7 @@ const QUICK_FACTS = [
   { label: "Rotas FastAPI", value: "16" },
   { label: "Migrations aplicadas", value: "012" },
   { label: "Modos de marketing", value: "8" },
-  { label: "Personas seedadas", value: "Tock · Prime · Baita · VZ" },
+  { label: "Personas suportadas", value: "Multi-persona (config-driven)" },
 ];
 
 export default function ToolsPage() {
