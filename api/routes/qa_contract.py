@@ -10,7 +10,14 @@ from typing import Optional, Any
 from routes import graph as graph_routes
 from routes.process import process as process_route
 from schemas.events import LeadEvent
-from services import approved_knowledge_snapshots, auth_service, knowledge_graph, knowledge_lifecycle, supabase_client
+from services import (
+    approved_knowledge_snapshots,
+    auth_service,
+    knowledge_graph,
+    knowledge_lifecycle,
+    knowledge_taxonomy,
+    supabase_client,
+)
 from utils.env import is_production_runtime
 
 router = APIRouter(tags=["qa-contract"])
@@ -144,6 +151,184 @@ class OfficialSeedBody(BaseModel):
     source_ref: Optional[str] = "qa_official_seed_v1"
     limit_products: int = 9
     run_id: Optional[str] = None
+
+
+class SofiaGraphCommandContext(BaseModel):
+    current_graph_hash: Optional[str] = None
+    selected_node_ids: list[str] = []
+    client_action: str = "natural_language"
+    graph_patch: Optional[dict[str, Any]] = None
+    accept_unverified: bool = False
+
+
+class SofiaGraphCommandBody(BaseModel):
+    persona_slug: str = "vz-lupas"
+    persona_ref: Optional[str] = None
+    command: str
+    context: SofiaGraphCommandContext = SofiaGraphCommandContext()
+
+
+def _slugify(raw: str) -> str:
+    value = "".join(ch.lower() if ch.isalnum() else "-" for ch in (raw or "").strip())
+    while "--" in value:
+        value = value.replace("--", "-")
+    return value.strip("-") or "node"
+
+
+def _resolve_sofia_graph_patch(command: str, context: SofiaGraphCommandContext) -> dict[str, list[dict]]:
+    if (context.client_action or "").strip().lower() == "structured_intent":
+        patch = context.graph_patch or {}
+        return {
+            "nodes_upsert": list(patch.get("nodes_upsert") or []),
+            "nodes_delete": list(patch.get("nodes_delete") or []),
+            "edges_upsert": list(patch.get("edges_upsert") or []),
+            "edges_delete": list(patch.get("edges_delete") or []),
+        }
+
+    normalized = (command or "").strip().lower()
+    if "reencaixe" in normalized and "vz lupas" in normalized:
+        return {
+            "nodes_upsert": [
+                {
+                    "node_type": "brand",
+                    "slug": "vz-lupas",
+                    "title": "VZ Lupas",
+                    "summary": "Brand reencaixada pela Sofia na cadeia canonica.",
+                }
+            ],
+            "nodes_delete": [],
+            "edges_upsert": [
+                {
+                    "source_ref": "persona:self",
+                    "target_ref": "slug:vz-lupas",
+                    "relation_type": "persona_has_brand",
+                    "metadata": {"primary_tree": True, "active": True},
+                }
+            ],
+            "edges_delete": [],
+        }
+    raise HTTPException(422, "Unable to resolve command into canonical graph operations")
+
+
+def _persona_graph_nodes(persona_id: str) -> dict[str, dict]:
+    rows = supabase_client.list_knowledge_nodes_by_type(
+        [
+            "persona",
+            "brand",
+            "briefing",
+            "campaign",
+            "audience",
+            "product_group",
+            "product",
+            "faq",
+            "embedded",
+            "copy",
+            "gallery",
+        ],
+        persona_id=persona_id,
+        limit=5000,
+    )
+    by_ref: dict[str, dict] = {}
+    for row in rows:
+        row_id = str(row.get("id") or "").strip()
+        if row_id:
+            by_ref[f"id:{row_id}"] = row
+        slug = str(row.get("slug") or "").strip().lower()
+        if slug:
+            by_ref[f"slug:{slug}"] = row
+    return by_ref
+
+
+def _canonical_ref(raw: Optional[str], persona_root: dict) -> Optional[str]:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    low = value.lower()
+    if low == "persona:self":
+        return f"id:{persona_root['id']}"
+    if low.startswith("id:") or low.startswith("slug:"):
+        return low
+    if len(value) >= 32:
+        return f"id:{value}"
+    return f"slug:{_slugify(value)}"
+
+
+def _validate_sofia_patch(
+    *,
+    patch: dict[str, list[dict]],
+    nodes_after_upsert: dict[str, dict],
+    accept_unverified: bool,
+) -> tuple[list[dict], list[dict]]:
+    violations: list[dict] = []
+    recommendations: list[dict] = []
+    for edge in patch["edges_upsert"]:
+        src = nodes_after_upsert.get(edge["source_ref"])
+        dst = nodes_after_upsert.get(edge["target_ref"])
+        src_type = knowledge_taxonomy.canonical_node_type(src.get("node_type") if src else None)
+        dst_type = knowledge_taxonomy.canonical_node_type(dst.get("node_type") if dst else None)
+        rel = str(edge.get("relation_type") or "contains").strip().lower()
+        edge_kind = knowledge_taxonomy.edge_kind_for_relation(rel)
+        if src_type == "product" and dst_type == "embedded":
+            violations.append(
+                {
+                    "code": "GRAPH_EDGE_FORBIDDEN",
+                    "message": "Direct Product -> Embed is not allowed.",
+                    "edge": {"from": edge["source_ref"], "to": edge["target_ref"], "relation": rel},
+                }
+            )
+        if src_type == "faq" and dst_type == "embedded":
+            src_status = str(src.get("status") or "").lower()
+            if src_status not in {"approved", "embedded", "validated"}:
+                violations.append(
+                    {
+                        "code": "FAQ_NOT_APPROVED",
+                        "message": "Unapproved FAQ cannot generate embeddings.",
+                        "faqRef": edge["source_ref"],
+                    }
+                )
+        if edge_kind == "primary" and not knowledge_taxonomy.is_primary_edge_allowed(src_type, dst_type, rel):
+            violations.append(
+                {
+                    "code": "CANONICAL_CHAIN_VIOLATION",
+                    "message": "Primary edge violates canonical chain.",
+                    "edge": {"from": edge["source_ref"], "to": edge["target_ref"], "relation": rel},
+                    "sourceType": src_type,
+                    "targetType": dst_type,
+                }
+            )
+    for node in patch["nodes_upsert"]:
+        ctype = knowledge_taxonomy.canonical_node_type(node.get("node_type"))
+        if ctype == "audience":
+            slug = str(node.get("slug") or "").lower()
+            summary = str(node.get("summary") or "").lower()
+            forbidden = {"role-sdr", "role-closer", "role-classifier"}
+            if any(token in slug or token in summary for token in forbidden):
+                violations.append(
+                    {
+                        "code": "AUDIENCE_ROLE_FORBIDDEN",
+                        "message": "Audience cannot be role-sdr, role-closer, or role-classifier.",
+                        "slug": slug,
+                    }
+                )
+        if ctype == "product" and not accept_unverified:
+            meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+            source_url = str(meta.get("source_url") or "").strip()
+            if not source_url:
+                violations.append(
+                    {
+                        "code": "PRODUCT_SOURCE_REQUIRED",
+                        "message": "Product requires metadata.source_url unless accept_unverified=true.",
+                        "slug": str(node.get("slug") or ""),
+                    }
+                )
+        if ctype == "audience" and str(node.get("slug") or "").startswith("audiencia-padrao-"):
+            recommendations.append(
+                {
+                    "type": "audience_default_shared",
+                    "reason": "Default audience detected; prefer individualized audience per brand when needed.",
+                }
+            )
+    return violations, recommendations
 
 
 def _official_products(limit_products: int = 9) -> list[dict]:
@@ -538,4 +723,128 @@ async def sdr_ask(body: SdrAskBody, request: Request):
         "persona_slug": persona_slug,
         "result": result,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/sofia/graph-command")
+def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
+    _require_non_production()
+    persona = _require_qa_persona(request, _persona_ref(body.persona_slug, body.persona_ref))
+    persona_id = persona.get("id")
+    if not persona_id:
+        raise HTTPException(409, "Resolved persona has no id")
+    persona_slug = _persona_slug(persona)
+
+    patch = _resolve_sofia_graph_patch(body.command, body.context)
+    persona_node = supabase_client.ensure_persona_knowledge_node(persona_id)
+    if not persona_node:
+        raise HTTPException(502, "Unable to ensure persona root node")
+    known = _persona_graph_nodes(persona_id)
+    known[f"id:{persona_node['id']}"] = persona_node
+    known["persona:self"] = persona_node
+    known["slug:self"] = persona_node
+
+    persisted_nodes: list[dict] = []
+    patch_nodes: list[dict] = []
+    for raw_node in patch["nodes_upsert"]:
+        node_type = knowledge_taxonomy.canonical_node_type(raw_node.get("node_type"))
+        if not node_type:
+            raise HTTPException(422, f"Unknown node_type in nodes_upsert: {raw_node.get('node_type')}")
+        node_payload = {
+            "persona_id": persona_id,
+            "node_type": node_type,
+            "slug": str(raw_node.get("slug") or _slugify(raw_node.get("title") or node_type)),
+            "title": str(raw_node.get("title") or node_type),
+            "summary": str(raw_node.get("summary") or ""),
+            "metadata": raw_node.get("metadata") if isinstance(raw_node.get("metadata"), dict) else {},
+            "status": str(raw_node.get("status") or "active"),
+            "tags": raw_node.get("tags") if isinstance(raw_node.get("tags"), list) else [],
+        }
+        row = supabase_client.upsert_knowledge_node(node_payload)
+        if not row:
+            raise HTTPException(502, f"Failed to upsert node slug={node_payload['slug']}")
+        persisted_nodes.append(row)
+        patch_nodes.append(node_payload)
+        known[f"id:{row['id']}"] = row
+        known[f"slug:{str(row.get('slug') or '').lower()}"] = row
+
+    edges_to_persist: list[dict] = []
+    for raw_edge in patch["edges_upsert"]:
+        src_ref = _canonical_ref(raw_edge.get("source_ref"), persona_node)
+        dst_ref = _canonical_ref(raw_edge.get("target_ref"), persona_node)
+        if not src_ref or not dst_ref:
+            raise HTTPException(422, "edges_upsert requires source_ref and target_ref")
+        src = known.get(src_ref)
+        dst = known.get(dst_ref)
+        if not src or not dst:
+            raise HTTPException(422, f"edge reference not found: source={src_ref} target={dst_ref}")
+        edges_to_persist.append(
+            {
+                "source_ref": src_ref,
+                "target_ref": dst_ref,
+                "source_node_id": src["id"],
+                "target_node_id": dst["id"],
+                "relation_type": str(raw_edge.get("relation_type") or "contains").strip().lower(),
+                "metadata": raw_edge.get("metadata") if isinstance(raw_edge.get("metadata"), dict) else {},
+            }
+        )
+
+    violations, recommendations = _validate_sofia_patch(
+        patch={"nodes_upsert": patch_nodes, "nodes_delete": patch["nodes_delete"], "edges_upsert": edges_to_persist, "edges_delete": patch["edges_delete"]},
+        nodes_after_upsert=known,
+        accept_unverified=bool(body.context.accept_unverified),
+    )
+    if violations:
+        supabase_client.insert_event(
+            {
+                "event_type": "sofia_graph_command_rejected",
+                "entity_type": "persona",
+                "entity_id": persona_id,
+                "persona_id": persona_id,
+                "payload": {"persona_slug": persona_slug, "command": body.command, "violations": violations},
+            },
+            source="qa_contract.sofia_graph_command",
+        )
+        raise HTTPException(
+            422,
+            {
+                "ok": False,
+                "code": "GRAPH_VALIDATION_FAILED",
+                "message": "Command violates canonical graph constraints.",
+                "violations": violations,
+            },
+        )
+
+    for edge in edges_to_persist:
+        supabase_client.upsert_knowledge_edge(
+            source_node_id=edge["source_node_id"],
+            target_node_id=edge["target_node_id"],
+            relation_type=edge["relation_type"],
+            persona_id=persona_id,
+            weight=1.0,
+            metadata=edge["metadata"] or {"primary_tree": True, "active": True},
+        )
+    supabase_client.insert_event(
+        {
+            "event_type": "sofia_graph_command_applied",
+            "entity_type": "persona",
+            "entity_id": persona_id,
+            "persona_id": persona_id,
+            "payload": {
+                "persona_slug": persona_slug,
+                "command": body.command,
+                "nodes_upsert": len(persisted_nodes),
+                "edges_upsert": len(edges_to_persist),
+                "recommendations": recommendations,
+            },
+        },
+        source="qa_contract.sofia_graph_command",
+    )
+    return {
+        "ok": True,
+        "sofia_message": "Comando aplicado com cadeia canonica validada.",
+        "graph_patch": patch,
+        "persisted": True,
+        "recommendations": recommendations,
+        "validation": {"canonical_chain_respected": True, "violations": []},
     }
