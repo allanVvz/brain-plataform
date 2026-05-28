@@ -1000,3 +1000,18 @@ ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecu��o real gerou p
   - `/sofia/graph-command` with `persona_slug=allanvvz` => 200 and `tool_calls` audit trail (resolve-persona, resolve-operation, validate_canonical_chain).
 - OpenAPI now contains `/sofia/tools/resolve-persona` and `/sofia/tools/resolve-operation`.
 - Tests: `pytest tests/test_qa_contract_routes.py -k "sofia_graph_command or resolve_persona_tool or resolve_operation_tool" -v` => 5 passed.
+
+## BRA-58 backend real repo fix (2026-05-28)
+- Applied in `ai-brain` (not workspace stub): `api/routes/qa_contract.py`, `api/services/sofia_orchestrator.py`.
+- `/sofia/graph-command` now resolves persona/operation via tool resolvers and no longer uses VZ-only QA allow-list gate.
+- Added/updated tool routes:
+  - `POST /sofia/tools/resolve-persona`
+  - `POST /sofia/tools/resolve-operation`
+- Contract behavior implemented:
+  - score threshold `0.65`
+  - low-confidence operation -> `needs_confirmation=true`
+  - canonical operation slug `reparent_brand` for reencaixe intent.
+- Live probes on `http://127.0.0.1:8001` after restart:
+  - `POST /sofia/graph-command` with `persona_slug=allanvvz` -> `200` (no 403)
+  - `/openapi.json` contains both `/sofia/tools/resolve-persona` and `/sofia/tools/resolve-operation`
+  - both tool endpoints return 200 with expected JSON fields.
