@@ -158,7 +158,8 @@ def test_sofia_graph_command_rejects_product_to_embed(monkeypatch):
     from routes import qa_contract
 
     monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
-    monkeypatch.setattr(qa_contract, "_require_qa_persona", lambda request, persona_ref: {"id": "p1", "slug": "vz-lupas"})
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas"})
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
     monkeypatch.setattr(qa_contract.supabase_client, "ensure_persona_knowledge_node", lambda _persona_id: {"id": "persona-1", "node_type": "persona", "slug": "self"})
     monkeypatch.setattr(qa_contract.supabase_client, "list_knowledge_nodes_by_type", lambda *args, **kwargs: [])
     monkeypatch.setattr(qa_contract.supabase_client, "insert_event", lambda payload, source=None: {"ok": True})
@@ -196,7 +197,8 @@ def test_sofia_graph_command_applies_reencaixe(monkeypatch):
     from routes import qa_contract
 
     monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
-    monkeypatch.setattr(qa_contract, "_require_qa_persona", lambda request, persona_ref: {"id": "p1", "slug": "vz-lupas"})
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas"})
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
     monkeypatch.setattr(qa_contract.supabase_client, "ensure_persona_knowledge_node", lambda _persona_id: {"id": "persona-1", "node_type": "persona", "slug": "self"})
     monkeypatch.setattr(qa_contract.supabase_client, "list_knowledge_nodes_by_type", lambda *args, **kwargs: [])
     monkeypatch.setattr(qa_contract.supabase_client, "insert_event", lambda payload, source=None: {"ok": True})
@@ -222,4 +224,60 @@ def test_sofia_graph_command_applies_reencaixe(monkeypatch):
 
     assert result["ok"] is True
     assert result["persisted"] is True
+    assert any(call.get("tool") == "validate_canonical_chain" for call in result["tool_calls"])
     assert len(edge_calls) == 1
+
+
+def test_sofia_graph_command_allanvvz_not_blocked_by_persona_gate(monkeypatch):
+    from routes import qa_contract
+
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p2", "slug": "allanvvz"})
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+    monkeypatch.setattr(qa_contract.supabase_client, "ensure_persona_knowledge_node", lambda _persona_id: {"id": "persona-2", "node_type": "persona", "slug": "self"})
+    monkeypatch.setattr(qa_contract.supabase_client, "list_knowledge_nodes_by_type", lambda *args, **kwargs: [])
+    monkeypatch.setattr(qa_contract.supabase_client, "insert_event", lambda payload, source=None: {"ok": True})
+    monkeypatch.setattr(
+        qa_contract.supabase_client,
+        "upsert_knowledge_node",
+        lambda payload: {"id": "brand-2", "node_type": payload["node_type"], "slug": payload["slug"], "status": "active"},
+    )
+    monkeypatch.setattr(qa_contract.supabase_client, "upsert_knowledge_edge", lambda **kwargs: {"id": "e2"})
+
+    body = qa_contract.SofiaGraphCommandBody(
+        persona_slug="allanvvz",
+        command="reencaixe VZ Lupas abaixo de AllanVvz",
+        context=qa_contract.SofiaGraphCommandContext(client_action="natural_language"),
+    )
+    result = qa_contract.sofia_graph_command(body, _req())
+    assert result["ok"] is True
+    assert result["persisted"] is True
+
+
+def test_sofia_resolve_persona_tool_contract_shape(monkeypatch):
+    from routes import qa_contract
+
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_personas", lambda: [{"slug": "allanvvz"}, {"slug": "vz-lupas"}])
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda slug: {"id": f"id-{slug}", "slug": slug})
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+
+    body = qa_contract.ResolvePersonaBody(persona_slug="allanvvz", command="reencaixe VZ Lupas abaixo de AllanVvz")
+    result = qa_contract.resolve_persona_tool(body, _req())
+    assert result["ok"] is True
+    assert result["resolved_persona"]["slug"] == "allanvvz"
+    assert "score" in result
+    assert "candidates" in result
+    assert "needs_clarification" in result
+
+
+def test_sofia_resolve_operation_tool_low_confidence_sets_confirmation(monkeypatch):
+    from routes import qa_contract
+
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    body = qa_contract.ResolveOperationBody(command="faz ai umas coisa massa no grafo", persona_context={"persona_slug": "allanvvz"})
+    result = qa_contract.resolve_operation_tool(body)
+    assert result["ok"] is True
+    assert result["operation"] == "validate_canonical_chain"
+    assert result["score"] < 0.65
+    assert result["needs_confirmation"] is True

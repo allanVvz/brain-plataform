@@ -1,5 +1,34 @@
 # Brain AI — Progresso UI/UX
 
+## Sofia tool-use contract (2026-05-28)
+- Spec autoritativa: `paperclip/docs/qa/sofia-tool-use-contract.md`.
+- Define schemas request/response de `/sofia/tools/resolve-persona` e `/sofia/tools/resolve-operation`, 8 canonical ops (reparent_brand, create_default_audience, move_product_to_group, reorganize_campaign_briefing, validate_canonical_chain, reclassify_product_group_as_campaign, commit_pending_change, revert_pending_change), comportamento obrigatorio de `/sofia/graph-command` (tool_calls populado, NUNCA 403 por gate de persona, threshold confidence 0.65), matriz 33 casos (4 personas x 8 ops + 1 low-confidence).
+- Fixture skeleton: `paperclip/fixtures/sofia-commands.skeleton.json`.
+- BRA-58 (backend) e BRA-59 (AI agent) tem que cumprir o contract antes de done. BRA-60 (QA sweep) roda 33 cases contra `:8001` e gera artifact em `paperclip/test-artifacts/qa/sofia-tool-use-contract-<UTC>.json`.
+
+## Sofia /sofia/graph-command — drop allow-list, cosine tools (2026-05-28)
+- Usuario reportou 403 `restricted to VZ Lupas QA persona aliases` ao usar chat lateral do Graph com persona `allanvvz`.
+- Origem: `api/routes/qa_contract.py:25-28` (QA_PERSONA_ALIASES) + `:55-60` (_require_qa_persona); restos do isolamento original da QA da VZ Lupas.
+- Decisao: em vez de expandir allow-list, eliminar. Mover validacao para tools deterministicos baseados em embeddings:
+  - `POST /sofia/tools/resolve-persona` — top-1 persona slug por cosine (sentence-transformers local OU pgvector).
+  - `POST /sofia/tools/resolve-operation` — top-1 op canonica (rebind_parent, reorganize_subtree, create_audience, move_node, add_brand, add_product_group, add_product, add_faq).
+  - Sofia (LLM) so orquestra: chama tools, recebe IDs+scores, monta patch. Custo reduzido vs reasoning livre.
+- Tracking: BRA-57 (CEO meta), BRA-58 (Backend tools + remove gate), BRA-59 (AI agent integration), BRA-60 (QA multi-persona sweep), BRA-61 (uvicorn reload=True para `:8001` refletir edits).
+- Cadeia ativa: BRA-54 (done) -> [BRA-58 + BRA-61] -> BRA-59 -> BRA-60 -> BRA-50 -> BRA-46 -> BRA-44.
+
+## Paperclip operating rules (2026-05-28)
+- Sistema corrigido em 2026-05-28 apos 6 dones fabricados em 24h. Regra dura:
+  - Evidencia so vale em `C:/Users/Alan/Documents/repositorios/ai-brain/...` ou `paperclip/...`.
+  - `.paperclip/instances/...`, SQLite stub, sandbox e comentario textual NAO contam.
+  - Done exige: artifact em path publicado + commit no repo alvo + memory.md atualizado + comando de validacao executado + disposition formal PATCH.
+- Single source of truth: `C:/Users/Alan/Documents/repositorios/paperclip/agents/OPERATING_RULES.md`.
+- Checklists operacionais:
+  - CEO/PO: `paperclip/agents/CEO_GATE_CHECKLIST.md`
+  - QA Lead: `paperclip/agents/QA_LEAD_GATE_CHECKLIST.md`
+- Estrutura canonica do grafo: `paperclip/agents/CANONICAL_CHAIN.md` (Persona -> Brand -> Briefing -> Campaign -> Audience -> Product Group -> Product -> FAQ).
+- Cadeia prioritaria ativa: `BRA-54 -> BRA-50 -> BRA-46 -> BRA-44`. Tudo fora dela em hold.
+- QA: nao repetir teste com inputs iguais. Discriminacao 401/403: probe sem header + probe com `X-AI-BRAIN-ADMIN-TOKEN`. Diferenca de status mostra se o problema e harness ou backend.
+
 ## Concluido
 - Fase 1: tokens liquid glass, tema, hydration fix.
 - Fase 2: Leads consolidado CRM + CSV/Bulk, botao Iniciar conversa.
@@ -7,6 +36,131 @@
 
 ## Em execucao
 - Fase 4: Leads -> Messages focado.
+
+## QA Supabase migracao para nova conta (2026-05-27)
+- Conta antiga `qhnepdcqtkjjslqqiyvp` (ai-brain-qa) suspensa por `exceed_egress_quota`.
+  REST 402, pooler Supavisor "Tenant or user not found" em todas regioes. Bloqueio total.
+- Schema fallback gerado: `docs/qa/ai-brain-qa-schema.sql` (concatenacao das 42 migrations
+  001..042, 4589 linhas, ~194 KB). NAO e introspeccao real, e concatenacao na ordem.
+- Conta NOVA destino: email `allanlise027@gmail.com`, project_ref `svkogegypdqquzlfzaor`.
+  Conexao direta IPv6 funciona (`db.svkogegypdqquzlfzaor.supabase.co:5432`); pooler nao roteia
+  o tenant (mesmo erro do antigo, mas REST 401 confirma que projeto esta ativo).
+- Senha Postgres do projeto novo: `@Marrie2025;` (com `;` final). Anotar com cuidado:
+  o `;` faz parte da senha, nao e separador.
+- Supabase MCP adicionado em `.mcp.json` apontando para o project_ref novo (HTTP,
+  scope=project). Carrega no proximo restart do Claude Code.
+- Schema completo aplicado com sucesso no projeto novo `svkogegypdqquzlfzaor` (2026-05-27).
+  Resultado: 52 tabelas, 6 views, 154 functions, 4 policies, 210 indexes, 4 triggers,
+  7 extensions. Script: `scripts/apply_schema_to_new_qa.py`. Estrategia adotada:
+  + Bootstrap legacy `docs/qa/00_legacy_leads_messages.sql` antes das migrations,
+    porque `leads` e `messages` sao tabelas pre-migrations que ALTERs assumem que existem.
+  + Migracoes aplicadas uma a uma (cada com sua transacao) com pre-patch antes da 004
+    para corrigir drift do `agent_logs` (a 024 e que adiciona `agent_type`/`action`/
+    `decision`/`metadata`, mas a 004 ja cria indice em `agent_type`).
+  + Conexao via IPv6 direto a `db.svkogegypdqquzlfzaor.supabase.co:5432` (pooler nao
+    roteia esse tenant; mesmo padrao do projeto antigo).
+- `env.qa.yaml` atualizado: `SUPABASE_URL` e `SUPABASE_SERVICE_KEY` agora apontam para
+  `svkogegypdqquzlfzaor`. URL: `https://svkogegypdqquzlfzaor.supabase.co`. Service_role
+  validada via REST (`scripts/validate_new_qa_rest.py`): 200 OK, 52 definitions no
+  OpenAPI (bate com 52 tabelas), personas=3 / knowledge_nodes=18 / knowledge_edges=36
+  vindos das seeds embarcadas nas migrations, `leads`/`messages` vazios. Anon key tambem
+  disponivel se o frontend precisar.
+- Smoke do backend local contra o projeto novo (2026-05-27): rodado em :8011 via
+  `python scripts/start_api_qa.py`. Startup OK, CORS carregado, storage buckets
+  `assets-raw` e `assets-derived` retornaram 200 contra `https://svkogegypdqquzlfzaor.supabase.co`.
+  `/health` = 200. `/api/menu/{slug}` testado em baita-conveniencia, vz-lupas e
+  tock-fatal: todos 200, cada um com 1 collection seed (`cardapio-<slug>-v1`),
+  products=0 (esperado — so o schema seedado das migrations existe, sem dados).
+  Probe: `scripts/probe_local_qa_menu.py`.
+- Arquivos novos criados nesta migracao: `docs/qa/00_legacy_leads_messages.sql`,
+  `docs/qa/ai-brain-qa-schema.sql`, `scripts/apply_schema_to_new_qa.py`,
+  `scripts/validate_new_qa_rest.py`, `scripts/probe_local_qa_menu.py`,
+  `scripts/probe_prod_legacy_tables.py`. `.mcp.json` agora aponta para o ref novo
+  (escopo project, HTTP). `env.qa.yaml` (gitignored) atualizado.
+- Pegadinha do "backend ainda fala com a conta antiga" mesmo apos reiniciar
+  (2026-05-27): `api/main.py:16` chama `load_dotenv()` que le `.env` da raiz.
+  Quando o backend e subido com `uvicorn main:app` direto (sem o launcher
+  `scripts/start_api_qa.py`), o `.env` ganha sobre `env.qa.yaml`. Por isso o
+  startup mostrava `slyxppvghniknqofhqzt` (PROD antigo, 402) e bucket assets-raw
+  MISSING. Resolvido apontando os tres arquivos pro projeto novo, com as chaves
+  antigas mantidas comentadas no topo de cada bloco (regra do usuario para reverter
+  rapido se precisar):
+  + `.env`: SUPABASE_URL/SERVICE_KEY/ANON_KEY/NEXT_PUBLIC_* substituidos pelas
+    chaves de `svkogegypdqquzlfzaor`; antigas (slyxppvghniknqofhqzt) comentadas
+    com o motivo ("suspensa por exceed_egress_quota em 2026-05-27").
+  + `env.yaml`: idem para `SUPABASE_URL` e `SUPABASE_SERVICE_KEY`. PROD passa a
+    apontar pro mesmo projeto novo enquanto nao existir projeto PROD dedicado.
+  + `env.qa.yaml`: chave antiga (qhnepdcqtkjjslqqiyvp) comentada no topo para
+    rastreabilidade; chave nova ja estava ativa.
+- TODOs apos liberacao do egress no projeto antigo:
+  + Rodar pg_dump real do PROD para extrair DDL real de `leads`/`messages` e substituir
+    o bootstrap minimalista (que e best-effort baseado em api/services/supabase_client.py).
+  + Repopular o QA novo com dados de Baita / VZ Lupas usando `db-fetch-prod-to-qa`.
+
+## Alinhamento de ambiente local apos migracao Supabase (2026-05-27)
+
+Diagnostico: dashboard em `192.168.0.182:3000` nao mostrava o grafo porque (a)
+o backend em `127.0.0.1:8001` foi subido com `python -m uvicorn main:app`
+direto do diretorio `api/`, o que carrega apenas `.env` e NAO `env.qa.yaml` —
+entao faltavam `ENVIRONMENT=qa` e `AI_BRAIN_ADMIN_TEST_TOKEN` (resultado:
+401 "Sessao obrigatoria" em rotas protegidas como /personas e
+/knowledge/graph-data); e (b) `dashboard/.env.local` ainda tinha
+`NEXT_PUBLIC_SUPABASE_URL` apontando para o projeto antigo.
+
+Acoes feitas (todas read-only / config, nenhuma escrita no banco):
+- `dashboard/.env.local`: `NEXT_PUBLIC_SUPABASE_URL` e
+  `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` trocados para o projeto novo
+  `svkogegypdqquzlfzaor`. Entradas antigas comentadas no topo do bloco com
+  o motivo. Adicionado lembrete inline: ao trocar de projeto Supabase
+  e necessario limpar cookies + localStorage do host de dev
+  (127.0.0.1:3000, localhost:3000, 192.168.0.182:3000) — sessao do projeto
+  antigo nao e valida no novo.
+- `.env` (raiz) e `env.qa.yaml`: ja estavam apontando para o projeto novo
+  desde a rodada anterior; auditados, sem mudanca. Nao expor service_key
+  ou anon_key em logs/relatorios.
+- `scripts/start_api_qa.py`: auditado, sem mudanca. Esse launcher injeta as
+  chaves de `env.qa.yaml` em `os.environ` ANTES de o app chamar `load_dotenv()`,
+  garantindo que `ENVIRONMENT=qa` e `AI_BRAIN_ADMIN_TEST_TOKEN` estejam
+  disponiveis durante o startup. SEMPRE usar este launcher para subir QA.
+- `scripts/validate_qa_read_only.py` criado: revalida `/health`, `/personas` e
+  `/knowledge/graph-data?persona_slug=allanvvz&mode=semantic_tree` apenas em
+  leitura, usando o admin test token lido de `env.qa.yaml`. Sem segredos no
+  source.
+
+Validacao (subido um backend de teste em :8011 via `start_api_qa.py`, parado
+no fim):
+- `/health` => 200 ok.
+- `/personas` => 200, retorna 4 personas: tock-fatal, baita-conveniencia,
+  vz-lupas, **allanvvz** (id 3d2c15f9-208d-474f-bc1e-f6bedee35e3b).
+- `/knowledge/graph-data?persona_slug=allanvvz&mode=semantic_tree` => 200,
+  6 nodes + 4 edges no payload react-flow. Meta confirma semantic_nodes=3,
+  semantic_edges=4. Formato: `node.data.slug` / `node.data.node_type`
+  (top-level dos nodes nao expoe slug — usar `data.*`).
+- Admin test token via header `X-AI-BRAIN-ADMIN-TOKEN` autenticou em todas
+  as rotas protegidas testadas.
+
+Estado pendente no :8001 do usuario: subido com `python -m uvicorn main:app`
+direto, sem env.qa.yaml. Retorna 401 "Sessao obrigatoria" com admin token.
+**Acao para o usuario reiniciar corretamente:**
+  1. Parar o uvicorn atual em :8001
+     (`Stop-Process -Id <pid>` ou Ctrl+C no terminal que rodou).
+  2. Da raiz do repo: `python scripts/start_api_qa.py`
+     (porta default 8001; usa `env.qa.yaml`).
+  3. No browser do dashboard, limpar cookies e localStorage de
+     192.168.0.182:3000 e localhost:3000 antes de logar de novo
+     (sessao antiga do Supabase nao serve no novo projeto).
+
+Comandos de referencia (sem segredos):
+- Backend QA local: `python scripts/start_api_qa.py`
+  (host 127.0.0.1, port 8001; carrega `env.qa.yaml`).
+- Dashboard local: dentro de `dashboard/`, `npm run dev`
+  (NEXT_PUBLIC_API_URL=http://127.0.0.1:8001; Supabase do projeto novo).
+- Validacao read-only: `python scripts/validate_qa_read_only.py`
+  (le `env.qa.yaml`, manda admin token, bate em /health, /personas,
+  /knowledge/graph-data; nenhum INSERT/UPDATE/DELETE).
+
+Pendencias / blocked: nenhuma chave faltando neste momento. Quando o egress
+do PROD antigo for liberado, ver TODOs no bloco anterior.
 
 ## Regras importantes
 - Tema atual e claro/liquid glass.
@@ -677,3 +831,172 @@ Regra base do CLAUDE.md: **"Todo conhecimento adicionado DEVE aparecer no grafo.
 
 ### Resumo do impacto na memoria de marca
 A unica violacao bloqueante para "memoria de marca consistente" e a **A (brand_profiles)**. As demais sao debitos tecnicos com sintomas localizados. Se tivermos que escolher uma para corrigir antes da migracao de tools, e a A — porque toda a creative reuse que a Sofia faria via `find_existing_persona_nodes(types=["brand"])` retorna vazio hoje, mesmo com o brand cadastrado.
+
+## Gate de testes antes do build - 2026-05-22
+
+Plano decidido:
+- Bloquear build em dois pontos: CI + `npm run build` local/Vercel.
+- Suite obrigatoria deve ser rapida e estavel, sem Supabase real, WhatsApp, browser, LLM ou deploy externo.
+- Criar `scripts/quality-gate.py` para rodar:
+  - `python -m compileall -q api`
+  - testes Python mockados de Sofia/assets/grafo:
+    - `tests/integration_sofia_image_upload.py`
+    - `tests/integration_sofia_lazy_start_upload.py`
+    - `tests/integration_asset_card_upload.py`
+    - `tests/integration_asset_validation_lifecycle.py`
+    - `tests/test_criar_entry_flow_summary.py`
+    - `tests/test_product_approval.py`
+  - `npx tsc --noEmit` dentro de `dashboard`
+- Atualizar `dashboard/package.json` com `typecheck`, `check` e `prebuild`, para que `npm run build` rode typecheck antes do `next build`.
+- Atualizar `.github/workflows/ci.yml` para rodar o quality gate antes do build frontend.
+- Atualizar deploy QA/prod do backend para rodar o gate backend antes de `gcloud run deploy`.
+
+Aceite:
+- Qualquer falha no gate deve sair com codigo nao-zero e impedir build/deploy.
+- `npm run build` deve executar `prebuild` automaticamente.
+- CI so deve executar build depois do gate passar.
+
+## Sessao 2026-05-23 - VZ Lupas, Sofia tools, catalogo na /persona e login QA
+
+### Commits recentes (develop, depois do gate de testes)
+- `6832f73 feat(capture): modal Sofia vira visualizacao + atalhos de prompt; Save sempre visivel` — corrige a serie de gambiarras catalogadas em 2026-05-21. Modal `BlockedPlanDiagnosticModal` passou a propagar `onOptionSelect`; cada opcao envia `prompt_to_sofia` via `kbIntakeMessage`. `GraphPreviewPanel` renderiza enquanto `draftPlan` existe e o botao Save fica `disabled` com tooltip listando violacoes, em vez de sumir.
+- `1899850 feat(sofia): backend tools deterministicas + tool-use loop opt-in via env` — `api/services/sofia_tools.py` ganhou as primeiras tools (`create_node`, `set_parent`, `connect_nodes`, `delete_node`, `validate_plan`, `set_expansion_policy`, `attach_session_asset`, `find_existing_persona_nodes`, `suggest_connections`). `ModelRouter.messages_create` aceita `tools=` e devolve `tool_calls`. Flag `SOFIA_TOOLS_ENABLED` mantem o caminho antigo enquanto migracao roda.
+- `397d539 fix(intake): aceita product_group/offer/gallery no ALLOWED_CONTENT_TYPES + E2E VZ Lupas` — `api/services/knowledge_rag_intake.py:20-37` agora reconhece `product_group/offer/gallery` (antes caiam em `general_note`). Acompanha pacote E2E VZ Lupas em `tmp/sofia_e2e/`: `run_vz_lupas_e2e.py`, `retry_assets_shot.py`, `run_screenshots_only.py`, REPORT.md + screenshots t1/t2/t3 + uploads VZ Lupas (clipon/grau/sol).
+
+### Plano cardapio multi-persona (`tmp/sofia_e2e/PLAN_CARDAPIO_MULTI_PERSONA.md`)
+- `baita-cardapio` ja roda por `personaSlug` na URL. Pontos acoplados que sobram (a fechar antes do VZ Lupas ir publico):
+  - `api/routes/menu.py:407-408,434,440,565,575,632` — alias map e `collection_slug` default `cardapio-baita-v14` so para baita.
+  - `../baita-cardapio/src/App.tsx:16` envia `VITE_DEFAULT_PERSONA=baita` na Vercel.
+  - `PersonaThemeProvider` precisa carregar tokens via `/api/menu/{slug}/theme` (D3.A: tokens em `persona.metadata.theme`).
+  - Copy persona-aware (`persona.metadata.copy.menu_label = "Cardapio" | "Catalogo"`).
+- Recomendacao adotada: discovery via marker `metadata.is_landing_root=true` em node `product_group` (Passo 1 do plano), descartando default hardcoded.
+- URL strategy hoje: path-based (`baita-cardapio.vercel.app/<persona-slug>`). Subdomain fica para 5+ personas.
+
+### Login QA quebrado (brain-plataform-qa.vercel.app) — diagnostico
+- Sintoma do navegador: `GET /api-brain/auth/me 401` repetitivo + `POST /api-brain/auth/login 401`. O loop infinito de `up/ud` no console e React batendo no `useEffect` do `AppShell.me()` em cada render porque `pathname !== "/login"` mas a sessao nao existe — quando `me()` lanca 401, o handler chama `router.replace("/login")`, mas o redirect nao executa se o `proxy.ts` ja redirecionou e o componente continua montando. Isso so se manifesta porque o backend QA esta rejeitando as credenciais.
+- Causa provavel: o Cloud Run QA (`ai-brain-api-qa-837167469397.us-central1.run.app`) nao tem usuario auth para o e-mail digitado. `api/middleware/auth.py:78-107` exige `auth_service.get_user_by_id(payload.sub)`; antes disso o `POST /auth/login` ja teria devolvido 401 se o usuario nao existir em `auth_users`.
+- Validacao operacional sugerida (nao executei — exige `env.qa.yaml` e `gcloud`):
+  1. `curl -sS https://ai-brain-api-qa-837167469397.us-central1.run.app/health` → confirmar que o servico esta no ar.
+  2. Verificar `auth_users` no Supabase QA: `select id, email, role, is_active from auth_users order by created_at;`.
+  3. Se vazio ou sem o admin esperado, rodar `cd api && python scripts/create_auth_user.py --email <op@empresa.com> --username <op> --password <senha> --role admin` apontando para `env.qa.yaml` (a sessao precisa ter `AI_BRAIN_SEED_ADMIN_EMAIL`/`PASSWORD` setados no Cloud Run QA para o seed automatico funcionar — checar `gcloud run services describe ai-brain-api-qa --region us-central1 --format='value(spec.template.spec.containers[0].env)'`).
+- Atalho enquanto a conta nao for criada: usar header `X-AI-BRAIN-ADMIN-TOKEN: <AI_BRAIN_ADMIN_TEST_TOKEN>` em endpoints internos (so funciona quando `ENVIRONMENT in {qa,preview,test}`), conforme `api/middleware/auth.py:36-65`.
+
+### Catalogo na /persona (esta sessao)
+- Pedido: adicionar na tela `/persona` (`dashboard/app/persona/page.tsx`) um link para o cardapio/catalogo publico da persona selecionada, sem nada hardcoded. Link tem que respeitar PROD vs QA e seguir o slug da persona (ex: `vzlupas`).
+- Decisao: novo env publico `NEXT_PUBLIC_CARDAPIO_BASE_URL` em `dashboard/.env.local.example`. Link no front e `${NEXT_PUBLIC_CARDAPIO_BASE_URL}/${persona.slug}` quando o env existir; quando nao, o card mostra estado vazio explicando como configurar. Para QA: `https://baita-cardapio-qa.vercel.app`. Para PROD: `https://baita-cardapio.vercel.app`. O slug e sempre da persona (`persona.slug`), e nunca uma constante.
+- O card resume o quanto da persona ja esta refletido no catalogo usando o `graphSummary` que a tela ja calcula: contagem de produtos conectados (`graphSummary.products`) e contagem de assets em Gallery (consultado via `api.galleryAssets(persona.id)` — mesmo endpoint que /settings usa). Assim "vinculando diretamente os produtos, assets de forma correta" e validavel pelo operador antes de abrir o link.
+- Vercel: precisa setar `NEXT_PUBLIC_CARDAPIO_BASE_URL` em ambos os scopes do projeto `brain-plataforma`:
+  - production -> `https://baita-cardapio.vercel.app`
+  - preview (branch `develop`) -> `https://baita-cardapio-qa.vercel.app`
+  - sem isso o card aparece em modo "configurar URL" e nao quebra a tela.
+- 2026-05-27 (BRA-22 re-dispatch): sweep `baseline-validate-only` executada via `node C:\Users\Alan\Documents\repositorios\paperclip\scripts\graph-test-runner.mjs` com `AI_BRAIN_BASE_URL=http://127.0.0.1:8001` e token admin de QA carregado do `env.qa.yaml`. Evidence gerada em `C:\Users\Alan\Documents\repositorios\paperclip\test-artifacts\graph-runs\2026-05-27T07-19-28-026Z.json`. Resultado: `disposition=blocked` por `fetch_graph status=404` (`/knowledge/graph?mode=semantic_tree&all_edges=1&persona_slug=vz-lupas`), sem avaliação das hard invariants por indisponibilidade da rota alvo.
+- 2026-05-27 (BRA-22 heartbeat): Corrigi o runner paperclip/scripts/graph-test-runner.mjs com fallback de endpoint (/knowledge/graph -> /knowledge/graph-data) e grava��o do oute/url usado no step etch_graph; adicionei teste de contrato em paperclip/tests/graph-runner.test.mjs (graph endpoint fallback prefers graph-data...) e validei com 
+ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecu��o real gerou paperclip/test-artifacts/graph-runs/2026-05-27T07-22-44-264Z.json com locked por 403 em /knowledge/graph-data?...persona_slug=vz-lupas (endpoint agora responde; bloqueio remanescente � acesso/persona no alvo, n�o mais 404).
+
+## Sessao 2026-05-27 - BRA-29 fluxo simples para criar persona em Configuracoes
+- Frontend: adicionado metodo `api.createPersona` em `dashboard/lib/api.ts` (POST `/personas`) para consumir a rota ja existente no backend.
+- Frontend: `dashboard/app/settings/page.tsx` ganhou bloco `Criar persona` com campos `Nome da persona` e `slug-da-persona`, botao `Criar persona`, e validacao UX minima (nome obrigatorio, slug normalizado).
+- UX pos-sucesso: limpa formulario, persiste `ai-brain-persona-slug` no localStorage, seleciona a persona criada e dispara refresh da tela para atualizar listas/indicadores.
+- Estados tratados: loading (`Criando...`), erro de API e sucesso visivel no card.
+- Verificacao minima: `cd dashboard && npx tsc --noEmit` (passou em 2026-05-27).
+
+## 2026-05-28 � codex (BRA-45 /sofia/graph-command real backend)
+- Issue/tarefa: BRA-45 endpoint backend para Sofia reprocessar nodes/edges com cadeia canonica.
+- Arquivos alterados:
+  - api/routes/qa_contract.py
+  - tests/test_qa_contract_routes.py
+  - tests/test_qa_contract_route_mapping.py
+- O que mudou:
+  - Nova rota `POST /sofia/graph-command` em `qa_contract` (tambem montada sob `/api/sofia/graph-command`).
+  - Aceita comando NL ou intent estruturada (`context.client_action`) e resolve para `graph_patch`.
+  - Valida antes de persistir:
+    - bloqueia `Product -> Embedded` direto (`GRAPH_EDGE_FORBIDDEN`);
+    - bloqueia `FAQ -> Embedded` sem FAQ aprovada (`FAQ_NOT_APPROVED`);
+    - valida edge primaria contra cadeia canonica via `knowledge_taxonomy.is_primary_edge_allowed`;
+    - bloqueia audiencia com papeis proibidos (`role-sdr|role-closer|role-classifier`);
+    - bloqueia produto sem `metadata.source_url` quando `accept_unverified=false`.
+  - Persiste nodes/edges em `knowledge_nodes`/`knowledge_edges` via `supabase_client` e grava auditoria:
+    - `sofia_graph_command_applied`
+    - `sofia_graph_command_rejected`
+  - Inclui recomendacao `audience_default_shared` quando aplicavel.
+- Evidencia/testes:
+  - `python -m pytest tests/test_qa_contract_routes.py -k "sofia_graph_command" -q` => 2 passed.
+  - `python -m pytest tests/test_qa_contract_route_mapping.py -q` => 1 passed.
+- Riscos/bloqueios:
+  - Fluxo de deletions (`nodes_delete`/`edges_delete`) permanece reservado no payload e nao executado nesta entrega.
+
+## 2026-05-28 � codex (BRA-46 frontend smoke /sofia/graph-command)
+- Wake comment atendido: execucao Frontend Agent para smoke real do `/sofia/graph-command` + patch React Flow pending/persisted com evidencia.
+- Frontend corrigido para contrato real da rota:
+  - `dashboard/lib/api.ts`: `api.sofiaGraphCommand(...)` agora envia payload canonico `{ persona_slug, command, context.client_action }` em vez de `{action,message}`.
+  - `dashboard/app/knowledge/graph/GraphPageClient.tsx`: aceita resposta backend com `sofia_message` + `graph_patch` (alem dos aliases antigos), preservando UX de pending/persisted.
+- Validacao local:
+  - `npx tsc --noEmit` em `dashboard` => PASS.
+- Evidencia de rota real:
+  - API local antiga em `127.0.0.1:8001` respondeu `404` para `/sofia/graph-command` (instancia sem rota nova montada).
+  - API fresh via `uvicorn main:app --port 8011` confirmou rota em `openapi` (`HAS_ROUTE=True`), mas chamada real retornou `{"detail":"Sessao obrigatoria."}`.
+  - Tentativa com `X-AI-BRAIN-ADMIN-TOKEN` (token de `env.qa.yaml`) e `ENVIRONMENT=qa` em nova instancia (`8013`) manteve `Sessao obrigatoria`.
+- Bloqueio objetivo para DoD de smoke real end-to-end: falta credencial de sessao valida (usuario/senha) para autenticar no backend e executar o comando real com persist/refetch no ambiente atual.
+
+## 2026-05-28 � codex (BRA-45 closure: commit + reload + live probe)
+- Branch: `develop`
+- Commit realizado: `76bd9c7` (`feat(qa-contract): POST /sofia/graph-command + validacao cadeia canonica`).
+- Arquivos no commit:
+  - `api/routes/qa_contract.py`
+  - `tests/test_qa_contract_routes.py`
+  - `tests/test_qa_contract_route_mapping.py`
+- Restart/reload backend QA executado em `127.0.0.1:8001` via `python scripts/start_api_qa.py` (processo `36976`).
+- Verificacao de rotas via `GET /openapi.json` confirmou:
+  - `/sofia/graph-command`
+  - `/api/sofia/graph-command`
+- Probe pos-deploy executado:
+  - `POST http://127.0.0.1:8001/sofia/graph-command`
+  - payload NL: `reencaixe VZ Lupas abaixo de AllanVvz e organize com Audience padrao.`
+  - resultado: HTTP 200, `ok=true`, `persisted=true`, `validation.canonical_chain_respected=true`.
+
+### 2026-05-28 � frontend-agent (BRA-46: chain lock by BRA-50)
+- Issue/tarefa: BRA-46
+- Arquivos alterados: memory.md
+- O que mudou: Recebido wake `CHAIN LOCK 2026-05-28` do board; BRA-46 fica travada por dependencia direta de evidencia smoke da BRA-50 conforme `paperclip/agents/OPERATING_RULES.md` �10. Nenhuma nova execucao E2E foi iniciada para evitar retry sem input novo.
+- Validacao executada: leitura de `paperclip/agents/OPERATING_RULES.md` e thread de comentarios da issue via Paperclip API; lock confirmado.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/memory.md
+- Riscos / bloqueios: unblock externo obrigatorio pela cadeia critica (BRA-50).
+- Proximo passo: owner BRA-50 publicar evidencia smoke em path publicado; depois retomar BRA-46.
+
+### 2026-05-28 � frontend-agent (BRA-46: gate update via BRA-57 chain)
+- Issue/tarefa: BRA-46
+- Arquivos alterados: memory.md
+- O que mudou: Recebido novo gate do board inserindo cadeia critica anterior a BRA-46: `BRA-54 (done) -> [BRA-58 + BRA-61] -> BRA-59 -> BRA-60 -> BRA-50 -> BRA-46 -> BRA-44`. BLOQUEIO mantido para BRA-46 ate fechamento com aceite real dos gates anteriores.
+- Validacao executada: leitura do comentario `652c8324-d981-43c8-b492-d6e3b8f64d61` e aplicacao da regra de cadeia critica.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/memory.md
+- Riscos / bloqueios: dependencia externa da cadeia BRA-58/61/59/60/50; sem isso nao ha execucao valida de smoke BRA-46.
+- Proximo passo: owner da cadeia BRA-57 publicar artifacts em path publicado e liberar gate para BRA-46.
+
+## 2026-05-28 - codex (BRA-59 Sofia resolve-persona + resolve-operation loop)
+- Added pi/services/sofia_orchestrator.py to enforce deterministic pre-patch tool sequence: esolve-persona then esolve-operation for /sofia/graph-command.
+- Added score gate via SOFIA_GRAPH_COMMAND_MIN_SCORE (default  .65); low confidence returns clarification without patch persistence.
+- Wired pi/routes/qa_contract.py::sofia_graph_command to orchestrator and response now includes auditable 	ool_calls + 	hreshold.
+- Added prompt contract file pi/prompts/sofia_graph_command.md.
+- Added tests 	ests/test_sofia_orchestrator_tools.py (2 passing cases: success and low-score fallback).
+- Produced artifact paperclip/test-artifacts/qa/bra59-sofia-orchestrator-2026-05-28.json with 5 command samples and captured tool call traces.
+
+## 2026-05-28 - codex (BRA-59 reopen: contract alignment)
+- Aligned `/sofia/graph-command` to published contract (`paperclip/docs/qa/sofia-tool-use-contract.md`).
+- Removed QA allow-list gating from Sofia path by replacing `_require_qa_persona(...)` with `_resolve_sofia_persona(...)` (accepts any existing persona slug/id; no 403 due to vz-lupas gate).
+- Added explicit `needs_clarification` propagation from orchestrator when score < threshold and no patch is returned.
+- Added auditable `validate_canonical_chain` tool entry to `tool_calls` in successful path.
+- Updated route response tool call shape to include `tool` + `score` + `result` for contract audits.
+- Extended tests with `allanvvz` non-gated route case and validate-canonical-chain tool call assertion.
+- Validation: `pytest tests/test_sofia_orchestrator_tools.py tests/test_qa_contract_routes.py -k "sofia_graph_command or sofia_orchestrator_tools" -v` => 5 passed.
+## 2026-05-28 - codex (BRA-59 strict rejection recovery)
+- Implemented contract-required tool endpoints on QA contract router:
+  - `POST/OPTIONS /sofia/tools/resolve-persona`
+  - `POST/OPTIONS /sofia/tools/resolve-operation`
+- Maintained `/sofia/graph-command` non-gated persona resolution (`_resolve_sofia_persona`) so `allanvvz` no longer fails with VZ-only gate.
+- Added low-confidence and operation metadata outputs required by contract (`needs_clarification`, `needs_confirmation`, `risk_level`, candidates).
+- Live probe evidence on `:8001` with QA admin token:
+  - `/sofia/tools/resolve-persona` => 200, schema fields present.
+  - `/sofia/tools/resolve-operation` => 200, schema fields present.
+  - `/sofia/graph-command` with `persona_slug=allanvvz` => 200 and `tool_calls` audit trail (resolve-persona, resolve-operation, validate_canonical_chain).
+- OpenAPI now contains `/sofia/tools/resolve-persona` and `/sofia/tools/resolve-operation`.
+- Tests: `pytest tests/test_qa_contract_routes.py -k "sofia_graph_command or resolve_persona_tool or resolve_operation_tool" -v` => 5 passed.

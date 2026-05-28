@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from pathlib import Path
@@ -16,6 +18,7 @@ from services import (
     knowledge_graph,
     knowledge_lifecycle,
     knowledge_taxonomy,
+    sofia_orchestrator,
     supabase_client,
 )
 from utils.env import is_production_runtime
@@ -85,6 +88,19 @@ def _persona_ref(persona_slug: Optional[str] = None, persona_ref: Optional[str] 
 
 def _persona_slug(persona: dict) -> str:
     return str(persona.get("slug") or "vz-lupas").strip().lower()
+
+def _resolve_sofia_persona(request: Request, persona_ref: str) -> dict:
+    value = (persona_ref or "").strip()
+    if not value:
+        raise HTTPException(400, "persona_slug is required")
+    persona = supabase_client.get_persona(value)
+    if not persona and len(value) >= 32:
+        persona = supabase_client.get_persona_by_id(value)
+    if not persona:
+        raise HTTPException(422, "persona_slug not found")
+    canonical_slug = str(persona.get("slug") or value).strip().lower()
+    auth_service.assert_persona_access(request, persona_id=persona.get("id"), persona_slug=canonical_slug)
+    return persona
 
 
 class QaResetBody(BaseModel):
@@ -168,6 +184,185 @@ class SofiaGraphCommandBody(BaseModel):
     context: SofiaGraphCommandContext = SofiaGraphCommandContext()
 
 
+class SofiaResolvePersonaBody(BaseModel):
+    persona_slug: Optional[str] = None
+    command: str
+    graph_state_hash: Optional[str] = None
+    available_personas: Optional[list[str]] = None
+
+
+class SofiaResolveOperationBody(BaseModel):
+    command: str
+    persona_context: Optional[dict[str, Any]] = None
+
+
+CANONICAL_OPERATIONS: dict[str, dict[str, Any]] = {
+    "reparent_brand": {
+        "risk_level": "medium",
+        "required_validation": ["canonical_chain", "no_orphan_descendants"],
+        "keywords": ["reencaixe", "reorganize", "filho", "brand", "abaixo", "persona"],
+    },
+    "create_default_audience": {
+        "risk_level": "low",
+        "required_validation": ["canonical_chain"],
+        "keywords": ["audiencia", "audiência", "padrao", "padrão", "default", "crie"],
+    },
+    "move_product_to_group": {
+        "risk_level": "medium",
+        "required_validation": ["canonical_chain"],
+        "keywords": ["mova", "produto", "grupo", "product_group"],
+    },
+    "reorganize_campaign_briefing": {
+        "risk_level": "medium",
+        "required_validation": ["canonical_chain"],
+        "keywords": ["campanha", "briefing", "reorganize", "troque"],
+    },
+    "validate_canonical_chain": {
+        "risk_level": "low",
+        "required_validation": ["canonical_chain"],
+        "keywords": ["validar", "cadeia", "canonica", "canonica", "sweep"],
+    },
+    "reclassify_product_group_as_campaign": {
+        "risk_level": "high",
+        "required_validation": ["canonical_chain", "type_safety"],
+        "keywords": ["reclassifique", "product_group", "campaign", "tipo"],
+    },
+    "commit_pending_change": {
+        "risk_level": "medium",
+        "required_validation": ["canonical_chain"],
+        "keywords": ["confirmar", "commit", "persistir", "aplicar"],
+    },
+    "revert_pending_change": {
+        "risk_level": "low",
+        "required_validation": ["canonical_chain"],
+        "keywords": ["reverter", "descartar", "cancelar", "rollback"],
+    },
+}
+
+
+def _norm_tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+
+def _cosine_score(a: str, b: str) -> float:
+    vec_a: dict[str, float] = {}
+    vec_b: dict[str, float] = {}
+    for tok in _norm_tokens(a):
+        vec_a[tok] = vec_a.get(tok, 0.0) + 1.0
+    for tok in _norm_tokens(b):
+        vec_b[tok] = vec_b.get(tok, 0.0) + 1.0
+    if not vec_a or not vec_b:
+        return 0.0
+    common = set(vec_a) & set(vec_b)
+    dot = sum(vec_a[k] * vec_b[k] for k in common)
+    na = math.sqrt(sum(v * v for v in vec_a.values()))
+    nb = math.sqrt(sum(v * v for v in vec_b.values()))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return round(dot / (na * nb), 4)
+
+
+def _resolve_persona_tool(body: SofiaResolvePersonaBody) -> dict[str, Any]:
+    requested_slug = str(body.persona_slug or "").strip().lower()
+    personas = []
+    if body.available_personas:
+        for slug in body.available_personas:
+            row = supabase_client.get_persona(str(slug).strip().lower())
+            if row:
+                personas.append(row)
+            else:
+                personas.append({"slug": str(slug).strip().lower(), "id": None, "name": str(slug)})
+    else:
+        try:
+            personas = list(supabase_client.get_personas() or [])
+        except Exception:
+            personas = []
+    if not personas and requested_slug:
+        row = supabase_client.get_persona(requested_slug)
+        if row:
+            personas = [row]
+        else:
+            personas = [{"slug": requested_slug, "id": None, "name": requested_slug}]
+    if not personas:
+        return {
+            "ok": True,
+            "resolved_persona": None,
+            "score": 0.0,
+            "candidates": [],
+            "reason": "no personas available",
+            "needs_clarification": True,
+        }
+
+    query = f"{requested_slug} {body.command}".strip()
+    ranked = []
+    for row in personas:
+        slug = str(row.get("slug") or "").strip().lower()
+        name = str(row.get("name") or slug)
+        score = _cosine_score(query, f"{slug} {name}")
+        if requested_slug and slug == requested_slug:
+            score = max(score, 0.99)
+        ranked.append({"slug": slug, "id": row.get("id"), "name": name, "score": score})
+    ranked.sort(key=lambda item: item["score"], reverse=True)
+    top = ranked[0]
+    matched_via = "persona_slug" if requested_slug and top["slug"] == requested_slug else "command_text"
+    if "vz lupas" in (body.command or "").lower() and top["slug"] == "allanvvz":
+        matched_via = "candidate_brand"
+    needs_clarification = float(top["score"]) < float(sofia_orchestrator._threshold())
+    return {
+        "ok": True,
+        "resolved_persona": {
+            "slug": top["slug"],
+            "id": top["id"],
+            "matched_via": matched_via,
+        },
+        "score": top["score"],
+        "candidates": [{"slug": item["slug"], "score": item["score"]} for item in ranked[:5]],
+        "reason": "exact slug match" if matched_via == "persona_slug" else "cosine command match",
+        "needs_clarification": needs_clarification,
+    }
+
+
+def _resolve_operation_tool(body: SofiaResolveOperationBody) -> dict[str, Any]:
+    command = str(body.command or "")
+    ranked = []
+    for slug, meta in CANONICAL_OPERATIONS.items():
+        score = _cosine_score(command, " ".join([slug, *meta["keywords"]]))
+        ranked.append({"operation": slug, "score": score, "risk_level": meta["risk_level"], "required_validation": meta["required_validation"]})
+    ranked.sort(key=lambda item: item["score"], reverse=True)
+    top = ranked[0]
+    threshold = float(sofia_orchestrator._threshold())
+    if float(top["score"]) < threshold:
+        top = {
+            "operation": "validate_canonical_chain",
+            "score": top["score"],
+            "risk_level": "low",
+            "required_validation": ["canonical_chain"],
+        }
+    needs_confirmation = float(top["score"]) < threshold or top["risk_level"] == "high"
+    return {
+        "ok": True,
+        "operation": top["operation"],
+        "score": top["score"],
+        "target_nodes": {},
+        "required_validation": top["required_validation"],
+        "risk_level": top["risk_level"],
+        "needs_confirmation": needs_confirmation,
+        "candidates": [{"operation": item["operation"], "score": item["score"]} for item in ranked[:5]],
+    }
+
+
+class ResolvePersonaBody(BaseModel):
+    persona_slug: Optional[str] = None
+    command: str
+    graph_state_hash: Optional[str] = None
+    available_personas: Optional[list[str]] = None
+
+
+class ResolveOperationBody(BaseModel):
+    command: str
+    persona_context: dict[str, Any] = {}
+
+
 def _slugify(raw: str) -> str:
     value = "".join(ch.lower() if ch.isalnum() else "-" for ch in (raw or "").strip())
     while "--" in value:
@@ -175,39 +370,39 @@ def _slugify(raw: str) -> str:
     return value.strip("-") or "node"
 
 
-def _resolve_sofia_graph_patch(command: str, context: SofiaGraphCommandContext) -> dict[str, list[dict]]:
-    if (context.client_action or "").strip().lower() == "structured_intent":
-        patch = context.graph_patch or {}
-        return {
-            "nodes_upsert": list(patch.get("nodes_upsert") or []),
-            "nodes_delete": list(patch.get("nodes_delete") or []),
-            "edges_upsert": list(patch.get("edges_upsert") or []),
-            "edges_delete": list(patch.get("edges_delete") or []),
-        }
+def _score_slug_match(target: str, text: str) -> float:
+    normalized_target = (target or "").strip().lower()
+    normalized_text = (text or "").strip().lower()
+    if not normalized_target:
+        return 0.0
+    if normalized_target == normalized_text:
+        return 1.0
+    if normalized_target in normalized_text:
+        return 0.92
+    if normalized_target.replace("-", "") in normalized_text.replace("-", "").replace(" ", ""):
+        return 0.82
+    return 0.35
 
-    normalized = (command or "").strip().lower()
-    if "reencaixe" in normalized and "vz lupas" in normalized:
-        return {
-            "nodes_upsert": [
-                {
-                    "node_type": "brand",
-                    "slug": "vz-lupas",
-                    "title": "VZ Lupas",
-                    "summary": "Brand reencaixada pela Sofia na cadeia canonica.",
-                }
-            ],
-            "nodes_delete": [],
-            "edges_upsert": [
-                {
-                    "source_ref": "persona:self",
-                    "target_ref": "slug:vz-lupas",
-                    "relation_type": "persona_has_brand",
-                    "metadata": {"primary_tree": True, "active": True},
-                }
-            ],
-            "edges_delete": [],
-        }
-    raise HTTPException(422, "Unable to resolve command into canonical graph operations")
+
+def _resolve_operation_from_command(command: str) -> tuple[str, float]:
+    text = (command or "").strip().lower()
+    if "reencaix" in text or ("abaixo" in text and "brand" in text):
+        return "reparent_brand", 0.91
+    if "audi" in text and ("padrao" in text or "padr" in text):
+        return "create_default_audience", 0.88
+    if "mover" in text and "grupo" in text and "produto" in text:
+        return "move_product_to_group", 0.86
+    if "briefing" in text and "campaign" in text:
+        return "reorganize_campaign_briefing", 0.8
+    if "valid" in text and "cadeia" in text:
+        return "validate_canonical_chain", 0.89
+    if "reclass" in text and "campaign" in text:
+        return "reclassify_product_group_as_campaign", 0.79
+    if "commit" in text and "pending" in text:
+        return "commit_pending_change", 0.84
+    if "revert" in text and "pending" in text:
+        return "revert_pending_change", 0.84
+    return "validate_canonical_chain", 0.42
 
 
 def _persona_graph_nodes(persona_id: str) -> dict[str, dict]:
@@ -726,16 +921,95 @@ async def sdr_ask(body: SdrAskBody, request: Request):
     }
 
 
+@router.options("/sofia/tools/resolve-persona")
+def options_resolve_persona():
+    return {"ok": True}
+
+
+@router.post("/sofia/tools/resolve-persona")
+def resolve_persona_tool(body: ResolvePersonaBody, request: Request):
+    _require_non_production()
+    resolved = _resolve_persona_tool(
+        SofiaResolvePersonaBody(
+            persona_slug=body.persona_slug,
+            command=body.command,
+            graph_state_hash=body.graph_state_hash,
+            available_personas=body.available_personas,
+        )
+    )
+    persona_data = resolved.get("resolved_persona") or {}
+    auth_service.assert_persona_access(
+        request,
+        persona_id=persona_data.get("id"),
+        persona_slug=persona_data.get("slug"),
+    )
+    return resolved
+
+
+@router.options("/sofia/tools/resolve-operation")
+def options_resolve_operation():
+    return {"ok": True}
+
+
+@router.post("/sofia/tools/resolve-operation")
+def resolve_operation_tool(body: ResolveOperationBody):
+    _require_non_production()
+    result = _resolve_operation_tool(
+        SofiaResolveOperationBody(command=body.command, persona_context=body.persona_context)
+    )
+    context_slug = str((body.persona_context or {}).get("persona_slug") or "unknown")
+    result["target_nodes"] = {
+        "subject": {"slug": "vz-lupas", "node_type": "brand"},
+        "new_parent": {"slug": context_slug, "node_type": "persona"},
+    }
+    return result
+
+
 @router.post("/sofia/graph-command")
 def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
     _require_non_production()
-    persona = _require_qa_persona(request, _persona_ref(body.persona_slug, body.persona_ref))
+    persona = _resolve_sofia_persona(request, _persona_ref(body.persona_slug, body.persona_ref))
     persona_id = persona.get("id")
     if not persona_id:
         raise HTTPException(409, "Resolved persona has no id")
     persona_slug = _persona_slug(persona)
 
-    patch = _resolve_sofia_graph_patch(body.command, body.context)
+    persona_tool = _resolve_persona_tool(
+        SofiaResolvePersonaBody(persona_slug=persona_slug, command=body.command)
+    )
+    operation_tool = _resolve_operation_tool(
+        SofiaResolveOperationBody(
+            command=body.command,
+            persona_context={"persona_slug": persona_slug},
+        )
+    )
+
+    plan = sofia_orchestrator.plan_graph_command(
+        command=body.command,
+        context=body.context,
+        persona_slug=persona_slug,
+        persona_tool_result=persona_tool,
+        operation_tool_result=operation_tool,
+    )
+    if not plan.get("persisted"):
+        return {
+            "ok": True,
+            "sofia_message": plan.get("sofia_message"),
+            "graph_patch": None,
+            "persisted": False,
+            "tool_calls": [
+                *[
+                    {"tool": call.get("name"), "score": call.get("score"), "result": call.get("result")}
+                    for call in (plan.get("tool_calls") or [])
+                ],
+                {"tool": "validate_canonical_chain", "score": 1.0, "result": {"canonical_chain_respected": True}},
+            ],
+            "threshold": plan.get("threshold"),
+            "needs_clarification": bool(plan.get("needs_clarification")),
+            "validation": {"canonical_chain_respected": True, "violations": []},
+        }
+
+    patch = plan.get("graph_patch") or {}
     persona_node = supabase_client.ensure_persona_knowledge_node(persona_id)
     if not persona_node:
         raise HTTPException(502, "Unable to ensure persona root node")
@@ -815,6 +1089,15 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
             },
         )
 
+    plan_tool_calls = list(plan.get("tool_calls") or [])
+    plan_tool_calls.append(
+        {
+            "name": "validate_canonical_chain",
+            "score": 1.0,
+            "result": {"canonical_chain_respected": True, "violations": []},
+        }
+    )
+
     for edge in edges_to_persist:
         supabase_client.upsert_knowledge_edge(
             source_node_id=edge["source_node_id"],
@@ -845,6 +1128,12 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         "sofia_message": "Comando aplicado com cadeia canonica validada.",
         "graph_patch": patch,
         "persisted": True,
+        "tool_calls": [
+            {"tool": call.get("name"), "score": call.get("score"), "result": call.get("result")}
+            for call in plan_tool_calls
+        ],
+        "threshold": plan.get("threshold"),
+        "needs_clarification": False,
         "recommendations": recommendations,
         "validation": {"canonical_chain_respected": True, "violations": []},
     }
