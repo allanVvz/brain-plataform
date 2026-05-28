@@ -26,6 +26,7 @@ PUBLIC_PREFIXES = (
 )
 
 ADMIN_TOKEN_HEADER = "x-ai-brain-admin-token"
+AUTHORIZATION_HEADER = "authorization"
 ADMIN_TOKEN_ENV_NAMES = ("QA", "qa", "preview", "PREVIEW", "test", "TEST")
 
 
@@ -34,11 +35,14 @@ def is_public_path(path: str) -> bool:
 
 
 def _admin_test_token_user(request: Request) -> dict | None:
-    """When ENVIRONMENT is qa/preview, allow a shared X-AI-BRAIN-ADMIN-TOKEN
-    header to act as the admin user. Production never accepts this path.
+    """When ENVIRONMENT is qa/preview, allow a shared admin token to act as
+    the admin user. Production never accepts this path.
 
     The token must come from the env var AI_BRAIN_ADMIN_TEST_TOKEN and is
-    compared in constant time. The token value itself is never logged.
+    compared in constant time. Accepted QA auth headers:
+      - X-AI-BRAIN-ADMIN-TOKEN: <token>
+      - Authorization: Bearer <token>  (compatibility alias)
+    The token value itself is never logged.
     """
     env_name = (os.environ.get("ENVIRONMENT") or "").strip()
     if env_name not in ADMIN_TOKEN_ENV_NAMES:
@@ -47,6 +51,11 @@ def _admin_test_token_user(request: Request) -> dict | None:
     if not expected:
         return None
     presented = (request.headers.get(ADMIN_TOKEN_HEADER) or "").strip()
+    if not presented:
+        authz = (request.headers.get(AUTHORIZATION_HEADER) or "").strip()
+        prefix = "bearer "
+        if authz.lower().startswith(prefix):
+            presented = authz[len(prefix):].strip()
     if not presented:
         return None
     # Constant-time compare to avoid timing leaks.
