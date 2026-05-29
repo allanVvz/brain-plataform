@@ -1176,3 +1176,11 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Added pi/scripts/import_v1_to_v2_allanvvz.py to export current knowledge/graph-data into graph_json v1.0 and publish (llanvvz:vz-lupas:v3).
 - Added pi/services/graph_json_validator.py CLI/service validator; latest document validates is_valid=true for structural main edges and embed guards.
 
+
+### 2026-05-29 - BRA-75 v2 patch loop test + live probe closure
+- Issue/tarefa: BRA-75 (Sofia graph_json v2 patch loop contract).
+- Arquivos alterados: `tests/test_sofia_v2_patch_loop.py`.
+- O que mudou: criado teste dedicado cobrindo 5 comandos da spec §3 no fluxo `/sofia/graph-command` com sessao e assert da sequencia obrigatoria de tools: `resolve-persona -> resolve-node -> resolve-operation -> validate-canonical-chain -> generate-graph-patch -> persist-graph-patch -> refetch-graph`.
+- Validacao executada: `pytest -q tests/test_sofia_v2_patch_loop.py tests/test_sofia_orchestrator_tools.py tests/test_sofia_session_context.py` => `8 passed`.
+- Probe live: turno 1 + turno 2 com `session_id=test-001` executados no backend `http://127.0.0.1:8001/sofia/graph-command` com auth admin; evidencias serializadas no artifact em `paperclip/test-artifacts/qa/BRA-75-live-probe-2026-05-29T17-27-38Z.json`.
+- Resultado: contrato BRA-75 atendido para teste faltante + probe autenticado + artifact publicado.
