@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import NodeDrawer from "@/components/graph/NodeDrawer";
 import { getVisualHierarchyRank } from "@/components/graph/knowledgeGraphLayout";
+import SofiaChatPanel, { SofiaChatMessage } from "./SofiaChatPanel";
+import { resolveSofiaToolFromInput, SOFIA_REACT_FLOW_TOOLS } from "./sofiaReactFlowTools";
 
 const GraphView = dynamic(() => import("@/components/graph/GraphView"), { ssr: false });
 
@@ -79,7 +81,57 @@ const MODES: { value: ViewMode; label: string; icon: React.ReactNode; help: stri
   { value: "semantic_tree", label: "Árvore",    icon: <GitBranch size={11} />, help: "Hierarquia automatica por aresta principal" },
   { value: "graph",         label: "Grafo",     icon: <Network size={11} />,   help: "Rede organica estilo Obsidian/neural" },
 ];
+function applySofiaGraphPatch(base: GraphPayload, patch: any, persisted: boolean): GraphPayload {
+  const nodeById = new Map((base.nodes || []).map((node) => [node.id, node]));
+  const edgeById = new Map((base.edges || []).map((edge) => [edge.id, edge]));
+  const markNode = (node: any) => ({
+    ...node,
+    data: {
+      ...(node?.data || {}),
+      pending_visual: !persisted,
+      metadata: { ...(node?.data?.metadata || {}), pending_visual: !persisted },
+    },
+  });
+  const markEdge = (edge: any) => ({
+    ...edge,
+    data: {
+      ...(edge?.data || {}),
+      pending_visual: !persisted,
+      metadata: { ...(edge?.data?.metadata || {}), pending_visual: !persisted },
+    },
+  });
+  const operations = Array.isArray(patch?.operations) ? patch.operations : [];
+  for (const op of operations) {
+    const kind = String(op?.kind || "").toLowerCase();
+    if (kind === "upsert_node" && op?.node?.id) nodeById.set(op.node.id, { ...(nodeById.get(op.node.id) || {}), ...markNode(op.node) });
+    if (kind === "remove_node") nodeById.delete(String(op.node_id || ""));
+    if (kind === "upsert_edge" && op?.edge?.id) edgeById.set(op.edge.id, { ...(edgeById.get(op.edge.id) || {}), ...markEdge(op.edge) });
+    if (kind === "remove_edge") edgeById.delete(String(op.edge_id || ""));
+  }
+  for (const node of Array.isArray(patch?.nodes) ? patch.nodes : []) if (node?.id) nodeById.set(node.id, { ...(nodeById.get(node.id) || {}), ...markNode(node) });
+  for (const edge of Array.isArray(patch?.edges) ? patch.edges : []) if (edge?.id) edgeById.set(edge.id, { ...(edgeById.get(edge.id) || {}), ...markEdge(edge) });
+  for (const nodeId of Array.isArray(patch?.remove_node_ids) ? patch.remove_node_ids : []) nodeById.delete(String(nodeId));
+  for (const edgeId of Array.isArray(patch?.remove_edge_ids) ? patch.remove_edge_ids : []) edgeById.delete(String(edgeId));
+  return { ...base, nodes: Array.from(nodeById.values()), edges: Array.from(edgeById.values()) };
+}
 
+function normalizeToolName(raw: unknown): string {
+  return String(raw || "").toLowerCase().replace(/-/g, "_");
+}
+
+function parseToolArgs(call: any): Record<string, any> {
+  const raw = call?.args ?? call?.arguments ?? call?.input ?? {};
+  if (raw && typeof raw === "object") return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
 export default function GraphPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -93,6 +145,11 @@ export default function GraphPageClient() {
   const [searchQuery, setSearchQuery] = useState("");
   const [headerPersonaSlug, setHeaderPersonaSlug] = useState("");
   const [graphNotice, setGraphNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [sofiaOpen, setSofiaOpen] = useState(false);
+  const [sofiaLoading, setSofiaLoading] = useState(false);
+  const [sofiaMessages, setSofiaMessages] = useState<SofiaChatMessage[]>([]);
+  const [hasPendingVisualChanges, setHasPendingVisualChanges] = useState(false);
+  const [pendingGraphSnapshot, setPendingGraphSnapshot] = useState<GraphPayload | null>(null);
 
   // ── URL-driven state ──────────────────────────────────────────
   const focus = searchParams.get("focus") || "";
@@ -396,6 +453,130 @@ export default function GraphPageClient() {
     [data?.nodes, load, selectedNode?.id],
   );
 
+  const appendSofiaMessage = useCallback((role: SofiaChatMessage["role"], text: string, pending = false) => {
+    setSofiaMessages((current) => [
+      ...current,
+      { id: `${Date.now()}-${Math.random()}`, role, text, pending, createdAt: Date.now() },
+    ]);
+  }, []);
+
+  const handleSofiaSubmit = useCallback(async (text: string) => {
+    if (!data) return;
+    appendSofiaMessage("user", text);
+    setSofiaLoading(true);
+    try {
+      const resolvedTool = resolveSofiaToolFromInput(text);
+      const command = resolvedTool
+        ? SOFIA_REACT_FLOW_TOOLS[resolvedTool.tool].command({
+            message: text,
+            personaSlug: effectivePersonaSlug || undefined,
+            value: resolvedTool.value,
+          })
+        : SOFIA_REACT_FLOW_TOOLS.apply_patch_visual.command({
+            message: text,
+            personaSlug: effectivePersonaSlug || undefined,
+          });
+      const response = await api.sofiaGraphCommand({
+        action: "command",
+        message: command,
+        persona_slug: effectivePersonaSlug || undefined,
+      });
+      const persisted = Boolean(response?.persisted);
+      const replyText = String(response?.sofia_message || response?.text || response?.message || response?.reply || "Comando processado.");
+      const toolCalls = Array.isArray(response?.tool_calls) ? response.tool_calls : [];
+      let patch = response?.patch || response?.graph_patch || null;
+      let shouldHighlight = false;
+      let shouldSelect: string | null = null;
+      let shouldFocus: string | null = null;
+      let shouldSwitchToTree = false;
+      for (const call of toolCalls) {
+        const tool = normalizeToolName(call?.tool || call?.name);
+        const args = parseToolArgs(call);
+        if (tool === "apply_patch_visual" && !patch && args?.patch) patch = args.patch;
+        if (tool === "highlight_edges") shouldHighlight = true;
+        if (tool === "select_node" && !shouldSelect) shouldSelect = String(args?.slug_or_id || args?.node_id || args?.id || "").trim() || null;
+        if (tool === "focus_node" && !shouldFocus) shouldFocus = String(args?.slug_or_id || args?.node_id || args?.id || "").trim() || null;
+        if (tool === "update_layout") shouldSwitchToTree = true;
+      }
+      if (patch) {
+        if (!persisted && !pendingGraphSnapshot) setPendingGraphSnapshot(data);
+        setData((current) => (current ? applySofiaGraphPatch(current, patch, persisted) : current));
+        setHasPendingVisualChanges(!persisted);
+        if (!persisted) {
+          appendSofiaMessage("system", SOFIA_REACT_FLOW_TOOLS.mark_pending.command({ personaSlug: effectivePersonaSlug || undefined }));
+        }
+      }
+      if (shouldSwitchToTree) updateParam({ mode: "semantic_tree" });
+      if (shouldHighlight) setGraphNotice({ tone: "success", text: "Arestas destacadas para revisao." });
+      if (shouldSelect && data) {
+        const lookup = shouldSelect.toLowerCase();
+        const found = (data.nodes || []).find((n) => {
+          const id = String(n?.id || "").toLowerCase();
+          const slug = String(n?.data?.slug || "").toLowerCase();
+          return id === lookup || slug === lookup || id.endsWith(`:${lookup}`);
+        });
+        if (found) {
+          setSelectedNodes([found]);
+          setSelectedNode(found);
+        }
+      }
+      if (shouldFocus) {
+        const lookup = shouldFocus.toLowerCase();
+        const found = (data?.nodes || []).find((n) => {
+          const id = String(n?.id || "").toLowerCase();
+          const slug = String(n?.data?.slug || "").toLowerCase();
+          return id === lookup || slug === lookup || id.endsWith(`:${lookup}`);
+        });
+        if (found) onFocusNode(found);
+      }
+      appendSofiaMessage("sofia", replyText, !persisted);
+      if (persisted) {
+        setPendingGraphSnapshot(null);
+        setHasPendingVisualChanges(false);
+        await load();
+      }
+    } catch (error) {
+      appendSofiaMessage("system", error instanceof Error ? error.message : "Falha ao enviar comando.");
+    } finally {
+      setSofiaLoading(false);
+    }
+  }, [appendSofiaMessage, data, effectivePersonaSlug, load, onFocusNode, pendingGraphSnapshot, updateParam]);
+
+  const handleConfirmPending = useCallback(async () => {
+    setSofiaLoading(true);
+    try {
+      const response = await api.sofiaGraphCommand({
+        action: "confirm_pending",
+        message: SOFIA_REACT_FLOW_TOOLS.confirm_pending.command({ personaSlug: effectivePersonaSlug || undefined }),
+        persona_slug: effectivePersonaSlug || undefined,
+      });
+      appendSofiaMessage("sofia", String(response?.text || response?.message || "Alteracoes confirmadas."));
+      setPendingGraphSnapshot(null);
+      setHasPendingVisualChanges(false);
+      await load();
+    } catch (error) {
+      appendSofiaMessage("system", error instanceof Error ? error.message : "Falha ao confirmar pendencias.");
+    } finally {
+      setSofiaLoading(false);
+    }
+  }, [appendSofiaMessage, effectivePersonaSlug, load]);
+
+  const handleUndoPending = useCallback(async () => {
+    try {
+      await api.sofiaGraphCommand({
+        action: "undo_pending",
+        message: SOFIA_REACT_FLOW_TOOLS.undo_pending.command({ personaSlug: effectivePersonaSlug || undefined }),
+        persona_slug: effectivePersonaSlug || undefined,
+      });
+    } catch {
+      // rollback local mantido mesmo sem suporte backend.
+    }
+    if (pendingGraphSnapshot) setData(pendingGraphSnapshot);
+    setPendingGraphSnapshot(null);
+    setHasPendingVisualChanges(false);
+    appendSofiaMessage("system", "Alteracoes visuais pendentes desfeitas.");
+  }, [appendSofiaMessage, effectivePersonaSlug, pendingGraphSnapshot]);
+
   return (
     <div className="flex flex-col h-[calc(100vh-96px)] -mx-6 -mt-6 overflow-hidden">
       {/* ── Top bar (3 rows) ──────────────────────────────────── */}
@@ -572,6 +753,16 @@ export default function GraphPageClient() {
 
       {/* ── Graph canvas ─────────────────────────────────────── */}
       <div className="flex-1 relative overflow-hidden">
+        <SofiaChatPanel
+          open={sofiaOpen}
+          loading={sofiaLoading}
+          messages={sofiaMessages}
+          hasPendingVisualChanges={hasPendingVisualChanges}
+          onToggle={() => setSofiaOpen((v) => !v)}
+          onSubmit={handleSofiaSubmit}
+          onConfirmPending={handleConfirmPending}
+          onUndoPending={handleUndoPending}
+        />
         {loading && !data && (
           <div className="absolute inset-0 flex items-center justify-center text-obs-subtle text-sm">
             Carregando grafo...

@@ -1,5 +1,52 @@
 # Brain AI â€” Progresso UI/UX
 
+## Graph JSON V2 spec entregue (2026-05-29)
+- Spec autoritativa: `ai-brain/docs/architecture/graph-json-canonical-architecture.md` (16 secoes).
+- Decisao: mover source of truth para `graph_documents.graph_json` versionado; v1 tabelas viram indices derivados.
+- 7 endpoints v2 propostos, 8 fases nao destrutivas, FAQ-before-Embed preservada.
+- Validacao gate: AllanVvz->VZ Lupas conversion + Sofia patch + frontend render + FAQ aprovada gerando embedding. Artifact obrigatorio em `paperclip/test-artifacts/architecture/`.
+- Issues paperclip: BRA-72 umbrella (CTO) + BRA-73 backend + BRA-74 frontend + BRA-75 AI agent + BRA-76 graph validator. Todas blocked aguardando CTO decision file em `paperclip/docs/architecture/`.
+- Regras: nao destrutivo; nao apagar dados de svkogegypdqquzlfzaor; nao quebrar endpoints atuais; v1 e v2 em paralelo ate cutover.
+
+## AGENTS.md unstale + QA local backend section (2026-05-29)
+- Linha 13 da `AGENTS.md` atualizada: Supabase QA atual `svkogegypdqquzlfzaor` (apos antigo `qhnepdcqtkjjslqqiyvp` ser suspenso por exceed_egress_quota).
+- Nova secao `### QA local backend (since 2026-05-29)`: comando `python ai-brain/scripts/start_api_qa.py`, hot-reload ativo, listen :8001, auth Option B (X-AI-BRAIN-ADMIN-TOKEN + Authorization: Bearer alias), sequence pos-edit obrigatoria, diagnose 401 vs 403.
+- Parte da rodada 3.3-3.9 de hardening per audit 2026-05-29.
+
+## Sofia Graph Agent umbrella â€” BRA-71 (2026-05-29)
+- Spec: `paperclip/docs/qa/sofia-graph-agent-acceptance-2026-05-29.md`.
+- CEO/PO live-test: Sofia responde fallback generico "Preciso de confirmacao: qual persona e qual operacao" mesmo com persona ativa allanvvz e contexto claro. Sofia nao age â€” apenas classifica.
+- Umbrella BRA-71 criada como gate unico de aceite para BRA-44 + BRA-46. Sub-scopes BRA-62/63/64/65 continuam abertas como tarefas de implementacao.
+- 7 comandos comportamentais obrigatorios para aceite: conecte allan rodrigues em persona allanvvz; crie audience; persona allanvvz; reencaixar allan rodrigues; corrigir campanha VZ Lupas; organize VZ Lupas; mover product groups.
+- 9 rejection criteria binarios. Done fabricado -> ESCALATION (Â§13).
+
+## Sofia Graph â€” anti-loop rule + CTO decision (2026-05-29)
+- Usuario formalizou regra anti-loop: QA nao parqueia blocked indefinidamente. Apos 1o blocked sem delta, 2o wake = handoff CEO; 3o wake = proibido.
+- Aplicado em BRA-66: QA reportou `/views/tree` e `/views/graph` -> 404. Probe local confirmou: rotas nao existem em ai-brain nem paperclip. `/knowledge/graph-data?persona_slug=allanvvz` ja retorna 200.
+- Logo contrato `/views/*` e fantasma â€” spec orfa.
+- Issue BRA-69 criada para CTO decidir Opcao A (implementar /views/* em ai-brain) vs Opcao B (substituir por /knowledge/graph-data).
+- Recomendacao do validator: Opcao B (sem valor adicional em implementar rotas duplicadas).
+- BRA-66 fica blocked ate documento de decisao em `paperclip/docs/architecture/route-contract-decision-2026-05-29.md`.
+- Regras: `paperclip/agents/OPERATING_RULES.md` Â§13 e `QA_LEAD_GATE_CHECKLIST.md` Â§G.
+
+## Sofia Graph acceptance â€” escopo expandido pelo CEO/PO (2026-05-29)
+- Spec: `paperclip/docs/qa/sofia-graph-acceptance-spec-2026-05-29.md` (11 secoes).
+- Observacao no grafo live de `allanvvz`: shape errado (Campaign VZ Lupas muito alto, Allan Rodrigues misturado, brand VZ Lupas deslocado), Sofia sem memoria curta, sem contexto de persona ativa, nao parece a mesma Sofia da aba Criar.
+- Nova arquitetura: 2 tool groups. Backend (resolve-persona, resolve-node, resolve-operation, validate_canonical_chain, generate_patch, persist_patch, refetch_graph) + Frontend (apply_patch_visual, mark_pending, undo, confirm, select, focus, layout, highlight).
+- Regra de produto: Sofia Graph = Sofia Criar (mesmo orchestrator, mesmo tool registry, mesmo contexto). Diferenca apenas no frontend toolset registrado por sessao.
+- BRAs novas: BRA-62 (conversational context), BRA-63 (unification), BRA-64 (frontend tools), BRA-65 (resolver tuning + 4 backend tools faltantes), BRA-66 (E2E test obrigatorio).
+- Cadeia: 58/59/61 done -> [62 + 63 + 64 + 65 parallel] -> 60 -> 66 -> 44 + 46.
+- Anti-patterns auto-reject (Â§5 do spec): Sofia text-only; confirmacao generica; "comando aplicado" sem patch; visual sem persist; duplicacao; Campaign VZ Lupas filho direto da persona; Allan Rodrigues misturado na VZ Lupas; hardcoded; allow-list.
+
+## Sofia tool-use contract â€” DESTRAVADO 2026-05-28T20:55Z
+- Commits ai-brain reais: `6d74e6a` (fix routes + remove gate) + `8f80352` (BRA-58 tool resolvers).
+- Causa do 403 persistente: uvicorn PID 37024 servia codigo antigo (`reload=False`). Restart manual + novo codigo carregado.
+- Probe `/sofia/graph-command` com `persona_slug=allanvvz` -> 200 com tool_calls (resolve-persona 0.99, resolve-operation 0.91 reparent_brand, validate_canonical_chain 1.0), patch persistido, brand vz-lupas com edge `persona_has_brand` allanvvz.
+- Option B (`Authorization: Bearer` alias) -> 200. Confirmado.
+- Low-confidence command -> 200 com `needs_clarification=true`, sem patch. Correto.
+- `scripts/start_api_qa.py` agora `reload=True` + `reload_dirs=[API_DIR]` (BRA-61 aplicado). Working tree edit, sem commit ainda.
+- Artifact: `paperclip/test-artifacts/qa/sofia-tool-use-contract-2026-05-28T20-55-00Z.json`.
+
 ## Sofia tool-use contract (2026-05-28)
 - Spec autoritativa: `paperclip/docs/qa/sofia-tool-use-contract.md`.
 - Define schemas request/response de `/sofia/tools/resolve-persona` e `/sofia/tools/resolve-operation`, 8 canonical ops (reparent_brand, create_default_audience, move_product_to_group, reorganize_campaign_briefing, validate_canonical_chain, reclassify_product_group_as_campaign, commit_pending_change, revert_pending_change), comportamento obrigatorio de `/sofia/graph-command` (tool_calls populado, NUNCA 403 por gate de persona, threshold confidence 0.65), matriz 33 casos (4 personas x 8 ops + 1 low-confidence).
@@ -1015,3 +1062,83 @@ ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecuï¿½ï¿½o real gerou p
   - `POST /sofia/graph-command` with `persona_slug=allanvvz` -> `200` (no 403)
   - `/openapi.json` contains both `/sofia/tools/resolve-persona` and `/sofia/tools/resolve-operation`
   - both tool endpoints return 200 with expected JSON fields.
+## 2026-05-28 - codex (BRA-59 auth addendum for BRA-60)
+- Formal QA auth decision adopted: **Option B**.
+- Backend now accepts both headers in QA for `/sofia/*` protected routes:
+  - `X-AI-BRAIN-ADMIN-TOKEN: <token>` (primary)
+  - `Authorization: Bearer <token>` (compatibility alias)
+- Implemented in `api/middleware/auth.py::_admin_test_token_user` using same `AI_BRAIN_ADMIN_TEST_TOKEN` and constant-time compare.
+- Added handler docstring note in `/sofia/graph-command` route about accepted QA auth headers.
+- Updated `paperclip/docs/qa/sofia-tool-use-contract.md` with new section `4.5 QA auth contract for /sofia/*`.
+- Created `paperclip/scripts/sofia-commands-runner.mjs` with dual-header auth emission to avoid 33x401 harness mismatch.
+- Live probe proof:
+  - `POST /sofia/graph-command` with only `Authorization: Bearer <token>` => HTTP 200.
+- Runner smoke from paperclip repo succeeded auth and produced artifact with `pass=33 fail=0`.
+
+## BRA-58 addendum auth-contract clarity (2026-05-28)
+- Formal decision: Option B for QA auth on `/sofia/*`.
+- Accepted headers in QA:
+  - `X-AI-BRAIN-ADMIN-TOKEN: <token>` (primary)
+  - `Authorization: Bearer <token>` (compatibility alias)
+- Handler docstring in `api/routes/qa_contract.py` explicitly documents both.
+- Updated `paperclip/docs/qa/sofia-tool-use-contract.md` section `4.5` to codify auth contract.
+- Updated `paperclip/scripts/sofia-commands-runner.mjs` to auth-fallback (x-admin first, bearer fallback) and record `auth_mode` per case.
+- Live probe: both headers return `200` for `POST /sofia/graph-command` on `:8001`.
+- BRA-60 compatibility check: runner executed 33 cases, `disposition=pass`.
+
+### 2026-05-29 ï¿½ frontend-agent (BRA-46: superseded by BRA-66 E2E formal)
+- Issue/tarefa: BRA-46
+- Arquivos alterados: memory.md
+- O que mudou: Gate atualizado pelo board/CEO-PO: BRA-46 fica supersedida pelo teste formal BRA-66. Fechamento de BRA-46 depende do aceite de BRA-66 com artifacts obrigatorios (json transcript completo, screenshots before/after e edge-set comparison contra estrutura ï¿½2 do spec).
+- Validacao executada: leitura do comentario `1f636ea7-530d-4866-85c5-73e098abc691`.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/memory.md
+- Riscos / bloqueios: bloqueio externo ate BRA-66 concluir com artifacts publicados.
+- Proximo passo: owner BRA-66 publicar artifacts requeridos e sinalizar aceite; depois retomar BRA-46 para fechamento formal.
+
+### 2026-05-29 ï¿½ frontend-agent (BRA-46: gate moved to BRA-71 umbrella)
+- Issue/tarefa: BRA-46
+- Arquivos alterados: memory.md
+- O que mudou: Board atualizou o gate; BRA-46 fica bloqueada por BRA-71 (Sofia Graph Agent umbrella). Aceite depende dos 7 comandos comportamentais do ï¿½3.7 no spec `paperclip/docs/qa/sofia-graph-agent-acceptance-2026-05-29.md` + artifacts em path publicado. Sub-scopes BRA-62/63/64/65 seguem como implementacao.
+- Validacao executada: leitura do comentario `81a4280c-d70b-4e85-81e9-0effe19c527e`.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/memory.md
+- Riscos / bloqueios: dependencia externa de aceite umbrella BRA-71.
+- Proximo passo: owner BRA-71 concluir aceite formal e publicar artifacts para liberar fechamento de BRA-46.
+
+### 2026-05-29 ï¿½ codex (BRA-62 reopen: session-context hardening)
+- Wake delta: issue reopened noting umbrella integration gate moved to BRA-71; BRA-62 remains implementation scope.
+- Ajustes entregues:
+  - SofiaGraphCommandContext.active_persona_slug aceito e usado como prioridade de contexto ativo.
+  - Memï¿½ria curta padronizada para contrato: TTL default 1800s (30min), janela default 5 turns.
+  - Memï¿½ria agora inclui last_referenced_node por session_id.
+  - Resoluï¿½ï¿½o de pronome (ele) no turno seguinte usando last_referenced_node.slug.
+  - /sofia/graph-command retorna conversation_context.last_referenced_node para auditoria.
+- Evidï¿½ncia:
+  - testes: pytest tests/test_sofia_session_context.py tests/test_qa_contract_routes.py -k "sofia_graph_command or sofia_session" -q => 5 passed.
+  - artifact: paperclip/test-artifacts/qa/bra62-session-context-2026-05-29.json com turno 1+2 e propagaï¿½ï¿½o de referï¿½ncia.
+
+### 2026-05-29 — graph-validator-migration-agent (BRA-76 blocker verification against ai-brain runtime)
+- Issue/tarefa: BRA-76 (04e050d-a8d1-4a58-9c6f-20fcbcdddb1f) validator/migration execution gate.
+- Arquivos alterados: i-brain/memory.md.
+- O que mudou: executada verificacao de pre-requisitos de runtime para importacao v1->v2 AllanVvz e validacao graph_documents.
+- Validacao executada: ausencia de pi/scripts/import_v1_to_v2_allanvvz.py, pi/services/graph_json_validator.py, pi/scripts/reindex_graph_json.py, pi/routes/graph_documents.py; GET http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz retornou 404; openapi.json nao contem /graph-documents/current.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/graph-json-v2-allanvvz-validation-2026-05-29T06-20-00Z.json.
+- Riscos / bloqueios: sem sub-1 BRA-73 implementada/deployada, BRA-76 nao consegue executar import/publish/validator/reindex no backend.
+- Proximo passo: Backend Engineer publicar implementacao BRA-73; reexecutar BRA-76 apos probe 200 em /graph-documents/current.
+
+### 2026-05-29 — codex (BRA-75: Sofia graph-command tool loop v2)
+- Issue/tarefa: BRA-75 Graph JSON V2 / AI Agent — Sofia edita graph_json via patch.
+- Arquivos alterados: `api/services/sofia_orchestrator.py`; `api/routes/qa_contract.py`; `tests/test_sofia_orchestrator_tools.py`; `tests/test_qa_contract_routes.py`.
+- O que mudou: o orquestrador agora executa loop explícito de tools com nomes canônicos (`resolve-persona`, `resolve-node`, `resolve-operation`, `validate-canonical-chain`, `generate-graph-patch`) e remove fallback genérico, retornando clarificação específica por condição (persona/node ausente, ambiguidade, baixa confiança). A rota `/sofia/graph-command` passou a registrar também `persist-graph-patch` e `refetch-graph` no `tool_calls`, mantendo trilha auditável fim-a-fim.
+- Validação executada: `pytest -q tests/test_sofia_orchestrator_tools.py tests/test_qa_contract_routes.py -k "sofia_graph_command or sofia_resolve or test_plan_graph_command" tests/test_sofia_session_context.py` ? `9 passed, 4 deselected`.
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/ai-brain/tests/test_sofia_orchestrator_tools.py` e `C:/Users/Alan/Documents/repositorios/ai-brain/tests/test_qa_contract_routes.py` (evidência em código + suíte passando).
+- Riscos / bloqueios: probe live autenticado em `:8001` bloqueado por variável ausente (`AI_BRAIN_ADMIN_TOKEN missing`), impedindo validar a resposta carregada com sessão/token no runtime ativo.
+- Próximo passo: Backend Engineer/Infra disponibilizar token admin QA no runtime da execução para probe autenticado e fechamento final.
+### 2026-05-29 - Frontend Agent (BRA-74: Graph JSON V2 + Sofia React Flow tools)
+- Issue/tarefa: BRA-74
+- Arquivos alterados: dashboard/app/knowledge/graph/GraphPageClient.tsx; dashboard/app/knowledge/graph/sofiaReactFlowTools.ts
+- O que mudou: alinhei os nomes dos 8 tools de frontend (pply_patch_visual, mark_pending, undo_pending, confirm_pending, select_node, ocus_node, update_layout, highlight_edges) e passei a executar 	ool_calls retornados pelo backend para aplicar patch visual, selecionar/focar node, acionar layout e destacar arestas, mantendo estado pending vs persisted e reconciliacao por refetch ao confirmar.
+- Validacao executada: 
+pm run build (em dashboard/) - sucesso, compilacao e TypeScript sem erros.
+- Artifact gerado: n/a (validacao por build do frontend sem artifact externo).
+- Riscos / bloqueios: backend ainda precisa manter emissao consistente de 	ool_calls + graph_patch para cobertura completa dos casos conversacionais.
+- Proximo passo: QA/E2E Validator validar os casos de comportamento Sofia Graph no fluxo real do painel.
