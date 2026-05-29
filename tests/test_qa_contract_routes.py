@@ -224,7 +224,9 @@ def test_sofia_graph_command_applies_reencaixe(monkeypatch):
 
     assert result["ok"] is True
     assert result["persisted"] is True
-    assert any(call.get("tool") == "validate_canonical_chain" for call in result["tool_calls"])
+    assert any(call.get("tool") == "validate-canonical-chain" for call in result["tool_calls"])
+    assert any(call.get("tool") == "persist-graph-patch" for call in result["tool_calls"])
+    assert any(call.get("tool") == "refetch-graph" for call in result["tool_calls"])
     assert len(edge_calls) == 1
 
 
@@ -252,6 +254,48 @@ def test_sofia_graph_command_allanvvz_not_blocked_by_persona_gate(monkeypatch):
     result = qa_contract.sofia_graph_command(body, _req())
     assert result["ok"] is True
     assert result["persisted"] is True
+
+
+def test_sofia_graph_command_session_memory_reuses_active_persona(monkeypatch):
+    from routes import qa_contract
+
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    persona_by_slug = {
+        "allanvvz": {"id": "p2", "slug": "allanvvz"},
+        "vz-lupas": {"id": "p1", "slug": "vz-lupas"},
+    }
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda slug: persona_by_slug.get(slug))
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+    monkeypatch.setattr(qa_contract.supabase_client, "ensure_persona_knowledge_node", lambda _persona_id: {"id": "persona-2", "node_type": "persona", "slug": "self"})
+    monkeypatch.setattr(qa_contract.supabase_client, "list_knowledge_nodes_by_type", lambda *args, **kwargs: [])
+    monkeypatch.setattr(qa_contract.supabase_client, "insert_event", lambda payload, source=None: {"ok": True})
+    monkeypatch.setattr(
+        qa_contract.supabase_client,
+        "upsert_knowledge_node",
+        lambda payload: {"id": "brand-2", "node_type": payload["node_type"], "slug": payload["slug"], "status": "active"},
+    )
+    monkeypatch.setattr(qa_contract.supabase_client, "upsert_knowledge_edge", lambda **kwargs: {"id": "e2"})
+
+    first = qa_contract.SofiaGraphCommandBody(
+        persona_slug="allanvvz",
+        command="reencaixe VZ Lupas abaixo de AllanVvz",
+        context=qa_contract.SofiaGraphCommandContext(client_action="natural_language", session_id="sess-1"),
+    )
+    first_result = qa_contract.sofia_graph_command(first, _req())
+    assert first_result["ok"] is True
+    assert first_result["persisted"] is True
+    assert first_result["conversation_context"]["active_persona_slug"] == "allanvvz"
+
+    second = qa_contract.SofiaGraphCommandBody(
+        persona_slug=None,
+        command="reencaixe VZ Lupas abaixo da persona principal",
+        context=qa_contract.SofiaGraphCommandContext(client_action="natural_language", session_id="sess-1"),
+    )
+    second_result = qa_contract.sofia_graph_command(second, _req())
+    assert second_result["ok"] is True
+    assert second_result["persisted"] is True
+    assert second_result["conversation_context"]["active_persona_slug"] == "allanvvz"
+    assert second_result["conversation_context"]["memory_turns"] >= 2
 
 
 def test_sofia_resolve_persona_tool_contract_shape(monkeypatch):

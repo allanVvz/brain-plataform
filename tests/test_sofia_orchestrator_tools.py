@@ -32,7 +32,7 @@ def test_plan_graph_command_calls_two_tools_and_builds_patch(monkeypatch):
     monkeypatch.setattr(
         sofia_orchestrator,
         "resolve_operation",
-        lambda command_text: {"operation": "persona_has_brand_relink", "score": 0.95},
+        lambda command_text: {"operation": "reparent_brand", "score": 0.95},
     )
 
     result = sofia_orchestrator.plan_graph_command(
@@ -44,7 +44,13 @@ def test_plan_graph_command_calls_two_tools_and_builds_patch(monkeypatch):
     assert result["ok"] is True
     assert result["persisted"] is True
     assert result["graph_patch"]["edges_upsert"][0]["relation_type"] == "persona_has_brand"
-    assert [c["name"] for c in result["tool_calls"]] == ["resolve-persona", "resolve-operation"]
+    assert [c["name"] for c in result["tool_calls"]] == [
+        "resolve-persona",
+        "resolve-node",
+        "resolve-operation",
+        "validate-canonical-chain",
+        "generate-graph-patch",
+    ]
 
 
 def test_plan_graph_command_low_score_returns_clarification_no_patch(monkeypatch):
@@ -71,5 +77,11 @@ def test_plan_graph_command_low_score_returns_clarification_no_patch(monkeypatch
     assert result["ok"] is True
     assert result["persisted"] is False
     assert result["graph_patch"] is None
-    assert "confirmacao" in result["sofia_message"].lower()
-    assert len(result["tool_calls"]) == 2
+    assert "persona ativa" in result["sofia_message"].lower()
+    assert [c["name"] for c in result["tool_calls"]] == [
+        "resolve-persona",
+        "resolve-node",
+        "resolve-operation",
+        "validate-canonical-chain",
+        "generate-graph-patch",
+    ]

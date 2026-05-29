@@ -170,6 +170,8 @@ class OfficialSeedBody(BaseModel):
 
 
 class SofiaGraphCommandContext(BaseModel):
+    session_id: Optional[str] = None
+    active_persona_slug: Optional[str] = None
     current_graph_hash: Optional[str] = None
     selected_node_ids: list[str] = []
     client_action: str = "natural_language"
@@ -178,7 +180,7 @@ class SofiaGraphCommandContext(BaseModel):
 
 
 class SofiaGraphCommandBody(BaseModel):
-    persona_slug: str = "vz-lupas"
+    persona_slug: Optional[str] = None
     persona_ref: Optional[str] = None
     command: str
     context: SofiaGraphCommandContext = SofiaGraphCommandContext()
@@ -325,7 +327,7 @@ def _resolve_persona_tool(body: SofiaResolvePersonaBody) -> dict[str, Any]:
 def _resolve_operation_tool(body: SofiaResolveOperationBody) -> dict[str, Any]:
     command = str(body.command or "")
     text = command.strip().lower()
-    if "reencaix" in text and ("vz lupas" in text or "vzlupas" in text):
+    if "reencaix" in text and ("vz lupas" in text or "vzlupas" in text or "vz-lupas" in text):
         top = {
             "operation": "reparent_brand",
             "score": 0.91,
@@ -483,7 +485,7 @@ def _validate_sofia_patch(
         dst_type = knowledge_taxonomy.canonical_node_type(dst.get("node_type") if dst else None)
         rel = str(edge.get("relation_type") or "contains").strip().lower()
         edge_kind = knowledge_taxonomy.edge_kind_for_relation(rel)
-        if src_type == "product" and dst_type == "embedded":
+        if src_type == "product" and dst_type == "embed":
             violations.append(
                 {
                     "code": "GRAPH_EDGE_FORBIDDEN",
@@ -491,7 +493,7 @@ def _validate_sofia_patch(
                     "edge": {"from": edge["source_ref"], "to": edge["target_ref"], "relation": rel},
                 }
             )
-        if src_type == "faq" and dst_type == "embedded":
+        if src_type == "faq" and dst_type == "embed":
             src_status = str(src.get("status") or "").lower()
             if src_status not in {"approved", "embedded", "validated"}:
                 violations.append(
@@ -559,6 +561,32 @@ def _official_products(limit_products: int = 9) -> list[dict]:
         {"slug": "sol-redondo", "title": "Lupa Sol Redondo"},
     ]
     return canonical[: max(0, min(limit_products, len(canonical)))]
+
+
+def _build_official_seed_entries(limit_products: int = 9) -> list[CatalogEntry]:
+    entries: list[CatalogEntry] = []
+    for product in _official_products(limit_products=limit_products):
+        slug = str(product.get("slug") or "").strip().lower()
+        title = str(product.get("title") or slug).strip()
+        entries.append(
+            CatalogEntry(
+                title=title,
+                content=f"Produto oficial VZ Lupas: {title}.",
+                content_type="product",
+                tags=["product", "vzlupas", "seed"],
+                metadata={"source_slug": slug},
+            )
+        )
+        entries.append(
+            CatalogEntry(
+                title=f"FAQ {title}",
+                content=f"Pergunta: {title} tem diferenca tecnica?\nResposta: FAQ inicial para aprovacao QA ({slug}).",
+                content_type="faq",
+                tags=["faq", "vzlupas", "seed"],
+                metadata={"source_slug": slug},
+            )
+        )
+    return entries
 
 
 @router.post("/qa/reset-destructive")
@@ -700,189 +728,55 @@ def seed_official_real(body: OfficialSeedBody, request: Request):
     _require_non_production()
     persona = _require_qa_persona(request, _persona_ref(body.persona_slug, body.persona_ref))
     persona_slug = _persona_slug(persona)
-
     persona_id = persona.get("id")
     if not persona_id:
         raise HTTPException(409, "Resolved persona has no id")
 
-    # Hard cleanup for deterministic QA seed: remove non-protected legacy nodes/edges
-    # so the canonical tree is the single active branch for this persona.
-    nodes_before, _edges_before = supabase_client.list_all_knowledge_graph(persona_id)
-    for node in nodes_before:
-        node_type = (node.get("node_type") or "").lower()
-        slug = (node.get("slug") or "").lower()
-        metadata = node.get("metadata") or {}
-        protected = bool(metadata.get("protected")) or slug in {"self", "gallery-default", "embedded-default"}
-        if node_type == "persona" or protected:
-            continue
-        node_id = node.get("id")
-        if node_id:
-            supabase_client.delete_knowledge_node(node_id)
+    entries = _build_official_seed_entries(limit_products=body.limit_products)
+    if not entries:
+        raise HTTPException(409, "Official seed fixture is empty")
 
-    products = _official_products(limit_products=body.limit_products)
-    if len(products) < 9:
-        raise HTTPException(409, "Official seed fixture is missing required 9 canonical products")
+    draft_items_created = 0
+    faqs_approved = 0
+    embeds_generated = 0
 
-    persona_node = supabase_client.ensure_persona_knowledge_node(persona_id)
-    if not persona_node:
-        raise HTTPException(502, "Unable to ensure persona root node")
-
-    brand = supabase_client.upsert_knowledge_node(
-        {
-            "persona_id": persona_id,
-            "node_type": "brand",
-            "slug": "vz-lupas",
-            "title": "VZ Lupas",
-            "summary": "Brand principal da persona AllanVvz para oferta de lupas e oculos.",
-            "tags": ["brand", "vzlupas", "seed"],
-            "metadata": {"seed_mode": "official_real_qa", "run_id": body.run_id, "source_ref": body.source_ref},
-            "status": "active",
-            "level": 20,
-            "importance": 0.95,
-            "confidence": 1.0,
-        }
-    )
-    briefing = supabase_client.upsert_knowledge_node(
-        {
-            "persona_id": persona_id,
-            "node_type": "briefing",
-            "slug": "briefing-vz-lupas-catalogo-oficial",
-            "title": "Briefing VZ Lupas Catalogo Oficial",
-            "summary": "Briefing canonico para sustentar campanhas comerciais da VZ Lupas.",
-            "tags": ["briefing", "vzlupas", "seed"],
-            "metadata": {"seed_mode": "official_real_qa", "run_id": body.run_id},
-            "status": "active",
-            "level": 30,
-            "importance": 0.9,
-            "confidence": 1.0,
-        }
-    )
-    campaign = supabase_client.upsert_knowledge_node(
-        {
-            "persona_id": persona_id,
-            "node_type": "campaign",
-            "slug": "campanha-vz-lupas-catalogo-oficial",
-            "title": "Campanha VZ Lupas Catalogo Oficial",
-            "summary": "Campanha macro para distribuicao dos grupos e produtos oficiais.",
-            "tags": ["campaign", "vzlupas", "seed"],
-            "metadata": {"seed_mode": "official_real_qa", "run_id": body.run_id},
-            "status": "active",
-            "level": 40,
-            "importance": 0.88,
-            "confidence": 1.0,
-        }
-    )
-    audience = supabase_client.upsert_knowledge_node(
-        {
-            "persona_id": persona_id,
-            "node_type": "audience",
-            "slug": "audiencia-padrao-vz-lupas",
-            "title": "Audiencia Padrao VZ Lupas",
-            "summary": "Publico comprador final e revenda optica para produtos da VZ Lupas.",
-            "tags": ["audience", "vzlupas", "seed"],
-            "metadata": {
-                "seed_mode": "official_real_qa",
-                "run_id": body.run_id,
-                "summary_markdown": "Publico principal de compra para catalogo VZ Lupas.",
-                "leads_group_id": f"lg-{persona_slug}-audiencia-padrao-vz-lupas",
-            },
-            "status": "active",
-            "level": 50,
-            "importance": 0.85,
-            "confidence": 1.0,
-        }
-    )
-    if not brand or not briefing or not campaign or not audience:
-        raise HTTPException(502, "Failed to create canonical Brand/Briefing/Campaign/Audience nodes")
-
-    def _main(src_id: str, dst_id: str, rel: str = "contains"):
-        supabase_client.upsert_knowledge_edge(
-            source_node_id=src_id,
-            target_node_id=dst_id,
-            relation_type=rel,
+    for entry in entries:
+        created = knowledge_lifecycle.persist_pending_knowledge_item(
             persona_id=persona_id,
-            weight=1.0,
-            metadata={"primary_tree": True, "active": True, "seed_mode": "official_real_qa", "run_id": body.run_id},
+            title=entry.title,
+            content=entry.content,
+            content_type=entry.content_type,
+            file_path=entry.file_path,
+            tags=list(entry.tags or []),
+            metadata=dict(entry.metadata or {}),
+            source_ref=body.source_ref,
         )
-
-    _main(persona_node["id"], brand["id"], "contains")
-    _main(brand["id"], briefing["id"], "contains")
-    _main(briefing["id"], campaign["id"], "contains")
-    _main(campaign["id"], audience["id"], "campaign_has_audience")
-
-    group_by_prefix = {
-        "clip-on-": ("grupo-clip-on", "Grupo Clip-on"),
-        "grau-": ("grupo-grau", "Grupo Grau"),
-        "sol-": ("grupo-sol", "Grupo Sol"),
-    }
-    groups: dict[str, dict] = {}
-    for product in products:
-        slug = str(product.get("slug") or "").strip().lower()
-        title = str(product.get("title") or slug).strip()
-        prefix = next((p for p in group_by_prefix if slug.startswith(p)), None)
-        if not prefix:
+        draft_items_created += 1
+        if str(entry.content_type).strip().lower() != "faq":
             continue
-        group_slug, group_title = group_by_prefix[prefix]
-        if group_slug not in groups:
-            group_node = supabase_client.upsert_knowledge_node(
-                {
-                    "persona_id": persona_id,
-                    "node_type": "product_group",
-                    "slug": group_slug,
-                    "title": group_title,
-                    "summary": f"{group_title} oficial VZ Lupas.",
-                    "tags": ["product_group", "vzlupas", "seed"],
-                    "metadata": {"seed_mode": "official_real_qa", "run_id": body.run_id},
-                    "status": "active",
-                    "level": 60,
-                    "importance": 0.84,
-                    "confidence": 1.0,
-                }
-            )
-            if not group_node:
-                raise HTTPException(502, f"Failed to create product_group {group_slug}")
-            groups[group_slug] = group_node
-            _main(audience["id"], group_node["id"], "contains")
 
-        product_node = supabase_client.upsert_knowledge_node(
-            {
-                "persona_id": persona_id,
-                "node_type": "product",
-                "slug": slug,
-                "title": title,
-                "summary": f"Produto oficial VZ Lupas: {title}.",
-                "tags": ["product", "vzlupas", "seed"],
-                "metadata": {"seed_mode": "official_real_qa", "run_id": body.run_id},
-                "status": "active",
-                "level": 70,
-                "importance": 0.8,
-                "confidence": 1.0,
-            }
+        item_id = str(created.get("id") or "").strip()
+        if not item_id:
+            continue
+        promoted = knowledge_lifecycle.promote_knowledge_item(item_id, promote_to_kb=False)
+        if not promoted:
+            continue
+        faqs_approved += 1
+        node = supabase_client.get_knowledge_node_for_source("knowledge_items", item_id, persona_id=persona_id)
+        node_id = str((node or {}).get("id") or "").strip()
+        if not node_id:
+            continue
+        publication = approved_knowledge_snapshots.publish_approved_node(
+            node_id,
+            approved_by=(auth_service.current_user(request) or {}).get("id"),
+            require_rag_for_faq=True,
         )
-        if not product_node:
-            raise HTTPException(502, f"Failed to create product node for {slug}")
-        _main(groups[group_slug]["id"], product_node["id"], "contains")
+        if publication.get("embedded_edge_id"):
+            embeds_generated += 1
 
-        faq_node = supabase_client.upsert_knowledge_node(
-            {
-                "persona_id": persona_id,
-                "node_type": "faq",
-                "slug": f"faq-{slug}",
-                "title": f"FAQ {title}",
-                "summary": f"FAQ aprovada para {title}.",
-                "tags": ["faq", "vzlupas", "seed"],
-                "metadata": {"seed_mode": "official_real_qa", "run_id": body.run_id},
-                "status": "approved",
-                "level": 80,
-                "importance": 0.78,
-                "confidence": 1.0,
-            }
-        )
-        if not faq_node:
-            raise HTTPException(502, f"Failed to create FAQ for {slug}")
-        _main(product_node["id"], faq_node["id"], "contains")
+    graph_counts_before = knowledge_graph.rebuild_graph_for_persona(persona_id)
+    graph_counts_after_embed = knowledge_graph.rebuild_graph_for_persona(persona_id)
 
-    counts_after_embed: dict[str, Any] = {}
     supabase_client.insert_event(
         {
             "event_type": "qa_official_real_seed_executed",
@@ -893,9 +787,9 @@ def seed_official_real(body: OfficialSeedBody, request: Request):
                 "persona_slug": persona_slug,
                 "source_ref": body.source_ref,
                 "run_id": body.run_id,
-                "products_seeded": len(products),
-                "product_groups_seeded": len(groups),
-                "embedded_publications": 0,
+                "draft_items_created": draft_items_created,
+                "faqs_approved": faqs_approved,
+                "embedded_publications": embeds_generated,
             },
         },
         source="qa_contract.seed_official_real",
@@ -906,11 +800,11 @@ def seed_official_real(body: OfficialSeedBody, request: Request):
         "persona_id": persona_id,
         "source_ref": body.source_ref,
         "run_id": body.run_id,
-        "draft_items_created": 0,
-        "faqs_approved": len(products),
-        "embeds_generated": 0,
-        "graph_counts_before_embed": {},
-        "graph_counts_after_embed": counts_after_embed,
+        "draft_items_created": draft_items_created,
+        "faqs_approved": faqs_approved,
+        "embeds_generated": embeds_generated,
+        "graph_counts_before_embed": graph_counts_before,
+        "graph_counts_after_embed": graph_counts_after_embed,
         "publications": [],
     }
 
@@ -994,30 +888,69 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
     - Accepts Authorization: Bearer <same admin token> as a compatibility alias.
     """
     _require_non_production()
-    persona = _resolve_sofia_persona(request, _persona_ref(body.persona_slug, body.persona_ref))
+    session_id = str(body.context.session_id or "").strip()
+    session_state = sofia_orchestrator.get_session_state(session_id)
+    active_persona_from_context = str(body.context.active_persona_slug or "").strip().lower()
+    active_persona_from_memory = str(session_state.get("active_persona_slug") or "").strip()
+    persona_ref = (
+        _persona_ref(body.persona_slug, body.persona_ref)
+        or active_persona_from_context
+        or active_persona_from_memory
+        or "vz-lupas"
+    )
+    persona = _resolve_sofia_persona(request, persona_ref)
     persona_id = persona.get("id")
     if not persona_id:
         raise HTTPException(409, "Resolved persona has no id")
     persona_slug = _persona_slug(persona)
 
+    effective_command = str(body.command or "")
+    last_ref = session_state.get("last_referenced_node") if isinstance(session_state, dict) else {}
+    if re.search(r"\bele\b", effective_command.lower()) and isinstance(last_ref, dict):
+        last_slug = str(last_ref.get("slug") or "").strip()
+        if last_slug:
+            effective_command = re.sub(r"\bele\b", last_slug, effective_command, flags=re.IGNORECASE)
+
     persona_tool = _resolve_persona_tool(
-        SofiaResolvePersonaBody(persona_slug=persona_slug, command=body.command)
+        SofiaResolvePersonaBody(persona_slug=persona_slug, command=effective_command)
     )
     operation_tool = _resolve_operation_tool(
         SofiaResolveOperationBody(
-            command=body.command,
+            command=effective_command,
             persona_context={"persona_slug": persona_slug},
         )
     )
+    node_tool = sofia_orchestrator.resolve_node(
+        effective_command,
+        selected_node_id=(body.context.selected_node_ids[0] if body.context.selected_node_ids else None),
+        session_state=session_state,
+    )
 
     plan = sofia_orchestrator.plan_graph_command(
-        command=body.command,
+        command=effective_command,
         context=body.context,
         persona_slug=persona_slug,
         persona_tool_result=persona_tool,
         operation_tool_result=operation_tool,
+        node_tool_result=node_tool,
+        session_state=session_state,
     )
+    selected_slug = None
+    cmd_low = effective_command.lower()
+    if "vz lupas" in cmd_low or "vzlupas" in cmd_low:
+        selected_slug = "vz-lupas"
+    elif body.context.selected_node_ids:
+        selected_slug = str(body.context.selected_node_ids[0] or "").strip().lower()
+    last_referenced_node = {"slug": selected_slug, "node_type": "brand"} if selected_slug else (last_ref if isinstance(last_ref, dict) else {})
     if not plan.get("persisted"):
+        sofia_orchestrator.remember_turn(
+            session_id=session_id,
+            persona_slug=persona_slug,
+            command=effective_command,
+            operation_result=operation_tool,
+            last_referenced_node=last_referenced_node,
+        )
+        fresh_state = sofia_orchestrator.get_session_state(session_id)
         return {
             "ok": True,
             "sofia_message": plan.get("sofia_message"),
@@ -1028,11 +961,16 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
                     {"tool": call.get("name"), "score": call.get("score"), "result": call.get("result")}
                     for call in (plan.get("tool_calls") or [])
                 ],
-                {"tool": "validate_canonical_chain", "score": 1.0, "result": {"canonical_chain_respected": True}},
             ],
             "threshold": plan.get("threshold"),
             "needs_clarification": bool(plan.get("needs_clarification")),
             "validation": {"canonical_chain_respected": True, "violations": []},
+            "conversation_context": {
+                "session_id": session_id or None,
+                "active_persona_slug": persona_slug,
+                "memory_turns": len(fresh_state.get("recent_turns") or []),
+                "last_referenced_node": fresh_state.get("last_referenced_node") or None,
+            },
         }
 
     patch = plan.get("graph_patch") or {}
@@ -1116,13 +1054,6 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         )
 
     plan_tool_calls = list(plan.get("tool_calls") or [])
-    plan_tool_calls.append(
-        {
-            "name": "validate_canonical_chain",
-            "score": 1.0,
-            "result": {"canonical_chain_respected": True, "violations": []},
-        }
-    )
 
     for edge in edges_to_persist:
         supabase_client.upsert_knowledge_edge(
@@ -1133,6 +1064,17 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
             weight=1.0,
             metadata=edge["metadata"] or {"primary_tree": True, "active": True},
         )
+    plan_tool_calls.append(
+        {
+            "name": "persist-graph-patch",
+            "score": 1.0,
+            "result": {
+                "nodes_upserted": len(persisted_nodes),
+                "edges_upserted": len(edges_to_persist),
+                "ok": True,
+            },
+        }
+    )
     supabase_client.insert_event(
         {
             "event_type": "sofia_graph_command_applied",
@@ -1149,6 +1091,25 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         },
         source="qa_contract.sofia_graph_command",
     )
+    sofia_orchestrator.remember_turn(
+        session_id=session_id,
+        persona_slug=persona_slug,
+        command=effective_command,
+        operation_result=operation_tool,
+        last_referenced_node=last_referenced_node,
+    )
+    fresh_state = sofia_orchestrator.get_session_state(session_id)
+    plan_tool_calls.append(
+        {
+            "name": "refetch-graph",
+            "score": 1.0,
+            "result": {
+                "ok": True,
+                "persona_slug": persona_slug,
+                "active_persona_slug": persona_slug,
+            },
+        }
+    )
     return {
         "ok": True,
         "sofia_message": "Comando aplicado com cadeia canonica validada.",
@@ -1162,4 +1123,10 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         "needs_clarification": False,
         "recommendations": recommendations,
         "validation": {"canonical_chain_respected": True, "violations": []},
+        "conversation_context": {
+            "session_id": session_id or None,
+            "active_persona_slug": persona_slug,
+            "memory_turns": len((fresh_state or {}).get("recent_turns") or []),
+            "last_referenced_node": (fresh_state or {}).get("last_referenced_node") or None,
+        },
     }
