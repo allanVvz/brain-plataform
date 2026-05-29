@@ -1160,3 +1160,19 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: n/a (smoke/build local).
 - Riscos / bloqueios: shape final de graph_json no backend pode evoluir; parser foi feito com tolerancia de campos opcionais para evitar quebra imediata.
 - Proximo passo: QA/E2E validar render com endpoint /graph-documents/current habilitado + flag NEXT_PUBLIC_GRAPH_JSON_V2=1.
+
+### 2026-05-29 - codex (BRA-73: reviewer confirmation -> final disposition)
+- Issue/tarefa: BRA-73 (sub-1 de BRA-72)
+- Arquivos alterados: paperclip/memory.md; ai-brain/memory.md.
+- O que mudou: heartbeat de continuidade apos comentario do local-board confirmando evidencia QA publicada e discriminacao 401 vs 403 no endpoint validado; preparado fechamento formal do status com base nessa validacao.
+- Validacao executada: `pytest -q tests/test_qa_contract_route_mapping.py tests/test_qa_contract_routes.py` -> `11 passed, 2 warnings`; probe live `Invoke-WebRequest POST http://127.0.0.1:8001/api/sofia/graph-command` sem header -> `401`; com `X-AI-BRAIN-ADMIN-TOKEN` -> `200`.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-73-backend-validation-2026-05-29T02-57-34Z.json.
+- Riscos / bloqueios: sem novo bloqueio tecnico reportado neste heartbeat.
+- Proximo passo: registrar PATCH de disposicao final em BRA-73 conforme gate do board.
+
+## 2026-05-29 (BRA-76 backend unblock)
+- Added new API router [pi/routes/graph_documents.py] with /graph-documents/current, /publish, /versions backed by system_events for versioned graph_json publishing.
+- Wired router in pi/main.py and validated live on 127.0.0.1:8001 (current returns 200 with X-AI-BRAIN-ADMIN-TOKEN).
+- Added pi/scripts/import_v1_to_v2_allanvvz.py to export current knowledge/graph-data into graph_json v1.0 and publish (llanvvz:vz-lupas:v3).
+- Added pi/services/graph_json_validator.py CLI/service validator; latest document validates is_valid=true for structural main edges and embed guards.
+
