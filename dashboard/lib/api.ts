@@ -194,6 +194,15 @@ export const api = {
 
   // Personas
   personas: () => req<any[]>("/personas"),
+  createPersona: (body: {
+    slug: string;
+    name: string;
+    tone?: string | null;
+    products?: string[];
+    prompts?: Record<string, string>;
+    config?: Record<string, any>;
+    catalog_url?: string | null;
+  }) => req<any>("/personas", { method: "POST", body: JSON.stringify(body) }),
   persona: (slug: string) => req<any>(`/personas/${slug}`),
   updatePersonaCatalogUrl: (slug: string, catalog_url: string | null) =>
     req<any>(`/personas/${slug}`, { method: "PATCH", body: JSON.stringify({ catalog_url }) }),
@@ -564,12 +573,39 @@ export const api = {
     const qs = params.toString();
     return req<any>(`/knowledge/graph-data${qs ? `?${qs}` : ""}`);
   },
+  getGraphDocument: (personaSlug: string) => {
+    const params = new URLSearchParams();
+    params.set("persona_slug", personaSlug);
+    return req<any>(`/graph-documents/current?${params.toString()}`);
+  },
   createGraphEdge: (body: { source_node_id: string; target_node_id: string; relation_type?: string; persona_id?: string; weight?: number; metadata?: any }) =>
     req<any>("/knowledge/graph-edges", { method: "POST", body: JSON.stringify(body) }),
   deleteGraphEdge: (edgeId: string) =>
     req<any>(`/knowledge/graph-edges/${encodeURIComponent(edgeId)}`, { method: "DELETE" }),
   deleteGraphNode: (nodeId: string) =>
     req<any>(`/knowledge/graph-nodes/${encodeURIComponent(nodeId)}`, { method: "DELETE" }),
+  sofiaGraphCommand: (body: {
+    message?: string;
+    action?: "command" | "confirm_pending" | "undo_pending";
+    persona_slug?: string;
+    tenant?: string;
+    pending_context?: Record<string, any>;
+  }) => {
+    const action = body.action || "command";
+    const explicit = String(body.message || "").trim();
+    const command = explicit || (action === "command" ? "" : action);
+    return req<any>("/sofia/graph-command", {
+      method: "POST",
+      body: JSON.stringify({
+        persona_slug: body.persona_slug,
+        command,
+        context: {
+          client_action: action === "command" ? "natural_language" : "ui_action",
+          pending_context: body.pending_context || {},
+        },
+      }),
+    });
+  },
 
   // Knowledge — Chat sidebar context (semantic graph + KB fallback)
   knowledgeChatContext: (leadRef: number, q?: string, personaId?: string) => {

@@ -1142,3 +1142,21 @@ pm run build (em dashboard/) - sucesso, compilacao e TypeScript sem erros.
 - Artifact gerado: n/a (validacao por build do frontend sem artifact externo).
 - Riscos / bloqueios: backend ainda precisa manter emissao consistente de 	ool_calls + graph_patch para cobertura completa dos casos conversacionais.
 - Proximo passo: QA/E2E Validator validar os casos de comportamento Sofia Graph no fluxo real do painel.
+
+### 2026-05-29 - codex (BRA-73: Graph JSON V2 backend validation gate)
+- Issue/tarefa: BRA-73 (sub-1 de BRA-72)
+- Arquivos alterados: api/routes/qa_contract.py (validated current state), tests/test_qa_contract_routes.py (executed), tests/test_qa_contract_route_mapping.py (executed)
+- O que mudou: Validacao de contrato backend executada para rotas QA de grafo/FAQ/embed e fluxo Sofia graph-command; guardas de Product->Embed e FAQ approval confirmadas via suite dedicada e probe live.
+- Validacao executada: `pytest -q tests/test_qa_contract_route_mapping.py tests/test_qa_contract_routes.py` -> `11 passed, 2 warnings`; `Invoke-WebRequest POST http://127.0.0.1:8001/api/sofia/graph-command` sem header -> `401`; com `X-AI-BRAIN-ADMIN-TOKEN` -> `200`.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-73-backend-validation-2026-05-29T02-57-34Z.json
+- Riscos / bloqueios: Worktree local do ai-brain permanece com varias alteracoes preexistentes fora do escopo BRA-73.
+- Proximo passo: QA/Test Engineer validar cadeia fim-a-fim Sofia graph-agent contra spec de 2026-05-29 usando artifact publicado.
+### 2026-05-29 - Frontend Agent (BRA-74 follow-up: graph_json v2 contract paths)
+- Issue/tarefa: BRA-74
+- Arquivos alterados: dashboard/lib/graph-json-v2.ts; dashboard/lib/api.ts; dashboard/app/knowledge/graph/GraphPageClient.tsx; memory.md
+- O que mudou: adicionei parser/schema tolerante de Graph JSON v2 (parseGraphJsonV2Payload), helper pi.getGraphDocument(persona_slug) para /graph-documents/current, e fallback no carregamento do Graph para consumir v2 quando NEXT_PUBLIC_GRAPH_JSON_V2=1 (com retorno automatico para v1 quando v2 indisponivel).
+- Validacao executada: 
+pm run build (em dashboard/) - sucesso apos integracao v2.
+- Artifact gerado: n/a (smoke/build local).
+- Riscos / bloqueios: shape final de graph_json no backend pode evoluir; parser foi feito com tolerancia de campos opcionais para evitar quebra imediata.
+- Proximo passo: QA/E2E validar render com endpoint /graph-documents/current habilitado + flag NEXT_PUBLIC_GRAPH_JSON_V2=1.

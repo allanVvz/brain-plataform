@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import NodeDrawer from "@/components/graph/NodeDrawer";
 import { getVisualHierarchyRank } from "@/components/graph/knowledgeGraphLayout";
+import { parseGraphJsonV2Payload } from "@/lib/graph-json-v2";
 import SofiaChatPanel, { SofiaChatMessage } from "./SofiaChatPanel";
 import { resolveSofiaToolFromInput, SOFIA_REACT_FLOW_TOOLS } from "./sofiaReactFlowTools";
 
@@ -186,6 +187,16 @@ export default function GraphPageClient() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const useGraphJsonV2 = process.env.NEXT_PUBLIC_GRAPH_JSON_V2 === "1";
+      if (useGraphJsonV2 && headerPersonaSlug) {
+        const currentDoc = await api.getGraphDocument(headerPersonaSlug);
+        const parsed = parseGraphJsonV2Payload(currentDoc);
+        if (parsed) {
+          const v2Payload = parsed as GraphPayload;
+          setData(v2Payload);
+          return v2Payload;
+        }
+      }
       const d = await api.graphData(headerPersonaSlug || undefined, {
         focus: focus || undefined,
         max_depth: 5,
