@@ -1318,3 +1318,19 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-plan-json-persistence-probe.md`.
 - Riscos / bloqueios: migration `043_sofia_plan_sessions.sql` precisa ser aplicada no projeto QA para persistencia completa no banco.
 - Proximo passo: executar migration 043 no Supabase QA e revalidar fluxo `/sofia/graph-command` + leitura de `plan_json` apos reload do processo.
+### 2026-05-29 - 57a6a5a4-a04e-47f4-8da9-b5ab914921fa (BRA-87: tentativa de aplicar migration 043 no QA)
+- Issue/tarefa: BRA-87 pendencia operacional - aplicar `043_sofia_plan_sessions.sql` no Supabase QA `svkogegypdqquzlfzaor`.
+- Arquivos alterados: `memory.md`.
+- O que mudou: tentei aplicar a migration no banco QA, mas o runner nao possui cliente SQL disponivel (`psycopg2` ausente e `psql` inexistente), impedindo execucao local do DDL.
+- Validacao executada: `python ... psycopg2.connect(...)` => `ModuleNotFoundError: No module named 'psycopg2'`; `psql --version` => comando nao encontrado; probe live `curl POST /sofia/graph-command` com header admin => `200`.
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-migration-apply-attempt-2026-05-29.md`.
+- Riscos / bloqueios: migration 043 segue pendente no banco QA ate execucao por owner com cliente SQL instalado.
+- Proximo passo: Infra/DB Sync executar a migration 043 diretamente no QA Postgres e anexar evidencias de tabela criada.
+### 2026-05-29 - 57a6a5a4-a04e-47f4-8da9-b5ab914921fa (BRA-87: migration 043 aplicada no QA)
+- Issue/tarefa: BRA-87 - concluir pendencia operacional da persistencia `plan_json` no banco QA.
+- Arquivos alterados: `memory.md`.
+- O que mudou: desbloqueei a pendencia operacional instalando cliente Postgres no runner e aplicando com sucesso a migration `043_sofia_plan_sessions.sql` no projeto QA `svkogegypdqquzlfzaor`; tabela `public.sofia_plan_sessions` confirmada por query.
+- Validacao executada: apply migration via python/psycopg2 => `migration_043: OK`; verificacao SQL => `table=sofia_plan_sessions` e `required_columns=6`; probe live `POST /sofia/graph-command` com header admin => `200`, sem header => `401`.
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-migration-applied-2026-05-29.md`.
+- Riscos / bloqueios: sem bloqueios remanescentes para BRA-87.
+- Proximo passo: manter monitoramento normal; endpoint de sessao pode ser validado em regressao de reload quando QA solicitar.
