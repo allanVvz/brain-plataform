@@ -1184,3 +1184,12 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Validacao executada: `pytest -q tests/test_sofia_v2_patch_loop.py tests/test_sofia_orchestrator_tools.py tests/test_sofia_session_context.py` => `8 passed`.
 - Probe live: turno 1 + turno 2 com `session_id=test-001` executados no backend `http://127.0.0.1:8001/sofia/graph-command` com auth admin; evidencias serializadas no artifact em `paperclip/test-artifacts/qa/BRA-75-live-probe-2026-05-29T17-27-38Z.json`.
 - Resultado: contrato BRA-75 atendido para teste faltante + probe autenticado + artifact publicado.
+
+### 2026-05-29 - codex (BRA-73 reopen: required tests + graph-documents endpoint coverage)
+- Issue/tarefa: BRA-73 reaberta por auditoria (faltavam `tests/test_graph_json_validator.py` e `tests/test_graph_documents_routes.py`).
+- Arquivos alterados: `api/routes/graph_documents.py`; `api/services/graph_json_v2_validator.py`; `tests/test_graph_json_validator.py`; `tests/test_graph_documents_routes.py`; `paperclip/test-artifacts/qa/BRA-73-pytest-coverage-2026-05-29T17-29-02Z.json`; `ai-brain/memory.md`; `paperclip/memory.md`.
+- O que mudou: implementei os 2 arquivos de teste exigidos (6 regras de validação canônica + 7 endpoints de graph-documents com sucesso e erro), adicionei endpoints faltantes (`apply-patch`, `rollback`, `reindex`, `events`) e incluí validação v2 explícita de `schema_version=2.0` e ownership da persona.
+- Validação executada: `pytest tests/test_graph_json_validator.py -v` => `7 passed`; `pytest tests/test_graph_documents_routes.py -v` => `7 passed`; probe live `curl -s -o NUL -w "%{http_code}" http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz` => `401`; probe live com header admin `curl -s -o NUL -w "%{http_code}" -H "X-AI-BRAIN-ADMIN-TOKEN: <token>" http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz` => `404`.
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-73-pytest-coverage-2026-05-29T17-29-02Z.json`.
+- Riscos / bloqueios: runtime QA em `:8001` não refletiu a atualização local do endpoint (`/graph-documents/current` continua 404 com auth), impedindo evidência live do comportamento esperado pós-fix.
+- Próximo passo: owner Infra/Backend reiniciar o processo `scripts/start_api_qa.py` carregando HEAD atual; rerodar probe de `/graph-documents/current` para confirmar status esperado e então concluir disposição final.
