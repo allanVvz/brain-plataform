@@ -1193,3 +1193,72 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-73-pytest-coverage-2026-05-29T17-29-02Z.json`.
 - Riscos / bloqueios: runtime QA em `:8001` não refletiu a atualização local do endpoint (`/graph-documents/current` continua 404 com auth), impedindo evidência live do comportamento esperado pós-fix.
 - Próximo passo: owner Infra/Backend reiniciar o processo `scripts/start_api_qa.py` carregando HEAD atual; rerodar probe de `/graph-documents/current` para confirmar status esperado e então concluir disposição final.
+
+## 2026-05-29 (BRA-76 resume delta - steps 4/6)
+- Step 4 executado: POST /sofia/graph-command (reencaixe brand vz-lupas abaixo de allanvvz) => 200, persisted=true, patch aplicado.
+- Construi e enviei graph_json v2.0 canonico: POST /graph-documents/apply-patch => 200 (version=3); POST /graph-documents/publish => 200 (doc llanvvz:vz-lupas:v4); GET /graph-documents/versions confirmou v4.
+- Step 6 parcial: criei FAQ via /knowledge/upload/text e aprovei via /knowledge/queue/{item}/approve (status approved), mas publish snapshot falhou com 22P02 invalid uuid qa-admin-token; /embeds/generate retornou 403 (rota restrita a aliases VZ Lupas); /graph-documents/reindex retornou 200.
+- Bloqueio adicional: consulta SQL em knowledge_faq_index retornou PGRST205 (tabela ausente no schema cache QA).
+
+
+### 2026-05-29 - codex (BRA-76: validator/migration heartbeat disposition)
+- Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration (AllanVvz -> VZ Lupas).
+- Arquivos alterados: paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json; paperclip/memory.md; ai-brain/memory.md.
+- O que mudou: Registrei artifact de heartbeat consolidando entregáveis de validação/migração já publicados e o bloqueio atual de execução por ausência de token admin no ambiente desta sessão.
+- Validação executada: probes locais para carregar token (AI_BRAIN_ADMIN_TOKEN) no ambiente e em arquivos .env/.env.local/env*.yaml do i-brain retornaram ausente; sem token não foi possível repetir probes autenticados nesta heartbeat.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json.
+- Riscos / bloqueios: sem token admin e sem correções de backend/schema do Step 6, a execução e2e completa permanece bloqueada.
+- Proximo passo: Backend Engineer + CTO + Board/Infra fornecer token/admin path e corrigir bloqueios técnicos (UUID approve snapshot, embed gate 403, tabela knowledge_faq_index).
+
+### 2026-05-29 - codex (BRA-76: resume delta after escalation comment)
+- Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration.
+- Arquivos alterados: paperclip/memory.md; ai-brain/memory.md.
+- O que mudou: tratei o wake por comentario de escalacao, confirmei que os artifacts publicados existem e que a issue voltou para in_progress sem evidencia nova de desbloqueio tecnico.
+- Validacao executada: GET /api/issues/f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f mostrou status in_progress; Test-Path confirmou existencia de BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json e graph-json-v2-allanvvz-validation-FINAL-2026-05-29T17-30-38Z.json.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json.
+- Riscos / bloqueios: sem token admin disponível e sem correções de backend/schema (22P02, 403 embeds gate, PGRST205), Step 6 permanece bloqueado.
+- Proximo passo: Backend Engineer + CTO + Board/Infra executar unblock action já registrada no comentário 98ef1b40-99f1-425d-9d53-a2b469cb6427.
+
+### 2026-05-29 - codex (BRA-76: anti-loop enforcement on repeated wake)
+- Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration.
+- Arquivos alterados: paperclip/memory.md; ai-brain/memory.md.
+- O que mudou: executei triagem do novo wake e confirmei repeticao sem delta tecnico; apliquei anti-loop mantendo bloqueio e reforcando que nao deve haver novo redespacho sem evidencia de desbloqueio.
+- Validacao executada: GET /api/issues/f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f => status in_progress por wake; Test-Path confirmou artifacts de bloqueio e FINAL existentes em path publicado.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json.
+- Riscos / bloqueios: tuple de bloqueio Step 6 inalterado (22P02, 403 embeds gate, PGRST205).
+- Proximo passo: Backend Engineer + CTO + Board/Infra entregar unblock action antes de novo wake desta issue.
+
+### 2026-05-29 - codex (BRA-76: repeated wake with no unblock delta)
+- Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration.
+- Arquivos alterados: paperclip/memory.md; ai-brain/memory.md.
+- O que mudou: confirmei novo wake sem delta tecnico e mantive enforcement de anti-loop para evitar retries sem mudanca de entrada.
+- Validacao executada: GET /api/issues/f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f mostrou status in_progress por wake; artifact de bloqueio segue presente em path publicado.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json.
+- Riscos / bloqueios: tuple inalterado (22P02 approve snapshot UUID, 403 /embeds/generate gate, PGRST205 knowledge_faq_index).
+- Proximo passo: Backend Engineer + CTO + Board/Infra devem publicar evidencias de unblock antes de novo dispatch de BRA-76.
+
+### 2026-05-29 - codex (BRA-76: anti-loop escalation handoff)
+- Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration.
+- Arquivos alterados: paperclip/memory.md; ai-brain/memory.md.
+- O que mudou: diante de repeticao sem delta tecnico, escalei ownership da issue para CTO/System Architect para coordenar unblock cross-team e interromper redespachos improdutivos ao mesmo assignee.
+- Validacao executada: GET /api/issues/f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f mostrou retorno automatico para in_progress sem nova evidencia; artifact de bloqueio segue presente.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json.
+- Riscos / bloqueios: tuple inalterado (22P02, 403 embeds gate, PGRST205) exige fixes de backend/schema + token/runtime.
+- Proximo passo: CTO/System Architect coordenar Backend Engineer + Board/Infra e republicar evidencias de unblock antes de novo dispatch tecnico.
+
+### 2026-05-29 - codex (BRA-76: post-handoff blocked confirmation)
+- Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration.
+- Arquivos alterados: paperclip/memory.md; ai-brain/memory.md.
+- O que mudou: confirmei estado pos-handoff anti-loop; issue permanece bloqueada e sob ownership do CTO/System Architect para coordenacao de desbloqueio.
+- Validacao executada: GET /api/issues/f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f => status=blocked, assigneeAgentId=6da5684e-7976-4c96-82bb-46d262f3ef27; artifact de bloqueio segue existente em path publicado.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json.
+- Riscos / bloqueios: tuple tecnico inalterado (22P02, 403 /embeds/generate, PGRST205 knowledge_faq_index).
+- Proximo passo: CTO/System Architect aciona pacote de unblock e so entao redespacha BRA-76.
+### 2026-05-29 - Frontend Agent (BRA-74 tests + smoke)
+- Issue/tarefa: BRA-74
+- Arquivos alterados: dashboard/__tests__/graph-json-v2.test.ts; dashboard/__tests__/GraphPageClient.test.tsx; dashboard/__tests__/api.test.ts; dashboard/vitest.config.ts; dashboard/vitest.setup.ts; dashboard/package.json; dashboard/package-lock.json; memory.md
+- O que mudou: configurei Vitest no dashboard e adicionei os 3 testes exigidos cobrindo parser Graph JSON v2, helper getGraphDocument e fallback de carregamento V2->V1 no GraphPageClient com flag.
+- Validacao executada: cd C:/Users/Alan/Documents/repositorios/ai-brain/dashboard && npm test (3 arquivos, 5 testes, tudo verde); curl -L http://127.0.0.1:3000/knowledge/graph?persona=allanvvz (200; status inicial 307).
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-74-frontend-tests-2026-05-29T17-39-52Z.json.
+- Riscos / bloqueios: sem bloqueios para este escopo de frontend.
+- Proximo passo: QA/E2E validar cadeia completa com backend v2 publicado.
