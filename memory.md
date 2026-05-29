@@ -1262,3 +1262,59 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-74-frontend-tests-2026-05-29T17-39-52Z.json.
 - Riscos / bloqueios: sem bloqueios para este escopo de frontend.
 - Proximo passo: QA/E2E validar cadeia completa com backend v2 publicado.
+### 2026-05-29 — ceo-product-owner (BRA-76: gate check + blocker formal)
+- Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
+- Arquivos alterados: ai-brain/memory.md.
+- O que mudou: Registrei decisão de produto/gate: não há critério para `done` enquanto não houver evidência autenticada dos passos 2-7 (publish/read 200, validator true por doc-id publicado, patch Sofia com version bump, FAQ approved->reindex->embeddings).
+- Validação executada: checagem de existência de `api/scripts/import_v1_to_v2_allanvvz.py`, `api/services/graph_json_validator.py`, `api/routes/graph_documents.py` e probe runtime `GET /graph-documents/current?persona_slug=allanvvz` com retorno 401.
+- Artifact gerado: sem novo artifact em ai-brain; referência cruzada no artifact publicado `paperclip/test-artifacts/architecture/graph-json-v2-allanvvz-validation-FINAL-2026-05-29T17-30-38Z.json`.
+- Riscos / bloqueios: sem token/fluxo autenticado comprovado, a validação e2e permanece incompleta e não pode avançar para aceite.
+- Próximo passo: Backend Engineer desbloquear autenticação/endpoint e publicar delta verificável; em seguida QA/Graph Validator executa contrato completo BRA-76.
+### 2026-05-29 — ceo-product-owner (BRA-76: status reconciliation no-delta wake)
+- Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
+- Arquivos alterados: ai-brain/memory.md.
+- O que mudou: Sem nova evidência técnica no wake; mantive o gate de produto e reconciliei a disposição formal da BRA-76 para bloquear reexecução sem delta.
+- Validação executada: leitura de status via Paperclip API (`BRA-76 in_progress`, `BRA-73 blocked`).
+- Artifact gerado: não aplicável.
+- Riscos / bloqueios: dependência em BRA-73 permanece ativa para autenticação/persistência do fluxo e2e.
+- Próximo passo: entregar unblock em BRA-73 com probe/artifact novo e só então retomar BRA-76.
+### 2026-05-29 — graph-validator-migration-agent (BRA-76: live contract execution + schema blocker)
+- Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
+- Arquivos alterados: ai-brain/memory.md.
+- O que mudou: Rodei o importador real da BRA-76 contra `:8001`; autenticação por token admin passou, mas o publish falhou em validação Pydantic porque o payload gerado ainda segue shape legado e não o contrato GraphJson V2 da rota.
+- Validação executada: `python api/scripts/import_v1_to_v2_allanvvz.py` => `422 Unprocessable Entity`; probe dirigido com o mesmo token em `GET /graph-documents/current?persona_slug=allanvvz` => `404 No published graph document`; replay do publish retornou erros de campos obrigatórios ausentes (`graph_id`, `tenant`, `persona_slug`, `nodes[*].node_type`).
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/graph-json-v2-allanvvz-validation-20260529T181957Z.json.
+- Riscos / bloqueios: enquanto o importador não serializar GraphJson V2 válido, o documento não publica e o fluxo Sofia/versionamento/reindex/embedding não é executável.
+- Próximo passo: Backend Engineer corrigir o mapper do importador para GraphJson V2 e rerodar o contrato BRA-76 a partir do passo 1.
+### 2026-05-29 — graph-validator-migration-agent (BRA-76: disposition API write failure)
+- Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
+- Arquivos alterados: ai-brain/memory.md.
+- O que mudou: execução técnica em ai-brain foi concluída até o diagnóstico do 422 no publish, porém a disposição formal no board não pôde ser gravada por erro 500 da API Paperclip em endpoints de escrita.
+- Validação executada: tentativa de `PATCH /api/issues/{id}` com `status=blocked` falhou (`500`), com leitura subsequente `GET /api/issues/{id}` ainda `in_progress`.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-76-disposition-api-failure-20260529T182058Z.json.
+- Riscos / bloqueios: governança de issue bloqueada por falha infra de persistência de comentários/disposição.
+- Próximo passo: Board/Infra restaurar writes da API Paperclip para permitir registro formal do bloqueio e handoff ao Backend Engineer.
+### 2026-05-29 — CEO / Product Owner (BRA-82: backend plan_json endpoints + validator severities)
+- Issue/tarefa: BRA-79 (execução técnica da filha BRA-82)
+- Arquivos alterados: api/services/sofia_orchestrator.py; api/routes/qa_contract.py; tests/test_qa_contract_routes.py; memory.md
+- O que mudou: Adicionado storage de plan_json por sessão no orquestrador, endpoints GET/PATCH em QA contract para obter/aplicar patch de plan_json, integração do retorno plan_json no fluxo sofia_graph_command e validação com severidades suggestion/pending/blocking sem bloquear criação por ausência de FAQ/regra.
+- Validação executada: `pytest -q tests/test_qa_contract_routes.py` -> `13 passed in 2.22s`.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/memory.md
+- Riscos / bloqueios: storage atual é em memória por sessão (TTL), sem persistência em banco entre reinícios.
+- Próximo passo: Backend Engineer evoluir para persistência durável (Supabase table/migration) mantendo o mesmo contrato de endpoint.
+### 2026-05-29 — CEO / Product Owner (BRA-79: probes reais plan_json + bugfix de retenção de sessão)
+- Issue/tarefa: BRA-79
+- Arquivos alterados: api/services/sofia_orchestrator.py; scripts/probe_sofia_plan_json_endpoints.py; memory.md
+- O que mudou: Corrigido bug onde `remember_turn` limpava `plan_json`; criado probe real GET/PATCH/POST dos endpoints Sofia com artifact JSON comprovando alteração de product/campaign, separação suggestion/pending/blocking, blocking estrutural e não-durabilidade após reload.
+- Validação executada: `python scripts/probe_sofia_plan_json_endpoints.py` (artifact gerado) e `pytest -q tests/test_qa_contract_routes.py` (`13 passed`).
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/test-artifacts/qa/sofia-plan-json-endpoints-probe-20260529T204937Z.json
+- Riscos / bloqueios: persistência ainda é memória de processo; após reload/restart o estado zera.
+- Próximo passo: BRA-87 (Backend) implementar persistência Supabase durável para plan_json.
+### 2026-05-29 - 57a6a5a4-a04e-47f4-8da9-b5ab914921fa (BRA-87: persistir plan_json em Supabase)
+- Issue/tarefa: BRA-87 (Backend) persistencia duravel de `plan_json` entre reloads.
+- Arquivos alterados: `api/services/sofia_orchestrator.py`; `api/services/supabase_client.py`; `supabase/migrations/043_sofia_plan_sessions.sql`; `tests/test_qa_contract_routes.py`; `memory.md`.
+- O que mudou: adicionei persistencia de sessao Sofia em Supabase (`sofia_plan_sessions`) com leitura/escrita no orchestrator e fallback seguro para memoria local quando Supabase nao estiver configurado; inclui teste que simula reset de memoria e recupera `plan_json` do store persistente.
+- Validacao executada: `pytest -q tests/test_qa_contract_routes.py -k "sofia_plan_json or session_memory_reuses_active_persona"` (4 passed, 10 deselected); `curl.exe -s -o NUL -w "%{http_code}\n" -X POST http://127.0.0.1:8001/sofia/graph-command -H "X-AI-BRAIN-ADMIN-TOKEN: <token>" -H "Content-Type: application/json" --data-binary "@C:\Users\Alan\Documents\repositorios\ai-brain\tmp\bra87_probe.json"` (200); sem header -> 401.
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-plan-json-persistence-probe.md`.
+- Riscos / bloqueios: migration `043_sofia_plan_sessions.sql` precisa ser aplicada no projeto QA para persistencia completa no banco.
+- Proximo passo: executar migration 043 no Supabase QA e revalidar fluxo `/sofia/graph-command` + leitura de `plan_json` apos reload do processo.

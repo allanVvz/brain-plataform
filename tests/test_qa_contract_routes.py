@@ -325,3 +325,116 @@ def test_sofia_resolve_operation_tool_low_confidence_sets_confirmation(monkeypat
     assert result["operation"] == "validate_canonical_chain"
     assert result["score"] < 0.65
     assert result["needs_confirmation"] is True
+
+
+def test_sofia_plan_json_patch_adds_product_without_faq_rule_block(monkeypatch):
+    from routes import qa_contract
+
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas"})
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+
+    body = qa_contract.SofiaPlanJsonPatchBody(
+        session_id="sess-plan-1",
+        persona_slug="vz-lupas",
+        command="crie um produto teste",
+        patch={},
+    )
+    result = qa_contract.sofia_patch_plan_json(body, _req())
+    plan_json = result["plan_json"]
+    assert result["ok"] is True
+    assert len(plan_json["plan"]["product"]) >= 1
+    assert any(item["code"] == "FAQ_RECOMMENDED" for item in plan_json["validation"]["suggestions"])
+    assert any(item["code"] == "RULE_RECOMMENDED" for item in plan_json["validation"]["suggestions"])
+    assert len(plan_json["validation"]["blocking"]) == 0
+
+
+def test_sofia_plan_json_supports_blocking_markers(monkeypatch):
+    from routes import qa_contract
+
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas"})
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+
+    body = qa_contract.SofiaPlanJsonPatchBody(
+        session_id="sess-plan-2",
+        persona_slug="vz-lupas",
+        patch={
+            "graph_patch_queue": [
+                {"marker": "product_above_product_group", "message": "Produto acima de Product Group"}
+            ]
+        },
+    )
+    result = qa_contract.sofia_patch_plan_json(body, _req())
+    validation = result["plan_json"]["validation"]
+    assert validation["is_valid"] is False
+    assert any(item["code"] == "PRODUCT_ABOVE_PRODUCT_GROUP" for item in validation["blocking"])
+
+
+def test_sofia_get_plan_json_returns_existing_session(monkeypatch):
+    from routes import qa_contract
+
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas"})
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+
+    qa_contract.sofia_patch_plan_json(
+        qa_contract.SofiaPlanJsonPatchBody(
+            session_id="sess-plan-3",
+            persona_slug="vz-lupas",
+            command="crie uma campanha teste IA",
+            patch={},
+        ),
+        _req(),
+    )
+
+    result = qa_contract.sofia_get_plan_json(_req(), session_id="sess-plan-3", persona_slug="vz-lupas", persona_ref=None)
+    assert result["ok"] is True
+    assert result["plan_json"]["session_id"] == "sess-plan-3"
+    assert len(result["plan_json"]["plan"]["campaign"]) >= 1
+
+
+def test_sofia_plan_json_survives_memory_reset_via_persistent_store(monkeypatch):
+    from routes import qa_contract
+
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas"})
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "service-key")
+
+    persisted: dict[str, dict] = {}
+
+    def fake_get_session(session_id: str):
+        return persisted.get(session_id)
+
+    def fake_upsert_session(**kwargs):
+        session_id = kwargs["session_id"]
+        row = {
+            "session_id": session_id,
+            "persona_slug": kwargs["persona_slug"],
+            "active_persona_slug": kwargs.get("active_persona_slug"),
+            "plan_json": kwargs.get("plan_json") or {},
+            "last_referenced_node": kwargs.get("last_referenced_node") or {},
+            "recent_turns": kwargs.get("recent_turns") or [],
+        }
+        persisted[session_id] = row
+        return row
+
+    monkeypatch.setattr(qa_contract.sofia_orchestrator.supabase_client, "get_sofia_plan_session", fake_get_session)
+    monkeypatch.setattr(qa_contract.sofia_orchestrator.supabase_client, "upsert_sofia_plan_session", fake_upsert_session)
+
+    qa_contract.sofia_patch_plan_json(
+        qa_contract.SofiaPlanJsonPatchBody(
+            session_id="sess-plan-durable",
+            persona_slug="vz-lupas",
+            command="crie uma campanha teste IA",
+            patch={},
+        ),
+        _req(),
+    )
+    qa_contract.sofia_orchestrator._SESSION_MEMORY.clear()
+
+    result = qa_contract.sofia_get_plan_json(_req(), session_id="sess-plan-durable", persona_slug="vz-lupas", persona_ref=None)
+    assert result["ok"] is True
+    assert len(result["plan_json"]["plan"]["campaign"]) >= 1

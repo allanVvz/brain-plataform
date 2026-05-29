@@ -3714,6 +3714,51 @@ def insert_kb_intake(data: dict) -> dict:
     return (result.data or [{}])[0]
 
 
+# -- Sofia plan session persistence -------------------------------------------------
+
+def get_sofia_plan_session(session_id: str) -> Optional[dict]:
+    key = str(session_id or "").strip().lower()
+    if not key:
+        return None
+    return _one(
+        get_client()
+        .table("sofia_plan_sessions")
+        .select("*")
+        .eq("session_id", key)
+        .maybe_single()
+    )
+
+
+def upsert_sofia_plan_session(
+    *,
+    session_id: str,
+    persona_slug: str,
+    plan_json: dict,
+    active_persona_slug: Optional[str] = None,
+    last_referenced_node: Optional[dict] = None,
+    recent_turns: Optional[list[dict]] = None,
+) -> Optional[dict]:
+    key = str(session_id or "").strip().lower()
+    if not key:
+        return None
+    row = {
+        "session_id": key,
+        "persona_slug": str(persona_slug or "").strip().lower(),
+        "active_persona_slug": str(active_persona_slug or persona_slug or "").strip().lower() or None,
+        "plan_json": plan_json or {},
+        "last_referenced_node": last_referenced_node or {},
+        "recent_turns": recent_turns or [],
+    }
+    try:
+        result = _execute_with_retry(
+            get_client()
+            .table("sofia_plan_sessions")
+            .upsert(row, on_conflict="session_id")
+        )
+    except Exception:
+        return None
+    return (result.data or [None])[0] if result else None
+
 # â”€â”€ Knowledge Items: multi-status query â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def get_knowledge_items_multi(

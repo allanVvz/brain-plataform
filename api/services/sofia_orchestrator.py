@@ -4,6 +4,7 @@ import os
 import time
 from typing import Any, Optional
 
+from services import supabase_client
 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.65
 PERSONA_CONFIDENT_SCORE = 0.85
@@ -55,13 +56,233 @@ def _normalise_session_id(value: Optional[str]) -> str:
     return str(value or "").strip().lower()
 
 
+def _supabase_plan_store_enabled() -> bool:
+    return bool((os.getenv("SUPABASE_URL") or "").strip() and (os.getenv("SUPABASE_SERVICE_KEY") or "").strip())
+
+
+def _load_supabase_state(session_id: str) -> Optional[dict[str, Any]]:
+    if not _supabase_plan_store_enabled():
+        return None
+    try:
+        row = supabase_client.get_sofia_plan_session(session_id)
+    except Exception:
+        return None
+    if not isinstance(row, dict):
+        return None
+    return {
+        "updated_at": time.time(),
+        "active_persona_slug": str(row.get("active_persona_slug") or row.get("persona_slug") or "").strip().lower(),
+        "last_referenced_node": dict(row.get("last_referenced_node") or {}),
+        "recent_turns": list(row.get("recent_turns") or []),
+        "plan_json": dict(row.get("plan_json") or {}),
+    }
+
+
+def _persist_state(session_id: str, state: dict[str, Any], fallback_persona_slug: str) -> None:
+    _SESSION_MEMORY[session_id] = dict(state)
+    if not _supabase_plan_store_enabled():
+        return
+    plan_json = state.get("plan_json")
+    if not isinstance(plan_json, dict):
+        return
+    persona_slug = str(
+        plan_json.get("persona_slug")
+        or state.get("active_persona_slug")
+        or fallback_persona_slug
+        or ""
+    ).strip().lower()
+    try:
+        supabase_client.upsert_sofia_plan_session(
+            session_id=session_id,
+            persona_slug=persona_slug,
+            plan_json=plan_json,
+            active_persona_slug=str(state.get("active_persona_slug") or persona_slug).strip().lower(),
+            last_referenced_node=state.get("last_referenced_node") if isinstance(state.get("last_referenced_node"), dict) else {},
+            recent_turns=list(state.get("recent_turns") or []),
+        )
+    except Exception:
+        return
+
+
 def get_session_state(session_id: Optional[str]) -> dict[str, Any]:
     key = _normalise_session_id(session_id)
     if not key:
         return {}
     _clean_expired_sessions()
     state = _SESSION_MEMORY.get(key)
+    if not state:
+        state = _load_supabase_state(key)
+        if state:
+            _SESSION_MEMORY[key] = dict(state)
     return dict(state) if state else {}
+
+
+def _default_plan_json(session_id: str, persona_slug: str) -> dict[str, Any]:
+    return {
+        "session_id": session_id,
+        "persona_slug": persona_slug,
+        "active_context": {
+            "brand_slug": None,
+            "selected_node_id": None,
+            "last_referenced_node": None,
+        },
+        "plan": {
+            "briefing": [],
+            "campaign": [],
+            "audience": [],
+            "product_group": [],
+            "product": [],
+            "offer": [],
+            "copy": [],
+            "faq": [],
+            "rule": [],
+            "asset": [],
+            "gallery": [],
+        },
+        "graph_patch_queue": [],
+        "blocking_issues": [],
+        "suggestions": [],
+        "pending_issues": [],
+        "validation": {
+            "is_valid": True,
+            "suggestions": [],
+            "pending": [],
+            "blocking": [],
+        },
+    }
+
+
+def _deep_merge(base: Any, patch: Any) -> Any:
+    if isinstance(base, dict) and isinstance(patch, dict):
+        merged = dict(base)
+        for key, value in patch.items():
+            merged[key] = _deep_merge(merged.get(key), value)
+        return merged
+    if isinstance(base, list) and isinstance(patch, list):
+        return patch
+    return patch
+
+
+def _validate_plan_json(plan_json: dict[str, Any]) -> dict[str, Any]:
+    plan = plan_json.get("plan") if isinstance(plan_json.get("plan"), dict) else {}
+    suggestions: list[dict[str, str]] = []
+    pending: list[dict[str, str]] = []
+    blocking: list[dict[str, str]] = []
+
+    if not plan.get("faq"):
+        suggestions.append({"code": "FAQ_RECOMMENDED", "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."})
+    if not plan.get("rule"):
+        suggestions.append({"code": "RULE_RECOMMENDED", "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."})
+
+    for section in ("campaign", "audience", "product_group", "product", "offer", "copy", "faq"):
+        for idx, item in enumerate(plan.get(section) or []):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            if not title:
+                pending.append({"code": "MISSING_TITLE", "message": f"{section}[{idx}] sem title."})
+            if section in {"campaign", "audience", "product_group", "product", "offer", "copy", "faq"}:
+                parent = str(item.get("parent_slug") or "").strip()
+                if not parent:
+                    pending.append({"code": "MISSING_PARENT", "message": f"{section}[{idx}] sem parent_slug."})
+
+    for edge in plan_json.get("graph_patch_queue") or []:
+        if not isinstance(edge, dict):
+            continue
+        marker = str(edge.get("marker") or "").strip().lower()
+        if marker in {"cycle", "edge_inverted", "product_above_product_group", "embed_without_approved_faq"}:
+            blocking.append({"code": marker.upper(), "message": str(edge.get("message") or marker)})
+
+    return {
+        "is_valid": len(blocking) == 0,
+        "suggestions": suggestions,
+        "pending": pending,
+        "blocking": blocking,
+    }
+
+
+def get_or_create_plan_json(
+    *,
+    session_id: Optional[str],
+    persona_slug: str,
+    selected_node_id: Optional[str] = None,
+) -> dict[str, Any]:
+    key = _normalise_session_id(session_id)
+    if not key:
+        plan_json = _default_plan_json("ephemeral", persona_slug)
+        plan_json["active_context"]["selected_node_id"] = selected_node_id
+        plan_json["validation"] = _validate_plan_json(plan_json)
+        plan_json["suggestions"] = list(plan_json["validation"]["suggestions"])
+        plan_json["pending_issues"] = list(plan_json["validation"]["pending"])
+        plan_json["blocking_issues"] = list(plan_json["validation"]["blocking"])
+        return plan_json
+    now_ts = time.time()
+    _clean_expired_sessions(now_ts)
+    state = _SESSION_MEMORY.get(key)
+    if not state:
+        state = _load_supabase_state(key)
+    state = state or {"recent_turns": []}
+    plan_json = state.get("plan_json")
+    if not isinstance(plan_json, dict):
+        plan_json = _default_plan_json(key, persona_slug)
+    plan_json["session_id"] = key
+    plan_json["persona_slug"] = str(persona_slug or plan_json.get("persona_slug") or "").strip().lower()
+    active_context = plan_json.get("active_context") if isinstance(plan_json.get("active_context"), dict) else {}
+    active_context["selected_node_id"] = selected_node_id or active_context.get("selected_node_id")
+    active_context["last_referenced_node"] = state.get("last_referenced_node") or active_context.get("last_referenced_node")
+    plan_json["active_context"] = active_context
+    plan_json["validation"] = _validate_plan_json(plan_json)
+    plan_json["suggestions"] = list(plan_json["validation"]["suggestions"])
+    plan_json["pending_issues"] = list(plan_json["validation"]["pending"])
+    plan_json["blocking_issues"] = list(plan_json["validation"]["blocking"])
+    state["plan_json"] = plan_json
+    state["updated_at"] = now_ts
+    _persist_state(key, state, persona_slug)
+    return dict(plan_json)
+
+
+def apply_plan_json_patch(
+    *,
+    session_id: Optional[str],
+    persona_slug: str,
+    patch: Optional[dict[str, Any]] = None,
+    command: Optional[str] = None,
+) -> dict[str, Any]:
+    key = _normalise_session_id(session_id)
+    if not key:
+        raise ValueError("session_id is required")
+    plan_json = get_or_create_plan_json(session_id=key, persona_slug=persona_slug)
+    next_plan = _deep_merge(plan_json, patch or {})
+
+    text = (command or "").strip().lower()
+    if "crie" in text or "criar" in text:
+        if "produto" in text:
+            title = "Produto"
+            parts = re_split_words(command or "")
+            if len(parts) > 2:
+                title = " ".join(parts[-2:]).strip().title()
+            next_plan["plan"]["product"].append({"title": title, "parent_slug": None, "status": "pending_parent"})
+        elif "audience" in text or "publico" in text or "público" in text:
+            next_plan["plan"]["audience"].append({"title": "Audience", "parent_slug": None, "status": "pending_parent"})
+        elif "campanha" in text or "campaign" in text:
+            next_plan["plan"]["campaign"].append({"title": "Campaign", "parent_slug": None, "status": "pending_parent"})
+
+    state = _SESSION_MEMORY.get(key)
+    if not state:
+        state = _load_supabase_state(key)
+    state = state or {"recent_turns": []}
+    next_plan["validation"] = _validate_plan_json(next_plan)
+    next_plan["suggestions"] = list(next_plan["validation"]["suggestions"])
+    next_plan["pending_issues"] = list(next_plan["validation"]["pending"])
+    next_plan["blocking_issues"] = list(next_plan["validation"]["blocking"])
+    state["plan_json"] = next_plan
+    state["updated_at"] = time.time()
+    _persist_state(key, state, persona_slug)
+    return dict(next_plan)
+
+
+def re_split_words(text: str) -> list[str]:
+    return [tok for tok in (text or "").replace(",", " ").split() if tok.strip()]
 
 
 def remember_turn(
@@ -77,7 +298,10 @@ def remember_turn(
         return
     _clean_expired_sessions()
     now_ts = time.time()
-    state = _SESSION_MEMORY.get(key) or {"recent_turns": []}
+    state = _SESSION_MEMORY.get(key)
+    if not state:
+        state = _load_supabase_state(key)
+    state = state or {"recent_turns": []}
     recent_turns = list(state.get("recent_turns") or [])
     recent_turns.append(
         {
@@ -90,13 +314,17 @@ def remember_turn(
     max_turns = _memory_max_turns()
     if len(recent_turns) > max_turns:
         recent_turns = recent_turns[-max_turns:]
-    _SESSION_MEMORY[key] = {
+    state = {
         "updated_at": now_ts,
         "active_persona_slug": str(persona_slug or "").strip().lower(),
         "last_operation_result": dict(operation_result or {}),
         "last_referenced_node": dict(last_referenced_node or state.get("last_referenced_node") or {}),
         "recent_turns": recent_turns,
+        # Keep plan_json across turns; otherwise POST /sofia/graph-command clears
+        # in-session planning state.
+        "plan_json": dict(state.get("plan_json") or {}),
     }
+    _persist_state(key, state, persona_slug)
 
 
 def resolve_persona(command_text: str, fallback_persona_slug: str) -> dict[str, Any]:
