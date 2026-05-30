@@ -4,7 +4,7 @@ import json
 import math
 import re
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional, Any
@@ -196,6 +196,14 @@ class SofiaResolvePersonaBody(BaseModel):
 class SofiaResolveOperationBody(BaseModel):
     command: str
     persona_context: Optional[dict[str, Any]] = None
+
+
+class SofiaPlanJsonPatchBody(BaseModel):
+    session_id: str
+    persona_slug: Optional[str] = None
+    persona_ref: Optional[str] = None
+    command: Optional[str] = None
+    patch: dict[str, Any] = {}
 
 
 CANONICAL_OPERATIONS: dict[str, dict[str, Any]] = {
@@ -485,7 +493,7 @@ def _validate_sofia_patch(
         dst_type = knowledge_taxonomy.canonical_node_type(dst.get("node_type") if dst else None)
         rel = str(edge.get("relation_type") or "contains").strip().lower()
         edge_kind = knowledge_taxonomy.edge_kind_for_relation(rel)
-        if src_type == "product" and dst_type == "embed":
+        if src_type == "product" and dst_type in {"embed", "embedded"}:
             violations.append(
                 {
                     "code": "GRAPH_EDGE_FORBIDDEN",
@@ -493,7 +501,7 @@ def _validate_sofia_patch(
                     "edge": {"from": edge["source_ref"], "to": edge["target_ref"], "relation": rel},
                 }
             )
-        if src_type == "faq" and dst_type == "embed":
+        if src_type == "faq" and dst_type in {"embed", "embedded"}:
             src_status = str(src.get("status") or "").lower()
             if src_status not in {"approved", "embedded", "validated"}:
                 violations.append(
@@ -943,6 +951,12 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         selected_slug = str(body.context.selected_node_ids[0] or "").strip().lower()
     last_referenced_node = {"slug": selected_slug, "node_type": "brand"} if selected_slug else (last_ref if isinstance(last_ref, dict) else {})
     if not plan.get("persisted"):
+        plan_json = sofia_orchestrator.apply_plan_json_patch(
+            session_id=session_id,
+            persona_slug=persona_slug,
+            patch=None,
+            command=effective_command,
+        )
         sofia_orchestrator.remember_turn(
             session_id=session_id,
             persona_slug=persona_slug,
@@ -965,6 +979,7 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
             "threshold": plan.get("threshold"),
             "needs_clarification": bool(plan.get("needs_clarification")),
             "validation": {"canonical_chain_respected": True, "violations": []},
+            "plan_json": plan_json,
             "conversation_context": {
                 "session_id": session_id or None,
                 "active_persona_slug": persona_slug,
@@ -1123,6 +1138,11 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         "needs_clarification": False,
         "recommendations": recommendations,
         "validation": {"canonical_chain_respected": True, "violations": []},
+        "plan_json": sofia_orchestrator.get_or_create_plan_json(
+            session_id=session_id,
+            persona_slug=persona_slug,
+            selected_node_id=(body.context.selected_node_ids[0] if body.context.selected_node_ids else None),
+        ),
         "conversation_context": {
             "session_id": session_id or None,
             "active_persona_slug": persona_slug,
@@ -1130,3 +1150,33 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
             "last_referenced_node": (fresh_state or {}).get("last_referenced_node") or None,
         },
     }
+
+
+@router.get("/sofia/plan-json")
+def sofia_get_plan_json(
+    request: Request,
+    session_id: str = Query(...),
+    persona_slug: Optional[str] = Query(None),
+    persona_ref: Optional[str] = Query(None),
+):
+    _require_non_production()
+    resolved_ref = _persona_ref(persona_slug, persona_ref) or "vz-lupas"
+    persona = _resolve_sofia_persona(request, resolved_ref)
+    slug = _persona_slug(persona)
+    plan_json = sofia_orchestrator.get_or_create_plan_json(session_id=session_id, persona_slug=slug)
+    return {"ok": True, "plan_json": plan_json}
+
+
+@router.patch("/sofia/plan-json")
+def sofia_patch_plan_json(body: SofiaPlanJsonPatchBody, request: Request):
+    _require_non_production()
+    resolved_ref = _persona_ref(body.persona_slug, body.persona_ref) or "vz-lupas"
+    persona = _resolve_sofia_persona(request, resolved_ref)
+    slug = _persona_slug(persona)
+    plan_json = sofia_orchestrator.apply_plan_json_patch(
+        session_id=body.session_id,
+        persona_slug=slug,
+        patch=body.patch,
+        command=body.command,
+    )
+    return {"ok": True, "plan_json": plan_json}

@@ -1,0 +1,593 @@
+{
+  "generated_at": "2026-05-30T01:38:35.284079+00:00",
+  "session_id": "probe-session-01",
+  "persona_slug": "vz-lupas",
+  "steps": [
+    {
+      "step": "GET /sofia/plan-json baseline",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "plan_json": {
+          "session_id": "probe-session-01",
+          "persona_slug": "vz-lupas",
+          "active_context": {
+            "brand_slug": null,
+            "selected_node_id": null,
+            "last_referenced_node": null
+          },
+          "plan": {
+            "briefing": [],
+            "campaign": [],
+            "audience": [],
+            "product_group": [],
+            "product": [],
+            "offer": [],
+            "copy": [],
+            "faq": [],
+            "rule": [],
+            "asset": [],
+            "gallery": []
+          },
+          "graph_patch_queue": [],
+          "blocking_issues": [],
+          "suggestions": [
+            {
+              "code": "FAQ_RECOMMENDED",
+              "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+            },
+            {
+              "code": "RULE_RECOMMENDED",
+              "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+            }
+          ],
+          "pending_issues": [],
+          "validation": {
+            "is_valid": true,
+            "suggestions": [
+              {
+                "code": "FAQ_RECOMMENDED",
+                "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+              },
+              {
+                "code": "RULE_RECOMMENDED",
+                "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+              }
+            ],
+            "pending": [],
+            "blocking": []
+          }
+        }
+      }
+    },
+    {
+      "step": "PATCH /sofia/plan-json create product",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "plan_json": {
+          "session_id": "probe-session-01",
+          "persona_slug": "vz-lupas",
+          "active_context": {
+            "brand_slug": null,
+            "selected_node_id": null,
+            "last_referenced_node": null
+          },
+          "plan": {
+            "briefing": [],
+            "campaign": [],
+            "audience": [],
+            "product_group": [],
+            "product": [
+              {
+                "title": "Produto Teste",
+                "parent_slug": null,
+                "status": "pending_parent"
+              }
+            ],
+            "offer": [],
+            "copy": [],
+            "faq": [],
+            "rule": [],
+            "asset": [],
+            "gallery": []
+          },
+          "graph_patch_queue": [],
+          "blocking_issues": [],
+          "suggestions": [
+            {
+              "code": "FAQ_RECOMMENDED",
+              "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+            },
+            {
+              "code": "RULE_RECOMMENDED",
+              "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+            }
+          ],
+          "pending_issues": [
+            {
+              "code": "MISSING_PARENT",
+              "message": "product[0] sem parent_slug."
+            }
+          ],
+          "validation": {
+            "is_valid": true,
+            "suggestions": [
+              {
+                "code": "FAQ_RECOMMENDED",
+                "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+              },
+              {
+                "code": "RULE_RECOMMENDED",
+                "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+              }
+            ],
+            "pending": [
+              {
+                "code": "MISSING_PARENT",
+                "message": "product[0] sem parent_slug."
+              }
+            ],
+            "blocking": []
+          }
+        }
+      }
+    },
+    {
+      "step": "POST /sofia/graph-command create campaign",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "sofia_message": "A operacao ficou ambigua entre duas opcoes proximas. Confirme a acao exata que voce quer aplicar.",
+        "graph_patch": null,
+        "persisted": false,
+        "tool_calls": [
+          {
+            "tool": "resolve-persona",
+            "score": 0.99,
+            "result": {
+              "ok": true,
+              "resolved_persona": {
+                "slug": "vz-lupas",
+                "id": "p1",
+                "matched_via": "persona_slug"
+              },
+              "score": 0.99,
+              "candidates": [
+                {
+                  "slug": "vz-lupas",
+                  "score": 0.99
+                }
+              ],
+              "reason": "exact slug match",
+              "needs_clarification": false
+            }
+          },
+          {
+            "tool": "resolve-node",
+            "score": 0.4,
+            "result": {
+              "node_ref": null,
+              "node_type": null,
+              "score": 0.4,
+              "source": "fallback",
+              "candidates": []
+            }
+          },
+          {
+            "tool": "resolve-operation",
+            "score": 0.1348,
+            "result": {
+              "ok": true,
+              "operation": "validate_canonical_chain",
+              "score": 0.1348,
+              "target_nodes": {},
+              "required_validation": [
+                "canonical_chain"
+              ],
+              "risk_level": "low",
+              "needs_confirmation": true,
+              "candidates": [
+                {
+                  "operation": "reorganize_campaign_briefing",
+                  "score": 0.1348
+                },
+                {
+                  "operation": "create_default_audience",
+                  "score": 0.124
+                },
+                {
+                  "operation": "reparent_brand",
+                  "score": 0.0
+                },
+                {
+                  "operation": "move_product_to_group",
+                  "score": 0.0
+                },
+                {
+                  "operation": "validate_canonical_chain",
+                  "score": 0.0
+                }
+              ]
+            }
+          },
+          {
+            "tool": "validate-canonical-chain",
+            "score": 1.0,
+            "result": {
+              "canonical_chain_respected": true,
+              "violations": []
+            }
+          },
+          {
+            "tool": "generate-graph-patch",
+            "score": 0.0,
+            "result": null
+          }
+        ],
+        "threshold": 0.65,
+        "needs_clarification": true,
+        "validation": {
+          "canonical_chain_respected": true,
+          "violations": []
+        },
+        "plan_json": {
+          "session_id": "probe-session-01",
+          "persona_slug": "vz-lupas",
+          "active_context": {
+            "brand_slug": null,
+            "selected_node_id": null,
+            "last_referenced_node": null
+          },
+          "plan": {
+            "briefing": [],
+            "campaign": [
+              {
+                "title": "Campaign",
+                "parent_slug": null,
+                "status": "pending_parent"
+              }
+            ],
+            "audience": [],
+            "product_group": [],
+            "product": [
+              {
+                "title": "Produto Teste",
+                "parent_slug": null,
+                "status": "pending_parent"
+              }
+            ],
+            "offer": [],
+            "copy": [],
+            "faq": [],
+            "rule": [],
+            "asset": [],
+            "gallery": []
+          },
+          "graph_patch_queue": [],
+          "blocking_issues": [],
+          "suggestions": [
+            {
+              "code": "FAQ_RECOMMENDED",
+              "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+            },
+            {
+              "code": "RULE_RECOMMENDED",
+              "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+            }
+          ],
+          "pending_issues": [
+            {
+              "code": "MISSING_PARENT",
+              "message": "campaign[0] sem parent_slug."
+            },
+            {
+              "code": "MISSING_PARENT",
+              "message": "product[0] sem parent_slug."
+            }
+          ],
+          "validation": {
+            "is_valid": true,
+            "suggestions": [
+              {
+                "code": "FAQ_RECOMMENDED",
+                "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+              },
+              {
+                "code": "RULE_RECOMMENDED",
+                "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+              }
+            ],
+            "pending": [
+              {
+                "code": "MISSING_PARENT",
+                "message": "campaign[0] sem parent_slug."
+              },
+              {
+                "code": "MISSING_PARENT",
+                "message": "product[0] sem parent_slug."
+              }
+            ],
+            "blocking": []
+          }
+        },
+        "conversation_context": {
+          "session_id": "probe-session-01",
+          "active_persona_slug": "vz-lupas",
+          "memory_turns": 1,
+          "last_referenced_node": null
+        }
+      }
+    },
+    {
+      "step": "PATCH /sofia/plan-json structural blocking",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "plan_json": {
+          "session_id": "probe-session-01",
+          "persona_slug": "vz-lupas",
+          "active_context": {
+            "brand_slug": null,
+            "selected_node_id": null,
+            "last_referenced_node": null
+          },
+          "plan": {
+            "briefing": [],
+            "campaign": [
+              {
+                "title": "Campaign",
+                "parent_slug": null,
+                "status": "pending_parent"
+              }
+            ],
+            "audience": [],
+            "product_group": [],
+            "product": [
+              {
+                "title": "Produto Teste",
+                "parent_slug": null,
+                "status": "pending_parent"
+              }
+            ],
+            "offer": [],
+            "copy": [],
+            "faq": [],
+            "rule": [],
+            "asset": [],
+            "gallery": []
+          },
+          "graph_patch_queue": [
+            {
+              "marker": "cycle",
+              "message": "cycle detected"
+            }
+          ],
+          "blocking_issues": [
+            {
+              "code": "CYCLE",
+              "message": "cycle detected"
+            }
+          ],
+          "suggestions": [
+            {
+              "code": "FAQ_RECOMMENDED",
+              "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+            },
+            {
+              "code": "RULE_RECOMMENDED",
+              "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+            }
+          ],
+          "pending_issues": [
+            {
+              "code": "MISSING_PARENT",
+              "message": "campaign[0] sem parent_slug."
+            },
+            {
+              "code": "MISSING_PARENT",
+              "message": "product[0] sem parent_slug."
+            }
+          ],
+          "validation": {
+            "is_valid": false,
+            "suggestions": [
+              {
+                "code": "FAQ_RECOMMENDED",
+                "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+              },
+              {
+                "code": "RULE_RECOMMENDED",
+                "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+              }
+            ],
+            "pending": [
+              {
+                "code": "MISSING_PARENT",
+                "message": "campaign[0] sem parent_slug."
+              },
+              {
+                "code": "MISSING_PARENT",
+                "message": "product[0] sem parent_slug."
+              }
+            ],
+            "blocking": [
+              {
+                "code": "CYCLE",
+                "message": "cycle detected"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "step": "GET /sofia/plan-json refresh same process",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "plan_json": {
+          "session_id": "probe-session-01",
+          "persona_slug": "vz-lupas",
+          "active_context": {
+            "brand_slug": null,
+            "selected_node_id": null,
+            "last_referenced_node": null
+          },
+          "plan": {
+            "briefing": [],
+            "campaign": [
+              {
+                "title": "Campaign",
+                "parent_slug": null,
+                "status": "pending_parent"
+              }
+            ],
+            "audience": [],
+            "product_group": [],
+            "product": [
+              {
+                "title": "Produto Teste",
+                "parent_slug": null,
+                "status": "pending_parent"
+              }
+            ],
+            "offer": [],
+            "copy": [],
+            "faq": [],
+            "rule": [],
+            "asset": [],
+            "gallery": []
+          },
+          "graph_patch_queue": [
+            {
+              "marker": "cycle",
+              "message": "cycle detected"
+            }
+          ],
+          "blocking_issues": [
+            {
+              "code": "CYCLE",
+              "message": "cycle detected"
+            }
+          ],
+          "suggestions": [
+            {
+              "code": "FAQ_RECOMMENDED",
+              "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+            },
+            {
+              "code": "RULE_RECOMMENDED",
+              "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+            }
+          ],
+          "pending_issues": [
+            {
+              "code": "MISSING_PARENT",
+              "message": "campaign[0] sem parent_slug."
+            },
+            {
+              "code": "MISSING_PARENT",
+              "message": "product[0] sem parent_slug."
+            }
+          ],
+          "validation": {
+            "is_valid": false,
+            "suggestions": [
+              {
+                "code": "FAQ_RECOMMENDED",
+                "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+              },
+              {
+                "code": "RULE_RECOMMENDED",
+                "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+              }
+            ],
+            "pending": [
+              {
+                "code": "MISSING_PARENT",
+                "message": "campaign[0] sem parent_slug."
+              },
+              {
+                "code": "MISSING_PARENT",
+                "message": "product[0] sem parent_slug."
+              }
+            ],
+            "blocking": [
+              {
+                "code": "CYCLE",
+                "message": "cycle detected"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "step": "GET /sofia/plan-json after orchestrator reload",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "plan_json": {
+          "session_id": "probe-session-01",
+          "persona_slug": "vz-lupas",
+          "active_context": {
+            "brand_slug": null,
+            "selected_node_id": null,
+            "last_referenced_node": null
+          },
+          "plan": {
+            "briefing": [],
+            "campaign": [],
+            "audience": [],
+            "product_group": [],
+            "product": [],
+            "offer": [],
+            "copy": [],
+            "faq": [],
+            "rule": [],
+            "asset": [],
+            "gallery": []
+          },
+          "graph_patch_queue": [],
+          "blocking_issues": [],
+          "suggestions": [
+            {
+              "code": "FAQ_RECOMMENDED",
+              "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+            },
+            {
+              "code": "RULE_RECOMMENDED",
+              "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+            }
+          ],
+          "pending_issues": [],
+          "validation": {
+            "is_valid": true,
+            "suggestions": [
+              {
+                "code": "FAQ_RECOMMENDED",
+                "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+              },
+              {
+                "code": "RULE_RECOMMENDED",
+                "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+              }
+            ],
+            "pending": [],
+            "blocking": []
+          }
+        }
+      }
+    }
+  ],
+  "assertions": {
+    "product_created_via_patch": true,
+    "campaign_created_via_graph_command": true,
+    "faq_rule_are_suggestions_not_blocking": true,
+    "blocking_only_for_structural_marker": true,
+    "separated_validation_buckets_present": true,
+    "survives_refresh_same_process": true,
+    "survives_reload_restart": false
+  }
+}

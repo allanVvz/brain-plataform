@@ -1,5 +1,16 @@
 # Brain AI â€” Progresso UI/UX
 
+## BRA-82 â€” plan_json severity validator boundary + patch-apply/persist (2026-05-29)
+- Frozen CTO contract: `paperclip/docs/architecture/sofia-plan-json-contract-frozen-decision-2026-05-29.md`.
+- Validator (`api/services/sofia_orchestrator._validate_plan_json`) agora reconhece os 7 markers blocking frozen: `cycle`, `orphan`, `edge_inverted`, `product_above_product_group`, `embed_without_approved_faq`, `persistence_failure`, `critical_duplication`. Cada marker emite `validation.blocking[].code = marker.upper()` e flipa `is_valid=false`. FAQ/Rule continuam sÃ³ em `suggestions`. Missing parent/title/type continuam em `pending`. `is_valid == (blocking == [])`.
+- Patch-apply path (`POST /sofia/graph-command`) jÃ¡ validava-> applica-> persiste-> refetch via `qa_contract.sofia_graph_command`. `_validate_sofia_patch` rejeita 422 com `GRAPH_VALIDATION_FAILED` em CANONICAL_CHAIN_VIOLATION (inclui inverted-edge e product-above-product_group), GRAPH_EDGE_FORBIDDEN (product->embed), FAQ_NOT_APPROVED, AUDIENCE_ROLE_FORBIDDEN, PRODUCT_SOURCE_REQUIRED. `needs_clarification` retorna `persisted:false` sem persistir.
+- SessÃ£o Supabase de plan_json compartilhada com BRA-87 (`get_sofia_plan_session` / `upsert_sofia_plan_session` em `api/services/supabase_client.py`).
+- Probes BRA-82 (TestClient + live :8001 `scripts/start_api_qa.py`) publicados em `ai-brain/test-artifacts/qa/`:
+  - `sofia-plan-json-blocking-probe-20260530T013822Z.json` (TestClient).
+  - `sofia-plan-json-blocking-live-probe-20260530T014152Z.json` (live :8001 â€” todas as 6 assertions passam, incluindo `acceptance_3_semantic_tree_refetch_responds_200`).
+  - Baseline reexecutado: `sofia-plan-json-endpoints-probe-20260530T013835Z.json` (sem regressÃ£o; `survives_reload_restart` continua dependendo da config Supabase do BRA-87).
+- Scripts: `scripts/probe_sofia_plan_json_endpoints.py` (TestClient) + `scripts/probe_sofia_plan_json_blocking.py` (TestClient blocking) + `scripts/probe_sofia_plan_json_blocking_live.py` (live :8001 blocking; usa `AI_BRAIN_ADMIN_TEST_TOKEN` de `env.qa.yaml`).
+
 ## Graph JSON V2 spec entregue (2026-05-29)
 - Spec autoritativa: `ai-brain/docs/architecture/graph-json-canonical-architecture.md` (16 secoes).
 - Decisao: mover source of truth para `graph_documents.graph_json` versionado; v1 tabelas viram indices derivados.
@@ -1116,7 +1127,7 @@ ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecuï¿½ï¿½o real gerou p
   - testes: pytest tests/test_sofia_session_context.py tests/test_qa_contract_routes.py -k "sofia_graph_command or sofia_session" -q => 5 passed.
   - artifact: paperclip/test-artifacts/qa/bra62-session-context-2026-05-29.json com turno 1+2 e propagaï¿½ï¿½o de referï¿½ncia.
 
-### 2026-05-29 — graph-validator-migration-agent (BRA-76 blocker verification against ai-brain runtime)
+### 2026-05-29 ï¿½ graph-validator-migration-agent (BRA-76 blocker verification against ai-brain runtime)
 - Issue/tarefa: BRA-76 (04e050d-a8d1-4a58-9c6f-20fcbcdddb1f) validator/migration execution gate.
 - Arquivos alterados: i-brain/memory.md.
 - O que mudou: executada verificacao de pre-requisitos de runtime para importacao v1->v2 AllanVvz e validacao graph_documents.
@@ -1125,14 +1136,14 @@ ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecuï¿½ï¿½o real gerou p
 - Riscos / bloqueios: sem sub-1 BRA-73 implementada/deployada, BRA-76 nao consegue executar import/publish/validator/reindex no backend.
 - Proximo passo: Backend Engineer publicar implementacao BRA-73; reexecutar BRA-76 apos probe 200 em /graph-documents/current.
 
-### 2026-05-29 — codex (BRA-75: Sofia graph-command tool loop v2)
-- Issue/tarefa: BRA-75 Graph JSON V2 / AI Agent — Sofia edita graph_json via patch.
+### 2026-05-29 ï¿½ codex (BRA-75: Sofia graph-command tool loop v2)
+- Issue/tarefa: BRA-75 Graph JSON V2 / AI Agent ï¿½ Sofia edita graph_json via patch.
 - Arquivos alterados: `api/services/sofia_orchestrator.py`; `api/routes/qa_contract.py`; `tests/test_sofia_orchestrator_tools.py`; `tests/test_qa_contract_routes.py`.
-- O que mudou: o orquestrador agora executa loop explícito de tools com nomes canônicos (`resolve-persona`, `resolve-node`, `resolve-operation`, `validate-canonical-chain`, `generate-graph-patch`) e remove fallback genérico, retornando clarificação específica por condição (persona/node ausente, ambiguidade, baixa confiança). A rota `/sofia/graph-command` passou a registrar também `persist-graph-patch` e `refetch-graph` no `tool_calls`, mantendo trilha auditável fim-a-fim.
-- Validação executada: `pytest -q tests/test_sofia_orchestrator_tools.py tests/test_qa_contract_routes.py -k "sofia_graph_command or sofia_resolve or test_plan_graph_command" tests/test_sofia_session_context.py` ? `9 passed, 4 deselected`.
-- Artifact gerado: `C:/Users/Alan/Documents/repositorios/ai-brain/tests/test_sofia_orchestrator_tools.py` e `C:/Users/Alan/Documents/repositorios/ai-brain/tests/test_qa_contract_routes.py` (evidência em código + suíte passando).
-- Riscos / bloqueios: probe live autenticado em `:8001` bloqueado por variável ausente (`AI_BRAIN_ADMIN_TOKEN missing`), impedindo validar a resposta carregada com sessão/token no runtime ativo.
-- Próximo passo: Backend Engineer/Infra disponibilizar token admin QA no runtime da execução para probe autenticado e fechamento final.
+- O que mudou: o orquestrador agora executa loop explï¿½cito de tools com nomes canï¿½nicos (`resolve-persona`, `resolve-node`, `resolve-operation`, `validate-canonical-chain`, `generate-graph-patch`) e remove fallback genï¿½rico, retornando clarificaï¿½ï¿½o especï¿½fica por condiï¿½ï¿½o (persona/node ausente, ambiguidade, baixa confianï¿½a). A rota `/sofia/graph-command` passou a registrar tambï¿½m `persist-graph-patch` e `refetch-graph` no `tool_calls`, mantendo trilha auditï¿½vel fim-a-fim.
+- Validaï¿½ï¿½o executada: `pytest -q tests/test_sofia_orchestrator_tools.py tests/test_qa_contract_routes.py -k "sofia_graph_command or sofia_resolve or test_plan_graph_command" tests/test_sofia_session_context.py` ? `9 passed, 4 deselected`.
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/ai-brain/tests/test_sofia_orchestrator_tools.py` e `C:/Users/Alan/Documents/repositorios/ai-brain/tests/test_qa_contract_routes.py` (evidï¿½ncia em cï¿½digo + suï¿½te passando).
+- Riscos / bloqueios: probe live autenticado em `:8001` bloqueado por variï¿½vel ausente (`AI_BRAIN_ADMIN_TOKEN missing`), impedindo validar a resposta carregada com sessï¿½o/token no runtime ativo.
+- Prï¿½ximo passo: Backend Engineer/Infra disponibilizar token admin QA no runtime da execuï¿½ï¿½o para probe autenticado e fechamento final.
 ### 2026-05-29 - Frontend Agent (BRA-74: Graph JSON V2 + Sofia React Flow tools)
 - Issue/tarefa: BRA-74
 - Arquivos alterados: dashboard/app/knowledge/graph/GraphPageClient.tsx; dashboard/app/knowledge/graph/sofiaReactFlowTools.ts
@@ -1180,7 +1191,7 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 ### 2026-05-29 - BRA-75 v2 patch loop test + live probe closure
 - Issue/tarefa: BRA-75 (Sofia graph_json v2 patch loop contract).
 - Arquivos alterados: `tests/test_sofia_v2_patch_loop.py`.
-- O que mudou: criado teste dedicado cobrindo 5 comandos da spec §3 no fluxo `/sofia/graph-command` com sessao e assert da sequencia obrigatoria de tools: `resolve-persona -> resolve-node -> resolve-operation -> validate-canonical-chain -> generate-graph-patch -> persist-graph-patch -> refetch-graph`.
+- O que mudou: criado teste dedicado cobrindo 5 comandos da spec ï¿½3 no fluxo `/sofia/graph-command` com sessao e assert da sequencia obrigatoria de tools: `resolve-persona -> resolve-node -> resolve-operation -> validate-canonical-chain -> generate-graph-patch -> persist-graph-patch -> refetch-graph`.
 - Validacao executada: `pytest -q tests/test_sofia_v2_patch_loop.py tests/test_sofia_orchestrator_tools.py tests/test_sofia_session_context.py` => `8 passed`.
 - Probe live: turno 1 + turno 2 com `session_id=test-001` executados no backend `http://127.0.0.1:8001/sofia/graph-command` com auth admin; evidencias serializadas no artifact em `paperclip/test-artifacts/qa/BRA-75-live-probe-2026-05-29T17-27-38Z.json`.
 - Resultado: contrato BRA-75 atendido para teste faltante + probe autenticado + artifact publicado.
@@ -1188,11 +1199,11 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 ### 2026-05-29 - codex (BRA-73 reopen: required tests + graph-documents endpoint coverage)
 - Issue/tarefa: BRA-73 reaberta por auditoria (faltavam `tests/test_graph_json_validator.py` e `tests/test_graph_documents_routes.py`).
 - Arquivos alterados: `api/routes/graph_documents.py`; `api/services/graph_json_v2_validator.py`; `tests/test_graph_json_validator.py`; `tests/test_graph_documents_routes.py`; `paperclip/test-artifacts/qa/BRA-73-pytest-coverage-2026-05-29T17-29-02Z.json`; `ai-brain/memory.md`; `paperclip/memory.md`.
-- O que mudou: implementei os 2 arquivos de teste exigidos (6 regras de validação canônica + 7 endpoints de graph-documents com sucesso e erro), adicionei endpoints faltantes (`apply-patch`, `rollback`, `reindex`, `events`) e incluí validação v2 explícita de `schema_version=2.0` e ownership da persona.
-- Validação executada: `pytest tests/test_graph_json_validator.py -v` => `7 passed`; `pytest tests/test_graph_documents_routes.py -v` => `7 passed`; probe live `curl -s -o NUL -w "%{http_code}" http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz` => `401`; probe live com header admin `curl -s -o NUL -w "%{http_code}" -H "X-AI-BRAIN-ADMIN-TOKEN: <token>" http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz` => `404`.
+- O que mudou: implementei os 2 arquivos de teste exigidos (6 regras de validaï¿½ï¿½o canï¿½nica + 7 endpoints de graph-documents com sucesso e erro), adicionei endpoints faltantes (`apply-patch`, `rollback`, `reindex`, `events`) e incluï¿½ validaï¿½ï¿½o v2 explï¿½cita de `schema_version=2.0` e ownership da persona.
+- Validaï¿½ï¿½o executada: `pytest tests/test_graph_json_validator.py -v` => `7 passed`; `pytest tests/test_graph_documents_routes.py -v` => `7 passed`; probe live `curl -s -o NUL -w "%{http_code}" http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz` => `401`; probe live com header admin `curl -s -o NUL -w "%{http_code}" -H "X-AI-BRAIN-ADMIN-TOKEN: <token>" http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz` => `404`.
 - Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-73-pytest-coverage-2026-05-29T17-29-02Z.json`.
-- Riscos / bloqueios: runtime QA em `:8001` não refletiu a atualização local do endpoint (`/graph-documents/current` continua 404 com auth), impedindo evidência live do comportamento esperado pós-fix.
-- Próximo passo: owner Infra/Backend reiniciar o processo `scripts/start_api_qa.py` carregando HEAD atual; rerodar probe de `/graph-documents/current` para confirmar status esperado e então concluir disposição final.
+- Riscos / bloqueios: runtime QA em `:8001` nï¿½o refletiu a atualizaï¿½ï¿½o local do endpoint (`/graph-documents/current` continua 404 com auth), impedindo evidï¿½ncia live do comportamento esperado pï¿½s-fix.
+- Prï¿½ximo passo: owner Infra/Backend reiniciar o processo `scripts/start_api_qa.py` carregando HEAD atual; rerodar probe de `/graph-documents/current` para confirmar status esperado e entï¿½o concluir disposiï¿½ï¿½o final.
 
 ## 2026-05-29 (BRA-76 resume delta - steps 4/6)
 - Step 4 executado: POST /sofia/graph-command (reencaixe brand vz-lupas abaixo de allanvvz) => 200, persisted=true, patch aplicado.
@@ -1204,11 +1215,11 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 ### 2026-05-29 - codex (BRA-76: validator/migration heartbeat disposition)
 - Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration (AllanVvz -> VZ Lupas).
 - Arquivos alterados: paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json; paperclip/memory.md; ai-brain/memory.md.
-- O que mudou: Registrei artifact de heartbeat consolidando entregáveis de validação/migração já publicados e o bloqueio atual de execução por ausência de token admin no ambiente desta sessão.
-- Validação executada: probes locais para carregar token (AI_BRAIN_ADMIN_TOKEN) no ambiente e em arquivos .env/.env.local/env*.yaml do i-brain retornaram ausente; sem token não foi possível repetir probes autenticados nesta heartbeat.
+- O que mudou: Registrei artifact de heartbeat consolidando entregï¿½veis de validaï¿½ï¿½o/migraï¿½ï¿½o jï¿½ publicados e o bloqueio atual de execuï¿½ï¿½o por ausï¿½ncia de token admin no ambiente desta sessï¿½o.
+- Validaï¿½ï¿½o executada: probes locais para carregar token (AI_BRAIN_ADMIN_TOKEN) no ambiente e em arquivos .env/.env.local/env*.yaml do i-brain retornaram ausente; sem token nï¿½o foi possï¿½vel repetir probes autenticados nesta heartbeat.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json.
-- Riscos / bloqueios: sem token admin e sem correções de backend/schema do Step 6, a execução e2e completa permanece bloqueada.
-- Proximo passo: Backend Engineer + CTO + Board/Infra fornecer token/admin path e corrigir bloqueios técnicos (UUID approve snapshot, embed gate 403, tabela knowledge_faq_index).
+- Riscos / bloqueios: sem token admin e sem correï¿½ï¿½es de backend/schema do Step 6, a execuï¿½ï¿½o e2e completa permanece bloqueada.
+- Proximo passo: Backend Engineer + CTO + Board/Infra fornecer token/admin path e corrigir bloqueios tï¿½cnicos (UUID approve snapshot, embed gate 403, tabela knowledge_faq_index).
 
 ### 2026-05-29 - codex (BRA-76: resume delta after escalation comment)
 - Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration.
@@ -1216,8 +1227,8 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - O que mudou: tratei o wake por comentario de escalacao, confirmei que os artifacts publicados existem e que a issue voltou para in_progress sem evidencia nova de desbloqueio tecnico.
 - Validacao executada: GET /api/issues/f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f mostrou status in_progress; Test-Path confirmou existencia de BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json e graph-json-v2-allanvvz-validation-FINAL-2026-05-29T17-30-38Z.json.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json.
-- Riscos / bloqueios: sem token admin disponível e sem correções de backend/schema (22P02, 403 embeds gate, PGRST205), Step 6 permanece bloqueado.
-- Proximo passo: Backend Engineer + CTO + Board/Infra executar unblock action já registrada no comentário 98ef1b40-99f1-425d-9d53-a2b469cb6427.
+- Riscos / bloqueios: sem token admin disponï¿½vel e sem correï¿½ï¿½es de backend/schema (22P02, 403 embeds gate, PGRST205), Step 6 permanece bloqueado.
+- Proximo passo: Backend Engineer + CTO + Board/Infra executar unblock action jï¿½ registrada no comentï¿½rio 98ef1b40-99f1-425d-9d53-a2b469cb6427.
 
 ### 2026-05-29 - codex (BRA-76: anti-loop enforcement on repeated wake)
 - Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration.
@@ -1262,54 +1273,54 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-74-frontend-tests-2026-05-29T17-39-52Z.json.
 - Riscos / bloqueios: sem bloqueios para este escopo de frontend.
 - Proximo passo: QA/E2E validar cadeia completa com backend v2 publicado.
-### 2026-05-29 — ceo-product-owner (BRA-76: gate check + blocker formal)
+### 2026-05-29 ï¿½ ceo-product-owner (BRA-76: gate check + blocker formal)
 - Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
 - Arquivos alterados: ai-brain/memory.md.
-- O que mudou: Registrei decisão de produto/gate: não há critério para `done` enquanto não houver evidência autenticada dos passos 2-7 (publish/read 200, validator true por doc-id publicado, patch Sofia com version bump, FAQ approved->reindex->embeddings).
-- Validação executada: checagem de existência de `api/scripts/import_v1_to_v2_allanvvz.py`, `api/services/graph_json_validator.py`, `api/routes/graph_documents.py` e probe runtime `GET /graph-documents/current?persona_slug=allanvvz` com retorno 401.
-- Artifact gerado: sem novo artifact em ai-brain; referência cruzada no artifact publicado `paperclip/test-artifacts/architecture/graph-json-v2-allanvvz-validation-FINAL-2026-05-29T17-30-38Z.json`.
-- Riscos / bloqueios: sem token/fluxo autenticado comprovado, a validação e2e permanece incompleta e não pode avançar para aceite.
-- Próximo passo: Backend Engineer desbloquear autenticação/endpoint e publicar delta verificável; em seguida QA/Graph Validator executa contrato completo BRA-76.
-### 2026-05-29 — ceo-product-owner (BRA-76: status reconciliation no-delta wake)
+- O que mudou: Registrei decisï¿½o de produto/gate: nï¿½o hï¿½ critï¿½rio para `done` enquanto nï¿½o houver evidï¿½ncia autenticada dos passos 2-7 (publish/read 200, validator true por doc-id publicado, patch Sofia com version bump, FAQ approved->reindex->embeddings).
+- Validaï¿½ï¿½o executada: checagem de existï¿½ncia de `api/scripts/import_v1_to_v2_allanvvz.py`, `api/services/graph_json_validator.py`, `api/routes/graph_documents.py` e probe runtime `GET /graph-documents/current?persona_slug=allanvvz` com retorno 401.
+- Artifact gerado: sem novo artifact em ai-brain; referï¿½ncia cruzada no artifact publicado `paperclip/test-artifacts/architecture/graph-json-v2-allanvvz-validation-FINAL-2026-05-29T17-30-38Z.json`.
+- Riscos / bloqueios: sem token/fluxo autenticado comprovado, a validaï¿½ï¿½o e2e permanece incompleta e nï¿½o pode avanï¿½ar para aceite.
+- Prï¿½ximo passo: Backend Engineer desbloquear autenticaï¿½ï¿½o/endpoint e publicar delta verificï¿½vel; em seguida QA/Graph Validator executa contrato completo BRA-76.
+### 2026-05-29 ï¿½ ceo-product-owner (BRA-76: status reconciliation no-delta wake)
 - Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
 - Arquivos alterados: ai-brain/memory.md.
-- O que mudou: Sem nova evidência técnica no wake; mantive o gate de produto e reconciliei a disposição formal da BRA-76 para bloquear reexecução sem delta.
-- Validação executada: leitura de status via Paperclip API (`BRA-76 in_progress`, `BRA-73 blocked`).
-- Artifact gerado: não aplicável.
-- Riscos / bloqueios: dependência em BRA-73 permanece ativa para autenticação/persistência do fluxo e2e.
-- Próximo passo: entregar unblock em BRA-73 com probe/artifact novo e só então retomar BRA-76.
-### 2026-05-29 — graph-validator-migration-agent (BRA-76: live contract execution + schema blocker)
+- O que mudou: Sem nova evidï¿½ncia tï¿½cnica no wake; mantive o gate de produto e reconciliei a disposiï¿½ï¿½o formal da BRA-76 para bloquear reexecuï¿½ï¿½o sem delta.
+- Validaï¿½ï¿½o executada: leitura de status via Paperclip API (`BRA-76 in_progress`, `BRA-73 blocked`).
+- Artifact gerado: nï¿½o aplicï¿½vel.
+- Riscos / bloqueios: dependï¿½ncia em BRA-73 permanece ativa para autenticaï¿½ï¿½o/persistï¿½ncia do fluxo e2e.
+- Prï¿½ximo passo: entregar unblock em BRA-73 com probe/artifact novo e sï¿½ entï¿½o retomar BRA-76.
+### 2026-05-29 ï¿½ graph-validator-migration-agent (BRA-76: live contract execution + schema blocker)
 - Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
 - Arquivos alterados: ai-brain/memory.md.
-- O que mudou: Rodei o importador real da BRA-76 contra `:8001`; autenticação por token admin passou, mas o publish falhou em validação Pydantic porque o payload gerado ainda segue shape legado e não o contrato GraphJson V2 da rota.
-- Validação executada: `python api/scripts/import_v1_to_v2_allanvvz.py` => `422 Unprocessable Entity`; probe dirigido com o mesmo token em `GET /graph-documents/current?persona_slug=allanvvz` => `404 No published graph document`; replay do publish retornou erros de campos obrigatórios ausentes (`graph_id`, `tenant`, `persona_slug`, `nodes[*].node_type`).
+- O que mudou: Rodei o importador real da BRA-76 contra `:8001`; autenticaï¿½ï¿½o por token admin passou, mas o publish falhou em validaï¿½ï¿½o Pydantic porque o payload gerado ainda segue shape legado e nï¿½o o contrato GraphJson V2 da rota.
+- Validaï¿½ï¿½o executada: `python api/scripts/import_v1_to_v2_allanvvz.py` => `422 Unprocessable Entity`; probe dirigido com o mesmo token em `GET /graph-documents/current?persona_slug=allanvvz` => `404 No published graph document`; replay do publish retornou erros de campos obrigatï¿½rios ausentes (`graph_id`, `tenant`, `persona_slug`, `nodes[*].node_type`).
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/graph-json-v2-allanvvz-validation-20260529T181957Z.json.
-- Riscos / bloqueios: enquanto o importador não serializar GraphJson V2 válido, o documento não publica e o fluxo Sofia/versionamento/reindex/embedding não é executável.
-- Próximo passo: Backend Engineer corrigir o mapper do importador para GraphJson V2 e rerodar o contrato BRA-76 a partir do passo 1.
-### 2026-05-29 — graph-validator-migration-agent (BRA-76: disposition API write failure)
+- Riscos / bloqueios: enquanto o importador nï¿½o serializar GraphJson V2 vï¿½lido, o documento nï¿½o publica e o fluxo Sofia/versionamento/reindex/embedding nï¿½o ï¿½ executï¿½vel.
+- Prï¿½ximo passo: Backend Engineer corrigir o mapper do importador para GraphJson V2 e rerodar o contrato BRA-76 a partir do passo 1.
+### 2026-05-29 ï¿½ graph-validator-migration-agent (BRA-76: disposition API write failure)
 - Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
 - Arquivos alterados: ai-brain/memory.md.
-- O que mudou: execução técnica em ai-brain foi concluída até o diagnóstico do 422 no publish, porém a disposição formal no board não pôde ser gravada por erro 500 da API Paperclip em endpoints de escrita.
-- Validação executada: tentativa de `PATCH /api/issues/{id}` com `status=blocked` falhou (`500`), com leitura subsequente `GET /api/issues/{id}` ainda `in_progress`.
+- O que mudou: execuï¿½ï¿½o tï¿½cnica em ai-brain foi concluï¿½da atï¿½ o diagnï¿½stico do 422 no publish, porï¿½m a disposiï¿½ï¿½o formal no board nï¿½o pï¿½de ser gravada por erro 500 da API Paperclip em endpoints de escrita.
+- Validaï¿½ï¿½o executada: tentativa de `PATCH /api/issues/{id}` com `status=blocked` falhou (`500`), com leitura subsequente `GET /api/issues/{id}` ainda `in_progress`.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-76-disposition-api-failure-20260529T182058Z.json.
-- Riscos / bloqueios: governança de issue bloqueada por falha infra de persistência de comentários/disposição.
-- Próximo passo: Board/Infra restaurar writes da API Paperclip para permitir registro formal do bloqueio e handoff ao Backend Engineer.
-### 2026-05-29 — CEO / Product Owner (BRA-82: backend plan_json endpoints + validator severities)
-- Issue/tarefa: BRA-79 (execução técnica da filha BRA-82)
+- Riscos / bloqueios: governanï¿½a de issue bloqueada por falha infra de persistï¿½ncia de comentï¿½rios/disposiï¿½ï¿½o.
+- Prï¿½ximo passo: Board/Infra restaurar writes da API Paperclip para permitir registro formal do bloqueio e handoff ao Backend Engineer.
+### 2026-05-29 ï¿½ CEO / Product Owner (BRA-82: backend plan_json endpoints + validator severities)
+- Issue/tarefa: BRA-79 (execuï¿½ï¿½o tï¿½cnica da filha BRA-82)
 - Arquivos alterados: api/services/sofia_orchestrator.py; api/routes/qa_contract.py; tests/test_qa_contract_routes.py; memory.md
-- O que mudou: Adicionado storage de plan_json por sessão no orquestrador, endpoints GET/PATCH em QA contract para obter/aplicar patch de plan_json, integração do retorno plan_json no fluxo sofia_graph_command e validação com severidades suggestion/pending/blocking sem bloquear criação por ausência de FAQ/regra.
-- Validação executada: `pytest -q tests/test_qa_contract_routes.py` -> `13 passed in 2.22s`.
+- O que mudou: Adicionado storage de plan_json por sessï¿½o no orquestrador, endpoints GET/PATCH em QA contract para obter/aplicar patch de plan_json, integraï¿½ï¿½o do retorno plan_json no fluxo sofia_graph_command e validaï¿½ï¿½o com severidades suggestion/pending/blocking sem bloquear criaï¿½ï¿½o por ausï¿½ncia de FAQ/regra.
+- Validaï¿½ï¿½o executada: `pytest -q tests/test_qa_contract_routes.py` -> `13 passed in 2.22s`.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/memory.md
-- Riscos / bloqueios: storage atual é em memória por sessão (TTL), sem persistência em banco entre reinícios.
-- Próximo passo: Backend Engineer evoluir para persistência durável (Supabase table/migration) mantendo o mesmo contrato de endpoint.
-### 2026-05-29 — CEO / Product Owner (BRA-79: probes reais plan_json + bugfix de retenção de sessão)
+- Riscos / bloqueios: storage atual ï¿½ em memï¿½ria por sessï¿½o (TTL), sem persistï¿½ncia em banco entre reinï¿½cios.
+- Prï¿½ximo passo: Backend Engineer evoluir para persistï¿½ncia durï¿½vel (Supabase table/migration) mantendo o mesmo contrato de endpoint.
+### 2026-05-29 ï¿½ CEO / Product Owner (BRA-79: probes reais plan_json + bugfix de retenï¿½ï¿½o de sessï¿½o)
 - Issue/tarefa: BRA-79
 - Arquivos alterados: api/services/sofia_orchestrator.py; scripts/probe_sofia_plan_json_endpoints.py; memory.md
-- O que mudou: Corrigido bug onde `remember_turn` limpava `plan_json`; criado probe real GET/PATCH/POST dos endpoints Sofia com artifact JSON comprovando alteração de product/campaign, separação suggestion/pending/blocking, blocking estrutural e não-durabilidade após reload.
-- Validação executada: `python scripts/probe_sofia_plan_json_endpoints.py` (artifact gerado) e `pytest -q tests/test_qa_contract_routes.py` (`13 passed`).
+- O que mudou: Corrigido bug onde `remember_turn` limpava `plan_json`; criado probe real GET/PATCH/POST dos endpoints Sofia com artifact JSON comprovando alteraï¿½ï¿½o de product/campaign, separaï¿½ï¿½o suggestion/pending/blocking, blocking estrutural e nï¿½o-durabilidade apï¿½s reload.
+- Validaï¿½ï¿½o executada: `python scripts/probe_sofia_plan_json_endpoints.py` (artifact gerado) e `pytest -q tests/test_qa_contract_routes.py` (`13 passed`).
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/test-artifacts/qa/sofia-plan-json-endpoints-probe-20260529T204937Z.json
-- Riscos / bloqueios: persistência ainda é memória de processo; após reload/restart o estado zera.
-- Próximo passo: BRA-87 (Backend) implementar persistência Supabase durável para plan_json.
+- Riscos / bloqueios: persistï¿½ncia ainda ï¿½ memï¿½ria de processo; apï¿½s reload/restart o estado zera.
+- Prï¿½ximo passo: BRA-87 (Backend) implementar persistï¿½ncia Supabase durï¿½vel para plan_json.
 ### 2026-05-29 - 57a6a5a4-a04e-47f4-8da9-b5ab914921fa (BRA-87: persistir plan_json em Supabase)
 - Issue/tarefa: BRA-87 (Backend) persistencia duravel de `plan_json` entre reloads.
 - Arquivos alterados: `api/services/sofia_orchestrator.py`; `api/services/supabase_client.py`; `supabase/migrations/043_sofia_plan_sessions.sql`; `tests/test_qa_contract_routes.py`; `memory.md`.
@@ -1334,3 +1345,27 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-migration-applied-2026-05-29.md`.
 - Riscos / bloqueios: sem bloqueios remanescentes para BRA-87.
 - Proximo passo: manter monitoramento normal; endpoint de sessao pode ser validado em regressao de reload quando QA solicitar.
+### 2026-05-29 - 57a6a5a4-a04e-47f4-8da9-b5ab914921fa (BRA-87: fechamento confirmado)
+- Issue/tarefa: BRA-87 validado pelo board apos aplicacao da migration 043 no QA.
+- Arquivos alterados: `memory.md`.
+- O que mudou: registrei somente o fechamento administrativo deste wake, sem mudancas adicionais de codigo ou schema.
+- Validacao executada: mantida a ultima evidencia valida do issue (`/sofia/graph-command`: 200 com header admin, 401 sem header).
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-migration-applied-2026-05-29.md`.
+- Riscos / bloqueios: nenhum.
+- Proximo passo: nenhum; issue encerrada.
+### 2026-05-29 - 57a6a5a4-a04e-47f4-8da9-b5ab914921fa (BRA-87: wake de reconfirmacao final)
+- Issue/tarefa: BRA-87 ja aceita; este wake apenas reconfirma fechamento sem delta tecnico.
+- Arquivos alterados: `memory.md`.
+- O que mudou: entrada administrativa final para evitar ambiguidade de status em wakes subsequentes.
+- Validacao executada: referencia mantida ao artifact final aceito no board.
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-migration-applied-2026-05-29.md`.
+- Riscos / bloqueios: nenhum.
+- Proximo passo: nenhum.
+### 2026-05-29 - 57a6a5a4-a04e-47f4-8da9-b5ab914921fa (BRA-87: reconciliaï¿½ï¿½o anti-loop)
+- Issue/tarefa: wake de confirmaï¿½ï¿½o sem delta tï¿½cnico em BRA-87.
+- Arquivos alterados: memory.md.
+- O que mudou: sem alteraï¿½ï¿½o de cï¿½digo/backend; apenas reconciliaï¿½ï¿½o administrativa da issue.
+- Validaï¿½ï¿½o executada: POST /sofia/graph-command sem header => 401; com X-AI-BRAIN-ADMIN-TOKEN => 422.
+- Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-migration-applied-2026-05-29.md.
+- Riscos / bloqueios: nenhum tï¿½cnico.
+- Prï¿½ximo passo: nenhum em BRA-87; handoff para BRA-83.

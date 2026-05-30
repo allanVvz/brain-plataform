@@ -186,11 +186,20 @@ def _validate_plan_json(plan_json: dict[str, Any]) -> dict[str, Any]:
                 if not parent:
                     pending.append({"code": "MISSING_PARENT", "message": f"{section}[{idx}] sem parent_slug."})
 
+    blocking_markers = {
+        "cycle",
+        "orphan",
+        "edge_inverted",
+        "product_above_product_group",
+        "embed_without_approved_faq",
+        "persistence_failure",
+        "critical_duplication",
+    }
     for edge in plan_json.get("graph_patch_queue") or []:
         if not isinstance(edge, dict):
             continue
         marker = str(edge.get("marker") or "").strip().lower()
-        if marker in {"cycle", "edge_inverted", "product_above_product_group", "embed_without_approved_faq"}:
+        if marker in blocking_markers:
             blocking.append({"code": marker.upper(), "message": str(edge.get("message") or marker)})
 
     return {
