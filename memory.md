@@ -1378,3 +1378,11 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/docs/qa/BRA-83-plan-json-context-panel-graph-sidebar-parity-2026-05-30T03-05-00Z.md`
 - Riscos / bloqueios: Ainda depende de validacao E2E com backend live para confirmar equivalencia total de tool-calls entre CRIAR e Graph em todos os casos de uso.
 - Proximo passo: QA/E2E Validator executar fluxo dual (CRIAR->Graph) e comparar request context/estado visual pendente vs persistido.
+### 2026-05-30 - dfc57cae-0b19-4b55-b605-02a2cdd96b85 (BRA-81: unify Sofia Criar+Graph on shared plan_json)
+- Issue/tarefa: BRA-81
+- Arquivos alterados: `api/routes/qa_contract.py`; `api/services/sofia_orchestrator.py`; `memory.md`.
+- O que mudou: unifiquei o fluxo de `/sofia/graph-command` para consumir `selected_node_id`/`selected_node_ids`, resolver referencias pronominais (`ele/esse/isso`) via memoria da sessao e gravar estado de operacao/patch no mesmo `plan_json` da sessao quando `session_id` existe; tambem eliminei fallback generico no orquestrador em favor de esclarecimentos especificos e adicionei hardening para sessoes com `plan_json` incompleto.
+- Validacao executada: `pytest -q tests/test_sofia_v2_patch_loop.py tests/test_sofia_session_context.py tests/test_qa_contract_routes.py` => `20 passed in 2.34s`.
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/docs/qa/BRA-81-sofia-unified-plan-json-tool-loop-2026-05-30T03-40-00Z.md`.
+- Riscos / bloqueios: sem bloqueio tecnico imediato; sweep E2E dual-flow ainda depende do gate QA/E2E (BRA-85).
+- Proximo passo: QA/Test Engineer validar fluxo integrado Criar->Graph com backend live e confirmar criterios finais.

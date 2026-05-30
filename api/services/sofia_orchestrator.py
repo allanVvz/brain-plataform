@@ -232,7 +232,7 @@ def get_or_create_plan_json(
         state = _load_supabase_state(key)
     state = state or {"recent_turns": []}
     plan_json = state.get("plan_json")
-    if not isinstance(plan_json, dict):
+    if not isinstance(plan_json, dict) or not isinstance(plan_json.get("plan"), dict):
         plan_json = _default_plan_json(key, persona_slug)
     plan_json["session_id"] = key
     plan_json["persona_slug"] = str(persona_slug or plan_json.get("persona_slug") or "").strip().lower()
@@ -262,6 +262,8 @@ def apply_plan_json_patch(
         raise ValueError("session_id is required")
     plan_json = get_or_create_plan_json(session_id=key, persona_slug=persona_slug)
     next_plan = _deep_merge(plan_json, patch or {})
+    if not isinstance(next_plan.get("plan"), dict):
+        next_plan["plan"] = dict(_default_plan_json(key, persona_slug)["plan"])
 
     text = (command or "").strip().lower()
     if "crie" in text or "criar" in text:
@@ -464,6 +466,8 @@ def plan_graph_command(
     ]
 
     graph_patch: Optional[dict[str, list[dict]]] = None
+    has_persona = False
+    has_node = False
     is_structured_intent = (context.client_action or "").strip().lower() == "structured_intent"
     if is_structured_intent:
         patch = context.graph_patch or {}
@@ -511,10 +515,16 @@ def plan_graph_command(
         graph_patch = _reencaixe_patch()
 
     if not graph_patch:
+        if operation_score < threshold:
+            message = "Nao consegui identificar a operacao com confianca suficiente. Descreva a acao de forma mais especifica."
+        elif not has_persona and not has_node:
+            message = "Nao encontrei persona ativa nem node alvo. Informe a persona ou selecione um node no grafo."
+        else:
+            message = "Nao consegui montar patch para a operacao resolvida. Informe o node alvo para continuar."
         return {
             "ok": True,
             "persisted": False,
-            "sofia_message": "Nao consegui mapear a operacao com seguranca. Pode detalhar melhor?",
+            "sofia_message": message,
             "graph_patch": None,
             "tool_calls": tool_calls,
             "threshold": threshold,

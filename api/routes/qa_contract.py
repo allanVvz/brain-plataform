@@ -173,6 +173,7 @@ class SofiaGraphCommandContext(BaseModel):
     session_id: Optional[str] = None
     active_persona_slug: Optional[str] = None
     current_graph_hash: Optional[str] = None
+    selected_node_id: Optional[str] = None
     selected_node_ids: list[str] = []
     client_action: str = "natural_language"
     graph_patch: Optional[dict[str, Any]] = None
@@ -914,10 +915,16 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
 
     effective_command = str(body.command or "")
     last_ref = session_state.get("last_referenced_node") if isinstance(session_state, dict) else {}
-    if re.search(r"\bele\b", effective_command.lower()) and isinstance(last_ref, dict):
+    selected_node_id = str(
+        body.context.selected_node_id
+        or (body.context.selected_node_ids[0] if body.context.selected_node_ids else "")
+        or ""
+    ).strip()
+
+    if re.search(r"\b(ele|esse|isso)\b", effective_command.lower()) and isinstance(last_ref, dict):
         last_slug = str(last_ref.get("slug") or "").strip()
         if last_slug:
-            effective_command = re.sub(r"\bele\b", last_slug, effective_command, flags=re.IGNORECASE)
+            effective_command = re.sub(r"\b(ele|esse|isso)\b", last_slug, effective_command, flags=re.IGNORECASE)
 
     persona_tool = _resolve_persona_tool(
         SofiaResolvePersonaBody(persona_slug=persona_slug, command=effective_command)
@@ -930,7 +937,7 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
     )
     node_tool = sofia_orchestrator.resolve_node(
         effective_command,
-        selected_node_id=(body.context.selected_node_ids[0] if body.context.selected_node_ids else None),
+        selected_node_id=selected_node_id or None,
         session_state=session_state,
     )
 
@@ -947,16 +954,36 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
     cmd_low = effective_command.lower()
     if "vz lupas" in cmd_low or "vzlupas" in cmd_low:
         selected_slug = "vz-lupas"
-    elif body.context.selected_node_ids:
-        selected_slug = str(body.context.selected_node_ids[0] or "").strip().lower()
+    elif selected_node_id:
+        selected_slug = str(selected_node_id or "").strip().lower()
     last_referenced_node = {"slug": selected_slug, "node_type": "brand"} if selected_slug else (last_ref if isinstance(last_ref, dict) else {})
+    plan_json_patch_base: dict[str, Any] = {
+        "active_context": {
+            "selected_node_id": selected_node_id or None,
+            "last_referenced_node": last_referenced_node or None,
+        },
+        "last_graph_operation": {
+            "operation": operation_tool.get("operation"),
+            "score": operation_tool.get("score"),
+            "command": effective_command,
+            "persisted": bool(plan.get("persisted")),
+        },
+    }
+
     if not plan.get("persisted"):
-        plan_json = sofia_orchestrator.apply_plan_json_patch(
-            session_id=session_id,
-            persona_slug=persona_slug,
-            patch=None,
-            command=effective_command,
-        )
+        if session_id:
+            plan_json = sofia_orchestrator.apply_plan_json_patch(
+                session_id=session_id,
+                persona_slug=persona_slug,
+                patch=plan_json_patch_base,
+                command=effective_command,
+            )
+        else:
+            plan_json = sofia_orchestrator.get_or_create_plan_json(
+                session_id=None,
+                persona_slug=persona_slug,
+                selected_node_id=selected_node_id or None,
+            )
         sofia_orchestrator.remember_turn(
             session_id=session_id,
             persona_slug=persona_slug,
@@ -1125,6 +1152,22 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
             },
         }
     )
+    if session_id:
+        plan_json_patch = dict(plan_json_patch_base)
+        plan_json_patch["graph_patch_queue"] = [patch]
+        plan_json_patch["last_graph_operation"]["persisted"] = True
+        plan_json = sofia_orchestrator.apply_plan_json_patch(
+            session_id=session_id,
+            persona_slug=persona_slug,
+            patch=plan_json_patch,
+            command=effective_command,
+        )
+    else:
+        plan_json = sofia_orchestrator.get_or_create_plan_json(
+            session_id=None,
+            persona_slug=persona_slug,
+            selected_node_id=selected_node_id or None,
+        )
     return {
         "ok": True,
         "sofia_message": "Comando aplicado com cadeia canonica validada.",
@@ -1138,11 +1181,7 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         "needs_clarification": False,
         "recommendations": recommendations,
         "validation": {"canonical_chain_respected": True, "violations": []},
-        "plan_json": sofia_orchestrator.get_or_create_plan_json(
-            session_id=session_id,
-            persona_slug=persona_slug,
-            selected_node_id=(body.context.selected_node_ids[0] if body.context.selected_node_ids else None),
-        ),
+        "plan_json": plan_json,
         "conversation_context": {
             "session_id": session_id or None,
             "active_persona_slug": persona_slug,
