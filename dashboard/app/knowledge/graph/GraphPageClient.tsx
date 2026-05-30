@@ -21,6 +21,7 @@ import { getVisualHierarchyRank } from "@/components/graph/knowledgeGraphLayout"
 import { parseGraphJsonV2Payload } from "@/lib/graph-json-v2";
 import SofiaChatPanel, { SofiaChatMessage } from "./SofiaChatPanel";
 import { resolveSofiaToolFromInput, SOFIA_REACT_FLOW_TOOLS } from "./sofiaReactFlowTools";
+import { chooseAddBlockParent, compatibleParentTypes, relationForParentChild } from "./graphParenting";
 
 const GraphView = dynamic(() => import("@/components/graph/GraphView"), { ssr: false });
 
@@ -507,6 +508,9 @@ export default function GraphPageClient() {
         action: "command",
         message: command,
         persona_slug: effectivePersonaSlug || undefined,
+        active_persona_slug: effectivePersonaSlug || undefined,
+        selected_node_id: selectedNode?.id || null,
+        selected_node_ids: selectedNodes.map((node) => String(node.id)).filter(Boolean),
         session_id: sharedSessionId || undefined,
         plan_json: sharedPlanJson || undefined,
       });
@@ -574,7 +578,7 @@ export default function GraphPageClient() {
     } finally {
       setSofiaLoading(false);
     }
-  }, [appendSofiaMessage, data, effectivePersonaSlug, load, onFocusNode, pendingGraphSnapshot, sharedPlanJson, sharedSessionId, updateParam]);
+  }, [appendSofiaMessage, data, effectivePersonaSlug, load, onFocusNode, pendingGraphSnapshot, selectedNode?.id, selectedNodes, sharedPlanJson, sharedSessionId, updateParam]);
 
   const handleConfirmPending = useCallback(async () => {
     setSofiaLoading(true);
@@ -884,6 +888,8 @@ export default function GraphPageClient() {
         <NodeDrawer
           node={selectedNode}
           selectedNodes={selectedNodes}
+          personaSlug={effectivePersonaSlug || undefined}
+          sessionId={sharedSessionId || undefined}
           onClose={() => {
             setSelectedNode(null);
             setSelectedNodes([]);
@@ -917,6 +923,7 @@ export default function GraphPageClient() {
             nodes={data?.nodes || []}
             edges={data?.edges || []}
             persona={effectivePersona}
+            selectedNode={selectedNode}
             onClose={() => setAddPanelOpen(false)}
             onCreated={async (created) => {
               setAddPanelOpen(false);
@@ -939,12 +946,14 @@ function AddBlockPanel({
   nodes,
   edges,
   persona,
+  selectedNode,
   onClose,
   onCreated,
 }: {
   nodes: any[];
   edges: any[];
   persona?: any;
+  selectedNode?: any;
   onClose: () => void;
   onCreated: (created?: any) => void | Promise<void>;
 }) {
@@ -993,6 +1002,15 @@ function AddBlockPanel({
       "supports_copy",
       "uses_asset",
       "belongs_to_persona",
+      "persona_has_brand",
+      "brand_has_briefing",
+      "briefing_has_campaign",
+      "campaign_has_audience",
+      "audience_has_product_group",
+      "product_group_has_product",
+      "product_has_copy",
+      "product_has_faq",
+      "copy_has_faq",
     ]);
     const out = new Map<string, typeof parentOptions>();
     for (const edge of edges || []) {
@@ -1016,10 +1034,6 @@ function AddBlockPanel({
     }
     return out;
   }, [edges, graphNodesById]);
-  const campaignOptions = useMemo(() => {
-    const campaigns = parentOptions.filter((node) => node.type === "campaign");
-    return campaigns.length ? campaigns : parentOptions.filter((node) => ["brand", "campaign", "briefing"].includes(node.type));
-  }, [parentOptions]);
   const [contentType, setContentType] = useState("product");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -1033,19 +1047,31 @@ function AddBlockPanel({
   const parentNodeId = selectedParent?.id || "";
 
   useEffect(() => {
-    if (!pathIds.length && campaignOptions[0]?.graphId) setPathIds([campaignOptions[0].graphId]);
-  }, [campaignOptions, pathIds.length]);
+    if (pathIds.length) return;
+    const chosen = chooseAddBlockParent(contentType, parentOptions, selectedNode?.id);
+    if (chosen?.graphId) setPathIds([chosen.graphId]);
+  }, [contentType, parentOptions, pathIds.length, selectedNode?.id]);
+
+  useEffect(() => {
+    if (!pathIds.length) return;
+    const selected = parentOptions.find((node) => node.graphId === pathIds[pathIds.length - 1]);
+    if (selected && compatibleParentTypes(contentType).includes(selected.type)) return;
+    const chosen = chooseAddBlockParent(contentType, parentOptions, selectedNode?.id);
+    setPathIds(chosen?.graphId ? [chosen.graphId] : []);
+  }, [contentType, parentOptions, pathIds, selectedNode?.id]);
 
   const selectPathNode = (level: number, graphId: string) => {
     setPathIds((current) => [...current.slice(0, level), graphId]);
   };
 
   const pathColumns = useMemo(() => {
+    const allowedRootTypes = new Set(compatibleParentTypes(contentType));
+    const rootOptions = parentOptions.filter((node) => allowedRootTypes.has(node.type));
     const columns: Array<{ title: string; helper: string; options: typeof parentOptions; selected?: string }> = [
       {
-        title: "Campanha",
-        helper: "Clique para escolher o galho raiz.",
-        options: campaignOptions,
+        title: "Parent compativel",
+        helper: "Escolha onde o novo bloco deve entrar.",
+        options: rootOptions,
         selected: pathIds[0],
       },
     ];
@@ -1065,7 +1091,7 @@ function AddBlockPanel({
       });
     }
     return columns;
-  }, [campaignOptions, childOptionsByParent, pathIds]);
+  }, [contentType, parentOptions, childOptionsByParent, pathIds]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -1092,12 +1118,12 @@ function AddBlockPanel({
           slug: title,
           markdown_document: true,
           parent_node_id: parentNodeId || undefined,
-          parent_relation_type: "manual",
+          parent_relation_type: selectedParent ? relationForParentChild(selectedParent.type, contentType) : "contains",
         },
         submitted_by: "graph_ui",
         validate: true,
         parent_node_id: parentNodeId || undefined,
-        parent_relation_type: "manual",
+        parent_relation_type: selectedParent ? relationForParentChild(selectedParent.type, contentType) : "contains",
       });
       await onCreated(created);
     } catch (err) {

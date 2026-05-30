@@ -26,7 +26,7 @@ CANONICAL_PARENT: dict[str, tuple[str, ...]] = {
     "audience": ("campaign",),
     "product_group": ("audience",),
     "product": ("product_group",),
-    "faq": ("product",),
+    "faq": ("product", "product_group"),
     "embedded": ("faq",),
 }
 
@@ -45,6 +45,17 @@ def _has_cycle(start_id: str, nodes_by_id: dict[str, "object"]) -> bool:
         if node is None:
             return False
         current = getattr(node, "parent_id", None) or ""
+    return False
+
+
+def _has_descendant_type(node_id: str, node_type: str, nodes_by_id: dict[str, "object"]) -> bool:
+    for node in nodes_by_id.values():
+        if getattr(node, "parent_id", None) != node_id:
+            continue
+        if getattr(node, "node_type", None) == node_type:
+            return True
+        if _has_descendant_type(getattr(node, "id", ""), node_type, nodes_by_id):
+            return True
     return False
 
 
@@ -109,6 +120,12 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
                 f"node {node.id} (type={node.node_type}) has parent type {parent.node_type}, "
                 f"expected one of {allowed}"
             )
+        elif node.node_type == "faq" and parent.node_type == "product_group":
+            if _has_descendant_type(parent.id, "product", nodes_by_id):
+                errors.append(
+                    f"node {node.id} (type=faq) cannot hang from product_group {parent.id} "
+                    "while a product exists below that product_group"
+                )
 
     # 5. No cycle reachable through parent_id chain.
     for node in graph.nodes:

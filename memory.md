@@ -1,5 +1,28 @@
 # Brain AI — Progresso UI/UX
 
+## FAQ Tool node-type-aware — Audience != Product (2026-05-30)
+- Problema: `adaptar_faqs_universais_ao_grafo` aplicava templates de e-commerce em qualquer node. Audience "Técnicos" (brand Allan Rodrigues, sem produto no galho) gerou "Como comprar o Técnicos?", "acompanha caixa?", "prazo de envio?".
+- Causa: `select_faq_parent` para audience retornava a própria audience; `_resolve_subject_and_brand` usava o label como subject; havia um único conjunto de templates comerciais.
+- Correção em `api/services/sofia_faq_tool.py`:
+  - `find_sellable_in_branch` procura objeto vendável (product/offer/service/course/event; product_group só conta com product) nos ancestrais E descendentes do galho.
+  - `classify_faq_target` mapeia categoria por node_type: product/offer/product_group/campaign/brand/briefing/copy/audience/audience_object/discovery.
+  - Conjuntos de templates por categoria. Compra/frete/garantia só para objetos vendáveis. Audience usa perguntas de qualificação/discovery com `_audience_descriptor` (1a frase do markdown). Audience com objeto vendável abaixo => `audience_object` (relação audience->objeto). Copy extrai specs (i5, 2TB, RTX...) do markdown via `_extract_spec_tokens`.
+  - Guardrail `_violates_commercial_guardrail` filtra audience/brand/briefing/discovery contra "frete/acompanha caixa/flanela/prazo de envio/parcelar" e "comprar/garantia/preço d{o,a} {nome}".
+  - Retorno agora inclui `category`, `commercial_object_type`, `commercial_object_name`.
+- Cada galho é independente: Allan Rodrigues não herda linguagem/óculos da VZ Lupas (subject/brand vêm do contexto real do galho, nunca hardcoded).
+- Markdown contextual segue como fonte obrigatória: `build_branch_context` lê `metadata.markdown` de cada ancestral; `nearest_markdown` alimenta descriptor (audience) e `{context}` (briefing/copy/discovery) e o snippet no answer[0].
+- Testes: `tests/test_sofia_faq_tool.py` +8 casos (audience sem compra, audience qualificação via markdown, brand sem frete, product mantém compra, copy specs i5/2TB, briefing cursos, Allan não herda VZ Lupas, audience_object). `python -m pytest tests/test_sofia_faq_tool.py tests/test_sofia_faq_routes.py -q` => 21 passed. Suite FAQ completa (tool+routes+embedded+node_md+lifecycle) => 34 passed.
+- Sem hard-delete, Playwright, Paperclip, rebuild ou teste global.
+
+## BRA-90 - backend business rules alignment (2026-05-30)
+- Agent: Codex.
+- Issue: BRA-90.
+- Files changed: `api/services/graph_json_v2_validator.py`, `api/services/sofia_orchestrator.py`, `api/routes/qa_contract.py`, `tests/test_graph_json_validator.py`, `tests/test_qa_contract_routes.py`, plus probe update in `paperclip/scripts/probe-backend-business-rules.mjs`.
+- What changed: graph_json v2 validator now accepts `Product Group -> FAQ` only when no `Product` exists below that product_group, preserving top-down/orphan/cycle checks. Sofia now answers from actual `plan_json` effects: when product/campaign/audience is added to the plan, the response is partial success with the specific missing parent question instead of generic ambiguity/low-confidence fallback.
+- Evidence: `python -m pytest tests/test_graph_json_validator.py tests/test_qa_contract_routes.py -q` passed 25 tests. Live probe passed 9/9 and wrote `paperclip/test-artifacts/qa/backend-business-rules-alignment-2026-05-30T04-55-27-915Z.json`.
+- Risks: campaign title extraction is deterministic and conservative; it improves the tested "chamada teste IA" path but does not attempt broad natural-language parsing.
+- Next step: keep BRA-90 in review with the 9/9 artifact; frontend BRA-83 can consume the corrected Sofia messages and validator contract after backend review.
+
 ## BRA-82 — plan_json severity validator boundary + patch-apply/persist (2026-05-29)
 - Frozen CTO contract: `paperclip/docs/architecture/sofia-plan-json-contract-frozen-decision-2026-05-29.md`.
 - Validator (`api/services/sofia_orchestrator._validate_plan_json`) agora reconhece os 7 markers blocking frozen: `cycle`, `orphan`, `edge_inverted`, `product_above_product_group`, `embed_without_approved_faq`, `persistence_failure`, `critical_duplication`. Cada marker emite `validation.blocking[].code = marker.upper()` e flipa `is_valid=false`. FAQ/Rule continuam só em `suggestions`. Missing parent/title/type continuam em `pending`. `is_valid == (blocking == [])`.
@@ -1386,3 +1409,12 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/docs/qa/BRA-81-sofia-unified-plan-json-tool-loop-2026-05-30T03-40-00Z.md`.
 - Riscos / bloqueios: sem bloqueio tecnico imediato; sweep E2E dual-flow ainda depende do gate QA/E2E (BRA-85).
 - Proximo passo: QA/Test Engineer validar fluxo integrado Criar->Graph com backend live e confirmar criterios finais.
+
+### 2026-05-30 - Codex (BRA-91: conexoes Graph AllanVvz pos-rebuild)
+- Issue/tarefa: investigar e corrigir origem dos erros de conexao no Graph AllanVvz apos rebuild destrutivo.
+- Arquivos alterados: `dashboard/components/graph/knowledgeGraphLayout.ts`; `dashboard/app/knowledge/graph/GraphPageClient.tsx`; `dashboard/app/knowledge/graph/graphParenting.ts`; `dashboard/lib/api.ts`; `api/services/sofia_orchestrator.py`; `api/routes/qa_contract.py`; `dashboard/__tests__/graph-layout-canonical.test.ts`; `dashboard/__tests__/graph-parenting.test.ts`; `tests/test_bra91_sofia_graph_intents.py`; `memory.md`.
+- O que mudou: tree builder passou a reconhecer relation_types canonicos (`persona_has_brand`, `audience_has_product_group`, `product_group_has_product` etc.) e `product_group` na hierarquia; modal passou a escolher parent compativel por tipo/selected node; Graph envia selected node para `/sofia/graph-command`; Sofia ganhou intents minimas para criar/conectar/reencaixar nodes claros.
+- Validacao executada: `npm.cmd run test -- graph-layout-canonical.test.ts graph-parenting.test.ts GraphPageClient.test.tsx` => 3 arquivos/8 testes PASS; `python -m pytest tests\test_bra91_sofia_graph_intents.py -q` => 3 PASS; probe live `GET /knowledge/graph-data?persona_slug=allanvvz...` confirmou 28 nodes, 34 edges, 3 product groups, 0 edges diretas proibidas da Persona.
+- Correcao live pontual: via `/sofia/graph-command` sem hard-delete, `conectar radar em audience padrao` persistiu `audience_has_product_group` para `grupo-radar`.
+- Riscos / bloqueios: nenhum hard-delete rodado nesta investigacao; estado live agora tem Product Groups Plantaris/Radar/Juliet sob Audience.
+- Proximo passo: validar manualmente no front sem Playwright se o modal e a Sofia refletem as novas escolhas de parent/contexto.

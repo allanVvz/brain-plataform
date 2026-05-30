@@ -33,11 +33,19 @@ import { Database, Images } from "lucide-react";
 import {
   buildNeuronGraphLayout,
   buildTreeFromGraph,
+  compactRankMap,
   GraphEdgeData,
   GraphNodeData,
   getVisualHierarchyRank,
   KnowledgeViewMode,
 } from "./knowledgeGraphLayout";
+import {
+  collectPositions,
+  overlayPositions,
+  positionsDiffer,
+  readPositions,
+  writePositions,
+} from "@/lib/graphPositions";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -237,6 +245,9 @@ function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Nod
     ranks.get(rank)!.push(node);
   }
   const mirroredPositions = new Map<string, { x: number; y: number }>();
+  // Compact occupied ranks to consecutive levels so empty bands (e.g. no
+  // offer/copy between product and FAQ) don't open an ugly vertical gap.
+  const compactRank = compactRankMap(ranks.keys());
   Array.from(ranks.entries()).sort(([a], [b]) => a - b).forEach(([rank, rankNodes]) => {
     const sorted = [...rankNodes].sort((a, b) => {
       const ax = a.position.x;
@@ -245,7 +256,7 @@ function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Nod
       return a.id.localeCompare(b.id);
     });
     const rankWidth = (sorted.length - 1) * (118 + spacing.nodeSep);
-    const y = rank * (74 + spacing.rankSep * 0.72);
+    const y = (compactRank.get(rank) ?? 0) * (74 + spacing.rankSep * 0.72);
     sorted.forEach((node, index) => {
       const x = index * (118 + spacing.nodeSep) - rankWidth / 2;
       mirroredPositions.set(node.id, { x, y });
@@ -339,6 +350,7 @@ function edgeStyle(data: GraphEdgeData | undefined, isInPath: boolean): Edge["st
   // Pending / draft / asset_pending: amber dashed bem visível + pulse via CSS.
   const meta = (data?.metadata || {}) as Record<string, unknown>;
   const status = String(meta.curation_status || meta.status || "").toLowerCase();
+  const pendingVisual = Boolean((data as any)?.pending_visual || meta.pending_visual);
   const isAssetPending = String(meta.edge_kind || "").toLowerCase() === "asset_pending";
   const isAssetApproved = String(meta.edge_kind || "").toLowerCase() === "asset_approved";
   if (isAssetApproved) {
@@ -353,7 +365,7 @@ function edgeStyle(data: GraphEdgeData | undefined, isInPath: boolean): Edge["st
       animation: "edgePulse 2s ease-in-out infinite",
     } as Edge["style"];
   }
-  if ((data as any)?.draft_terminal_edge || status === "pending" || status === "pending_validation" || status === "pending_supersede") {
+  if (pendingVisual || (data as any)?.draft_terminal_edge || status === "pending" || status === "pending_validation" || status === "pending_supersede") {
     return {
       stroke: "rgba(251,191,36,0.95)",
       strokeWidth: 2,
@@ -425,7 +437,7 @@ function KnowledgeNode({ data, selected }: NodeProps) {
   const isAuxiliary = !!d.is_auxiliary;
   const isEmbedded = d.node_type === "embedded";
   const isGallery = d.node_type === "gallery";
-  const isPending = d.validated === false;
+  const isPending = d.validated === false || Boolean((d as any)?.pending_visual || (d as any)?.metadata?.pending_visual);
   const branchComplete = Boolean((d as any).branch_complete_validated);
   const color = branchComplete
     ? "#22c55e"
@@ -617,14 +629,24 @@ const edgeTypes: EdgeTypes = {
 // ── Main component ─────────────────────────────────────────────
 
 function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConnectNodes, onDeleteEdge, mode, searchQuery, focusNodeId, showAllEdges = false, branchDistance = 48 }: GraphViewProps) {
-  const { fitView, getViewport, setViewport } = useReactFlow();
+  const { fitView, getViewport, setViewport, getNodes } = useReactFlow();
   const [panActive, setPanActive] = useState(false);
   const [graphNodeOpacity, setGraphNodeOpacity] = useState(false);
   const [theme, setTheme] = useState<AppTheme>("clean");
-  const viewportKey = useMemo(() => {
-    const personaIds = Array.from(new Set((rawNodes || []).map((n: any) => n?.data?.persona_slug || n?.data?.persona_id || n?.id).filter(Boolean))).slice(0, 3).join("|");
-    return `knowledge-graph-viewport:${personaIds || "global"}:${mode}:${focusNodeId || "all"}`;
-  }, [rawNodes, mode, focusNodeId]);
+  const personaScope = useMemo(
+    () => Array.from(new Set((rawNodes || []).map((n: any) => n?.data?.persona_slug || n?.data?.persona_id || n?.id).filter(Boolean))).slice(0, 3).join("|") || "global",
+    [rawNodes],
+  );
+  const viewportKey = useMemo(
+    () => `knowledge-graph-viewport:${personaScope}:${mode}:${focusNodeId || "all"}`,
+    [personaScope, mode, focusNodeId],
+  );
+  // Saved node positions are per persona + mode (not per focus): a manual
+  // arrangement should hold regardless of which node is focused.
+  const positionsKey = useMemo(
+    () => `knowledge-graph-positions:${personaScope}:${mode}`,
+    [personaScope, mode],
+  );
   const initialViewportDone = useRef(false);
   const lastFocusNodeId = useRef<string | null | undefined>(undefined);
   const visibleEdges = useMemo(
@@ -733,8 +755,10 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
 
   const laid = useMemo<Node[]>(() => {
     const layoutFn = mode === "graph" ? applyLayoutGraphSeed : mode === "semantic_tree" ? applyLayoutTree : applyLayoutLayered;
-    return layoutFn(decoratedNodes, styledEdges, branchDistance);
-  }, [decoratedNodes, styledEdges, mode, branchDistance]);
+    const computed = layoutFn(decoratedNodes, styledEdges, branchDistance);
+    // Overlay any saved per-persona arrangement on top of the computed layout.
+    return overlayPositions(computed, readPositions(positionsKey));
+  }, [decoratedNodes, styledEdges, mode, branchDistance, positionsKey]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(laid);
   const [edges, setEdges, onEdgesChange] = useEdgesState(styledEdges);
@@ -792,6 +816,17 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
     }));
   }, [getViewport, viewportKey]);
 
+  // Persist node positions per persona whenever the user moves a node, but only
+  // when they actually changed (diff guard) so storage/screen stay quiet otherwise.
+  const persistNodePositions = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const current = getNodes();
+    if (!current.length) return;
+    const saved = readPositions(positionsKey);
+    if (!positionsDiffer(current, saved)) return;
+    writePositions(positionsKey, collectPositions(current));
+  }, [getNodes, positionsKey]);
+
   const handleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       onNodeClick(node);
@@ -837,6 +872,7 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
       onNodeClick={handleClick}
       onSelectionChange={({ nodes: selected }) => onSelectionChange?.(selected)}
       onMoveEnd={saveViewport}
+      onNodeDragStop={persistNodePositions}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       connectionMode={ConnectionMode.Loose}

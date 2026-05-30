@@ -46,14 +46,16 @@ type ParentCandidate = {
 };
 
 const EXPECTED_PARENT_TYPES: Record<string, string[]> = {
-  campaign: ["brand", "persona"],
-  briefing: ["campaign", "brand", "persona"],
+  brand: ["persona"],
+  campaign: ["briefing", "brand", "persona"],
+  briefing: ["brand", "campaign", "persona"],
   audience: ["briefing", "campaign", "brand", "persona"],
+  product_group: ["audience", "briefing", "campaign", "brand", "persona"],
   gallery: ["copy", "faq", "asset", "background", "texture", "product", "campaign", "brand", "persona"],
   embedded: ["faq"],
-  product: ["audience", "briefing", "campaign", "brand", "persona"],
+  product: ["product_group", "audience", "briefing", "campaign", "brand", "persona"],
   faq: ["rule", "copy", "offer", "product"],
-  copy: ["product", "audience", "briefing", "campaign", "brand"],
+  copy: ["product", "product_group", "audience", "briefing", "campaign", "brand"],
   rule: ["product", "entity", "audience", "briefing", "campaign", "brand"],
   asset: ["product", "audience", "briefing", "campaign", "brand"],
   background: ["product", "audience", "briefing", "campaign", "brand"],
@@ -80,6 +82,15 @@ const STRUCTURAL_RELATIONS = new Set([
   "briefing_of",
   "campaign_of",
   "brand_of",
+  "persona_has_brand",
+  "brand_has_briefing",
+  "briefing_has_campaign",
+  "campaign_has_audience",
+  "audience_has_product_group",
+  "product_group_has_product",
+  "product_has_faq",
+  "product_has_copy",
+  "copy_has_faq",
 ]);
 
 const STRONG_RELATIONS = new Set([
@@ -102,18 +113,20 @@ const CURATION_RELATIONS = new Set(["duplicate_of", "similar_to", "alias_of"]);
 const HIERARCHY_RANK: Record<string, number> = {
   persona: 0,
   brand: 1,
-  campaign: 2,
-  briefing: 3,
+  briefing: 2,
+  campaign: 3,
   audience: 4,
-  product: 5,
-  entity: 6,
-  tone: 7,
-  rule: 8,
-  copy: 9,
+  product_group: 5,
+  product: 6,
+  entity: 7,
+  tone: 8,
+  rule: 9,
+  offer: 10,
+  copy: 11,
   asset: 10,
   background: 10,
   texture: 10,
-  faq: 11,
+  faq: 12,
   gallery: 97,
   embedded: 98,
   knowledge_item: 98,
@@ -125,6 +138,19 @@ const HIERARCHY_RANK: Record<string, number> = {
 export function getVisualHierarchyRank(nodeTypeValue?: string | null): number {
   const key = String(nodeTypeValue || "").toLowerCase();
   return HIERARCHY_RANK[key] ?? 50;
+}
+
+/**
+ * Maps the set of *occupied* hierarchy ranks onto consecutive vertical levels.
+ *
+ * Ranks are sparse (product=6, faq=9): when a branch has a product and a FAQ
+ * but no offer/copy in between, ranks 7 and 8 are empty and the tree shows an
+ * ugly vertical gap between product and FAQ. Compacting occupied ranks to
+ * 0,1,2,… removes those empty bands while preserving top-down order.
+ */
+export function compactRankMap(ranks: Iterable<number>): Map<number, number> {
+  const unique = Array.from(new Set(ranks)).sort((a, b) => a - b);
+  return new Map(unique.map((rank, index) => [rank, index]));
 }
 
 function nodeType(node: Node<GraphNodeData>): string {
@@ -164,7 +190,7 @@ function directionBonus(childId: string, parentId: string, edge: Edge<GraphEdgeD
     }
   }
   if (edge.source === parentId && edge.target === childId) {
-    if (["contains", "parent_of", "targets", "supports_copy", "supports_campaign", "answers_question", "defines_brand", "has_tone", "about", "about_product", "manual", "belongs_to_persona"].includes(rt)) {
+    if (["contains", "parent_of", "targets", "supports_copy", "supports_campaign", "answers_question", "defines_brand", "has_tone", "about", "about_product", "manual", "belongs_to_persona", "persona_has_brand", "brand_has_briefing", "briefing_has_campaign", "campaign_has_audience", "audience_has_product_group", "product_group_has_product", "product_has_faq", "product_has_copy", "copy_has_faq"].includes(rt)) {
       return 0.16;
     }
   }
@@ -179,7 +205,7 @@ function isExplicitPrimaryEdge(edge: Edge<GraphEdgeData>): boolean {
 
 function relationAllowsParentCandidate(childId: string, parentId: string, edge: Edge<GraphEdgeData>): boolean {
   const rt = relationType(edge);
-  if (["manual", "contains", "parent_of", "targets", "supports_copy", "supports_campaign", "answers_question", "defines_brand", "has_tone", "gallery_asset"].includes(rt)) {
+  if (["manual", "contains", "parent_of", "targets", "supports_copy", "supports_campaign", "answers_question", "defines_brand", "has_tone", "gallery_asset", "persona_has_brand", "brand_has_briefing", "briefing_has_campaign", "campaign_has_audience", "audience_has_product_group", "product_group_has_product", "product_has_faq", "product_has_copy", "copy_has_faq"].includes(rt)) {
     return edge.source === parentId && edge.target === childId;
   }
   if (["belongs_to", "part_of", "derived_from", "product_of", "audience_of", "campaign_of", "brand_of"].includes(rt)) {
@@ -190,6 +216,13 @@ function relationAllowsParentCandidate(childId: string, parentId: string, edge: 
 
 function relationPriority(edge: Edge<GraphEdgeData>): number {
   const rt = relationType(edge);
+  if (rt === "persona_has_brand") return 0;
+  if (rt === "brand_has_briefing") return 1;
+  if (rt === "briefing_has_campaign") return 2;
+  if (rt === "campaign_has_audience") return 3;
+  if (rt === "audience_has_product_group") return 4;
+  if (rt === "product_group_has_product") return 5;
+  if (rt === "product_has_faq" || rt === "copy_has_faq") return 6;
   if (rt === "manual") return 0;
   if (rt === "contains" || rt === "parent_of") return 1;
   if (rt === "part_of_campaign" || rt === "campaign_of") return 2;
@@ -203,7 +236,7 @@ function relationPriority(edge: Edge<GraphEdgeData>): number {
 }
 
 function isAllowedRoot(type: string): boolean {
-  return type === "brand" || type === "persona";
+  return type === "persona";
 }
 
 export function getEdgeImportanceScore(

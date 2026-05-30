@@ -26,9 +26,13 @@ class AudienceUpdateBody(BaseModel):
 
 @router.get("")
 def list_audiences(request: Request, persona_id: str = Query(...)):
-    """Lista audiences de uma persona. Garante a system audience `import`
-    antes de devolver. Sync graph nodes em best-effort (qualquer falha em
-    sync nao bloqueia a resposta)."""
+    """Lista as audiences operacionais de uma persona para a aba Leads.
+
+    Retorna as audiences reais da persona (reconciliadas com as audiences
+    criadas no Graph/Sofia) menos o bucket interno `import`, que e operacional
+    e nao deve aparecer como audience semantica/filtro. Sync de graph nodes e
+    best-effort e nunca bloqueia a resposta; `sync_audience_node` ja ignora
+    `import` e audiences de origem `graph` para evitar duplicacao no grafo."""
     auth_service.assert_persona_access(request, persona_id=persona_id)
     try:
         user = auth_service.current_user(request)
@@ -38,9 +42,9 @@ def list_audiences(request: Request, persona_id: str = Query(...)):
     except Exception as exc:
         logger.warning("ensure_system_audiences_for_persona failed: %s", exc)
     try:
-        rows = supabase_client.get_audiences(persona_id=persona_id) or []
+        rows = supabase_client.list_persona_audiences(persona_id) or []
     except Exception as exc:
-        logger.exception("get_audiences failed: %s", exc)
+        logger.exception("list_persona_audiences failed: %s", exc)
         return []
     for row in rows:
         try:

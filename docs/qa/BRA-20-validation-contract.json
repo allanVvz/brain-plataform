@@ -1,0 +1,105 @@
+{
+  "issue": "BRA-20",
+  "version": "2026-05-26",
+  "persona_slug": "vz-lupas",
+  "hierarchy": [
+    "persona",
+    "brand",
+    "briefing",
+    "campaign",
+    "audience",
+    "product_group",
+    "product",
+    "offer",
+    "copy",
+    "faq",
+    "embed"
+  ],
+  "minimum_node_properties": [
+    "persona_id|persona_slug",
+    "node_type",
+    "slug",
+    "title",
+    "status",
+    "source",
+    "metadata.active"
+  ],
+  "allowed_main_edges": [
+    ["persona", "brand"],
+    ["brand", "briefing"],
+    ["briefing", "campaign"],
+    ["campaign", "briefing"],
+    ["briefing", "audience"],
+    ["campaign", "audience"],
+    ["audience", "product_group"],
+    ["product_group", "product"],
+    ["product", "offer"],
+    ["offer", "copy"],
+    ["copy", "faq"],
+    ["faq", "embed"]
+  ],
+  "embed_guards": {
+    "required_source_type": "faq",
+    "required_source_status": "approved",
+    "blocked_direct_sources": ["product", "campaign", "copy", "asset", "gallery"]
+  },
+  "error_contract": {
+    "INVALID_MAIN_EDGE": "Invalid main edge pair.",
+    "MAIN_EDGE_BACKWARD": "Main edge direction is backward.",
+    "MAIN_EDGE_CYCLE": "Main edge creates cycle.",
+    "MULTIPLE_ACTIVE_MAIN_PARENTS": "Child node already has active main parent.",
+    "EMBED_SOURCE_NOT_FAQ": "Invalid edge: PRODUCT cannot connect directly to EMBED. Expected path: PRODUCT -> FAQ -> EMBED with FAQ.status = approved.",
+    "FAQ_NOT_APPROVED_FOR_EMBED": "Invalid edge: FAQ must be approved before EMBED creation."
+  },
+  "negative_cases": [
+    {
+      "id": "product_to_embed_direct",
+      "edge": ["product", "embed", "main"],
+      "expected_error_code": "EMBED_SOURCE_NOT_FAQ"
+    },
+    {
+      "id": "faq_not_approved_to_embed",
+      "edge": ["faq", "embed", "main"],
+      "source_status": "pending_validation",
+      "expected_error_code": "FAQ_NOT_APPROVED_FOR_EMBED"
+    }
+  ],
+  "knowledge_inserted_criteria": {
+    "endpoint": "/knowledge/graph?mode=semantic_tree&all_edges=1&persona_slug=vz-lupas",
+    "requires_persisted_node_ids": true,
+    "requires_persisted_edge_ids": true,
+    "requires_endpoint_visibility": true,
+    "requires_rejected_edges_not_persisted": true,
+    "requires_validation_event_rows": true
+  },
+  "semantic_tree_expectations": {
+    "every_non_persona_has_main_parent": true,
+    "brand_min_count": 1,
+    "brand_has_briefing_child": true,
+    "briefing_not_sibling_of_campaign": true,
+    "briefing_not_sibling_of_audience": true,
+    "briefing_main_parent_must_be_brand_or_campaign": true,
+    "audience_has_summary_markdown": true,
+    "audience_forbidden_terms": ["sdr", "classifier"],
+    "audience_has_leads_group_ref": true,
+    "sofia_must_log_recommendations_for_optional_layers": true
+  },
+  "optional_layer_recommendation_contract": {
+    "recommended_path": ["campaign", "briefing", "audience"],
+    "direct_path_allowed_when_no_briefing_layer": ["campaign", "audience"],
+    "autocreate_optional_layer_forbidden": true,
+    "recommendation_log": {
+      "required_fields": [
+        "subject_node_id",
+        "recommended_edge.source_node_id",
+        "recommended_edge.target_node_id",
+        "recommended_edge.edge_type",
+        "reason",
+        "created_at",
+        "accepted_at|null",
+        "dismissed_at|null"
+      ],
+      "storage": ["metadata.recommendations", "kg_recommendations"]
+    }
+  }
+}

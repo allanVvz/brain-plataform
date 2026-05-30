@@ -584,6 +584,14 @@ export const api = {
     req<any>(`/knowledge/graph-edges/${encodeURIComponent(edgeId)}`, { method: "DELETE" }),
   deleteGraphNode: (nodeId: string) =>
     req<any>(`/knowledge/graph-nodes/${encodeURIComponent(nodeId)}`, { method: "DELETE" }),
+  updateGraphNode: (
+    nodeId: string,
+    body: { title?: string; markdown?: string; summary?: string; tags?: string[]; status?: string },
+  ) =>
+    req<any>(`/knowledge/graph-nodes/${encodeURIComponent(nodeId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   sofiaGraphCommand: (body: {
     message?: string;
     action?: "command" | "confirm_pending" | "undo_pending";
@@ -592,6 +600,9 @@ export const api = {
     session_id?: string;
     plan_json?: Record<string, any> | null;
     pending_context?: Record<string, any>;
+    active_persona_slug?: string;
+    selected_node_id?: string | null;
+    selected_node_ids?: string[];
   }) => {
     const action = body.action || "command";
     const explicit = String(body.message || "").trim();
@@ -604,12 +615,57 @@ export const api = {
         context: {
           client_action: action === "command" ? "natural_language" : "ui_action",
           session_id: body.session_id || null,
+          active_persona_slug: body.active_persona_slug || body.persona_slug || null,
+          selected_node_id: body.selected_node_id || null,
+          selected_node_ids: body.selected_node_ids || [],
           plan_json: body.plan_json || null,
           pending_context: body.pending_context || {},
         },
       }),
     });
   },
+
+  // Sofia FAQ tool (adaptar_faqs_universais_ao_grafo)
+  sofiaFaqGenerate: (body: {
+    persona_slug?: string;
+    session_id?: string | null;
+    selected_node_id?: string | null;
+    count?: number;
+  }) => {
+    const qty = body.count && body.count > 0 ? ` ${body.count}` : "";
+    return req<any>("/sofia/graph-command", {
+      method: "POST",
+      body: JSON.stringify({
+        persona_slug: body.persona_slug,
+        command: `gere${qty} perguntas de FAQ para esse node`,
+        context: {
+          client_action: "natural_language",
+          session_id: body.session_id || null,
+          active_persona_slug: body.persona_slug || null,
+          selected_node_id: body.selected_node_id || null,
+          selected_node_ids: body.selected_node_id ? [body.selected_node_id] : [],
+        },
+      }),
+    });
+  },
+  sofiaFaqAccept: (body: {
+    persona_slug?: string;
+    parent_node_id: string;
+    parent_node_type?: string;
+    faq_generation_count?: number;
+    source_context?: Record<string, any>;
+    generated_from_node_id?: string;
+    generated_from_node_slug?: string;
+    suggestions: Array<{ question: string; answer?: string }>;
+  }) =>
+    req<any>("/sofia/faq/accept", { method: "POST", body: JSON.stringify(body) }),
+  // "Gerar" on a FAQ node appends accepted suggestions to that same FAQ's body.
+  sofiaFaqAppend: (body: {
+    persona_slug?: string;
+    faq_node_id: string;
+    suggestions: Array<{ question: string; answer?: string }>;
+  }) =>
+    req<any>("/sofia/faq/append", { method: "POST", body: JSON.stringify(body) }),
 
   // Knowledge — Chat sidebar context (semantic graph + KB fallback)
   knowledgeChatContext: (leadRef: number, q?: string, personaId?: string) => {

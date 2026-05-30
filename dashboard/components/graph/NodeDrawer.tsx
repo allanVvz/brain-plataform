@@ -2,6 +2,8 @@
 import { useState, useEffect } from "react";
 import { X, Edit2, Save, CheckCircle, XCircle, Tag, Loader2, Crosshair, Maximize2, Trash2, ExternalLink } from "lucide-react";
 import { api, API_URL } from "@/lib/api";
+import FaqGeneratorPanel from "./FaqGeneratorPanel";
+import AudienceLeadsShortcut from "@/components/leads/AudienceLeadsShortcut";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "svg", "gif"]);
 const VIDEO_EXTS = new Set(["mp4", "mov", "webm"]);
@@ -34,6 +36,8 @@ function formatLastModified(value: unknown): string | null {
 interface NodeDrawerProps {
   node: any | null;
   selectedNodes?: any[];
+  personaSlug?: string;
+  sessionId?: string | null;
   onClose: () => void;
   onUpdated?: (itemId: string) => void | Promise<any>;
   directLinks?: Array<{
@@ -58,7 +62,7 @@ interface NodeDrawerProps {
   onSelectNode?: (nodeId: string) => void;
 }
 
-export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdated, directLinks = [], focusPath = [], onFocusHere, onDeleteNode, onDeleteEdge, onSelectNode }: NodeDrawerProps) {
+export default function NodeDrawer({ node, selectedNodes = [], personaSlug, sessionId, onClose, onUpdated, directLinks = [], focusPath = [], onFocusHere, onDeleteNode, onDeleteEdge, onSelectNode }: NodeDrawerProps) {
   const [editing, setEditing]     = useState(false);
   const [fullItem, setFullItem]   = useState<any>(null);
   const [fetching, setFetching]   = useState(false);
@@ -130,7 +134,8 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
     ? (fullItem.conteudo ?? fullItem.content ?? "")
     : (d.markdown ?? d.metadata?.body ?? d.content_preview ?? "");
 
-  const canEdit     = !isProtected && (isVault || isQueue);
+  const isGraphNode = String(node.id || "").startsWith("gn:");
+  const canEdit     = !isProtected && (isVault || isQueue || isGraphNode);
   const needsCanonicalSnapshot = isQueue && currentStatus === "approved" && !d.approved_snapshot_id;
   const canValidate = !isProtected && (!ALREADY_VALID.has(currentStatus) || needsCanonicalSnapshot);
   const canReject   = !isProtected && isQueue && currentStatus !== "rejected";
@@ -141,6 +146,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
     && d.node_type === "faq"
     && currentStatus === "approved"
     && !!d.persona_id;
+  const canGenerateFaqs = !isPersona && !isProtected;
   const audiencePreview = Array.isArray(d.metadata?.preview) ? d.metadata.preview : [];
   const audienceOpenUrl = d.metadata?.open_url || (d.metadata?.lead_import_batch_id ? `/leads/import?open=${d.metadata.lead_import_batch_id}` : "");
 
@@ -149,21 +155,50 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
     setTimeout(() => setFlash(null), 2500);
   }
 
-  async function save() {
-    if (!d.item_id) return;
+  async function saveValues(vals: { title: string; content: string; tags: string[] }) {
     setSaving(true);
     try {
-      const tagsArr = tagsRaw.split(",").map((t: string) => t.trim()).filter(Boolean);
-      if (isVault) {
-        await api.updateKbEntry(d.item_id, { titulo: title, conteudo: content, tipo, tags: tagsArr });
+      if (isVault && d.item_id) {
+        await api.updateKbEntry(d.item_id, { titulo: vals.title, conteudo: vals.content, tipo, tags: vals.tags });
+      } else if (isGraphNode) {
+        // The node body (Markdown) is the source of context. The node endpoint
+        // persists metadata.markdown + the backing item, and reverts an
+        // approved/embedded FAQ to draft (removing it from the Embedded body).
+        const saved = await api.updateGraphNode(String(node.id), { title: vals.title, markdown: vals.content, tags: vals.tags });
+        if (saved?.reverted_to_draft) {
+          setFullItem((prev: any) => ({ ...(prev || {}), status: "pending" }));
+        }
+      } else if (d.item_id) {
+        const saved = await api.updateQueueItem(d.item_id, { title: vals.title, content: vals.content, tags: vals.tags, content_type: tipo || undefined });
+        if (saved?.status) {
+          setFullItem((prev: any) => (prev ? { ...prev, ...saved } : saved));
+        }
       } else {
-        await api.updateQueueItem(d.item_id, { title, content, tags: tagsArr, content_type: tipo || undefined });
+        return;
       }
       setEditing(false);
       showFlash("ok");
-      await onUpdated?.(d.item_id);
+      await onUpdated?.(d.item_id || node.id);
     } catch { showFlash("err"); }
     finally { setSaving(false); }
+  }
+
+  async function save() {
+    await saveValues({
+      title,
+      content,
+      tags: tagsRaw.split(",").map((t: string) => t.trim()).filter(Boolean),
+    });
+  }
+
+  function beginEdit() {
+    // Seed the edit fields from the node's real body so non-item graph nodes
+    // (whose content is the node Markdown) are editable too, not just items.
+    setTitle(fullItem?.titulo ?? fullItem?.title ?? d.label ?? "");
+    setContent(fullItem ? (fullItem.conteudo ?? fullItem.content ?? "") : (displayContent ?? ""));
+    setTagsRaw(((fullItem?.tags ?? d.tags ?? []) as string[]).join(", "));
+    setTipo(fullItem?.tipo ?? fullItem?.content_type ?? d.node_type ?? "");
+    setEditing(true);
   }
 
   async function validate() {
@@ -383,7 +418,7 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
           )}
           {canEdit && !editing && (
             <button
-              onClick={() => setEditing(true)}
+              onClick={beginEdit}
               title="Editar"
               className="p-1.5 rounded-lg hover:bg-white/5 text-obs-subtle hover:text-obs-text transition-colors"
             >
@@ -485,6 +520,21 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
               </pre>
             )}
           </div>
+        )}
+
+        {/* Audience -> Leads shortcut */}
+        {!editing && String(d.node_type || "").toLowerCase() === "audience" && d.slug && (
+          <AudienceLeadsShortcut slug={d.slug} />
+        )}
+
+        {/* Sofia FAQ generator (adaptar_faqs_universais_ao_grafo) */}
+        {!editing && canGenerateFaqs && (
+          <FaqGeneratorPanel
+            node={node}
+            personaSlug={personaSlug}
+            sessionId={sessionId}
+            onSaved={() => onUpdated?.(d.item_id || node.id)}
+          />
         )}
 
         {/* Focus path */}
@@ -700,9 +750,11 @@ export default function NodeDrawer({ node, selectedNodes = [], onClose, onUpdate
           onValidate={canValidate ? validate : undefined}
           onPublish={canPublish ? publish : undefined}
           onDelete={canDelete ? () => onDeleteNode?.(node.id) : undefined}
-          onEdit={canEdit ? () => { setEditing(true); setExpanded(false); } : undefined}
-          onSelectNode={onSelectNode ? (id) => { onSelectNode(id); setExpanded(false); } : undefined}
+          onEdit={canEdit ? () => { beginEdit(); setExpanded(false); } : undefined}
+          canEdit={canEdit}
+          onSaveEdit={canEdit ? saveValues : undefined}
           saving={saving}
+          onSelectNode={onSelectNode ? (id) => { onSelectNode(id); setExpanded(false); } : undefined}
         />
       )}
     </div>
@@ -902,6 +954,8 @@ function NodeExpandedModal({
   onPublish,
   onDelete,
   onEdit,
+  canEdit,
+  onSaveEdit,
   onSelectNode,
   saving,
 }: {
@@ -918,10 +972,30 @@ function NodeExpandedModal({
   onPublish?: () => void;
   onDelete?: () => void | Promise<void>;
   onEdit?: () => void;
+  canEdit?: boolean;
+  onSaveEdit?: (vals: { title: string; content: string; tags: string[] }) => void | Promise<void>;
   onSelectNode?: (nodeId: string) => void;
   saving: boolean;
 }) {
   const d = node.data || {};
+  const [editing, setEditing] = useState(false);
+  const [eTitle, setETitle] = useState(title);
+  const [eContent, setEContent] = useState(content);
+  const [eTags, setETags] = useState((tags || []).join(", "));
+  const startEdit = () => {
+    setETitle(title);
+    setEContent(content);
+    setETags((tags || []).join(", "));
+    setEditing(true);
+  };
+  const commitEdit = async () => {
+    await onSaveEdit?.({
+      title: eTitle,
+      content: eContent,
+      tags: eTags.split(",").map((t) => t.trim()).filter(Boolean),
+    });
+    setEditing(false);
+  };
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-5 backdrop-blur-sm">
       <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl glass-raised shadow-2xl shadow-black/40">
@@ -934,9 +1008,27 @@ function NodeExpandedModal({
             <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-obs-subtle">{d.source || "graph"}</span>
           </div>
           <div className="flex items-start gap-4">
-            <h2 className="min-w-0 flex-1 text-2xl font-semibold leading-tight tracking-tight text-obs-text">{title}</h2>
+            {editing ? (
+              <input
+                value={eTitle}
+                onChange={(e) => setETitle(e.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-obs-violet/40 bg-obs-base px-3 py-1.5 text-xl font-semibold text-obs-text focus:outline-none focus:border-obs-violet"
+              />
+            ) : (
+              <h2 className="min-w-0 flex-1 text-2xl font-semibold leading-tight tracking-tight text-obs-text">{title}</h2>
+            )}
             <div className="flex items-center gap-2 shrink-0">
-              {onEdit && (
+              {canEdit && onSaveEdit && !editing && (
+                <button
+                  onClick={startEdit}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.035] text-obs-subtle transition-colors hover:bg-white/[0.07] hover:text-obs-text"
+                  aria-label="Editar"
+                  title="Editar"
+                >
+                  <Edit2 size={14} />
+                </button>
+              )}
+              {!canEdit && onEdit && (
                 <button
                   onClick={onEdit}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.035] text-obs-subtle transition-colors hover:bg-white/[0.07] hover:text-obs-text"
@@ -967,9 +1059,19 @@ function NodeExpandedModal({
           </div>
           <section>
             <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-obs-subtle">Conteudo</p>
-            <pre className="code-surface max-h-80 overflow-y-auto whitespace-pre-wrap rounded-xl p-4 text-sm leading-6 font-mono">
-              {content || "Sem conteudo."}
-            </pre>
+            {editing ? (
+              <textarea
+                value={eContent}
+                onChange={(e) => setEContent(e.target.value)}
+                rows={12}
+                className="w-full rounded-xl border border-white/10 bg-obs-base px-4 py-3 text-sm leading-6 font-mono text-obs-text focus:outline-none focus:border-obs-violet/50 resize-y"
+                placeholder="Conteudo / markdown"
+              />
+            ) : (
+              <pre className="code-surface max-h-80 overflow-y-auto whitespace-pre-wrap rounded-xl p-4 text-sm leading-6 font-mono">
+                {content || "Sem conteudo."}
+              </pre>
+            )}
           </section>
           {!!audiencePreview?.length && (
             <section>
@@ -991,13 +1093,22 @@ function NodeExpandedModal({
           )}
           <section>
             <p className="mb-2 text-[10px] uppercase tracking-wide text-obs-subtle">Tags</p>
-            <div className="flex flex-wrap gap-1.5">
-              {tags.length ? tags.map((tag) => (
-                <span key={tag} className="rounded-full border border-obs-slate/20 bg-obs-slate/10 px-2 py-0.5 text-[10px] text-obs-slate">
-                  {tag}
-                </span>
-              )) : <span className="text-xs text-obs-faint">Sem tags.</span>}
-            </div>
+            {editing ? (
+              <input
+                value={eTags}
+                onChange={(e) => setETags(e.target.value)}
+                placeholder="tag1, tag2, tag3"
+                className="w-full rounded-lg border border-white/10 bg-obs-base px-3 py-2 text-xs text-obs-text focus:outline-none focus:border-obs-violet/50"
+              />
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {tags.length ? tags.map((tag) => (
+                  <span key={tag} className="rounded-full border border-obs-slate/20 bg-obs-slate/10 px-2 py-0.5 text-[10px] text-obs-slate">
+                    {tag}
+                  </span>
+                )) : <span className="text-xs text-obs-faint">Sem tags.</span>}
+              </div>
+            )}
           </section>
           <section>
             <p className="mb-2 text-[10px] uppercase tracking-wide text-obs-subtle">Relacoes</p>
@@ -1014,7 +1125,26 @@ function NodeExpandedModal({
           </section>
         </div>
         <div className="sticky bottom-0 z-10 flex items-center justify-end gap-2 border-t border-white/10 bg-obs-surface/70 backdrop-blur-xl px-6 py-4">
-          {onValidate && (
+          {editing && (
+            <>
+              <button
+                onClick={() => setEditing(false)}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-medium text-obs-subtle hover:bg-white/10 hover:text-obs-text disabled:opacity-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={commitEdit}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-obs-violet/40 bg-obs-violet/20 px-4 py-2 text-xs font-medium text-obs-text hover:bg-obs-violet/30 disabled:opacity-50 transition-colors"
+              >
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                Salvar
+              </button>
+            </>
+          )}
+          {!editing && onValidate && (
             <button
               onClick={onValidate}
               disabled={saving}
@@ -1024,7 +1154,7 @@ function NodeExpandedModal({
               Aprovar
             </button>
           )}
-          {onPublish && (
+          {!editing && onPublish && (
             <button
               onClick={onPublish}
               disabled={saving}
@@ -1034,7 +1164,7 @@ function NodeExpandedModal({
               Publicar no Golden Dataset
             </button>
           )}
-          {onDelete && (
+          {!editing && onDelete && (
             <button
               onClick={onDelete}
               disabled={saving}

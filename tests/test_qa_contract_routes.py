@@ -349,6 +349,81 @@ def test_sofia_plan_json_patch_adds_product_without_faq_rule_block(monkeypatch):
     assert len(plan_json["validation"]["blocking"]) == 0
 
 
+def test_sofia_graph_command_reports_partial_success_when_product_added_to_plan(monkeypatch):
+    from routes import qa_contract
+
+    qa_contract.sofia_orchestrator._SESSION_MEMORY.clear()
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas", "name": "VZ Lupas"})
+    monkeypatch.setattr(qa_contract.supabase_client, "get_personas", lambda: [{"id": "p1", "slug": "vz-lupas", "name": "VZ Lupas"}])
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+
+    body = qa_contract.SofiaGraphCommandBody(
+        persona_slug="vz-lupas",
+        command="crie um produto teste",
+        context=qa_contract.SofiaGraphCommandContext(session_id="sess-plan-msg-product"),
+    )
+    result = qa_contract.sofia_graph_command(body, _req())
+
+    assert result["ok"] is True
+    assert len(result["plan_json"]["plan"]["product"]) == 1
+    message = result["sofia_message"].lower()
+    assert "criei" in message
+    assert "produto teste" in message
+    assert "product group" in message
+    assert "ambigua" not in message
+
+
+def test_sofia_graph_command_reports_partial_success_when_audience_added_to_plan(monkeypatch):
+    from routes import qa_contract
+
+    qa_contract.sofia_orchestrator._SESSION_MEMORY.clear()
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas", "name": "VZ Lupas"})
+    monkeypatch.setattr(qa_contract.supabase_client, "get_personas", lambda: [{"id": "p1", "slug": "vz-lupas", "name": "VZ Lupas"}])
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+
+    body = qa_contract.SofiaGraphCommandBody(
+        persona_slug="vz-lupas",
+        command="crie um node de audience",
+        context=qa_contract.SofiaGraphCommandContext(session_id="sess-plan-msg-audience"),
+    )
+    result = qa_contract.sofia_graph_command(body, _req())
+
+    assert result["ok"] is True
+    assert len(result["plan_json"]["plan"]["audience"]) == 1
+    message = result["sofia_message"].lower()
+    assert "criei" in message
+    assert "audience" in message
+    assert "campaign" in message
+    assert "nao consegui identificar" not in message
+
+
+def test_sofia_graph_command_reports_partial_success_when_campaign_added_to_plan(monkeypatch):
+    from routes import qa_contract
+
+    qa_contract.sofia_orchestrator._SESSION_MEMORY.clear()
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas", "name": "VZ Lupas"})
+    monkeypatch.setattr(qa_contract.supabase_client, "get_personas", lambda: [{"id": "p1", "slug": "vz-lupas", "name": "VZ Lupas"}])
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+
+    body = qa_contract.SofiaGraphCommandBody(
+        persona_slug="vz-lupas",
+        command="crie uma campanha chamada teste IA",
+        context=qa_contract.SofiaGraphCommandContext(session_id="sess-plan-msg-campaign"),
+    )
+    result = qa_contract.sofia_graph_command(body, _req())
+
+    assert result["ok"] is True
+    assert len(result["plan_json"]["plan"]["campaign"]) == 1
+    message = result["sofia_message"].lower()
+    assert "criei" in message
+    assert "campanha" in message
+    assert "briefing/brand" in message
+    assert "ambigua" not in message
+
+
 def test_sofia_plan_json_supports_blocking_markers(monkeypatch):
     from routes import qa_contract
 

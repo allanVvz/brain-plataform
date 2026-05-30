@@ -15,9 +15,11 @@ from schemas.events import LeadEvent
 from services import (
     approved_knowledge_snapshots,
     auth_service,
+    embedded_markdown,
     knowledge_graph,
     knowledge_lifecycle,
     knowledge_taxonomy,
+    sofia_faq_tool,
     sofia_orchestrator,
     supabase_client,
 )
@@ -103,6 +105,165 @@ def _resolve_sofia_persona(request: Request, persona_ref: str) -> dict:
     return persona
 
 
+# ── Sofia FAQ generation (adaptar_faqs_universais_ao_grafo) ──────────────────
+
+def _strip_graph_id(node_id: Optional[str]) -> str:
+    raw = str(node_id or "").strip()
+    return raw[3:] if raw.startswith("gn:") else raw
+
+
+def _resolve_faq_target_node(
+    nodes: list[dict],
+    *,
+    selected_node_id: Optional[str],
+    command: str,
+    session_state: Optional[dict],
+) -> Optional[dict]:
+    """Find the node a FAQ command refers to: selected node first, then an
+    explicit title/slug mention, then the last referenced node."""
+    by_id = {str(n.get("id")): n for n in (nodes or [])}
+    if selected_node_id:
+        raw = _strip_graph_id(selected_node_id)
+        node = by_id.get(raw) or by_id.get(str(selected_node_id))
+        if node:
+            return node
+    text = (command or "").lower()
+    best: Optional[dict] = None
+    best_len = 0
+    for node in nodes or []:
+        for field in ("title", "slug"):
+            value = str(node.get(field) or "").strip().lower()
+            if value and len(value) >= 4 and value in text and len(value) > best_len:
+                best, best_len = node, len(value)
+    if best:
+        return best
+    last_ref = (session_state or {}).get("last_referenced_node") or {}
+    slug = str(last_ref.get("slug") or "").strip().lower()
+    if slug:
+        for node in nodes or []:
+            if str(node.get("slug") or "").strip().lower() == slug:
+                return node
+    return None
+
+
+def _handle_sofia_faq_generation(
+    *,
+    persona_id: str,
+    persona_slug: str,
+    command: str,
+    selected_node_id: Optional[str],
+    session_state: Optional[dict],
+    intent: dict,
+    session_id: str,
+) -> dict:
+    try:
+        nodes, edges = supabase_client.list_all_knowledge_graph(persona_id)
+    except Exception:
+        nodes, edges = [], []
+    target = _resolve_faq_target_node(
+        nodes, selected_node_id=selected_node_id, command=command, session_state=session_state
+    )
+    if not target:
+        return {
+            "ok": True,
+            "persisted": False,
+            "needs_clarification": True,
+            "sofia_message": "Selecione um node (produto, grupo ou FAQ) no grafo, ou cite o título do node, para eu gerar as perguntas no galho certo.",
+            "graph_patch": None,
+            "faq_suggestions": [],
+            "tool_calls": [{"tool": sofia_faq_tool.SOURCE_TOOL, "score": 0.0, "result": None}],
+            "validation": {"canonical_chain_respected": True, "violations": []},
+        }
+    saved_meta = target.get("metadata") if isinstance(target.get("metadata"), dict) else {}
+    count = intent.get("count") or (saved_meta or {}).get("faq_generation_count") or sofia_faq_tool.DEFAULT_FAQ_COUNT
+    result = sofia_faq_tool.adaptar_faqs_universais_ao_grafo(
+        target_node=target, nodes=nodes, edges=edges, count=count, persona_slug=persona_slug
+    )
+    try:
+        sofia_orchestrator.remember_turn(
+            session_id=session_id,
+            persona_slug=persona_slug,
+            command=command,
+            operation_result={"operation": intent.get("intent"), "score": 1.0},
+            last_referenced_node={"slug": target.get("slug"), "node_type": target.get("node_type")},
+        )
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "persisted": False,
+        "needs_clarification": False,
+        "sofia_message": (
+            f"Gerei {result['count']} sugestões de FAQ para {result['parent_node_label'] or 'esse node'}. "
+            "Revise, edite e aceite as que quiser — elas entram como rascunho até você aprovar."
+        ),
+        "graph_patch": None,
+        "faq_suggestions": result["suggestions"],
+        "faq_context": {
+            "parent_node_id": result["parent_node_id"],
+            "parent_node_type": result["parent_node_type"],
+            "parent_node_label": result["parent_node_label"],
+            "count": result["count"],
+            "source_tool": result["source_tool"],
+            "source_context": result["source_context"],
+            "intent": intent.get("intent"),
+        },
+        "tool_calls": [
+            {
+                "tool": sofia_faq_tool.SOURCE_TOOL,
+                "score": 1.0,
+                "result": {"count": result["count"], "parent_node_id": result["parent_node_id"]},
+            }
+        ],
+        "validation": {"canonical_chain_respected": True, "violations": []},
+        "conversation_context": {"session_id": session_id or None, "active_persona_slug": persona_slug},
+    }
+
+
+class SofiaFaqAcceptSuggestion(BaseModel):
+    question: str
+    answer: Optional[str] = None
+
+
+class SofiaFaqAcceptBody(BaseModel):
+    persona_slug: Optional[str] = None
+    persona_ref: Optional[str] = None
+    parent_node_id: str
+    parent_node_type: Optional[str] = None
+    faq_generation_count: Optional[int] = None
+    source_context: Optional[dict[str, Any]] = None
+    generated_from_node_id: Optional[str] = None
+    generated_from_node_slug: Optional[str] = None
+    suggestions: list[SofiaFaqAcceptSuggestion] = []
+
+
+def _faq_parent_relation(parent_type: str) -> str:
+    ptype = (parent_type or "").strip().lower()
+    if ptype in {"product", "offer"}:
+        return "product_has_faq"
+    if ptype == "copy":
+        return "copy_has_faq"
+    return "answers_question"
+
+
+class SofiaFaqAppendBody(BaseModel):
+    persona_slug: Optional[str] = None
+    persona_ref: Optional[str] = None
+    faq_node_id: str
+    suggestions: list[SofiaFaqAcceptSuggestion] = []
+
+
+def _format_faq_sections(suggestions: list) -> str:
+    blocks: list[str] = []
+    for suggestion in suggestions:
+        question = str(suggestion.question or "").strip()
+        if not question:
+            continue
+        answer = str(suggestion.answer or "").strip()
+        blocks.append(f"### {question}\n\nResposta: {answer}" if answer else f"### {question}")
+    return "\n\n".join(blocks).strip()
+
+
 class QaResetBody(BaseModel):
     persona_slug: str = "vz-lupas"
     persona_ref: Optional[str] = None
@@ -178,6 +339,7 @@ class SofiaGraphCommandContext(BaseModel):
     client_action: str = "natural_language"
     graph_patch: Optional[dict[str, Any]] = None
     accept_unverified: bool = False
+    allow_destructive: bool = False
 
 
 class SofiaGraphCommandBody(BaseModel):
@@ -336,6 +498,20 @@ def _resolve_persona_tool(body: SofiaResolvePersonaBody) -> dict[str, Any]:
 def _resolve_operation_tool(body: SofiaResolveOperationBody) -> dict[str, Any]:
     command = str(body.command or "")
     text = command.strip().lower()
+    heuristic = sofia_orchestrator.resolve_operation(command)
+    if float(heuristic.get("score") or 0.0) >= float(sofia_orchestrator._threshold()):
+        operation = str(heuristic.get("operation") or "validate_canonical_chain")
+        risk = "medium" if operation in {"reparent_brand", "connect_product_group_to_audience"} else "low"
+        return {
+            "ok": True,
+            "operation": operation,
+            "score": float(heuristic.get("score") or 0.0),
+            "target_nodes": {},
+            "required_validation": ["canonical_chain"],
+            "risk_level": risk,
+            "needs_confirmation": False,
+            "candidates": [{"operation": operation, "score": float(heuristic.get("score") or 0.0)}],
+        }
     if "reencaix" in text and ("vz lupas" in text or "vzlupas" in text or "vz-lupas" in text):
         top = {
             "operation": "reparent_brand",
@@ -477,6 +653,50 @@ def _canonical_ref(raw: Optional[str], persona_root: dict) -> Optional[str]:
     if len(value) >= 32:
         return f"id:{value}"
     return f"slug:{_slugify(value)}"
+
+
+def _strip_graph_ref(raw: Optional[str], prefix: str) -> str:
+    value = str(raw or "").strip()
+    if value.lower().startswith(prefix):
+        return value[len(prefix):]
+    return value
+
+
+def _delete_sofia_patch_scope(
+    *,
+    patch: dict[str, list[dict]],
+    persona_id: str,
+    known: dict[str, dict],
+    allow_destructive: bool,
+) -> dict[str, Any]:
+    edges_delete = list(patch.get("edges_delete") or [])
+    nodes_delete = list(patch.get("nodes_delete") or [])
+    if (edges_delete or nodes_delete) and not allow_destructive:
+        raise HTTPException(422, "Destructive graph patch requires context.allow_destructive=true")
+
+    report = {"edges_deleted": 0, "nodes_deleted": 0, "nodes_skipped": []}
+    for raw_edge in edges_delete:
+        edge_ref = _strip_graph_ref(raw_edge.get("id") or raw_edge.get("edge_id") or raw_edge.get("ref"), "ge:")
+        if edge_ref and supabase_client.hard_delete_knowledge_edge(edge_ref):
+            report["edges_deleted"] += 1
+
+    protected_types = {"persona", "embedded", "gallery"}
+    for raw_node in nodes_delete:
+        ref = _canonical_ref(raw_node.get("id") or raw_node.get("node_id") or raw_node.get("ref"), {"id": ""})
+        node = known.get(ref or "")
+        if not node:
+            raw_id = _strip_graph_ref(raw_node.get("id") or raw_node.get("node_id") or raw_node.get("ref"), "gn:")
+            node = known.get(f"id:{raw_id}")
+        if not node:
+            continue
+        if node.get("persona_id") != persona_id:
+            continue
+        if str(node.get("node_type") or "").lower() in protected_types or (node.get("metadata") or {}).get("protected") is True:
+            report["nodes_skipped"].append({"id": node.get("id"), "node_type": node.get("node_type"), "slug": node.get("slug")})
+            continue
+        if supabase_client.delete_knowledge_node(str(node.get("id") or "")):
+            report["nodes_deleted"] += 1
+    return report
 
 
 def _validate_sofia_patch(
@@ -926,6 +1146,22 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         if last_slug:
             effective_command = re.sub(r"\b(ele|esse|isso)\b", last_slug, effective_command, flags=re.IGNORECASE)
 
+    # FAQ generation/regeneration is handled by the adaptar_faqs_universais_ao_grafo
+    # tool, which returns editable suggestions (no patch, no auto-persist) anchored
+    # to the active branch. Intercept before the deterministic patch flow so these
+    # commands never fall into "operação ambígua".
+    faq_intent = sofia_faq_tool.detect_faq_generation_intent(effective_command)
+    if faq_intent:
+        return _handle_sofia_faq_generation(
+            persona_id=persona_id,
+            persona_slug=persona_slug,
+            command=effective_command,
+            selected_node_id=selected_node_id or None,
+            session_state=session_state,
+            intent=faq_intent,
+            session_id=session_id,
+        )
+
     persona_tool = _resolve_persona_tool(
         SofiaResolvePersonaBody(persona_slug=persona_slug, command=effective_command)
     )
@@ -959,6 +1195,7 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
     last_referenced_node = {"slug": selected_slug, "node_type": "brand"} if selected_slug else (last_ref if isinstance(last_ref, dict) else {})
     plan_json_patch_base: dict[str, Any] = {
         "active_context": {
+            "brand_slug": selected_slug if selected_slug == "vz-lupas" else None,
             "selected_node_id": selected_node_id or None,
             "last_referenced_node": last_referenced_node or None,
         },
@@ -984,6 +1221,10 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
                 persona_slug=persona_slug,
                 selected_node_id=selected_node_id or None,
             )
+        sofia_message = (
+            sofia_orchestrator.plan_json_partial_success_message(plan_json, effective_command)
+            or plan.get("sofia_message")
+        )
         sofia_orchestrator.remember_turn(
             session_id=session_id,
             persona_slug=persona_slug,
@@ -994,7 +1235,7 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         fresh_state = sofia_orchestrator.get_session_state(session_id)
         return {
             "ok": True,
-            "sofia_message": plan.get("sofia_message"),
+            "sofia_message": sofia_message,
             "graph_patch": None,
             "persisted": False,
             "tool_calls": [
@@ -1019,10 +1260,40 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
     persona_node = supabase_client.ensure_persona_knowledge_node(persona_id)
     if not persona_node:
         raise HTTPException(502, "Unable to ensure persona root node")
+    try:
+        embedded_node = supabase_client.ensure_embedded_node(persona_id)
+    except Exception:
+        embedded_node = None
+    try:
+        gallery_node = supabase_client.ensure_gallery_node(persona_id)
+    except Exception:
+        gallery_node = None
     known = _persona_graph_nodes(persona_id)
     known[f"id:{persona_node['id']}"] = persona_node
     known["persona:self"] = persona_node
     known["slug:self"] = persona_node
+    for protected_node in (embedded_node, gallery_node):
+        if protected_node and protected_node.get("id"):
+            known[f"id:{protected_node['id']}"] = protected_node
+            if protected_node.get("slug"):
+                known[f"slug:{str(protected_node.get('slug')).lower()}"] = protected_node
+
+    destructive_report = _delete_sofia_patch_scope(
+        patch=patch,
+        persona_id=persona_id,
+        known=known,
+        allow_destructive=bool(body.context.allow_destructive),
+    )
+    if destructive_report["edges_deleted"] or destructive_report["nodes_deleted"]:
+        known = _persona_graph_nodes(persona_id)
+        known[f"id:{persona_node['id']}"] = persona_node
+        known["persona:self"] = persona_node
+        known["slug:self"] = persona_node
+        for protected_node in (embedded_node, gallery_node):
+            if protected_node and protected_node.get("id"):
+                known[f"id:{protected_node['id']}"] = protected_node
+                if protected_node.get("slug"):
+                    known[f"slug:{str(protected_node.get('slug')).lower()}"] = protected_node
 
     persisted_nodes: list[dict] = []
     patch_nodes: list[dict] = []
@@ -1113,6 +1384,8 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
             "result": {
                 "nodes_upserted": len(persisted_nodes),
                 "edges_upserted": len(edges_to_persist),
+                "nodes_deleted": destructive_report["nodes_deleted"],
+                "edges_deleted": destructive_report["edges_deleted"],
                 "ok": True,
             },
         }
@@ -1128,6 +1401,7 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
                 "command": body.command,
                 "nodes_upsert": len(persisted_nodes),
                 "edges_upsert": len(edges_to_persist),
+                "destructive_report": destructive_report,
                 "recommendations": recommendations,
             },
         },
@@ -1180,6 +1454,7 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         "threshold": plan.get("threshold"),
         "needs_clarification": False,
         "recommendations": recommendations,
+        "destructive_report": destructive_report,
         "validation": {"canonical_chain_respected": True, "violations": []},
         "plan_json": plan_json,
         "conversation_context": {
@@ -1188,6 +1463,143 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
             "memory_turns": len((fresh_state or {}).get("recent_turns") or []),
             "last_referenced_node": (fresh_state or {}).get("last_referenced_node") or None,
         },
+    }
+
+
+@router.post("/sofia/faq/accept")
+def sofia_faq_accept(body: SofiaFaqAcceptBody, request: Request):
+    """Persist accepted FAQ suggestions as pending/draft FAQ nodes connected to
+    their branch parent. They are NOT sent to Embedded — they follow the normal
+    approve -> publish-to-Embedded flow afterwards."""
+    _require_non_production()
+    persona = _resolve_sofia_persona(request, _persona_ref(body.persona_slug, body.persona_ref))
+    persona_id = persona.get("id")
+    persona_slug = _persona_slug(persona)
+    raw_parent = _strip_graph_id(body.parent_node_id)
+    parent = supabase_client.get_knowledge_node(raw_parent)
+    if not parent:
+        raise HTTPException(404, "parent node not found")
+    parent_type = (body.parent_node_type or parent.get("node_type") or "").strip().lower()
+    accepted = [s for s in body.suggestions if str(s.question or "").strip()]
+    if not accepted:
+        raise HTTPException(400, "no accepted suggestions to persist")
+    count = sofia_faq_tool.clamp_count(body.faq_generation_count or len(accepted))
+    relation = _faq_parent_relation(parent_type)
+    created: list[dict] = []
+    for suggestion in accepted:
+        question = suggestion.question.strip()
+        answer = str(suggestion.answer or "").strip()
+        content = f"Pergunta: {question}\nResposta: {answer}" if answer else question
+        item = knowledge_lifecycle.persist_pending_knowledge_item(
+            persona_slug=persona_slug,
+            title=question,
+            content=content,
+            content_type="faq",
+            file_path=None,
+            file_type="md",
+            metadata={
+                "faq_generation_count": count,
+                "source_tool": sofia_faq_tool.SOURCE_TOOL,
+                "parent_node_id": raw_parent,
+                "parent_node_type": parent_type,
+                "source_context": body.source_context or {},
+                "generated_from_node_id": body.generated_from_node_id,
+                "generated_from_node_slug": body.generated_from_node_slug,
+                "question": question,
+                "answer": answer,
+            },
+            tags=["faq", "sofia", sofia_faq_tool.SOURCE_TOOL],
+        )
+        node_id = (item.get("metadata") or {}).get("knowledge_node_id")
+        edge = None
+        if node_id:
+            edge = supabase_client.upsert_knowledge_edge(
+                raw_parent,
+                node_id,
+                relation,
+                persona_id=persona_id,
+                weight=0.9,
+                metadata={"primary_tree": True, "active": True, "created_from": sofia_faq_tool.SOURCE_TOOL},
+            )
+        created.append(
+            {
+                "item_id": item.get("id"),
+                "node_id": node_id,
+                "edge_id": (edge or {}).get("id"),
+                "question": question,
+                "status": item.get("status"),
+            }
+        )
+    try:
+        supabase_client.update_knowledge_node(
+            raw_parent,
+            {"metadata": {**(parent.get("metadata") or {}), "faq_generation_count": count}},
+            mark_related_faqs=False,
+        )
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "persona_slug": persona_slug,
+        "parent_node_id": raw_parent,
+        "faq_generation_count": count,
+        "created": created,
+    }
+
+
+@router.post("/sofia/faq/append")
+def sofia_faq_append(body: SofiaFaqAppendBody, request: Request):
+    """Append accepted suggestions to a FAQ node's OWN Markdown body.
+
+    The "Gerar" action on a FAQ node updates that same FAQ — it never creates a
+    new FAQ node. The FAQ stays/returns to pending (draft); if it was already
+    published, it is withdrawn from Embedded (its section is removed from the
+    Embedded body) and must be approved + published again."""
+    _require_non_production()
+    persona = _resolve_sofia_persona(request, _persona_ref(body.persona_slug, body.persona_ref))
+    persona_id = persona.get("id")
+    raw_node = _strip_graph_id(body.faq_node_id)
+    node = supabase_client.get_knowledge_node(raw_node)
+    if not node:
+        raise HTTPException(404, "FAQ node not found")
+    if str(node.get("node_type") or "").lower() != "faq":
+        raise HTTPException(400, "Append is only valid on FAQ nodes")
+    accepted = [s for s in body.suggestions if str(s.question or "").strip()]
+    if not accepted:
+        raise HTTPException(400, "no accepted suggestions to append")
+
+    appended = _format_faq_sections(accepted)
+    existing_md = str((node.get("metadata") or {}).get("markdown") or node.get("summary") or "").strip()
+    new_md = (f"{existing_md}\n\n{appended}".strip() if existing_md else appended).rstrip() + "\n"
+
+    item = None
+    if node.get("source_table") == "knowledge_items" and node.get("source_id"):
+        item = supabase_client.get_knowledge_item(str(node.get("source_id")))
+    was_published = str((item or {}).get("status") or "").lower() in {"approved", "embedded"}
+
+    supabase_client.update_knowledge_node(
+        raw_node,
+        {"metadata": {**(node.get("metadata") or {}), "markdown": new_md}, "status": "pending_validation"},
+        mark_related_faqs=False,
+    )
+    if item and item.get("id"):
+        supabase_client.update_knowledge_item(
+            item["id"], {"content": new_md, "status": "pending", "curation_status": "draft"}
+        )
+    if was_published and item and item.get("id"):
+        try:
+            supabase_client.withdraw_faq_from_embedded(item["id"])
+        except Exception:
+            pass
+        embedded_markdown.rebuild_embedded_markdown(persona_id)
+
+    return {
+        "ok": True,
+        "faq_node_id": raw_node,
+        "appended_count": len(accepted),
+        "status": "pending",
+        "markdown": new_md,
+        "created_node": False,
     }
 
 

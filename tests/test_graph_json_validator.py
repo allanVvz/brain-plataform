@@ -56,6 +56,27 @@ def test_validate_graph_json_accepts_valid_graph():
     assert errors == []
 
 
+def test_validate_graph_json_accepts_product_group_faq_when_product_absent():
+    payload = _valid_graph().model_dump()
+    payload["nodes"] = [node for node in payload["nodes"] if node["id"] not in {"n7", "n9"}]
+    for node in payload["nodes"]:
+        if node["id"] == "n8":
+            node["parent_id"] = "n6"
+            break
+    payload["edges"] = [
+        {"id": "e1", "source": "n1", "target": "n2", "relation": "main"},
+        {"id": "e2", "source": "n2", "target": "n3", "relation": "main"},
+        {"id": "e3", "source": "n3", "target": "n4", "relation": "main"},
+        {"id": "e4", "source": "n4", "target": "n5", "relation": "main"},
+        {"id": "e5", "source": "n5", "target": "n6", "relation": "main"},
+        {"id": "e6", "source": "n6", "target": "n8", "relation": "main"},
+    ]
+    graph = GraphJson.model_validate(payload)
+    is_valid, errors = validate_graph_json(graph)
+    assert is_valid is True
+    assert errors == []
+
+
 def test_validate_graph_json_rejects_schema_version_mismatch():
     graph = _valid_graph()
     graph.schema_version = "1.0"

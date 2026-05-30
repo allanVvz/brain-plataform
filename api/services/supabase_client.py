@@ -432,6 +432,17 @@ def ensure_system_audience(
     return create_audience(payload)
 
 
+def _is_import_audience(audience: Optional[dict]) -> bool:
+    """The `import` system bucket is an operational leads grouping (source_type
+    'import'), not a semantic audience of the persona tree. It must never appear
+    as a graph audience node nor as a Leads filter pill."""
+    if not audience:
+        return False
+    slug = str(audience.get("slug") or "").strip().lower()
+    source_type = str(audience.get("source_type") or "").strip().lower()
+    return slug == "import" or source_type == "import"
+
+
 def ensure_import_audience(persona_id: str, created_by_user_id: Optional[str] = None) -> Optional[dict]:
     return ensure_system_audience(
         persona_id,
@@ -470,6 +481,97 @@ def ensure_system_audiences_for_persona(
             pass
         imp = None
     return {"import": imp}
+
+
+def materialize_graph_audiences_for_persona(persona_id: Optional[str]) -> list[dict]:
+    """Reconcile graph audience nodes into the operational `audiences` table.
+
+    Audiences created via Sofia or the Graph tab live as `knowledge_nodes`
+    (node_type='audience'). For them to be usable as Leads filters (and as
+    move/share targets) they must also exist as `audiences` rows. This bridge is
+    idempotent by (persona_id, slug): it only creates rows that do not yet exist
+    and never touches the `import` bucket or archived nodes. Rows it creates are
+    tagged `source_type='graph'` so `sync_audience_node` skips them and we do not
+    spawn a duplicate node back into the tree.
+    """
+    if not persona_id:
+        return []
+    try:
+        nodes = list_knowledge_nodes_by_type(["audience"], persona_id=persona_id, limit=500)
+    except Exception:
+        return []
+    created: list[dict] = []
+    for node in nodes or []:
+        slug = _slugify(node.get("slug") or node.get("title") or "")
+        if not slug or slug == "import":
+            continue
+        meta = node.get("metadata") or {}
+        if str(meta.get("source_type") or "").strip().lower() == "import":
+            continue
+        if str(node.get("status") or "").strip().lower() == "archived":
+            continue
+        if get_audience_by_slug(persona_id, slug):
+            continue
+        try:
+            row = create_audience({
+                "persona_id": persona_id,
+                "slug": slug,
+                "name": node.get("title") or slug,
+                "description": node.get("summary"),
+                "source_type": "graph",
+            })
+        except Exception:
+            row = None
+        if row:
+            created.append(row)
+    return created
+
+
+def list_persona_audiences(persona_id: Optional[str]) -> list[dict]:
+    """Operational audiences for the Leads tab filters.
+
+    Returns the persona's real audiences (reconciled with graph-created ones)
+    minus the internal `import` bucket. This is the single source the Leads UI
+    should consume so that any audience created in the Graph/Sofia automatically
+    becomes a Leads filter, while `import` never shows as a semantic audience.
+    """
+    if not persona_id:
+        return []
+    try:
+        materialize_graph_audiences_for_persona(persona_id)
+    except Exception:
+        pass
+    rows = [row for row in (get_audiences(persona_id=persona_id) or []) if not _is_import_audience(row)]
+    by_slug = {str(row.get("slug") or "").strip().lower(): row for row in rows}
+    # Union with graph audience nodes (read-only) so anything highlighted as an
+    # audience in the Graph becomes a Leads filter even if row materialization
+    # did not persist. Persona-scoped, never the `import` bucket, never archived.
+    try:
+        nodes = list_knowledge_nodes_by_type(["audience"], persona_id=persona_id, limit=500)
+    except Exception:
+        nodes = []
+    for node in nodes or []:
+        slug = _slugify(node.get("slug") or node.get("title") or "")
+        if not slug or slug == "import" or slug in by_slug:
+            continue
+        meta = node.get("metadata") or {}
+        if str(meta.get("source_type") or "").strip().lower() == "import":
+            continue
+        if str(node.get("status") or "").strip().lower() == "archived":
+            continue
+        synthesized = {
+            "id": node.get("id"),
+            "persona_id": persona_id,
+            "slug": slug,
+            "name": node.get("title") or slug,
+            "description": node.get("summary"),
+            "source_type": "graph",
+            "is_system": False,
+            "from_graph_node": True,
+        }
+        by_slug[slug] = synthesized
+        rows.append(synthesized)
+    return rows
 
 
 def get_lead_memberships(lead_id: int) -> list[dict]:
@@ -1000,6 +1102,10 @@ def ensure_gallery_node(persona_id: str) -> Optional[dict]:
 def sync_audience_node(audience: dict) -> Optional[dict]:
     if not audience or not audience.get("persona_id") or not audience.get("id"):
         return None
+    # Never mirror the `import` bucket (operational, not semantic) nor a
+    # graph-sourced audience (it already exists as a node) into the tree.
+    if _is_import_audience(audience) or str(audience.get("source_type") or "").strip().lower() == "graph":
+        return None
     persona = get_persona_by_id(audience["persona_id"]) or {}
     node = upsert_knowledge_node({
         "persona_id": audience["persona_id"],
@@ -1317,6 +1423,25 @@ def delete_knowledge_edge(edge_id: str) -> bool:
         _execute_with_retry(client.table("knowledge_edges").update({"metadata": metadata}).eq("id", edge_id))
         if row.get("relation_type") == "gallery_asset":
             mark_gallery_asset_inactive_by_edge(edge_id)
+        return True
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return False
+        raise
+
+
+def hard_delete_knowledge_edge(edge_id: str) -> bool:
+    """Hard-delete a knowledge edge by id. Scoped callers must validate ownership first."""
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING or not edge_id:
+        return False
+    try:
+        client = get_client()
+        row = _one(client.table("knowledge_edges").select("id").eq("id", edge_id).maybe_single())
+        if not row:
+            return False
+        _execute_with_retry(client.table("knowledge_edges").delete().eq("id", edge_id))
         return True
     except Exception as exc:
         if _kg_unavailable(exc):
@@ -3059,6 +3184,69 @@ def update_knowledge_item(item_id: str, data: dict) -> None:
         except Exception:
             pass
         raise
+
+
+def withdraw_faq_from_embedded(item_id: str) -> dict:
+    """Send an approved/embedded FAQ back to draft and pull it out of Embedded.
+
+    Used when an already-approved FAQ document is edited: the published content
+    is now stale, so the FAQ must be re-approved and re-published before it can
+    live in the Golden Dataset again. Fully non-destructive — the FAQ node goes
+    to `pending_validation` and its FAQ->Embedded edges are *soft* deactivated
+    (metadata.active=false). RAG chunks/snapshots are preserved, not deleted.
+    Best-effort: any failure is swallowed so it never blocks the edit itself.
+    """
+    from datetime import datetime, timezone
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    summary: dict = {"item_id": item_id, "node_ids": [], "deactivated_embedded_edges": []}
+    if _KG_TABLES_MISSING or not item_id:
+        return summary
+    client = get_client()
+    try:
+        nodes = (
+            client.table("knowledge_nodes")
+            .select("id,metadata")
+            .eq("source_table", "knowledge_items")
+            .eq("source_id", item_id)
+            .eq("node_type", "faq")
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        nodes = []
+    for node in nodes:
+        node_id = node.get("id")
+        if not node_id:
+            continue
+        summary["node_ids"].append(node_id)
+        try:
+            metadata = {
+                **(node.get("metadata") or {}),
+                "needs_republish": True,
+                "withdrawn_from_embedded_at": now_iso,
+            }
+            client.table("knowledge_nodes").update(
+                {"status": "pending_validation", "metadata": metadata, "updated_at": now_iso}
+            ).eq("id", node_id).execute()
+        except Exception:
+            pass
+        try:
+            edges = list_edges_for_nodes([node_id]) or []
+        except Exception:
+            edges = []
+        for edge in edges:
+            if edge.get("source_node_id") != node_id:
+                continue
+            target = get_knowledge_node(edge.get("target_node_id"))
+            if target and str(target.get("node_type") or "").lower() == "embedded":
+                try:
+                    if delete_knowledge_edge(edge.get("id")):
+                        summary["deactivated_embedded_edges"].append(edge.get("id"))
+                except Exception:
+                    pass
+    return summary
 
 
 def delete_knowledge_item(item_id: str) -> bool:

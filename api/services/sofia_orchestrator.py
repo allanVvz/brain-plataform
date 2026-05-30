@@ -276,7 +276,8 @@ def apply_plan_json_patch(
         elif "audience" in text or "publico" in text or "público" in text:
             next_plan["plan"]["audience"].append({"title": "Audience", "parent_slug": None, "status": "pending_parent"})
         elif "campanha" in text or "campaign" in text:
-            next_plan["plan"]["campaign"].append({"title": "Campaign", "parent_slug": None, "status": "pending_parent"})
+            title = _title_from_command(command or "", markers=("chamada", "chamado", "campanha", "campaign"), default="Campaign")
+            next_plan["plan"]["campaign"].append({"title": title, "parent_slug": None, "status": "pending_parent"})
 
     state = _SESSION_MEMORY.get(key)
     if not state:
@@ -294,6 +295,52 @@ def apply_plan_json_patch(
 
 def re_split_words(text: str) -> list[str]:
     return [tok for tok in (text or "").replace(",", " ").split() if tok.strip()]
+
+
+def _title_from_command(command: str, *, markers: tuple[str, ...], default: str) -> str:
+    words = re_split_words(command)
+    lowered = [word.lower() for word in words]
+    start = -1
+    for marker in markers:
+        if marker in lowered:
+            start = lowered.index(marker)
+    if start < 0 or start >= len(words) - 1:
+        return default
+    title_words = words[start + 1 :]
+    if title_words and title_words[0].lower() in {"de", "do", "da", "um", "uma"}:
+        title_words = title_words[1:]
+    title = " ".join(title_words).strip()
+    return title.title() if title else default
+
+
+def plan_json_partial_success_message(plan_json: dict[str, Any], command: str) -> Optional[str]:
+    plan = plan_json.get("plan") if isinstance(plan_json.get("plan"), dict) else {}
+    text = (command or "").strip().lower()
+    if not ("crie" in text or "criar" in text):
+        return None
+
+    if "produto" in text and plan.get("product"):
+        item = plan["product"][-1]
+        title = str(item.get("title") or "Produto").strip()
+        if not str(item.get("parent_slug") or "").strip():
+            return f"Criei o produto {title} no plano. Ele ainda esta sem parent definido. Quer conectar esse produto a qual Product Group?"
+        return f"Criei o produto {title} no plano."
+
+    if ("campanha" in text or "campaign" in text) and plan.get("campaign"):
+        item = plan["campaign"][-1]
+        title = str(item.get("title") or "Campaign").strip()
+        if not str(item.get("parent_slug") or "").strip():
+            return f"Criei a campanha {title} no plano. Falta definir abaixo de qual Briefing/Brand ela deve ficar."
+        return f"Criei a campanha {title} no plano."
+
+    if ("audience" in text or "publico" in text or "pÃºblico" in text) and plan.get("audience"):
+        item = plan["audience"][-1]
+        title = str(item.get("title") or "Audience").strip()
+        if not str(item.get("parent_slug") or "").strip():
+            return f"Criei uma {title} no plano. Falta definir onde ela deve entrar. Quer conectar abaixo de qual Campaign?"
+        return f"Criei uma {title} no plano."
+
+    return None
 
 
 def remember_turn(
@@ -351,15 +398,26 @@ def resolve_operation(command_text: str) -> dict[str, Any]:
     text = (command_text or "").strip().lower()
     if "reencaixe" in text and ("vz lupas" in text or "vzlupas" in text):
         return {"operation": "reparent_brand", "score": 0.98, "source": "heuristic"}
+    if ("conectar" in text or "colocar" in text) and ("brand" in text or "vz lupas" in text or "vzlupas" in text) and ("persona" in text or "allanvvz" in text):
+        return {"operation": "reparent_brand", "score": 0.96, "source": "heuristic"}
+    if ("conectar" in text or "colocar" in text) and ("audience" in text or "audi" in text) and ("juliet" in text or "radar" in text or "plantaris" in text or "product group" in text):
+        return {"operation": "connect_product_group_to_audience", "score": 0.94, "source": "heuristic"}
+    if ("criar" in text or "crie" in text or "adicionar" in text) and ("copy" in text):
+        return {"operation": "create_copy_node", "score": 0.92, "source": "heuristic"}
+    if ("criar" in text or "crie" in text or "adicionar" in text) and ("faq" in text):
+        return {"operation": "create_faq_node", "score": 0.92, "source": "heuristic"}
+    if ("criar" in text or "crie" in text or "adicionar" in text) and ("produto" in text or "product" in text):
+        return {"operation": "create_product_node", "score": 0.92, "source": "heuristic"}
     return {"operation": "validate_canonical_chain", "score": 0.42, "source": "fallback"}
 
 
 def resolve_node(command_text: str, *, selected_node_id: Optional[str] = None, session_state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     selected = str(selected_node_id or "").strip().lower()
     if selected:
+        selected_type = "product_group" if "grupo-" in selected or "product_group" in selected else "unknown"
         return {
             "node_ref": selected,
-            "node_type": "unknown",
+            "node_type": selected_type,
             "score": 0.95,
             "source": "selected_node_id",
             "candidates": [{"node_ref": selected, "score": 0.95}],
@@ -376,6 +434,23 @@ def resolve_node(command_text: str, *, selected_node_id: Optional[str] = None, s
                 "candidates": [{"node_ref": f"slug:{slug}", "score": 0.88}],
             }
     text = (command_text or "").lower()
+    if "audience" in text or "audi" in text or "padrao" in text or "padr" in text:
+        return {
+            "node_ref": "slug:padrao-vz-lupas",
+            "node_type": "audience",
+            "score": 0.88,
+            "source": "heuristic",
+            "candidates": [{"node_ref": "slug:padrao-vz-lupas", "score": 0.88}],
+        }
+    for group in ("juliet", "radar", "plantaris"):
+        if group in text:
+            return {
+                "node_ref": f"slug:grupo-{group}",
+                "node_type": "product_group",
+                "score": 0.9,
+                "source": "heuristic",
+                "candidates": [{"node_ref": f"slug:grupo-{group}", "score": 0.9}],
+            }
     if "vz lupas" in text or "vzlupas" in text:
         return {
             "node_ref": "slug:vz-lupas",
@@ -391,6 +466,85 @@ def resolve_node(command_text: str, *, selected_node_id: Optional[str] = None, s
         "source": "fallback",
         "candidates": [],
     }
+
+
+def _simple_graph_patch(command: str, operation: str, node_result: dict[str, Any]) -> Optional[dict[str, list[dict]]]:
+    text = (command or "").strip().lower()
+    if operation == "reparent_brand":
+        return _reencaixe_patch()
+    if operation == "connect_product_group_to_audience":
+        group = next((name for name in ("juliet", "radar", "plantaris") if name in text), "juliet")
+        return {
+            "nodes_upsert": [],
+            "nodes_delete": [],
+            "edges_delete": [],
+            "edges_upsert": [{
+                "source_ref": "slug:padrao-vz-lupas",
+                "target_ref": f"slug:grupo-{group}",
+                "relation_type": "audience_has_product_group",
+                "metadata": {"primary_tree": True, "active": True, "created_from": "sofia_graph_command"},
+            }],
+        }
+    if operation == "create_product_node":
+        parent_ref = str(node_result.get("node_ref") or "").strip() if node_result.get("node_type") == "product_group" else ""
+        return {
+            "nodes_upsert": [{
+                "node_type": "product",
+                "slug": "produto",
+                "title": "Produto",
+                "summary": "Produto criado pela Sofia.",
+                "status": "pending_validation",
+                "metadata": {"source_url": "pending_source"},
+            }],
+            "nodes_delete": [],
+            "edges_delete": [],
+            "edges_upsert": ([{
+                "source_ref": parent_ref,
+                "target_ref": "slug:produto",
+                "relation_type": "product_group_has_product",
+                "metadata": {"primary_tree": True, "active": True, "created_from": "sofia_graph_command"},
+            }] if parent_ref else []),
+        }
+    if operation == "create_copy_node":
+        group = next((name for name in ("juliet", "radar", "plantaris") if name in text), "")
+        parent_ref = f"slug:grupo-{group}" if group else str(node_result.get("node_ref") or "")
+        return {
+            "nodes_upsert": [{
+                "node_type": "copy",
+                "slug": f"copy-{group or 'node'}",
+                "title": f"Copy {group.title() if group else 'Node'}",
+                "summary": "Copy criada pela Sofia.",
+                "status": "pending_validation",
+            }],
+            "nodes_delete": [],
+            "edges_delete": [],
+            "edges_upsert": ([{
+                "source_ref": parent_ref,
+                "target_ref": f"slug:copy-{group or 'node'}",
+                "relation_type": "contains",
+                "metadata": {"primary_tree": True, "active": True, "created_from": "sofia_graph_command"},
+            }] if parent_ref else []),
+        }
+    if operation == "create_faq_node":
+        parent_ref = str(node_result.get("node_ref") or "")
+        return {
+            "nodes_upsert": [{
+                "node_type": "faq",
+                "slug": "faq-node",
+                "title": "FAQ",
+                "summary": "FAQ criada pela Sofia.",
+                "status": "pending_validation",
+            }],
+            "nodes_delete": [],
+            "edges_delete": [],
+            "edges_upsert": ([{
+                "source_ref": parent_ref,
+                "target_ref": "slug:faq-node",
+                "relation_type": "product_has_faq",
+                "metadata": {"primary_tree": True, "active": True, "created_from": "sofia_graph_command"},
+            }] if parent_ref else []),
+        }
+    return None
 
 
 def _reencaixe_patch() -> dict[str, list[dict]]:
@@ -511,8 +665,8 @@ def plan_graph_command(
                 "needs_clarification": True,
             }
 
-    if not is_structured_intent and str(operation_result.get("operation") or "") == "reparent_brand":
-        graph_patch = _reencaixe_patch()
+    if not is_structured_intent:
+        graph_patch = _simple_graph_patch(command, str(operation_result.get("operation") or ""), node_result)
 
     if not graph_patch:
         if operation_score < threshold:

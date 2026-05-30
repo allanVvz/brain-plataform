@@ -356,6 +356,26 @@ class ItemUpdate(BaseModel):
     asset_function: Optional[str] = None
 
 
+_FAQ_REVERT_STATUSES = {"approved", "embedded"}
+_FAQ_CONTENT_FIELDS = ("title", "content")
+
+
+def _should_revert_faq_to_draft(existing: Optional[dict], data: dict) -> bool:
+    """An already-approved/embedded FAQ whose content is edited must go back to
+    draft (rascunho) so it is re-approved and re-published before it can live in
+    Embedded again. A patch that explicitly sets `status` is left untouched."""
+    if not existing or "status" in data:
+        return False
+    if str(existing.get("content_type") or "").lower() != "faq":
+        return False
+    if str(existing.get("status") or "").lower() not in _FAQ_REVERT_STATUSES:
+        return False
+    return any(
+        field in data and data[field] is not None and data[field] != existing.get(field)
+        for field in _FAQ_CONTENT_FIELDS
+    )
+
+
 @router.patch("/queue/{item_id}")
 def update_queue_item(item_id: str, body: ItemUpdate, request: Request):
     data = body.model_dump(exclude_none=True)
@@ -382,7 +402,30 @@ def update_queue_item(item_id: str, body: ItemUpdate, request: Request):
             if cached_item and cached_item.get("status") == "needs_category":
                 data["status"] = "pending"
 
+        # Editing an approved/embedded FAQ document withdraws it from Embedded and
+        # sends it back to draft until it is re-approved and re-published.
+        reverted_faq = _should_revert_faq_to_draft(existing, data)
+        if reverted_faq:
+            data["status"] = "pending"
+            data["curation_status"] = "draft"
+
         supabase_client.update_knowledge_item(item_id, data)
+        if reverted_faq:
+            try:
+                supabase_client.withdraw_faq_from_embedded(item_id)
+                # The withdrawn FAQ must drop out of the Embedded body too.
+                from services import embedded_markdown
+                embedded_markdown.rebuild_embedded_markdown((existing or {}).get("persona_id"))
+            except Exception as exc:
+                emit(
+                    "faq_withdraw_from_embedded_failed",
+                    entity_type="knowledge_item",
+                    entity_id=item_id,
+                    persona_id=(existing or {}).get("persona_id"),
+                    payload={"error": str(exc)},
+                    level="warn",
+                    source="routes.knowledge",
+                )
         updated = supabase_client.get_knowledge_item(item_id)
     except HTTPException:
         raise
