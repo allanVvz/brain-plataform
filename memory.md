@@ -1369,3 +1369,12 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-migration-applied-2026-05-29.md.
 - Riscos / bloqueios: nenhum t�cnico.
 - Pr�ximo passo: nenhum em BRA-87; handoff para BRA-83.
+
+### 2026-05-30 - frontend-agent (BRA-83: plan_json-driven context panel + Graph sidebar parity)
+- Issue/tarefa: BRA-83
+- Arquivos alterados: `dashboard/lib/api.ts`; `dashboard/app/knowledge/graph/GraphPageClient.tsx`; `dashboard/app/knowledge/graph/SofiaChatPanel.tsx`; `dashboard/app/knowledge/capture/page.tsx`; `memory.md`
+- O que mudou: O Graph passou a compartilhar a mesma sessao/orquestracao do CRIAR via `session_id` + `plan_json` em `/sofia/graph-command` (command/confirm/undo), com hidratação da sessao ativa por `kbIntakeSession`; a sidebar da Sofia no Graph agora exibe resumo de contexto do `plan_json`; e o painel de contexto da tela CRIAR passou a priorizar `plan_json` da sessao para contagens/erros bloqueantes exibidos.
+- Validacao executada: `npm test -- GraphPageClient.test.tsx` em `ai-brain/dashboard` -> PASS (1 arquivo, 2 testes).
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/docs/qa/BRA-83-plan-json-context-panel-graph-sidebar-parity-2026-05-30T03-05-00Z.md`
+- Riscos / bloqueios: Ainda depende de validacao E2E com backend live para confirmar equivalencia total de tool-calls entre CRIAR e Graph em todos os casos de uso.
+- Proximo passo: QA/E2E Validator executar fluxo dual (CRIAR->Graph) e comparar request context/estado visual pendente vs persistido.

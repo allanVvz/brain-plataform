@@ -589,6 +589,8 @@ export const api = {
     action?: "command" | "confirm_pending" | "undo_pending";
     persona_slug?: string;
     tenant?: string;
+    session_id?: string;
+    plan_json?: Record<string, any> | null;
     pending_context?: Record<string, any>;
   }) => {
     const action = body.action || "command";
@@ -601,6 +603,8 @@ export const api = {
         command,
         context: {
           client_action: action === "command" ? "natural_language" : "ui_action",
+          session_id: body.session_id || null,
+          plan_json: body.plan_json || null,
           pending_context: body.pending_context || {},
         },
       }),

@@ -151,6 +151,8 @@ export default function GraphPageClient() {
   const [sofiaMessages, setSofiaMessages] = useState<SofiaChatMessage[]>([]);
   const [hasPendingVisualChanges, setHasPendingVisualChanges] = useState(false);
   const [pendingGraphSnapshot, setPendingGraphSnapshot] = useState<GraphPayload | null>(null);
+  const [sharedSessionId, setSharedSessionId] = useState<string | null>(null);
+  const [sharedPlanJson, setSharedPlanJson] = useState<any | null>(null);
 
   // ── URL-driven state ──────────────────────────────────────────
   const focus = searchParams.get("focus") || "";
@@ -182,6 +184,20 @@ export default function GraphPageClient() {
     syncFromHeader();
     window.addEventListener("ai-brain-persona-change", syncFromHeader as EventListener);
     return () => window.removeEventListener("ai-brain-persona-change", syncFromHeader as EventListener);
+  }, []);
+
+  useEffect(() => {
+    const sessionId = window.localStorage.getItem("active_criar_session_id");
+    if (!sessionId) return;
+    setSharedSessionId(sessionId);
+    api.kbIntakeSession(sessionId)
+      .then((session: any) => {
+        const planJson = session?.plan_json || session?.state?.plan_json || null;
+        if (planJson) setSharedPlanJson(planJson);
+      })
+      .catch(() => {
+        // Graph sidebar keeps working even if no active CRIAR session exists.
+      });
   }, []);
 
   const load = useCallback(async () => {
@@ -491,7 +507,14 @@ export default function GraphPageClient() {
         action: "command",
         message: command,
         persona_slug: effectivePersonaSlug || undefined,
+        session_id: sharedSessionId || undefined,
+        plan_json: sharedPlanJson || undefined,
       });
+      if (response?.session_id && response.session_id !== sharedSessionId) {
+        setSharedSessionId(String(response.session_id));
+        window.localStorage.setItem("active_criar_session_id", String(response.session_id));
+      }
+      if (response?.plan_json) setSharedPlanJson(response.plan_json);
       const persisted = Boolean(response?.persisted);
       const replyText = String(response?.sofia_message || response?.text || response?.message || response?.reply || "Comando processado.");
       const toolCalls = Array.isArray(response?.tool_calls) ? response.tool_calls : [];
@@ -551,7 +574,7 @@ export default function GraphPageClient() {
     } finally {
       setSofiaLoading(false);
     }
-  }, [appendSofiaMessage, data, effectivePersonaSlug, load, onFocusNode, pendingGraphSnapshot, updateParam]);
+  }, [appendSofiaMessage, data, effectivePersonaSlug, load, onFocusNode, pendingGraphSnapshot, sharedPlanJson, sharedSessionId, updateParam]);
 
   const handleConfirmPending = useCallback(async () => {
     setSofiaLoading(true);
@@ -560,7 +583,10 @@ export default function GraphPageClient() {
         action: "confirm_pending",
         message: SOFIA_REACT_FLOW_TOOLS.confirm_pending.command({ personaSlug: effectivePersonaSlug || undefined }),
         persona_slug: effectivePersonaSlug || undefined,
+        session_id: sharedSessionId || undefined,
+        plan_json: sharedPlanJson || undefined,
       });
+      if (response?.plan_json) setSharedPlanJson(response.plan_json);
       appendSofiaMessage("sofia", String(response?.text || response?.message || "Alteracoes confirmadas."));
       setPendingGraphSnapshot(null);
       setHasPendingVisualChanges(false);
@@ -570,7 +596,7 @@ export default function GraphPageClient() {
     } finally {
       setSofiaLoading(false);
     }
-  }, [appendSofiaMessage, effectivePersonaSlug, load]);
+  }, [appendSofiaMessage, effectivePersonaSlug, load, sharedPlanJson, sharedSessionId]);
 
   const handleUndoPending = useCallback(async () => {
     try {
@@ -578,6 +604,8 @@ export default function GraphPageClient() {
         action: "undo_pending",
         message: SOFIA_REACT_FLOW_TOOLS.undo_pending.command({ personaSlug: effectivePersonaSlug || undefined }),
         persona_slug: effectivePersonaSlug || undefined,
+        session_id: sharedSessionId || undefined,
+        plan_json: sharedPlanJson || undefined,
       });
     } catch {
       // rollback local mantido mesmo sem suporte backend.
@@ -586,7 +614,21 @@ export default function GraphPageClient() {
     setPendingGraphSnapshot(null);
     setHasPendingVisualChanges(false);
     appendSofiaMessage("system", "Alteracoes visuais pendentes desfeitas.");
-  }, [appendSofiaMessage, effectivePersonaSlug, pendingGraphSnapshot]);
+  }, [appendSofiaMessage, effectivePersonaSlug, pendingGraphSnapshot, sharedPlanJson, sharedSessionId]);
+
+  const sharedPlanSummary = useMemo(() => {
+    if (!sharedPlanJson || typeof sharedPlanJson !== "object") return null;
+    const ctx = sharedPlanJson.active_context || {};
+    const blocking = Array.isArray(sharedPlanJson.blocking_issues) ? sharedPlanJson.blocking_issues.length : 0;
+    const queue = Array.isArray(sharedPlanJson.graph_patch_queue) ? sharedPlanJson.graph_patch_queue.length : 0;
+    return {
+      persona: String(sharedPlanJson.persona_slug || effectivePersonaSlug || ""),
+      brand: ctx.brand_slug ? String(ctx.brand_slug) : null,
+      selectedNodeId: ctx.selected_node_id ? String(ctx.selected_node_id) : null,
+      queueSize: queue,
+      blockingCount: blocking,
+    };
+  }, [effectivePersonaSlug, sharedPlanJson]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-96px)] -mx-6 -mt-6 overflow-hidden">
@@ -769,6 +811,8 @@ export default function GraphPageClient() {
           loading={sofiaLoading}
           messages={sofiaMessages}
           hasPendingVisualChanges={hasPendingVisualChanges}
+          sessionId={sharedSessionId}
+          planSummary={sharedPlanSummary}
           onToggle={() => setSofiaOpen((v) => !v)}
           onSubmit={handleSofiaSubmit}
           onConfirmPending={handleConfirmPending}

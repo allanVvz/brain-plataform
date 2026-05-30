@@ -2571,6 +2571,7 @@ function CaptureSidebar({
   uploads,
   crawlerRuns,
   assetReadings,
+  sessionPlanJson,
   planState,
   currentKnowledgePlan,
   currentBlockCounts,
@@ -2581,6 +2582,7 @@ function CaptureSidebar({
   uploads: SessionUpload[];
   crawlerRuns: CrawlerRun[];
   assetReadings: any[];
+  sessionPlanJson: any | null;
   planState: PlanState | null;
   currentKnowledgePlan: KnowledgePlan | null;
   currentBlockCounts: BlockCounts;
@@ -2593,13 +2595,19 @@ function CaptureSidebar({
   );
   const latestCrawler = crawlerRuns[0];
   const initialCounts = normalizeBlockCounts(plan.variationCounts);
-  const blockingViolations = planState?.validation?.blocking_violations || [];
+  const planJsonPlan = sessionPlanJson?.plan && typeof sessionPlanJson.plan === "object" ? sessionPlanJson.plan : null;
+  const planJsonCounts = planJsonPlan
+    ? normalizeBlockCounts(Object.fromEntries(Object.keys(initialCounts).map((key) => [key, Array.isArray(planJsonPlan[key]) ? planJsonPlan[key].length : 0])))
+    : null;
+  const blockingViolations = Array.isArray(sessionPlanJson?.validation?.errors)
+    ? sessionPlanJson.validation.errors.map((item: any) => repairText(String(item || "")))
+    : (planState?.validation?.blocking_violations || []);
   const liveCounts = planState
     ? normalizeBlockCounts(planState.summary.current_block_counts)
     : currentKnowledgePlan?.entries?.length
       ? countBlocksByType(currentKnowledgePlan.entries)
       : normalizeBlockCounts(currentBlockCounts);
-  const displayCounts = planState || currentKnowledgePlan?.entries?.length ? liveCounts : initialCounts;
+  const displayCounts = planJsonCounts || (planState || currentKnowledgePlan?.entries?.length ? liveCounts : initialCounts);
   const expansion = planState?.summary?.expansion || buildExpansionSummary(currentKnowledgePlan);
   const totalInitial = Object.values(initialCounts).reduce((sum, value) => sum + value, 0);
   const totalCurrent = Number(planState?.summary?.entry_count ?? Object.values(displayCounts).reduce((sum, value) => sum + value, 0));
@@ -2610,7 +2618,7 @@ function CaptureSidebar({
     planState || currentKnowledgePlan?.entries?.length ? "Plano em construcao" :
     "Plano inicial";
   const createdCountFor = (id: string) => {
-    if (id === "persona") return plan.personaSlug ? 1 : 0;
+    if (id === "persona") return String(sessionPlanJson?.persona_slug || plan.personaSlug || "").trim() ? 1 : 0;
     if (id === "embedded" || id === "gallery") {
       return (planState?.normalized_plan.entries || currentKnowledgePlan?.entries || [])
         .filter((entry) => normalizeContentTypeAlias(entry.content_type) === id).length;
@@ -2833,6 +2841,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
   const [assetReadings, setAssetReadings] = useState<any[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [planState, setPlanState] = useState<PlanState | null>(null);
+  const [sessionPlanJson, setSessionPlanJson] = useState<any | null>(null);
   const [confirmedPlanHash, setConfirmedPlanHash] = useState<string | null>(null);
   const [currentKnowledgePlan, setCurrentKnowledgePlan] = useState<KnowledgePlan | null>(null);
   const [currentBlockCounts, setCurrentBlockCounts] = useState<BlockCounts>(normalizeBlockCounts(DEFAULT_VARIATION_COUNTS));
@@ -2856,6 +2865,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
     setConfirmedPlanHash(null);
     setCurrentKnowledgePlan(null);
     setCurrentBlockCounts(normalizeBlockCounts(plan.variationCounts));
+    setSessionPlanJson(null);
     setAssetReadings([]);
     setUploads((prev) => prev.filter((upload) => upload.source !== "session_attach"));
     if (message) {
@@ -2920,6 +2930,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
           variationCounts: normalizeBlockCounts(session.initial_block_counts || prev.variationCounts),
         }));
         const restoredState = normalizePlanState(session, personaSlug || plan.personaSlug);
+        setSessionPlanJson(session?.plan_json || session?.state?.plan_json || null);
         const restoredPlan = restoredState?.normalized_plan || normalizeKnowledgePlan(session.knowledge_plan, personaSlug || plan.personaSlug);
         setPlanState(restoredState);
         setConfirmedPlanHash(session.confirmed_plan_hash || null);
@@ -3100,6 +3111,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
         uploads={uploads}
         crawlerRuns={crawlerRuns}
         assetReadings={assetReadings}
+        sessionPlanJson={sessionPlanJson}
         planState={planState}
         currentKnowledgePlan={currentKnowledgePlan}
         currentBlockCounts={currentBlockCounts}
