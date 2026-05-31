@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Any, Optional
 
@@ -287,6 +288,181 @@ def _validate_patch_canonical(graph_patch: Optional[dict[str, list[dict]]]) -> l
             if viol:
                 violations.append(viol)
     return violations
+
+
+_EMPTY_GRAPH_PLAN_SECTIONS = (
+    "briefing", "campaign", "audience", "product_group", "product",
+    "offer", "copy", "faq", "rule", "asset", "gallery",
+)
+
+
+def _empty_graph_plan() -> dict[str, list[dict]]:
+    return {section: [] for section in _EMPTY_GRAPH_PLAN_SECTIONS}
+
+
+def _ga_slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-") or "node"
+
+
+def _parse_group_names(command: str) -> list[str]:
+    """Extract explicit product-group names, e.g. "grupos: Radar, Juliet e HSTN"
+    or "(Radar, Juliet, HSTN)". Never invents names (anti-hallucination)."""
+    raw = None
+    m = re.search(r"grupos?\s*[:\-]?\s*([A-Za-z0-9 ,;]+?)(?:\s+com\b|\s+por\b|[\.\n]|$)", command, re.I)
+    if m:
+        raw = m.group(1)
+    if not raw:
+        m2 = re.search(r"\(([^)]+)\)", command)
+        if m2:
+            raw = m2.group(1)
+    if not raw:
+        return []
+    parts = re.split(r",|;|\be\b", raw, flags=re.I)
+    return [p.strip() for p in parts if p.strip() and len(p.strip()) > 1 and not p.strip().isdigit()]
+
+
+def _repair_graph_plan(plan: dict[str, list[dict]]) -> tuple[dict[str, list[dict]], bool]:
+    """Real repair: reparent nodes whose parent type violates the SHARED rules to
+    the first available canonical parent. Returns (plan, changed)."""
+    slug_to_type: dict[str, str] = {}
+    by_type: dict[str, list[str]] = {}
+    for section, items in plan.items():
+        for item in items:
+            slug = str(item.get("slug") or "").strip().lower()
+            if slug:
+                slug_to_type[slug] = section
+                by_type.setdefault(section, []).append(slug)
+    changed = False
+    for section in ("product_group", "product", "offer", "copy", "faq"):
+        for item in plan.get(section, []):
+            parent = str(item.get("parent_slug") or "").strip().lower()
+            if parent in ("", "self", "persona"):
+                continue
+            ptype = slug_to_type.get(parent)
+            if ptype and graph_validation.parent_violation(section, ptype):
+                for allowed in sorted(graph_validation.canonical_parents(section)):
+                    if by_type.get(allowed):
+                        item["parent_slug"] = by_type[allowed][0]
+                        changed = True
+                        break
+    return plan, changed
+
+
+def is_graph_agent_intent(command: str) -> bool:
+    """True when a Graph command is a tree-building/decision/repair intent that
+    the shared graph agent should handle (groups, offer, rule, skip decisions,
+    repair). Single-node commands (audience/campaign/product/copy/connect) stay
+    on the legacy deterministic flow."""
+    t = (command or "").strip().lower()
+    return bool(re.search(
+        r"\bgrupos?\b|product[_ ]group|\boferta\b|\bregra\b|"
+        r"sem\s+assets?|sem\s+oferta|sem\s+regra|resolver\s+pend|consertar|\brepair\b",
+        t,
+    ))
+
+
+def graph_agent_summary(result: dict[str, Any]) -> str:
+    """Short operator-facing summary of a run_graph_agent_command result."""
+    plan = result.get("plan") or {}
+    state = result.get("state") or {}
+    parts: list[str] = []
+    for section in ("product_group", "product", "offer", "copy", "faq", "rule"):
+        n = len(plan.get(section) or [])
+        if n:
+            parts.append(f"{n} {section}")
+    skips = [k.replace("skip_", "sem ") for k in ("skip_assets", "skip_offer", "skip_rule") if state.get(k)]
+    head = "Criei: " + ", ".join(parts) if parts else "Plano atualizado"
+    if result.get("repaired"):
+        head = "Resolvi as pendencias. " + head
+    if skips:
+        head += f" (decisao: {', '.join(skips)})"
+    blocking = (result.get("validation") or {}).get("blocking") or []
+    if blocking:
+        head += f". Pendencias bloqueantes: {len(blocking)}"
+    return head
+
+
+def run_graph_agent_command(
+    *,
+    command: str,
+    persona_slug: str,
+    session_id: Optional[str] = None,
+    session_state: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Graph agent: builds/edits the graph from a command, sharing the Create
+    path's tools/taxonomy/validation. Deterministic-first (structured groups,
+    decision persistence, real repair); the LLM-tools loop is the free-form
+    fallback. Returns {plan(sections), state, validation, repaired, ok}."""
+    text = (command or "").strip().lower()
+    state = dict(session_state or (get_session_state(session_id) if session_id else {}) or {})
+    plan = _empty_graph_plan()
+    existing = state.get("graph_plan")
+    if isinstance(existing, dict):
+        for section in plan:
+            plan[section] = list(existing.get(section) or [])
+
+    def _ensure_audience() -> str:
+        if not plan["audience"]:
+            plan["audience"].append({"slug": "publico-padrao", "title": "Publico Padrao", "parent_slug": "self"})
+        return str(plan["audience"][0]["slug"])
+
+    def _ensure_product() -> str:
+        if not plan["product"]:
+            aud = _ensure_audience()
+            plan["product"].append({"slug": "produto", "title": "Produto", "parent_slug": aud})
+        return str(plan["product"][0]["slug"])
+
+    # #6/#7 — persist skip decisions in the session state.
+    if re.search(r"\bsem\s+assets?\b|pular\s+assets?|skip\s+assets?", text):
+        state["skip_assets"] = True
+    if re.search(r"\bsem\s+oferta", text):
+        state["skip_offer"] = True
+    if re.search(r"\bsem\s+regra", text):
+        state["skip_rule"] = True
+
+    # #2 — materialize product_group nodes from EXPLICIT names (never invented).
+    if re.search(r"\bgrupos?\b|product[_ ]group", text):
+        aud = _ensure_audience()
+        for name in _parse_group_names(command):
+            gslug = "grupo-" + _ga_slug(name)
+            if not any(g.get("slug") == gslug for g in plan["product_group"]):
+                plan["product_group"].append({"slug": gslug, "title": name, "parent_slug": aud})
+
+    # #4 — offer must have an exit (copy under it).
+    if re.search(r"\boferta\b", text) and not state.get("skip_offer"):
+        prod = _ensure_product()
+        if not any(o.get("slug") == "oferta" for o in plan["offer"]):
+            plan["offer"].append({"slug": "oferta", "title": "Oferta", "parent_slug": prod})
+        if not any(c.get("parent_slug") == "oferta" for c in plan["copy"]):
+            plan["copy"].append({"slug": "copy-oferta", "title": "Copy da Oferta", "parent_slug": "oferta"})
+
+    # #5 — rule connected to scope, and FAQ anchored to a commercial leaf.
+    if re.search(r"\bregra\b", text) and not state.get("skip_rule"):
+        if not plan["rule"]:
+            plan["rule"].append({"slug": "regra-comercial", "title": "Regra Comercial", "parent_slug": "self"})
+    if re.search(r"\bfaq\b", text):
+        anchor = (
+            (plan["copy"][0]["slug"] if plan["copy"] else None)
+            or (plan["product_group"][0]["slug"] if plan["product_group"] else None)
+            or _ensure_product()
+        )
+        if anchor and not any(f.get("slug") == "faq-1" for f in plan["faq"]):
+            plan["faq"].append({"slug": "faq-1", "title": "FAQ", "parent_slug": anchor})
+
+    # #8 — "resolver pendencias" runs a real repair pass.
+    repaired = False
+    if re.search(r"resolver\s+pend|corrigir|consertar|\brepair\b", text):
+        plan, repaired = _repair_graph_plan(plan)
+        repaired = True
+
+    validation = _validate_plan_json({"plan": plan})
+    state["graph_plan"] = plan
+    if session_id:
+        persisted = get_session_state(session_id) or {}
+        persisted.update(state)
+        _persist_state(session_id, persisted, persona_slug)
+
+    return {"ok": True, "plan": plan, "state": state, "validation": validation, "repaired": repaired}
 
 
 def get_or_create_plan_json(

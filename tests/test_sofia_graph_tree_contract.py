@@ -4,11 +4,12 @@
 Graph path: UI /knowledge/graph, endpoint /sofia/graph-command, service
 `sofia_orchestrator` (+ shared `services/graph_validation.py`). See SOFIA_PATHS.md.
 
-The validator-level requirements (#1 path-to-persona, #3 FAQ placement,
-#9 unified validator) are enforced now and PASS. The tree-BUILDING requirements
-(#2/#4/#5/#6/#7/#8) need the LLM-tools graph engine (Option B, em construção) and
-are marked xfail so the contract is documented and the remaining gaps are visible
-without faking green.
+All 10 requirements are enforced: validator-level (#1 path-to-persona, #3 FAQ
+placement, #9 unified validator) via services/graph_validation.py, and the
+tree-BUILDING ones (#2 materialize groups, #4 offer→copy exit, #5 rule+FAQ,
+#6/#7 persisted skip decisions, #8 real repair) via
+`sofia_orchestrator.run_graph_agent_command` (deterministic-first graph agent
+that shares the Create path's taxonomy/validation).
 
 Run: python -m pytest tests/test_sofia_graph_tree_contract.py -q
 """
@@ -85,7 +86,6 @@ def test_item9_graph_uses_shared_validation():
 
 
 # ── #2 — materialize product_group nodes/edges from text (ENGINE) ───────────
-@pytest.mark.xfail(reason=ENGINE, strict=False)
 def test_item2_materializes_product_group_from_text():
     out = orch.run_graph_agent_command(  # noqa: F821 — function exists only with the engine
         command="crie 3 grupos de produtos (Radar, Juliet, HSTN) com 3 produtos cada",
@@ -96,38 +96,57 @@ def test_item2_materializes_product_group_from_text():
 
 
 # ── #4 — offer must have an exit (copy) ─────────────────────────────────────
-@pytest.mark.xfail(reason=ENGINE, strict=False)
 def test_item4_offer_has_exit():
     out = orch.run_graph_agent_command(command="crie uma oferta para o produto X", persona_slug="vz-lupas")
     assert out["plan"].get("copy"), "offer should be followed by a copy (exit)"
 
 
 # ── #5 — rule connected to scope/FAQ ────────────────────────────────────────
-@pytest.mark.xfail(reason=ENGINE, strict=False)
 def test_item5_rule_connected_to_scope_and_faq():
     out = orch.run_graph_agent_command(command="crie uma regra comercial e uma FAQ", persona_slug="vz-lupas")
     assert out["plan"].get("rule") and out["plan"].get("faq")
 
 
 # ── #6 — asset per product OR persisted skip_assets ─────────────────────────
-@pytest.mark.xfail(reason=ENGINE, strict=False)
 def test_item6_asset_or_skip_persisted():
     out = orch.run_graph_agent_command(command="seguir sem assets", persona_slug="vz-lupas")
     assert out["state"].get("skip_assets") is True
 
 
 # ── #7 — "seguir sem oferta/regra" persists the decision ────────────────────
-@pytest.mark.xfail(reason=ENGINE, strict=False)
 def test_item7_skip_offer_rule_persisted():
     out = orch.run_graph_agent_command(command="seguir sem oferta e sem regra", persona_slug="vz-lupas")
     assert out["state"].get("skip_offer") is True and out["state"].get("skip_rule") is True
 
 
 # ── #8 — "resolver pendências" does a real repair ───────────────────────────
-@pytest.mark.xfail(reason=ENGINE, strict=False)
 def test_item8_resolver_pendencias_repairs():
     out = orch.run_graph_agent_command(command="resolver pendências", persona_slug="vz-lupas")
     assert out["repaired"] is True and not out["validation"]["blocking"]
+
+
+# ── route wiring — /sofia/graph-command uses the shared graph agent ─────────
+def test_route_graph_agent_materializes_groups(monkeypatch):
+    from types import SimpleNamespace
+    from routes import qa_contract
+
+    qa_contract.sofia_orchestrator._SESSION_MEMORY.clear()
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona",
+                        lambda _s: {"id": "11111111-1111-1111-1111-111111111111", "slug": "vz-lupas", "name": "VZ"})
+    monkeypatch.setattr(qa_contract.supabase_client, "get_personas",
+                        lambda: [{"id": "11111111-1111-1111-1111-111111111111", "slug": "vz-lupas", "name": "VZ"}])
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda *a, **k: True)
+
+    req = SimpleNamespace(state=SimpleNamespace(user={"id": "u1", "role": "admin"}))
+    body = qa_contract.SofiaGraphCommandBody(
+        persona_slug="vz-lupas",
+        command="crie 3 grupos (Radar, Juliet, HSTN)",
+        context=qa_contract.SofiaGraphCommandContext(session_id=""),
+    )
+    res = qa_contract.sofia_graph_command(body, req)
+    assert res["ok"] is True
+    assert len(res["plan_json"]["plan"]["product_group"]) == 3, res["plan_json"]["plan"]
 
 
 if __name__ == "__main__":

@@ -1162,6 +1162,55 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
             session_id=session_id,
         )
 
+    # Shared graph agent (tree-building / decisions / repair). Single-node
+    # commands fall through to the legacy deterministic flow below.
+    if sofia_orchestrator.is_graph_agent_intent(effective_command):
+        agent = sofia_orchestrator.run_graph_agent_command(
+            command=effective_command,
+            persona_slug=persona_slug,
+            session_id=session_id or None,
+            session_state=session_state,
+        )
+        val = agent.get("validation") or {}
+        plan_json = {
+            "session_id": session_id or None,
+            "persona_slug": persona_slug,
+            "plan": agent.get("plan") or {},
+            "validation": val,
+            "blocking_issues": list(val.get("blocking") or []),
+            "pending_issues": list(val.get("pending") or []),
+            "suggestions": list(val.get("suggestions") or []),
+            "graph_agent_state": agent.get("state") or {},
+        }
+        sofia_orchestrator.remember_turn(
+            session_id=session_id,
+            persona_slug=persona_slug,
+            command=effective_command,
+            operation_result={"operation": "graph_agent", "score": 1.0},
+            last_referenced_node={},
+        )
+        fresh_state = sofia_orchestrator.get_session_state(session_id)
+        return {
+            "ok": True,
+            "sofia_message": sofia_orchestrator.graph_agent_summary(agent),
+            "graph_patch": None,
+            "persisted": False,
+            "tool_calls": [],
+            "threshold": None,
+            "needs_clarification": False,
+            "validation": {
+                "canonical_chain_respected": bool(val.get("is_valid", True)),
+                "violations": val.get("blocking") or [],
+            },
+            "plan_json": plan_json,
+            "conversation_context": {
+                "session_id": session_id or None,
+                "active_persona_slug": persona_slug,
+                "memory_turns": len((fresh_state or {}).get("recent_turns") or []),
+                "last_referenced_node": (fresh_state or {}).get("last_referenced_node") or None,
+            },
+        }
+
     persona_tool = _resolve_persona_tool(
         SofiaResolvePersonaBody(persona_slug=persona_slug, command=effective_command)
     )
