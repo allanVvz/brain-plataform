@@ -1,0 +1,16 @@
+-- Set login passwords for the Supabase service roles to POSTGRES_PASSWORD.
+--
+-- The supabase/postgres image creates these roles WITHOUT a password; only the
+-- `postgres`/`supabase_admin` superusers get POSTGRES_PASSWORD from migrate.sh.
+-- PostgREST (authenticator) and Storage (supabase_storage_admin) authenticate
+-- with a password, so without this they fail with 28P01 password auth errors.
+--
+-- migrate.sh runs every init-scripts/*.sql as the (still-superuser) `postgres`
+-- role during first boot, so altering these reserved roles is allowed here.
+--
+-- Copy to 99-roles.sql (gitignored) and replace __POSTGRES_PASSWORD__ with the
+-- same value as POSTGRES_PASSWORD in .env.compose, or render it with:
+--   python infra/render_db_init.py
+ALTER ROLE authenticator            WITH LOGIN PASSWORD '__POSTGRES_PASSWORD__';
+ALTER ROLE supabase_storage_admin   WITH LOGIN PASSWORD '__POSTGRES_PASSWORD__';
+ALTER ROLE supabase_auth_admin      WITH LOGIN PASSWORD '__POSTGRES_PASSWORD__';

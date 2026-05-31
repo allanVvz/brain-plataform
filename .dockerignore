@@ -17,5 +17,16 @@ api/logs-dev-restart.err.txt
 api/logs-dev-restart.out.txt
 .env
 .env.local
+.env.compose
 dashboard/.env.local
+dashboard
+tests
+test-artifacts
+data
+tmp
+paperclip
+.agents
+.codex
+Imagens
+*.log
 

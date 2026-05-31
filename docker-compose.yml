@@ -1,0 +1,198 @@
+# Self-hosted, single-host AI Brain stack.
+#
+#   data plane (Supabase):  db -> storage -> rest -> kong  (one SUPABASE_URL)
+#   app plane:              migrate (one-shot) -> api + workers
+#
+# The dashboard (Next.js) and baita-cardapio (Vite) stay on Vercel and are NOT
+# part of this compose; they point NEXT_PUBLIC_API_URL / VITE_AI_BRAIN_API_URL
+# at the public host of the `api` service.
+#
+# Bring-up:
+#   python infra/generate_keys.py --write .env.compose   # fill JWT material
+#   docker compose up -d --build
+#
+# All variables come from .env.compose (see .env.compose.example).
+
+name: ai-brain
+
+x-supabase-url: &supabase_url ${SUPABASE_URL:-http://kong:8000}
+
+services:
+  # ── Postgres (Supabase flavor: roles, extensions, auth/storage schemas) ──
+  db:
+    image: supabase/postgres:15.8.1.060
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Sets the service-role passwords (authenticator / storage_admin / auth_admin)
+      # to POSTGRES_PASSWORD on first boot. Render with: python infra/render_db_init.py
+      - ./infra/db-init/init-scripts/99-roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ── Storage API (creates the `storage` schema, file backend on a volume) ──
+  storage:
+    image: supabase/storage-api:v1.11.13
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-52428800}
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - storage-data:/var/lib/storage
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://localhost:5000/status',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # ── PostgREST (the REST API supabase-py talks to) ───────────────────────
+  rest:
+    image: postgrest/postgrest:v12.2.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+
+  # ── Kong gateway: one SUPABASE_URL routing /rest/v1 and /storage/v1 ──────
+  kong:
+    image: kong:2.8.1
+    restart: unless-stopped
+    depends_on:
+      rest:
+        condition: service_started
+      storage:
+        condition: service_started
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_DNS_ORDER: LAST,A,CNAME
+    volumes:
+      - ./infra/kong.yml:/home/kong/kong.yml:ro
+    ports:
+      - "${KONG_PORT:-8000}:8000"
+
+  # ── One-shot: legacy bootstrap + 43 migrations applied to db ────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/migrate.Dockerfile
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: postgres
+      PGSSLMODE: disable
+      APPLY_LEGACY_BOOTSTRAP: "1"
+      APPLY_SEED: ${APPLY_SEED:-0}
+      SEED_FILE: ${SEED_FILE:-}
+
+  # ── Backend API (FastAPI/gunicorn) ──────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: ai-brain-backend:local
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kong:
+        condition: service_started
+    environment:
+      SUPABASE_URL: *supabase_url
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_SSL_VERIFY: "false"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      ALLOWED_ORIGIN_REGEX: ${ALLOWED_ORIGIN_REGEX:-}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      RUN_EMBEDDED_WORKERS: "false"
+      PORT: "8080"
+    ports:
+      - "${API_PORT:-8080}:8080"
+
+  # ── Background workers (same image, separate process) ───────────────────
+  workers:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: ai-brain-backend:local
+    restart: unless-stopped
+    command: ["python", "-m", "workers.runner", "--all"]
+    # Workers don't serve HTTP, so the image's /health probe never passes.
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kong:
+        condition: service_started
+    environment:
+      SUPABASE_URL: *supabase_url
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_SSL_VERIFY: "false"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+
+  # ── Optional: Supabase Studio for DB admin (compose --profile studio) ───
+  studio:
+    image: supabase/studio:20241202-71e5240
+    restart: unless-stopped
+    profiles: ["studio"]
+    depends_on:
+      kong:
+        condition: service_started
+    environment:
+      SUPABASE_URL: http://kong:8000
+      STUDIO_PG_META_URL: http://kong:8000/pg
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${STUDIO_PORT:-3030}:3000"
+
+volumes:
+  db-data:
+  storage-data:

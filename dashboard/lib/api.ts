@@ -1,19 +1,18 @@
-// Browser requests go through the Next.js rewrite proxy.
-import { getPublicApiUrl } from "@/utils/env";
-
-export const BASE = "/api-brain";
+// Browser requests go through the Next.js rewrite proxy (same-origin).
+// The relative prefix below is rewritten server-side to the real backend
+// (API_INTERNAL_BASE_URL) by next.config.js, so the browser never needs the
+// backend host and no secret is exposed. Override the prefix only if you mount
+// the proxy under a different path.
+export const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "/api-brain";
 export const API_URL = BASE;
-const API_ENV_ERROR = "Backend nao configurado. Defina NEXT_PUBLIC_API_URL na Vercel.";
 const API_OFFLINE_ERROR =
-  "Backend indisponivel agora. Verifique NEXT_PUBLIC_API_URL, confirme o endpoint /health e tente novamente.";
+  "Backend indisponivel agora. Confirme o backend (API_INTERNAL_BASE_URL), o endpoint /health e tente novamente.";
 
 function assertApiConfigured() {
-  if (process.env.NODE_ENV === "production") {
-    try {
-      getPublicApiUrl();
-    } catch {
-      throw new Error(API_ENV_ERROR);
-    }
+  // With the same-origin proxy the browser only needs a relative prefix, which
+  // always has a default. Guard only against an explicitly blanked prefix.
+  if (!BASE) {
+    throw new Error("Proxy base ausente. Defina NEXT_PUBLIC_API_BASE_URL (padrao /api-brain).");
   }
 }
 
