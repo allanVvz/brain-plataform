@@ -149,8 +149,17 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-production}
       RUN_EMBEDDED_WORKERS: "false"
       PORT: "8080"
+      # Obsidian vault for the Sofia/kb-intake save pipeline (must be writable).
+      VAULT_PATH: ${VAULT_PATH:-/data/vault}
+      OBSIDIAN_LOCAL_PATH: ${VAULT_PATH:-/data/vault}
+      VAULT_SOURCE_MODE: local
+      # Canonical Sofia (Janela 2): tool-driven planning + canonical validator
+      # (allows audience->product_group->product, no per-audience product cloning).
+      SOFIA_TOOLS_ENABLED: ${SOFIA_TOOLS_ENABLED:-true}
     ports:
       - "${API_PORT:-8080}:8080"
+    volumes:
+      - vault-data:/data/vault
 
   # ── Background workers (same image, separate process) ───────────────────
   workers:
@@ -175,6 +184,12 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ENVIRONMENT: ${ENVIRONMENT:-production}
+      VAULT_PATH: ${VAULT_PATH:-/data/vault}
+      OBSIDIAN_LOCAL_PATH: ${VAULT_PATH:-/data/vault}
+      VAULT_SOURCE_MODE: local
+      SOFIA_TOOLS_ENABLED: ${SOFIA_TOOLS_ENABLED:-true}
+    volumes:
+      - vault-data:/data/vault
 
   # ── Optional: Supabase Studio for DB admin (compose --profile studio) ───
   studio:
@@ -196,3 +211,4 @@ services:
 volumes:
   db-data:
   storage-data:
+  vault-data:

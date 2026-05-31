@@ -31,6 +31,10 @@ ENV PYTHONUNBUFFERED=1 \
 # Non-root runtime user.
 RUN useradd --create-home --uid 10001 appuser
 
+# Writable Obsidian vault dir for the kb-intake/Sofia save pipeline (VAULT_PATH).
+# A fresh named volume mounted here inherits this ownership on first init.
+RUN mkdir -p /data/vault && chown -R appuser:appuser /data
+
 COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app

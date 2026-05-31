@@ -206,8 +206,16 @@ def is_primary_edge_allowed(
     tgt = canonical_node_type(target_type)
     if not src or not tgt:
         return False
-    triple = (src, tgt, (relation_type or "").strip().lower())
+    rel = (relation_type or "").strip().lower()
+    triple = (src, tgt, rel)
     if triple in PRIMARY_CHAIN:
+        return True
+    # Type-only check: when the relation label is unspecified, accept any
+    # canonical (src -> tgt) pair from the primary chain regardless of label.
+    # Callers like sofia_tools._violates_hierarchy validate by node type and
+    # pass an empty relation, so without this audience->product_group and
+    # product_group->product would be wrongly rejected.
+    if not rel and any(a == src and b == tgt for a, b, _ in PRIMARY_CHAIN):
         return True
     row = get_relation(relation_type)
     if not row or row.get("edge_kind") != "primary":

@@ -133,6 +133,33 @@ Quando QUALQUER um aparecer, você responde com `<knowledge_plan>` completo na M
 NÃO RESTRINJA POR content_type INICIAL:
 O `content_type` que o operador escolheu na tela sinaliza a INTENÇÃO PRINCIPAL, não limita você a um só nó. Mas você TAMBÉM NÃO infla o plano com nodes que o operador não pediu nem o galho exige. Quando ele pede 1 produto, crie 1 produto.
 
+=== NÃO ALUCINAR PRODUTOS (REGRA FORTE) ===
+Termos amplos de campanha/posicionamento NÃO são lista de produtos. Frases como
+"óculos esportivos", "moda inverno", "linha premium", "produto feminino",
+"coleção nova" descrevem CONTEXTO (campaign/briefing/audience), NÃO produtos.
+- NUNCA materialize produtos genéricos a partir desses termos (ex.: NÃO crie 9
+  nós chamados "óculos para esportes"). Isso é alucinação.
+- Só crie `product` quando houver pelo menos UM destes sinais: nomes reais de
+  produtos fornecidos pelo operador; pedido explícito de quantidade ("crie 9
+  produtos", "3 produtos por grupo"); instrução "use estes produtos" / "extraia
+  do catálogo"; ou catálogo/fonte conectada.
+- Se faltarem esses sinais, NÃO invente. Pergunte antes, oferecendo opções, ex.:
+  "Entendi a campanha de óculos esportivos. Para montar o grafo sem inventar
+  produtos, você quer que eu: A) use produtos já cadastrados; B) crie product
+  groups por modelo/coleção; C) aguarde os nomes dos produtos?"
+
+=== PRODUCT_GROUP QUANDO O OPERADOR PEDE GRUPOS ===
+Quando o operador pedir grupos explicitamente — "crie 3 grupos de produtos",
+"associe 3 produtos para cada grupo", "crie grupos por modelo/coleção", "grupos
+Radar, Juliet e HSTN" — `product_group` é OBRIGATÓRIO e estrutural:
+- Crie cada `product_group` sob a `audience` (ou campaign/briefing/brand quando
+  não houver audience) e pendure cada `product` sob o seu `product_group`.
+  Cadeia: audience → product_group → product.
+- NUNCA jogue os produtos direto no briefing/audience quando há grupos pedidos.
+- `product_group` é OPCIONAL quando o operador NÃO pede grupos: nesse caso o
+  product pode ficar direto sob audience/campaign/briefing/brand. Não crie
+  product_group que ninguém pediu.
+
 === HIERARQUIA FRACTAL CANÔNICA (ÚNICA VÁLIDA) ===
 A árvore principal segue exatamente esta ordem. Pule apenas níveis ausentes — nunca invente node "para preencher".
 
@@ -1108,6 +1135,7 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
         if isinstance(entry, dict) and entry.get("slug")
     }
     product_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "product"]
+    product_group_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "product_group"]
     audience_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "audience"]
     faq_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "faq"]
     asset_entries = [entry for entry in entries if isinstance(entry, dict) and _entry_type(entry) == "asset"]
@@ -1137,16 +1165,20 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
             # Canonical fractal validator (Janela 2). Each child has exactly one
             # legal parent type. Persona/brand/briefing accept "self" as parent
             # which means "directly under the persona".
+            # product_group is an OPTIONAL grouping layer: when present, products
+            # hang off it; when absent, products may attach directly to
+            # audience/campaign/briefing/brand. Mirrors the business rule
+            # "product_group não é obrigatório em todo grafo".
             _canonical_parent_for = {
                 "brand":         {"persona", ""},
                 "briefing":      {"brand", ""},
-                "campaign":      {"briefing", ""},
-                "audience":      {"campaign", "briefing", ""},
-                "product_group": {"audience", ""},
-                "product":       {"product_group", ""},
+                "campaign":      {"briefing", "brand", ""},
+                "audience":      {"campaign", "briefing", "brand", ""},
+                "product_group": {"audience", "campaign", "briefing", "brand", ""},
+                "product":       {"product_group", "audience", "campaign", "briefing", "brand", ""},
                 "offer":         {"product", ""},
-                "copy":          {"offer", ""},
-                "faq":           {"copy", ""},
+                "copy":          {"offer", "product", "product_group", "campaign", "audience", ""},
+                "faq":           {"copy", "offer", "product", "product_group", ""},
                 "gallery":       {"copy", ""},
                 # Asset is lateral; any parent is allowed.
             }
@@ -1163,10 +1195,14 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
             if ctype_lower == "audience" and parent_slug and parent_type not in {"campaign", "briefing", "brand", ""}:
                 errors.append(f"entry[{idx}] audience must stay under campaign/briefing/brand, got parent {parent_slug!r}")
             if ctype_lower == "product":
-                if audience_entries and parent_type != "audience":
-                    errors.append(f"entry[{idx}] product must stay under audience when audience exists")
-                elif parent_slug and parent_type not in {"audience", "campaign", "briefing", "brand", ""}:
+                # product_group is a legal grouping layer between audience and
+                # product. When the plan declares product groups, products hang
+                # off the group (not directly off the audience).
+                allowed_product_parents = {"product_group", "audience", "campaign", "briefing", "brand", ""}
+                if parent_slug and parent_type not in allowed_product_parents:
                     errors.append(f"entry[{idx}] product has invalid parent {parent_slug!r}")
+                elif audience_entries and not product_group_entries and parent_type not in {"audience", ""}:
+                    errors.append(f"entry[{idx}] product must stay under audience when audience exists")
                 if "audience" in str(entry.get("slug") or "").lower():
                     errors.append(f"entry[{idx}] product slug must not embed audience slug")
             if ctype_lower == "offer" and parent_type != "product":
@@ -1296,8 +1332,8 @@ _DIAGNOSTIC_KIND_DESCRIPTIONS = {
     "no_path_to_persona": "Existem entradas cuja cadeia de pais nao termina na persona. Sao galhos soltos no grafo.",
     "offer_under_product": "Oferta precisa ficar diretamente abaixo de um produto. Encontramos oferta(s) com parent diferente.",
     "audience_parent": "Audience deve ficar abaixo de campaign, briefing ou brand.",
-    "product_under_audience": "Quando ha audience no plano, todo produto deve ficar abaixo dela.",
-    "product_invalid_parent": "Produto deve ficar abaixo de audience, campaign, briefing ou brand.",
+    "product_under_audience": "Quando ha audience no plano e nenhum product_group, todo produto deve ficar abaixo da audience.",
+    "product_invalid_parent": "Produto deve ficar abaixo de product_group, audience, campaign, briefing ou brand.",
     "copy_parent": "Copy deve ficar agrupada no contexto produto/publico por padrao; use oferta como parent apenas quando pedido explicitamente.",
     "faq_parent": "FAQ agrupado deve ficar abaixo de rule. Sem rule, use copy, offer ou produto como fallback.",
     "rule_parent": "Regra comercial deve ficar abaixo de campaign, briefing, brand ou persona.",
@@ -1317,8 +1353,8 @@ _DIAGNOSTIC_KIND_REPAIRS = {
     "no_path_to_persona": "Conecte o galho ate a persona reescrevendo metadata.parent_slug das entradas afetadas (a cadeia precisa chegar em persona/self).",
     "offer_under_product": "Escolha o produto correto como parent da oferta (metadata.parent_slug aponta para um slug de product).",
     "audience_parent": "Aponte o audience para campaign, briefing ou brand existente.",
-    "product_under_audience": "Coloque os produtos abaixo da audience presente no plano.",
-    "product_invalid_parent": "Reaponte os produtos para audience, campaign, briefing ou brand.",
+    "product_under_audience": "Coloque os produtos abaixo da audience (ou de um product_group sob ela).",
+    "product_invalid_parent": "Reaponte os produtos para product_group, audience, campaign, briefing ou brand.",
     "copy_parent": "Reaponte as copies para o produto/contexto comercial; use oferta como parent apenas quando o operador pedir copy por oferta.",
     "faq_parent": "Reaponte o FAQ agrupado para a rule estrutural; sem rule, use copy, offer ou produto como fallback.",
     "rule_parent": "Aponte as regras para campaign, briefing, brand ou persona.",
