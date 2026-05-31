@@ -5,6 +5,8 @@ import time
 from typing import Any, Optional
 
 from services import supabase_client
+from services import knowledge_taxonomy
+from services import graph_validation
 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.65
 PERSONA_CONFIDENT_SCORE = 0.85
@@ -174,6 +176,16 @@ def _validate_plan_json(plan_json: dict[str, Any]) -> dict[str, Any]:
     if not plan.get("rule"):
         suggestions.append({"code": "RULE_RECOMMENDED", "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."})
 
+    # Map every node slug -> its node type (the section name) so we can validate
+    # parent hierarchy by TYPE using the SHARED graph_validation rules (same as
+    # the Create path). product_group -> product is valid; product_group under
+    # product is blocked here, not via a divergent marker list.
+    slug_to_type: dict[str, str] = {}
+    for section in plan.keys():
+        for item in plan.get(section) or []:
+            if isinstance(item, dict) and item.get("slug"):
+                slug_to_type[str(item["slug"]).strip().lower()] = section
+
     for section in ("campaign", "audience", "product_group", "product", "offer", "copy", "faq"):
         for idx, item in enumerate(plan.get(section) or []):
             if not isinstance(item, dict):
@@ -185,6 +197,46 @@ def _validate_plan_json(plan_json: dict[str, Any]) -> dict[str, Any]:
                 parent = str(item.get("parent_slug") or "").strip()
                 if not parent:
                     pending.append({"code": "MISSING_PARENT", "message": f"{section}[{idx}] sem parent_slug."})
+                else:
+                    parent_type = slug_to_type.get(parent.lower())
+                    if parent_type:
+                        viol = graph_validation.parent_violation(section, parent_type)
+                        if viol:
+                            blocking.append({"code": "INVALID_PARENT", "message": f"{section}[{idx}] {viol}"})
+
+    # Item #1 — every non-top-level node must have a complete path to the persona.
+    # Walk parent_slug up: rooted when it reaches "self"/persona, a top-level type
+    # under persona, or an existing graph node (parent not declared in this plan).
+    parent_by_slug: dict[str, str] = {}
+    for section in plan.keys():
+        for item in plan.get(section) or []:
+            if isinstance(item, dict) and item.get("slug"):
+                parent_by_slug[str(item["slug"]).strip().lower()] = str(item.get("parent_slug") or "").strip().lower()
+    _persona_parent = {"self", "persona"}
+    for section in ("campaign", "audience", "product_group", "product", "offer", "copy", "faq"):
+        for idx, item in enumerate(plan.get(section) or []):
+            if not isinstance(item, dict) or not item.get("slug"):
+                continue
+            cur = str(item["slug"]).strip().lower()
+            seen: set[str] = set()
+            rooted = False
+            for _ in range(64):
+                parent = parent_by_slug.get(cur)
+                if parent in _persona_parent:
+                    rooted = True
+                    break
+                if not parent:
+                    rooted = slug_to_type.get(cur) in graph_validation.TOP_LEVEL_TYPES
+                    break
+                if parent in seen:
+                    break  # cycle — reported via markers
+                if parent not in parent_by_slug:
+                    rooted = True  # parent is an existing graph node
+                    break
+                seen.add(parent)
+                cur = parent
+            if not rooted:
+                blocking.append({"code": "NO_PATH_TO_PERSONA", "message": f"{section}[{idx}] sem caminho completo ate a persona."})
 
     blocking_markers = {
         "cycle",
@@ -208,6 +260,33 @@ def _validate_plan_json(plan_json: dict[str, Any]) -> dict[str, Any]:
         "pending": pending,
         "blocking": blocking,
     }
+
+
+def _validate_patch_canonical(graph_patch: Optional[dict[str, list[dict]]]) -> list[str]:
+    """Validate a graph_patch's primary edges against the SHARED canonical rules.
+
+    Conservative: only edges whose BOTH endpoints are new nodes in THIS patch
+    (node types known without a DB lookup) are checked, so existing-node ops are
+    never wrongly flagged. Empty list = canonical. Same rules as the Create path.
+    """
+    if not isinstance(graph_patch, dict):
+        return []
+    type_by_ref: dict[str, str] = {}
+    for node in graph_patch.get("nodes_upsert") or []:
+        slug = str(node.get("slug") or "").strip().lower()
+        if slug:
+            type_by_ref[f"slug:{slug}"] = str(node.get("node_type") or "")
+    violations: list[str] = []
+    for edge in graph_patch.get("edges_upsert") or []:
+        if (edge.get("metadata") or {}).get("primary_tree") is not True:
+            continue
+        src_t = type_by_ref.get(str(edge.get("source_ref") or "").strip())
+        tgt_t = type_by_ref.get(str(edge.get("target_ref") or "").strip())
+        if src_t and tgt_t:
+            viol = graph_validation.edge_violation(src_t, tgt_t, str(edge.get("relation_type") or ""))
+            if viol:
+                violations.append(viol)
+    return violations
 
 
 def get_or_create_plan_json(
@@ -692,6 +771,26 @@ def plan_graph_command(
             "score": 1.0,
         }
     )
+
+    # Real canonical-chain validation (was a stub) — shared rules with Create.
+    canonical_violations = _validate_patch_canonical(graph_patch)
+    for call in tool_calls:
+        if call.get("name") == "validate-canonical-chain":
+            call["result"] = {
+                "canonical_chain_respected": not canonical_violations,
+                "violations": canonical_violations,
+            }
+            call["score"] = 1.0 if not canonical_violations else 0.0
+    if canonical_violations:
+        return {
+            "ok": True,
+            "persisted": False,
+            "sofia_message": "Patch viola a hierarquia canonica: " + "; ".join(canonical_violations[:3]),
+            "graph_patch": None,
+            "tool_calls": tool_calls,
+            "threshold": threshold,
+            "needs_clarification": True,
+        }
 
     return {
         "ok": True,

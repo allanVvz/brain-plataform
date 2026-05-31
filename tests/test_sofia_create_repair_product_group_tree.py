@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Repair regression: an old tree corrected into product groups must stay grouped.
+"""[PATH: CREATE] Repair: an old tree corrected into product groups stays grouped.
+
+Create path: UI /knowledge/capture, /kb-intake/*, normalize_validate_summarize_plan.
+See tests/SOFIA_PATHS.md.
 
 Scenario (the user's): products were created, then the operator corrects the
 request asking for 3 groups (Radar / Juliet / HSTN) with 3 products each. The

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Regression: Sofia plan validator must accept the product_group grouping layer.
+"""[PATH: CREATE] Sofia Create plan validator must accept the product_group layer.
+
+Create path: UI /knowledge/capture, endpoint /kb-intake/*, validator
+`validate_sofia_knowledge_plan` (shared rules in services/graph_validation.py).
+See tests/SOFIA_PATHS.md.
 
 Bug: with SOFIA_TOOLS_ENABLED off, the legacy branch of
 `validate_sofia_knowledge_plan` rejected `product_group -> product` and forced

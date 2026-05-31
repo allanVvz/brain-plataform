@@ -17,6 +17,7 @@ from typing import Any, Optional
 from services import supabase_client
 from services import knowledge_graph
 from services import knowledge_lifecycle
+from services import graph_validation
 from services.catalog_crawler import crawl_catalog_url
 from services.vault_sync import run_sync, VAULT_PATH, ensure_persona_vault_structure, persona_folder_name
 from services.model_router import AVAILABLE_MODELS as ROUTER_MODELS
@@ -1162,43 +1163,23 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
         if ctype_lower in {"tag", "knowledge_item", "kb_entry", "mention"}:
             errors.append(f"entry[{idx}] {ctype_lower} cannot be a primary tree card")
         if _sofia_tools_enabled():
-            # Canonical fractal validator (Janela 2). Each child has exactly one
-            # legal parent type. Persona/brand/briefing accept "self" as parent
-            # which means "directly under the persona".
-            # product_group is an OPTIONAL grouping layer: when present, products
-            # hang off it; when absent, products may attach directly to
-            # audience/campaign/briefing/brand. Mirrors the business rule
-            # "product_group não é obrigatório em todo grafo".
-            _canonical_parent_for = {
-                "brand":         {"persona", ""},
-                "briefing":      {"brand", ""},
-                "campaign":      {"briefing", "brand", ""},
-                "audience":      {"campaign", "briefing", "brand", ""},
-                "product_group": {"audience", "campaign", "briefing", "brand", ""},
-                "product":       {"product_group", "audience", "campaign", "briefing", "brand", ""},
-                "offer":         {"product", ""},
-                "copy":          {"offer", "product", "product_group", "campaign", "audience", ""},
-                "faq":           {"copy", "offer", "product", "product_group", ""},
-                "gallery":       {"copy", ""},
-                # Asset is lateral; any parent is allowed.
-            }
-            if ctype_lower in _canonical_parent_for and parent_slug not in ("self", None, ""):
-                allowed_parents = _canonical_parent_for[ctype_lower]
-                if parent_type not in allowed_parents:
-                    errors.append(
-                        f"entry[{idx}] {ctype_lower} parent must be one of "
-                        f"{sorted(allowed_parents) or ['persona']} "
-                        f"(got {parent_type or '?'} via slug {parent_slug!r})"
-                    )
+            # Canonical validator — parent rules sourced from the SHARED
+            # graph_validation module so the Create and Graph paths can never
+            # diverge. product_group is an OPTIONAL layer; product may hang off a
+            # group OR directly off audience/campaign/briefing/brand.
+            if parent_slug not in ("self", None, "") and ctype_lower in graph_validation.CANONICAL_PARENTS:
+                violation = graph_validation.parent_violation(ctype_lower, parent_type)
+                if violation:
+                    errors.append(f"entry[{idx}] {violation} (via slug {parent_slug!r})")
         else:
             # Legacy validator preserved for non-canonical callers.
             if ctype_lower == "audience" and parent_slug and parent_type not in {"campaign", "briefing", "brand", ""}:
                 errors.append(f"entry[{idx}] audience must stay under campaign/briefing/brand, got parent {parent_slug!r}")
             if ctype_lower == "product":
                 # product_group is a legal grouping layer between audience and
-                # product. When the plan declares product groups, products hang
-                # off the group (not directly off the audience).
-                allowed_product_parents = {"product_group", "audience", "campaign", "briefing", "brand", ""}
+                # product. Allowed parents come from the SHARED graph_validation
+                # module (same rule the Graph path uses).
+                allowed_product_parents = graph_validation.canonical_parents("product") | {""}
                 if parent_slug and parent_type not in allowed_product_parents:
                     errors.append(f"entry[{idx}] product has invalid parent {parent_slug!r}")
                 elif audience_entries and not product_group_entries and parent_type not in {"audience", ""}:
