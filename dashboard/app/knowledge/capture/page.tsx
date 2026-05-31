@@ -2599,7 +2599,7 @@ function CaptureSidebar({
   const planJsonCounts = planJsonPlan
     ? normalizeBlockCounts(Object.fromEntries(Object.keys(initialCounts).map((key) => [key, Array.isArray(planJsonPlan[key]) ? planJsonPlan[key].length : 0])))
     : null;
-  const blockingViolations = Array.isArray(sessionPlanJson?.validation?.errors)
+  const blockingViolations: string[] = Array.isArray(sessionPlanJson?.validation?.errors)
     ? sessionPlanJson.validation.errors.map((item: any) => repairText(String(item || "")))
     : (planState?.validation?.blocking_violations || []);
   const liveCounts = planState
