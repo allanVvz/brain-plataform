@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from schemas.graph_json_v2 import GraphJson
-from services import graph_json_v2_store, graph_json_v2_validator
+from services import graph_json_importer, graph_json_v2_store, graph_json_v2_validator
 from services import auth_service, supabase_client
 
 router = APIRouter(prefix="/graph-documents", tags=["graph-documents"])
@@ -25,6 +25,14 @@ class ApplyPatchBody(BaseModel):
     persona_slug: str = Field(..., min_length=1)
     graph_json: dict
     source: str = "apply_patch"
+    note: Optional[str] = None
+
+
+class ImportGraphDocumentBody(BaseModel):
+    persona_slug: str = Field(..., min_length=1)
+    graph_json: dict
+    source: str = "graph_documents.import_json"
+    session_id: Optional[str] = None
     note: Optional[str] = None
 
 
@@ -188,6 +196,36 @@ def graph_document_apply_patch(body: ApplyPatchBody, request: Request):
         "version": next_version,
         "checksum": checksum,
         "source": body.source,
+        "note": body.note,
+    }
+
+
+@router.post("/import-json")
+def graph_document_import_json(body: ImportGraphDocumentBody, request: Request):
+    auth_service.current_user(request)
+    graph = _validate_graph_json_or_422(body.graph_json)
+    if graph.persona_slug != body.persona_slug:
+        raise HTTPException(
+            422,
+            {
+                "code": "GRAPH_PERSONA_MISMATCH",
+                "errors": [f"body persona_slug={body.persona_slug} differs from graph_json persona_slug={graph.persona_slug}"],
+            },
+        )
+    result = graph_json_importer.import_graph_json(
+        graph_json=graph,
+        source=body.source,
+        session_id=body.session_id,
+    )
+    if result.get("ok") is False:
+        raise HTTPException(422, result)
+    current = graph_json_v2_store.load_current(body.persona_slug)
+    next_version = 1 if not current else current[0] + 1
+    checksum = graph_json_v2_store.save_version(body.persona_slug, next_version, graph)
+    return {
+        **result,
+        "version": next_version,
+        "checksum": checksum,
         "note": body.note,
     }
 

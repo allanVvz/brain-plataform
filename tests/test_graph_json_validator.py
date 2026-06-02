@@ -32,8 +32,23 @@ def _valid_graph() -> GraphJson:
                 {"id": "n5", "node_type": "audience", "slug": "aud", "label": "Aud", "parent_id": "n4"},
                 {"id": "n6", "node_type": "product_group", "slug": "grp", "label": "Group", "parent_id": "n5"},
                 {"id": "n7", "node_type": "product", "slug": "prod", "label": "Prod", "parent_id": "n6"},
-                {"id": "n8", "node_type": "faq", "slug": "faq", "label": "FAQ", "parent_id": "n7"},
-                {"id": "n9", "node_type": "embedded", "slug": "emb", "label": "Emb", "parent_id": "n8"},
+                {"id": "n8", "node_type": "copy", "slug": "copy", "label": "Copy", "parent_id": "n7"},
+                {
+                    "id": "n9",
+                    "node_type": "faq",
+                    "slug": "faq",
+                    "label": "FAQ",
+                    "parent_id": "n8",
+                    "data": {
+                        "markdown_document": True,
+                        "markdown": "### 1. Pergunta?\nResposta: Sim.",
+                        "question_count": 1,
+                        "validation_status": "pending_validation",
+                        "branch_path": ["n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9"],
+                        "source_node_id": "n8",
+                        "source_node_type": "copy",
+                    },
+                },
             ],
             "edges": [
                 {"id": "e1", "source": "n1", "target": "n2", "relation": "main"},
@@ -58,10 +73,13 @@ def test_validate_graph_json_accepts_valid_graph():
 
 def test_validate_graph_json_accepts_product_group_faq_when_product_absent():
     payload = _valid_graph().model_dump()
-    payload["nodes"] = [node for node in payload["nodes"] if node["id"] not in {"n7", "n9"}]
+    payload["nodes"] = [node for node in payload["nodes"] if node["id"] not in {"n7", "n8"}]
     for node in payload["nodes"]:
-        if node["id"] == "n8":
+        if node["id"] == "n9":
             node["parent_id"] = "n6"
+            node["data"]["branch_path"] = ["n1", "n2", "n3", "n4", "n5", "n6", "n9"]
+            node["data"]["source_node_id"] = "n6"
+            node["data"]["source_node_type"] = "product_group"
             break
     payload["edges"] = [
         {"id": "e1", "source": "n1", "target": "n2", "relation": "main"},
@@ -69,9 +87,30 @@ def test_validate_graph_json_accepts_product_group_faq_when_product_absent():
         {"id": "e3", "source": "n3", "target": "n4", "relation": "main"},
         {"id": "e4", "source": "n4", "target": "n5", "relation": "main"},
         {"id": "e5", "source": "n5", "target": "n6", "relation": "main"},
-        {"id": "e6", "source": "n6", "target": "n8", "relation": "main"},
+        {"id": "e6", "source": "n6", "target": "n9", "relation": "main"},
     ]
     graph = GraphJson.model_validate(payload)
+    is_valid, errors = validate_graph_json(graph)
+    assert is_valid is True
+    assert errors == []
+
+
+def test_validate_graph_json_accepts_campaign_briefing_before_audience():
+    graph = _valid_graph()
+    # Current business rule allows Campaign -> Briefing -> Audience.
+    for node in graph.nodes:
+        if node.id == "n3":
+            node.parent_id = "n4"
+        if node.id == "n4":
+            node.parent_id = "n2"
+        if node.id == "n5":
+            node.parent_id = "n3"
+    graph.edges[1].source = "n2"
+    graph.edges[1].target = "n4"
+    graph.edges[2].source = "n4"
+    graph.edges[2].target = "n3"
+    graph.edges[3].source = "n3"
+    graph.edges[3].target = "n5"
     is_valid, errors = validate_graph_json(graph)
     assert is_valid is True
     assert errors == []
@@ -93,13 +132,28 @@ def test_validate_graph_json_rejects_persona_ownership_mismatch():
     assert any("persona ownership mismatch" in err for err in errors)
 
 
-def test_validate_graph_json_rejects_canonical_chain_break():
+def test_validate_graph_json_accepts_product_directly_under_audience():
     graph = _valid_graph()
-    # FAQ must hang from product; attach to audience to violate canonical chain.
+    # Product Group is optional; product may hang directly from audience.
     for node in graph.nodes:
-        if node.id == "n8":
+        if node.id == "n7":
             node.parent_id = "n5"
             break
+    graph.edges[5].source = "n5"
+    graph.edges[5].target = "n7"
+    is_valid, errors = validate_graph_json(graph)
+    assert is_valid is True
+    assert errors == []
+
+
+def test_validate_graph_json_rejects_product_directly_under_campaign():
+    graph = _valid_graph()
+    for node in graph.nodes:
+        if node.id == "n7":
+            node.parent_id = "n4"
+            break
+    graph.edges[5].source = "n4"
+    graph.edges[5].target = "n7"
     is_valid, errors = validate_graph_json(graph)
     assert is_valid is False
     assert any("expected one of" in err for err in errors)
@@ -126,11 +180,25 @@ def test_validate_graph_json_rejects_missing_edge_integrity():
 
 def test_validate_graph_json_rejects_faq_before_embed_violation():
     graph = _valid_graph()
-    # embedded must hang from faq, not directly from product.
-    for node in graph.nodes:
-        if node.id == "n9":
-            node.parent_id = "n7"
-            break
+    graph.nodes.append(
+        type(graph.nodes[0]).model_validate(
+            {"id": "n10", "node_type": "embedded", "slug": "emb", "label": "Emb", "parent_id": "n7"}
+        )
+    )
+    graph.edges.append(type(graph.edges[0]).model_validate({"id": "e9", "source": "n7", "target": "n10", "relation": "main"}))
     is_valid, errors = validate_graph_json(graph)
     assert is_valid is False
     assert any("expected one of" in err for err in errors)
+
+
+def test_validate_graph_json_rejects_pending_faq_to_embedded():
+    graph = _valid_graph()
+    graph.nodes.append(
+        type(graph.nodes[0]).model_validate(
+            {"id": "n10", "node_type": "embedded", "slug": "emb", "label": "Emb", "parent_id": "n9"}
+        )
+    )
+    graph.edges.append(type(graph.edges[0]).model_validate({"id": "e9", "source": "n9", "target": "n10", "relation": "main"}))
+    is_valid, errors = validate_graph_json(graph)
+    assert is_valid is False
+    assert any("pending FAQ cannot connect to embedded" in err for err in errors)

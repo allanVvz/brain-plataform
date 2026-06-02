@@ -112,6 +112,51 @@ def test_publish_success_and_validation_error(monkeypatch):
     assert exc.value.status_code == 422
 
 
+def test_import_json_success_and_validation_error(monkeypatch):
+    calls = []
+    monkeypatch.setattr(graph_documents.auth_service, "current_user", lambda request: {"id": "u1"})
+    monkeypatch.setattr(graph_documents.graph_json_v2_store, "load_current", lambda persona_slug: None)
+    monkeypatch.setattr(graph_documents.graph_json_v2_store, "save_version", lambda persona_slug, version, graph: "imp123")
+    monkeypatch.setattr(
+        graph_documents.graph_json_importer,
+        "import_graph_json",
+        lambda **kwargs: calls.append(kwargs) or {
+            "ok": True,
+            "graph_id": kwargs["graph_json"].graph_id,
+            "nodes_imported": len(kwargs["graph_json"].nodes),
+            "edges_imported": len(kwargs["graph_json"].edges),
+            "knowledge_item_ids": [],
+            "knowledge_node_ids": [],
+            "knowledge_edge_ids": [],
+            "written_files": [],
+        },
+    )
+
+    ok = graph_documents.graph_document_import_json(
+        graph_documents.ImportGraphDocumentBody(
+            persona_slug="allanvvz",
+            graph_json=_graph_json(),
+            source="test",
+            session_id="sess-1",
+        ),
+        _req(),
+    )
+    assert ok["ok"] is True
+    assert ok["version"] == 1
+    assert ok["checksum"] == "imp123"
+    assert calls[0]["source"] == "test"
+    assert calls[0]["session_id"] == "sess-1"
+
+    bad = _graph_json()
+    bad["nodes"][1]["parent_id"] = None
+    with pytest.raises(HTTPException) as exc:
+        graph_documents.graph_document_import_json(
+            graph_documents.ImportGraphDocumentBody(persona_slug="allanvvz", graph_json=bad),
+            _req(),
+        )
+    assert exc.value.status_code == 422
+
+
 def test_rollback_success_and_not_found(monkeypatch):
     monkeypatch.setattr(graph_documents.auth_service, "current_user", lambda request: {"id": "u1"})
     graph_obj = graph_documents.GraphJson.model_validate(_graph_json())

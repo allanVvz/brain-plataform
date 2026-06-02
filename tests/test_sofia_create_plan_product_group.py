@@ -132,8 +132,8 @@ def test_grouped_products_valid_canonical() -> None:
     _assert_no_product_parent_violations(violations, "canonical mode")
 
 
-def test_product_directly_under_audience_still_valid() -> None:
-    """No product_group in the plan -> product may hang directly off audience."""
+def test_product_directly_under_audience_is_valid() -> None:
+    """Product Group is optional; product may sit directly under audience."""
     entries = [
         _entry("briefing", "briefing-vz", "self"),
         _entry("campaign", "campaign-esportivos", "briefing-vz"),
@@ -153,7 +153,8 @@ def test_product_directly_under_audience_still_valid() -> None:
     }
     with sofia_tools(False):
         violations = svc.validate_sofia_knowledge_plan(plan, _neutral_session())
-    _assert_no_product_parent_violations(violations, "no-group fallback")
+    offending = [v for v in violations if "product" in v and "parent" in v]
+    expect(not offending, f"product directly under audience is accepted (got {violations})")
 
 
 def test_product_group_under_product_is_invalid_canonical() -> None:
@@ -186,7 +187,7 @@ def test_product_group_under_product_is_invalid_canonical() -> None:
 def main() -> int:
     test_grouped_products_valid_legacy()
     test_grouped_products_valid_canonical()
-    test_product_directly_under_audience_still_valid()
+    test_product_directly_under_audience_is_valid()
     test_product_group_under_product_is_invalid_canonical()
     print("PASS test_sofia_plan_product_group")
     return 0

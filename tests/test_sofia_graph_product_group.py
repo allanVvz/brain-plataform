@@ -7,7 +7,7 @@ the shared `services/graph_validation.py` (same rules as the Create path),
 instead of the old divergent stub. See tests/SOFIA_PATHS.md.
 
 Covers:
-  * shared rules: product_group -> product valid; product_group under product invalid
+  * shared rules: audience -> product and product_group -> product valid; product_group under product invalid
   * _validate_plan_json blocks product_group-under-product, accepts the chain
   * _validate_patch_canonical (was a stub) blocks an inverted patch
   * anti-hallucination signal shared by both paths
@@ -35,7 +35,7 @@ def test_shared_rules_product_group() -> None:
     expect(gv.parent_violation("product", "product_group") is None,
            "product under product_group is valid")
     expect(gv.parent_violation("product", "audience") is None,
-           "product directly under audience is valid (group optional)")
+           "product directly under audience is valid")
     expect(gv.parent_violation("product_group", "audience") is None,
            "product_group under audience is valid")
     expect(gv.parent_violation("product_group", "product") is not None,

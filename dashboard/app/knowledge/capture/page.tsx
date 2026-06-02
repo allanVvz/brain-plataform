@@ -35,10 +35,11 @@ const MODELS = [
 const TYPE_OPTIONS = [
   { value: "brand", label: "Brand / Identidade" },
   { value: "briefing", label: "Briefing" },
+  { value: "product_group", label: "Grupo de Produtos" },
   { value: "product", label: "Produto" },
   { value: "campaign", label: "Campanha" },
   { value: "copy", label: "Copy / Texto" },
-  { value: "faq", label: "FAQ / Golden Dataset" },
+  { value: "faq", label: "FAQ / Atendimento" },
   { value: "tone", label: "Tom de Voz" },
   { value: "rule", label: "Regra / Padrao" },
   { value: "asset", label: "Asset Visual" },
@@ -46,7 +47,7 @@ const TYPE_OPTIONS = [
 ];
 
 const DEFAULT_OBJECTIVE =
-  "Criar conhecimento de marketing em grafo a partir da fonte informada, com briefing, publico, produto, copy e FAQ.";
+  "Criar conhecimento de marketing em grafo a partir da fonte informada, com cards conectados top-down apos confirmacao.";
 
 const DEFAULT_SOURCE = "";
 
@@ -55,17 +56,18 @@ const KNOWLEDGE_BLOCKS = [
   { id: "briefing", label: "Briefing", description: "Contexto bruto, objetivo, fonte e restricoes da captura." },
   { id: "campaign", label: "Campanha", description: "Colecoes, lancamentos, sazonalidade e angulos comerciais." },
   { id: "audience", label: "Publico", description: "Segmentos, dores, desejos, linguagem e objecoes." },
+  { id: "product_group", label: "Grupo de produtos", description: "Agrupador opcional: quando existe, produtos ficam dentro dele." },
   { id: "product", label: "Produto", description: "Itens, beneficios, precos, disponibilidade e atributos." },
-  { id: "offer", label: "Oferta", description: "Preco, quantidade, pacote, plano ou variacao comercial." },
+  { id: "offer", label: "Oferta", description: "Condicao comercial opcional; nao e camada obrigatoria do galho." },
   { id: "entity", label: "Entidades", description: "Cores, materiais, categorias, variantes e termos relacionados." },
-  { id: "copy", label: "Copy", description: "Textos comerciais por canal, publico, etapa e oferta." },
-  { id: "faq", label: "FAQ", description: "Perguntas e respostas recuperaveis pelo Golden Dataset." },
-  { id: "rule", label: "Regras", description: "Politicas comerciais, limites, validacoes e padroes operacionais." },
+  { id: "copy", label: "Copy", description: "Card opcional que adiciona contexto comercial a produto ou grupo." },
+  { id: "faq", label: "FAQ", description: "Perguntas e respostas de atendimento ligadas ao card mais especifico." },
+  { id: "rule", label: "Regras", description: "Card opcional de politica, limite ou padrao operacional." },
   { id: "tone", label: "Tom de voz", description: "Estilo, delicadeza, vocabulario e restricoes de linguagem." },
   { id: "asset", label: "Assets", description: "Imagens, referencias visuais, criativos e materiais de apoio." },
 ];
 
-const DEFAULT_SELECTED_BLOCKS = ["briefing", "audience", "product", "copy", "faq"];
+const DEFAULT_SELECTED_BLOCKS = ["briefing", "audience", "product"];
 
 interface Message {
   role: "user" | "assistant" | "system";
@@ -208,10 +210,11 @@ interface PlanState {
     }>;
   };
   plan_hash: string;
+  graph_json?: Record<string, any> | null;
   diagnostic?: PlanDiagnostic | null;
 }
 
-const COUNTED_BLOCK_IDS = ["brand", "briefing", "campaign", "audience", "product", "offer", "copy", "faq", "rule", "tone", "asset"];
+const COUNTED_BLOCK_IDS = ["brand", "briefing", "campaign", "audience", "product_group", "product", "offer", "copy", "faq", "rule", "tone", "asset"];
 const SIDEBAR_TREE_BLOCKS = [
   { id: "persona", label: "Persona", description: "Raiz da sessao CRIAR." },
   ...KNOWLEDGE_BLOCKS,
@@ -248,7 +251,7 @@ function planEntriesOfType(plan: KnowledgePlan | null | undefined, type: string)
 function buildExpansionSummary(plan: KnowledgePlan | null | undefined) {
   const counts = countBlocksByType(plan?.entries || []);
   const parentTypeFor = (blockId: "faq" | "asset") => {
-    if (blockId === "faq") return plan?.faq_parent_type || (counts.rule ? "rule" : counts.copy ? "copy" : counts.offer ? "offer" : "product");
+    if (blockId === "faq") return plan?.faq_parent_type || (counts.copy ? "copy" : counts.product ? "product" : counts.product_group ? "product_group" : "audience");
     return plan?.asset_parent_type || "product";
   };
   const parentCountFor = (blockId: "faq" | "asset") => planEntriesOfType(plan, parentTypeFor(blockId)).length;
@@ -291,6 +294,12 @@ function normalizeContentTypeAlias(value: any) {
     regras: "rule",
     rules: "rule",
     regra: "rule",
+    grupo: "product_group",
+    grupos: "product_group",
+    productgroup: "product_group",
+    product_group: "product_group",
+    product_collection: "product_group",
+    category: "product_group",
     ofertas: "offer",
     oferta: "offer",
     offers: "offer",
@@ -317,19 +326,56 @@ function labelForBlockId(blockId: string) {
   return SIDEBAR_TREE_BLOCKS.find((block) => block.id === blockId)?.label || blockId;
 }
 
+function buildOperatorEdgeTranslations(plan: KnowledgePlan): string[] {
+  const entries = plan.entries || [];
+  const bySlug = new Map(entries.filter((entry) => entry.slug).map((entry) => [entry.slug, entry]));
+  const lines: string[] = [];
+  const relationFor = (entry: KnowledgePlanEntry, parent: KnowledgePlanEntry) => {
+    const childType = normalizeContentTypeAlias(entry.content_type);
+    const parentType = normalizeContentTypeAlias(parent.content_type);
+    const childTitle = repairText(entry.title || entry.slug);
+    const parentTitle = repairText(parent.title || parent.slug);
+    if (parentType === "product_group" && childType === "product") {
+      return `Esse produto "${childTitle}" deve ficar dentro do grupo de produtos "${parentTitle}".`;
+    }
+    if (childType === "product_group") {
+      return `Esse grupo de produtos "${childTitle}" fica dentro de "${parentTitle}".`;
+    }
+    if (childType === "copy") {
+      return `Essa copy "${childTitle}" adiciona contexto para "${parentTitle}".`;
+    }
+    if (childType === "faq") {
+      return `Essa FAQ "${childTitle}" responde sobre "${parentTitle}".`;
+    }
+    if (childType === "rule") {
+      return `Essa regra "${childTitle}" limita ou orienta "${parentTitle}".`;
+    }
+    return `"${childTitle}" fica dentro de "${parentTitle}".`;
+  };
+  for (const entry of entries) {
+    const parentSlug = normalizeParentSlug(parentSlugOf(entry), plan.persona_slug);
+    if (!parentSlug || parentSlug === "self") continue;
+    const parent = bySlug.get(parentSlug);
+    if (!parent) continue;
+    lines.push(relationFor(entry, parent));
+  }
+  return lines.slice(0, 12);
+}
+
 function createManualDraftEntry(blockId: string, index: number, personaSlug: string, currentPlan: KnowledgePlan | null): KnowledgePlanEntry {
   const title = `${labelForBlockId(blockId)} ${index}`;
   const slug = `${slugifyPlanValue(blockId)}-manual-${Date.now().toString(36)}-${index}`;
   const entries = currentPlan?.entries || [];
   const latestOf = (type: string) => [...entries].reverse().find((entry) => entry.content_type === type)?.slug;
   const parentByType: Record<string, string | undefined> = {
-    briefing: "self",
-    campaign: latestOf("briefing"),
-    audience: latestOf("campaign") || latestOf("briefing"),
-    product: latestOf("audience"),
+    briefing: latestOf("brand") || "self",
+    campaign: latestOf("briefing") || latestOf("brand"),
+    audience: latestOf("campaign") || latestOf("briefing") || latestOf("brand"),
+    product_group: latestOf("audience") || latestOf("campaign") || latestOf("briefing"),
+    product: latestOf("product_group") || latestOf("audience"),
     offer: latestOf("product"),
-    copy: latestOf("offer") || latestOf("product"),
-    faq: latestOf("copy") || latestOf("product"),
+    copy: latestOf("product") || latestOf("product_group"),
+    faq: latestOf("copy") || latestOf("product") || latestOf("product_group"),
     rule: latestOf("campaign") || latestOf("briefing") || latestOf("brand"),
     tone: latestOf("brand") || latestOf("briefing"),
     asset: latestOf("product") || latestOf("brand"),
@@ -391,6 +437,16 @@ function isKbIntakeSessionNotFound(error: unknown): boolean {
 function formatSaveError(body: Record<string, unknown> | null | undefined): string {
   if (!body) return "Erro ao salvar.";
   const error = (body.error as string) || (body.detail as string) || "Erro ao salvar.";
+  const graphValidation = body.graph_json_validation as { blocking?: string[]; questions?: string[] } | undefined;
+  if (body.requires_sofia_intervention && graphValidation) {
+    const blocking = Array.isArray(graphValidation.blocking) ? graphValidation.blocking : [];
+    const questions = Array.isArray(graphValidation.questions) ? graphValidation.questions : [];
+    return [
+      `Sofia precisa corrigir o JSON do grafo antes de salvar: ${error}`,
+      ...blocking.map((item) => `- ${item}`),
+      ...questions.map((item) => `? ${item}`),
+    ].join("\n");
+  }
   const violations = body.violations as string[] | undefined;
   if (Array.isArray(violations) && violations.length > 0) {
     return `Erro: ${error}\n- ${violations.join("\n- ")}`;
@@ -432,7 +488,7 @@ function ensureSofiaOptionPrompt(question: SofiaQuestion, option: SofiaQuestionO
       prompt = `Ajuste faq_count_per_parent para ${typeof newTarget === "number" ? newTarget : 1} no normalized_plan e mantenha os FAQs ja gerados.`;
       break;
     case "drop_faq_target":
-      prompt = "Remova a exigencia do Golden Dataset de FAQ: faq_count_policy=total. Mantenha os FAQs ja criados.";
+      prompt = "Remova a exigencia de FAQ deste plano: faq_count_policy=total. Mantenha os FAQs ja criados.";
       break;
     case "create_offer":
       prompt = `Crie uma oferta abaixo do produto ${productSlug || "principal"} com title/content concretos e parent_slug=${productSlug || "<produto principal>"}.`;
@@ -556,7 +612,7 @@ function normalizeKnowledgePlan(plan: any, personaSlug: string): KnowledgePlan |
     tree_mode: String(plan.tree_mode || "pyramidal"),
     branch_policy: String(plan.branch_policy || "top_down_pyramidal"),
     faq_count_policy: String(plan.faq_count_policy || "grouped"),
-    faq_parent_type: String(plan.faq_parent_type || "rule"),
+    faq_parent_type: String(plan.faq_parent_type || "copy"),
     faq_count_per_parent: Number(plan.faq_count_per_parent ?? 1),
     asset_count_policy: String(plan.asset_count_policy || "per_parent"),
     asset_parent_type: String(plan.asset_parent_type || "product"),
@@ -615,6 +671,7 @@ function normalizePlanState(raw: any, personaSlug: string): PlanState | null {
   if (!normalizedPlan) return null;
   const summary = source.summary || raw?.plan_summary || {};
   const validation = source.validation || raw?.plan_validation || {};
+  const normalizedCounts = countBlocksByType(normalizedPlan.entries);
   return {
     normalized_plan: normalizedPlan,
     validation: {
@@ -623,9 +680,9 @@ function normalizePlanState(raw: any, personaSlug: string): PlanState | null {
       warnings: Array.isArray(validation.warnings) ? validation.warnings.map((item: any) => String(item)) : [],
     },
     summary: {
-      entry_count: Number(summary.entry_count ?? normalizedPlan.entries.length),
-      current_block_counts: normalizeBlockCounts(summary.current_block_counts || raw?.current_block_counts || countBlocksByType(normalizedPlan.entries)),
-      link_count: Number(summary.link_count ?? normalizedPlan.links.length),
+      entry_count: Number(normalizedPlan.entries.length),
+      current_block_counts: normalizeBlockCounts(normalizedCounts),
+      link_count: Number(Array.isArray(normalizedPlan.links) ? normalizedPlan.links.length : 0),
       tree_mode: String(summary.tree_mode || (normalizedPlan as any).tree_mode || "pyramidal"),
       branch_policy: String(summary.branch_policy || (normalizedPlan as any).branch_policy || "top_down_pyramidal"),
       faq_count_policy: String(summary.faq_count_policy || (normalizedPlan as any).faq_count_policy || "grouped"),
@@ -707,13 +764,13 @@ function planStateCountsMatch(planState: PlanState | null) {
 }
 
 function summarizePlanStateForChat(planState: PlanState): string {
-  const counts = normalizeBlockCounts(planState.summary.current_block_counts);
+  const counts = normalizeBlockCounts(countBlocksByType(planState.normalized_plan.entries));
   const lines = [
     planState.summary.entry_count > 0 ? "Status: plano gerado" : "Status: bloqueado",
     planState.summary.entry_count > 0
-      ? `Resumo: briefing ${counts.briefing || 0}, publico ${counts.audience || 0}, produto ${counts.product || 0}, oferta ${counts.offer || 0}, copy ${counts.copy || 0}, FAQ ${counts.faq || 0}, asset ${counts.asset || 0}, regra ${counts.rule || 0}.`
+      ? `Resumo: briefing ${counts.briefing || 0}, publico ${counts.audience || 0}, grupo ${counts.product_group || 0}, produto ${counts.product || 0}, copy ${counts.copy || 0}, FAQ ${counts.faq || 0}, asset ${counts.asset || 0}, regra ${counts.rule || 0}.`
       : "Motivo: Estrutura ainda nao gerada.",
-    `Politica: arvore piramidal; FAQ agrupado por ${planState.summary.faq_parent_type || "rule"}; Asset por parent.`,
+    `Politica: arvore top-down; cards opcionais adicionam contexto; Asset por parent.`,
   ];
   const violations = planState.validation.blocking_violations || [];
   if (violations.length > 0) {
@@ -751,10 +808,8 @@ function validatePreviewPlan(plan: KnowledgePlan | null | undefined): string[] {
   const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
   const slugs = entries.map((entry) => entry.slug).filter(Boolean);
   if (new Set(slugs).size !== slugs.length) errors.push("Plano contem slugs duplicados.");
-  const hasOffer = entries.some((entry) => entry.content_type === "offer");
   const hasCopy = entries.some((entry) => entry.content_type === "copy");
-  const hasAudience = entries.some((entry) => entry.content_type === "audience");
-  const hasRule = entries.some((entry) => entry.content_type === "rule");
+  const hasProductGroup = entries.some((entry) => entry.content_type === "product_group");
   const parentByChild = new Map(entries.map((entry) => [entry.slug, normalizeParentSlug(parentSlugOf(entry), plan.persona_slug)]));
   for (const entry of entries) {
     const parentSlug = normalizeParentSlug(parentSlugOf(entry), plan.persona_slug);
@@ -788,32 +843,31 @@ function validatePreviewPlan(plan: KnowledgePlan | null | undefined): string[] {
     if (entry.content_type === "audience" && parentType && !["campaign", "briefing", "brand", "persona"].includes(parentType)) {
       errors.push(`Publico ${entry.slug} precisa estar abaixo de briefing/campaign.`);
     }
-    if (entry.content_type === "product" && hasAudience && parentType !== "audience") {
-      errors.push(`Produto ${entry.slug} precisa estar abaixo de audience.`);
+    if (entry.content_type === "product_group" && parentType && !["audience", "campaign", "briefing", "brand", "persona"].includes(parentType)) {
+      errors.push(`Grupo de produtos ${entry.slug} precisa ficar abaixo de publico, campanha, briefing ou brand.`);
+    }
+    if (entry.content_type === "product" && hasProductGroup && parentType !== "product_group") {
+      errors.push(`Produto ${entry.slug} deve ficar dentro de um grupo de produtos existente.`);
     }
     if (entry.content_type === "offer" && parentType !== "product") {
       errors.push(`Oferta ${entry.slug} precisa estar abaixo de product.`);
     }
     if (entry.content_type === "copy") {
-      if (hasOffer && parentType === "offer" && plan.copy_policy !== "per_offer") errors.push(`Copy ${entry.slug} deve ficar agrupada por product/publico por padrao.`);
-      if (parentType && !["product", "offer", "campaign", "briefing", "brand"].includes(parentType)) {
+      if (parentType && !["product", "product_group", "campaign", "briefing", "brand"].includes(parentType)) {
         errors.push(`Copy ${entry.slug} tem parent invalido.`);
       }
     }
-    if (entry.content_type === "faq" && hasRule && parentType !== "rule") {
-      errors.push(`FAQ ${entry.slug} precisa estar abaixo de rule.`);
+    if (entry.content_type === "faq" && hasCopy && parentType !== "copy") {
+      errors.push(`FAQ ${entry.slug} precisa responder a copy mais especifica do ramo.`);
     }
-    if (entry.content_type === "faq" && !["rule", "copy", "offer", "product"].includes(parentType)) {
-      errors.push(`FAQ ${entry.slug} precisa estar abaixo de rule, copy, offer ou product.`);
+    if (entry.content_type === "faq" && !["copy", "product", "product_group", "audience", "campaign", "briefing", "brand"].includes(parentType)) {
+      errors.push(`FAQ ${entry.slug} precisa estar ligada ao card semantico que ela responde.`);
     }
     if (entry.content_type === "rule" && parentType && !["campaign", "briefing", "brand", "persona"].includes(parentType)) {
       errors.push(`Rule ${entry.slug} precisa estar abaixo de campaign/briefing/brand.`);
     }
   }
   const expansion = buildExpansionSummary(plan);
-  if (expansion.faq.count_policy !== "total" && expansion.faq.created < expansion.faq.expected) {
-    errors.push(`FAQ insuficiente: esperado ${expansion.faq.expected}, criado ${expansion.faq.created}.`);
-  }
   if (expansion.asset.expected > 0 && expansion.asset.created < expansion.asset.expected) {
     errors.push(`Asset insuficiente: esperado ${expansion.asset.expected}, criado ${expansion.asset.created}.`);
   }
@@ -1059,10 +1113,11 @@ function buildInitialContext(plan: CapturePlan, uploads: SessionUpload[]) {
     "- O plano inicial e apenas ponto de partida; se o operador expandir para 2 publicos, 4 produtos e 8 FAQs, manter esse plano vivo.",
     "- Sempre usar o knowledge_plan atual como fonte para salvar; nunca voltar ao plano inicial apos expansao.",
     "- Sempre criar uma estrutura de conhecimento em arvore piramidal, nao uma lista de cards soltos.",
-    "- Gerar conhecimento hierarquizado como grafo quando houver relacoes entre brand, briefing, campanha, publico, produto, oferta, copy, FAQ, regra, asset ou tom.",
+    "- Gerar conhecimento hierarquizado como grafo quando houver relacoes entre brand, briefing, campanha, publico, grupo de produtos, produto, copy, FAQ, regra, asset ou tom.",
     "- FAQ deve ser um Markdown agrupado de atendimento real, sem expor termos internos do grafo.",
-    "- RULE fica antes de FAQ: copy -> rule -> faq quando houver orientacao comercial geral.",
-    "- normalizedPlan deve usar faq_count_policy=grouped, faq_parent_type=rule, asset_count_policy=per_parent e copy_policy=per_product_context por padrao.",
+    "- Rule, Copy e Product Group sao opcionais: quando existirem, adicionam contexto; quando ausentes, nao bloqueiam o plano.",
+    "- Se Product Group existir, traduza a ligacao como produto dentro do grupo e conecte product_group -> product.",
+    "- normalizedPlan deve usar faq_count_policy=grouped, asset_count_policy=per_parent e copy_policy=per_product_context por padrao.",
     "- Separar primary_tree_edges de secondary_semantic_edges; tags nunca entram na primary_tree.",
     "- Nao inventar precos, cores, disponibilidade ou URLs.",
     "- CRIAR exige persona especifica; nao usar Todos/global para criar conhecimento.",
@@ -1362,12 +1417,13 @@ function ChatPanel({
   const [resumeSummary, setResumeSummary] = useState<string | null>(null);
   const [showRawMarkdown, setShowRawMarkdown] = useState(false);
   const [planConfirmed, setPlanConfirmed] = useState(false);
+  const [planSyncPending, setPlanSyncPending] = useState(false);
   const [selectedFaqSlug, setSelectedFaqSlug] = useState<string | null>(null);
   const [selectedProductSlug, setSelectedProductSlug] = useState<string | null>(null);
   const [applyingSofiaAction, setApplyingSofiaAction] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const draftPlan = planState?.normalized_plan || currentKnowledgePlan;
+  const draftPlan = currentKnowledgePlan || planState?.normalized_plan || null;
   const blockingViolations = planState?.validation?.blocking_violations || [];
   const planStateValid = Boolean(planState && planState.validation.valid && blockingViolations.length === 0 && planStateCountsMatch(planState));
   const previewViolations = planState
@@ -1379,6 +1435,7 @@ function ChatPanel({
     setPlanState(nextState);
     setCurrentKnowledgePlan(nextState?.normalized_plan || null);
     setCurrentBlockCounts(normalizeBlockCounts(nextState?.summary?.current_block_counts || undefined));
+    setPlanSyncPending(false);
     setPlanConfirmed(false);
     setConfirmedPlanHash(null);
     setSelectedFaqSlug(null);
@@ -1550,6 +1607,10 @@ function ChatPanel({
 
   async function save() {
     if (!sessionId || !planState || !planConfirmed) return;
+    if (planSyncPending) {
+      setFriendlyError("Aguarde a sincronizacao da ultima edicao antes de salvar.");
+      return;
+    }
     if (!planStateValid || confirmedPlanHash !== planState.plan_hash) {
       setFriendlyError(
         "Plano ainda não pode ser salvo. Corrija as pendências bloqueantes primeiro."
@@ -1563,6 +1624,7 @@ function ChatPanel({
       const d = await api.kbIntakeSave(sessionId, contentText, {
         plan_hash: planState.plan_hash,
         normalized_plan: planState.normalized_plan,
+        graph_json: planState.graph_json || null,
       });
       setStage("done");
       setMessages((p) => [...p, {
@@ -1730,6 +1792,8 @@ function ChatPanel({
     const nextPlan = mutator(draftPlan);
     setCurrentKnowledgePlan(nextPlan);
     setCurrentBlockCounts(countBlocksByType(nextPlan.entries));
+    setPlanState(null);
+    setPlanSyncPending(true);
     if (sessionId) {
       api.kbIntakeUpdatePlan(sessionId, {
         knowledge_plan: nextPlan,
@@ -1737,7 +1801,9 @@ function ChatPanel({
       }).then((result: any) => {
         const nextState = normalizePlanState(result, plan.personaSlug);
         if (nextState) applyPlanState(nextState);
-      }).catch(() => {});
+      }).catch(() => {
+        setPlanSyncPending(false);
+      });
     }
     setPlanConfirmed(false);
     setConfirmedPlanHash(null);
@@ -1961,6 +2027,7 @@ function ChatPanel({
                 setFriendlyError("Plano ainda nao pode ser confirmado. Corrija as pendencias bloqueantes primeiro.");
                 return;
               }
+              setPlanSyncPending(true);
               try {
                 const result = await api.kbIntakeUpdatePlan(sessionId, {
                   knowledge_plan: planState.normalized_plan,
@@ -1972,8 +2039,10 @@ function ChatPanel({
                   setFriendlyError("Plano ainda nao pode ser confirmado. Corrija as pendencias bloqueantes primeiro.");
                   setPlanConfirmed(false);
                   setConfirmedPlanHash(null);
+                  setPlanSyncPending(false);
                   return;
                 }
+                setPlanSyncPending(false);
                 setPlanState(nextState);
                 setCurrentKnowledgePlan(nextState.normalized_plan);
                 setCurrentBlockCounts(normalizeBlockCounts(nextState.summary.current_block_counts));
@@ -1982,6 +2051,7 @@ function ChatPanel({
                 setSessionStatus(result.status || "ready_to_save");
                 setFriendlyError(null);
               } catch (error: any) {
+                setPlanSyncPending(false);
                 setFriendlyError(formatChatRequestError(error));
                 setPlanConfirmed(false);
                 setConfirmedPlanHash(null);
@@ -1989,6 +2059,7 @@ function ChatPanel({
             }}
             onSaveKnowledge={save}
             loading={loading}
+            planSyncPending={planSyncPending}
           />
         )}
         <div ref={bottomRef} />
@@ -2334,6 +2405,7 @@ function GraphPreviewPanel({
   onConfirmStructure,
   onSaveKnowledge,
   loading,
+  planSyncPending,
 }: {
   plan: KnowledgePlan;
   confirmed: boolean;
@@ -2350,6 +2422,7 @@ function GraphPreviewPanel({
   onConfirmStructure: () => void;
   onSaveKnowledge: () => void;
   loading: boolean;
+  planSyncPending: boolean;
 }) {
   const previewPlan = plan;
   const entries = previewPlan.entries || [];
@@ -2379,13 +2452,14 @@ function GraphPreviewPanel({
   // connected to the persona Embedded node automatically, so the preview
   // surfaces an info message about FAQ pending instead of a "no exit" alert.
   const leafAlerts = entries
-    .filter((entry) => entry.slug && !["asset", "embedded", "gallery", "faq"].includes(entry.content_type))
+    .filter((entry) => entry.slug && !["asset", "embedded", "gallery", "faq", "persona"].includes(entry.content_type))
     .filter((entry) => !(childrenByParent.get(entry.slug) || []).length && !outgoingLinkSources.has(entry.slug))
     .slice(0, 6);
   const faqPendingTerminals = entries
     .filter((entry) => entry.slug && entry.content_type === "faq")
     .filter((entry) => !(childrenByParent.get(entry.slug) || []).length && !outgoingLinkSources.has(entry.slug))
     .slice(0, 4);
+  const operatorEdges = buildOperatorEdgeTranslations(previewPlan);
 
   const renderEntry = (entry: KnowledgePlanEntry, depth = 0): ReactNode => {
     const children = childrenByParent.get(entry.slug) || [];
@@ -2496,12 +2570,14 @@ function GraphPreviewPanel({
         <button
           type="button"
           onClick={onSaveKnowledge}
-          disabled={!confirmed || !canSave || loading}
+          disabled={!confirmed || !canSave || loading || planSyncPending}
           title={
             !canSave
               ? `Plano bloqueado: ${blockingReasons.slice(0, 4).join("; ")}${blockingReasons.length > 4 ? ` (+${blockingReasons.length - 4})` : ""}`
               : !confirmed
                 ? "Clique em Confirmar estrutura antes de salvar"
+                : planSyncPending
+                  ? "Aguarde a sincronizacao da ultima edicao"
                 : ""
           }
           className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed"
@@ -2509,6 +2585,19 @@ function GraphPreviewPanel({
           Salvar conhecimento
         </button>
       </div>
+
+      {!!operatorEdges.length && (
+        <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-300 mb-2">Confirmacao operacional</p>
+          <div className="space-y-1">
+            {operatorEdges.map((line, index) => (
+              <p key={`${line}-${index}`} className="text-xs leading-5 text-obs-text">
+                {line}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
 
       {selectedLabel && (
         <p className="text-[11px] text-obs-subtle">
@@ -2994,6 +3083,16 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
       window.localStorage.setItem("ai-brain-persona-id", selected.id);
     } else {
       window.localStorage.removeItem("ai-brain-persona-id");
+    }
+    if (activeSessionId && nextSlug && nextSlug !== plan.personaSlug) {
+      window.localStorage.removeItem("active_criar_session_id");
+      setActiveSessionId(null);
+      setSessionStatus("collecting");
+      setPlanState(null);
+      setCurrentKnowledgePlan(null);
+      setSessionPlanJson(null);
+      setConfirmedPlanHash(null);
+      setCurrentBlockCounts(normalizeBlockCounts(plan.variationCounts));
     }
     window.dispatchEvent(new CustomEvent("ai-brain-persona-change", {
       detail: { slug: nextSlug, id: selected?.id || "" },

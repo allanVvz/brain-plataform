@@ -6,14 +6,16 @@ anti-hallucination product signals. Both the Create path
 (`sofia_orchestrator`) import from here so the two caminhos can never drift into
 contradictory rules again.
 
-The canonical *strict* chain lives in `knowledge_taxonomy.PRIMARY_CHAIN`:
+The canonical *preferred* chain lives in `knowledge_taxonomy.PRIMARY_CHAIN`:
 
     persona -> brand -> briefing -> campaign -> audience
-            -> product_group -> product -> offer -> copy -> {faq, gallery}
+            -> product_group? -> product? -> copy? -> {faq, gallery}
 
-`CANONICAL_PARENTS` below *extends* that strict chain with the agreed business
-fallbacks (e.g. product_group is OPTIONAL, so product may also hang directly off
-audience/campaign/briefing/brand). `product_group` may never hang off `product`.
+`CANONICAL_PARENTS` below keeps optional cards optional. When an optional card
+exists in the plan, children that use its context must connect top-down to it.
+Example: if `product_group=Radar` exists, products in that group connect as
+`product_group -> product`. Without a product_group, a product may connect
+directly as `audience -> product`.
 """
 from __future__ import annotations
 
@@ -26,17 +28,16 @@ from services import knowledge_taxonomy
 CANONICAL_PARENTS: dict[str, set[str]] = {
     "persona":       set(),  # root
     "brand":         {"persona"},
-    "briefing":      {"brand"},
+    "briefing":      {"brand", "campaign"},
     "campaign":      {"briefing", "brand"},
     "audience":      {"campaign", "briefing", "brand"},
-    "product_group": {"audience", "campaign", "briefing", "brand"},
-    "product":       {"product_group", "audience", "campaign", "briefing", "brand"},
+    "product_group": {"audience"},
+    "product":       {"product_group", "audience"},
     "offer":         {"product"},
-    "copy":          {"offer", "product", "product_group", "campaign", "audience"},
-    # FAQ hangs only off the commercial leaf layer — never directly off audience,
-    # campaign, briefing or brand (item #3). Create legacy may also use `rule`
-    # (handled in kb_intake_service's own faq block, not here).
-    "faq":           {"copy", "offer", "product", "product_group"},
+    "copy":          {"product", "product_group", "campaign", "audience"},
+    # FAQ hangs only off the commercial leaf layer. The simplified preview
+    # contract keeps it attached to copy/product/product_group.
+    "faq":           {"copy", "product", "product_group"},
     "gallery":       {"copy"},
     "embedded":      {"faq"},
 }
@@ -109,6 +110,25 @@ def edge_violation(
 
 # ── Anti-hallucination (shared by both prompts/paths) ────────────────────────
 # Broad campaign/positioning terms that must NOT be auto-materialized as products.
+def contextual_parent_violation(
+    child_type: Optional[str],
+    parent_type: Optional[str],
+    available_types: set[str],
+) -> Optional[str]:
+    """Validate optional-card context without making optional cards mandatory."""
+    child = _canon(child_type)
+    parent = _canon(parent_type) or (parent_type or "").strip().lower()
+    available = {_canon(item) or item for item in (available_types or set()) if item}
+    if child == "product" and "product_group" in available and parent != "product_group":
+        return (
+            "product_group existe no plano; confirme qual grupo recebe este "
+            "produto e conecte product_group -> product"
+        )
+    if child == "copy" and parent not in {"product", "product_group", "campaign", "audience", "briefing", "brand"}:
+        return "copy precisa ficar ligada ao card que ela contextualiza"
+    return None
+
+
 BROAD_CAMPAIGN_TERMS: frozenset[str] = frozenset({
     "esportivo", "esportivos", "esportiva", "esportivas",
     "moda inverno", "moda verao", "moda de inverno", "linha premium",

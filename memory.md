@@ -1,17 +1,65 @@
-# Brain AI — Progresso UI/UX
+﻿## Sofia Criar â€” simplificacao da arvore principal e preview (2026-06-01)
+- Contexto do usuario: a Sofia estava criando audiences extras sem motivo, omitindo `product_group`, `product`, `copy` e `faq` do plano visivel, e retornando erros confusos como `entry[4] has no complete path to persona`.
+- Diagnostico consolidado:
+  - `entry[n]` e apenas o indice do array `entries` do plano, nao um node do grafo.
+  - A arvore principal nao pode depender do `relation_type` semantico; a publicacao precisa salvar a edge estrutural com `metadata.primary_tree=true`.
+  - Relacoes semanticas como `targets_audience`, `supports_copy`, `answers_question` e `contains` podem existir, mas nao substituem a edge principal.
+  - O preview deve bloquear so o que realmente quebra a arvore: ciclo, tipo invalido, parent proibido, slug duplicado critico e ausencia real de caminho ate persona.
+  - Copy, FAQ, Embedded, Asset, Offer e Rule sem caminho principal passam a warning, nao bloqueio.
+- Ajustes registrados no backend:
+  - `knowledge_graph.ensure_main_tree_connection()` agora cria sempre a edge principal com `primary_tree=true`.
+  - `repair_primary_tree_connections()` trata `primary_tree=true` como fonte de verdade.
+  - `kb_intake_service._repair_canonical_parent_slugs()` preenche parents faltantes na ordem canonica.
+  - `graph_validation.CANONICAL_PARENTS` simplificou o contrato da FAQ para `copy`, `product` e `product_group`.
+- Pendencias observadas pelo usuario:
+  - preview ainda pode ficar confuso quando o plano mostra grupos vazios ou grupos duplicados;
+  - a Sofia precisa explicar no chat o que esta fazendo antes de bloquear;
+  - o grafo de preview precisa renderizar a arvore completa em uma passada quando o plano ja esta coerente.
+# Brain AI â€” Progresso UI/UX
 
-## FAQ Tool node-type-aware — Audience != Product (2026-05-30)
-- Problema: `adaptar_faqs_universais_ao_grafo` aplicava templates de e-commerce em qualquer node. Audience "Técnicos" (brand Allan Rodrigues, sem produto no galho) gerou "Como comprar o Técnicos?", "acompanha caixa?", "prazo de envio?".
-- Causa: `select_faq_parent` para audience retornava a própria audience; `_resolve_subject_and_brand` usava o label como subject; havia um único conjunto de templates comerciais.
-- Correção em `api/services/sofia_faq_tool.py`:
-  - `find_sellable_in_branch` procura objeto vendável (product/offer/service/course/event; product_group só conta com product) nos ancestrais E descendentes do galho.
+## Sofia Criar â€” diagnÃ³stico save/publicaÃ§Ã£o no grafo (Tock Fatal, 2026-05-31)
+- Pedido do usuÃ¡rio: rastrear por que o plano `ready_to_save` (brandâ†’briefingâ†’campaignâ†’audienceâ†’product_groupâ†’productâ†’copyâ†’faq, 2 produtos) salva mas NÃƒO aparece completo em `http://localhost:3000/knowledge/graph`. RestriÃ§Ãµes: nÃ£o mexer no builder da criaÃ§Ã£o, sem push/deploy prod.
+- **1. BotÃ£o "Salvar conhecimento"** chama `POST /kb-intake/save` (`api/routes/kb_intake.py:465` â†’ `services/kb_intake_service.save`). O 500 que o usuÃ¡rio via vinha do safety-net do route (retorna 400/â€œUnhandled exception in save()â€). Reproduzido in-container: `save()` hoje retorna `EXC=None`, persiste os 11 nodes (created=11) + edges, sem exceÃ§Ã£o. Logo o 500 original era estado prÃ©-fix/transitÃ³rio, nÃ£o um bug reprodutÃ­vel atual.
+- **2. Recebe o plano completo?** SIM. O dump da sessÃ£o (`api/.runtime/kb-intake-sessions/9545b772â€¦.json`) tem 11 entries + 11 links cobrindo a cadeia canÃ´nica inteira, 2 kits de modal. `save()` usa `normalized_plan`/`knowledge_plan`/`plan_override` com gates de hash/confirmaÃ§Ã£o e contagem.
+- **3. Faz upsert de todos os content_types?** SIM. Query in-container confirmou no DB de `tock-fatal`: persona, brand, briefing, campaign, audience(1), product_group(1, â€œmodalâ€), product(2), copy(2), faq(2) = 13 nodes. Caminho: `save` â†’ `knowledge_lifecycle.persist_pending_knowledge_item` por entry â†’ `bootstrap_from_item` cria o `knowledge_node`.
+- **4. Cria knowledge_edges em lote?** SIM, via `knowledge_graph.apply_plan_hierarchy(persona_id, persisted_items, plan_entries, plan_links)` + `repair_primary_tree_connections`. `apply_plan_hierarchy` resolve o pai de cada filho por `plan_links` (`explicit_targets[target_slug]=source_slug`) e chama `ensure_main_tree_connection`, que faz `upsert_knowledge_edge(..., metadata.primary_tree=True)`.
+- **5. `/knowledge/graph` lÃª os mesmos nodes/edges?** SIM, mesma fonte: `GET /knowledge/graph-data` (`api/routes/graph.py:1046` `get_graph_data`) usa `supabase_client.list_all_knowledge_graph(persona_id)`. PORÃ‰M em modo `layered`/`semantic_tree` (default) ele FILTRA e mantÃ©m SÃ“ arestas com `metadata.primary_tree is True` (mais terminal faqâ†’embedded e gallery_asset) â€” `graph.py:1122-1146`.
+- **6. RAIZ do "nÃ£o aparece completo":** os nodes existem, mas a cadeia abaixo de `brand` foi gravada como arestas **nÃ£o-primary** (`primary_tree != True`) no save do usuÃ¡rio (evidÃªncia: 10 de 11 edges `primary=None`, sÃ³ `personaâ†’brand` primary). Como o leitor do grafo sÃ³ mantÃ©m `primary_tree=True`, a Ã¡rvore abaixo de brand nÃ£o renderiza. Re-salvar converge (1â†’7â†’9 primary) porque `repair_primary_tree_connections` reconecta a cada passada, mas nÃ£o fecha em 1 save sobre dados sujos.
+- **Defeito concreto identificado:** os `plan_links` do builder usam relaÃ§Ãµes `targets_audience` (campaignâ†’audience), alÃ©m de `contains`/`briefed_by`/`supports_copy`/`answers_question`. `apply_plan_hierarchy` usa a relaÃ§Ã£o explÃ­cita do link na aresta primÃ¡ria; mas `repair_primary_tree_connections` (`graph.py:544`) sÃ³ conta como â€œconectadoâ€ arestas com `relation_type in _MAIN_TREE_RELATIONS`. `_MAIN_TREE_RELATIONS` NÃƒO inclui `targets_audience` â†’ audience (e descendentes) Ã© tratado como solto e re-aterrado em `personaâ†’node`, quebrando o layout. IdempotÃªncia de re-save agrava: item jÃ¡ existente volta de `persist_*` sem re-linkar `knowledge_node_id`, entÃ£o `nodes_by_slug` fica incompleto e alguns pais nÃ£o resolvem (ex.: 2Âº produto ficou Ã³rfÃ£o).
+- **Fix recomendado (publicaÃ§Ã£o, nÃ£o builder):** (a) adicionar `targets_audience` (e quaisquer relaÃ§Ãµes de plan_link canÃ´nicas) a `_MAIN_TREE_RELATIONS`; e/ou (b) em `apply_plan_hierarchy`, normalizar a relaÃ§Ã£o do link para a canÃ´nica `_default_plan_relation(parent_type, child_type)` ao gravar a aresta primÃ¡ria; e (c) garantir que re-save re-resolva `knowledge_node_id` para popular `nodes_by_slug`. NÃƒO aplicado ainda (aguardando aval; evitar mudanÃ§a meio-testada no core de publicaÃ§Ã£o).
+- **SDR/Closer â€œaudiences fantasmasâ€:** NÃƒO sÃ£o audiences criadas pelo save. `save` seta `agent_visibility=["SDR","Closer","Classifier"]` em cada knowledge_item (`kb_intake_service.py:6291`; idem `knowledge_lifecycle.py:129/213`, `supabase_client.py:1955`) â€” Ã© metadado de visibilidade de bot, nÃ£o node. A criaÃ§Ã£o real de audience role-* vem do caminho do Graph chat: `sofia_orchestrator` + `qa_contract` op `create_default_audience` (`qa_contract.py:378/599`); hÃ¡ guard `AUDIENCE_ROLE_FORBIDDEN` contra `role-sdr/role-closer/role-classifier` em `qa_contract.py:750`. No DB atual de tock-fatal sÃ³ existe 1 audience (`publico-alvo-principal-da-campanha`), sem SDR/Closer. Escopo reduzido pelo usuÃ¡rio para save/publicaÃ§Ã£o â€” SDR/Closer nÃ£o tratado neste turno.
+- EvidÃªncia viva coletada via `docker exec ai-brain-api-1 python` consultando `supabase_client.list_all_knowledge_graph` e `kb_intake_service.save`. Nada commitado; working tree limpo.
+
+## Sofia Criar / Tock Fatal modais - crawler tolerante + preview sem persona duplicada (2026-05-31)
+- Sintoma: no caminho Criar para `tock-fatal` / `https://tockfatal.com`, a Sofia nao recuperava os produtos e o preview mostrava alerta quebrado `PERSONA ficou sem saida: tock-fatal`.
+- Causa 1: `catalog_crawler` falhava antes do parsing por `SSL: CERTIFICATE_VERIFY_FAILED`; como `product_candidates=[]`, o builder deterministico de arvore completa nao tinha insumo e a conversa caia em pendencias.
+- Causa 2: quando o LLM emitia `content_type=persona`, a persona virava um card duplicado em `entries`; o frontend ja desenha a persona como raiz implicita, entao esse card ficava terminal e gerava alerta falso.
+- Fix: crawler agora tenta `/products.json`/HTML com fallback controlado para certificado local invalido, extrai `<product-card>` de Shopify, deduplica candidatos por titulo e preserva preco/imagem/source. Para Tock Fatal, o crawl retorna 2 produtos reais: `Kit Modal 2 - Urso Estampado` e `Kit Modal 1 (9 cores disponiveis)`.
+- Fix: `_full_tree_command` tambem entende pedido de "monte a estrutura/campanha" na mesma mensagem de extracao; `_normalize_sofia_knowledge_plan` remove entry `persona` que corresponde a `persona_slug`, mantendo a persona como raiz implicita; `_leaf_alert_warnings` nao trata persona como terminal pendente.
+- Fix adicional: `parse_tree_counts` agora usa 1 grupo por padrao e so amplia grupos quando ha quantidade explicita; `build_pre_initialization_review` nao reabre a pergunta da audiencia `Import` quando o operador pede audiencia padrao; a persona trocada no header invalida a sessao ativa para evitar reaproveitamento de contexto antigo.
+- Validacao: `python -m pytest tests/test_marketing_criacao_kb_intake_flow.py tests/test_sofia_create_plan_product_group.py tests/test_sofia_create_repair_product_group_tree.py -q` -> `12 passed`. Novo caso cobre Tock Fatal em uma unica mensagem e exige arvore `brand -> briefing -> campaign -> audience -> product_group -> product -> copy -> faq` com 2 kits de modal, sem violacoes bloqueantes.
+
+## Sofia Criar /marketing/criacao â€” full-tree determinÃ­stico (2026-05-31)
+- Sintoma: em `http://localhost:3000/marketing/criacao` a Sofia parava cedo ("vou comeÃ§ar pelo Briefing"), fazia perguntas ou gerava plano com parent links quebrados; Ã s vezes "NÃ£o consegui processar sua mensagem agora". A Ã¡rvore (brandâ†’briefingâ†’campaignâ†’audienceâ†’3 product_groupsâ†’9 productsâ†’copyâ†’faq) nÃ£o materializava.
+- DiagnÃ³stico (reproduzido via `docker exec ai-brain-api-1 python` chamando `kb_intake_service.chat` direto, sem auth): NÃƒO era 500 â€” `chat()` retornava `ok:True`. O 500/genÃ©rico vem do safety-net em `chat()` wrapper + `routes/kb_intake.py` sÃ³ quando o LLM realmente estoura. O bug real Ã© **nÃ£o-determinismo do LLM**: na 2Âª msg ele emitia plano sem brand/campaign/product_group, produtos com parent invÃ¡lido â†’ `validate_sofia_knowledge_plan` bloqueava com ~15 violaÃ§Ãµes; ou nÃ£o emitia plano nenhum. O crawler funciona perfeitamente (30 candidatos reais, conf 0.85: Radar/Juliet/HSTN/Plantaris com preÃ§os).
+- `/marketing/criacao` JÃ chamava o Create path correto: `dashboard/app/marketing/criacao/page.tsx` â†’ `CaptureWorkspace` (de `app/knowledge/capture/page.tsx`) â†’ `api.kbIntakeStart`/`api.kbIntakeMessage` â†’ `/kb-intake/start` + `/kb-intake/message`. Nenhuma mudanÃ§a de frontend foi necessÃ¡ria.
+- Fix (backend, `api/services/kb_intake_service.py`): builder determinÃ­stico `build_full_tree_plan_from_session()` + helpers (`_full_tree_command`, `_parse_tree_counts`, `_product_family`, `_extract_campaign_title`, `_extract_audience_descriptor`, `_deterministic_tree_summary`). Em `_chat_impl`, quando o operador confirma a Ã¡rvore inteira ("sim crie toda a arvore"/"crie a arvore completa") E o plano do LLM Ã© vazio/bloqueado E hÃ¡ candidatos do crawler na sessÃ£o â†’ constrÃ³i a cadeia canÃ´nica a partir dos candidatos reais, passa por `normalize_validate_summarize_plan` e, se vÃ¡lido, grava e marca `ready_to_save`. Produto sem preÃ§o vai com `metadata.pending_price=true` (nÃ£o bloqueia). Nada hardcoded: brand vem do persona slug, campaign/audience extraÃ­dos das mensagens, produtos do crawler agrupados por famÃ­lia detectada.
+- IMPORTANTE: compose roda `SOFIA_TOOLS_ENABLED=true` (default no docker-compose.yml linhas 158/190) = **modo canÃ´nico**, onde `_normalize_sofia_knowledge_plan` Ã© cleanup puro e preserva os 9 copy/9 faq por produto. Em modo legacy (`false`) o `_ensure_faq_golden_datasets_by_branch` colapsaria faq em 1 golden dataset. Teste e validaÃ§Ã£o devem usar `SOFIA_TOOLS_ENABLED=true` para refletir produÃ§Ã£o.
+- Teste: `tests/test_marketing_criacao_kb_intake_flow.py` (mocka ModelRouter sem plano + crawler com candidatos shape-real; modo canÃ´nico). Asserts: brandâ‰¥1, briefingâ‰¥1, campaignâ‰¥1, audienceâ‰¥1, product_group==3, product==9, copyâ‰¥9, faqâ‰¥9, sem violaÃ§Ãµes, todo node com caminho atÃ© persona, product_groupâ†’product, pending_price nÃ£o bloqueia. PASS. RegressÃ£o `test_sofia_create_plan_product_group.py` + `test_sofia_create_repair_product_group_tree.py` PASS.
+- ValidaÃ§Ã£o: `npm run build` OK; `docker compose up -d --build api workers` OK; `/health` 200; E2E live no container rebuildado â†’ stage `ready_to_save`, 0 violaÃ§Ãµes, cadeia completa a partir do crawl real. Sem deploy prod, sem migration, sem push.
+
+## FAQ Tool node-type-aware â€” Audience != Product (2026-05-30)
+- Problema: `adaptar_faqs_universais_ao_grafo` aplicava templates de e-commerce em qualquer node. Audience "TÃ©cnicos" (brand Allan Rodrigues, sem produto no galho) gerou "Como comprar o TÃ©cnicos?", "acompanha caixa?", "prazo de envio?".
+- Causa: `select_faq_parent` para audience retornava a prÃ³pria audience; `_resolve_subject_and_brand` usava o label como subject; havia um Ãºnico conjunto de templates comerciais.
+- CorreÃ§Ã£o em `api/services/sofia_faq_tool.py`:
+  - `find_sellable_in_branch` procura objeto vendÃ¡vel (product/offer/service/course/event; product_group sÃ³ conta com product) nos ancestrais E descendentes do galho.
   - `classify_faq_target` mapeia categoria por node_type: product/offer/product_group/campaign/brand/briefing/copy/audience/audience_object/discovery.
-  - Conjuntos de templates por categoria. Compra/frete/garantia só para objetos vendáveis. Audience usa perguntas de qualificação/discovery com `_audience_descriptor` (1a frase do markdown). Audience com objeto vendável abaixo => `audience_object` (relação audience->objeto). Copy extrai specs (i5, 2TB, RTX...) do markdown via `_extract_spec_tokens`.
-  - Guardrail `_violates_commercial_guardrail` filtra audience/brand/briefing/discovery contra "frete/acompanha caixa/flanela/prazo de envio/parcelar" e "comprar/garantia/preço d{o,a} {nome}".
+  - Conjuntos de templates por categoria. Compra/frete/garantia sÃ³ para objetos vendÃ¡veis. Audience usa perguntas de qualificaÃ§Ã£o/discovery com `_audience_descriptor` (1a frase do markdown). Audience com objeto vendÃ¡vel abaixo => `audience_object` (relaÃ§Ã£o audience->objeto). Copy extrai specs (i5, 2TB, RTX...) do markdown via `_extract_spec_tokens`.
+  - Guardrail `_violates_commercial_guardrail` filtra audience/brand/briefing/discovery contra "frete/acompanha caixa/flanela/prazo de envio/parcelar" e "comprar/garantia/preÃ§o d{o,a} {nome}".
   - Retorno agora inclui `category`, `commercial_object_type`, `commercial_object_name`.
-- Cada galho é independente: Allan Rodrigues não herda linguagem/óculos da VZ Lupas (subject/brand vêm do contexto real do galho, nunca hardcoded).
-- Markdown contextual segue como fonte obrigatória: `build_branch_context` lê `metadata.markdown` de cada ancestral; `nearest_markdown` alimenta descriptor (audience) e `{context}` (briefing/copy/discovery) e o snippet no answer[0].
-- Testes: `tests/test_sofia_faq_tool.py` +8 casos (audience sem compra, audience qualificação via markdown, brand sem frete, product mantém compra, copy specs i5/2TB, briefing cursos, Allan não herda VZ Lupas, audience_object). `python -m pytest tests/test_sofia_faq_tool.py tests/test_sofia_faq_routes.py -q` => 21 passed. Suite FAQ completa (tool+routes+embedded+node_md+lifecycle) => 34 passed.
+- Cada galho Ã© independente: Allan Rodrigues nÃ£o herda linguagem/Ã³culos da VZ Lupas (subject/brand vÃªm do contexto real do galho, nunca hardcoded).
+- Markdown contextual segue como fonte obrigatÃ³ria: `build_branch_context` lÃª `metadata.markdown` de cada ancestral; `nearest_markdown` alimenta descriptor (audience) e `{context}` (briefing/copy/discovery) e o snippet no answer[0].
+- Testes: `tests/test_sofia_faq_tool.py` +8 casos (audience sem compra, audience qualificaÃ§Ã£o via markdown, brand sem frete, product mantÃ©m compra, copy specs i5/2TB, briefing cursos, Allan nÃ£o herda VZ Lupas, audience_object). `python -m pytest tests/test_sofia_faq_tool.py tests/test_sofia_faq_routes.py -q` => 21 passed. Suite FAQ completa (tool+routes+embedded+node_md+lifecycle) => 34 passed.
 - Sem hard-delete, Playwright, Paperclip, rebuild ou teste global.
 
 ## BRA-90 - backend business rules alignment (2026-05-30)
@@ -23,15 +71,15 @@
 - Risks: campaign title extraction is deterministic and conservative; it improves the tested "chamada teste IA" path but does not attempt broad natural-language parsing.
 - Next step: keep BRA-90 in review with the 9/9 artifact; frontend BRA-83 can consume the corrected Sofia messages and validator contract after backend review.
 
-## BRA-82 — plan_json severity validator boundary + patch-apply/persist (2026-05-29)
+## BRA-82 â€” plan_json severity validator boundary + patch-apply/persist (2026-05-29)
 - Frozen CTO contract: `paperclip/docs/architecture/sofia-plan-json-contract-frozen-decision-2026-05-29.md`.
-- Validator (`api/services/sofia_orchestrator._validate_plan_json`) agora reconhece os 7 markers blocking frozen: `cycle`, `orphan`, `edge_inverted`, `product_above_product_group`, `embed_without_approved_faq`, `persistence_failure`, `critical_duplication`. Cada marker emite `validation.blocking[].code = marker.upper()` e flipa `is_valid=false`. FAQ/Rule continuam só em `suggestions`. Missing parent/title/type continuam em `pending`. `is_valid == (blocking == [])`.
-- Patch-apply path (`POST /sofia/graph-command`) já validava-> applica-> persiste-> refetch via `qa_contract.sofia_graph_command`. `_validate_sofia_patch` rejeita 422 com `GRAPH_VALIDATION_FAILED` em CANONICAL_CHAIN_VIOLATION (inclui inverted-edge e product-above-product_group), GRAPH_EDGE_FORBIDDEN (product->embed), FAQ_NOT_APPROVED, AUDIENCE_ROLE_FORBIDDEN, PRODUCT_SOURCE_REQUIRED. `needs_clarification` retorna `persisted:false` sem persistir.
-- Sessão Supabase de plan_json compartilhada com BRA-87 (`get_sofia_plan_session` / `upsert_sofia_plan_session` em `api/services/supabase_client.py`).
+- Validator (`api/services/sofia_orchestrator._validate_plan_json`) agora reconhece os 7 markers blocking frozen: `cycle`, `orphan`, `edge_inverted`, `product_above_product_group`, `embed_without_approved_faq`, `persistence_failure`, `critical_duplication`. Cada marker emite `validation.blocking[].code = marker.upper()` e flipa `is_valid=false`. FAQ/Rule continuam sÃ³ em `suggestions`. Missing parent/title/type continuam em `pending`. `is_valid == (blocking == [])`.
+- Patch-apply path (`POST /sofia/graph-command`) jÃ¡ validava-> applica-> persiste-> refetch via `qa_contract.sofia_graph_command`. `_validate_sofia_patch` rejeita 422 com `GRAPH_VALIDATION_FAILED` em CANONICAL_CHAIN_VIOLATION (inclui inverted-edge e product-above-product_group), GRAPH_EDGE_FORBIDDEN (product->embed), FAQ_NOT_APPROVED, AUDIENCE_ROLE_FORBIDDEN, PRODUCT_SOURCE_REQUIRED. `needs_clarification` retorna `persisted:false` sem persistir.
+- SessÃ£o Supabase de plan_json compartilhada com BRA-87 (`get_sofia_plan_session` / `upsert_sofia_plan_session` em `api/services/supabase_client.py`).
 - Probes BRA-82 (TestClient + live :8001 `scripts/start_api_qa.py`) publicados em `ai-brain/test-artifacts/qa/`:
   - `sofia-plan-json-blocking-probe-20260530T013822Z.json` (TestClient).
-  - `sofia-plan-json-blocking-live-probe-20260530T014152Z.json` (live :8001 — todas as 6 assertions passam, incluindo `acceptance_3_semantic_tree_refetch_responds_200`).
-  - Baseline reexecutado: `sofia-plan-json-endpoints-probe-20260530T013835Z.json` (sem regressão; `survives_reload_restart` continua dependendo da config Supabase do BRA-87).
+  - `sofia-plan-json-blocking-live-probe-20260530T014152Z.json` (live :8001 â€” todas as 6 assertions passam, incluindo `acceptance_3_semantic_tree_refetch_responds_200`).
+  - Baseline reexecutado: `sofia-plan-json-endpoints-probe-20260530T013835Z.json` (sem regressÃ£o; `survives_reload_restart` continua dependendo da config Supabase do BRA-87).
 - Scripts: `scripts/probe_sofia_plan_json_endpoints.py` (TestClient) + `scripts/probe_sofia_plan_json_blocking.py` (TestClient blocking) + `scripts/probe_sofia_plan_json_blocking_live.py` (live :8001 blocking; usa `AI_BRAIN_ADMIN_TEST_TOKEN` de `env.qa.yaml`).
 
 ## Graph JSON V2 spec entregue (2026-05-29)
@@ -47,32 +95,32 @@
 - Nova secao `### QA local backend (since 2026-05-29)`: comando `python ai-brain/scripts/start_api_qa.py`, hot-reload ativo, listen :8001, auth Option B (X-AI-BRAIN-ADMIN-TOKEN + Authorization: Bearer alias), sequence pos-edit obrigatoria, diagnose 401 vs 403.
 - Parte da rodada 3.3-3.9 de hardening per audit 2026-05-29.
 
-## Sofia Graph Agent umbrella — BRA-71 (2026-05-29)
+## Sofia Graph Agent umbrella â€” BRA-71 (2026-05-29)
 - Spec: `paperclip/docs/qa/sofia-graph-agent-acceptance-2026-05-29.md`.
-- CEO/PO live-test: Sofia responde fallback generico "Preciso de confirmacao: qual persona e qual operacao" mesmo com persona ativa allanvvz e contexto claro. Sofia nao age — apenas classifica.
+- CEO/PO live-test: Sofia responde fallback generico "Preciso de confirmacao: qual persona e qual operacao" mesmo com persona ativa allanvvz e contexto claro. Sofia nao age â€” apenas classifica.
 - Umbrella BRA-71 criada como gate unico de aceite para BRA-44 + BRA-46. Sub-scopes BRA-62/63/64/65 continuam abertas como tarefas de implementacao.
 - 7 comandos comportamentais obrigatorios para aceite: conecte allan rodrigues em persona allanvvz; crie audience; persona allanvvz; reencaixar allan rodrigues; corrigir campanha VZ Lupas; organize VZ Lupas; mover product groups.
-- 9 rejection criteria binarios. Done fabricado -> ESCALATION (§13).
+- 9 rejection criteria binarios. Done fabricado -> ESCALATION (Â§13).
 
-## Sofia Graph — anti-loop rule + CTO decision (2026-05-29)
+## Sofia Graph â€” anti-loop rule + CTO decision (2026-05-29)
 - Usuario formalizou regra anti-loop: QA nao parqueia blocked indefinidamente. Apos 1o blocked sem delta, 2o wake = handoff CEO; 3o wake = proibido.
 - Aplicado em BRA-66: QA reportou `/views/tree` e `/views/graph` -> 404. Probe local confirmou: rotas nao existem em ai-brain nem paperclip. `/knowledge/graph-data?persona_slug=allanvvz` ja retorna 200.
-- Logo contrato `/views/*` e fantasma — spec orfa.
+- Logo contrato `/views/*` e fantasma â€” spec orfa.
 - Issue BRA-69 criada para CTO decidir Opcao A (implementar /views/* em ai-brain) vs Opcao B (substituir por /knowledge/graph-data).
 - Recomendacao do validator: Opcao B (sem valor adicional em implementar rotas duplicadas).
 - BRA-66 fica blocked ate documento de decisao em `paperclip/docs/architecture/route-contract-decision-2026-05-29.md`.
-- Regras: `paperclip/agents/OPERATING_RULES.md` §13 e `QA_LEAD_GATE_CHECKLIST.md` §G.
+- Regras: `paperclip/agents/OPERATING_RULES.md` Â§13 e `QA_LEAD_GATE_CHECKLIST.md` Â§G.
 
-## Sofia Graph acceptance — escopo expandido pelo CEO/PO (2026-05-29)
+## Sofia Graph acceptance â€” escopo expandido pelo CEO/PO (2026-05-29)
 - Spec: `paperclip/docs/qa/sofia-graph-acceptance-spec-2026-05-29.md` (11 secoes).
 - Observacao no grafo live de `allanvvz`: shape errado (Campaign VZ Lupas muito alto, Allan Rodrigues misturado, brand VZ Lupas deslocado), Sofia sem memoria curta, sem contexto de persona ativa, nao parece a mesma Sofia da aba Criar.
 - Nova arquitetura: 2 tool groups. Backend (resolve-persona, resolve-node, resolve-operation, validate_canonical_chain, generate_patch, persist_patch, refetch_graph) + Frontend (apply_patch_visual, mark_pending, undo, confirm, select, focus, layout, highlight).
 - Regra de produto: Sofia Graph = Sofia Criar (mesmo orchestrator, mesmo tool registry, mesmo contexto). Diferenca apenas no frontend toolset registrado por sessao.
 - BRAs novas: BRA-62 (conversational context), BRA-63 (unification), BRA-64 (frontend tools), BRA-65 (resolver tuning + 4 backend tools faltantes), BRA-66 (E2E test obrigatorio).
 - Cadeia: 58/59/61 done -> [62 + 63 + 64 + 65 parallel] -> 60 -> 66 -> 44 + 46.
-- Anti-patterns auto-reject (§5 do spec): Sofia text-only; confirmacao generica; "comando aplicado" sem patch; visual sem persist; duplicacao; Campaign VZ Lupas filho direto da persona; Allan Rodrigues misturado na VZ Lupas; hardcoded; allow-list.
+- Anti-patterns auto-reject (Â§5 do spec): Sofia text-only; confirmacao generica; "comando aplicado" sem patch; visual sem persist; duplicacao; Campaign VZ Lupas filho direto da persona; Allan Rodrigues misturado na VZ Lupas; hardcoded; allow-list.
 
-## Sofia tool-use contract — DESTRAVADO 2026-05-28T20:55Z
+## Sofia tool-use contract â€” DESTRAVADO 2026-05-28T20:55Z
 - Commits ai-brain reais: `6d74e6a` (fix routes + remove gate) + `8f80352` (BRA-58 tool resolvers).
 - Causa do 403 persistente: uvicorn PID 37024 servia codigo antigo (`reload=False`). Restart manual + novo codigo carregado.
 - Probe `/sofia/graph-command` com `persona_slug=allanvvz` -> 200 com tool_calls (resolve-persona 0.99, resolve-operation 0.91 reparent_brand, validate_canonical_chain 1.0), patch persistido, brand vz-lupas com edge `persona_has_brand` allanvvz.
@@ -87,12 +135,12 @@
 - Fixture skeleton: `paperclip/fixtures/sofia-commands.skeleton.json`.
 - BRA-58 (backend) e BRA-59 (AI agent) tem que cumprir o contract antes de done. BRA-60 (QA sweep) roda 33 cases contra `:8001` e gera artifact em `paperclip/test-artifacts/qa/sofia-tool-use-contract-<UTC>.json`.
 
-## Sofia /sofia/graph-command — drop allow-list, cosine tools (2026-05-28)
+## Sofia /sofia/graph-command â€” drop allow-list, cosine tools (2026-05-28)
 - Usuario reportou 403 `restricted to VZ Lupas QA persona aliases` ao usar chat lateral do Graph com persona `allanvvz`.
 - Origem: `api/routes/qa_contract.py:25-28` (QA_PERSONA_ALIASES) + `:55-60` (_require_qa_persona); restos do isolamento original da QA da VZ Lupas.
 - Decisao: em vez de expandir allow-list, eliminar. Mover validacao para tools deterministicos baseados em embeddings:
-  - `POST /sofia/tools/resolve-persona` — top-1 persona slug por cosine (sentence-transformers local OU pgvector).
-  - `POST /sofia/tools/resolve-operation` — top-1 op canonica (rebind_parent, reorganize_subtree, create_audience, move_node, add_brand, add_product_group, add_product, add_faq).
+  - `POST /sofia/tools/resolve-persona` â€” top-1 persona slug por cosine (sentence-transformers local OU pgvector).
+  - `POST /sofia/tools/resolve-operation` â€” top-1 op canonica (rebind_parent, reorganize_subtree, create_audience, move_node, add_brand, add_product_group, add_product, add_faq).
   - Sofia (LLM) so orquestra: chama tools, recebe IDs+scores, monta patch. Custo reduzido vs reasoning livre.
 - Tracking: BRA-57 (CEO meta), BRA-58 (Backend tools + remove gate), BRA-59 (AI agent integration), BRA-60 (QA multi-persona sweep), BRA-61 (uvicorn reload=True para `:8001` refletir edits).
 - Cadeia ativa: BRA-54 (done) -> [BRA-58 + BRA-61] -> BRA-59 -> BRA-60 -> BRA-50 -> BRA-46 -> BRA-44.
@@ -151,7 +199,7 @@
   `assets-raw` e `assets-derived` retornaram 200 contra `https://svkogegypdqquzlfzaor.supabase.co`.
   `/health` = 200. `/api/menu/{slug}` testado em baita-conveniencia, vz-lupas e
   tock-fatal: todos 200, cada um com 1 collection seed (`cardapio-<slug>-v1`),
-  products=0 (esperado — so o schema seedado das migrations existe, sem dados).
+  products=0 (esperado â€” so o schema seedado das migrations existe, sem dados).
   Probe: `scripts/probe_local_qa_menu.py`.
 - Arquivos novos criados nesta migracao: `docs/qa/00_legacy_leads_messages.sql`,
   `docs/qa/ai-brain-qa-schema.sql`, `scripts/apply_schema_to_new_qa.py`,
@@ -182,7 +230,7 @@
 
 Diagnostico: dashboard em `192.168.0.182:3000` nao mostrava o grafo porque (a)
 o backend em `127.0.0.1:8001` foi subido com `python -m uvicorn main:app`
-direto do diretorio `api/`, o que carrega apenas `.env` e NAO `env.qa.yaml` —
+direto do diretorio `api/`, o que carrega apenas `.env` e NAO `env.qa.yaml` â€”
 entao faltavam `ENVIRONMENT=qa` e `AI_BRAIN_ADMIN_TEST_TOKEN` (resultado:
 401 "Sessao obrigatoria" em rotas protegidas como /personas e
 /knowledge/graph-data); e (b) `dashboard/.env.local` ainda tinha
@@ -194,7 +242,7 @@ Acoes feitas (todas read-only / config, nenhuma escrita no banco):
   `svkogegypdqquzlfzaor`. Entradas antigas comentadas no topo do bloco com
   o motivo. Adicionado lembrete inline: ao trocar de projeto Supabase
   e necessario limpar cookies + localStorage do host de dev
-  (127.0.0.1:3000, localhost:3000, 192.168.0.182:3000) — sessao do projeto
+  (127.0.0.1:3000, localhost:3000, 192.168.0.182:3000) â€” sessao do projeto
   antigo nao e valida no novo.
 - `.env` (raiz) e `env.qa.yaml`: ja estavam apontando para o projeto novo
   desde a rodada anterior; auditados, sem mudanca. Nao expor service_key
@@ -216,7 +264,7 @@ no fim):
 - `/knowledge/graph-data?persona_slug=allanvvz&mode=semantic_tree` => 200,
   6 nodes + 4 edges no payload react-flow. Meta confirma semantic_nodes=3,
   semantic_edges=4. Formato: `node.data.slug` / `node.data.node_type`
-  (top-level dos nodes nao expoe slug — usar `data.*`).
+  (top-level dos nodes nao expoe slug â€” usar `data.*`).
 - Admin test token via header `X-AI-BRAIN-ADMIN-TOKEN` autenticou em todas
   as rotas protegidas testadas.
 
@@ -451,8 +499,8 @@ Backend (`api/.env`):
 - Codex tambem reescreveu o backend de asset upload: agora `_ensure_asset_graph_contract` (em `api/routes/assets.py`) garante hard-contract `branch -> asset` + `asset -> Gallery`. Usa as novas funcoes `supabase_client.upsert_knowledge_node`, `supabase_client.update_asset_graph_refs`, `supabase_client.get_knowledge_node_for_source`. `bootstrap_from_item` foi substituido por upsert direto com `source_table='assets'`.
 - O teste `integration_asset_card_upload.py` foi atualizado para mockar essas tres funcoes novas e o `get_asset`. Bateria de 12 testes verde (CRIAR + ASSET).
 - Tests recomendados:
-  - `tests/e2e_criar_tockfatal_plan_mode_branch_contract.py` (Codex; passa) — estrutura completa + termos proibidos.
-  - `tests/e2e_criar_tockfatal_commercial_pyramidal.py` (este Claude) — prompt do usuario + assertions do RULE antes do FAQ + trigger `pending_regeneration` ao alterar offer.
+  - `tests/e2e_criar_tockfatal_plan_mode_branch_contract.py` (Codex; passa) â€” estrutura completa + termos proibidos.
+  - `tests/e2e_criar_tockfatal_commercial_pyramidal.py` (este Claude) â€” prompt do usuario + assertions do RULE antes do FAQ + trigger `pending_regeneration` ao alterar offer.
 
 ## Fix 500/415 nos uploads + sidebar Sofia - 2026-05-13
 
@@ -515,11 +563,11 @@ Atualizacao 2026-05-12:
 - Os testes planejados `integration_sofia_image_upload.py` e `integration_asset_validation_lifecycle.py` ainda nao existem em `tests/`.
 - Regra de direcao FAQ reforcada: FAQ e destino terminal de vetores comerciais; `product/offer/copy -> faq` e valido, `faq -> product/offer/copy/campaign/audience` e invalido, e a unica saida permitida de FAQ e `faq -> embedded`. Criada migration `034_repair_faq_edge_direction.sql` para reverter/soft-delete edges invertidas e reduzir importancia visual de FAQ.
 
-Arquitetura aprovada — pipeline hibrido e barato (decidido com o usuario):
-1. **Classifier local** (`api/services/asset_pipeline/classifier.py`) — heuristica pura com Pillow + mime/extension; decide `kind`, `needs_ocr`, `has_text_estimate`. Sem chamada externa.
-2. **OCR local** (`api/services/asset_pipeline/ocr_local.py`) — cascade de adapters: PaddleOCR -> EasyOCR -> pytesseract -> mock. Selecao via `ASSET_OCR_BACKEND` (default cascade; CI usa `mock`). Marca `needs_ai_fallback=True` quando `confidence<0.45` ou `len(text)<8`.
-3. **AI fallback** (`api/services/asset_pipeline/ai_fallback.py`) — so roda quando `needs_ai_fallback`. Usa `model_router.vision_extract` (novo) com modelo configuravel via `ASSET_VISION_MODEL` (default `gpt-4o-mini`).
-4. **Renamer** (`api/services/asset_pipeline/renamer.py`) — heuristica primeiro; opcional `model_router.cheap_text` quando heuristica produz <3 tokens. Desativavel via `ASSET_RENAME_DISABLE_MODEL=1`.
+Arquitetura aprovada â€” pipeline hibrido e barato (decidido com o usuario):
+1. **Classifier local** (`api/services/asset_pipeline/classifier.py`) â€” heuristica pura com Pillow + mime/extension; decide `kind`, `needs_ocr`, `has_text_estimate`. Sem chamada externa.
+2. **OCR local** (`api/services/asset_pipeline/ocr_local.py`) â€” cascade de adapters: PaddleOCR -> EasyOCR -> pytesseract -> mock. Selecao via `ASSET_OCR_BACKEND` (default cascade; CI usa `mock`). Marca `needs_ai_fallback=True` quando `confidence<0.45` ou `len(text)<8`.
+3. **AI fallback** (`api/services/asset_pipeline/ai_fallback.py`) â€” so roda quando `needs_ai_fallback`. Usa `model_router.vision_extract` (novo) com modelo configuravel via `ASSET_VISION_MODEL` (default `gpt-4o-mini`).
+4. **Renamer** (`api/services/asset_pipeline/renamer.py`) â€” heuristica primeiro; opcional `model_router.cheap_text` quando heuristica produz <3 tokens. Desativavel via `ASSET_RENAME_DISABLE_MODEL=1`.
 5. **PDF text** (`pdf_text.py` via pypdf), **video mock** (`video_mock.py`), **schemas Pydantic** (`schemas.py`).
 
 Entrada unica: `services.asset_pipeline.run_pipeline(file_bytes, AssetPipelineContext) -> AssetReadingBundle`. Bundle traz `classification`, `ocr`, `ai_fallback`, `pdf_text`, `video_mock`, `rename`, `extracted_text`, `visual_summary`, `reading_status` e `rows_to_persist` para `asset_readings`.
@@ -530,7 +578,7 @@ Dois fluxos persistentes:
 
 Guard explicito: POST `/assets/{id}/connect` recusa target = node_type='gallery' com 422 `gallery_invalid_target`. Apenas `asset -> gallery` autorizado.
 
-RAG nunca cria entry para asset — `is_rag_eligible` ja gateia em `{"faq"}`.
+RAG nunca cria entry para asset â€” `is_rag_eligible` ja gateia em `{"faq"}`.
 
 Migration `supabase/migrations/033_asset_upload_pipeline.sql`:
 - Buckets `assets-raw` + `assets-derived` (insert idempotente em `storage.buckets`).
@@ -539,7 +587,7 @@ Migration `supabase/migrations/033_asset_upload_pipeline.sql`:
 - Nova tabela `public.asset_readings`: linha por etapa do pipeline (`classification|ocr|ai_fallback|pdf_text|video_mock|rename`), RLS service_role, indexes por (asset_id,reading_type,created_at desc) e persona.
 
 Endpoints novos:
-- `POST /assets/upload` — multipart `file + persona_id + branch_hint + asset_function? + persona_slug?`.
+- `POST /assets/upload` â€” multipart `file + persona_id + branch_hint + asset_function? + persona_slug?`.
 - `GET /assets`, `GET /assets/{id}` (devolve `{asset, readings}`), `POST /assets/{id}/connect` (re-parent com gallery-guard).
 
 Frontend:
@@ -561,11 +609,11 @@ Testes integrados criados em `tests/` (8 escritos e passando, 2 planejados ainda
 - `integration_asset_pipeline_pdf.py` PASS
 - `integration_asset_pipeline_video_mock.py` PASS
 - `integration_asset_pipeline_rename_heuristic.py` PASS
-- `integration_asset_card_upload.py` PASS — valida assets row + knowledge_item + node + edges parent/gallery + asset.knowledge_node_id linkado + asset NAO eh rag_eligible
-- `integration_asset_card_parent_required.py` PASS — 422 + `needs_parent=true` quando sem branch_hint, nada criado
-- `integration_asset_card_gallery_guard.py` PASS — POST /assets/{id}/connect recusa target gallery com `gallery_invalid_target`
-- `integration_sofia_image_upload.py` PASS — upload Sofia anexa reading na sessao (`asset_readings` populado, `classification.attachments` espelhado), tagueia asset com `upload_context='sofia_chat'`/`validation_status='context_only'` e NAO cria knowledge_item; chat() recebe `file_info.asset_reading` para reagir.
-- `integration_asset_validation_lifecycle.py` PASS — asset card aparece em `/knowledge/queue?content_type=asset`; `promote_knowledge_item(promote_to_kb=False)` move item para `status=approved`/`curation_status=approved` com evidence.knowledge_node_id; `is_rag_eligible('asset')` permanece False e nenhum `knowledge_rag_entries`/`knowledge_rag_chunks` e inserido durante a aprovacao.
+- `integration_asset_card_upload.py` PASS â€” valida assets row + knowledge_item + node + edges parent/gallery + asset.knowledge_node_id linkado + asset NAO eh rag_eligible
+- `integration_asset_card_parent_required.py` PASS â€” 422 + `needs_parent=true` quando sem branch_hint, nada criado
+- `integration_asset_card_gallery_guard.py` PASS â€” POST /assets/{id}/connect recusa target gallery com `gallery_invalid_target`
+- `integration_sofia_image_upload.py` PASS â€” upload Sofia anexa reading na sessao (`asset_readings` populado, `classification.attachments` espelhado), tagueia asset com `upload_context='sofia_chat'`/`validation_status='context_only'` e NAO cria knowledge_item; chat() recebe `file_info.asset_reading` para reagir.
+- `integration_asset_validation_lifecycle.py` PASS â€” asset card aparece em `/knowledge/queue?content_type=asset`; `promote_knowledge_item(promote_to_kb=False)` move item para `status=approved`/`curation_status=approved` com evidence.knowledge_node_id; `is_rag_eligible('asset')` permanece False e nenhum `knowledge_rag_entries`/`knowledge_rag_chunks` e inserido durante a aprovacao.
 
 Verificacao tecnica realizada: `py_compile` em todos os modulos novos/alterados; `npx tsc --noEmit` no dashboard limpo apos cada bloco frontend; `npm.cmd run build` do dashboard passou; testes locais de asset listados acima passaram em sequencia.
 
@@ -583,23 +631,23 @@ Verificacao tecnica realizada: `py_compile` em todos os modulos novos/alterados;
 
 Objetivo: tornar Sofia menos rigida e mais consciente do contexto ja existente da persona antes de gerar nodes.
 
-### Etapa A — Pre-init review com contexto da persona (kb_intake_service.py)
+### Etapa A â€” Pre-init review com contexto da persona (kb_intake_service.py)
 
 - Novas funcoes: `_load_persona_context(persona_id)` consulta `knowledge_nodes` via `supabase_client.list_knowledge_nodes_by_type` filtrando `node_type in {brand, briefing, campaign, audience, product, offer, copy, rule, asset, faq}` da persona ativa. Best-effort: erros viram dict vazio, nunca quebram a sessao.
 - `build_pre_initialization_review(session, persona_context, classification)` produz contrato `/tree-reference`: `persona_context_loaded`, `existing_nodes_found`, `recommended_connections`, `new_nodes_needed`, `questions`. Lida com reuso de audience/campaign existentes e roteia asset por `classification.asset_function` (campaign_hero -> campaign, product_reference -> product).
 - `create_session` em `mode='criar'` com `persona_id` resolvido agora popula `session["persona_context"]` e `session["pre_init_review"]` automaticamente.
-- `_session_public_state` expõe `pre_init_review` + `persona_context` no payload da sessao; `_bootstrap_result_payload` propaga `pre_init_review` para o frontend.
+- `_session_public_state` expÃµe `pre_init_review` + `persona_context` no payload da sessao; `_bootstrap_result_payload` propaga `pre_init_review` para o frontend.
 - `_chat_impl` injeta no `state_ctx` enviado ao LLM um bloco "Contexto existente da persona (pre-init review)" com slugs por tipo, recomendacoes de reuso e perguntas obrigatorias antes do plano final. Isso impede a Sofia de criar audience/campanha/asset duplicados sem perguntar.
 
-### Etapa C — FAQ terminal nao gera leaf alert
+### Etapa C â€” FAQ terminal nao gera leaf alert
 
 - `_leaf_alert_warnings` (kb_intake_service.py:803) trocou exclusao `{"asset","embedded","gallery"}` por `{"asset","embedded","gallery","faq"}`. Comentario explica: FAQ e terminal-valido ate aprovacao; pos-aprovacao recebe edge automatica para Embedded.
 - Frontend `dashboard/app/knowledge/capture/page.tsx::leafAlerts` recebeu o mesmo filtro. Nova lista `faqPendingTerminals` separa FAQ pendentes para mostrar como card info azul ("FAQ <titulo>: terminal ate aprovacao. Apos aprovado, sera conectado automaticamente ao Embedded da persona.") em vez de alerta amarelo de "sem saida".
 
-### Etapa D — Embedded fora da previa pre-aprovacao
+### Etapa D â€” Embedded fora da previa pre-aprovacao
 
 - `dashboard/app/knowledge/capture/page.tsx::CaptureSidebar` esconde a linha de `Embedded` em "Plano inicial" e em "Plano em construcao" quando `expectedCountFor('embedded') === 0 && createdCountFor('embedded') === 0`. Continua aparecendo automaticamente assim que houver um node embedded real (FAQ aprovado).
-- `knowledgeGraphLayout.ts` nao foi alterado — `embedded` aparece la apenas quando ha node `embedded` real conectado a FAQ via `embedded_edge`.
+- `knowledgeGraphLayout.ts` nao foi alterado â€” `embedded` aparece la apenas quando ha node `embedded` real conectado a FAQ via `embedded_edge`.
 
 ### Validacao
 
@@ -758,8 +806,8 @@ Complemento da mesma sessao:
 - Token QA local: `baita-cardapio/.env.local` deve ter `AI_BRAIN_PROXY_TARGET=http://localhost:8001` e `AI_BRAIN_ADMIN_TEST_TOKEN=<valor de env.qa.yaml>`. Reiniciar o Vite depois de alterar `.env.local`; o proxy injeta `X-AI-BRAIN-ADMIN-TOKEN` em `POST/PUT/PATCH/DELETE`.
 - Validacao HTTP real local: `DELETE http://localhost:5173/assets-api/303678f1-df60-48ca-bcec-ddafd6f16206/bind-slot/product_image%3Acamiseta-branca-baita?target_slug=camiseta-branca-baita` deixou `asset_count=0`; `POST http://localhost:5173/assets-api/303678f1-df60-48ca-bcec-ddafd6f16206/bind-slot` com slot `product_image:camiseta-branca-baita` restaurou `asset_count=1`.
 - `/api/menu/baita-conveniencia?collection_slug=cardapio-baita-v14&nocache=1` via `localhost:5173` retorna `Camiseta Baita` com `asset_id=303678f1-df60-48ca-bcec-ddafd6f16206`, URL assinada de `assets-raw`, e `slot_key=product_image:camiseta-branca-baita`.
-- Configuracoes: `GET /api/menu/baita-conveniencia/admin-blocks` retorna bloco `Produto — Camiseta Baita` com `slot_instance_key=product_image:camiseta-branca-baita`, imagem atual e edge `fa779596-ca37-42b5-8395-b84b876c01db`.
-- Assets UI: markdown visual em `buildAssetMarkdown` agora emite `# Asset — <nome>`, imagem `assets-raw:<path>`, slots conectados e mapa com `asset → product_image:<slug> → card do produto ... no catálogo Baita`.
+- Configuracoes: `GET /api/menu/baita-conveniencia/admin-blocks` retorna bloco `Produto â€” Camiseta Baita` com `slot_instance_key=product_image:camiseta-branca-baita`, imagem atual e edge `fa779596-ca37-42b5-8395-b84b876c01db`.
+- Assets UI: markdown visual em `buildAssetMarkdown` agora emite `# Asset â€” <nome>`, imagem `assets-raw:<path>`, slots conectados e mapa com `asset â†’ product_image:<slug> â†’ card do produto ... no catÃ¡logo Baita`.
 - Validacao frontend: `npm.cmd test -- --run src/services/menu-api.test.ts src/pages/AdminCardapioPage.test.tsx src/utils/asset-connections.test.ts src/utils/product-visuals.test.ts` passou (13 testes). `agent-browser` e Playwright nao estavam disponiveis; Chrome/Edge headless nao geraram screenshot neste ambiente, entao a verificacao visual automatizada ficou limitada a HTTP/DOM/API e testes de componentes.
 
 ## Sessao 2026-05-20 - Auditoria do grafo + amarrar pipeline de upload
@@ -783,7 +831,7 @@ Complemento da mesma sessao:
   - `Bucket not found` -> tenta self-heal via `ensure_bucket`; se falhar devolve **503 `storage_bucket_missing`** com mensagem orientando rodar migration 033 ou `scripts/ensure_qa_buckets.py`.
   - `InvalidKey/Invalid key` -> **422 `invalid_storage_key`** com mensagem explicando que precisa de letras/numeros/hifens/pontos/sublinhados.
   - Outros erros: mantem fallback legado para bucket `knowledge`.
-- **Causa raiz real do 502 persistente**: o filename do upload era `0 - Capa - BAITA - LAYOUT - Cardapio Atualização.png` com espacos + acento (`ç`). Supabase Storage rejeita com `400 InvalidKey`, mas o exception_type comum (`StorageApiError`) fez parecer que era "Bucket not found" novamente.
+- **Causa raiz real do 502 persistente**: o filename do upload era `0 - Capa - BAITA - LAYOUT - Cardapio AtualizaÃ§Ã£o.png` com espacos + acento (`Ã§`). Supabase Storage rejeita com `400 InvalidKey`, mas o exception_type comum (`StorageApiError`) fez parecer que era "Bucket not found" novamente.
 - Fix: novo helper `_safe_storage_filename(fname)` em `api/routes/assets.py` slugifica stem + extensao reusando `knowledge_graph._slugify` (NFKD + ASCII). `original_filename` continua intacto em `assets.original_filename` e `assets.metadata` para exibicao. Storage_path agora vai como `{persona_id}/0-capa-baita-layout-cardapio-atualizacao.png`.
 - Reproducao validada contra QA Supabase real: filename cru -> `400 InvalidKey`; filename sanitizado -> upload OK com URL assinada.
 - Endpoint de diagnostico: `GET /health/storage` (publico em `api/middleware/auth.py`) retorna `{supabase_url, project_ref, buckets_visible, required, missing, ok, bucket_error}`. Permite descobrir, sem reabrir codigo, qual Supabase o backend esta atingindo e quais buckets estao visiveis para o service_role daquele projeto.
@@ -799,7 +847,7 @@ Complemento da mesma sessao:
 - `tests/test_product_approval.py`: PASS.
 - `tests/integration_asset_card_gallery_guard.py`: PASS (cobre meu novo emit `asset_connect_rejected_gallery` em `connect_asset`).
 - `tests/integration_asset_card_parent_required.py`: PASS.
-- ⚠️ `tests/integration_asset_card_upload.py`: FALHA por regressao **pre-existente** dos edits anteriores em `_upload_asset_impl` (helpers HEIC nao mockados). Meus edits nao tocam essa funcao alem do bloco de captura de exception, mas o teste ja falhava antes desta sessao. Decisao: deixar como divida tecnica ou atualizar mocks do teste numa proxima rodada.
+- âš ï¸ `tests/integration_asset_card_upload.py`: FALHA por regressao **pre-existente** dos edits anteriores em `_upload_asset_impl` (helpers HEIC nao mockados). Meus edits nao tocam essa funcao alem do bloco de captura de exception, mas o teste ja falhava antes desta sessao. Decisao: deixar como divida tecnica ou atualizar mocks do teste numa proxima rodada.
 
 ### Pendencias para commit + deploy QA
 1. Commit consolidado (sugestao: dois commits separados)
@@ -819,25 +867,25 @@ Complemento da mesma sessao:
 - **`/logs/audit` retorna 403**: usuario nao e admin. Auditoria so e visivel para `role=admin` (PII potencial em `actor.email`).
 - **Backend aponta para Supabase errado**: chamar `GET /health/storage` -- ele reporta `supabase_url` e `project_ref` atuais. Se nao bater com o esperado, conferir env vars do Cloud Run (`gcloud run services describe ai-brain-api-qa --region us-central1 --format='value(spec.template.spec.containers[0].env)'`).
 
-## Sofia/CRIAR — diagnostico modal + arquitetura gambiarra (2026-05-21)
+## Sofia/CRIAR â€” diagnostico modal + arquitetura gambiarra (2026-05-21)
 
 ### Sintoma reportado pelo operador
 - Modal "Plano precisa de decisoes da Sofia" abre com `asset_expansion_incomplete`, mas os botoes A/B/C nao fazem nada quando clicados.
-- Subir asset pelo paperclip nao remove a violacao — mensagem volta "Asset expansion incompleto" no proximo turno.
+- Subir asset pelo paperclip nao remove a violacao â€” mensagem volta "Asset expansion incompleto" no proximo turno.
 - As vezes a arvore aparece praticamente pronta no chat, mas o botao "Salvar conhecimento" nao surge.
 
 ### Causas (todas confirmadas no codigo)
 1. **Opcoes do modal sao botoes mortos**. `dashboard/components/capture/BlockedPlanDiagnosticModal.tsx:369-374` renderiza `SofiaQuestionCard` sem passar `onOptionSelect`. O componente filho tem o callback opcional (`linha 185-194`), mas o pai nunca cabeia -> click so destaca o botao.
 2. **Os `action` strings emitidos pelo backend (`upload_asset`, `attach_existing_asset`, `drop_asset_requirement`, `drop_faq_target`, `create_offer`, `create_rule`) nao tem handler em lugar nenhum**. `api/services/kb_intake_service.py:1695-1722` cria as opcoes mas nao existe `/kb-intake/sofia-action`, nem switch dentro de `chat()`, nem aplicacao do `payload`. Contrato fingido.
 3. **Upload pelo paperclip NAO cria entry asset no `normalized_plan`**. O arquivo entra em `session.asset_readings` (`kb_intake_service.py:4501`) e em `mission_state.evidence_items`, mas e o LLM que tem que decidir, no proximo turno, inserir uma entry `content_type=asset` com `metadata.parent_slug=<produto>`. Quando ele esquece, `expansion.asset.created` continua em 0 e o validador (`_validate_plan:1269-1274`) mantem `Asset expansion incomplete` para sempre.
-4. **`GraphPreviewPanel` so renderiza se `planStateValid===true`** (`dashboard/app/knowledge/capture/page.tsx:1732`). Qualquer violacao bloqueante esconde o painel inteiro — junto com o botao "Salvar conhecimento" (linha 2271). Por isso o operador ve a estrutura no chat mas nao tem como salvar.
-5. **"Editar plano" no rodape do modal so abre o textarea de `contentText`** (`page.tsx:1858`), que e um campo de vault opcional — nao edita a arvore. `onRegenerate` nunca e passado, entao o botao "Regerar estrutura" do modal nem aparece.
+4. **`GraphPreviewPanel` so renderiza se `planStateValid===true`** (`dashboard/app/knowledge/capture/page.tsx:1732`). Qualquer violacao bloqueante esconde o painel inteiro â€” junto com o botao "Salvar conhecimento" (linha 2271). Por isso o operador ve a estrutura no chat mas nao tem como salvar.
+5. **"Editar plano" no rodape do modal so abre o textarea de `contentText`** (`page.tsx:1858`), que e um campo de vault opcional â€” nao edita a arvore. `onRegenerate` nunca e passado, entao o botao "Regerar estrutura" do modal nem aparece.
 
 ### Raiz arquitetural (porque essas gambiarras existem)
 - **`ModelRouter.messages_create` so faz text-in/text-out** (`api/services/model_router.py:154-192`). Sem function-calling/tool-use de provider. Toda mutacao de plano e: LLM gera texto -> regex extrai `<knowledge_plan>{json}</knowledge_plan>` em `_extract_plan` (`kb_intake_service.py:560`) com 4 fallbacks defensivos (`_candidate_plan_blocks:526`).
 - **Cada turno = regenerar o plano inteiro**. Nao existe patch incremental. O LLM regrava o JSON todo, incluindo edges, mesmo para corrigir um parent. Caro, lento, hallucination-prone.
 - **System prompt de 700+ linhas com "HARD CONTRACT" implorando o modelo a nao usar markdown fence** (`kb_intake_service.py:311-315`). E sintoma classico de falta de tools: com ferramentas estruturadas o modelo nao tem como errar o formato.
-- **Reuso proativo de nodes existentes e injetado como TEXTO** no system prompt via `pre_init_review` (`kb_intake_service.py:4854-4876`) — frase em portugues, nao tool. Fragil.
+- **Reuso proativo de nodes existentes e injetado como TEXTO** no system prompt via `pre_init_review` (`kb_intake_service.py:4854-4876`) â€” frase em portugues, nao tool. Fragil.
 - **Acao do operador via modal nao tem caminho de volta para o plano**: as `options[].action` sao etiquetas declarativas sem implementacao.
 
 ### Plano de migracao (acordado com o operador, ordem de commit)
@@ -853,7 +901,7 @@ Complemento da mesma sessao:
   - Wire `onRegenerate={() => api.kbIntakeMessage(sessionId, "Regere a arvore aplicando os reparos sugeridos pelo diagnostico atual")}`.
   - Mover `GraphPreviewPanel` para sempre renderizar quando `draftPlan` existe (linha 1732); botao Save fica `disabled` em vez de oculto. Tooltip lista violacoes.
   - Trocar `onEdit={() => setShowContent(true)}` por `onEdit={() => router.push(/knowledge/graph?...)}` ou remover ate ter tela de edicao node-a-node.
-- `dashboard/lib/api.ts`: nada novo — usar `kbIntakeMessage` existente. O backend acompanha enviando `prompt_to_sofia` ja embutido em cada opcao.
+- `dashboard/lib/api.ts`: nada novo â€” usar `kbIntakeMessage` existente. O backend acompanha enviando `prompt_to_sofia` ja embutido em cada opcao.
 
 ### Mapa do backend que sera tocado na etapa 2
 - `api/services/kb_intake_service.py::_sofia_questions_from_diagnostic` (linha 1625+): para cada `kind`, emitir opcoes com `prompt_to_sofia` em vez de `action`. Manter `action`+`payload` por 1 release como fallback caso o front ainda nao tenha migrado.
@@ -866,52 +914,52 @@ Complemento da mesma sessao:
 - Botao = atalho que dispara mensagem para Sofia, que escolhe a tool. Backend e a unica fonte da verdade.
 - Sofia ganha tools para criatividade (creative subtree expansion, proactive node reuse) deixando de regerar plano inteiro a cada turno.
 
-## ALERTAS — codigo legado que NAO respeita a hierarquia do grafo (2026-05-21)
+## ALERTAS â€” codigo legado que NAO respeita a hierarquia do grafo (2026-05-21)
 
 Regra base do CLAUDE.md: **"Todo conhecimento adicionado DEVE aparecer no grafo. knowledge_items -> knowledge_nodes -> knowledge_edges"**. Os pontos abaixo violam isso e poluem a persistencia de memoria de marca/persona porque criam estados paralelos que nao tem reflexo em `knowledge_nodes`.
 
-### A — Brand: `brand_profiles` e ilha; nao vira knowledge_node
+### A â€” Brand: `brand_profiles` e ilha; nao vira knowledge_node
 - **Arquivo**: `api/routes/knowledge.py:1116-1138` (PUT `/knowledge/brand/{persona_id}`).
 - **Servico**: `api/services/supabase_client.py:3332-3336` (`upsert_brand_profile`).
 - **O que faz**: `PUT /knowledge/brand/{persona_id}` chama `supabase_client.upsert_brand_profile({persona_id, **body})` que faz `table("brand_profiles").upsert(...)` direto e emite `brand_profile_updated`. Nao chama `sync_brand_node`, nao chama `bootstrap_from_item`, nao cria nem atualiza nenhuma entry em `knowledge_nodes` com `node_type=brand`.
 - **Sintoma**: a diretriz de marca persiste apenas em `brand_profiles`; chat-context/RAG/Sofia nao "veem" a marca pelo grafo (so via SELECT direto). Quando alguem inspeciona o grafo, a persona aparece "sem brand", embora a aba Brand mostre dados.
 - **Comparativo**: `audiences` foi corrigido (`api/routes/audiences.py:67` chama `supabase_client.sync_audience_node(audience)`). Brand ficou para tras.
-- **Acao sugerida**: criar `supabase_client.sync_brand_node(brand_profile)` espelhando o padrao do audience — slug `brand-<persona_slug>`, `node_type="brand"`, `metadata` com posicionamento/promessa/tom, edge `belongs_to_persona`. Chamar em `upsert_brand` apos o upsert, e backfill via script para personas existentes.
+- **Acao sugerida**: criar `supabase_client.sync_brand_node(brand_profile)` espelhando o padrao do audience â€” slug `brand-<persona_slug>`, `node_type="brand"`, `metadata` com posicionamento/promessa/tom, edge `belongs_to_persona`. Chamar em `upsert_brand` apos o upsert, e backfill via script para personas existentes.
 
-### B — Auditoria de eventos: tudo em `system_events`, sem nada no grafo
+### B â€” Auditoria de eventos: tudo em `system_events`, sem nada no grafo
 - **Servico**: `api/services/supabase_client.py:3358-3376` (`insert_event`).
 - **O que faz**: eventos `brand_profile_updated`, `product_node_updated`, `graph_*` viajam todos por `system_events`. So leem na tela `/logs`. Nao geram edges de "produto X foi editado por usuario Y".
-- **Status**: aceito como design (auditoria != memoria). Nao mudar — mas anotar para Sofia nao tratar `system_events` como fonte de "conhecimento".
+- **Status**: aceito como design (auditoria != memoria). Nao mudar â€” mas anotar para Sofia nao tratar `system_events` como fonte de "conhecimento".
 
-### C — `kb_entries`: agora espelha, mas o codigo legado de PROD ainda escreve direto
+### C â€” `kb_entries`: agora espelha, mas o codigo legado de PROD ainda escreve direto
 - **Arquivo**: `api/services/supabase_client.py:2556-2595` (`upsert_kb_entry`).
 - **Fluxo correto** (do CLAUDE.md): aprovar `knowledge_items(pending)` -> `promote_to_kb=true` -> `kb_entries(ATIVO)` -> `bootstrap_from_item(source_table="kb_entries")` -> `knowledge_nodes` -> `knowledge_edges`.
 - **Sintoma**: existem chamadas `upsert_kb_entry` em scripts/seed/imports antigos que nao chamam `bootstrap_from_item` em seguida. Resultado: `kb_entries` com rows orfas no grafo. CLAUDE.md item 11 e explicito: "kb_entries nunca deve existir sem reflexo no grafo".
-- **Acao sugerida**: auditoria — `SELECT k.id, k.kb_id, k.persona_id FROM kb_entries k LEFT JOIN knowledge_nodes n ON n.metadata->>'kb_id' = k.kb_id WHERE n.id IS NULL;`. Para cada orfao, rodar `bootstrap_from_item` retroativo. `knowledge_graph.py:933` ja tem helper `rebuild_graph` para isso.
+- **Acao sugerida**: auditoria â€” `SELECT k.id, k.kb_id, k.persona_id FROM kb_entries k LEFT JOIN knowledge_nodes n ON n.metadata->>'kb_id' = k.kb_id WHERE n.id IS NULL;`. Para cada orfao, rodar `bootstrap_from_item` retroativo. `knowledge_graph.py:933` ja tem helper `rebuild_graph` para isso.
 
-### D — `audiences`: corrigido mas nao tem garantia transacional
+### D â€” `audiences`: corrigido mas nao tem garantia transacional
 - **Arquivo**: `api/routes/audiences.py:54-84`.
-- **O que faz**: chama `create_audience` (INSERT em `audiences`) seguido de `sync_audience_node`. Sao duas chamadas separadas; se a segunda falhar (rede, RLS), fica `audience` sem node — mesmo problema do brand, so que menor.
+- **O que faz**: chama `create_audience` (INSERT em `audiences`) seguido de `sync_audience_node`. Sao duas chamadas separadas; se a segunda falhar (rede, RLS), fica `audience` sem node â€” mesmo problema do brand, so que menor.
 - **Acao sugerida**: envolver em transacao via RPC Supabase ou pelo menos compensar (rollback do INSERT) quando `sync_audience_node` retornar None.
 
-### E — `assets`: sem `gallery_asset` automatico
+### E â€” `assets`: sem `gallery_asset` automatico
 - **Servico**: `api/services/supabase_client.py:3564-3580` (`insert_asset`).
 - **Regra CLAUDE.md item 10**: "assets ligados ao Gallery usam `gallery_asset`".
 - **Sintoma**: criar asset via `/assets/upload` insere row em `assets` mas nao gera edge `gallery_asset` para o Gallery node da persona. So aparece no Gallery quando o operador conecta manualmente via `connect_asset`.
-- **Acao sugerida**: opcional — auto-conectar assets aprovados a `gallery-{persona_slug}` na promocao. Hoje o fluxo manual e intencional, mas para uploads automaticos (crawler/sync) o asset fica invisivel ate alguem clicar.
+- **Acao sugerida**: opcional â€” auto-conectar assets aprovados a `gallery-{persona_slug}` na promocao. Hoje o fluxo manual e intencional, mas para uploads automaticos (crawler/sync) o asset fica invisivel ate alguem clicar.
 
-### F — `lead_audience_memberships` x `leads.persona_id`
+### F â€” `lead_audience_memberships` x `leads.persona_id`
 - **Reference memory ja existente**: `reference_leads_schema.md` / `feedback_persona_audience_visibility.md`. Repito aqui porque toca persistencia de persona.
-- **Acao sugerida**: nada novo — usar `lead_audience_memberships` como fonte canonica em queries operacionais; `leads.persona_id` e legado.
+- **Acao sugerida**: nada novo â€” usar `lead_audience_memberships` como fonte canonica em queries operacionais; `leads.persona_id` e legado.
 
-### G — Sofia: o knowledge_plan vai para `knowledge_nodes` so no save final
+### G â€” Sofia: o knowledge_plan vai para `knowledge_nodes` so no save final
 - **Arquivo**: `api/services/kb_intake_service.py` (todo o pipeline `chat()` -> `save()`).
 - **Comportamento atual**: durante a conversa, o plano vive em `session.normalized_plan` (arquivo .json local). So vira `knowledge_nodes` no `POST /kb-intake/save` (que dispara `vault_sync` -> `bootstrap_from_item`).
 - **Risco**: se a sessao expirar/morrer antes do save, todo o conhecimento gerado some. **A migracao para tools (camada 2 abaixo) ajuda aqui**: cada `create_node` tool call pode persistir incrementalmente em `knowledge_nodes` com `status=draft`, eliminando o "tudo ou nada" do save.
 - **Acao sugerida (alinhada com a migracao de tools)**: tool `create_node` faz `INSERT` em `knowledge_nodes(status="draft", metadata.session_id=...)`. Save final so faz UPDATE para `status="pendente_validacao"` ou `validated`. Sofia para de regerar plano do zero a cada turno.
 
 ### Resumo do impacto na memoria de marca
-A unica violacao bloqueante para "memoria de marca consistente" e a **A (brand_profiles)**. As demais sao debitos tecnicos com sintomas localizados. Se tivermos que escolher uma para corrigir antes da migracao de tools, e a A — porque toda a creative reuse que a Sofia faria via `find_existing_persona_nodes(types=["brand"])` retorna vazio hoje, mesmo com o brand cadastrado.
+A unica violacao bloqueante para "memoria de marca consistente" e a **A (brand_profiles)**. As demais sao debitos tecnicos com sintomas localizados. Se tivermos que escolher uma para corrigir antes da migracao de tools, e a A â€” porque toda a creative reuse que a Sofia faria via `find_existing_persona_nodes(types=["brand"])` retorna vazio hoje, mesmo com o brand cadastrado.
 
 ## Gate de testes antes do build - 2026-05-22
 
@@ -940,39 +988,39 @@ Aceite:
 ## Sessao 2026-05-23 - VZ Lupas, Sofia tools, catalogo na /persona e login QA
 
 ### Commits recentes (develop, depois do gate de testes)
-- `6832f73 feat(capture): modal Sofia vira visualizacao + atalhos de prompt; Save sempre visivel` — corrige a serie de gambiarras catalogadas em 2026-05-21. Modal `BlockedPlanDiagnosticModal` passou a propagar `onOptionSelect`; cada opcao envia `prompt_to_sofia` via `kbIntakeMessage`. `GraphPreviewPanel` renderiza enquanto `draftPlan` existe e o botao Save fica `disabled` com tooltip listando violacoes, em vez de sumir.
-- `1899850 feat(sofia): backend tools deterministicas + tool-use loop opt-in via env` — `api/services/sofia_tools.py` ganhou as primeiras tools (`create_node`, `set_parent`, `connect_nodes`, `delete_node`, `validate_plan`, `set_expansion_policy`, `attach_session_asset`, `find_existing_persona_nodes`, `suggest_connections`). `ModelRouter.messages_create` aceita `tools=` e devolve `tool_calls`. Flag `SOFIA_TOOLS_ENABLED` mantem o caminho antigo enquanto migracao roda.
-- `397d539 fix(intake): aceita product_group/offer/gallery no ALLOWED_CONTENT_TYPES + E2E VZ Lupas` — `api/services/knowledge_rag_intake.py:20-37` agora reconhece `product_group/offer/gallery` (antes caiam em `general_note`). Acompanha pacote E2E VZ Lupas em `tmp/sofia_e2e/`: `run_vz_lupas_e2e.py`, `retry_assets_shot.py`, `run_screenshots_only.py`, REPORT.md + screenshots t1/t2/t3 + uploads VZ Lupas (clipon/grau/sol).
+- `6832f73 feat(capture): modal Sofia vira visualizacao + atalhos de prompt; Save sempre visivel` â€” corrige a serie de gambiarras catalogadas em 2026-05-21. Modal `BlockedPlanDiagnosticModal` passou a propagar `onOptionSelect`; cada opcao envia `prompt_to_sofia` via `kbIntakeMessage`. `GraphPreviewPanel` renderiza enquanto `draftPlan` existe e o botao Save fica `disabled` com tooltip listando violacoes, em vez de sumir.
+- `1899850 feat(sofia): backend tools deterministicas + tool-use loop opt-in via env` â€” `api/services/sofia_tools.py` ganhou as primeiras tools (`create_node`, `set_parent`, `connect_nodes`, `delete_node`, `validate_plan`, `set_expansion_policy`, `attach_session_asset`, `find_existing_persona_nodes`, `suggest_connections`). `ModelRouter.messages_create` aceita `tools=` e devolve `tool_calls`. Flag `SOFIA_TOOLS_ENABLED` mantem o caminho antigo enquanto migracao roda.
+- `397d539 fix(intake): aceita product_group/offer/gallery no ALLOWED_CONTENT_TYPES + E2E VZ Lupas` â€” `api/services/knowledge_rag_intake.py:20-37` agora reconhece `product_group/offer/gallery` (antes caiam em `general_note`). Acompanha pacote E2E VZ Lupas em `tmp/sofia_e2e/`: `run_vz_lupas_e2e.py`, `retry_assets_shot.py`, `run_screenshots_only.py`, REPORT.md + screenshots t1/t2/t3 + uploads VZ Lupas (clipon/grau/sol).
 
 ### Plano cardapio multi-persona (`tmp/sofia_e2e/PLAN_CARDAPIO_MULTI_PERSONA.md`)
 - `baita-cardapio` ja roda por `personaSlug` na URL. Pontos acoplados que sobram (a fechar antes do VZ Lupas ir publico):
-  - `api/routes/menu.py:407-408,434,440,565,575,632` — alias map e `collection_slug` default `cardapio-baita-v14` so para baita.
+  - `api/routes/menu.py:407-408,434,440,565,575,632` â€” alias map e `collection_slug` default `cardapio-baita-v14` so para baita.
   - `../baita-cardapio/src/App.tsx:16` envia `VITE_DEFAULT_PERSONA=baita` na Vercel.
   - `PersonaThemeProvider` precisa carregar tokens via `/api/menu/{slug}/theme` (D3.A: tokens em `persona.metadata.theme`).
   - Copy persona-aware (`persona.metadata.copy.menu_label = "Cardapio" | "Catalogo"`).
 - Recomendacao adotada: discovery via marker `metadata.is_landing_root=true` em node `product_group` (Passo 1 do plano), descartando default hardcoded.
 - URL strategy hoje: path-based (`baita-cardapio.vercel.app/<persona-slug>`). Subdomain fica para 5+ personas.
 
-### Login QA quebrado (brain-plataform-qa.vercel.app) — diagnostico
-- Sintoma do navegador: `GET /api-brain/auth/me 401` repetitivo + `POST /api-brain/auth/login 401`. O loop infinito de `up/ud` no console e React batendo no `useEffect` do `AppShell.me()` em cada render porque `pathname !== "/login"` mas a sessao nao existe — quando `me()` lanca 401, o handler chama `router.replace("/login")`, mas o redirect nao executa se o `proxy.ts` ja redirecionou e o componente continua montando. Isso so se manifesta porque o backend QA esta rejeitando as credenciais.
+### Login QA quebrado (brain-plataform-qa.vercel.app) â€” diagnostico
+- Sintoma do navegador: `GET /api-brain/auth/me 401` repetitivo + `POST /api-brain/auth/login 401`. O loop infinito de `up/ud` no console e React batendo no `useEffect` do `AppShell.me()` em cada render porque `pathname !== "/login"` mas a sessao nao existe â€” quando `me()` lanca 401, o handler chama `router.replace("/login")`, mas o redirect nao executa se o `proxy.ts` ja redirecionou e o componente continua montando. Isso so se manifesta porque o backend QA esta rejeitando as credenciais.
 - Causa provavel: o Cloud Run QA (`ai-brain-api-qa-837167469397.us-central1.run.app`) nao tem usuario auth para o e-mail digitado. `api/middleware/auth.py:78-107` exige `auth_service.get_user_by_id(payload.sub)`; antes disso o `POST /auth/login` ja teria devolvido 401 se o usuario nao existir em `auth_users`.
-- Validacao operacional sugerida (nao executei — exige `env.qa.yaml` e `gcloud`):
-  1. `curl -sS https://ai-brain-api-qa-837167469397.us-central1.run.app/health` → confirmar que o servico esta no ar.
+- Validacao operacional sugerida (nao executei â€” exige `env.qa.yaml` e `gcloud`):
+  1. `curl -sS https://ai-brain-api-qa-837167469397.us-central1.run.app/health` â†’ confirmar que o servico esta no ar.
   2. Verificar `auth_users` no Supabase QA: `select id, email, role, is_active from auth_users order by created_at;`.
-  3. Se vazio ou sem o admin esperado, rodar `cd api && python scripts/create_auth_user.py --email <op@empresa.com> --username <op> --password <senha> --role admin` apontando para `env.qa.yaml` (a sessao precisa ter `AI_BRAIN_SEED_ADMIN_EMAIL`/`PASSWORD` setados no Cloud Run QA para o seed automatico funcionar — checar `gcloud run services describe ai-brain-api-qa --region us-central1 --format='value(spec.template.spec.containers[0].env)'`).
+  3. Se vazio ou sem o admin esperado, rodar `cd api && python scripts/create_auth_user.py --email <op@empresa.com> --username <op> --password <senha> --role admin` apontando para `env.qa.yaml` (a sessao precisa ter `AI_BRAIN_SEED_ADMIN_EMAIL`/`PASSWORD` setados no Cloud Run QA para o seed automatico funcionar â€” checar `gcloud run services describe ai-brain-api-qa --region us-central1 --format='value(spec.template.spec.containers[0].env)'`).
 - Atalho enquanto a conta nao for criada: usar header `X-AI-BRAIN-ADMIN-TOKEN: <AI_BRAIN_ADMIN_TEST_TOKEN>` em endpoints internos (so funciona quando `ENVIRONMENT in {qa,preview,test}`), conforme `api/middleware/auth.py:36-65`.
 
 ### Catalogo na /persona (esta sessao)
 - Pedido: adicionar na tela `/persona` (`dashboard/app/persona/page.tsx`) um link para o cardapio/catalogo publico da persona selecionada, sem nada hardcoded. Link tem que respeitar PROD vs QA e seguir o slug da persona (ex: `vzlupas`).
 - Decisao: novo env publico `NEXT_PUBLIC_CARDAPIO_BASE_URL` em `dashboard/.env.local.example`. Link no front e `${NEXT_PUBLIC_CARDAPIO_BASE_URL}/${persona.slug}` quando o env existir; quando nao, o card mostra estado vazio explicando como configurar. Para QA: `https://baita-cardapio-qa.vercel.app`. Para PROD: `https://baita-cardapio.vercel.app`. O slug e sempre da persona (`persona.slug`), e nunca uma constante.
-- O card resume o quanto da persona ja esta refletido no catalogo usando o `graphSummary` que a tela ja calcula: contagem de produtos conectados (`graphSummary.products`) e contagem de assets em Gallery (consultado via `api.galleryAssets(persona.id)` — mesmo endpoint que /settings usa). Assim "vinculando diretamente os produtos, assets de forma correta" e validavel pelo operador antes de abrir o link.
+- O card resume o quanto da persona ja esta refletido no catalogo usando o `graphSummary` que a tela ja calcula: contagem de produtos conectados (`graphSummary.products`) e contagem de assets em Gallery (consultado via `api.galleryAssets(persona.id)` â€” mesmo endpoint que /settings usa). Assim "vinculando diretamente os produtos, assets de forma correta" e validavel pelo operador antes de abrir o link.
 - Vercel: precisa setar `NEXT_PUBLIC_CARDAPIO_BASE_URL` em ambos os scopes do projeto `brain-plataforma`:
   - production -> `https://baita-cardapio.vercel.app`
   - preview (branch `develop`) -> `https://baita-cardapio-qa.vercel.app`
   - sem isso o card aparece em modo "configurar URL" e nao quebra a tela.
-- 2026-05-27 (BRA-22 re-dispatch): sweep `baseline-validate-only` executada via `node C:\Users\Alan\Documents\repositorios\paperclip\scripts\graph-test-runner.mjs` com `AI_BRAIN_BASE_URL=http://127.0.0.1:8001` e token admin de QA carregado do `env.qa.yaml`. Evidence gerada em `C:\Users\Alan\Documents\repositorios\paperclip\test-artifacts\graph-runs\2026-05-27T07-19-28-026Z.json`. Resultado: `disposition=blocked` por `fetch_graph status=404` (`/knowledge/graph?mode=semantic_tree&all_edges=1&persona_slug=vz-lupas`), sem avaliação das hard invariants por indisponibilidade da rota alvo.
-- 2026-05-27 (BRA-22 heartbeat): Corrigi o runner paperclip/scripts/graph-test-runner.mjs com fallback de endpoint (/knowledge/graph -> /knowledge/graph-data) e grava��o do oute/url usado no step etch_graph; adicionei teste de contrato em paperclip/tests/graph-runner.test.mjs (graph endpoint fallback prefers graph-data...) e validei com 
-ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecu��o real gerou paperclip/test-artifacts/graph-runs/2026-05-27T07-22-44-264Z.json com locked por 403 em /knowledge/graph-data?...persona_slug=vz-lupas (endpoint agora responde; bloqueio remanescente � acesso/persona no alvo, n�o mais 404).
+- 2026-05-27 (BRA-22 re-dispatch): sweep `baseline-validate-only` executada via `node C:\Users\Alan\Documents\repositorios\paperclip\scripts\graph-test-runner.mjs` com `AI_BRAIN_BASE_URL=http://127.0.0.1:8001` e token admin de QA carregado do `env.qa.yaml`. Evidence gerada em `C:\Users\Alan\Documents\repositorios\paperclip\test-artifacts\graph-runs\2026-05-27T07-19-28-026Z.json`. Resultado: `disposition=blocked` por `fetch_graph status=404` (`/knowledge/graph?mode=semantic_tree&all_edges=1&persona_slug=vz-lupas`), sem avaliaÃ§Ã£o das hard invariants por indisponibilidade da rota alvo.
+- 2026-05-27 (BRA-22 heartbeat): Corrigi o runner paperclip/scripts/graph-test-runner.mjs com fallback de endpoint (/knowledge/graph -> /knowledge/graph-data) e gravaï¿½ï¿½o do oute/url usado no step etch_graph; adicionei teste de contrato em paperclip/tests/graph-runner.test.mjs (graph endpoint fallback prefers graph-data...) e validei com 
+ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecuï¿½ï¿½o real gerou paperclip/test-artifacts/graph-runs/2026-05-27T07-22-44-264Z.json com locked por 403 em /knowledge/graph-data?...persona_slug=vz-lupas (endpoint agora responde; bloqueio remanescente ï¿½ acesso/persona no alvo, nï¿½o mais 404).
 
 ## Sessao 2026-05-27 - BRA-29 fluxo simples para criar persona em Configuracoes
 - Frontend: adicionado metodo `api.createPersona` em `dashboard/lib/api.ts` (POST `/personas`) para consumir a rota ja existente no backend.
@@ -981,7 +1029,7 @@ ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecu��o real gerou p
 - Estados tratados: loading (`Criando...`), erro de API e sucesso visivel no card.
 - Verificacao minima: `cd dashboard && npx tsc --noEmit` (passou em 2026-05-27).
 
-## 2026-05-28 � codex (BRA-45 /sofia/graph-command real backend)
+## 2026-05-28 ï¿½ codex (BRA-45 /sofia/graph-command real backend)
 - Issue/tarefa: BRA-45 endpoint backend para Sofia reprocessar nodes/edges com cadeia canonica.
 - Arquivos alterados:
   - api/routes/qa_contract.py
@@ -1006,7 +1054,7 @@ ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecu��o real gerou p
 - Riscos/bloqueios:
   - Fluxo de deletions (`nodes_delete`/`edges_delete`) permanece reservado no payload e nao executado nesta entrega.
 
-## 2026-05-28 � codex (BRA-46 frontend smoke /sofia/graph-command)
+## 2026-05-28 ï¿½ codex (BRA-46 frontend smoke /sofia/graph-command)
 - Wake comment atendido: execucao Frontend Agent para smoke real do `/sofia/graph-command` + patch React Flow pending/persisted com evidencia.
 - Frontend corrigido para contrato real da rota:
   - `dashboard/lib/api.ts`: `api.sofiaGraphCommand(...)` agora envia payload canonico `{ persona_slug, command, context.client_action }` em vez de `{action,message}`.
@@ -1019,7 +1067,7 @@ ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecu��o real gerou p
   - Tentativa com `X-AI-BRAIN-ADMIN-TOKEN` (token de `env.qa.yaml`) e `ENVIRONMENT=qa` em nova instancia (`8013`) manteve `Sessao obrigatoria`.
 - Bloqueio objetivo para DoD de smoke real end-to-end: falta credencial de sessao valida (usuario/senha) para autenticar no backend e executar o comando real com persist/refetch no ambiente atual.
 
-## 2026-05-28 � codex (BRA-45 closure: commit + reload + live probe)
+## 2026-05-28 ï¿½ codex (BRA-45 closure: commit + reload + live probe)
 - Branch: `develop`
 - Commit realizado: `76bd9c7` (`feat(qa-contract): POST /sofia/graph-command + validacao cadeia canonica`).
 - Arquivos no commit:
@@ -1035,16 +1083,16 @@ ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecu��o real gerou p
   - payload NL: `reencaixe VZ Lupas abaixo de AllanVvz e organize com Audience padrao.`
   - resultado: HTTP 200, `ok=true`, `persisted=true`, `validation.canonical_chain_respected=true`.
 
-### 2026-05-28 � frontend-agent (BRA-46: chain lock by BRA-50)
+### 2026-05-28 ï¿½ frontend-agent (BRA-46: chain lock by BRA-50)
 - Issue/tarefa: BRA-46
 - Arquivos alterados: memory.md
-- O que mudou: Recebido wake `CHAIN LOCK 2026-05-28` do board; BRA-46 fica travada por dependencia direta de evidencia smoke da BRA-50 conforme `paperclip/agents/OPERATING_RULES.md` �10. Nenhuma nova execucao E2E foi iniciada para evitar retry sem input novo.
+- O que mudou: Recebido wake `CHAIN LOCK 2026-05-28` do board; BRA-46 fica travada por dependencia direta de evidencia smoke da BRA-50 conforme `paperclip/agents/OPERATING_RULES.md` ï¿½10. Nenhuma nova execucao E2E foi iniciada para evitar retry sem input novo.
 - Validacao executada: leitura de `paperclip/agents/OPERATING_RULES.md` e thread de comentarios da issue via Paperclip API; lock confirmado.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/memory.md
 - Riscos / bloqueios: unblock externo obrigatorio pela cadeia critica (BRA-50).
 - Proximo passo: owner BRA-50 publicar evidencia smoke em path publicado; depois retomar BRA-46.
 
-### 2026-05-28 � frontend-agent (BRA-46: gate update via BRA-57 chain)
+### 2026-05-28 ï¿½ frontend-agent (BRA-46: gate update via BRA-57 chain)
 - Issue/tarefa: BRA-46
 - Arquivos alterados: memory.md
 - O que mudou: Recebido novo gate do board inserindo cadeia critica anterior a BRA-46: `BRA-54 (done) -> [BRA-58 + BRA-61] -> BRA-59 -> BRA-60 -> BRA-50 -> BRA-46 -> BRA-44`. BLOQUEIO mantido para BRA-46 ate fechamento com aceite real dos gates anteriores.
@@ -1120,37 +1168,37 @@ ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecu��o real gerou p
 - Live probe: both headers return `200` for `POST /sofia/graph-command` on `:8001`.
 - BRA-60 compatibility check: runner executed 33 cases, `disposition=pass`.
 
-### 2026-05-29 � frontend-agent (BRA-46: superseded by BRA-66 E2E formal)
+### 2026-05-29 ï¿½ frontend-agent (BRA-46: superseded by BRA-66 E2E formal)
 - Issue/tarefa: BRA-46
 - Arquivos alterados: memory.md
-- O que mudou: Gate atualizado pelo board/CEO-PO: BRA-46 fica supersedida pelo teste formal BRA-66. Fechamento de BRA-46 depende do aceite de BRA-66 com artifacts obrigatorios (json transcript completo, screenshots before/after e edge-set comparison contra estrutura �2 do spec).
+- O que mudou: Gate atualizado pelo board/CEO-PO: BRA-46 fica supersedida pelo teste formal BRA-66. Fechamento de BRA-46 depende do aceite de BRA-66 com artifacts obrigatorios (json transcript completo, screenshots before/after e edge-set comparison contra estrutura ï¿½2 do spec).
 - Validacao executada: leitura do comentario `1f636ea7-530d-4866-85c5-73e098abc691`.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/memory.md
 - Riscos / bloqueios: bloqueio externo ate BRA-66 concluir com artifacts publicados.
 - Proximo passo: owner BRA-66 publicar artifacts requeridos e sinalizar aceite; depois retomar BRA-46 para fechamento formal.
 
-### 2026-05-29 � frontend-agent (BRA-46: gate moved to BRA-71 umbrella)
+### 2026-05-29 ï¿½ frontend-agent (BRA-46: gate moved to BRA-71 umbrella)
 - Issue/tarefa: BRA-46
 - Arquivos alterados: memory.md
-- O que mudou: Board atualizou o gate; BRA-46 fica bloqueada por BRA-71 (Sofia Graph Agent umbrella). Aceite depende dos 7 comandos comportamentais do �3.7 no spec `paperclip/docs/qa/sofia-graph-agent-acceptance-2026-05-29.md` + artifacts em path publicado. Sub-scopes BRA-62/63/64/65 seguem como implementacao.
+- O que mudou: Board atualizou o gate; BRA-46 fica bloqueada por BRA-71 (Sofia Graph Agent umbrella). Aceite depende dos 7 comandos comportamentais do ï¿½3.7 no spec `paperclip/docs/qa/sofia-graph-agent-acceptance-2026-05-29.md` + artifacts em path publicado. Sub-scopes BRA-62/63/64/65 seguem como implementacao.
 - Validacao executada: leitura do comentario `81a4280c-d70b-4e85-81e9-0effe19c527e`.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/memory.md
 - Riscos / bloqueios: dependencia externa de aceite umbrella BRA-71.
 - Proximo passo: owner BRA-71 concluir aceite formal e publicar artifacts para liberar fechamento de BRA-46.
 
-### 2026-05-29 � codex (BRA-62 reopen: session-context hardening)
+### 2026-05-29 ï¿½ codex (BRA-62 reopen: session-context hardening)
 - Wake delta: issue reopened noting umbrella integration gate moved to BRA-71; BRA-62 remains implementation scope.
 - Ajustes entregues:
   - SofiaGraphCommandContext.active_persona_slug aceito e usado como prioridade de contexto ativo.
-  - Mem�ria curta padronizada para contrato: TTL default 1800s (30min), janela default 5 turns.
-  - Mem�ria agora inclui last_referenced_node por session_id.
-  - Resolu��o de pronome (ele) no turno seguinte usando last_referenced_node.slug.
+  - Memï¿½ria curta padronizada para contrato: TTL default 1800s (30min), janela default 5 turns.
+  - Memï¿½ria agora inclui last_referenced_node por session_id.
+  - Resoluï¿½ï¿½o de pronome (ele) no turno seguinte usando last_referenced_node.slug.
   - /sofia/graph-command retorna conversation_context.last_referenced_node para auditoria.
-- Evid�ncia:
+- Evidï¿½ncia:
   - testes: pytest tests/test_sofia_session_context.py tests/test_qa_contract_routes.py -k "sofia_graph_command or sofia_session" -q => 5 passed.
-  - artifact: paperclip/test-artifacts/qa/bra62-session-context-2026-05-29.json com turno 1+2 e propaga��o de refer�ncia.
+  - artifact: paperclip/test-artifacts/qa/bra62-session-context-2026-05-29.json com turno 1+2 e propagaï¿½ï¿½o de referï¿½ncia.
 
-### 2026-05-29 � graph-validator-migration-agent (BRA-76 blocker verification against ai-brain runtime)
+### 2026-05-29 ï¿½ graph-validator-migration-agent (BRA-76 blocker verification against ai-brain runtime)
 - Issue/tarefa: BRA-76 (04e050d-a8d1-4a58-9c6f-20fcbcdddb1f) validator/migration execution gate.
 - Arquivos alterados: i-brain/memory.md.
 - O que mudou: executada verificacao de pre-requisitos de runtime para importacao v1->v2 AllanVvz e validacao graph_documents.
@@ -1159,14 +1207,14 @@ ode --test tests/graph-runner.test.mjs (14/14 pass). Reexecu��o real gerou p
 - Riscos / bloqueios: sem sub-1 BRA-73 implementada/deployada, BRA-76 nao consegue executar import/publish/validator/reindex no backend.
 - Proximo passo: Backend Engineer publicar implementacao BRA-73; reexecutar BRA-76 apos probe 200 em /graph-documents/current.
 
-### 2026-05-29 � codex (BRA-75: Sofia graph-command tool loop v2)
-- Issue/tarefa: BRA-75 Graph JSON V2 / AI Agent � Sofia edita graph_json via patch.
+### 2026-05-29 ï¿½ codex (BRA-75: Sofia graph-command tool loop v2)
+- Issue/tarefa: BRA-75 Graph JSON V2 / AI Agent ï¿½ Sofia edita graph_json via patch.
 - Arquivos alterados: `api/services/sofia_orchestrator.py`; `api/routes/qa_contract.py`; `tests/test_sofia_orchestrator_tools.py`; `tests/test_qa_contract_routes.py`.
-- O que mudou: o orquestrador agora executa loop expl�cito de tools com nomes can�nicos (`resolve-persona`, `resolve-node`, `resolve-operation`, `validate-canonical-chain`, `generate-graph-patch`) e remove fallback gen�rico, retornando clarifica��o espec�fica por condi��o (persona/node ausente, ambiguidade, baixa confian�a). A rota `/sofia/graph-command` passou a registrar tamb�m `persist-graph-patch` e `refetch-graph` no `tool_calls`, mantendo trilha audit�vel fim-a-fim.
-- Valida��o executada: `pytest -q tests/test_sofia_orchestrator_tools.py tests/test_qa_contract_routes.py -k "sofia_graph_command or sofia_resolve or test_plan_graph_command" tests/test_sofia_session_context.py` ? `9 passed, 4 deselected`.
-- Artifact gerado: `C:/Users/Alan/Documents/repositorios/ai-brain/tests/test_sofia_orchestrator_tools.py` e `C:/Users/Alan/Documents/repositorios/ai-brain/tests/test_qa_contract_routes.py` (evid�ncia em c�digo + su�te passando).
-- Riscos / bloqueios: probe live autenticado em `:8001` bloqueado por vari�vel ausente (`AI_BRAIN_ADMIN_TOKEN missing`), impedindo validar a resposta carregada com sess�o/token no runtime ativo.
-- Pr�ximo passo: Backend Engineer/Infra disponibilizar token admin QA no runtime da execu��o para probe autenticado e fechamento final.
+- O que mudou: o orquestrador agora executa loop explï¿½cito de tools com nomes canï¿½nicos (`resolve-persona`, `resolve-node`, `resolve-operation`, `validate-canonical-chain`, `generate-graph-patch`) e remove fallback genï¿½rico, retornando clarificaï¿½ï¿½o especï¿½fica por condiï¿½ï¿½o (persona/node ausente, ambiguidade, baixa confianï¿½a). A rota `/sofia/graph-command` passou a registrar tambï¿½m `persist-graph-patch` e `refetch-graph` no `tool_calls`, mantendo trilha auditï¿½vel fim-a-fim.
+- Validaï¿½ï¿½o executada: `pytest -q tests/test_sofia_orchestrator_tools.py tests/test_qa_contract_routes.py -k "sofia_graph_command or sofia_resolve or test_plan_graph_command" tests/test_sofia_session_context.py` ? `9 passed, 4 deselected`.
+- Artifact gerado: `C:/Users/Alan/Documents/repositorios/ai-brain/tests/test_sofia_orchestrator_tools.py` e `C:/Users/Alan/Documents/repositorios/ai-brain/tests/test_qa_contract_routes.py` (evidï¿½ncia em cï¿½digo + suï¿½te passando).
+- Riscos / bloqueios: probe live autenticado em `:8001` bloqueado por variï¿½vel ausente (`AI_BRAIN_ADMIN_TOKEN missing`), impedindo validar a resposta carregada com sessï¿½o/token no runtime ativo.
+- Prï¿½ximo passo: Backend Engineer/Infra disponibilizar token admin QA no runtime da execuï¿½ï¿½o para probe autenticado e fechamento final.
 ### 2026-05-29 - Frontend Agent (BRA-74: Graph JSON V2 + Sofia React Flow tools)
 - Issue/tarefa: BRA-74
 - Arquivos alterados: dashboard/app/knowledge/graph/GraphPageClient.tsx; dashboard/app/knowledge/graph/sofiaReactFlowTools.ts
@@ -1214,7 +1262,7 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 ### 2026-05-29 - BRA-75 v2 patch loop test + live probe closure
 - Issue/tarefa: BRA-75 (Sofia graph_json v2 patch loop contract).
 - Arquivos alterados: `tests/test_sofia_v2_patch_loop.py`.
-- O que mudou: criado teste dedicado cobrindo 5 comandos da spec �3 no fluxo `/sofia/graph-command` com sessao e assert da sequencia obrigatoria de tools: `resolve-persona -> resolve-node -> resolve-operation -> validate-canonical-chain -> generate-graph-patch -> persist-graph-patch -> refetch-graph`.
+- O que mudou: criado teste dedicado cobrindo 5 comandos da spec ï¿½3 no fluxo `/sofia/graph-command` com sessao e assert da sequencia obrigatoria de tools: `resolve-persona -> resolve-node -> resolve-operation -> validate-canonical-chain -> generate-graph-patch -> persist-graph-patch -> refetch-graph`.
 - Validacao executada: `pytest -q tests/test_sofia_v2_patch_loop.py tests/test_sofia_orchestrator_tools.py tests/test_sofia_session_context.py` => `8 passed`.
 - Probe live: turno 1 + turno 2 com `session_id=test-001` executados no backend `http://127.0.0.1:8001/sofia/graph-command` com auth admin; evidencias serializadas no artifact em `paperclip/test-artifacts/qa/BRA-75-live-probe-2026-05-29T17-27-38Z.json`.
 - Resultado: contrato BRA-75 atendido para teste faltante + probe autenticado + artifact publicado.
@@ -1222,11 +1270,11 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 ### 2026-05-29 - codex (BRA-73 reopen: required tests + graph-documents endpoint coverage)
 - Issue/tarefa: BRA-73 reaberta por auditoria (faltavam `tests/test_graph_json_validator.py` e `tests/test_graph_documents_routes.py`).
 - Arquivos alterados: `api/routes/graph_documents.py`; `api/services/graph_json_v2_validator.py`; `tests/test_graph_json_validator.py`; `tests/test_graph_documents_routes.py`; `paperclip/test-artifacts/qa/BRA-73-pytest-coverage-2026-05-29T17-29-02Z.json`; `ai-brain/memory.md`; `paperclip/memory.md`.
-- O que mudou: implementei os 2 arquivos de teste exigidos (6 regras de valida��o can�nica + 7 endpoints de graph-documents com sucesso e erro), adicionei endpoints faltantes (`apply-patch`, `rollback`, `reindex`, `events`) e inclu� valida��o v2 expl�cita de `schema_version=2.0` e ownership da persona.
-- Valida��o executada: `pytest tests/test_graph_json_validator.py -v` => `7 passed`; `pytest tests/test_graph_documents_routes.py -v` => `7 passed`; probe live `curl -s -o NUL -w "%{http_code}" http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz` => `401`; probe live com header admin `curl -s -o NUL -w "%{http_code}" -H "X-AI-BRAIN-ADMIN-TOKEN: <token>" http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz` => `404`.
+- O que mudou: implementei os 2 arquivos de teste exigidos (6 regras de validaï¿½ï¿½o canï¿½nica + 7 endpoints de graph-documents com sucesso e erro), adicionei endpoints faltantes (`apply-patch`, `rollback`, `reindex`, `events`) e incluï¿½ validaï¿½ï¿½o v2 explï¿½cita de `schema_version=2.0` e ownership da persona.
+- Validaï¿½ï¿½o executada: `pytest tests/test_graph_json_validator.py -v` => `7 passed`; `pytest tests/test_graph_documents_routes.py -v` => `7 passed`; probe live `curl -s -o NUL -w "%{http_code}" http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz` => `401`; probe live com header admin `curl -s -o NUL -w "%{http_code}" -H "X-AI-BRAIN-ADMIN-TOKEN: <token>" http://127.0.0.1:8001/graph-documents/current?persona_slug=allanvvz` => `404`.
 - Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-73-pytest-coverage-2026-05-29T17-29-02Z.json`.
-- Riscos / bloqueios: runtime QA em `:8001` n�o refletiu a atualiza��o local do endpoint (`/graph-documents/current` continua 404 com auth), impedindo evid�ncia live do comportamento esperado p�s-fix.
-- Pr�ximo passo: owner Infra/Backend reiniciar o processo `scripts/start_api_qa.py` carregando HEAD atual; rerodar probe de `/graph-documents/current` para confirmar status esperado e ent�o concluir disposi��o final.
+- Riscos / bloqueios: runtime QA em `:8001` nï¿½o refletiu a atualizaï¿½ï¿½o local do endpoint (`/graph-documents/current` continua 404 com auth), impedindo evidï¿½ncia live do comportamento esperado pï¿½s-fix.
+- Prï¿½ximo passo: owner Infra/Backend reiniciar o processo `scripts/start_api_qa.py` carregando HEAD atual; rerodar probe de `/graph-documents/current` para confirmar status esperado e entï¿½o concluir disposiï¿½ï¿½o final.
 
 ## 2026-05-29 (BRA-76 resume delta - steps 4/6)
 - Step 4 executado: POST /sofia/graph-command (reencaixe brand vz-lupas abaixo de allanvvz) => 200, persisted=true, patch aplicado.
@@ -1238,11 +1286,11 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 ### 2026-05-29 - codex (BRA-76: validator/migration heartbeat disposition)
 - Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration (AllanVvz -> VZ Lupas).
 - Arquivos alterados: paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json; paperclip/memory.md; ai-brain/memory.md.
-- O que mudou: Registrei artifact de heartbeat consolidando entreg�veis de valida��o/migra��o j� publicados e o bloqueio atual de execu��o por aus�ncia de token admin no ambiente desta sess�o.
-- Valida��o executada: probes locais para carregar token (AI_BRAIN_ADMIN_TOKEN) no ambiente e em arquivos .env/.env.local/env*.yaml do i-brain retornaram ausente; sem token n�o foi poss�vel repetir probes autenticados nesta heartbeat.
+- O que mudou: Registrei artifact de heartbeat consolidando entregï¿½veis de validaï¿½ï¿½o/migraï¿½ï¿½o jï¿½ publicados e o bloqueio atual de execuï¿½ï¿½o por ausï¿½ncia de token admin no ambiente desta sessï¿½o.
+- Validaï¿½ï¿½o executada: probes locais para carregar token (AI_BRAIN_ADMIN_TOKEN) no ambiente e em arquivos .env/.env.local/env*.yaml do i-brain retornaram ausente; sem token nï¿½o foi possï¿½vel repetir probes autenticados nesta heartbeat.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json.
-- Riscos / bloqueios: sem token admin e sem corre��es de backend/schema do Step 6, a execu��o e2e completa permanece bloqueada.
-- Proximo passo: Backend Engineer + CTO + Board/Infra fornecer token/admin path e corrigir bloqueios t�cnicos (UUID approve snapshot, embed gate 403, tabela knowledge_faq_index).
+- Riscos / bloqueios: sem token admin e sem correï¿½ï¿½es de backend/schema do Step 6, a execuï¿½ï¿½o e2e completa permanece bloqueada.
+- Proximo passo: Backend Engineer + CTO + Board/Infra fornecer token/admin path e corrigir bloqueios tï¿½cnicos (UUID approve snapshot, embed gate 403, tabela knowledge_faq_index).
 
 ### 2026-05-29 - codex (BRA-76: resume delta after escalation comment)
 - Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration.
@@ -1250,8 +1298,8 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - O que mudou: tratei o wake por comentario de escalacao, confirmei que os artifacts publicados existem e que a issue voltou para in_progress sem evidencia nova de desbloqueio tecnico.
 - Validacao executada: GET /api/issues/f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f mostrou status in_progress; Test-Path confirmou existencia de BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json e graph-json-v2-allanvvz-validation-FINAL-2026-05-29T17-30-38Z.json.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/BRA-76-validator-migration-heartbeat-2026-05-29T17-33-13Z.json.
-- Riscos / bloqueios: sem token admin dispon�vel e sem corre��es de backend/schema (22P02, 403 embeds gate, PGRST205), Step 6 permanece bloqueado.
-- Proximo passo: Backend Engineer + CTO + Board/Infra executar unblock action j� registrada no coment�rio 98ef1b40-99f1-425d-9d53-a2b469cb6427.
+- Riscos / bloqueios: sem token admin disponï¿½vel e sem correï¿½ï¿½es de backend/schema (22P02, 403 embeds gate, PGRST205), Step 6 permanece bloqueado.
+- Proximo passo: Backend Engineer + CTO + Board/Infra executar unblock action jï¿½ registrada no comentï¿½rio 98ef1b40-99f1-425d-9d53-a2b469cb6427.
 
 ### 2026-05-29 - codex (BRA-76: anti-loop enforcement on repeated wake)
 - Issue/tarefa: BRA-76 Graph JSON V2 / Validator+Migration.
@@ -1296,54 +1344,54 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-74-frontend-tests-2026-05-29T17-39-52Z.json.
 - Riscos / bloqueios: sem bloqueios para este escopo de frontend.
 - Proximo passo: QA/E2E validar cadeia completa com backend v2 publicado.
-### 2026-05-29 � ceo-product-owner (BRA-76: gate check + blocker formal)
+### 2026-05-29 ï¿½ ceo-product-owner (BRA-76: gate check + blocker formal)
 - Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
 - Arquivos alterados: ai-brain/memory.md.
-- O que mudou: Registrei decis�o de produto/gate: n�o h� crit�rio para `done` enquanto n�o houver evid�ncia autenticada dos passos 2-7 (publish/read 200, validator true por doc-id publicado, patch Sofia com version bump, FAQ approved->reindex->embeddings).
-- Valida��o executada: checagem de exist�ncia de `api/scripts/import_v1_to_v2_allanvvz.py`, `api/services/graph_json_validator.py`, `api/routes/graph_documents.py` e probe runtime `GET /graph-documents/current?persona_slug=allanvvz` com retorno 401.
-- Artifact gerado: sem novo artifact em ai-brain; refer�ncia cruzada no artifact publicado `paperclip/test-artifacts/architecture/graph-json-v2-allanvvz-validation-FINAL-2026-05-29T17-30-38Z.json`.
-- Riscos / bloqueios: sem token/fluxo autenticado comprovado, a valida��o e2e permanece incompleta e n�o pode avan�ar para aceite.
-- Pr�ximo passo: Backend Engineer desbloquear autentica��o/endpoint e publicar delta verific�vel; em seguida QA/Graph Validator executa contrato completo BRA-76.
-### 2026-05-29 � ceo-product-owner (BRA-76: status reconciliation no-delta wake)
+- O que mudou: Registrei decisï¿½o de produto/gate: nï¿½o hï¿½ critï¿½rio para `done` enquanto nï¿½o houver evidï¿½ncia autenticada dos passos 2-7 (publish/read 200, validator true por doc-id publicado, patch Sofia com version bump, FAQ approved->reindex->embeddings).
+- Validaï¿½ï¿½o executada: checagem de existï¿½ncia de `api/scripts/import_v1_to_v2_allanvvz.py`, `api/services/graph_json_validator.py`, `api/routes/graph_documents.py` e probe runtime `GET /graph-documents/current?persona_slug=allanvvz` com retorno 401.
+- Artifact gerado: sem novo artifact em ai-brain; referï¿½ncia cruzada no artifact publicado `paperclip/test-artifacts/architecture/graph-json-v2-allanvvz-validation-FINAL-2026-05-29T17-30-38Z.json`.
+- Riscos / bloqueios: sem token/fluxo autenticado comprovado, a validaï¿½ï¿½o e2e permanece incompleta e nï¿½o pode avanï¿½ar para aceite.
+- Prï¿½ximo passo: Backend Engineer desbloquear autenticaï¿½ï¿½o/endpoint e publicar delta verificï¿½vel; em seguida QA/Graph Validator executa contrato completo BRA-76.
+### 2026-05-29 ï¿½ ceo-product-owner (BRA-76: status reconciliation no-delta wake)
 - Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
 - Arquivos alterados: ai-brain/memory.md.
-- O que mudou: Sem nova evid�ncia t�cnica no wake; mantive o gate de produto e reconciliei a disposi��o formal da BRA-76 para bloquear reexecu��o sem delta.
-- Valida��o executada: leitura de status via Paperclip API (`BRA-76 in_progress`, `BRA-73 blocked`).
-- Artifact gerado: n�o aplic�vel.
-- Riscos / bloqueios: depend�ncia em BRA-73 permanece ativa para autentica��o/persist�ncia do fluxo e2e.
-- Pr�ximo passo: entregar unblock em BRA-73 com probe/artifact novo e s� ent�o retomar BRA-76.
-### 2026-05-29 � graph-validator-migration-agent (BRA-76: live contract execution + schema blocker)
+- O que mudou: Sem nova evidï¿½ncia tï¿½cnica no wake; mantive o gate de produto e reconciliei a disposiï¿½ï¿½o formal da BRA-76 para bloquear reexecuï¿½ï¿½o sem delta.
+- Validaï¿½ï¿½o executada: leitura de status via Paperclip API (`BRA-76 in_progress`, `BRA-73 blocked`).
+- Artifact gerado: nï¿½o aplicï¿½vel.
+- Riscos / bloqueios: dependï¿½ncia em BRA-73 permanece ativa para autenticaï¿½ï¿½o/persistï¿½ncia do fluxo e2e.
+- Prï¿½ximo passo: entregar unblock em BRA-73 com probe/artifact novo e sï¿½ entï¿½o retomar BRA-76.
+### 2026-05-29 ï¿½ graph-validator-migration-agent (BRA-76: live contract execution + schema blocker)
 - Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
 - Arquivos alterados: ai-brain/memory.md.
-- O que mudou: Rodei o importador real da BRA-76 contra `:8001`; autentica��o por token admin passou, mas o publish falhou em valida��o Pydantic porque o payload gerado ainda segue shape legado e n�o o contrato GraphJson V2 da rota.
-- Valida��o executada: `python api/scripts/import_v1_to_v2_allanvvz.py` => `422 Unprocessable Entity`; probe dirigido com o mesmo token em `GET /graph-documents/current?persona_slug=allanvvz` => `404 No published graph document`; replay do publish retornou erros de campos obrigat�rios ausentes (`graph_id`, `tenant`, `persona_slug`, `nodes[*].node_type`).
+- O que mudou: Rodei o importador real da BRA-76 contra `:8001`; autenticaï¿½ï¿½o por token admin passou, mas o publish falhou em validaï¿½ï¿½o Pydantic porque o payload gerado ainda segue shape legado e nï¿½o o contrato GraphJson V2 da rota.
+- Validaï¿½ï¿½o executada: `python api/scripts/import_v1_to_v2_allanvvz.py` => `422 Unprocessable Entity`; probe dirigido com o mesmo token em `GET /graph-documents/current?persona_slug=allanvvz` => `404 No published graph document`; replay do publish retornou erros de campos obrigatï¿½rios ausentes (`graph_id`, `tenant`, `persona_slug`, `nodes[*].node_type`).
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/architecture/graph-json-v2-allanvvz-validation-20260529T181957Z.json.
-- Riscos / bloqueios: enquanto o importador n�o serializar GraphJson V2 v�lido, o documento n�o publica e o fluxo Sofia/versionamento/reindex/embedding n�o � execut�vel.
-- Pr�ximo passo: Backend Engineer corrigir o mapper do importador para GraphJson V2 e rerodar o contrato BRA-76 a partir do passo 1.
-### 2026-05-29 � graph-validator-migration-agent (BRA-76: disposition API write failure)
+- Riscos / bloqueios: enquanto o importador nï¿½o serializar GraphJson V2 vï¿½lido, o documento nï¿½o publica e o fluxo Sofia/versionamento/reindex/embedding nï¿½o ï¿½ executï¿½vel.
+- Prï¿½ximo passo: Backend Engineer corrigir o mapper do importador para GraphJson V2 e rerodar o contrato BRA-76 a partir do passo 1.
+### 2026-05-29 ï¿½ graph-validator-migration-agent (BRA-76: disposition API write failure)
 - Issue/tarefa: BRA-76 (f04e050d-a8d1-4a58-9c6f-20fcbcdddb1f).
 - Arquivos alterados: ai-brain/memory.md.
-- O que mudou: execu��o t�cnica em ai-brain foi conclu�da at� o diagn�stico do 422 no publish, por�m a disposi��o formal no board n�o p�de ser gravada por erro 500 da API Paperclip em endpoints de escrita.
-- Valida��o executada: tentativa de `PATCH /api/issues/{id}` com `status=blocked` falhou (`500`), com leitura subsequente `GET /api/issues/{id}` ainda `in_progress`.
+- O que mudou: execuï¿½ï¿½o tï¿½cnica em ai-brain foi concluï¿½da atï¿½ o diagnï¿½stico do 422 no publish, porï¿½m a disposiï¿½ï¿½o formal no board nï¿½o pï¿½de ser gravada por erro 500 da API Paperclip em endpoints de escrita.
+- Validaï¿½ï¿½o executada: tentativa de `PATCH /api/issues/{id}` com `status=blocked` falhou (`500`), com leitura subsequente `GET /api/issues/{id}` ainda `in_progress`.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-76-disposition-api-failure-20260529T182058Z.json.
-- Riscos / bloqueios: governan�a de issue bloqueada por falha infra de persist�ncia de coment�rios/disposi��o.
-- Pr�ximo passo: Board/Infra restaurar writes da API Paperclip para permitir registro formal do bloqueio e handoff ao Backend Engineer.
-### 2026-05-29 � CEO / Product Owner (BRA-82: backend plan_json endpoints + validator severities)
-- Issue/tarefa: BRA-79 (execu��o t�cnica da filha BRA-82)
+- Riscos / bloqueios: governanï¿½a de issue bloqueada por falha infra de persistï¿½ncia de comentï¿½rios/disposiï¿½ï¿½o.
+- Prï¿½ximo passo: Board/Infra restaurar writes da API Paperclip para permitir registro formal do bloqueio e handoff ao Backend Engineer.
+### 2026-05-29 ï¿½ CEO / Product Owner (BRA-82: backend plan_json endpoints + validator severities)
+- Issue/tarefa: BRA-79 (execuï¿½ï¿½o tï¿½cnica da filha BRA-82)
 - Arquivos alterados: api/services/sofia_orchestrator.py; api/routes/qa_contract.py; tests/test_qa_contract_routes.py; memory.md
-- O que mudou: Adicionado storage de plan_json por sess�o no orquestrador, endpoints GET/PATCH em QA contract para obter/aplicar patch de plan_json, integra��o do retorno plan_json no fluxo sofia_graph_command e valida��o com severidades suggestion/pending/blocking sem bloquear cria��o por aus�ncia de FAQ/regra.
-- Valida��o executada: `pytest -q tests/test_qa_contract_routes.py` -> `13 passed in 2.22s`.
+- O que mudou: Adicionado storage de plan_json por sessï¿½o no orquestrador, endpoints GET/PATCH em QA contract para obter/aplicar patch de plan_json, integraï¿½ï¿½o do retorno plan_json no fluxo sofia_graph_command e validaï¿½ï¿½o com severidades suggestion/pending/blocking sem bloquear criaï¿½ï¿½o por ausï¿½ncia de FAQ/regra.
+- Validaï¿½ï¿½o executada: `pytest -q tests/test_qa_contract_routes.py` -> `13 passed in 2.22s`.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/memory.md
-- Riscos / bloqueios: storage atual � em mem�ria por sess�o (TTL), sem persist�ncia em banco entre rein�cios.
-- Pr�ximo passo: Backend Engineer evoluir para persist�ncia dur�vel (Supabase table/migration) mantendo o mesmo contrato de endpoint.
-### 2026-05-29 � CEO / Product Owner (BRA-79: probes reais plan_json + bugfix de reten��o de sess�o)
+- Riscos / bloqueios: storage atual ï¿½ em memï¿½ria por sessï¿½o (TTL), sem persistï¿½ncia em banco entre reinï¿½cios.
+- Prï¿½ximo passo: Backend Engineer evoluir para persistï¿½ncia durï¿½vel (Supabase table/migration) mantendo o mesmo contrato de endpoint.
+### 2026-05-29 ï¿½ CEO / Product Owner (BRA-79: probes reais plan_json + bugfix de retenï¿½ï¿½o de sessï¿½o)
 - Issue/tarefa: BRA-79
 - Arquivos alterados: api/services/sofia_orchestrator.py; scripts/probe_sofia_plan_json_endpoints.py; memory.md
-- O que mudou: Corrigido bug onde `remember_turn` limpava `plan_json`; criado probe real GET/PATCH/POST dos endpoints Sofia com artifact JSON comprovando altera��o de product/campaign, separa��o suggestion/pending/blocking, blocking estrutural e n�o-durabilidade ap�s reload.
-- Valida��o executada: `python scripts/probe_sofia_plan_json_endpoints.py` (artifact gerado) e `pytest -q tests/test_qa_contract_routes.py` (`13 passed`).
+- O que mudou: Corrigido bug onde `remember_turn` limpava `plan_json`; criado probe real GET/PATCH/POST dos endpoints Sofia com artifact JSON comprovando alteraï¿½ï¿½o de product/campaign, separaï¿½ï¿½o suggestion/pending/blocking, blocking estrutural e nï¿½o-durabilidade apï¿½s reload.
+- Validaï¿½ï¿½o executada: `python scripts/probe_sofia_plan_json_endpoints.py` (artifact gerado) e `pytest -q tests/test_qa_contract_routes.py` (`13 passed`).
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/ai-brain/test-artifacts/qa/sofia-plan-json-endpoints-probe-20260529T204937Z.json
-- Riscos / bloqueios: persist�ncia ainda � mem�ria de processo; ap�s reload/restart o estado zera.
-- Pr�ximo passo: BRA-87 (Backend) implementar persist�ncia Supabase dur�vel para plan_json.
+- Riscos / bloqueios: persistï¿½ncia ainda ï¿½ memï¿½ria de processo; apï¿½s reload/restart o estado zera.
+- Prï¿½ximo passo: BRA-87 (Backend) implementar persistï¿½ncia Supabase durï¿½vel para plan_json.
 ### 2026-05-29 - 57a6a5a4-a04e-47f4-8da9-b5ab914921fa (BRA-87: persistir plan_json em Supabase)
 - Issue/tarefa: BRA-87 (Backend) persistencia duravel de `plan_json` entre reloads.
 - Arquivos alterados: `api/services/sofia_orchestrator.py`; `api/services/supabase_client.py`; `supabase/migrations/043_sofia_plan_sessions.sql`; `tests/test_qa_contract_routes.py`; `memory.md`.
@@ -1384,19 +1432,19 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-migration-applied-2026-05-29.md`.
 - Riscos / bloqueios: nenhum.
 - Proximo passo: nenhum.
-### 2026-05-29 - 57a6a5a4-a04e-47f4-8da9-b5ab914921fa (BRA-87: reconcilia��o anti-loop)
-- Issue/tarefa: wake de confirma��o sem delta t�cnico em BRA-87.
+### 2026-05-29 - 57a6a5a4-a04e-47f4-8da9-b5ab914921fa (BRA-87: reconciliaï¿½ï¿½o anti-loop)
+- Issue/tarefa: wake de confirmaï¿½ï¿½o sem delta tï¿½cnico em BRA-87.
 - Arquivos alterados: memory.md.
-- O que mudou: sem altera��o de c�digo/backend; apenas reconcilia��o administrativa da issue.
-- Valida��o executada: POST /sofia/graph-command sem header => 401; com X-AI-BRAIN-ADMIN-TOKEN => 422.
+- O que mudou: sem alteraï¿½ï¿½o de cï¿½digo/backend; apenas reconciliaï¿½ï¿½o administrativa da issue.
+- Validaï¿½ï¿½o executada: POST /sofia/graph-command sem header => 401; com X-AI-BRAIN-ADMIN-TOKEN => 422.
 - Artifact gerado: C:/Users/Alan/Documents/repositorios/paperclip/test-artifacts/qa/BRA-87-migration-applied-2026-05-29.md.
-- Riscos / bloqueios: nenhum t�cnico.
-- Pr�ximo passo: nenhum em BRA-87; handoff para BRA-83.
+- Riscos / bloqueios: nenhum tï¿½cnico.
+- Prï¿½ximo passo: nenhum em BRA-87; handoff para BRA-83.
 
 ### 2026-05-30 - frontend-agent (BRA-83: plan_json-driven context panel + Graph sidebar parity)
 - Issue/tarefa: BRA-83
 - Arquivos alterados: `dashboard/lib/api.ts`; `dashboard/app/knowledge/graph/GraphPageClient.tsx`; `dashboard/app/knowledge/graph/SofiaChatPanel.tsx`; `dashboard/app/knowledge/capture/page.tsx`; `memory.md`
-- O que mudou: O Graph passou a compartilhar a mesma sessao/orquestracao do CRIAR via `session_id` + `plan_json` em `/sofia/graph-command` (command/confirm/undo), com hidratação da sessao ativa por `kbIntakeSession`; a sidebar da Sofia no Graph agora exibe resumo de contexto do `plan_json`; e o painel de contexto da tela CRIAR passou a priorizar `plan_json` da sessao para contagens/erros bloqueantes exibidos.
+- O que mudou: O Graph passou a compartilhar a mesma sessao/orquestracao do CRIAR via `session_id` + `plan_json` em `/sofia/graph-command` (command/confirm/undo), com hidrataÃ§Ã£o da sessao ativa por `kbIntakeSession`; a sidebar da Sofia no Graph agora exibe resumo de contexto do `plan_json`; e o painel de contexto da tela CRIAR passou a priorizar `plan_json` da sessao para contagens/erros bloqueantes exibidos.
 - Validacao executada: `npm test -- GraphPageClient.test.tsx` em `ai-brain/dashboard` -> PASS (1 arquivo, 2 testes).
 - Artifact gerado: `C:/Users/Alan/Documents/repositorios/paperclip/docs/qa/BRA-83-plan-json-context-panel-graph-sidebar-parity-2026-05-30T03-05-00Z.md`
 - Riscos / bloqueios: Ainda depende de validacao E2E com backend live para confirmar equivalencia total de tool-calls entre CRIAR e Graph em todos os casos de uso.
@@ -1418,3 +1466,43 @@ pm run build (em dashboard/) - sucesso apos integracao v2.
 - Correcao live pontual: via `/sofia/graph-command` sem hard-delete, `conectar radar em audience padrao` persistiu `audience_has_product_group` para `grupo-radar`.
 - Riscos / bloqueios: nenhum hard-delete rodado nesta investigacao; estado live agora tem Product Groups Plantaris/Radar/Juliet sob Audience.
 - Proximo passo: validar manualmente no front sem Playwright se o modal e a Sofia refletem as novas escolhas de parent/contexto.
+
+## Sofia Criar Ã¢â‚¬â€ primary_tree como fonte de verdade (2026-05-31)
+- A publicaÃ§Ã£o da Ã¡rvore principal precisa tratar `metadata.primary_tree=true` como verdade estrutural, mesmo quando o `relation_type` do link Ã© semÃ¢ntico.
+- O `relation_type` pode continuar existindo como `semantic_relation` no metadata ou ser canonicalizado pelo par pai/filho, mas nÃ£o deve bloquear a edge principal.
+- O repair/layout nÃ£o pode ignorar uma edge principal sÃ³ porque ela veio como `targets_audience`.
+- A correÃ§Ã£o foi aplicada no guard de Ã¡rvore principal e deve ser testada com save completo + `/knowledge/graph` em modo layered/semantic_tree.
+
+## Sofia Criar /knowledge/graph â€” default tree view and structural relation alignment (2026-06-01)
+- Sintoma: o plano Tock Fatal estava salvando corretamente, mas o dashboard de grafo abria em layout orgânico e fazia `briefing`/`audience` parecerem paralelos; o `product_group` também sumia visualmente em alguns fluxos.
+- Diagnóstico:
+  - a página `/knowledge/graph` abria por padrão em `mode=graph`, não em `semantic_tree`;
+  - o renderizador de árvore reconhecia parte das relações estruturais, mas o fluxo atual usa `targets_audience`/`campaign_has_audience` como backbone e isso precisava estar coberto nas tabelas de relações estruturais;
+  - o plano salvo da Tock Fatal estava íntegro: `brand -> briefing -> campaign -> audience -> product_group -> product -> copy -> faq`.
+- Correções:
+  - `GraphPageClient` agora abre em `semantic_tree` por padrão quando não há `mode` na URL;
+  - `api/routes/graph.py` passou a tratar `targets_audience`, `campaign_has_audience`, `audience_has_product_group`, `product_group_has_product`, `product_has_copy`, `product_has_faq` e `copy_has_faq` como relações estruturais;
+  - `dashboard/components/graph/knowledgeGraphLayout.ts` passou a reconhecer as mesmas relações para parentagem e prioridade;
+  - teste `tests/test_sofia_primary_tree_publication.py` agora garante que o dashboard default continue em árvore canônica.
+
+## Sofia Criar / Tock Fatal â€” preferred spine is brand -> campaign -> briefing -> audience (2026-06-01)
+- Sintoma: o grafo ainda mostrava `briefing` como paralelo a `audience` e o `product_group` não aparecia de forma consistente no caminho principal.
+- Diagnóstico: o planner determinístico e as heurísticas de parentagem ainda favoreciam o spine antigo (`brand -> briefing -> campaign -> audience`) em parte do stack, o que deixava a árvore serial quebrada para o prompt de inverno da Tock Fatal.
+- Correções:
+  - `build_full_tree_plan_from_session()` agora materializa a cadeia como `brand -> campaign -> briefing -> audience -> product_group -> product -> copy -> faq`;
+  - `knowledge_taxonomy.PRIMARY_CHAIN` passou a preferir essa ordem, preservando o caminho legado apenas como alternativa;
+  - `graph_validation`, `knowledge_graph._default_plan_relation()` e os rankings do layout do frontend foram alinhados para escolher `campaign` antes de `briefing` e `briefing` antes de `audience`;
+  - `dashboard/app/knowledge/graph/graphParenting.ts` e `dashboard/__tests__/graph-layout-canonical.test.ts` foram atualizados para refletir a cadeia nova;
+  - os contratos de Sofia e os textos de orientação foram ajustados para a mesma ordem.
+- Validação executada:
+  - `python -m pytest tests/test_sofia_primary_tree_publication.py tests/test_sofia_create_plan_product_group.py -q`
+  - `npm.cmd run test -- --run __tests__/graph-layout-canonical.test.ts`
+  - `npm.cmd run build:check`
+
+## Sofia Criar / Graph JSON bulk import local - Tock Fatal (2026-06-02)
+- Sintoma corrigido: em `/marketing/criacao`, o prompt "segmentacao nova de publico atacarejo inverno. briefing para produtos quentes e baratos. 2 produtos do site agrupados" antes podia cair no loop de tools da Sofia, ler o site, mas sair sem `knowledge_plan`/Graph JSON utilizavel.
+- Estado validado: o backend local usado pelo dashboard (`API_INTERNAL_BASE_URL=http://127.0.0.1:8001`) agora responde esse prompt com `ok=true`, `stage=ready_to_save` e plano completo: `brand=1`, `briefing=1`, `campaign=1`, `audience=1`, `product_group=1`, `product=2`, `copy=2`, `faq=2`, sem violacoes bloqueantes.
+- Validacao no grafo local: `GET /knowledge/graph-data?persona_slug=tock-fatal&mode=semantic_tree&max_depth=6&include_embedded=true` retornou 16 nodes e 13 edges, com tipos `persona=1`, `brand=1`, `briefing=1`, `campaign=3`, `audience=1`, `product_group=1`, `product=2`, `copy=2`, `faq=2`, `gallery=1`, `embedded=1`; o ramo novo contem `brand -> briefing -> campaign -> audience -> product_group -> product -> copy -> faq -> embedded`.
+- Mudancas de codigo relacionadas: o CRIAR passou a salvar via `GraphJson`/`graph_json_importer.import_graph_json` em lote; `/graph-documents/import-json` aceita o JSON canonico; o contrato aceita tanto `audience -> product` quanto `audience -> product_group -> product`; prompts estruturados com "produtos do site agrupados" agora disparam o builder deterministico em vez de depender do LLM emitir JSON perfeito.
+- Validacao automatizada: `api\.venv\Scripts\python.exe tests\test_marketing_criacao_kb_intake_flow.py` e `api\.venv\Scripts\python.exe -m py_compile api\services\kb_intake_service.py` passaram. O teste isolado loga `SUPABASE_URL` ausente por nao carregar env completo, mas nao falha.
+- Proximo risco identificado: os FAQs gerados ainda podem interpretar apenas o node imediatamente acima (`copy`) em vez de todo o galho; a proxima correcao deve compor prompt/contexto a partir de todos os ancestrais conectados ate o FAQ.

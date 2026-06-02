@@ -15,9 +15,11 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from services import supabase_client
+from services import graph_json_importer
 from services import knowledge_graph
 from services import knowledge_lifecycle
 from services import graph_validation
+from schemas.graph_json_v2 import GraphJson
 from services.catalog_crawler import crawl_catalog_url
 from services.vault_sync import run_sync, VAULT_PATH, ensure_persona_vault_structure, persona_folder_name
 from services.model_router import AVAILABLE_MODELS as ROUTER_MODELS
@@ -34,6 +36,7 @@ _CONTENT_TYPE_FOLDERS = {
     "brand":         "01_BRAND",
     "briefing":      "02_BRIEFING",
     "product":       "03_PRODUCTS",
+    "product_group": "03_PRODUCT_GROUPS",
     "campaign":      "04_CAMPAIGNS",
     "copy":          "05_COPY",
     "faq":           "06_FAQ",
@@ -149,7 +152,7 @@ Termos amplos de campanha/posicionamento NÃO são lista de produtos. Frases com
   produtos, você quer que eu: A) use produtos já cadastrados; B) crie product
   groups por modelo/coleção; C) aguarde os nomes dos produtos?"
 
-=== PRODUCT_GROUP QUANDO O OPERADOR PEDE GRUPOS ===
+=== PRODUCT_GROUP, COPY E RULE SAO CONTEXTO OPCIONAL ===
 Quando o operador pedir grupos explicitamente — "crie 3 grupos de produtos",
 "associe 3 produtos para cada grupo", "crie grupos por modelo/coleção", "grupos
 Radar, Juliet e HSTN" — `product_group` é OBRIGATÓRIO e estrutural:
@@ -158,13 +161,16 @@ Radar, Juliet e HSTN" — `product_group` é OBRIGATÓRIO e estrutural:
   Cadeia: audience → product_group → product.
 - NUNCA jogue os produtos direto no briefing/audience quando há grupos pedidos.
 - `product_group` é OPCIONAL quando o operador NÃO pede grupos: nesse caso o
-  product pode ficar direto sob audience/campaign/briefing/brand. Não crie
-  product_group que ninguém pediu.
+  product pode ficar direto sob audience/campaign/briefing/brand.
+- `copy` e `rule` tambem sao opcionais. Eles adicionam contexto quando existem,
+  mas a ausencia deles nao bloqueia a criacao do JSON.
+- Antes de salvar, traduza as conexoes para o operador em linguagem concreta,
+  por exemplo: "Esse produto deve ficar dentro do grupo de produtos Radar".
 
 === HIERARQUIA FRACTAL CANÔNICA (ÚNICA VÁLIDA) ===
 A árvore principal segue exatamente esta ordem. Pule apenas níveis ausentes — nunca invente node "para preencher".
 
-  persona → brand → briefing → campaign → audience → product_group → product → offer → copy → { faq, gallery }
+  persona → brand → briefing → campaign → audience → product_group opcional → product opcional → copy opcional → { faq, gallery }
 
 Cardinalidade primária:
   persona  → brand           (1:1)
@@ -172,9 +178,8 @@ Cardinalidade primária:
   briefing → campaign        (N:N)
   campaign → audience        (N:N)
   audience → product_group   (N:N)
-  product_group → product    (N:N)
-  product  → offer           (N:N)
-  offer    → copy            (N:N)
+  product_group → product    (N:N, quando product_group existir)
+  product  → copy            (N:N, quando copy existir)
   copy     → faq             (1:1)
   copy     → gallery         (1:1)
 
@@ -185,8 +190,8 @@ Tipos NÃO canônicos (use apenas quando estritamente necessário e marque `stat
 
 Relation types primários (use EXATAMENTE estes no links[]):
   persona_has_brand, brand_has_briefing, briefing_has_campaign, campaign_has_audience,
-  audience_has_product_group, product_group_has_product, product_has_offer,
-  offer_has_copy, copy_has_faq, copy_has_gallery
+  audience_has_product_group, product_group_has_product, product_has_copy,
+  product_group_has_copy, copy_has_faq, copy_has_gallery
 
 Qualquer edge entre nodes de tipos canônicos que NÃO use uma dessas relations é SECUNDÁRIA (`relation_type: "secondary"`). Edges secundárias podem existir entre quaisquer dois nodes e NÃO definem hierarquia.
 
@@ -200,9 +205,9 @@ Gallery é destino de assets aprovados. Você nunca gera Gallery por iniciativa:
 Asset criado por você ou subido na sessão entra como pendente. Edge `asset_pending`. Quem aprova é o operador. Você não emite `asset_approved`.
 
 === CONTRATO DE EXPANSÃO (LEIA COM CALMA) ===
-Você NÃO multiplica nodes para "completar" o galho. Não existe mais "FAQ Golden Dataset", "expansion incomplete", "1 copy por audience automática". Cada entry só nasce se:
+Você NÃO multiplica nodes para "completar" o galho. Não existe mais pacote obrigatório de FAQ, expansão incompleta abstrata ou "1 copy por audience" automática. Cada entry só nasce se:
   (a) o operador pediu explicitamente, OU
-  (b) é PRÉ-REQUISITO canônico de uma entry que ele pediu (ex.: pedir um produto exige product_group ancestral; criar product_group exige audience).
+  (b) é PRÉ-REQUISITO canônico de uma entry que ele pediu (ex.: criar product_group exige um parent estrutural; product_group só é obrigatório quando o operador pedir grupos).
 Quando o pré-requisito não está claro, INFIRA o mínimo e marque `status: pendente_validacao`. NÃO crie ramos paralelos só porque a hierarquia "comportaria mais".
 
 CONEXÕES (parent_slug + links) SÃO OBRIGATÓRIAS:
@@ -212,10 +217,10 @@ Toda entry não top-level precisa de:
 
 REGRAS RÍGIDAS DE ANINHAMENTO (NÃO QUEBRE):
 - `product_group` SEMPRE filho de `audience` quando existir audience no plano. NUNCA com `parent_slug="self"` se houver audience.
-- `product` SEMPRE filho de `product_group`. Nunca filho direto de audience.
-- `offer` SEMPRE filho de `product`. Uma offer não pertence ao product_group nem à audience.
-- `copy` SEMPRE filho de `offer`. Não há copy direto sob product.
-- `faq` e `gallery` SEMPRE filhos de `copy`.
+- `product` fica filho de `product_group` quando esse grupo existir no plano; sem grupo, pode ficar sob audience/campaign/briefing/brand.
+- `offer` não é camada obrigatória do galho; use como metadata ou relação secundária quando necessário.
+- `copy` fica ligada ao product ou product_group que contextualiza.
+- `faq` fica ligada ao card mais específico disponível no branch.
 
 REGRAS DE METADATA OPERACIONAL:
 - Quando o operador pedir `metadata.<chave>='<valor>'` (ex.: `test_tag='01'`, `display_price=9`, `flavors_note='consultar sabores'`), PROPAGUE esse metadata EXATAMENTE em TODAS as entries que ele referenciou. NÃO omita por achar que é redundante. NÃO converta o tipo.
@@ -339,7 +344,7 @@ O JSON deve seguir este formato:
   "validation_policy": "human_validation_required",
   "entries": [
     {
-      "content_type": "brand|briefing|product|campaign|copy|asset|prompt|faq|maker_material|tone|competitor|audience|rule|other",
+      "content_type": "brand|briefing|campaign|audience|product_group|product|offer|copy|asset|prompt|faq|maker_material|tone|competitor|rule|entity|other",
       "title": "titulo concreto",
       "slug": "slug-canonico",
       "status": "confirmado|inferido|pendente_validacao",
@@ -382,7 +387,7 @@ Regras para esse bloco:
 
 === OUTPUT VALIDATION (HARD CONTRACT) ===
 Antes de fechar `<knowledge_plan>`, verifique entrada por entrada:
-- `content_type` ESTRITAMENTE in {brand, briefing, product, offer, campaign, copy, asset, prompt, faq, maker_material, tone, competitor, audience, rule, entity, other}. Qualquer outro valor (incluindo "rules", "publico" ou "category") sera rejeitado pelo banco.
+- `content_type` ESTRITAMENTE in {brand, briefing, campaign, audience, product_group, product, offer, copy, asset, prompt, faq, maker_material, tone, competitor, rule, entity, other}. Qualquer outro valor (incluindo "rules", "publico" ou "category") sera rejeitado pelo banco.
 - `title` nao vazio, com pelo menos 3 caracteres.
 - `content` nao vazio.
 - `tags` deve ser lista de strings (pode ser vazia). Nunca dict.
@@ -659,7 +664,7 @@ def _direct_parent_type_for(plan: dict, block_id: str) -> str:
     entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
     types = {_entry_type(entry) for entry in entries}
     if block_id == "faq":
-        return str(plan.get("faq_parent_type") or ("rule" if "rule" in types else "copy" if "copy" in types else "offer" if "offer" in types else "product")).strip() or "rule"
+        return str(plan.get("faq_parent_type") or ("copy" if "copy" in types else "product" if "product" in types else "product_group" if "product_group" in types else "audience")).strip() or "copy"
     if block_id == "asset":
         return str(plan.get("asset_parent_type") or ("product" if "product" in types else "campaign" if "campaign" in types else "briefing")).strip() or "product"
     return "product"
@@ -753,7 +758,7 @@ def summarize_normalized_plan(plan: dict) -> dict[str, Any]:
         "tree_mode": plan.get("tree_mode") or "pyramidal",
         "branch_policy": plan.get("branch_policy") or "top_down_pyramidal",
         "faq_count_policy": plan.get("faq_count_policy") or "grouped",
-        "faq_parent_type": plan.get("faq_parent_type") or "rule",
+        "faq_parent_type": plan.get("faq_parent_type") or "copy",
         "asset_count_policy": plan.get("asset_count_policy") or "per_parent",
         "copy_policy": plan.get("copy_policy") or "per_product_context",
         "expansion": _expansion_summary(plan),
@@ -773,6 +778,136 @@ def _plan_hash(plan: dict) -> str:
     return hashlib.sha256(_stable_json(canonical).encode("utf-8")).hexdigest()
 
 
+def normalized_plan_to_graph_json(plan: dict, session: dict) -> GraphJson:
+    persona_slug = str(
+        plan.get("persona_slug")
+        or (session.get("classification") or {}).get("persona_slug")
+        or session.get("persona_slug")
+        or ""
+    ).strip()
+    if not persona_slug:
+        raise ValueError("persona_slug is required to build graph_json")
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    graph_id = f"kb-intake:{session.get('id') or uuid.uuid4().hex}:{_plan_hash(plan)[:16]}"
+    persona_id = f"persona:{persona_slug}"
+    source = plan.get("source") or (session.get("classification") or {}).get("source") or "pending_source"
+    nodes: list[dict[str, Any]] = [
+        {
+            "id": persona_id,
+            "node_type": "persona",
+            "slug": persona_slug,
+            "label": persona_slug,
+            "data": {"status": "validated", "source": source},
+        }
+    ]
+    slug_to_node_id: dict[str, str] = {persona_slug: persona_id, "self": persona_id}
+    entry_by_slug: dict[str, dict] = {}
+    for entry in entries:
+        slug = str(entry.get("slug") or _slug_for_plan_entry(entry.get("title") or entry.get("content_type") or "node"))
+        ctype = _entry_type(entry)
+        if not slug or ctype == "persona":
+            continue
+        slug_to_node_id[slug] = f"{ctype}:{slug}"
+        entry_by_slug[slug] = entry
+
+    def branch_path_for(entry: dict, node_id: str) -> list[str]:
+        path = [node_id]
+        cursor = entry
+        seen: set[str] = set()
+        for _ in range(30):
+            parent_slug = str(_entry_parent_slug(cursor) or "self")
+            if parent_slug in seen:
+                break
+            seen.add(parent_slug)
+            parent_id = slug_to_node_id.get(parent_slug) or persona_id
+            path.append(parent_id)
+            if parent_id == persona_id:
+                break
+            cursor = entry_by_slug.get(parent_slug) or {}
+            if not cursor:
+                break
+        return list(reversed(path))
+
+    for entry in entries:
+        ctype = _entry_type(entry)
+        if ctype == "persona":
+            continue
+        slug = str(entry.get("slug") or _slug_for_plan_entry(entry.get("title") or ctype))
+        node_id = slug_to_node_id.get(slug) or f"{ctype}:{slug}"
+        parent_slug = str(_entry_parent_slug(entry) or "self")
+        parent_id = slug_to_node_id.get(parent_slug) or persona_id
+        metadata = dict(entry.get("metadata") or {})
+        content = str(entry.get("content") or metadata.get("markdown") or "")
+        status = str(entry.get("status") or metadata.get("validation_status") or "pending_validation")
+        data = {
+            **metadata,
+            "source": source,
+            "status": status,
+            "validation_status": metadata.get("validation_status") or status,
+            "content": content,
+            "markdown": metadata.get("markdown") or content,
+            "tags": entry.get("tags") or [],
+            "parent_slug": parent_slug,
+        }
+        if ctype == "faq":
+            branch_path = branch_path_for(entry, node_id)
+            direct_parent = next((node for node in nodes if node["id"] == parent_id), None)
+            data.setdefault("markdown_document", True)
+            data.setdefault("question_count", max(1, len(re.findall(r"(?m)^###\s+", content))))
+            data.setdefault("branch_path", branch_path)
+            data.setdefault("source_node_id", parent_id)
+            data.setdefault("source_node_type", (direct_parent or {}).get("node_type") or "unknown")
+        nodes.append(
+            {
+                "id": node_id,
+                "node_type": ctype,
+                "slug": slug,
+                "label": str(entry.get("title") or slug),
+                "parent_id": parent_id,
+                "data": data,
+            }
+        )
+
+    node_type_by_id = {node["id"]: node["node_type"] for node in nodes}
+    edges: list[dict[str, Any]] = []
+    seen_edges: set[tuple[str, str]] = set()
+    for node in nodes:
+        parent_id = node.get("parent_id")
+        if not parent_id:
+            continue
+        pair = (str(parent_id), str(node["id"]))
+        if pair in seen_edges:
+            continue
+        seen_edges.add(pair)
+        parent_type = node_type_by_id.get(str(parent_id), "")
+        child_type = str(node.get("node_type") or "")
+        relation = graph_json_importer.RELATION_BY_PAIR.get((parent_type, child_type), "main")
+        edges.append(
+            {
+                "id": f"edge:{parent_id}->{node['id']}",
+                "source": parent_id,
+                "target": node["id"],
+                "relation": relation,
+                "primary_tree": True,
+                "metadata": {"primary_tree": True, "source": "kb_intake.normalized_plan"},
+            }
+        )
+
+    return GraphJson.model_validate(
+        {
+            "schema_version": "2.0",
+            "graph_id": graph_id,
+            "tenant": "local",
+            "persona_slug": persona_slug,
+            "brand_slug": next((entry.get("slug") for entry in entries if _entry_type(entry) == "brand"), None),
+            "status": "draft",
+            "nodes": nodes,
+            "edges": edges,
+            "validation": {"is_valid": True, "errors": []},
+        }
+    )
+
+
 def _plan_validation(violations: list[str] | None = None, warnings: list[str] | None = None) -> dict[str, Any]:
     blocking = [str(item) for item in (violations or []) if str(item).strip()]
     return {
@@ -782,8 +917,9 @@ def _plan_validation(violations: list[str] | None = None, warnings: list[str] | 
     }
 
 
-def _leaf_alert_warnings(plan: dict) -> list[str]:
+def _leaf_alert_warnings(plan: dict, session: Optional[dict] = None) -> list[str]:
     entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    counts = count_blocks_by_type(entries)
     child_parent_slugs = {_entry_parent_slug(entry) for entry in entries if _entry_parent_slug(entry)}
     link_sources = {
         str(link.get("source_slug"))
@@ -791,10 +927,24 @@ def _leaf_alert_warnings(plan: dict) -> list[str]:
         if isinstance(link, dict) and link.get("source_slug") and link.get("target_slug")
     }
     warnings: list[str] = []
+    if session and _rule_required(session, plan) and counts.get("rule", 0) == 0:
+        warnings.append("pending_rule: regra comercial explicita ainda nao foi criada.")
+    if session and _offers_required(session, plan) and counts.get("offer", 0) == 0:
+        warnings.append("pending_offer: oferta/condicao comercial ainda nao foi criada.")
+    if session and _requested_variation_count(session, "asset", 0) > 0 and counts.get("asset", 0) == 0:
+        warnings.append("pending_asset: asset solicitado ainda nao foi criado.")
+    if counts.get("product", 0) > 0 and counts.get("copy", 0) == 0:
+        warnings.append("pending_copy: produtos ainda nao tem copy. Deseja gerar agora?")
+    if (counts.get("product", 0) > 0 or counts.get("product_group", 0) > 0) and counts.get("faq", 0) == 0:
+        warnings.append("pending_faq: ainda nao ha FAQ comercial. Deseja gerar agora?")
+    if counts.get("faq", 0) == 0:
+        warnings.append("pending_embedded: Embedded sera conectado depois que houver FAQ aprovada.")
+    elif counts.get("embedded", 0) == 0:
+        warnings.append("pending_embedded_connection: FAQ existe, mas ainda nao ha conexao final com Embedded.")
     # FAQ is terminal-valid in the plan: after human approval it is connected
     # to the persona's Embedded node automatically, so the plan itself must not
     # treat a pending FAQ as a structural error.
-    terminal_ok = {"asset", "embedded", "gallery", "faq"}
+    terminal_ok = {"persona", "asset", "embedded", "gallery", "faq"}
     for entry in entries:
         slug = str(entry.get("slug") or "").strip()
         ctype = _entry_type(entry)
@@ -806,11 +956,11 @@ def _leaf_alert_warnings(plan: dict) -> list[str]:
         title = str(entry.get("title") or slug).strip()
         if ctype == "rule":
             warnings.append(
-                f"O node RULE ficou sem saida: {title}. Deseja conectar RULE antes do FAQ, transformar em orientacao global da campanha ou manter como pendencia?"
+                f"pending_terminal_connection: O node RULE ficou sem saida: {title}. Deseja conectar RULE antes do FAQ, transformar em orientacao global da campanha ou manter como pendencia?"
             )
         else:
             warnings.append(
-                f"O node {ctype or 'desconhecido'} ficou sem saida: {title}. Deseja conectar, transformar em orientacao global ou manter como pendencia?"
+                f"pending_terminal_connection: O node {ctype or 'desconhecido'} ficou sem saida: {title}. Deseja conectar, transformar em orientacao global ou manter como pendencia?"
             )
     return warnings
 
@@ -820,7 +970,14 @@ def _plan_state_from_normalized(plan: dict, session: Optional[dict] = None, *, v
     summary = summarize_normalized_plan(normalized_plan)
     normalized_plan["summary"] = summary
     resolved_violations = violations if violations is not None else validate_sofia_knowledge_plan(normalized_plan, session=session)
-    validation = _plan_validation(resolved_violations, _leaf_alert_warnings(normalized_plan))
+    validation = _plan_validation(resolved_violations, _leaf_alert_warnings(normalized_plan, session))
+    graph_json_payload: dict[str, Any] | None = None
+    if validation.get("valid"):
+        try:
+            graph_doc = normalized_plan_to_graph_json(normalized_plan, session or {})
+            graph_json_payload = graph_doc.model_dump()
+        except Exception as exc:
+            validation = _plan_validation([f"graph_json_generation_failed: {exc}"], validation.get("warnings") or [])
     plan_hash = _plan_hash(normalized_plan)
     diagnostic = build_plan_diagnostic(normalized_plan, session, validation["blocking_violations"]) if validation["blocking_violations"] else None
     state: dict[str, Any] = {
@@ -829,6 +986,8 @@ def _plan_state_from_normalized(plan: dict, session: Optional[dict] = None, *, v
         "summary": summary,
         "plan_hash": plan_hash,
     }
+    if graph_json_payload is not None:
+        state["graph_json"] = graph_json_payload
     if diagnostic is not None:
         state["diagnostic"] = diagnostic
     return state
@@ -856,6 +1015,8 @@ def _store_plan_state(session: dict, plan_state: dict[str, Any], *, last_change:
     session["plan_summary"] = summary
     session["knowledge_plan_summary"] = summary
     session["plan_hash"] = plan_hash
+    if plan_state.get("graph_json"):
+        session["graph_json"] = plan_state.get("graph_json")
     session["current_block_counts"] = summary.get("current_block_counts") or count_blocks_by_type(normalized_plan.get("entries") or [])
     session["plan_changed"] = True
     session["memory_summary"] = _build_live_memory_summary(session, normalized_plan, last_change=last_change)
@@ -872,17 +1033,18 @@ SOFIA_TOP_LEVEL_TYPES: frozenset[str] = frozenset({"persona", "brand", "briefing
 # that type). This mirrors the architectural intent: faq belongs to a
 # product, products belong to a campaign, copies belong to a product, etc.
 # Top-down chain enforced by the operator's hierarchy:
-#   Persona → Brand → Campaign|Briefing → Audience → Product → Copy|FAQ|Asset
+#   Persona → Brand → Campaign|Briefing → Audience → Product Group → Product → Copy|FAQ|Asset
 # Each child's preferred parents are listed from CLOSEST to fallback. The
-# audience pivot between campaign and product is what prevents a flat
-# "campaign → product" shortcut that bypasses the audience semantic step.
+# audience/product_group pivot prevents flat shortcuts that bypass the semantic
+# grouping step.
 _PREFERRED_PARENT_TYPES: dict[str, tuple[str, ...]] = {
     "briefing": ("brand",),
     "campaign": ("briefing", "brand"),
     "audience": ("campaign", "briefing", "brand"),
-    # Product must hang under audience whenever an audience exists in the
-    # plan. Falls back to campaign/briefing/brand only when none does.
-    "product": ("audience", "campaign", "briefing", "brand"),
+    "product_group": ("audience",),
+    # Product prefers product_group. Falls back only for older plans that did
+    # not request or emit the grouping layer.
+    "product": ("product_group",),
     "offer": ("product",),
     "entity": ("product", "audience", "campaign", "briefing", "brand"),
     "tone": ("brand", "briefing", "campaign"),
@@ -890,8 +1052,8 @@ _PREFERRED_PARENT_TYPES: dict[str, tuple[str, ...]] = {
     "competitor": ("brand", "briefing"),
     # Per-product children prefer the product directly. Falling back to
     # audience preserves the semantic step instead of jumping to campaign.
-    "copy": ("product", "offer", "campaign"),
-    "faq": ("rule", "copy", "offer", "product"),
+    "copy": ("product", "product_group", "campaign", "audience"),
+    "faq": ("copy", "product", "product_group", "audience", "campaign", "briefing", "brand"),
     "asset": ("product", "audience", "campaign", "brand"),
     "maker_material": ("product", "campaign", "brand"),
     "prompt": ("campaign", "brand", "briefing"),
@@ -1148,10 +1310,10 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
     if len(slugs) != len(set(slugs)):
         errors.append("plan.entries must not contain duplicate slugs")
 
-    if session and _offers_required(session, plan) and not offer_entries:
-        errors.append("offer required when the request includes price, quantity, package, plan, subscription, purchase option or commercial variation")
-    if session and _rule_required(session, plan) and not rule_entries:
-        errors.append("rule required when the request includes commercial governing rules")
+    # Preview/create validation is intentionally tolerant for complementary
+    # commercial layers. Missing offer/rule/copy/FAQ/asset/embedded are surfaced
+    # as Sofia suggestions in _leaf_alert_warnings instead of blocking the
+    # primary tree. Structural errors below still block.
 
     for idx, entry in enumerate(entries):
         if not isinstance(entry, dict):
@@ -1171,6 +1333,14 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
                 violation = graph_validation.parent_violation(ctype_lower, parent_type)
                 if violation:
                     errors.append(f"entry[{idx}] {violation} (via slug {parent_slug!r})")
+                available_types = {
+                    _entry_type(candidate)
+                    for candidate in entries
+                    if isinstance(candidate, dict)
+                }
+                contextual = graph_validation.contextual_parent_violation(ctype_lower, parent_type, available_types)
+                if contextual:
+                    errors.append(f"entry[{idx}] {contextual} (via slug {parent_slug!r})")
         else:
             # Legacy validator preserved for non-canonical callers.
             if ctype_lower == "audience" and parent_slug and parent_type not in {"campaign", "briefing", "brand", ""}:
@@ -1189,19 +1359,13 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
             if ctype_lower == "offer" and parent_type != "product":
                 errors.append(f"entry[{idx}] offer must stay under product, got parent {parent_slug!r}")
             if ctype_lower == "copy":
-                allowed_copy_parents = {"offer", "product", "campaign", ""}
+                allowed_copy_parents = {"product", "product_group", "campaign", "audience", "briefing", "brand", ""}
                 if parent_type not in allowed_copy_parents:
                     errors.append(f"entry[{idx}] copy has invalid parent {parent_slug!r}")
-                if offer_entries and parent_type == "offer" and not _explicit_copy_per_offer_requested(session or {}):
-                    errors.append(f"entry[{idx}] copy must stay grouped by product/audience by default; use offer parent only when copy per offer is explicit")
             if ctype_lower == "faq":
-                allowed_faq_parents = {"rule", "copy", "offer"}
-                if not copy_entries and not offer_entries:
-                    allowed_faq_parents.add("product")
+                allowed_faq_parents = {"copy", "product", "product_group", "audience", "campaign", "briefing", "brand"}
                 if parent_type not in allowed_faq_parents:
                     errors.append(f"entry[{idx}] faq has invalid parent {parent_slug!r}")
-                if rule_entries and parent_type != "rule":
-                    errors.append(f"entry[{idx}] faq must stay under rule when rule exists")
             if ctype_lower == "rule" and parent_type not in {"campaign", "briefing", "brand", "persona", ""}:
                 errors.append(f"entry[{idx}] rule must stay under campaign/briefing/brand, got parent {parent_slug!r}")
 
@@ -1246,7 +1410,7 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
                 break
             seen.add(parent)
             current = parent
-        if not reaches_persona:
+        if not reaches_persona and ctype not in {"copy", "faq", "offer", "rule", "asset"}:
             errors.append(f"entry[{idx}] has no complete path to persona")
 
     faq_policy = str(plan.get("faq_count_policy") or "per_branch").strip() or "per_branch"
@@ -1259,17 +1423,7 @@ def validate_sofia_knowledge_plan(plan: dict, session: Optional[dict] = None) ->
 
     expansion = _expansion_summary(plan, session)
     faq_expansion = expansion.get("faq") or {}
-    if faq_policy != "total" and int(faq_expansion.get("created") or 0) < int(faq_expansion.get("expected") or 0):
-        errors.append(
-            f"FAQ Golden Dataset incomplete: expected {faq_expansion.get('expected')} FAQ documents by terminal {faq_expansion.get('parent_type')}, "
-            f"created {faq_expansion.get('created')}"
-        )
     asset_expansion = expansion.get("asset") or {}
-    if int(asset_expansion.get("expected") or 0) > 0 and int(asset_expansion.get("created") or 0) < int(asset_expansion.get("expected") or 0):
-        errors.append(
-            f"Asset expansion incomplete: expected {asset_expansion.get('expected')} Asset by {asset_expansion.get('parent_type')} "
-            f"({asset_expansion.get('count_per_parent')} per parent), created {asset_expansion.get('created')}"
-        )
 
     if len(entries) > 1 and not (plan.get("links") or []):
         errors.append("plan.links must not be empty when the hierarchy already contains clear parent/child relations")
@@ -1300,7 +1454,7 @@ _DIAGNOSTIC_KIND_TITLES = {
     "invalid_primary_tree_type": "Tipo nao permitido na arvore principal",
     "duplicate_slug": "Slugs duplicados no plano",
     "missing_parent_slug": "Entrada sem parent obrigatorio",
-    "faq_expansion_incomplete": "FAQ Golden Dataset incompleto",
+    "faq_expansion_incomplete": "FAQ esperado incompleto",
     "asset_expansion_incomplete": "Asset expansion incompleto",
     "offer_missing": "Oferta exigida e ausente",
     "rule_missing": "Regra comercial exigida e ausente",
@@ -1315,8 +1469,8 @@ _DIAGNOSTIC_KIND_DESCRIPTIONS = {
     "audience_parent": "Audience deve ficar abaixo de campaign, briefing ou brand.",
     "product_under_audience": "Quando ha audience no plano e nenhum product_group, todo produto deve ficar abaixo da audience.",
     "product_invalid_parent": "Produto deve ficar abaixo de product_group, audience, campaign, briefing ou brand.",
-    "copy_parent": "Copy deve ficar agrupada no contexto produto/publico por padrao; use oferta como parent apenas quando pedido explicitamente.",
-    "faq_parent": "FAQ agrupado deve ficar abaixo de rule. Sem rule, use copy, offer ou produto como fallback.",
+    "copy_parent": "Copy deve ficar ligada ao produto, grupo de produtos, campanha ou publico que ela contextualiza.",
+    "faq_parent": "FAQ deve ficar ligada ao card mais especifico do galho: copy, produto, grupo de produtos, publico, campanha, briefing ou brand.",
     "rule_parent": "Regra comercial deve ficar abaixo de campaign, briefing, brand ou persona.",
     "invalid_primary_tree_type": "Tipos auxiliares (tag, mention, knowledge_item, kb_entry) nao podem estar na arvore principal.",
     "duplicate_slug": "O mesmo slug aparece em mais de uma entrada do plano.",
@@ -1337,7 +1491,7 @@ _DIAGNOSTIC_KIND_REPAIRS = {
     "product_under_audience": "Coloque os produtos abaixo da audience (ou de um product_group sob ela).",
     "product_invalid_parent": "Reaponte os produtos para product_group, audience, campaign, briefing ou brand.",
     "copy_parent": "Reaponte as copies para o produto/contexto comercial; use oferta como parent apenas quando o operador pedir copy por oferta.",
-    "faq_parent": "Reaponte o FAQ agrupado para a rule estrutural; sem rule, use copy, offer ou produto como fallback.",
+    "faq_parent": "Reaponte o FAQ para a copy, produto, grupo de produtos ou outro card especifico que ele responde.",
     "rule_parent": "Aponte as regras para campaign, briefing, brand ou persona.",
     "invalid_primary_tree_type": "Remova esses tipos da arvore principal; tags/mentions ficam em camada auxiliar.",
     "duplicate_slug": "Renomeie um dos slugs duplicados.",
@@ -1369,7 +1523,7 @@ def _diagnostic_classify_violation(message: str) -> tuple[str, Optional[int]]:
         return "product_under_audience", affected_idx
     if "product has invalid parent" in message or "product slug must not embed audience slug" in message:
         return "product_invalid_parent", affected_idx
-    if "copy has invalid parent" in message or "copy must stay under offer" in message:
+    if "copy has invalid parent" in message or "copy precisa ficar ligada" in message:
         return "copy_parent", affected_idx
     if "faq has invalid parent" in message or "faq must stay under copy" in message or "faq must use copy parent" in message:
         return "faq_parent", affected_idx
@@ -1381,7 +1535,7 @@ def _diagnostic_classify_violation(message: str) -> tuple[str, Optional[int]]:
         return "duplicate_slug", None
     if "requires a parent" in message:
         return "missing_parent_slug", affected_idx
-    if "FAQ Golden Dataset incomplete" in message:
+    if "FAQ expansion incomplete" in message or "FAQs esperado incompleto" in message:
         return "faq_expansion_incomplete", None
     if "Asset expansion incomplete" in message:
         return "asset_expansion_incomplete", None
@@ -1403,20 +1557,20 @@ def _diagnostic_expected_parents(ctype: str, *, has_audience: bool, has_offer: b
         return ["campaign", "briefing", "brand"]
     if ctype == "product":
         if has_audience:
-            return ["audience"]
-        return ["audience", "campaign", "briefing", "brand"]
+            return ["product_group", "audience"]
+        return ["product_group", "audience", "campaign", "briefing", "brand"]
     if ctype == "offer":
         return ["product"]
     if ctype == "copy":
-        return ["product", "offer", "campaign"]
+        return ["product", "product_group", "campaign", "audience"]
     if ctype == "faq":
-        return ["rule", "copy", "offer", "product"]
+        return ["copy", "product", "product_group", "audience", "campaign", "briefing", "brand"]
     if ctype == "rule":
         return ["campaign", "briefing", "brand", "persona"]
     if ctype == "tone":
         return ["brand", "briefing", "persona"]
     if ctype == "asset":
-        return ["product", "offer", "copy", "faq", "brand", "campaign", "audience"]
+        return ["product", "product_group", "copy", "faq", "brand", "campaign", "audience"]
     return []
 
 
@@ -1474,7 +1628,7 @@ def _diagnostic_questions_markdown(
         if orphan_or_cycle:
             questions.append(
                 "As entradas com ciclo ou sem caminho ate a persona devem ser reorganizadas como "
-                "`persona -> brand -> briefing -> campaign -> audience -> product -> offer -> copy -> rule -> faq`?"
+                "`persona -> brand -> briefing -> campaign -> audience -> product_group -> product -> copy -> faq`?"
             )
 
     if "offer_under_product" in by_kind:
@@ -1483,10 +1637,10 @@ def _diagnostic_questions_markdown(
         )
 
     if "copy_parent" in by_kind:
-        questions.append("As copies devem ser agrupadas por produto/publico ou o operador pediu uma copy por oferta?")
+        questions.append("As copies devem contextualizar qual produto, grupo de produtos, campanha ou publico?")
 
     if "faq_parent" in by_kind or "faq_expansion_incomplete" in by_kind:
-        questions.append("O FAQ agrupado deve ficar depois da rule estrutural antes de publicar?")
+        questions.append("Esse FAQ responde sobre qual copy, produto ou grupo de produtos?")
 
     campaign_slugs = [n["slug"] for n in nodes if n["type"] == "campaign" and n.get("slug")]
     if campaign_slugs and ("offer_under_product" in by_kind or "no_path_to_persona" in by_kind):
@@ -1496,7 +1650,7 @@ def _diagnostic_questions_markdown(
 
     questions.append(
         "Deseja que o sistema regenere o plano automaticamente seguindo a arvore "
-        "`campaign -> audience -> product -> offer -> copy -> rule -> faq`?"
+        "`briefing -> campaign -> audience -> product_group -> product -> copy -> faq`?"
     )
 
     if not questions:
@@ -1654,11 +1808,11 @@ def _sofia_questions_from_diagnostic(
                     question = f"Onde devo aplicar a regra \"{label}\"?"
                 elif ntype == "faq":
                     human = f"O FAQ \"{label}\" ficou sem conexao clara com a campanha confirmada."
-                    cause = "FAQ precisa pertencer a rule, copy, offer ou produto para chegar na persona."
+                    cause = "FAQ precisa pertencer ao card mais especifico que ele responde: copy, produto, grupo de produtos, publico, campanha, briefing ou brand."
                     question = f"Esse FAQ deve responder sobre qual parte da campanha?"
                 elif ntype == "copy":
                     human = f"A copy \"{label}\" ficou sem destino comercial."
-                    cause = "Copy precisa apontar para produto, oferta ou campanha."
+                    cause = "Copy precisa apontar para produto, grupo de produtos, campanha ou publico."
                     question = f"Em qual contexto a copy \"{label}\" deve aparecer?"
                 elif ntype == "offer":
                     human = f"A oferta \"{label}\" nao esta ligada a um produto."
@@ -1743,7 +1897,7 @@ def _sofia_questions_from_diagnostic(
                 "kind": kind,
                 "technical_error": raw_messages[0] if raw_messages else "",
                 "severity": "blocking",
-                "human_summary": "O conjunto de FAQs esperado pelo Golden Dataset ainda nao esta completo.",
+                "human_summary": "O conjunto de FAQs esperado para este plano ainda nao esta completo.",
                 "probable_cause": f"O plano espera {expected_count} FAQ(s) mas tem {created_count}.",
                 "question": "Quer que a Sofia gere os FAQs faltantes a partir das copies/produtos terminais?",
                 "options": [
@@ -1758,7 +1912,7 @@ def _sofia_questions_from_diagnostic(
                         "payload": {"new_target": created_count},
                     },
                     {
-                        "label": "Seguir sem completar o Golden Dataset",
+                        "label": "Seguir sem completar os FAQs",
                         "action": "drop_faq_target",
                         "payload": {},
                     },
@@ -1981,7 +2135,7 @@ def _derive_sofia_option_prompt(question: dict, option: dict) -> tuple[str, Opti
         )
     if action == "drop_faq_target":
         return (
-            "Remova a exigencia do Golden Dataset de FAQ: set_expansion_policy(block='faq', "
+            "Remova a exigencia de gerar mais FAQs: set_expansion_policy(block='faq', "
             "count_policy='total'). Mantenha os FAQs ja criados.",
             None,
         )
@@ -2212,7 +2366,7 @@ def build_plan_diagnostic(
         "questions_markdown": questions_markdown,
         "repair_suggestion": (
             "Arvore sugerida: persona -> brand -> briefing -> campaign -> audience -> "
-            "product -> offer -> copy -> faq"
+            "product_group -> product -> copy -> faq"
         ),
     }
 
@@ -2312,6 +2466,126 @@ def _normalize_plan_parent_slugs(plan: dict, persona_slug: str) -> None:
             meta.pop("parent_slug", None)
 
 
+def _repair_canonical_parent_slugs(plan: dict) -> int:
+    """Repair structural parents using the canonical tree order.
+
+    The business graph is serial: campaign -> audience -> product_group ->
+    product. This function repairs both missing parents and invalid shortcuts
+    emitted by Sofia/LLM, such as product_group under campaign or product under
+    audience while a product_group exists.
+    """
+    if not isinstance(plan, dict):
+        return 0
+    entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    if not entries:
+        return 0
+
+    by_type: dict[str, list[dict]] = {}
+    for entry in entries:
+        ctype = _entry_type(entry)
+        if ctype:
+            by_type.setdefault(ctype, []).append(entry)
+
+    canonical_parents: dict[str, tuple[str, ...]] = {
+        "brand": ("persona",),
+        "briefing": ("brand", "persona"),
+        "campaign": ("briefing", "brand", "persona"),
+        "audience": ("campaign", "briefing", "brand", "persona"),
+        "product_group": ("audience",),
+        "product": ("product_group",),
+        "copy": ("product", "product_group", "campaign", "audience", "briefing", "brand"),
+        "faq": ("copy", "product", "product_group", "campaign", "audience", "briefing", "brand"),
+        "offer": ("product", "product_group", "campaign", "audience", "briefing", "brand"),
+        "rule": ("campaign", "briefing", "brand", "persona"),
+        "asset": ("product", "product_group", "copy", "faq", "campaign", "audience", "brand"),
+    }
+
+    repaired = 0
+    slug_to_entry = {str(entry.get("slug")): entry for entry in entries if entry.get("slug")}
+
+    def _current_parent_type(entry: dict) -> str:
+        parent_slug = _entry_parent_slug(entry)
+        if parent_slug == "self":
+            return "persona"
+        return _entry_type(slug_to_entry.get(parent_slug or "") or {})
+
+    def _parent_map_with(entry_slug: str, parent_slug: str) -> dict[str, str]:
+        parent_by_child = {
+            str(candidate.get("slug")): str(_entry_parent_slug(candidate) or "")
+            for candidate in entries
+            if candidate.get("slug") and _entry_parent_slug(candidate)
+        }
+        parent_by_child[entry_slug] = parent_slug
+        return parent_by_child
+
+    def _would_create_cycle(entry: dict, parent_candidate: dict) -> bool:
+        entry_slug = str(entry.get("slug") or "").strip()
+        parent_slug = str(parent_candidate.get("slug") or "").strip()
+        if not entry_slug or not parent_slug or entry_slug == parent_slug:
+            return True
+        parent_by_child = _parent_map_with(entry_slug, parent_slug)
+        seen: set[str] = set()
+        cursor = entry_slug
+        while cursor:
+            if cursor in {"self", "persona", "root", "global"}:
+                return False
+            if cursor in seen:
+                return True
+            seen.add(cursor)
+            cursor = parent_by_child.get(cursor, "")
+        return False
+
+    for _ in range(3):
+        changed_this_pass = 0
+        for entry in entries:
+            ctype = _entry_type(entry)
+            if not ctype or ctype == "persona":
+                continue
+            allowed_parent_types = canonical_parents.get(ctype, ())
+            if _entry_parent_slug(entry) and (
+                ctype == "brand"
+                or not allowed_parent_types
+                or _current_parent_type(entry) in allowed_parent_types
+            ):
+                continue
+            metadata = _entry_metadata(entry)
+            parent_candidate: Optional[dict] = None
+            for parent_type in canonical_parents.get(ctype, ()):
+                candidates = [candidate for candidate in by_type.get(parent_type, []) if candidate is not entry and candidate.get("slug")]
+                if not candidates:
+                    continue
+                ordered: list[dict] = []
+                picked = _best_parent_by_slug(entry, candidates)
+                if picked is not None:
+                    ordered.append(picked)
+                ordered.extend(candidate for candidate in reversed(candidates) if candidate is not picked)
+                for candidate in ordered:
+                    if not _would_create_cycle(entry, candidate):
+                        parent_candidate = candidate
+                        break
+                if parent_candidate and parent_candidate.get("slug"):
+                    break
+            if parent_candidate and parent_candidate.get("slug"):
+                old_parent = metadata.get("parent_slug")
+                metadata["parent_slug"] = str(parent_candidate.get("slug"))
+                metadata["parent_inferred"] = True
+                metadata["parent_inferred_from"] = parent_candidate.get("content_type") or "unknown"
+                if old_parent != metadata["parent_slug"]:
+                    changed_this_pass += 1
+                continue
+            if ctype == "brand":
+                old_parent = metadata.get("parent_slug")
+                metadata["parent_slug"] = "self"
+                metadata["parent_inferred"] = True
+                metadata["parent_inferred_from"] = "persona"
+                if old_parent != "self":
+                    changed_this_pass += 1
+        repaired += changed_this_pass
+        if not changed_this_pass:
+            break
+    return repaired
+
+
 def _knowledge_plan_title_from_session(session: dict) -> str:
     cls = session.get("classification") or {}
     if cls.get("title"):
@@ -2404,6 +2678,14 @@ def _relation_type_for_parent(parent_type: str, child_type: str) -> str:
         ("briefing", "product"): "contains",
         ("product", "briefing"): "contains",
         ("audience", "briefing"): "contains",
+        ("audience", "product_group"): "contains",
+        ("campaign", "product_group"): "contains",
+        ("briefing", "product_group"): "contains",
+        ("brand", "product_group"): "contains",
+        ("product_group", "product"): "contains",
+        ("product_group", "copy"): "supports_copy",
+        ("product_group", "faq"): "answers_question",
+        ("product_group", "asset"): "uses_asset",
         ("audience", "product"): "offers_product",
         ("product", "offer"): "contains",
         ("offer", "copy"): "supports_copy",
@@ -3168,6 +3450,11 @@ def _clone_plan_entry(template: dict, *, title: str, slug: str, parent_slug: str
 def _build_links_from_parent_slugs(plan: dict) -> None:
     entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
     slug_to_type = {str(entry.get("slug")): _entry_type(entry) for entry in entries if entry.get("slug")}
+    parent_by_target = {
+        str(entry.get("slug")): str(_entry_parent_slug(entry) or "")
+        for entry in entries
+        if entry.get("slug") and _entry_parent_slug(entry)
+    }
     deduped: dict[tuple[str, str], dict] = {}
     for link in plan.get("links") or []:
         if not isinstance(link, dict):
@@ -3175,6 +3462,9 @@ def _build_links_from_parent_slugs(plan: dict) -> None:
         source_slug = str(link.get("source_slug") or "").strip()
         target_slug = str(link.get("target_slug") or "").strip()
         if not source_slug or not target_slug:
+            continue
+        declared_parent = parent_by_target.get(target_slug)
+        if declared_parent and declared_parent != source_slug:
             continue
         deduped[(source_slug, target_slug)] = {
             "source_slug": source_slug,
@@ -3377,7 +3667,7 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
     normalized["faq_count_policy"] = _normalize_count_policy(normalized, session, "faq")
     if normalized["faq_count_policy"] == "per_branch":
         normalized["faq_count_policy"] = "grouped"
-    normalized["faq_parent_type"] = str(normalized.get("faq_parent_type") or "rule").strip() or "rule"
+    normalized["faq_parent_type"] = str(normalized.get("faq_parent_type") or "copy").strip() or "copy"
     normalized["faq_count_per_parent"] = max(0, int(normalized.get("faq_count_per_parent") or 1))
     normalized["asset_count_policy"] = _normalize_count_policy(normalized, session, "asset")
     normalized["asset_parent_type"] = str(normalized.get("asset_parent_type") or "product").strip() or "product"
@@ -3388,8 +3678,23 @@ def _normalize_sofia_knowledge_plan(plan: dict, session: dict) -> dict:
         normalized["copy_policy"] = "per_product_context"
 
     entries = [_normalize_plan_entry(entry) for entry in (normalized.get("entries") or []) if isinstance(entry, dict)]
+    # The persona is the implicit rendered/session root. If the LLM includes a
+    # persona entry, it becomes a duplicate terminal card in the preview
+    # because children are normalized to parent "self".
+    root_persona_slug = _slug_for_plan_entry(str(normalized.get("persona_slug") or ""))
+    entries = [
+        entry for entry in entries
+        if not (
+            _entry_type(entry) == "persona"
+            and (
+                not root_persona_slug
+                or _slug_for_plan_entry(str(entry.get("slug") or entry.get("title") or "")) == root_persona_slug
+            )
+        )
+    ]
     normalized["entries"] = entries
     _normalize_plan_parent_slugs(normalized, normalized["persona_slug"])
+    _repair_canonical_parent_slugs(normalized)
 
     # Root scaffolding: persona -> brand? -> briefing -> campaign? -> audience.
     # A briefing without brand is a valid first real node below persona; never
@@ -3576,7 +3881,7 @@ def _normalize_live_session_plan(plan: dict, session: dict) -> dict:
     normalized["faq_count_policy"] = _normalize_count_policy(normalized, session, "faq")
     if normalized["faq_count_policy"] == "per_branch":
         normalized["faq_count_policy"] = "grouped"
-    normalized["faq_parent_type"] = str(normalized.get("faq_parent_type") or "rule").strip() or "rule"
+    normalized["faq_parent_type"] = str(normalized.get("faq_parent_type") or "copy").strip() or "copy"
     normalized["faq_count_per_parent"] = max(0, int(normalized.get("faq_count_per_parent") or 1))
     normalized["asset_count_policy"] = _normalize_count_policy(normalized, session, "asset")
     normalized["asset_parent_type"] = str(normalized.get("asset_parent_type") or "product").strip() or "product"
@@ -4198,12 +4503,26 @@ def build_pre_initialization_review(
     recommended: list[dict[str, Any]] = []
     new_nodes_needed: list[dict[str, Any]] = []
     questions: list[str] = []
+    session_text = _fold(
+        " ".join(
+            [
+                str(session.get("context") or ""),
+                _session_user_text(session),
+            ]
+        )
+    )
 
     # Audience reuse: if the persona already has audience nodes and the plan
     # has no explicit audience yet, suggest reusing instead of cloning.
     existing_audiences = existing_nodes_found.get("audience") or []
     plan_has_audience = int(plan_counts.get("audience") or 0) > 0
     requested_audience = int(initial_counts.get("audience") or 0) > 0
+    explicit_default_audience = bool(
+        re.search(
+            r"\b(audiencia|audience|publico|publico-alvo)\s+(padrao|default)\b|\bconect(e|ar|ar)\s+a\s+(audiencia|audience)\s+padrao\b",
+            session_text,
+        )
+    )
     if existing_audiences and not plan_has_audience:
         for audience in existing_audiences[:3]:
             recommended.append({
@@ -4212,12 +4531,12 @@ def build_pre_initialization_review(
                 "target_title": audience.get("title"),
                 "reason": "audience ja existente para esta persona",
             })
-        if requested_audience:
+        if requested_audience and not explicit_default_audience:
             questions.append(
                 f"Encontrei audiencia ja descrita: {existing_audiences[0].get('title')}. "
                 "Deseja conectar nela ou criar uma nova segmentacao?"
             )
-        else:
+        elif not explicit_default_audience:
             questions.append(
                 f"A audiencia existente '{existing_audiences[0].get('title')}' atende esta captura ou precisa de nova segmentacao?"
             )
@@ -4234,6 +4553,17 @@ def build_pre_initialization_review(
         })
         questions.append(
             f"Esta captura deve entrar na campanha existente '{existing_campaigns[0].get('title')}' ou e uma nova campanha?"
+        )
+
+    # Group ambiguity: if the operator mentions plural groups without a count,
+    # keep the deterministic flow at one group and ask a single clarification
+    # only when the transcript is actually ambiguous.
+    has_group_word = bool(re.search(r"\bgrupos?\b", session_text))
+    has_explicit_group_count = bool(re.search(r"\d+\s*grupos?", session_text))
+    singular_group_hint = bool(re.search(r"\bgrupo\s+[a-z0-9]", session_text))
+    if has_group_word and not has_explicit_group_count and not singular_group_hint:
+        questions.append(
+            "O texto menciona grupos sem quantidade explicitada. Você quer criar 2 grupos ou manter 1 grupo com os produtos extraídos?"
         )
 
     # Asset routing: route by classification.asset_function instead of the
@@ -4382,8 +4712,15 @@ def _mission_summary(state: dict[str, Any]) -> str:
     ) or "sem modelos"
     source = ((state.get("source") or {}).get("url") or "sem fonte")
     persona = state.get("persona") or "sem persona"
+    action = "Vou explicar a estrutura que estou montando e só vou pedir confirmação quando houver ambiguidade."
+    if models:
+        action = (
+            "Vou montar a arvore da campanha com Brand -> Briefing -> Campaign -> Audience -> "
+            "Product Group -> Product -> Copy -> FAQ, usando os produtos extraidos do site."
+        )
     return (
         "Atualizei a missao:\n"
+        f"{action}\n"
         f"Persona: {persona}\n"
         f"Fonte: {source}\n"
         f"Blocos mantidos: {blocks}\n"
@@ -4826,6 +5163,340 @@ def _crawler_context(captures: list[dict]) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Deterministic full-tree builder                                              #
+# --------------------------------------------------------------------------- #
+# The LLM is unreliable at emitting a complete, valid <knowledge_plan> for a
+# big request ("crie toda a arvore"). It frequently stalls ("vou comecar pelo
+# briefing"), asks clarifying questions, or emits a plan with broken parent
+# links. When the operator EXPLICITLY confirms building the whole tree and we
+# already have crawler candidates from the configured source, we build the
+# canonical chain server-side and validate it deterministically instead of
+# trusting the model JSON. Nothing is hardcoded to a specific client: brand,
+# campaign and audience are derived from the persona/source/message, and the
+# products come from the real crawler candidates.
+
+# Generic tokens that never identify a product family.
+_PRODUCT_FAMILY_STOPWORDS: frozenset[str] = frozenset({
+    "oculos", "lupa", "lupas", "kit", "pague", "leve", "para", "com", "sem",
+    "de", "do", "da", "novo", "nova", "linha", "modelo", "produto", "produtos",
+})
+
+
+def _full_tree_command(text: str) -> bool:
+    """True when the operator confirms building the WHOLE tree.
+
+    Requires a creation/confirmation verb AND a scope word ("toda", "tudo",
+    "arvore", "completa", "inspirada"). The first crawl message ("extraia os
+    produtos do site ...") deliberately does NOT match so the first turn only
+    collects candidates."""
+    if not text:
+        return False
+    low = _fold(text)
+    has_verb = bool(re.search(r"\b(cria|crie|criar|monte|monta|montar|gere|gera|gerar|construa|constroi|construir)\b", low))
+    confirm = bool(re.match(r"\s*(sim|ok|isso|pode|vai|manda|fecha)\b", low))
+    has_scope = bool(re.search(r"\b(toda|todo|tudo|completa|completo|arvore|estrutura|campanha|inspirad[ao])\b", low))
+    proceed = bool(re.search(r"\b(gere|gera|gerar|crie|cria|criar)\b.{0,24}\b(prossiga|prosseguir|segue|seguir|continua|continuar)\b", low))
+    generate_only = bool(re.match(r"\s*(gere|gera|gerar|crie|cria|criar|monte|monta|montar)\s*[.!?]*\s*$", low))
+    extractive_full_scope = bool(
+        re.search(r"\b(extraia|extrai|extrair|extracao|captura|capture)\b", low)
+        and re.search(r"\b(copys?|copies|copy|campanha|audiencia|audience|publico|publico-alvo|briefing|brand|marca)\b", low)
+    )
+    extraction_only = bool(re.search(r"\b(extraia|extrai|extrair|extracao|captura|capture|coleta|colete|coletar)\b", low))
+    structured_source_spec = bool(
+        not extraction_only
+        and re.search(r"\bprodutos?\b.{0,32}\b(site|fonte|catalogo|cat[aá]logo)\b|\b(site|fonte|catalogo|cat[aá]logo)\b.{0,32}\bprodutos?\b", low)
+        and re.search(r"\b(segmentacao|segmenta[cç][aã]o|publico|p[uú]blico|audiencia|audi[eê]ncia|briefing|campanha|grupo|grupos|agrupad[oa]s?)\b", low)
+    )
+    return proceed or generate_only or extractive_full_scope or structured_source_spec or (has_scope and (has_verb or confirm))
+
+
+def _session_user_text(session: dict) -> str:
+    # Join with a sentence boundary so per-message phrase extraction (campaign
+    # title, audience descriptor) never bleeds across two operator turns.
+    return " . ".join(
+        str(m.get("content") or "")
+        for m in (session.get("messages") or [])
+        if m.get("role") == "user"
+    )
+
+
+def _session_latest_candidates(session: dict) -> list[dict]:
+    captures = session.get("crawler_captures") or []
+    for capture in reversed(captures):
+        cands = capture.get("product_candidates") or []
+        if cands:
+            return cands
+    return []
+
+
+def _session_has_buildable_candidates(session: dict) -> bool:
+    return bool(_session_latest_candidates(session))
+
+
+def _parse_tree_counts(session: dict) -> tuple[int, int]:
+    """Parse (num_groups, num_products) from the operator's messages.
+
+    Defaults: 1 group, all available products. Only an explicit numeric
+    grouping ("3 grupos") changes the number of groups; bare plural mentions
+    stay at one group and are handled as a clarification prompt elsewhere."""
+    low = _fold(_session_user_text(session))
+    mg = re.search(r"(\d+)\s*grupos?", low)
+    mp = re.search(r"(\d+)\s*produtos?", low)
+    num_groups = int(mg.group(1)) if mg else 1
+    num_products = int(mp.group(1)) if mp else 0
+    num_groups = max(1, num_groups)
+    if num_products <= 0:
+        num_products = max(num_groups, len(_session_latest_candidates(session)))
+    return num_groups, max(num_groups, num_products)
+
+
+def _requested_single_group_title(session: dict) -> str | None:
+    """Return an explicit one-group title from the operator message, if present."""
+    text = _session_user_text(session)
+    patterns = [
+        r"\bgrupos?\s+(?:de\s+produtos?\s+)?([A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9 _-]{2,40})",
+        r"\bgrupo\s+([A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9 _-]{2,40})",
+    ]
+    stop = {
+        "produto", "produtos", "de", "para", "com", "e", "a", "o", "os", "as",
+        "campanha", "fonte", "site", "audiencia", "publico", "padrao",
+    }
+    for pattern in patterns:
+        match = re.search(pattern, text or "", re.I)
+        if not match:
+            continue
+        raw = re.split(
+            r"[.,;\n]|\b(?:conecte?|campanha|aumentar|fonte|site|extraia|crie|monte)\b",
+            match.group(1).strip(),
+            maxsplit=1,
+            flags=re.I,
+        )[0].strip()
+        raw = re.sub(r"\s+", " ", raw)
+        words = [w for w in raw.split() if _fold(w) not in stop]
+        if not words:
+            continue
+        title = " ".join(words[:3]).strip(" -_")
+        if title:
+            return title.title()
+    return None
+
+
+def _product_family(title: str) -> str:
+    cleaned = re.sub(r"[^0-9A-Za-zÀ-ÿ ]+", " ", title or "")
+    for token in cleaned.split():
+        if len(token) >= 3 and _fold(token) not in _PRODUCT_FAMILY_STOPWORDS:
+            return token.strip().title()
+    first = (title or "Produto").split()
+    return (first[0] if first else "Produto").title()
+
+
+def _brand_name_for_session(session: dict) -> str:
+    slug = session.get("persona_slug") or (session.get("classification") or {}).get("persona_slug") or "marca"
+    return slug.replace("-", " ").replace("_", " ").strip().title() or "Marca"
+
+
+def _brand_slug_base_for_session(session: dict, brand_name: str) -> str:
+    base = _slug_for_plan_entry(brand_name or "brand")
+    persona_slug = _slug_for_plan_entry(
+        session.get("persona_slug")
+        or (session.get("classification") or {}).get("persona_slug")
+        or ""
+    )
+    if persona_slug and base == persona_slug:
+        return f"{base}-brand"
+    return base or "brand"
+
+
+def _extract_campaign_title(session: dict) -> str:
+    text = _session_user_text(session)
+    matches = [
+        re.sub(r"\s+", " ", match.group(1)).strip()
+        for match in re.finditer(r"(campanha[^.,;\n]{0,80})", text, re.I)
+    ]
+    if matches:
+        def score(raw: str) -> tuple[int, int]:
+            folded = _fold(raw)
+            generic = folded in {"campanha", "campanha nova", "campanha existente"}
+            detail = len([w for w in folded.split() if w not in {"campanha", "nova", "novo", "existente"}])
+            return (0 if generic else 1, detail)
+
+        title = max(matches, key=score)
+        title = re.sub(r"(?i)^campanha\s+e\s+briefing\s+", "Campanha ", title)
+        title = re.sub(r"(?i)^campanha\s+com\s+briefing\s+", "Campanha ", title)
+        title = re.sub(r"(?i)^campanha\s*/\s*briefing\s+", "Campanha ", title)
+        return title.title()[:80]
+    return "Campanha"
+
+
+def _extract_audience_descriptor(session: dict) -> str:
+    text = _session_user_text(session)
+    m = re.search(r"\b(?:audiencia|audience|publico(?:-alvo)?)\s+([^.;\n]{3,120})", text, re.I)
+    if m:
+        base = re.sub(r"\s+", " ", m.group(1)).strip(" :-")
+        tail = text[m.end():]
+        extra = ""
+        next_sentence = re.match(r"\s*[.;,]\s*([^.;\n]{3,100})", tail or "", re.I)
+        if next_sentence:
+            candidate = re.sub(r"\s+", " ", next_sentence.group(1)).strip(" :-")
+            if candidate and not re.match(
+                r"(?i)^(campanha|fonte|site|extraia|extrair|crie|criar|monte|montar|produto|produtos|grupo|grupos)\b",
+                candidate,
+            ):
+                extra = candidate
+        descriptor = base if not extra else f"{base}: {extra}"
+        if descriptor:
+            return descriptor[:120].capitalize()
+    m = re.search(r"\bloja\s+([^.,;\n]{3,80})", text, re.I)
+    if m:
+        return ("Publico: " + re.sub(r"\s+", " ", m.group(1)).strip())[:120]
+    m = re.search(r"\b(jovens[^.,;\n]{0,80}|publico[^.,;\n]{0,80})", text, re.I)
+    if m:
+        return re.sub(r"\s+", " ", m.group(1)).strip().capitalize()[:120]
+    return "Publico-alvo principal da campanha"
+
+
+def build_full_tree_plan_from_session(session: dict, user_message: str) -> Optional[dict]:
+    """Build a canonical knowledge_plan skeleton from crawler candidates.
+
+    Chain: brand -> briefing -> campaign -> audience -> product_group(s)
+    -> product -> copy -> faq. Products are taken from the real crawler
+    candidates and distributed across the requested number of groups, grouped
+    by detected product family. Returns None when there are no candidates to
+    build from. The returned plan is a SKELETON; the caller passes it through
+    normalize_validate_summarize_plan for offer/expansion/validation."""
+    candidates = _session_latest_candidates(session)
+    if not candidates:
+        return None
+
+    persona_slug = (
+        session.get("persona_slug")
+        or (session.get("classification") or {}).get("persona_slug")
+        or ""
+    )
+    num_groups, num_products = _parse_tree_counts(session)
+    source_url = session.get("source_url") or ((session.get("mission_state") or {}).get("source") or {}).get("url") or ""
+
+    # Group candidates by detected family, ranked by frequency. When fewer
+    # distinct families than requested groups exist, fall back to an even
+    # chunking of all candidates so we still honour the grouping request.
+    families: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for cand in candidates:
+        fam = _product_family(cand.get("title") or "")
+        if fam not in families:
+            families[fam] = []
+            order.append(fam)
+        families[fam].append(cand)
+    ranked = sorted(order, key=lambda fam: -len(families[fam]))
+
+    if num_groups == 1:
+        group_title = _requested_single_group_title(session) or _product_family(candidates[0].get("title") or "") or "Grupo 1"
+        chosen = [(group_title, candidates[:num_products])]
+    elif len(ranked) >= num_groups:
+        chosen = [(fam, families[fam]) for fam in ranked[:num_groups]]
+    else:
+        # Even chunking fallback.
+        flat = candidates[:num_products]
+        size = max(1, -(-len(flat) // num_groups))  # ceil division
+        chosen = []
+        for i in range(num_groups):
+            chunk = flat[i * size:(i + 1) * size]
+            if not chunk:
+                break
+            chosen.append((f"Grupo {i + 1}", chunk))
+
+    per_group = max(1, -(-num_products // max(1, len(chosen))))  # ceil
+    entries: list[dict] = []
+    links: list[dict] = []
+    used: set[str] = set()
+
+    def add(content_type: str, base_slug: str, parent_slug: str, title: str, content: str, metadata: Optional[dict] = None) -> str:
+        slug = _dedupe_slug(_slug_for_plan_entry(base_slug)[:60] or content_type, used)
+        meta = dict(metadata or {})
+        meta["parent_slug"] = parent_slug
+        entries.append({
+            "content_type": content_type,
+            "title": (title or content_type).strip()[:120],
+            "slug": slug,
+            "status": "pendente_validacao",
+            "content": (content or title or content_type).strip(),
+            "metadata": meta,
+        })
+        if parent_slug and parent_slug != "self":
+            links.append({"source_slug": parent_slug, "target_slug": slug})
+        return slug
+
+    brand_name = _brand_name_for_session(session)
+    brand_slug = add(
+        "brand",
+        _brand_slug_base_for_session(session, brand_name),
+        "self",
+        brand_name,
+        f"Marca {brand_name}, fonte {source_url or 'configurada'}.",
+    )
+    campaign_title = _extract_campaign_title(session)
+    briefing_slug = add(
+        "briefing", f"briefing-{campaign_title}", brand_slug,
+        f"Briefing {campaign_title}", f"Briefing da {campaign_title}.",
+    )
+    campaign_slug = add("campaign", campaign_title, briefing_slug, campaign_title, f"{campaign_title}.")
+    audience_desc = _extract_audience_descriptor(session)
+    audience_slug = add("audience", audience_desc, campaign_slug, audience_desc, audience_desc)
+
+    total = 0
+    for fam, items in chosen:
+        if total >= num_products:
+            break
+        group_slug = add("product_group", fam, audience_slug, fam, f"Grupo de produtos {fam}.")
+        for cand in items[:per_group]:
+            if total >= num_products:
+                break
+            title = (cand.get("title") or "Produto").strip()
+            prices = cand.get("prices") or ([cand.get("price")] if cand.get("price") else [])
+            price = prices[0] if prices else None
+            meta: dict[str, Any] = {"product_type": fam, "source_url": cand.get("source") or source_url}
+            if price:
+                meta["price"] = {"unit": {"amount": str(price), "currency": "BRL"}}
+            else:
+                meta["pending_price"] = True
+            product_slug = add(
+                "product", title, group_slug, title,
+                f"{title}. Fonte: {cand.get('source') or source_url or 'crawler'}.", meta,
+            )
+            copy_slug = add(
+                "copy", f"copy-{product_slug}", product_slug,
+                f"Copy {title}", f"Copy de divulgacao para {title}.",
+            )
+            add(
+                "faq", f"faq-{product_slug}", copy_slug,
+                f"FAQ {title}", f"Perguntas frequentes sobre {title}.",
+            )
+            total += 1
+
+    return {
+        "source": "session",
+        "persona_slug": persona_slug,
+        "tree_mode": "pyramidal",
+        "entries": entries,
+        "links": links,
+        "built_by": "deterministic_full_tree",
+    }
+
+
+def _deterministic_tree_summary(plan: dict) -> str:
+    counts = count_blocks_by_type((plan or {}).get("entries") or [])
+    order = ["brand", "briefing", "campaign", "audience", "product_group", "product", "copy", "faq"]
+    parts = [f"{ctype} {counts.get(ctype, 0)}" for ctype in order if counts.get(ctype)]
+    return (
+        "Cadeia canonica montada: " + " -> ".join(
+            p for p in ["brand", "briefing", "campaign", "audience", "product_group", "product", "copy", "faq"]
+        )
+        + ".\nBlocos criados: " + ", ".join(parts)
+        + ".\nAcao: revise a preview e clique em Salvar. Produtos sem preco ficam marcados como pending_price."
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Sofia tool-use loop                                                          #
 # --------------------------------------------------------------------------- #
 # Quando `SOFIA_TOOLS_ENABLED=true` (env var, default false), o chat() invoca
@@ -5073,6 +5744,47 @@ def _chat_impl(session_id: str, user_message: str, file_info: Optional[dict] = N
             if crawler_result.get("warnings"):
                 progress_reasons.append("crawler_warning")
 
+    if session.get("mode") == "criar" and session.get("persona_context"):
+        try:
+            session["pre_init_review"] = build_pre_initialization_review(
+                session,
+                persona_context=session.get("persona_context") or {},
+                classification=session.get("classification") or {},
+            )
+        except Exception:
+            pass
+
+    deterministic_raw: str | None = None
+    if (
+        not internal
+        and _full_tree_command(user_content)
+        and _session_has_buildable_candidates(session)
+    ):
+        built_plan = build_full_tree_plan_from_session(session, user_content)
+        if built_plan is not None:
+            built_state = normalize_validate_summarize_plan(built_plan, session)
+            if built_state["validation"]["valid"]:
+                deterministic_plan = built_state["normalized_plan"]
+                deterministic_raw = (
+                    "Arvore completa criada a partir da fonte "
+                    f"{session.get('source_url') or ((mission_state.get('source') or {}).get('url')) or 'configurada'}.\n\n"
+                    + _deterministic_tree_summary(deterministic_plan)
+                    + "\n\n<knowledge_plan>\n"
+                    + json.dumps(deterministic_plan, ensure_ascii=False)
+                    + "\n</knowledge_plan>\n"
+                    + "<classification>"
+                    + json.dumps(
+                        {
+                            "persona_slug": cls.get("persona_slug") or session.get("persona_slug"),
+                            "content_type": "campaign",
+                            "title": _extract_campaign_title(session),
+                            "complete": True,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "</classification>"
+                )
+
     state_ctx = f"""
 Estado atual:
 - Agente: {session.get('agent_name') or 'Sofia'} ({session.get('agent_role') or 'agente de inteligencia marketing comercial'})
@@ -5126,13 +5838,17 @@ Estado atual:
             state_ctx += "Perguntas obrigatorias antes do plano final:\n" + "\n".join(f"- {q}" for q in qs[:4]) + "\n"
 
     try:
-        router = ModelRouter()
-        raw, sofia_tools_meta = _invoke_router_with_tools(
-            router=router,
-            session=session,
-            system_prompt=_SYSTEM_PROMPT + "\n\n" + state_ctx,
-            max_tokens=4000,
-        )
+        if deterministic_raw is not None:
+            raw = deterministic_raw
+            sofia_tools_meta = {"tool_used": False, "tool_calls": [], "provider": "deterministic_full_tree"}
+        else:
+            router = ModelRouter()
+            raw, sofia_tools_meta = _invoke_router_with_tools(
+                router=router,
+                session=session,
+                system_prompt=_SYSTEM_PROMPT + "\n\n" + state_ctx,
+                max_tokens=4000,
+            )
     except ModelRouterError as exc:
         session["messages"].pop()  # roll back the user message on failure
         _save_session(session)
@@ -5218,6 +5934,43 @@ Estado atual:
             session.pop("plan_validation_warnings", None)
             current_block_counts = plan_summary["current_block_counts"]
             plan_changed = True
+
+    # Deterministic full-tree materialization. When the operator explicitly
+    # confirms building the entire tree and the LLM produced no usable plan (or
+    # one with blocking violations), build the canonical chain from the crawler
+    # candidates so the Create path materializes instead of stalling. Never
+    # depends on the LLM emitting a perfect giant JSON.
+    llm_plan_usable = bool(isinstance(plan_payload, dict) and plan_payload.get("entries")) and not plan_violations
+    if (
+        not internal
+        and _full_tree_command(user_content)
+        and not llm_plan_usable
+        and _session_has_buildable_candidates(session)
+    ):
+        built_plan = build_full_tree_plan_from_session(session, user_content)
+        if built_plan is not None:
+            built_state = normalize_validate_summarize_plan(built_plan, session)
+            if built_state["validation"]["valid"]:
+                plan_state = built_state
+                plan_payload = built_state["normalized_plan"]
+                plan_violations = []
+                plan_summary = built_state["summary"]
+                _store_plan_state(session, built_state, last_change="arvore completa construida a partir da fonte")
+                current_block_counts = plan_summary["current_block_counts"]
+                plan_changed = True
+                session.pop("plan_validation_warnings", None)
+                session.pop("last_invalid_plan", None)
+                session["status"] = "ready_to_save"
+                session["stage"] = "ready_to_save"
+                cls["persona_slug"] = cls.get("persona_slug") or session.get("persona_slug")
+                cls["content_type"] = cls.get("content_type") or "campaign"
+                cls["title"] = cls.get("title") or _extract_campaign_title(session)
+                raw = (
+                    "Arvore completa criada a partir da fonte "
+                    f"{session.get('source_url') or 'configurada'}.\n\n"
+                    + _deterministic_tree_summary(plan_payload)
+                )
+
     visible = _strip_knowledge_plan(_strip_cls(raw))
     if plan_violations:
         visible = (
@@ -5799,6 +6552,32 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
         )
         return {"error": error, "violations": validation.get("blocking_violations") or [], "plan_state": plan_state}
 
+    if str(session.get("mode") or "").strip().lower() == "criar":
+        current_hash = str(plan_state.get("plan_hash") or "")
+        confirmed_hash = str(session.get("confirmed_plan_hash") or "")
+        if current_hash and confirmed_hash != current_hash:
+            error = "Confirme a estrutura no chat antes de salvar. O JSON atual ainda não foi confirmado pelo operador."
+            _emit_kb_event(
+                "kb_intake_dialog_rejected",
+                session=session,
+                source="kb-intake.save",
+                status="rejected",
+                transcript=True,
+                result={
+                    "error": error,
+                    "error_code": "PLAN_CONFIRMATION_REQUIRED",
+                    "plan_hash": current_hash,
+                    "confirmed_plan_hash": confirmed_hash,
+                },
+            )
+            return {
+                "error": error,
+                "error_code": "PLAN_CONFIRMATION_REQUIRED",
+                "plan_hash": current_hash,
+                "confirmed_plan_hash": confirmed_hash,
+                "plan_state": plan_state,
+            }
+
     plan_entries = plan_payload.get("entries", [])
     expected_counts = _normalize_block_counts((plan_state.get("summary") or {}).get("current_block_counts") or session.get("current_block_counts"))
     actual_counts = count_blocks_by_type(plan_entries)
@@ -5842,6 +6621,110 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
         for warning in (plan_payload.get("warnings") or [])
         if isinstance(warning, dict)
     ]
+
+    if str(session.get("mode") or "").strip().lower() == "criar":
+        try:
+            graph_doc = GraphJson.model_validate(plan_state.get("graph_json") or normalized_plan_to_graph_json(plan_payload, session).model_dump())
+            import_result = graph_json_importer.import_graph_json(
+                graph_json=graph_doc,
+                source="kb-intake.save",
+                session_id=session_id,
+            )
+        except Exception as exc:
+            import_result = {
+                "ok": False,
+                "error_code": "GRAPH_JSON_IMPORT_FAILED",
+                "errors": [str(exc)],
+            }
+        if import_result.get("ok") is False:
+            error_code = import_result.get("error_code") or "GRAPH_JSON_INVALID"
+            errors = import_result.get("errors") or [import_result.get("error") or "Graph JSON import failed"]
+            response = {
+                "error": "O grafo JSON ainda nao pode ser salvo. A Sofia precisa corrigir a estrutura antes da importacao.",
+                "error_code": error_code,
+                "requires_sofia_intervention": True,
+                "graph_json_validation": {
+                    "blocking": errors,
+                    "questions": [
+                        "Qual deve ser o pai principal dos nodes sem caminho ate Persona?",
+                        "A FAQ deve ficar abaixo de Copy, Product ou Product Group neste galho?",
+                    ],
+                },
+                "plan_state": plan_state,
+            }
+            _emit_kb_event(
+                "kb_intake_dialog_rejected",
+                session=session,
+                source="kb-intake.save",
+                status="rejected",
+                transcript=True,
+                result=response,
+            )
+            return response
+
+        session["stage"] = "done"
+        session["status"] = "saved"
+        _save_session(session)
+        completion_payload = {
+            "file_path": (import_result.get("written_files") or ["graph-json-import"])[0],
+            "saved_paths": import_result.get("written_files") or [],
+            "git": {"ok": True, "git": "skipped_graph_json_import", "commit_ok": True, "push_ok": True},
+            "success": True,
+            "status": "saved",
+            "warnings": plan_warnings,
+            "sync_mode": "graph_json_import",
+            "entries_written": len(import_result.get("written_files") or []),
+            "plan_entries": len(plan_entries),
+            "plan_links": len(plan_payload.get("links") or []),
+            "knowledge_item_ids": import_result.get("knowledge_item_ids") or [],
+            "knowledge_node_ids": import_result.get("knowledge_node_ids") or [],
+            "knowledge_edge_ids": import_result.get("knowledge_edge_ids") or [],
+            "hierarchy": {
+                "mode": "graph_json_import",
+                "nodes_imported": import_result.get("nodes_imported"),
+                "edges_imported": import_result.get("edges_imported"),
+            },
+            "plan_state": plan_state,
+            "plan_hash": plan_state.get("plan_hash"),
+            "graph_json": graph_doc.model_dump(),
+            "vault_write": {"paths": import_result.get("written_files") or []},
+        }
+        _emit_kb_event(
+            "kb_intake_dialog_completed",
+            session=session,
+            source="kb-intake.save",
+            status="completed",
+            transcript=True,
+            result=completion_payload,
+        )
+        try:
+            _emit_kb_event(
+                "kb_intake_saved",
+                session=session,
+                source="kb-intake.save",
+                status="saved",
+                transcript=False,
+                result=completion_payload,
+            )
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "success": True,
+            "status": "saved",
+            "warnings": plan_warnings,
+            "file_path": completion_payload["file_path"],
+            "knowledge_item_ids": completion_payload["knowledge_item_ids"],
+            "knowledge_node_ids": completion_payload["knowledge_node_ids"],
+            "knowledge_edge_ids": completion_payload["knowledge_edge_ids"],
+            "hierarchy": completion_payload["hierarchy"],
+            "plan_state": plan_state,
+            "plan_hash": plan_state.get("plan_hash"),
+            "graph_json": graph_doc.model_dump(),
+            "vault_write": completion_payload["vault_write"],
+            "git": completion_payload["git"],
+            "sync": {"mode": "graph_json_import", "new": len(completion_payload["knowledge_item_ids"]), "updated": 0, "error": None},
+        }
 
     persisted_items: list[dict] = []
     persisted_evidence: list[dict] = []

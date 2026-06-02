@@ -5,11 +5,15 @@ from the registry tables (`knowledge_node_type_registry`,
 `knowledge_relation_type_registry`) after migration 039 introduced the
 `canonical`, `alias_of`, `edge_kind` and `primary_one_to_one` columns.
 
-The canonical fractal hierarchy is:
+The preferred create-path hierarchy is:
 
     persona -> brand -> briefing -> campaign -> audience
-            -> product_group -> product -> offer -> copy
+            -> product_group? -> product -> offer -> copy
             -> {faq, gallery}
+
+Legacy `brand -> campaign -> briefing` / `campaign -> briefing` edges remain
+accepted for old content, but the Create path prefers the serial
+brand->briefing->campaign->audience spine so briefing is rendered in series.
 
 Asset is a lateral layer that may connect to any node or to another asset via
 `asset_pending` / `asset_approved` / `asset_related`.
@@ -52,17 +56,20 @@ PRIMARY_CHAIN: tuple[tuple[str, str, str], ...] = (
     ("briefing",      "campaign",      "briefing_has_campaign"),
     ("campaign",      "audience",      "campaign_has_audience"),
     ("audience",      "product_group", "audience_has_product_group"),
+    ("audience",      "product",       "offers_product"),
     ("product_group", "product",       "product_group_has_product"),
     ("product",       "offer",         "product_has_offer"),
     ("offer",         "copy",          "offer_has_copy"),
     ("copy",          "faq",           "copy_has_faq"),
     ("copy",          "gallery",       "copy_has_gallery"),
+    # Legacy alternatives kept valid so older content can still be repaired.
+    ("brand",         "campaign",      "contains"),
+    ("briefing",      "audience",      "contains"),
 )
 
 # (source_type, target_type) tuples where the primary edge is 1:1 (vs N:N).
 PRIMARY_ONE_TO_ONE: frozenset[tuple[str, str]] = frozenset({
     ("persona", "brand"),
-    ("brand", "briefing"),
     ("copy", "faq"),
     ("copy", "gallery"),
 })

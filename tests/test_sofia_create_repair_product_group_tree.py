@@ -123,9 +123,8 @@ def test_repair_keeps_products_grouped_and_valid() -> None:
     expect(len(groups) == 3, f"3 product groups preserved (got {len(groups)})")
 
 
-def test_no_group_invented_when_not_requested() -> None:
-    """Without a grouping request, products hang directly off audience; no
-    product_group is fabricated."""
+def test_product_without_group_is_valid_under_audience() -> None:
+    """Product Group is optional; direct Audience -> Product is valid."""
     plan = {
         "source": "session",
         "persona_slug": "vz-lupas",
@@ -147,13 +146,14 @@ def test_no_group_invented_when_not_requested() -> None:
             "id": "sofia-no-group", "messages": [{"role": "user", "content": "um produto"}],
             "classification": {"persona_slug": "vz-lupas"},
         })
-    groups = [e for e in state["normalized_plan"]["entries"] if e["content_type"] == "product_group"]
-    expect(len(groups) == 0, f"no product_group invented when not requested (got {len(groups)})")
+    violations = state["validation"]["blocking_violations"]
+    expect(not any("product nao pode ficar abaixo de audience" in item or "product precisa" in item for item in violations),
+           f"product directly under audience is accepted (got {violations})")
 
 
 def main() -> int:
     test_repair_keeps_products_grouped_and_valid()
-    test_no_group_invented_when_not_requested()
+    test_product_without_group_is_valid_under_audience()
     print("PASS test_sofia_repair_product_group_tree")
     return 0
 

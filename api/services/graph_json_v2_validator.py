@@ -21,17 +21,24 @@ else:
 # Allowed parent node_types per child node_type (canonical chain).
 CANONICAL_PARENT: dict[str, tuple[str, ...]] = {
     "brand": ("persona",),
-    "briefing": ("brand",),
-    "campaign": ("briefing",),
-    "audience": ("campaign",),
+    "campaign": ("brand", "briefing"),
+    "briefing": ("brand", "campaign"),
+    "audience": ("campaign", "briefing"),
     "product_group": ("audience",),
-    "product": ("product_group",),
-    "faq": ("product", "product_group"),
+    "product": ("product_group", "audience"),
+    "offer": ("product", "product_group"),
+    "copy": ("product", "product_group", "offer"),
+    "rule": ("campaign", "briefing", "brand", "persona"),
+    "faq": ("copy", "product", "product_group", "audience", "briefing", "campaign", "brand", "persona", "rule"),
     "embedded": ("faq",),
+    "asset": ("product", "product_group", "campaign", "brand", "gallery"),
 }
 
 # Types that may attach to persona as a protected branch outside the main chain.
 PROTECTED_PERSONA_CHILDREN: set[str] = {"gallery"}
+
+
+FAQ_APPROVED_STATUSES: set[str] = {"approved", "validated", "embedded", "active", "ativo"}
 
 
 def _has_cycle(start_id: str, nodes_by_id: dict[str, "object"]) -> bool:
@@ -57,6 +64,20 @@ def _has_descendant_type(node_id: str, node_type: str, nodes_by_id: dict[str, "o
         if _has_descendant_type(getattr(node, "id", ""), node_type, nodes_by_id):
             return True
     return False
+
+
+def _node_data(node: "object") -> dict:
+    data = getattr(node, "data", None)
+    return data if isinstance(data, dict) else {}
+
+
+def _status_of(node: "object") -> str:
+    data = _node_data(node)
+    return str(data.get("validation_status") or data.get("status") or "").strip().lower()
+
+
+def _is_primary(edge: "object") -> bool:
+    return getattr(edge, "primary_tree", True) is True
 
 
 def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
@@ -121,11 +142,29 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
                 f"expected one of {allowed}"
             )
         elif node.node_type == "faq" and parent.node_type == "product_group":
-            if _has_descendant_type(parent.id, "product", nodes_by_id):
+            data = _node_data(node)
+            general_group_faq = data.get("grouped_faq") is True or data.get("scope") in {"product_group", "general"}
+            if _has_descendant_type(parent.id, "product", nodes_by_id) and not general_group_faq:
                 errors.append(
                     f"node {node.id} (type=faq) cannot hang from product_group {parent.id} "
                     "while a product exists below that product_group"
                 )
+        elif node.node_type == "embedded" and _status_of(parent) not in FAQ_APPROVED_STATUSES:
+            errors.append(f"pending FAQ cannot connect to embedded: {parent.id}")
+
+        if node.node_type == "faq":
+            data = _node_data(node)
+            if not data.get("branch_path"):
+                errors.append(f"faq node {node.id} must include data.branch_path")
+            if not data.get("source_node_id"):
+                errors.append(f"faq node {node.id} must include data.source_node_id")
+            if not data.get("source_node_type"):
+                errors.append(f"faq node {node.id} must include data.source_node_type")
+            if data.get("markdown_document") is True:
+                if not str(data.get("markdown") or "").strip():
+                    errors.append(f"grouped faq node {node.id} must include data.markdown")
+                if int(data.get("question_count") or 0) < 1:
+                    errors.append(f"grouped faq node {node.id} must include data.question_count >= 1")
 
     # 5. No cycle reachable through parent_id chain.
     for node in graph.nodes:
@@ -133,7 +172,8 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
             errors.append(f"cycle detected starting at {node.id}")
             break
 
-    # 6. Edge source/target must exist.
+    # 6. Edge source/target must exist and primary edges must mirror parent_id.
+    primary_parent_edges: dict[str, str] = {}
     for edge in graph.edges:
         if edge.source not in nodes_by_id:
             errors.append(f"edge {edge.id} source {edge.source} missing")
@@ -141,5 +181,25 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
             errors.append(f"edge {edge.id} target {edge.target} missing")
         if edge.source == edge.target:
             errors.append(f"edge {edge.id} self-loop is not allowed")
+        source = nodes_by_id.get(edge.source)
+        target = nodes_by_id.get(edge.target)
+        if source and target and getattr(target, "node_type", None) == "embedded" and getattr(source, "node_type", None) != "faq":
+            errors.append(f"embedded edge {edge.id} source must be FAQ, got {getattr(source, 'node_type', None)}")
+        if source and target and _is_primary(edge):
+            expected_parent = getattr(target, "parent_id", None)
+            if expected_parent and edge.source != expected_parent:
+                errors.append(f"primary edge {edge.id} does not match target parent_id")
+            previous = primary_parent_edges.get(edge.target)
+            if previous and previous != edge.source:
+                errors.append(f"node {edge.target} has multiple primary parents")
+            primary_parent_edges[edge.target] = edge.source
+
+    for node in graph.nodes:
+        if node.node_type == "persona":
+            continue
+        if not node.parent_id:
+            continue
+        if node.id not in primary_parent_edges:
+            errors.append(f"node {node.id} has no primary edge from its parent")
 
     return (not errors, errors)
