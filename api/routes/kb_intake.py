@@ -23,6 +23,31 @@ from services.kb_intake_service import (
 router = APIRouter(prefix="/kb-intake", tags=["kb-intake"])
 
 
+def _assert_json_serializable(result: Any) -> None:
+    """Raise if `result` cannot be JSON-encoded the way FastAPI will encode it.
+
+    FastAPI serializes the return value AFTER the route handler returns — i.e.
+    outside the handler's try/except. A non-serializable field (e.g. a set or a
+    custom object stashed in mission_state/plan_state by the tool loop) would
+    surface as a raw 500 with no traceback in the response body. Calling this
+    inside the handler turns that into a catchable exception so the cause lands
+    in `traceback_tail`."""
+    from fastapi.encoders import jsonable_encoder
+    import json as _json
+
+    _json.dumps(jsonable_encoder(result))
+
+
+def _json_safe(obj: Any) -> Any:
+    """Best-effort coercion to JSON-safe data; never raises."""
+    import json as _json
+
+    try:
+        return _json.loads(_json.dumps(obj, default=str))
+    except Exception:
+        return None
+
+
 class StartBody(BaseModel):
     model: str = "gpt-4o-mini"
     initial_context: str = ""
@@ -90,6 +115,10 @@ def start_session(body: StartBody):
 def send_message(body: MessageBody):
     try:
         result = chat(body.session_id, body.message)
+        # Validate serialization inside the handler so a non-serializable field
+        # becomes a catchable error (with traceback) instead of a raw 500 raised
+        # by FastAPI during response encoding, after this handler returns.
+        _assert_json_serializable(result)
         return result
     except Exception as exc:
         # Full safety net: log structured event + return controlled body so
@@ -139,7 +168,9 @@ def send_message(body: MessageBody):
             ),
             "detail": str(exc)[:300],
             "traceback_tail": tb_text.splitlines()[-12:],
-            "state": (session or {}).get("mission_state") if session else None,
+            # Coerce to JSON-safe so this error body itself can never trigger a
+            # second (serialization) 500 when mission_state holds odd types.
+            "state": _json_safe((session or {}).get("mission_state")) if session else None,
         }
 
 
@@ -466,6 +497,10 @@ def patch_session_plan(session_id: str, body: PlanUpdateBody):
 def save_knowledge(body: SaveBody):
     try:
         result = save(body.session_id, body.content, body.plan_override)
+        # Validate serialization here (inside the try) so a non-serializable
+        # field in the success body OR the HTTPException(400, result) detail
+        # below cannot escape as a raw 500 during FastAPI response encoding.
+        _assert_json_serializable(result)
     except Exception as exc:
         # Safety net: surface unhandled exceptions in the response body so the
         # frontend (and the operator) can see the real cause without digging

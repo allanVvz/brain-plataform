@@ -5892,6 +5892,100 @@ Estado atual:
             "state": mission_state,
         }
 
+    try:
+        return _process_post_llm_response(
+            session=session,
+            raw=raw,
+            sofia_tools_meta=sofia_tools_meta,
+            cls=cls,
+            mission_state=mission_state,
+            previous_stage=previous_stage,
+            user_content=user_content,
+            internal=internal,
+            crawler_result=crawler_result,
+            patch=patch,
+            progress_reasons=progress_reasons,
+        )
+    except Exception as exc:
+        import traceback as _tb
+        tb_text = _tb.format_exc()
+        # 1. Roll back the unpaired user turn (no assistant reply yet) so the
+        #    message history and transcript stay paired for the next turn.
+        msgs = session.get("messages") or []
+        if msgs and msgs[-1].get("role") == "user":
+            msgs.pop()
+        transcript = session.get("telemetry_transcript") or []
+        if transcript and transcript[-1].get("role") == "user":
+            transcript.pop()
+            for _i, _item in enumerate(transcript):
+                _item["turn_index"] = _i
+        # 5. Do not advance save/stage/graph on a post-LLM failure.
+        session["stage"] = previous_stage
+        # 2. Persist the full traceback to log + telemetry event.
+        try:
+            from services import sre_logger
+            sre_logger.error(
+                "kb_intake_chat_post_llm",
+                f"post-LLM processing failed session={(session_id or '')[:8]}: {exc}",
+                exc,
+            )
+        except Exception:
+            pass
+        try:
+            _emit_kb_event(
+                "kb_intake_dialog_failed",
+                session=session,
+                source="kb-intake.chat",
+                status="failed",
+                transcript=True,
+                result={
+                    "error_code": "POST_LLM_ERROR",
+                    "error_message": str(exc)[:500],
+                    "failure_type": "post_llm",
+                    "traceback_tail": tb_text.splitlines()[-12:],
+                },
+            )
+        except Exception:
+            pass
+        _save_session(session)
+        # 3. Useful response carrying the technical reason + traceback tail.
+        return {
+            "ok": False,
+            "error_code": "POST_LLM_ERROR",
+            "exception_type": type(exc).__name__,
+            "message": (
+                "Recebi a resposta do modelo, mas falhei ao processar o plano. "
+                "Revertendo sua ultima mensagem para voce tentar de novo sem "
+                "duplicar o historico. Detalhe tecnico em traceback_tail."
+            ),
+            "detail": str(exc)[:300],
+            "traceback_tail": tb_text.splitlines()[-12:],
+            "stage": session.get("stage"),
+            "state": mission_state,
+        }
+
+
+def _process_post_llm_response(
+    *,
+    session: dict,
+    raw: str,
+    sofia_tools_meta: dict,
+    cls: dict,
+    mission_state: dict,
+    previous_stage,
+    user_content,
+    internal: bool,
+    crawler_result,
+    patch: dict,
+    progress_reasons: list,
+) -> dict:
+    """Deterministic post-LLM processing extracted from _chat_impl.
+
+    Plan extraction, normalization, visible summary and telemetry. Isolated in
+    its own function so the entire post-LLM phase runs inside one resilience
+    boundary: any failure is caught by the caller, which rolls back the unpaired
+    user turn and returns a controlled error instead of corrupting the
+    transcript or advancing save/graph."""
     cls_data = _extract_cls(raw)
     plan_payload = _extract_plan(raw)
     plan_changed = False
