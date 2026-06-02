@@ -199,6 +199,44 @@ def test_copy_generates_spec_questions():
     assert "2TB" in joined
 
 
+def test_faq_under_copy_uses_whole_product_branch_not_copy_templates():
+    from services import sofia_faq_tool as t
+
+    nodes = [
+        {"id": "b1", "node_type": "brand", "title": "Tock Fatal", "metadata": {"markdown": "Marca Tock Fatal."}},
+        {"id": "bf1", "node_type": "briefing", "title": "Briefing inverno", "metadata": {"markdown": "Briefing para produtos quentes e baratos."}},
+        {"id": "c1", "node_type": "campaign", "title": "Campanha inverno", "metadata": {"markdown": "Campanha de inverno para giro rapido."}},
+        {"id": "a1", "node_type": "audience", "title": "Atacarejo inverno", "metadata": {"markdown": "Publico que compra para revenda e busca preco acessivel."}},
+        {"id": "g1", "node_type": "product_group", "title": "Modal", "metadata": {"markdown": "Grupo de produtos Modal."}},
+        {"id": "p1", "node_type": "product", "title": "Kit Modal 1", "metadata": {"markdown": "Kit Modal 1 com opcoes para revenda."}},
+        {"id": "cp1", "node_type": "copy", "title": "Copy Kit Modal 1", "metadata": {"markdown": "Copy de divulgacao para Kit Modal 1."}},
+        {"id": "f1", "node_type": "faq", "title": "FAQ Kit Modal 1"},
+    ]
+    edges = [
+        {"source_node_id": "b1", "target_node_id": "bf1", "metadata": {"active": True}},
+        {"source_node_id": "bf1", "target_node_id": "c1", "metadata": {"active": True}},
+        {"source_node_id": "c1", "target_node_id": "a1", "metadata": {"active": True}},
+        {"source_node_id": "a1", "target_node_id": "g1", "metadata": {"active": True}},
+        {"source_node_id": "g1", "target_node_id": "p1", "metadata": {"active": True}},
+        {"source_node_id": "p1", "target_node_id": "cp1", "metadata": {"active": True}},
+        {"source_node_id": "cp1", "target_node_id": "f1", "metadata": {"active": True}},
+    ]
+
+    out = t.adaptar_faqs_universais_ao_grafo(target_node=nodes[-1], nodes=nodes, edges=edges, count=5)
+    joined = " ".join(s["question"] + " " + s["answer"] for s in out["suggestions"]).lower()
+
+    assert out["parent_node_type"] == "copy"
+    assert out["category"] == "product"
+    assert out["commercial_object_name"] == "Kit Modal 1"
+    assert "principal promessa desta copy" not in joined
+    assert "argumento esta copy" not in joined
+    assert "detalhe do galho" not in joined
+    assert "copy de divulgacao" not in joined
+    assert "kit modal 1" in joined
+    assert "tock fatal" in joined
+    assert "atacarejo inverno" in joined
+
+
 def test_briefing_about_courses_asks_about_courses():
     from services import sofia_faq_tool as t
 

@@ -78,6 +78,49 @@ _COMMERCIAL_FAQ_TEMPLATES: list[dict[str, str]] = [
     },
 ]
 
+_COMMERCIAL_FAQ_TEMPLATES = [
+    {
+        "question": "Como faco para comprar o {product} na {brand}?",
+        "answer": "Fale com a {brand} e informe que tem interesse no {product}. A equipe confirma disponibilidade, valores, variacoes e proximo passo do pedido. {context}",
+    },
+    {
+        "question": "O {product} e indicado para quem quer revender?",
+        "answer": "Pode ser indicado quando as condicoes comerciais, quantidade e margem fizerem sentido para o perfil da compra. A {brand} confirma os kits e valores atualizados. {context}",
+    },
+    {
+        "question": "Quais opcoes de quantidade existem para o {product}?",
+        "answer": "As opcoes podem variar por estoque e condicao comercial. O atendimento da {brand} confirma se ha unidade, kit ou lote disponivel para o {product}. {context}",
+    },
+    {
+        "question": "Quais cores, tamanhos ou variacoes do {product} estao disponiveis?",
+        "answer": "A disponibilidade muda conforme estoque. Peca para a {brand} confirmar as variacoes atuais do {product} antes de fechar o pedido. {context}",
+    },
+    {
+        "question": "Por que o {product} pode ser uma boa escolha?",
+        "answer": "A melhor resposta deve conectar o {product} ao objetivo da pessoa, como uso proprio, presente, revenda ou reposicao de estoque. {context}",
+    },
+    {
+        "question": "Posso pedir atendimento antes de comprar o {product}?",
+        "answer": "Sim. Fale com a {brand} antes da compra para tirar duvidas sobre o {product}, disponibilidade e formas de pagamento. {context}",
+    },
+    {
+        "question": "O que preciso confirmar antes de fechar o pedido do {product}?",
+        "answer": "Confirme disponibilidade, valores, variacoes, quantidade, forma de pagamento e prazo diretamente com a {brand}. {context}",
+    },
+    {
+        "question": "Quais formas de pagamento a {brand} aceita para o {product}?",
+        "answer": "A {brand} informa as formas de pagamento atuais para o {product}, incluindo eventuais condicoes por quantidade ou kit.",
+    },
+    {
+        "question": "O {product} esta disponivel para pronta entrega?",
+        "answer": "A disponibilidade precisa ser confirmada no atendimento da {brand}, porque estoque e variacoes podem mudar.",
+    },
+    {
+        "question": "Como funciona troca, garantia ou devolucao do {product}?",
+        "answer": "A {brand} orienta as condicoes aplicaveis antes da compra, junto com disponibilidade, valores e prazo.",
+    },
+]
+
 
 def clamp_count(count: Optional[int]) -> int:
     try:
@@ -95,7 +138,16 @@ def _node_type(node: Optional[dict]) -> str:
 
 def _node_label(node: Optional[dict]) -> str:
     node = node or {}
-    return str(node.get("title") or node.get("label") or node.get("slug") or "").strip()
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    return str(
+        node.get("title")
+        or node.get("label")
+        or data.get("label")
+        or data.get("title")
+        or node.get("slug")
+        or data.get("slug")
+        or ""
+    ).strip()
 
 
 def node_markdown(node: Optional[dict]) -> str:
@@ -103,7 +155,18 @@ def node_markdown(node: Optional[dict]) -> str:
     summary is the fallback)."""
     node = node or {}
     meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
-    return str((meta or {}).get("markdown") or (meta or {}).get("body") or node.get("summary") or "").strip()
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    data_meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    return str(
+        (meta or {}).get("markdown")
+        or (meta or {}).get("body")
+        or data_meta.get("markdown")
+        or data_meta.get("body")
+        or data.get("markdown")
+        or node.get("summary")
+        or data.get("content_preview")
+        or ""
+    ).strip()
 
 
 def _context_snippet(markdown: str) -> str:
@@ -116,6 +179,49 @@ def _context_snippet(markdown: str) -> str:
     if len(first) > 180:
         first = first[:177].rstrip() + "…"
     return f"Detalhe do galho: {first}"
+
+
+def _clean_branch_sentence(text: str) -> str:
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not text:
+        return ""
+    text = re.sub(
+        r"^(copy|briefing|campanha|faq)\s+(de\s+)?(divulgacao|divulga[cç][aã]o|atendimento)?\s*(para|sobre)?\s*",
+        "",
+        text,
+        flags=re.I,
+    ).strip(" .:-")
+    return text[:220].rstrip()
+
+
+def _clean_branch_label(text: Any) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip().strip("'\"`")
+
+
+def _branch_customer_context(context: dict[str, Any], sellable: Optional[dict]) -> str:
+    """Summarize the whole branch in customer-facing terms."""
+    path = [entry for entry in (context.get("path") or []) if isinstance(entry, dict)]
+    by_type: dict[str, dict] = {}
+    for entry in path:
+        ctype = str(entry.get("node_type") or "").lower()
+        if ctype and ctype not in by_type:
+            by_type[ctype] = entry
+
+    parts: list[str] = []
+    brand = _clean_branch_label((by_type.get("brand") or {}).get("label") or context.get("brand"))
+    audience = _clean_branch_label((by_type.get("audience") or {}).get("label"))
+    product_group = _clean_branch_label((by_type.get("product_group") or {}).get("label") or context.get("product_group"))
+    product = _clean_branch_label((sellable or {}).get("name") or context.get("product"))
+    if brand:
+        parts.append(f"marca {brand}")
+    if audience:
+        parts.append(f"publico {audience}")
+    if product_group:
+        parts.append(f"grupo {product_group}")
+    if product:
+        parts.append(f"produto {product}")
+
+    return "; ".join(parts).strip()
 
 
 def detect_faq_generation_intent(command: str) -> Optional[dict[str, Any]]:
@@ -436,10 +542,12 @@ def adaptar_faqs_universais_ao_grafo(
     context = build_branch_context(parent, nodes, edges)
     sellable = find_sellable_in_branch(parent, nodes, edges, context)
     category = classify_faq_target(parent, sellable)
+    if _node_type(target_node) == "faq" and _node_type(parent) == "copy" and sellable:
+        category = "product"
 
     label = _node_label(parent)
     brand = context.get("brand") or "loja"
-    context_snippet = _context_snippet(context.get("nearest_markdown") or "")
+    context_snippet = _branch_customer_context(context, sellable) or _context_snippet(context.get("nearest_markdown") or "")
     nearest_md = context.get("nearest_markdown") or ""
 
     if category in {"product", "offer"}:
