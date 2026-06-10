@@ -707,22 +707,32 @@ def get_messages(lead_id: str, limit: int = 30) -> list:
     """
     client = get_client()
 
-    # Primary: lead_ref (integer) â€” strip non-digits and cast
+    # Primary: lead_ref (legacy integer) or lead_id (local Docker schema).
     try:
         import re as _re
         digits = _re.sub(r"\D", "", lead_id or "")
         # Only use digits if they look like an integer DB id (not a phone number > 12 digits)
         if digits and len(digits) <= 10:
-            rows = _q(
-                client.table("messages")
-                .select("*")
-                .eq("lead_ref", int(digits))
-                .order("created_at", desc=False)
-                .order("id", desc=False)
-                .limit(limit)
-            )
+            try:
+                rows = _q(
+                    client.table("messages")
+                    .select("*")
+                    .eq("lead_ref", int(digits))
+                    .order("created_at", desc=False)
+                    .order("id", desc=False)
+                    .limit(limit)
+                )
+            except Exception:
+                rows = _q(
+                    client.table("messages")
+                    .select("*")
+                    .eq("lead_id", int(digits))
+                    .order("created_at", desc=False)
+                    .order("id", desc=False)
+                    .limit(limit)
+                )
             if rows:
-                return _sort_messages_for_chat(rows)
+                return _sort_messages_for_chat([_normalize_message_row(row) for row in rows])
     except Exception:
         pass
 
@@ -782,6 +792,22 @@ def _sort_messages_for_chat(rows: list) -> list:
         return (own_ts, own_id, 0, own_ts, own_id)
 
     return sorted(rows, key=key)
+
+
+def _normalize_message_row(row: dict) -> dict:
+    normalized = dict(row or {})
+    if "texto" not in normalized and normalized.get("content") is not None:
+        normalized["texto"] = normalized.get("content")
+    if "canal" not in normalized and normalized.get("channel") is not None:
+        normalized["canal"] = normalized.get("channel")
+    if "lead_ref" not in normalized and normalized.get("lead_id") is not None:
+        normalized["lead_ref"] = normalized.get("lead_id")
+    if "sender_type" not in normalized and normalized.get("role") is not None:
+        role = str(normalized.get("role") or "").lower()
+        normalized["sender_type"] = "client" if role in {"user", "client", "human"} else "ai"
+    if "message_id" not in normalized and normalized.get("sender_id") is not None:
+        normalized["message_id"] = normalized.get("sender_id")
+    return normalized
 
 
 def get_recent_messages(hours: int = 24, limit: int = 500, persona_id: Optional[str] = None, lead_refs: Optional[list[int]] = None) -> list:
@@ -880,7 +906,45 @@ def get_conversations(hours: int = 168, limit: int = 1000, persona_id: Optional[
 
 
 def insert_message(data: dict) -> None:
-    _execute_with_retry(get_client().table("messages").insert(data))
+    client = get_client()
+    try:
+        _execute_with_retry(client.table("messages").insert(data))
+        return
+    except Exception as exc:
+        text = str(exc)
+        legacy_column_mismatch = any(
+            marker in text
+            for marker in (
+                "messages.lead_ref does not exist",
+                "messages.message_id does not exist",
+                "messages.sender_type does not exist",
+                "messages.texto does not exist",
+                "messages.canal does not exist",
+                "messages.nome does not exist",
+            )
+        )
+        if not legacy_column_mismatch:
+            raise
+
+    sender_type = str(data.get("sender_type") or "").lower()
+    direction = str(data.get("direction") or "").lower()
+    role = data.get("role")
+    if not role:
+        role = "assistant" if sender_type in {"ai", "assistant"} or direction == "outbound" else "user"
+
+    mapped = {
+        "lead_id": data.get("lead_id") or data.get("lead_ref"),
+        "role": role,
+        "content": data.get("content") or data.get("texto") or "",
+        "direction": data.get("direction"),
+        "status": data.get("status"),
+        "channel": data.get("channel") or data.get("canal"),
+        "sender_id": data.get("sender_id") or data.get("message_id"),
+        "whatsapp_phone_number_id": data.get("whatsapp_phone_number_id"),
+        "created_at": data.get("created_at"),
+    }
+    mapped = {k: v for k, v in mapped.items() if v is not None}
+    _execute_with_retry(client.table("messages").insert(mapped))
 
 
 # â”€â”€ Knowledge Graph: nodes & edges (migration 008) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

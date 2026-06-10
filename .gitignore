@@ -139,3 +139,5 @@ tests/e2e_clone_vz_lupas_to_tock_fatal.py
 tests/e2e_topdown_hierarchy_tock_fatal.py
 tests/e2e_vz_lupas_full_catalog.py
 tests/integration_knowledge_curation_architecture.py
+
+.vercel
