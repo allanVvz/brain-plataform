@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import Optional
 from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
 from services import approved_knowledge_snapshots
+from services import integration_service, product_import_service
 from services.knowledge_rag_backfill import backfill_knowledge_rag
 from services.knowledge_rag_intake import process_intake, process_intake_plan
 from services.vault_sync import run_sync, scan_vault
@@ -911,6 +912,98 @@ def create_product(body: ProductBody, request: Request):
             supabase_client.upsert_knowledge_edge(product["id"], collection["id"], "part_of_collection", persona_id=persona_id, weight=0.7, metadata={"primary_tree": False, "created_from": "products_api"})
     emit("product_node_created", entity_type="knowledge_node", entity_id=product.get("id"), persona_id=persona_id, payload={"slug": slug, "title": body.title})
     return _decorate_products([product])[0]
+
+
+class ProductImportPreviewBody(BaseModel):
+    provider: str
+    persona_id: Optional[str] = None
+    persona_slug: Optional[str] = None
+    config: Optional[dict] = None
+
+
+@router.post("/products/import/preview")
+def import_products_preview_route(body: ProductImportPreviewBody, request: Request):
+    """Crawl/list products WITHOUT importing, grouped by collection.
+
+    Powers the audit screen so the operator can toggle collections/products
+    before confirming. No nodes are created."""
+    persona_id, _persona = _resolve_persona_scope(request, persona_id=body.persona_id, persona_slug=body.persona_slug)
+    if not persona_id:
+        raise HTTPException(400, "persona_id or persona_slug is required")
+    provider = (body.provider or "").strip().lower()
+    config = dict(body.config or {})
+    try:
+        return product_import_service.preview_products(provider=provider, config=config)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class ProductImportBody(BaseModel):
+    provider: str
+    persona_id: Optional[str] = None
+    persona_slug: Optional[str] = None
+    config: Optional[dict] = None
+    items: Optional[list[dict]] = None
+    download_images: Optional[bool] = None
+
+
+@router.post("/products/import")
+def import_products_route(body: ProductImportBody, request: Request):
+    """Import products from Meta / Shopify / Scraper(mock) into pending nodes.
+
+    The response NEVER includes credentials. Meta credentials are read
+    decrypted from the per-user integration (configured in Tools). When `items`
+    is provided (audit confirmation), only those products are imported."""
+    persona_id, persona = _resolve_persona_scope(request, persona_id=body.persona_id, persona_slug=body.persona_slug)
+    if not persona_id:
+        raise HTTPException(400, "persona_id or persona_slug is required")
+    provider = (body.provider or "").strip().lower()
+    config = dict(body.config or {})
+    if provider == "meta" and not body.items:
+        user = auth_service.current_user(request) or {}
+        config = {**config, **integration_service.get_meta_credentials(user.get("id") or "")}
+    try:
+        result = product_import_service.import_products(
+            provider=provider,
+            persona_id=persona_id,
+            persona_slug=(persona or {}).get("slug"),
+            config=config,
+            items=body.items,
+            download_images=bool(body.download_images),
+        )
+    except integration_service.IntegrationValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    emit("products_imported", entity_type="persona", entity_id=persona_id, persona_id=persona_id,
+         payload={"provider": provider, "created": result["created"], "updated": result["updated"],
+                  "skipped": result["skipped"], "images_downloaded": result.get("images_downloaded", 0)})
+    return result
+
+
+@router.post("/products/import/csv")
+async def import_products_csv_route(
+    request: Request,
+    file: UploadFile = File(...),
+    persona_id: Optional[str] = Form(None),
+    persona_slug: Optional[str] = Form(None),
+):
+    resolved_persona_id, persona = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    if not resolved_persona_id:
+        raise HTTPException(400, "persona_id or persona_slug is required")
+    content = await file.read()
+    try:
+        result = product_import_service.import_products(
+            provider="csv",
+            persona_id=resolved_persona_id,
+            persona_slug=(persona or {}).get("slug"),
+            file_bytes=content,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    emit("products_imported", entity_type="persona", entity_id=resolved_persona_id, persona_id=resolved_persona_id,
+         payload={"provider": "csv", "created": result["created"], "updated": result["updated"], "skipped": result["skipped"]})
+    return result
 
 
 @router.get("/products/{slug}")

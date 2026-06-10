@@ -1,19 +1,36 @@
-const required = ["NEXT_PUBLIC_SUPABASE_URL"];
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const oneOf = [["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY"]];
-// The /api-brain rewrite target can come from the preferred private var or the
-// legacy public ones. Any of them satisfies the backend requirement.
-const apiOneOf = ["API_INTERNAL_BASE_URL", "NEXT_PUBLIC_API_URL", "NEXT_PUBLIC_AI_BRAIN_URL"];
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(__dirname, "..");
+const localEnvPath = path.join(root, ".env.local");
 
-const missing = required.filter((name) => !process.env[name]);
-if (!apiOneOf.some((name) => process.env[name])) {
-  missing.push(`${apiOneOf[0]} (ou legado ${apiOneOf[1]}/${apiOneOf[2]})`);
-}
-for (const pair of oneOf) {
-  if (!pair.some((name) => process.env[name])) {
-    missing.push(`${pair[0]} (ou ${pair[1]})`);
+function loadLocalEnv(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  const text = fs.readFileSync(filePath, "utf8");
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const idx = trimmed.indexOf("=");
+    if (idx <= 0) continue;
+    const key = trimmed.slice(0, idx).trim();
+    let value = trimmed.slice(idx + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (!process.env[key]) process.env[key] = value;
   }
 }
+
+loadLocalEnv(localEnvPath);
+
+const required = [
+  "API_INTERNAL_BASE_URL",
+  "NEXT_PUBLIC_API_BASE_URL",
+];
+
+const missing = required.filter((name) => !process.env[name]);
 
 if (missing.length === 0) {
   console.log("[env-check] OK");

@@ -251,19 +251,20 @@ def test_golden_dataset_becomes_canonical_entries_and_chunks() -> None:
         _assert(meta["branch_types"] == ["persona", "briefing", "audience", "product", "copy", "faq"], "chunk branch types are canonical")
 
 
-def test_weak_answer_blocks_active_chunks() -> None:
+def test_approved_weak_answer_publishes_with_review_warnings() -> None:
     store = CanonicalFaqStore(weak_answer=True)
     result = with_store(store)
-    _assert(result["success"] is False, "weak answer blocks publication")
-    _assert(result["status"] == "needs_review", "weak answer marks snapshot needs_review")
-    _assert(not store.rag_entries, "weak answer does not create RAG entries")
-    _assert(not store.chunks, "weak answer does not create chunks")
+    _assert(result["success"] is True, "approved FAQ publishes even with review warnings")
+    _assert(result["status"] == "active", "approved FAQ snapshot becomes active")
+    _assert(store.rag_entries, "approved FAQ creates RAG entries")
+    _assert(store.chunks, "approved FAQ creates chunks")
+    _assert("faq_answer_not_useful" in (store.snapshots[0].get("metadata") or {}).get("review_warnings", []), "review warnings are preserved")
 
 
 def main() -> int:
     test_no_entry_without_snapshot()
     test_golden_dataset_becomes_canonical_entries_and_chunks()
-    test_weak_answer_blocks_active_chunks()
+    test_approved_weak_answer_publishes_with_review_warnings()
     print("PASS canonical FAQ RAG entries")
     return 0
 

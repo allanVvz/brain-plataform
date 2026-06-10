@@ -6,7 +6,7 @@ Scope: arquitetura e sequenciamento para validar insercao real no grafo QA sem m
 
 ## 1) Technical Architecture Decision
 
-- Stack preservada: FastAPI (`/api`) + Next.js (`/dashboard`) + Supabase Postgres/pgvector + Cloud Run + Vercel.
+- Stack atual: FastAPI (`/api`) + Next.js (`/dashboard`) + Postgres/pgvector local compatível com Supabase + Docker Compose + Vercel.
 - AI Brain permanece fonte canonica de inteligencia validada.
 - Catalog permanece fonte operacional/comercial; nao e dono de embeddings.
 - Regra imutavel aplicada no backend:

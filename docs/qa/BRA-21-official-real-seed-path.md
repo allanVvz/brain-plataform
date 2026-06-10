@@ -53,10 +53,10 @@ Provide one backend-owned, non-production-only path that seeds real QA knowledge
 - No direct Product -> Embed publication path.
 - No unapproved FAQ -> Embed publication.
 
-## Example (QA Cloud Run)
+## Example (local Docker QA)
 
 ```bash
-curl -X POST "https://ai-brain-api-qa-837167469397.us-central1.run.app/api/seed/official-real" \
+curl -X POST "http://localhost:8080/api/seed/official-real" \
   -H "Content-Type: application/json" \
   -H "X-AI-BRAIN-ADMIN-TOKEN: $AI_BRAIN_ADMIN_TEST_TOKEN" \
   -d '{"persona_slug":"vzlupas","source_ref":"qa_official_seed_v1","limit_products":9}'

@@ -53,6 +53,15 @@ function countItems(value: any) {
   return Array.isArray(value) ? value.length : 0;
 }
 
+function slugifyPersona(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 export default function SettingsPage() {
   const [panKey, setPanKey] = useState("Control");
   const [theme, setTheme] = useState<Theme>("clean");
@@ -77,6 +86,11 @@ export default function SettingsPage() {
   const [galleryAssets, setGalleryAssets] = useState<any[]>([]);
   const [menuPayload, setMenuPayload] = useState<any>(null);
   const [menuError, setMenuError] = useState("");
+  const [newPersonaName, setNewPersonaName] = useState("");
+  const [newPersonaSlug, setNewPersonaSlug] = useState("");
+  const [creatingPersona, setCreatingPersona] = useState(false);
+  const [createPersonaError, setCreatePersonaError] = useState("");
+  const [createPersonaSuccess, setCreatePersonaSuccess] = useState("");
 
   useEffect(() => {
     setPanKey(window.localStorage.getItem(PAN_KEY_STORAGE) || "Control");
@@ -121,6 +135,44 @@ export default function SettingsPage() {
   function updateLanguage(next: UiLanguage) {
     setLanguage(next);
     applyLanguage(next);
+  }
+
+  function handlePersonaNameChange(value: string) {
+    setNewPersonaName(value);
+    setCreatePersonaError("");
+    setCreatePersonaSuccess("");
+    if (!newPersonaSlug.trim()) {
+      setNewPersonaSlug(slugifyPersona(value));
+    }
+  }
+
+  async function handleCreatePersona() {
+    const name = newPersonaName.trim();
+    const slug = slugifyPersona(newPersonaSlug.trim());
+    setCreatePersonaError("");
+    setCreatePersonaSuccess("");
+    if (!name) {
+      setCreatePersonaError("Informe o nome da persona.");
+      return;
+    }
+    if (!slug) {
+      setCreatePersonaError("Informe um slug valido (letras, numeros e hifen).");
+      return;
+    }
+    setCreatingPersona(true);
+    try {
+      await api.createPersona({ name, slug, products: [], prompts: {}, config: {} });
+      setCreatePersonaSuccess(`Persona ${name} criada.`);
+      setNewPersonaName("");
+      setNewPersonaSlug("");
+      setPersonaSlug(slug);
+      window.localStorage.setItem(PERSONA_SLUG_STORAGE, slug);
+      await refreshIntegrationState();
+    } catch (error: any) {
+      setCreatePersonaError(error?.message || "Falha ao criar persona.");
+    } finally {
+      setCreatingPersona(false);
+    }
   }
 
   async function refreshIntegrationState() {
@@ -230,6 +282,49 @@ export default function SettingsPage() {
             "A configuracao detalhada da persona permanece na aba Persona.",
           ]}
         />
+      </section>
+
+      <section className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
+        <div className="mb-4 flex items-center gap-2">
+          <Settings size={15} className="text-obs-violet" />
+          <h2 className="text-sm font-semibold text-obs-text">Criar persona</h2>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <input
+            value={newPersonaName}
+            onChange={(event) => handlePersonaNameChange(event.target.value)}
+            placeholder="Nome da persona"
+            className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+          />
+          <input
+            value={newPersonaSlug}
+            onChange={(event) => {
+              setNewPersonaSlug(slugifyPersona(event.target.value));
+              setCreatePersonaError("");
+              setCreatePersonaSuccess("");
+            }}
+            placeholder="slug-da-persona"
+            className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+          />
+          <button
+            type="button"
+            onClick={handleCreatePersona}
+            disabled={creatingPersona}
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-obs-violet/30 bg-obs-violet/15 px-3 text-sm font-medium text-obs-violet transition hover:bg-obs-violet/20 disabled:opacity-50"
+          >
+            {creatingPersona ? "Criando..." : "Criar persona"}
+          </button>
+        </div>
+        {createPersonaError && (
+          <p className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+            {createPersonaError}
+          </p>
+        )}
+        {createPersonaSuccess && (
+          <p className="mt-3 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs text-green-200">
+            {createPersonaSuccess}
+          </p>
+        )}
       </section>
 
       <section className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">

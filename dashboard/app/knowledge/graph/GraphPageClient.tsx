@@ -140,7 +140,12 @@ export default function GraphPageClient() {
 
   const [personas, setPersonas] = useState<any[]>([]);
   const [data, setData] = useState<GraphPayload | null>(null);
+  // Raw canonical graph_json document (only when GRAPH_JSON_V2 is on). Edits are
+  // applied to this document and re-published (write-through), which triggers the
+  // backend reindex of the derived knowledge_nodes/knowledge_edges.
+  const [docGraph, setDocGraph] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
+  const useGraphJsonV2 = process.env.NEXT_PUBLIC_GRAPH_JSON_V2 === "1";
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [selectedNodes, setSelectedNodes] = useState<any[]>([]);
   const [addPanelOpen, setAddPanelOpen] = useState(false);
@@ -157,7 +162,7 @@ export default function GraphPageClient() {
 
   // ── URL-driven state ──────────────────────────────────────────
   const focus = searchParams.get("focus") || "";
-  const mode = (searchParams.get("mode") as ViewMode) || "graph";
+  const mode = (searchParams.get("mode") as ViewMode) || "semantic_tree";
   const includeTags = searchParams.get("tags") === "1";
   const includeMentions = searchParams.get("mentions") === "1";
   const includeTechnical = searchParams.get("tech") === "1";
@@ -204,15 +209,16 @@ export default function GraphPageClient() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const useGraphJsonV2 = process.env.NEXT_PUBLIC_GRAPH_JSON_V2 === "1";
       if (useGraphJsonV2 && headerPersonaSlug) {
         const currentDoc = await api.getGraphDocument(headerPersonaSlug);
         const parsed = parseGraphJsonV2Payload(currentDoc);
         if (parsed) {
           const v2Payload = parsed as GraphPayload;
+          setDocGraph(currentDoc?.graph_json || null);
           setData(v2Payload);
           return v2Payload;
         }
+        setDocGraph(null);
       }
       const d = await api.graphData(headerPersonaSlug || undefined, {
         focus: focus || undefined,
@@ -228,7 +234,39 @@ export default function GraphPageClient() {
     } finally {
       setLoading(false);
     }
-  }, [headerPersonaSlug, focus, includeTags, includeMentions, includeTechnical, includeEmbedded, mode]);
+  }, [headerPersonaSlug, focus, includeTags, includeMentions, includeTechnical, includeEmbedded, mode, useGraphJsonV2]);
+
+  // Write-through: apply an edit to the canonical graph_json and re-publish it.
+  // The backend validates the whole document and reindexes the derived tables.
+  const publishEditedGraph = useCallback(
+    async (mutate: (graph: any) => void, successText: string): Promise<boolean> => {
+      if (!docGraph || !headerPersonaSlug) {
+        setGraphNotice({ tone: "error", text: "Documento canônico do grafo indisponível para edição." });
+        return false;
+      }
+      const next = JSON.parse(JSON.stringify(docGraph));
+      mutate(next);
+      try {
+        await api.publishGraphDocument({
+          persona_slug: headerPersonaSlug,
+          brand_slug: next.brand_slug ?? null,
+          graph_json: next,
+          source: "graph_ui",
+        });
+        await load();
+        setGraphNotice({ tone: "success", text: successText });
+        window.setTimeout(() => setGraphNotice(null), 2200);
+        return true;
+      } catch (error) {
+        setGraphNotice({
+          tone: "error",
+          text: error instanceof Error ? error.message : "Falha ao publicar a alteração no grafo.",
+        });
+        return false;
+      }
+    },
+    [docGraph, headerPersonaSlug, load],
+  );
 
   useEffect(() => {
     api.personas().then((p: any) => setPersonas(p));
@@ -329,6 +367,27 @@ export default function GraphPageClient() {
       const targetNode = byId.get(targetId);
       const sourceType = String(sourceNode?.data?.node_type || sourceNode?.data?.content_type || "");
       const targetType = String(targetNode?.data?.node_type || targetNode?.data?.content_type || "");
+
+      // V2 write-through: add the edge to the canonical graph_json and re-publish.
+      // The backend validator enforces the graph law (FAQ->Embedded, etc.) and the
+      // publish reindex updates the derived tables.
+      if (useGraphJsonV2 && docGraph) {
+        const relation =
+          targetType === "gallery" ? "gallery_asset" : targetType === "embedded" ? "visible_to_agent" : targetType === "faq" ? "answers_question" : "contains";
+        const finalReceiver = targetType === "gallery" || targetType === "embedded";
+        await publishEditedGraph((graph) => {
+          graph.edges = Array.isArray(graph.edges) ? graph.edges : [];
+          graph.edges.push({
+            id: `edge:ui:${Date.now()}`,
+            source: sourceId,
+            target: targetId,
+            relation,
+            primary_tree: !finalReceiver,
+            metadata: { created_from: "graph_ui", active: true },
+          });
+        }, targetType === "embedded" ? "FAQ publicado no Golden Dataset." : "Conexão criada.");
+        return;
+      }
       const allowedRef = (id: string) => id.startsWith("gn:") || id.startsWith("ki:") || id.startsWith("persona:") || id.startsWith("embedded:");
       if (!allowedRef(sourceId) || !allowedRef(targetId)) {
         setGraphNotice({ tone: "error", text: "Conexao permitida apenas entre blocos persistidos do grafo." });
@@ -404,12 +463,22 @@ export default function GraphPageClient() {
         });
       }
     },
-    [data?.nodes, effectivePersona?.id, load],
+    [data?.nodes, effectivePersona?.id, load, useGraphJsonV2, docGraph, publishEditedGraph],
   );
 
   const handleDeleteEdge = useCallback(
     async (edgeId: string) => {
       const rawEdgeId = String(edgeId || "");
+
+      // V2 write-through: drop the edge from the canonical graph_json and re-publish.
+      if (useGraphJsonV2 && docGraph) {
+        await publishEditedGraph((graph) => {
+          graph.edges = (Array.isArray(graph.edges) ? graph.edges : []).filter(
+            (edge: any) => String(edge?.id) !== rawEdgeId,
+          );
+        }, "Conexão apagada.");
+        return;
+      }
       const geIndex = rawEdgeId.indexOf("ge:");
       const resolvedEdgeId = rawEdgeId.startsWith("ge:")
         ? rawEdgeId
@@ -444,7 +513,7 @@ export default function GraphPageClient() {
         });
       }
     },
-    [load],
+    [load, useGraphJsonV2, docGraph, publishEditedGraph],
   );
 
   const handleDeleteNode = useCallback(
@@ -667,7 +736,7 @@ export default function GraphPageClient() {
               <button
                 key={m.value}
                 title={m.help}
-                onClick={() => updateParam({ mode: m.value === "graph" ? null : m.value })}
+                onClick={() => updateParam({ mode: m.value === "semantic_tree" ? null : m.value })}
                 className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition ${
                   mode === m.value
                     ? "bg-obs-violet/20 border-obs-violet text-obs-violet"

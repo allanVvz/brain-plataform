@@ -1391,6 +1391,8 @@ def deactivate_primary_paths_for_target(target_node_id: str, except_source_node_
         next_metadata = {
             **metadata,
             "active": False,
+            "primary_tree": False,
+            "visual_hidden": True,
             "deleted_at": now_iso,
             "deleted_from": "graph_ui_reparent",
         }
@@ -3191,15 +3193,21 @@ def withdraw_faq_from_embedded(item_id: str) -> dict:
 
     Used when an already-approved FAQ document is edited: the published content
     is now stale, so the FAQ must be re-approved and re-published before it can
-    live in the Golden Dataset again. Fully non-destructive — the FAQ node goes
-    to `pending_validation` and its FAQ->Embedded edges are *soft* deactivated
-    (metadata.active=false). RAG chunks/snapshots are preserved, not deleted.
+    live in the Golden Dataset again. The FAQ node goes to
+    `pending_validation`, its FAQ->Embedded edges are soft-deactivated, and its
+    RAG entries/chunks are deleted so stale approved content cannot be retrieved.
     Best-effort: any failure is swallowed so it never blocks the edit itself.
     """
     from datetime import datetime, timezone
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    summary: dict = {"item_id": item_id, "node_ids": [], "deactivated_embedded_edges": []}
+    summary: dict = {
+        "item_id": item_id,
+        "node_ids": [],
+        "deactivated_embedded_edges": [],
+        "deleted_rag_entry_ids": [],
+        "stale_snapshot_ids": [],
+    }
     if _KG_TABLES_MISSING or not item_id:
         return summary
     client = get_client()
@@ -3221,12 +3229,66 @@ def withdraw_faq_from_embedded(item_id: str) -> dict:
         if not node_id:
             continue
         summary["node_ids"].append(node_id)
+        current_meta = node.get("metadata") or {}
+        rag_entry_ids: list[str] = []
+        for key in ("knowledge_rag_entry_id", "rag_entry_id"):
+            if current_meta.get(key):
+                rag_entry_ids.append(str(current_meta.get(key)))
+        for key in ("knowledge_rag_entry_ids", "rag_entry_ids"):
+            for entry_id in current_meta.get(key) or []:
+                if entry_id:
+                    rag_entry_ids.append(str(entry_id))
+        snapshots = {}
+        try:
+            snapshots = list_approved_snapshots_for_nodes([node_id])
+        except Exception:
+            snapshots = {}
+        snapshot = snapshots.get(node_id) or {}
+        if snapshot.get("rag_entry_id"):
+            rag_entry_ids.append(str(snapshot.get("rag_entry_id")))
+        snapshot_meta = snapshot.get("metadata") or {}
+        for entry_id in snapshot_meta.get("rag_entry_ids") or []:
+            if entry_id:
+                rag_entry_ids.append(str(entry_id))
+        try:
+            rows = (
+                client.table("knowledge_rag_entries")
+                .select("id")
+                .eq("source_node_id", node_id)
+                .eq("content_type", "faq")
+                .execute()
+                .data
+                or []
+            )
+            for row in rows:
+                if row.get("id"):
+                    rag_entry_ids.append(str(row["id"]))
+        except Exception:
+            pass
+        rag_entry_ids = list(dict.fromkeys(rag_entry_ids))
+        for rag_entry_id in rag_entry_ids:
+            try:
+                if delete_knowledge_rag_entry(rag_entry_id):
+                    summary["deleted_rag_entry_ids"].append(rag_entry_id)
+            except Exception:
+                pass
         try:
             metadata = {
-                **(node.get("metadata") or {}),
+                **current_meta,
                 "needs_republish": True,
+                "n8n_ready": False,
+                "snapshot_status": "withdrawn",
                 "withdrawn_from_embedded_at": now_iso,
             }
+            for key in (
+                "knowledge_rag_entry_id",
+                "knowledge_rag_entry_ids",
+                "knowledge_rag_chunk_ids",
+                "rag_entry_id",
+                "rag_entry_ids",
+                "rag_chunk_ids",
+            ):
+                metadata.pop(key, None)
             client.table("knowledge_nodes").update(
                 {"status": "pending_validation", "metadata": metadata, "updated_at": now_iso}
             ).eq("id", node_id).execute()
@@ -3246,6 +3308,50 @@ def withdraw_faq_from_embedded(item_id: str) -> dict:
                         summary["deactivated_embedded_edges"].append(edge.get("id"))
                 except Exception:
                     pass
+        if snapshot.get("id"):
+            try:
+                updated_meta = {
+                    **snapshot_meta,
+                    "n8n_ready": False,
+                    "snapshot_status": "withdrawn",
+                    "withdrawn_from_embedded_at": now_iso,
+                    "withdrawn_rag_entry_ids": rag_entry_ids,
+                }
+                for key in ("rag_entry_id", "rag_entry_ids", "rag_chunk_ids"):
+                    updated_meta.pop(key, None)
+                update_approved_knowledge_snapshot(
+                    snapshot["id"],
+                    {
+                        "status": "stale",
+                        "rag_entry_id": None,
+                        "metadata": updated_meta,
+                        "updated_at": now_iso,
+                    },
+                )
+                summary["stale_snapshot_ids"].append(snapshot["id"])
+            except Exception:
+                pass
+    try:
+        item = get_knowledge_item(item_id) or {}
+        item_meta = {
+            **(item.get("metadata") or {}),
+            "needs_republish": True,
+            "n8n_ready": False,
+            "snapshot_status": "withdrawn",
+            "withdrawn_from_embedded_at": now_iso,
+        }
+        for key in (
+            "knowledge_rag_entry_id",
+            "knowledge_rag_entry_ids",
+            "knowledge_rag_chunk_ids",
+            "rag_entry_id",
+            "rag_entry_ids",
+            "rag_chunk_ids",
+        ):
+            item_meta.pop(key, None)
+        client.table("knowledge_items").update({"metadata": item_meta, "updated_at": now_iso}).eq("id", item_id).execute()
+    except Exception:
+        pass
     return summary
 
 

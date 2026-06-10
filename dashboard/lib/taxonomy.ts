@@ -52,7 +52,7 @@ export const PRIMARY_CHAIN: readonly {
   oneToOne: boolean;
 }[] = [
   { source: "persona",       target: "brand",         relation: "persona_has_brand",          oneToOne: true  },
-  { source: "brand",         target: "briefing",      relation: "brand_has_briefing",         oneToOne: true  },
+  { source: "brand",         target: "briefing",      relation: "brand_has_briefing",         oneToOne: false },
   { source: "briefing",      target: "campaign",      relation: "briefing_has_campaign",      oneToOne: false },
   { source: "campaign",      target: "audience",      relation: "campaign_has_audience",      oneToOne: false },
   { source: "audience",      target: "product_group", relation: "audience_has_product_group", oneToOne: false },
@@ -61,6 +61,10 @@ export const PRIMARY_CHAIN: readonly {
   { source: "offer",         target: "copy",          relation: "offer_has_copy",             oneToOne: false },
   { source: "copy",          target: "faq",           relation: "copy_has_faq",               oneToOne: true  },
   { source: "copy",          target: "gallery",       relation: "copy_has_gallery",           oneToOne: true  },
+  // Legacy alternatives kept valid so older content can still be repaired.
+  { source: "brand",         target: "campaign",      relation: "contains",                  oneToOne: false },
+  { source: "campaign",      target: "briefing",      relation: "contains",                  oneToOne: false },
+  { source: "briefing",      target: "audience",      relation: "contains",                  oneToOne: false },
 ];
 
 export const NODE_TYPE_LABEL: Record<GraphNodeType, string> = {

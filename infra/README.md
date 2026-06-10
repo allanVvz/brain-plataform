@@ -1,6 +1,6 @@
 # Self-hosted AI Brain stack (Docker, single-host)
 
-Runs the whole platform on one host without Supabase cloud / Cloud Run. The
+Runs the whole platform on one host without the retired cloud backend. The
 data plane is the **self-hosted Supabase** data services (Postgres + PostgREST
 + Storage + Kong gateway); the app plane is our **api** and **workers** images.
 The dashboard (Next.js) and `baita-cardapio` (Vite) stay on Vercel.

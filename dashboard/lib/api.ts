@@ -232,6 +232,9 @@ export const api = {
       spreadsheet_id?: string;
       api_key?: string;
       base_id?: string;
+      access_token?: string;
+      business_id?: string;
+      catalog_id?: string;
     },
   ) => req<any>(`/integrations/user/${encodeURIComponent(service)}`, { method: "PUT", body: JSON.stringify(body) }),
   validateUserIntegration: (
@@ -241,6 +244,9 @@ export const api = {
       spreadsheet_id?: string;
       api_key?: string;
       base_id?: string;
+      access_token?: string;
+      business_id?: string;
+      catalog_id?: string;
     },
   ) => req<any>(`/integrations/user/${encodeURIComponent(service)}/validate`, { method: "POST", body: JSON.stringify(body || {}) }),
   deleteUserIntegrationCredentials: (service: string) =>
@@ -327,6 +333,36 @@ export const api = {
   },
   createProduct: (body: any) =>
     req<any>("/knowledge/products", { method: "POST", body: JSON.stringify(body) }),
+  importProducts: (
+    provider: "meta" | "shopify" | "scraper",
+    opts: { persona_id?: string; persona_slug?: string; config?: Record<string, any>; items?: any[]; download_images?: boolean },
+  ) =>
+    req<any>("/knowledge/products/import", {
+      method: "POST",
+      body: JSON.stringify({
+        provider,
+        persona_id: opts.persona_id,
+        persona_slug: opts.persona_slug,
+        config: opts.config,
+        items: opts.items,
+        download_images: opts.download_images,
+      }),
+    }),
+  previewImport: (
+    provider: "meta" | "shopify" | "scraper",
+    opts: { persona_id?: string; persona_slug?: string; config?: Record<string, any> },
+  ) =>
+    req<any>("/knowledge/products/import/preview", {
+      method: "POST",
+      body: JSON.stringify({ provider, persona_id: opts.persona_id, persona_slug: opts.persona_slug, config: opts.config }),
+    }),
+  importProductsCsv: (file: File, opts: { persona_id?: string; persona_slug?: string }) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (opts.persona_id) form.append("persona_id", opts.persona_id);
+    if (opts.persona_slug) form.append("persona_slug", opts.persona_slug);
+    return reqForm<any>("/knowledge/products/import/csv", form);
+  },
   product: (slug: string, opts?: { persona_id?: string; persona_slug?: string }) => {
     const params = new URLSearchParams();
     if (opts?.persona_id) params.set("persona_id", opts.persona_id);
@@ -577,6 +613,12 @@ export const api = {
     params.set("persona_slug", personaSlug);
     return req<any>(`/graph-documents/current?${params.toString()}`);
   },
+  // Canonical write path: publish the edited graph_json. The backend validates
+  // the whole document and materializes the derived knowledge_nodes/edges (reindex).
+  publishGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json: any; source?: string; note?: string }) =>
+    req<any>("/graph-documents/publish", { method: "POST", body: JSON.stringify({ source: "graph_ui", ...body }) }),
+  applyGraphPatch: (body: { persona_slug: string; graph_json: any; source?: string; note?: string }) =>
+    req<any>("/graph-documents/apply-patch", { method: "POST", body: JSON.stringify({ source: "graph_ui_patch", ...body }) }),
   createGraphEdge: (body: { source_node_id: string; target_node_id: string; relation_type?: string; persona_id?: string; weight?: number; metadata?: any }) =>
     req<any>("/knowledge/graph-edges", { method: "POST", body: JSON.stringify(body) }),
   deleteGraphEdge: (edgeId: string) =>

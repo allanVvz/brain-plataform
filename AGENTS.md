@@ -1,45 +1,31 @@
-# AGENTS.md - Brain AI
+﻿# AGENTS.md - Brain AI
 
-## Ambientes (PROD / QA)
+## Stack local Docker
 
-### PROD — branch `main`
-- Supabase: `slyxppvghniknqofhqzt` (us-west-2). 383 produtos, 16 categorias, 18 imagens reais. Bucket `assets-raw` privado com URLs assinadas.
-- Cloud Run: `ai-brain-api` (`https://ai-brain-api-837167469397.us-central1.run.app`).
-- Frontend: `https://baita-cardapio.vercel.app` (Vercel project `baita-cardapio`, branch `main`).
-- Env file local (gitignored): `env.yaml`.
-- Promocao: `git checkout main && git merge --no-ff develop && git push origin main && gcloud run deploy ai-brain-api --source ./api --region us-central1 --allow-unauthenticated --env-vars-file env.yaml`.
+A operacao corrente do projeto e local-first e auditavel via Docker Compose.
 
-### QA — branch `develop` (atualizado 2026-05-29)
-- Supabase QA atual: **`svkogegypdqquzlfzaor`** (desde 2026-05-27, apos o antigo `qhnepdcqtkjjslqqiyvp` ser suspenso por `exceed_egress_quota`). Schema completo via migrations; seed canonica via `POST /seed/official-real` que monta a cadeia Persona->Brand->Briefing->Campaign->Audience->ProductGroup->Product->FAQ.
-- Cloud Run: `ai-brain-api-qa` (`https://ai-brain-api-qa-837167469397.us-central1.run.app`).
-- Frontend: branch `qa` em `https://github.com/allanVvz/Card-pio`, alias Vercel `https://baita-cardapio-qa.vercel.app` (com SSO ativo — usar bypass token ou Vercel MCP).
-- Env file local (gitignored): `env.qa.yaml`.
-- Deploy: `git checkout develop && gcloud run deploy ai-brain-api-qa --source ./api --region us-central1 --allow-unauthenticated --env-vars-file env.qa.yaml`.
-
-### QA local backend (since 2026-05-29)
-- Comando: `python ai-brain/scripts/start_api_qa.py`. Hot-reload ativo (`reload=True`, `reload_dirs=[API_DIR]`) desde BRA-61 — edits em `api/` recarregam sem restart manual.
-- Listen: `127.0.0.1:8001`.
-- Auth contract (Option B per `paperclip/docs/qa/sofia-tool-use-contract.md` §4.5):
-  - primary: `X-AI-BRAIN-ADMIN-TOKEN: <value from env.qa.yaml>`
-  - alias: `Authorization: Bearer <same value>`
-  - PROD nunca aceita shared-token; e QA-only.
-- Sequence pos-edit obrigatoria:
-  1. Salvar arquivo em `ai-brain/api/...`.
-  2. Aguardar log uvicorn "Reloading...".
-  3. Probe `curl -s -o /dev/null -w "%{http_code}\n" <route>` confirmando que o backend serve a nova logica.
-  4. Anexar o probe (comando + status code) na disposition body da issue Paperclip.
-- Diagnose 401 vs 403:
-  - 401 `"Sessao obrigatoria."` -> auth middleware rejeitou; faltou ou header errado.
-  - 403 com mensagem custom -> auth passou, gate de rota rejeitou (allow-list, persona scope, etc.).
+### Servicos principais
+- `db`: Postgres local.
+- `storage`: storage API local.
+- `rest`: PostgREST local.
+- `kong`: gateway local em `:8000`.
+- `migrate`: bootstrap + migrations.
+- `api`: FastAPI backend em `:8080`.
+- `workers`: processo separado para jobs.
+- `studio`: admin opcional em `:3030`.
 
 ### Regras rigidas
-- `env.yaml` e `env.qa.yaml` nunca vao para o git. Template versionado: `env.yaml.example`.
-- `SUPABASE_SERVICE_KEY` deve carregar o JWT com `role:service_role`. O `anon` key causa 404 em rotas que dependem de RLS bypass (ex: `/api/menu/{slug}` retorna "Persona not found").
-- CORS prod liberou `https://baita-cardapio.vercel.app`. QA inclui `https://baita-cardapio-qa.vercel.app` + `*-allanvvzs-projects.vercel.app` + `http://localhost:5173`.
-- `gcloud auth/disable_ssl_validation True` foi necessario nesta maquina por problema de CA chain. Reverter em ambientes com cert valido (`gcloud config unset auth/disable_ssl_validation`).
-- Baita-cardapio resolve `VITE_AI_BRAIN_API_URL` por scope no Vercel: production -> ai-brain-api prod; preview branch `qa` -> ai-brain-api-qa.
-- Validar prod: `curl https://ai-brain-api-837167469397.us-central1.run.app/api/menu/baita-conveniencia` retorna 200 com `persona.collections[0]` com 16 categorias e 383 produtos.
-- Validar QA: mesma URL com `-qa-` retorna 200 com 9 categorias e 4 produtos seed. Frontend QA usa Vercel SSO; obter bypass via `mcp__vercel__get_access_to_vercel_url`.
+- `docker compose --env-file .env.compose up -d --build` e o comando base para subir a stack.
+- `ENVIRONMENT=qa` no container `api` habilita o shared admin token para auditoria local.
+- `API_INTERNAL_BASE_URL=http://localhost:8080` e `NEXT_PUBLIC_API_BASE_URL=/api-brain` sao os defaults do dashboard.
+- A rota operacional e `.env.compose` + Docker Compose.
+- O dashboard nunca deve apontar diretamente para backend legado; use `/api-brain`.
+
+### Auditoria
+1. `docker compose --env-file .env.compose ps`
+2. `docker compose --env-file .env.compose logs -f db api workers`
+3. `curl http://localhost:8080/health`
+4. `curl http://localhost:8080/api/menu/baita-conveniencia`
 
 ## Regras de negocio - Grafos
 
@@ -167,7 +153,8 @@ dashboard/lib/api.ts
 
 Em producao:
 
-NEXT_PUBLIC_API_URL=https://BACKEND.run.app
+NEXT_PUBLIC_API_BASE_URL=/api-brain
+API_INTERNAL_BASE_URL deve apontar para o backend final aprovado.
 5. Pipeline de conhecimento
 
 Todo conhecimento segue este fluxo:
@@ -556,7 +543,7 @@ npm run build
 Deploy:
 
 frontend: Vercel, root dashboard
-backend: Cloud Run, source ./api
+backend: backend final aprovado
 24. Regra final
 
 Todo conhecimento deve responder:

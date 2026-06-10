@@ -1,11 +1,10 @@
-# Self-hosted, single-host AI Brain stack.
+﻿# Self-hosted, single-host AI Brain stack.
 #
-#   data plane (Supabase):  db -> storage -> rest -> kong  (one SUPABASE_URL)
-#   app plane:              migrate (one-shot) -> api + workers
+#   data plane (Supabase local): db -> storage -> rest -> kong (one SUPABASE_URL)
+#   app plane:                migrate (one-shot) -> api + workers
 #
-# The dashboard (Next.js) and baita-cardapio (Vite) stay on Vercel and are NOT
-# part of this compose; they point NEXT_PUBLIC_API_URL / VITE_AI_BRAIN_API_URL
-# at the public host of the `api` service.
+# This compose is the source of truth for local audit/repro. The dashboard can
+# point to the api service on :8080 via API_INTERNAL_BASE_URL.
 #
 # Bring-up:
 #   python infra/generate_keys.py --write .env.compose   # fill JWT material
@@ -18,7 +17,7 @@ name: ai-brain
 x-supabase-url: &supabase_url ${SUPABASE_URL:-http://kong:8000}
 
 services:
-  # ── Postgres (Supabase flavor: roles, extensions, auth/storage schemas) ──
+  # â”€â”€ Postgres local (Supabase flavor: roles, extensions, auth/storage schemas) â”€â”€
   db:
     image: supabase/postgres:15.8.1.060
     restart: unless-stopped
@@ -39,7 +38,7 @@ services:
       timeout: 5s
       retries: 20
 
-  # ── Storage API (creates the `storage` schema, file backend on a volume) ──
+  # â”€â”€ Storage API local (creates the `storage` schema, file backend on a volume) â”€â”€
   storage:
     image: supabase/storage-api:v1.11.13
     restart: unless-stopped
@@ -71,7 +70,7 @@ services:
       timeout: 5s
       retries: 30
 
-  # ── PostgREST (the REST API supabase-py talks to) ───────────────────────
+  # â”€â”€ PostgREST local (the REST API supabase-py talks to) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   rest:
     image: postgrest/postgrest:v12.2.3
     restart: unless-stopped
@@ -85,7 +84,7 @@ services:
       PGRST_JWT_SECRET: ${JWT_SECRET}
       PGRST_DB_USE_LEGACY_GUCS: "false"
 
-  # ── Kong gateway: one SUPABASE_URL routing /rest/v1 and /storage/v1 ──────
+  # â”€â”€ Kong gateway local: one SUPABASE_URL routing /rest/v1 and /storage/v1 â”€
   kong:
     image: kong:2.8.1
     restart: unless-stopped
@@ -104,7 +103,7 @@ services:
     ports:
       - "${KONG_PORT:-8000}:8000"
 
-  # ── One-shot: legacy bootstrap + 43 migrations applied to db ────────────
+  # â”€â”€ One-shot: bootstrap + migrations applied to db â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   migrate:
     build:
       context: .
@@ -126,7 +125,7 @@ services:
       APPLY_SEED: ${APPLY_SEED:-0}
       SEED_FILE: ${SEED_FILE:-}
 
-  # ── Backend API (FastAPI/gunicorn) ──────────────────────────────────────
+  # â”€â”€ Backend API (FastAPI/gunicorn) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   api:
     build:
       context: ./api
@@ -146,7 +145,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
       ALLOWED_ORIGIN_REGEX: ${ALLOWED_ORIGIN_REGEX:-}
-      ENVIRONMENT: ${ENVIRONMENT:-production}
+      ENVIRONMENT: ${ENVIRONMENT:-qa}
       RUN_EMBEDDED_WORKERS: "false"
       PORT: "8080"
       # Obsidian vault for the Sofia/kb-intake save pipeline (must be writable).
@@ -161,7 +160,7 @@ services:
     volumes:
       - vault-data:/data/vault
 
-  # ── Background workers (same image, separate process) ───────────────────
+  # â”€â”€ Background workers (same image, separate process) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   workers:
     build:
       context: ./api
@@ -183,7 +182,7 @@ services:
       SUPABASE_SSL_VERIFY: "false"
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ENVIRONMENT: ${ENVIRONMENT:-production}
+      ENVIRONMENT: ${ENVIRONMENT:-qa}
       VAULT_PATH: ${VAULT_PATH:-/data/vault}
       OBSIDIAN_LOCAL_PATH: ${VAULT_PATH:-/data/vault}
       VAULT_SOURCE_MODE: local
@@ -191,7 +190,7 @@ services:
     volumes:
       - vault-data:/data/vault
 
-  # ── Optional: Supabase Studio for DB admin (compose --profile studio) ───
+  # â”€â”€ Optional: Supabase Studio for DB admin (compose --profile studio) â”€â”€â”€
   studio:
     image: supabase/studio:20241202-71e5240
     restart: unless-stopped
@@ -207,6 +206,30 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "${STUDIO_PORT:-3030}:3000"
+
+  # â”€â”€ Cardapio (baita-cardapio): frontend Vite servido no Docker, consumindo
+  # o backend local via Kong (same-origin proxy). Nada aponta para backend legado.
+  cardapio:
+    build:
+      context: ../baita-cardapio
+      dockerfile: Dockerfile
+    image: baita-cardapio:local
+    restart: unless-stopped
+    depends_on:
+      kong:
+        condition: service_started
+      api:
+        condition: service_started
+    environment:
+      # Rotas FastAPI (/api,/menu,/knowledge,/personas,/assets-api) vao para a
+      # api:8080. Imagens (/storage) vao para o Kong:8000 (Supabase Storage).
+      # Same-origin via proxy do Vite: sem CORS.
+      AI_BRAIN_PROXY_TARGET: http://api:8080
+      STORAGE_PROXY_TARGET: http://kong:8000
+      VITE_MENU_SOURCE: auto
+      VITE_DEFAULT_PERSONA: ${CARDAPIO_DEFAULT_PERSONA:-vz-lupas}
+    ports:
+      - "${CARDAPIO_PORT:-5173}:5173"
 
 volumes:
   db-data:

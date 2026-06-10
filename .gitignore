@@ -9,20 +9,35 @@ env/
 dist/
 build/
 
-# Environment
+# Runtime env files
 .env
 .env.local
+.env.compose
 api/.env
 dashboard/.env
 dashboard/.env.local
-env.yaml
-env.qa.yaml
-.env.compose
-infra/db-init/init-scripts/99-roles.sql
-env*.local
+
+# Legacy sensitive env references
+env*.yml
+env*.yaml
 env*.yaml.db
 env*.yaml.local
+env*.local
+.env*.local
+
+# AI Brain local secrets
 secrets/
+secrets/*.env
+secrets/*.json
+secrets/*.yaml
+secrets/*.yml
+secrets/*.toml
+secrets/*.key
+secrets/*.pem
+secrets/ai-brain.local.env
+
+# Local generated sensitive files
+infra/db-init/init-scripts/99-roles.sql
 *.pem
 *.key
 
@@ -76,5 +91,51 @@ dashboard/modes.json
 *.responses
 *.output
 
+# Vercel local state
 .vercel
-.env*.local
+
+# Local agent/runtime state
+.codex/
+.agents/
+.mcp.json
+.vault-dev/
+.claude/
+tmp/
+memory.backup-*.md
+.pytest_cache/
+
+# Local legacy QA/prod scripts kept out of the Docker-first operational branch.
+scripts/apply_seed_delivery_01.py
+scripts/ensure_qa_buckets.py
+scripts/fix_baita_asset_nodes_qa.py
+scripts/fix_baita_camiseta_png_qa.py
+scripts/probe_local_qa_menu.py
+scripts/refresh_baita_signed_urls_qa.py
+scripts/reset_baita_asset_bindings_qa.py
+scripts/sync_baita_camiseta_qa.py
+scripts/sync_baita_full_qa.py
+scripts/test_sofia_tools_deterministic.py
+scripts/validate_approved_faq_publications.py
+scripts/validate_qa_read_only.py
+scripts/apply_schema_to_new_qa.py
+scripts/probe_prod_legacy_tables.py
+scripts/seed_delivery_01.py
+scripts/seed_delivery_01.sql
+scripts/seed_delivery_01/
+scripts/sofia_conversational_test.py
+scripts/sofia_convo_resp.json
+scripts/sofia_delivery_01_cervejas.py
+scripts/sofia_delivery_b1.json
+scripts/sofia_delivery_b2.json
+scripts/sofia_resp.json
+scripts/sofia_tools_resp.json
+scripts/test_sofia_isotonicos_01.py
+scripts/validate_new_qa_rest.py
+api/n8n-workflows/*.json
+DEPLOY_SERVICES_PLAN.md
+api/prompts/claude_knowledge_graph_validation.md
+api/scripts/import_v1_to_v2_allanvvz.py
+tests/e2e_clone_vz_lupas_to_tock_fatal.py
+tests/e2e_topdown_hierarchy_tock_fatal.py
+tests/e2e_vz_lupas_full_catalog.py
+tests/integration_knowledge_curation_architecture.py

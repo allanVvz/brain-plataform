@@ -474,7 +474,8 @@ def ensure_main_tree_connection(
     target_id = node["id"]
     meta = node.get("metadata") or {}
     source_id = _normalize_uuid(parent_node_id or meta.get("resolved_parent_node_id"))
-    rel = relation_type or "manual"
+    semantic_relation = (relation_type or "manual").strip() or "manual"
+    rel = semantic_relation
     source_node: Optional[dict] = None
     if not source_id:
         persona_node = _ensure_persona_root(persona_id)
@@ -490,17 +491,26 @@ def ensure_main_tree_connection(
             source_node = None
     if source_id == target_id:
         return None
+    source_type = ((source_node or {}).get("node_type") or "").lower()
+    target_type = (node.get("node_type") or "").lower()
+    canonical_relation = semantic_relation if semantic_relation in _MAIN_TREE_RELATIONS else _default_plan_relation(source_type, target_type)
+    if canonical_relation not in _MAIN_TREE_RELATIONS:
+        canonical_relation = "manual"
     return supabase_client.upsert_knowledge_edge(
         source_id,
         target_id,
-        rel,
+        canonical_relation,
         persona_id=persona_id,
         weight=1,
         metadata=semantic_edge_metadata(
             source_node,
             node,
-            rel,
-            {"primary_tree": True, "created_from": "main_tree_guard"},
+            canonical_relation,
+            {
+                "primary_tree": True,
+                "created_from": "main_tree_guard",
+                "semantic_relation": semantic_relation,
+            },
         ),
     )
 
@@ -541,8 +551,6 @@ def repair_primary_tree_connections(
             continue
         if meta.get("primary_tree") is not True:
             continue
-        if (edge.get("relation_type") or "") not in _MAIN_TREE_RELATIONS:
-            continue
         if edge.get("target_node_id") in ids:
             connected.add(edge["target_node_id"])
 
@@ -573,6 +581,20 @@ def _default_plan_relation(parent_type: Optional[str], child_type: Optional[str]
     parent = (parent_type or "").strip().lower()
     if parent == "copy" and child == "faq":
         return "answers_question"
+    if parent == "brand" and child == "campaign":
+        return "contains"
+    if parent == "campaign" and child == "briefing":
+        return "contains"
+    if parent == "briefing" and child == "audience":
+        return "contains"
+    if parent == "product_group" and child == "product":
+        return "contains"
+    if parent == "product_group" and child == "copy":
+        return "supports_copy"
+    if parent == "product_group" and child == "faq":
+        return "answers_question"
+    if parent == "audience" and child == "product_group":
+        return "contains"
     if parent == "persona":
         return "contains"
     if child == "entity" or parent == "entity":
@@ -600,8 +622,10 @@ def _preferred_parent_types(child_type: Optional[str]) -> tuple[str, ...]:
         return ("copy", "offer", "product")
     if child == "copy":
         return ("product", "campaign")
+    if child == "campaign":
+        return ("briefing", "brand", "persona")
     if child == "briefing":
-        return ("product", "audience", "campaign", "brand")
+        return ("brand", "campaign", "audience", "product")
     if child == "product":
         return ("audience", "entity", "campaign", "briefing", "brand")
     if child == "entity":

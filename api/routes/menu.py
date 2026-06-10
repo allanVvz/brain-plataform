@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from core.landing_slots import LandingSlot, slot_for_metadata
 from services import supabase_client
+from utils.rich_text import to_clean_markdown
 
 router = APIRouter(tags=["menu"])
 
@@ -62,7 +63,9 @@ def _copy_payload(node: dict) -> dict:
     return {
         "id": node.get("id") or node.get("slug") or "",
         "slot": meta.get("slot") or "body",
-        "body": meta.get("body") or node.get("summary") or node.get("title") or "",
+        # Copy bodies frequently arrive as HTML (Shopify/CMS). Clean to markdown
+        # so no raw tags ever reach the cardapio, agents, or RAG.
+        "body": to_clean_markdown(meta.get("body") or node.get("summary") or node.get("title") or ""),
     }
 
 
@@ -135,16 +138,29 @@ def _product_assets(products: list[dict], persona_id: str, cache: Optional[dict]
         relation_types=["product_image", "product_has_asset"],
         limit=5000,
     )
+    # Imported product images live as asset knowledge_nodes (metadata.url), not
+    # as approved gallery assets. Resolve those by id so freshly-imported
+    # catalogs render their photos before any gallery curation.
+    asset_node_ids = []
+    for edge in edges:
+        src, tgt = edge.get("source_node_id"), edge.get("target_node_id")
+        asset_node_ids.append(tgt if src in product_ids else src)
+    node_by_id = {
+        str(row["id"]): row
+        for row in supabase_client.list_knowledge_nodes_by_ids([nid for nid in asset_node_ids if nid])
+        if row.get("id") and row.get("node_type") == "asset"
+    }
     out: dict[str, list[dict]] = {}
     for edge in edges:
         source_id = edge.get("source_node_id")
         target_id = edge.get("target_node_id")
         product_id = source_id if source_id in product_ids else target_id if target_id in product_ids else None
         asset_node_id = target_id if product_id == source_id else source_id
-        asset = gallery_by_node.get(str(asset_node_id))
         meta = edge.get("metadata") or {}
         if meta.get("active") is False:
             continue
+        # Prefer the curated gallery asset; fall back to the asset node itself.
+        asset = gallery_by_node.get(str(asset_node_id)) or node_by_id.get(str(asset_node_id))
         if product_id and asset:
             out.setdefault(product_id, []).append({**asset, "_edge": edge})
     return out
@@ -330,6 +346,11 @@ def _brand_payload(persona: dict, persona_slug: str, cache: Optional[dict] = Non
         "id": brand.get("id") or fallback["id"],
         "slug": brand.get("slug") or fallback["slug"],
         "name": brand.get("title") or fallback["name"],
+        # short_name = selo/monograma curto da marca (ex.: "VZ"); wordmark = texto
+        # exibido. Sem isso o front cai em iniciais derivadas do nome (ex.: "VZ
+        # Lupas" -> "VL"). Emitir o valor canonico evita esse derivado errado.
+        "short_name": brand_meta.get("short_name") or None,
+        "wordmark": brand_meta.get("wordmark") or None,
         "accent_color": brand_meta.get("accent_color") or fallback["accent_color"],
         # node_id is only present when a real knowledge_node backs this brand.
         # admin-blocks uses it to decide whether to emit brand_* slot blocks.
@@ -524,7 +545,7 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
         products = supabase_client.list_product_nodes(persona_id=persona_id, limit=1000)
     products_by_category: dict[str, list[dict]] = {}
     product_assets = _product_assets(products, persona_id, cache=cache)
-    product_related, related_node_map = _related_nodes(products, ["product_has_copy", "product_has_faq", "offer_has_copy"])
+    product_related, related_node_map = _related_nodes(products, ["product_has_copy", "supports_copy", "product_has_faq", "offer_has_copy"])
     all_faq_nodes = [node for node in related_node_map.values() if node.get("node_type") == "faq"]
     embedded_faq_ids = _embedded_faq_ids(all_faq_nodes)
     product_to_group_id = {
@@ -548,7 +569,11 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
             "slug": product.get("slug") or product["id"],
             "name": product.get("title") or product.get("slug") or "Produto",
             "price_cents": _read_int(metadata.get("price_cents"), 0),
-            "description": product.get("summary") or metadata.get("description") or "",
+            # Offer = preco/kits/variacoes comerciais (metadata.price: unit/kit_5/...).
+            # None quando ausente — nunca inventar preco.
+            "offer": metadata.get("price") or None,
+            # Limpa HTML importado -> markdown enxuto (sem tags cruas).
+            "description": to_clean_markdown(product.get("summary") or metadata.get("description") or ""),
             "visible": metadata.get("visible") is not False and product.get("status") != "archived",
             "position": _read_int(metadata.get("position"), 0),
             "copies": [_copy_payload(node) for node in copy_nodes],
@@ -580,12 +605,22 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
         cover_asset = covers.get(category["id"])
         cover_edge = (cover_asset or {}).get("_edge") if cover_asset else None
         category_slug = category.get("slug") or metadata.get("category_slug") or category["id"]
+        cover_url = (cover_asset or {}).get("url") or ""
+        # Fallback: toda categoria deve ter capa. Sem cover dedicado, usa a
+        # primeira imagem de um produto interno do grupo (os assets de produto
+        # ja foram resolvidos em products_by_category acima).
+        if not cover_url:
+            for product in products_by_category.get(str(category_slug), []):
+                product_cover = next((a.get("url") for a in product.get("assets") or [] if a.get("url")), None)
+                if product_cover:
+                    cover_url = product_cover
+                    break
         category_payloads.append({
             "id": category["id"],
             "slug": category_slug,
             "title": category.get("title") or category_slug,
             "eyebrow": metadata.get("eyebrow") or metadata.get("category_eyebrow") or "",
-            "cover": (cover_asset or {}).get("url") or "",
+            "cover": cover_url,
             "cover_alt": (cover_asset or {}).get("title") or category.get("title") or category_slug,
             "cover_asset_id": (cover_asset or {}).get("id") if cover_asset else None,
             "cover_edge_id": (cover_edge or {}).get("id") if cover_edge else None,

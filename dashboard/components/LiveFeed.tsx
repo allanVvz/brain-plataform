@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { createClient } from "@/utils/supabase/client";
+import { api } from "@/lib/api";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -17,29 +17,23 @@ export function LiveFeed() {
   const [items, setItems] = useState<FeedItem[]>([]);
 
   useEffect(() => {
-    const supabase = createClient();
+    let active = true;
 
-    // initial load
-    supabase
-      .from("agent_logs")
-      .select("id,lead_id,agent_name,status,latency_ms,created_at")
-      .order("created_at", { ascending: false })
-      .limit(20)
-      .then(({ data }) => data && setItems(data));
+    async function load() {
+      try {
+        const rows = await api.agentLogs(undefined, 20);
+        if (active) setItems(rows as FeedItem[]);
+      } catch {
+        if (active) setItems([]);
+      }
+    }
 
-    // realtime subscription
-    const channel = supabase
-      .channel("agent_logs_live")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "agent_logs" },
-        (payload) => {
-          setItems((prev) => [payload.new as FeedItem, ...prev.slice(0, 19)]);
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    load();
+    const timer = window.setInterval(load, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   return (

@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from schemas.graph_json_v2 import GraphJson, Node
+from schemas.graph_json_v2 import Edge, GraphJson, Node
 from services import graph_json_v2_validator, supabase_client
 from services.vault_sync import VAULT_PATH as CONFIGURED_VAULT_PATH
 
@@ -130,6 +130,197 @@ def _node_metadata(graph: GraphJson, node: Node, relative_path: str, content: st
 
 def _default_relation(parent_type: str, child_type: str) -> str:
     return RELATION_BY_PAIR.get((parent_type, child_type), "contains")
+
+
+# content_type (Sofia Criar plan) -> canonical graph node_type. Non-canonical
+# types (tone/entity/competitor/prompt/maker_material/other) are NOT part of the
+# graph law chain and are dropped from the canonical tree.
+_PLAN_TYPE_ALIASES: dict[str, str] = {
+    "product_collection": "product_group",
+    "publico": "audience",
+    "rules": "rule",
+}
+_CANONICAL_NODE_TYPES: set[str] = {
+    "persona", "brand", "briefing", "campaign", "audience",
+    "product_group", "product", "offer", "copy", "rule", "faq",
+    "embedded", "asset", "gallery",
+}
+_PERSONA_PARENTS: set[str] = {"", "self", "persona", "root", "global"}
+
+
+def _canon_plan_type(content_type: str | None) -> str | None:
+    t = (content_type or "").strip().lower()
+    t = _PLAN_TYPE_ALIASES.get(t, t)
+    return t if t in _CANONICAL_NODE_TYPES else None
+
+
+def _parent_slug_of(entry: dict, links_by_target: dict[str, str]) -> str:
+    meta = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+    raw = str(meta.get("parent_slug") or "").strip().lower()
+    if raw:
+        return raw
+    slug = str(entry.get("slug") or "").strip().lower()
+    return links_by_target.get(slug, "")
+
+
+def normalized_plan_to_graph_json(
+    plan: dict[str, Any],
+    session: dict[str, Any] | None = None,
+    *,
+    tenant: str = "qa",
+    graph_id: str | None = None,
+) -> GraphJson:
+    """Pure conversion: Sofia Criar `normalized_plan` -> canonical GraphJson.
+
+    Does NOT persist. The single canonical document the importer/validator and the
+    front-end all consume. Non-canonical content_types are dropped from the tree.
+    The result is meant to be validated by `graph_json_v2_validator.validate_graph_json`
+    before any persistence (the importer calls the validator itself).
+    """
+    plan = plan or {}
+    session = session or {}
+    persona_slug = str(
+        plan.get("persona_slug") or session.get("persona_slug") or ""
+    ).strip().lower()
+    persona_id = f"node:persona:{persona_slug}"
+    persona_label = str(
+        session.get("persona_name") or plan.get("persona_name") or persona_slug
+    ).strip() or persona_slug
+
+    nodes: list[Node] = [
+        Node(
+            id=persona_id,
+            node_type="persona",
+            slug=persona_slug,
+            label=persona_label,
+            parent_id=None,
+            data={"source": "sofia_criar", "status": "validated"},
+        )
+    ]
+
+    entries = [e for e in (plan.get("entries") or []) if isinstance(e, dict)]
+    links_by_target: dict[str, str] = {}
+    for link in plan.get("links") or []:
+        if not isinstance(link, dict):
+            continue
+        tgt = str(link.get("target_slug") or "").strip().lower()
+        src = str(link.get("source_slug") or "").strip().lower()
+        if tgt and src and tgt not in links_by_target:
+            links_by_target[tgt] = src
+
+    # Pass 1: assign canonical node ids (dedupe by node_type+slug).
+    resolved: list[dict[str, Any]] = []
+    slug_to_id: dict[str, str] = {}
+    seen_ids: set[str] = set()
+    for entry in entries:
+        node_type = _canon_plan_type(entry.get("content_type"))
+        if not node_type or node_type == "persona":
+            continue
+        slug = _slug(str(entry.get("slug") or entry.get("title") or node_type))
+        node_id = f"node:{node_type}:{slug}"
+        if node_id in seen_ids:
+            continue
+        seen_ids.add(node_id)
+        slug_to_id[slug] = node_id
+        orig_slug = str(entry.get("slug") or "").strip().lower()
+        if orig_slug:
+            slug_to_id[orig_slug] = node_id
+        resolved.append({"entry": entry, "node_type": node_type, "slug": slug, "id": node_id})
+
+    # Pass 2: parent resolution.
+    parent_id_by_node: dict[str, str] = {}
+    for item in resolved:
+        parent_slug = _parent_slug_of(item["entry"], links_by_target)
+        if parent_slug in _PERSONA_PARENTS:
+            parent_id_by_node[item["id"]] = persona_id
+        else:
+            parent_id_by_node[item["id"]] = slug_to_id.get(parent_slug, persona_id)
+
+    nodes_by_id: dict[str, Node] = {}
+
+    def _branch_path(node_id: str) -> list[dict[str, str]]:
+        chain: list[dict[str, str]] = []
+        cur = node_id
+        guard = 0
+        while cur and guard < 64:
+            guard += 1
+            node = nodes_by_id.get(cur)
+            if node is None:
+                break
+            chain.insert(0, {"node_type": node.node_type, "slug": node.slug, "label": node.label})
+            cur = node.parent_id or ""
+        return chain
+
+    # Pass 3: build nodes (persona first so branch_path can walk it).
+    nodes_by_id[persona_id] = nodes[0]
+    for item in resolved:
+        entry = item["entry"]
+        node_type = item["node_type"]
+        meta = dict(entry.get("metadata") or {})
+        content = str(entry.get("content") or "").strip()
+        data: dict[str, Any] = {
+            **meta,
+            "source": meta.get("source") or entry.get("source") or "sofia_criar",
+            "status": str(entry.get("status") or meta.get("status") or "pending_validation"),
+            "summary": (content[:400] if content else meta.get("summary")),
+            "tags": entry.get("tags") or meta.get("tags") or [node_type],
+        }
+        if content:
+            data["markdown"] = content
+        node = Node(
+            id=item["id"],
+            node_type=node_type,
+            slug=item["slug"],
+            label=str(entry.get("title") or item["slug"]),
+            parent_id=parent_id_by_node[item["id"]],
+            data=data,
+        )
+        nodes_by_id[item["id"]] = node
+        nodes.append(node)
+
+    # Pass 4: enrich FAQ nodes with the inherited-context fields the validator requires.
+    for item in resolved:
+        if item["node_type"] != "faq":
+            continue
+        node = nodes_by_id[item["id"]]
+        parent_id = node.parent_id or persona_id
+        parent = nodes_by_id.get(parent_id)
+        node.data.setdefault("source_node_id", parent_id)
+        node.data.setdefault("source_node_type", parent.node_type if parent else "persona")
+        node.data.setdefault("branch_path", _branch_path(parent_id))
+        meta = item["entry"].get("metadata") or {}
+        if meta.get("markdown_document") is True or meta.get("generate_via") == "branch":
+            node.data["markdown_document"] = True
+            node.data.setdefault("markdown", str(item["entry"].get("content") or node.label))
+            node.data["question_count"] = int(meta.get("question_count") or 1) or 1
+
+    # Pass 5: primary edges mirror parent_id.
+    edges: list[Edge] = []
+    for idx, item in enumerate(resolved):
+        node = nodes_by_id[item["id"]]
+        parent_id = node.parent_id or persona_id
+        parent = nodes_by_id.get(parent_id)
+        relation = _default_relation(parent.node_type if parent else "persona", node.node_type)
+        edges.append(
+            Edge(
+                id=f"edge:{idx + 1}",
+                source=parent_id,
+                target=node.id,
+                relation=relation,
+                primary_tree=True,
+                metadata={"created_from": "normalized_plan_to_graph_json"},
+            )
+        )
+
+    return GraphJson(
+        schema_version="2.0",
+        graph_id=graph_id or f"{persona_slug}-criar",
+        tenant=tenant,
+        persona_slug=persona_slug,
+        status="draft",
+        nodes=nodes,
+        edges=edges,
+    )
 
 
 def import_graph_json(*, graph_json: GraphJson, source: str = "graph_json.import", session_id: str | None = None) -> dict[str, Any]:

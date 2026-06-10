@@ -785,10 +785,17 @@ _STRUCTURAL_RELATIONS: set[str] = {
     "belongs_to_persona",
     "contains",
     "part_of_campaign",
+    "targets_audience",
+    "campaign_has_audience",
+    "audience_has_product_group",
+    "product_group_has_product",
     "about_product",
     "offers_product",
     "briefed_by",
     "answers_question",
+    "product_has_copy",
+    "product_has_faq",
+    "copy_has_faq",
     "supports_copy",
     "uses_asset",
     "manual",
@@ -1113,7 +1120,8 @@ def get_graph_data(
     ]
     sem_edges = [
         e for e in sem_edges
-        if not (e.get("metadata") or {}).get("visual_hidden")
+        if (e.get("metadata") or {}).get("active") is not False
+        and not (e.get("metadata") or {}).get("visual_hidden")
         and not (
             (e.get("relation_type") or "").lower() == "belongs_to_persona"
             and (e.get("metadata") or {}).get("primary_tree") is not True

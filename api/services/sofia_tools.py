@@ -673,7 +673,7 @@ SOFIA_TOOLS_SCHEMA: list[dict] = [
         "name": "validate_hierarchy",
         "description": (
             "Valida que o caminho ancestral do `slug` no plano segue a hierarquia "
-            "canonica do grafo fractal (persona -> brand -> briefing -> campaign -> "
+            "canonica do grafo fractal (persona -> brand -> campaign -> briefing -> "
             "audience -> product_group -> product -> offer -> copy -> {faq, gallery})."
         ),
         "input_schema": {

@@ -8,7 +8,7 @@ Issue: BRA-20
 
 Decision: keep the current stack and enforce the BRA-20 graph insertion contract as a backend-validated, QA-verifiable fixture package.
 
-- Backend API (FastAPI on Cloud Run) remains the single write authority for node/edge persistence.
+- Backend API (FastAPI) remains the single write authority for node/edge persistence.
 - Supabase Postgres remains persistence source; no schema expansion in this step.
 - Graph rendering contract remains split by mode:
   - `semantic_tree` consumes only active `main` edges.
@@ -23,7 +23,7 @@ Rationale:
 
 ## 2) Stack Decision Record
 
-- Preserve: Next.js + Vercel frontend, FastAPI + Cloud Run backend, Supabase Postgres/pgvector, n8n support flows.
+- Preserve: Next.js + Vercel frontend, FastAPI backend, local Postgres/pgvector data plane, n8n support flows.
 - Reject for BRA-20 scope:
   - frontend-only validation;
   - direct DB writes for fixture acceptance;

@@ -1,0 +1,56 @@
+{
+  "name": "bra24_guardian_fixture",
+  "nodes": [
+    { "id": "persona-1", "type": "persona", "approved": true },
+    { "id": "brand-1", "type": "brand", "approved": true },
+    { "id": "campaign-1", "type": "campaign", "approved": true },
+    { "id": "audience-1", "type": "audience", "approved": true },
+    { "id": "product-group-1", "type": "product_group", "approved": true },
+    { "id": "product-1", "type": "product", "approved": true },
+    { "id": "faq-approved-1", "type": "faq", "approved": true },
+    { "id": "faq-approved-2", "type": "faq", "approved": true },
+    { "id": "faq-pending-1", "type": "faq", "approved": false },
+    { "id": "embed-1", "type": "embed", "approved": true },
+    { "id": "gallery-1", "type": "gallery", "approved": true }
+  ],
+  "valid_edges": [
+    { "id": "e1", "source": "persona-1", "target": "brand-1", "edge_type": "main", "active": true },
+    { "id": "e2", "source": "brand-1", "target": "campaign-1", "edge_type": "reference", "active": true },
+    { "id": "e3", "source": "campaign-1", "target": "audience-1", "edge_type": "main", "active": true },
+    { "id": "e4", "source": "audience-1", "target": "product-group-1", "edge_type": "main", "active": true },
+    { "id": "e5", "source": "product-group-1", "target": "product-1", "edge_type": "main", "active": true },
+    { "id": "e6", "source": "product-1", "target": "faq-approved-1", "edge_type": "main", "active": true },
+    { "id": "e7", "source": "product-1", "target": "faq-approved-2", "edge_type": "main", "active": true },
+    { "id": "e8", "source": "faq-approved-1", "target": "embed-1", "edge_type": "main", "active": true }
+  ],
+  "invalid_edges": [
+    { "id": "bad-product-embed", "source": "product-1", "target": "embed-1", "edge_type": "main", "active": true },
+    { "id": "bad-faq-unapproved", "source": "faq-pending-1", "target": "embed-1", "edge_type": "main", "active": true },
+    { "id": "bad-gallery-embed", "source": "gallery-1", "target": "embed-1", "edge_type": "reference", "active": true }
+  ],
+  "tree_edge_ids_valid": ["e1", "e3", "e4", "e5", "e6", "e7", "e8"],
+  "tree_edge_ids_invalid": ["e1", "bad-gallery-embed"],
+  "agent_run_cases": {
+    "valid_done_with_graph_evidence": {
+      "status": "done",
+      "task_scope": "graph",
+      "work_products": [
+        { "type": "graph_node", "id": "n-123", "persona_slug": "baita-conveniencia" },
+        { "type": "graph_edge", "id": "e-123", "relation_type": "supports_copy" }
+      ],
+      "blocker": null
+    },
+    "valid_blocked_with_explicit_cause": {
+      "status": "blocked",
+      "task_scope": "graph",
+      "work_products": [],
+      "blocker": { "owner": "platform", "action": "restore QA database access" }
+    },
+    "invalid_done_without_work_product": {
+      "status": "done",
+      "task_scope": "graph",
+      "work_products": [],
+      "blocker": null
+    }
+  }
+}

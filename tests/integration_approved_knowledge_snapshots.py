@@ -26,8 +26,10 @@ class FakeStore:
             self.node("n-persona", "persona", "self", "Tock Fatal"),
             self.node("n-brand", "brand", "tock-fatal", "Tock Fatal", "Marca feminina de venda direta."),
             self.node("n-briefing", "briefing", "campanha-inverno-modal", "Campanha de inverno", "Foco em modais de fabricacao propria."),
+            self.node("n-campaign", "campaign", "inverno-2026", "Inverno 2026", "Briefing da campanha com kits de inverno para revenda."),
             self.node("n-audience", "audience", "empreendedoras", "Empreendedoras", "Revendedoras que compram kits."),
             self.node("n-product", "product", "kit-modal-1", "Kit Modal 1", "Kit Modal 1 para revenda."),
+            self.node("n-copy", "copy", "copy-kit-modal-1", "Copy Kit Modal 1", "Copy aprovada para vender o Kit Modal 1 no WhatsApp."),
             self.node(
                 "n-faq",
                 "faq",
@@ -42,9 +44,11 @@ class FakeStore:
         self.edges = [
             self.edge("e1", "n-persona", "n-brand", "contains"),
             self.edge("e2", "n-brand", "n-briefing", "contains"),
-            self.edge("e3", "n-briefing", "n-audience", "contains"),
-            self.edge("e4", "n-audience", "n-product", "contains"),
-            self.edge("e5", "n-product", "n-faq", "contains"),
+            self.edge("e3", "n-briefing", "n-campaign", "contains"),
+            self.edge("e4", "n-campaign", "n-audience", "contains"),
+            self.edge("e5", "n-audience", "n-product", "contains"),
+            self.edge("e6", "n-product", "n-copy", "contains"),
+            self.edge("e7", "n-copy", "n-faq", "contains"),
         ]
         self.item = {
             "id": "item-faq",
@@ -188,7 +192,19 @@ def main() -> int:
     assert result["rag_chunk_ids"] == ["chunk-0"], result
     assert store.snapshots[0]["status"] == "active", store.snapshots
     assert store.rag_entries[0]["status"] == "active", store.rag_entries
+    assert store.rag_entries[0]["embedding_model"] == "faq", store.rag_entries
+    assert store.rag_entries[0]["connected_node_type"] == "faq", store.rag_entries
+    assert store.rag_entries[0]["branch_brand_md"] == "Marca feminina de venda direta.", store.rag_entries
+    assert store.rag_entries[0]["branch_briefing_md"] == "Foco em modais de fabricacao propria.", store.rag_entries
+    assert store.rag_entries[0]["branch_campaign_md"] == "Briefing da campanha com kits de inverno para revenda.", store.rag_entries
+    assert store.rag_entries[0]["branch_audience_md"] == "Revendedoras que compram kits.", store.rag_entries
+    assert store.rag_entries[0]["branch_product_md"] == "Kit Modal 1 para revenda.", store.rag_entries
+    assert store.rag_entries[0]["branch_copy_md"] == "Copy aprovada para vender o Kit Modal 1 no WhatsApp.", store.rag_entries
     chunk = store.chunks[0]
+    assert chunk["embedding_model"] == "faq", chunk
+    assert chunk["connected_node_type"] == "faq", chunk
+    assert chunk["branch_campaign_md"] == "Briefing da campanha com kits de inverno para revenda.", chunk
+    assert chunk["branch_copy_md"] == "Copy aprovada para vender o Kit Modal 1 no WhatsApp.", chunk
     metadata = store.snapshots[0]["metadata"]
     assert metadata["branch_context"]["path"], metadata
     assert metadata["branch_context"]["edges"], metadata

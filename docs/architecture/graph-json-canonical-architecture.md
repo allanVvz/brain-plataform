@@ -44,7 +44,7 @@ The user authorized creating a new Supabase project for v2/QA if it reduces risk
 - Allows v2 RLS, roles, and migrations to be designed clean.
 - Reverting v2 in QA is a project drop, not a multi-table delete.
 
-Naming convention: `svkogegypdqquzlfzaor` stays as v1 QA. New project: TBD by CTO. Document the new project ref + env in `env.qa.yaml.v2.example` + add an env var `SUPABASE_URL_V2` so the backend can read from either.
+Naming convention: v1 QA remains a historical reference. New targets must be documented through `.env.compose.example` or explicit Docker/Vercel environment variables, not through legacy YAML env files.
 
 PROD `slyxppvghniknqofhqzt` is **untouched**.
 

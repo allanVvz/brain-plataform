@@ -146,7 +146,7 @@ def graph_document_versions(
 @router.post("/publish")
 def graph_document_publish(body: PublishGraphDocumentBody, request: Request):
     auth_service.current_user(request)
-    _validate_graph_json_or_422(body.graph_json)
+    graph = _validate_graph_json_or_422(body.graph_json)
     current = _latest_event(body.persona_slug, body.brand_slug)
     current_payload = (current or {}).get("payload") or {}
     next_version = int(current_payload.get("version") or 0) + 1
@@ -174,12 +174,30 @@ def graph_document_publish(body: PublishGraphDocumentBody, request: Request):
     )
     if not evt:
         raise HTTPException(502, "Failed to persist graph document event")
+
+    # Publishing the canonical document materializes the derived knowledge_nodes /
+    # knowledge_edges / vault rows (this is what "aciona os serviços de atualizar o
+    # banco" when the front-end edits the graph). A reindex failure does NOT lose
+    # the published document — it is surfaced as `reindex_error`.
+    reindex: dict = {}
+    try:
+        reindex = graph_json_importer.import_graph_json(
+            graph_json=graph,
+            source=f"graph_documents.publish:{body.source}",
+        ) or {}
+    except Exception as exc:  # pragma: no cover - defensive
+        reindex = {"ok": False, "reindex_error": str(exc)}
+
     return {
         "ok": True,
         "id": doc_id,
         "persona_slug": body.persona_slug,
         "brand_slug": body.brand_slug,
         "version": next_version,
+        "reindex_ok": bool(reindex.get("ok", False)),
+        "nodes_imported": reindex.get("nodes_imported"),
+        "edges_imported": reindex.get("edges_imported"),
+        "reindex_error": reindex.get("reindex_error") or (None if reindex.get("ok", True) else reindex.get("errors")),
     }
 
 
@@ -260,14 +278,25 @@ def graph_document_reindex(body: ReindexBody, request: Request):
     is_valid, errors = graph_json_v2_validator.validate_graph_json(graph)
     if not is_valid:
         raise HTTPException(422, {"code": "GRAPH_VALIDATION_FAILED", "errors": errors})
-    node_count = len(graph.nodes)
-    edge_count = len(graph.edges)
+    # Materialize the canonical document into the derived tables (knowledge_nodes /
+    # knowledge_edges / knowledge_items + vault). Tolerant: a materialization error
+    # is reported but does not 500 the reindex.
+    reindex: dict = {}
+    try:
+        reindex = graph_json_importer.import_graph_json(
+            graph_json=graph,
+            source=f"graph_documents.reindex:{body.persona_slug}",
+        ) or {}
+    except Exception as exc:  # pragma: no cover - defensive
+        reindex = {"ok": False, "reindex_error": str(exc)}
     return {
         "ok": True,
         "persona_slug": body.persona_slug,
         "version": version,
-        "indexed_nodes": node_count,
-        "indexed_edges": edge_count,
+        "indexed_nodes": reindex.get("nodes_imported", len(graph.nodes)),
+        "indexed_edges": reindex.get("edges_imported", len(graph.edges)),
+        "reindex_ok": bool(reindex.get("ok", False)),
+        "reindex_error": reindex.get("reindex_error"),
         "note": body.note,
     }
 

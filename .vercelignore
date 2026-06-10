@@ -1,0 +1,17 @@
+/.pytest_cache
+/.git
+/.codex
+/.agents
+/.claude
+/.vault-dev
+/tmp
+/api
+/tests
+/docs
+/data
+/supabase
+/scripts
+/infra
+/Imagens
+*.log
+*.backup-*.md

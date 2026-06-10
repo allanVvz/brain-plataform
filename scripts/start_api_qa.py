@@ -1,38 +1,23 @@
-"""Local launcher: load env.qa.yaml into os.environ, then run uvicorn against api.main."""
-import os
+#!/usr/bin/env python3
+"""Retired launcher.
+
+The current backend runtime is Docker Compose:
+
+    docker compose --env-file .env.compose up -d --build
+
+This file is kept only so old references fail with a clear message instead of
+silently starting a backend against legacy environment files.
+"""
+
+from __future__ import annotations
+
 import sys
-from pathlib import Path
 
-import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-ENV_FILE = REPO_ROOT / "env.qa.yaml"
-API_DIR = REPO_ROOT / "api"
+def main() -> int:
+    print("scripts/start_api_qa.py is retired. Use Docker Compose with .env.compose.")
+    return 64
 
-if not ENV_FILE.exists():
-    sys.exit(f"env file not found: {ENV_FILE}")
-
-with ENV_FILE.open("r", encoding="utf-8") as fh:
-    config = yaml.safe_load(fh) or {}
-for key, value in config.items():
-    if value is None:
-        continue
-    os.environ[str(key)] = str(value)
-
-os.environ.setdefault("RUN_EMBEDDED_WORKERS", "false")
-os.environ.setdefault("AI_BRAIN_LOCAL_DEV", "true")
-
-sys.path.insert(0, str(API_DIR))
-os.chdir(API_DIR)
-
-import uvicorn  # noqa: E402
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="127.0.0.1",
-        port=int(os.getenv("PORT", "8001")),
-        reload=True,
-        reload_dirs=[str(API_DIR)],
-        log_level="info",
-    )
+    sys.exit(main())

@@ -11,8 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY api/ .
 
-# Expose the port that the application will run on
-# Cloud Run injects the PORT environment variable
+# Expose the port that the application will run on.
 ENV PORT 8080
 EXPOSE $PORT
 

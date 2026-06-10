@@ -12,7 +12,7 @@ Result: official seed path cannot be executed end-to-end in QA with the availabl
 ## Technical Architecture Decision
 
 1. Preserve stack and ownership:
-- Keep FastAPI + Supabase + Cloud Run + Next.js/Vercel as-is.
+- Keep FastAPI + local Postgres-compatible data plane + Next.js/Vercel as-is.
 - AI Brain remains the owner of validated knowledge and embedding publication.
 - Catalog remains draft/intake source only.
 

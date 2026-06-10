@@ -16,6 +16,34 @@ DEFAULT_MEMORY_MAX_TURNS = 5
 _SESSION_MEMORY: dict[str, dict[str, Any]] = {}
 
 
+# D2: the Orquestrar operating prompt lives in agents/sofia_orquestrar.md and is
+# loaded at runtime, with a concise inline fallback when the file is absent.
+_INLINE_OPERATING_PROMPT = (
+    "Sofia em modo Graph: edição cirúrgica do graph_json canônico. "
+    "Resolva persona/node/operação, valide a cadeia canônica "
+    "(persona->brand->briefing->campaign->audience->product_group->product->copy->faq->embedded), "
+    "e emita um Patch (PatchOperation). FAQ no menor nó; FAQ->Embedded só após aprovação; "
+    "persona/embedded/gallery são protegidos."
+)
+
+
+def _load_agent_prompt(name: str, fallback: str) -> str:
+    try:
+        from pathlib import Path as _Path
+
+        path = _Path(__file__).resolve().parents[2] / "agents" / name
+        if path.exists():
+            text = path.read_text(encoding="utf-8").strip()
+            if text:
+                return text
+    except Exception:
+        pass
+    return fallback
+
+
+OPERATING_PROMPT = _load_agent_prompt("sofia_orquestrar.md", _INLINE_OPERATING_PROMPT)
+
+
 def _threshold() -> float:
     raw = os.getenv("SOFIA_GRAPH_COMMAND_MIN_SCORE", str(DEFAULT_CONFIDENCE_THRESHOLD)).strip()
     try:
@@ -153,6 +181,89 @@ def _default_plan_json(session_id: str, persona_slug: str) -> dict[str, Any]:
             "blocking": [],
         },
     }
+
+
+def _orchestrator_plan_to_entries(plan_json: dict[str, Any]) -> dict[str, Any]:
+    """Flatten the orchestrator section shape (`plan.<section>[]`) into the
+    normalized-plan `{persona_slug, entries, links}` shape so it can be converted
+    to the single canonical GraphJson."""
+    plan = plan_json.get("plan") if isinstance(plan_json.get("plan"), dict) else {}
+    entries: list[dict[str, Any]] = []
+    for section, items in plan.items():
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            slug = str(item.get("slug") or item.get("title") or section).strip()
+            entries.append(
+                {
+                    "content_type": section,
+                    "title": item.get("title") or slug,
+                    "slug": slug,
+                    "status": item.get("status") or "pending_validation",
+                    "content": item.get("content") or item.get("summary") or "",
+                    "tags": item.get("tags") or [section],
+                    "metadata": {
+                        "parent_slug": item.get("parent_slug") or "self",
+                        **(item.get("metadata") if isinstance(item.get("metadata"), dict) else {}),
+                    },
+                }
+            )
+    return {
+        "persona_slug": str(plan_json.get("persona_slug") or "").strip().lower(),
+        "entries": entries,
+        "links": [],
+    }
+
+
+def plan_json_to_graph_json(plan_json: dict[str, Any]) -> dict[str, Any]:
+    """Canonical view of a session plan_json as a GraphJson dict (D1).
+
+    The section shape remains the deterministic working scratch; this is the ONE
+    canonical document the front-end, importer and validator consume. Best-effort:
+    returns an empty graph dict if conversion fails (never raises into the chat)."""
+    try:
+        from services import graph_json_importer
+
+        graph = graph_json_importer.normalized_plan_to_graph_json(
+            _orchestrator_plan_to_entries(plan_json),
+            {"persona_slug": plan_json.get("persona_slug")},
+        )
+        return graph.model_dump()
+    except Exception:
+        return {}
+
+
+def graph_json_to_plan_json(graph_json: dict[str, Any], *, session_id: Optional[str] = None) -> dict[str, Any]:
+    """Inverse bridge: rebuild the section-shaped plan from a canonical GraphJson.
+
+    Used when the front-end edits the graph_json (Orquestrar write-through) and the
+    session needs its sections refreshed to match the published document."""
+    graph = graph_json if isinstance(graph_json, dict) else {}
+    nodes = graph.get("nodes") or []
+    persona_slug = str(graph.get("persona_slug") or "").strip().lower()
+    by_id: dict[str, dict] = {n.get("id"): n for n in nodes if isinstance(n, dict)}
+    plan_json = _default_plan_json(session_id or "ephemeral", persona_slug)
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_type = str(node.get("node_type") or "").strip().lower()
+        if node_type in ("persona", "embedded"):
+            continue
+        section = plan_json["plan"].get(node_type)
+        if section is None:
+            continue
+        parent = by_id.get(node.get("parent_id"))
+        parent_slug = str((parent or {}).get("slug") or "self")
+        section.append(
+            {
+                "slug": node.get("slug"),
+                "title": node.get("label") or node.get("slug"),
+                "parent_slug": parent_slug,
+                "status": str((node.get("data") or {}).get("status") or "pending_validation"),
+            }
+        )
+    plan_json["graph_json"] = graph
+    return plan_json
 
 
 def _deep_merge(base: Any, patch: Any) -> Any:
@@ -499,6 +610,7 @@ def get_or_create_plan_json(
     plan_json["suggestions"] = list(plan_json["validation"]["suggestions"])
     plan_json["pending_issues"] = list(plan_json["validation"]["pending"])
     plan_json["blocking_issues"] = list(plan_json["validation"]["blocking"])
+    plan_json["graph_json"] = plan_json_to_graph_json(plan_json)
     state["plan_json"] = plan_json
     state["updated_at"] = now_ts
     _persist_state(key, state, persona_slug)
@@ -528,8 +640,11 @@ def apply_plan_json_patch(
             if len(parts) > 2:
                 title = " ".join(parts[-2:]).strip().title()
             next_plan["plan"]["product"].append({"title": title, "parent_slug": None, "status": "pending_parent"})
-        elif "audience" in text or "publico" in text or "público" in text:
-            next_plan["plan"]["audience"].append({"title": "Audience", "parent_slug": None, "status": "pending_parent"})
+        elif "audience" in text or "audiencia" in text or "audiência" in text or "publico" in text or "público" in text:
+            if not next_plan["plan"]["audience"]:
+                title = "Audience Padrão" if ("padrao" in text or "padr" in text or "default" in text) else "Audience"
+                slug = "audiencia-padrao" if ("padrao" in text or "padr" in text or "default" in text) else "audience"
+                next_plan["plan"]["audience"].append({"slug": slug, "title": title, "parent_slug": None, "status": "pending_parent"})
         elif "campanha" in text or "campaign" in text:
             title = _title_from_command(command or "", markers=("chamada", "chamado", "campanha", "campaign"), default="Campaign")
             next_plan["plan"]["campaign"].append({"title": title, "parent_slug": None, "status": "pending_parent"})
@@ -542,6 +657,7 @@ def apply_plan_json_patch(
     next_plan["suggestions"] = list(next_plan["validation"]["suggestions"])
     next_plan["pending_issues"] = list(next_plan["validation"]["pending"])
     next_plan["blocking_issues"] = list(next_plan["validation"]["blocking"])
+    next_plan["graph_json"] = plan_json_to_graph_json(next_plan)
     state["plan_json"] = next_plan
     state["updated_at"] = time.time()
     _persist_state(key, state, persona_slug)

@@ -92,6 +92,13 @@ def test_publish_success_and_validation_error(monkeypatch):
     monkeypatch.setattr(graph_documents.auth_service, "current_user", lambda request: {"id": "u1"})
     monkeypatch.setattr(graph_documents, "_latest_event", lambda persona_slug, brand_slug: None)
     monkeypatch.setattr(graph_documents.supabase_client, "insert_event", lambda payload, source=None: {"id": "evt1"})
+    reindex_calls = []
+    monkeypatch.setattr(
+        graph_documents.graph_json_importer,
+        "import_graph_json",
+        lambda **kwargs: reindex_calls.append(kwargs)
+        or {"ok": True, "nodes_imported": len(kwargs["graph_json"].nodes), "edges_imported": len(kwargs["graph_json"].edges)},
+    )
     body = graph_documents.PublishGraphDocumentBody(
         persona_slug="allanvvz",
         brand_slug=None,
@@ -102,6 +109,10 @@ def test_publish_success_and_validation_error(monkeypatch):
     ok = graph_documents.graph_document_publish(body, _req())
     assert ok["ok"] is True
     assert ok["version"] == 1
+    # Publishing materializes the derived tables (reindex).
+    assert ok["reindex_ok"] is True
+    assert ok["nodes_imported"] == 2
+    assert reindex_calls, "publish must trigger import_graph_json"
 
     bad = _graph_json()
     bad["schema_version"] = "legacy"
@@ -187,9 +198,15 @@ def test_reindex_success_and_validation_error(monkeypatch):
     monkeypatch.setattr(graph_documents.auth_service, "current_user", lambda request: {"id": "u1"})
     graph_obj = graph_documents.GraphJson.model_validate(_graph_json())
     monkeypatch.setattr(graph_documents.graph_json_v2_store, "load_current", lambda persona_slug: (3, graph_obj))
+    monkeypatch.setattr(
+        graph_documents.graph_json_importer,
+        "import_graph_json",
+        lambda **kwargs: {"ok": True, "nodes_imported": len(kwargs["graph_json"].nodes), "edges_imported": len(kwargs["graph_json"].edges)},
+    )
     ok = graph_documents.graph_document_reindex(graph_documents.ReindexBody(persona_slug="allanvvz"), _req())
     assert ok["ok"] is True
     assert ok["indexed_nodes"] == 2
+    assert ok["reindex_ok"] is True
 
     invalid_graph = graph_documents.GraphJson.model_validate(_graph_json())
     invalid_graph.schema_version = "1.0"

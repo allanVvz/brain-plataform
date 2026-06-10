@@ -12,7 +12,7 @@ export const ADD_BLOCK_PARENT_TYPES: Record<string, string[]> = {
   campaign: ["briefing", "brand", "persona"],
   audience: ["campaign", "briefing", "brand"],
   product_group: ["audience"],
-  product: ["product_group"],
+  product: ["product_group", "audience", "campaign", "briefing", "brand"],
   copy: ["product", "product_group"],
   faq: ["copy", "product", "product_group"],
   asset: ["product", "product_group", "campaign", "brand"],
@@ -23,7 +23,7 @@ export const ADD_BLOCK_PARENT_TYPES: Record<string, string[]> = {
 
 export const ADD_BLOCK_PARENT_RELATIONS: Record<string, Record<string, string>> = {
   brand: { persona: "persona_has_brand" },
-  briefing: { brand: "brand_has_briefing", campaign: "campaign_has_briefing", persona: "contains" },
+  briefing: { brand: "brand_has_briefing", campaign: "contains", persona: "contains" },
   campaign: { briefing: "briefing_has_campaign", brand: "contains", persona: "contains" },
   audience: { campaign: "campaign_has_audience", briefing: "contains", brand: "contains" },
   product_group: { audience: "audience_has_product_group" },

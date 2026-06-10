@@ -49,7 +49,7 @@ const EXPECTED_PARENT_TYPES: Record<string, string[]> = {
   brand: ["persona"],
   campaign: ["briefing", "brand", "persona"],
   briefing: ["brand", "campaign", "persona"],
-  audience: ["briefing", "campaign", "brand", "persona"],
+  audience: ["campaign", "briefing", "brand", "persona"],
   product_group: ["audience", "briefing", "campaign", "brand", "persona"],
   gallery: ["copy", "faq", "asset", "background", "texture", "product", "campaign", "brand", "persona"],
   embedded: ["faq"],
@@ -73,6 +73,10 @@ const STRUCTURAL_RELATIONS = new Set([
   "belongs_to_persona",
   "part_of",
   "part_of_campaign",
+  "targets_audience",
+  "campaign_has_audience",
+  "audience_has_product_group",
+  "product_group_has_product",
   "under",
   "parent_of",
   "contains",
@@ -85,9 +89,6 @@ const STRUCTURAL_RELATIONS = new Set([
   "persona_has_brand",
   "brand_has_briefing",
   "briefing_has_campaign",
-  "campaign_has_audience",
-  "audience_has_product_group",
-  "product_group_has_product",
   "product_has_faq",
   "product_has_copy",
   "copy_has_faq",
@@ -205,7 +206,29 @@ function isExplicitPrimaryEdge(edge: Edge<GraphEdgeData>): boolean {
 
 function relationAllowsParentCandidate(childId: string, parentId: string, edge: Edge<GraphEdgeData>): boolean {
   const rt = relationType(edge);
-  if (["manual", "contains", "parent_of", "targets", "supports_copy", "supports_campaign", "answers_question", "defines_brand", "has_tone", "gallery_asset", "persona_has_brand", "brand_has_briefing", "briefing_has_campaign", "campaign_has_audience", "audience_has_product_group", "product_group_has_product", "product_has_faq", "product_has_copy", "copy_has_faq"].includes(rt)) {
+  if ([
+    "manual",
+    "contains",
+    "parent_of",
+    "targets",
+    "targets_audience",
+    "supports_copy",
+    "supports_campaign",
+    "answers_question",
+    "defines_brand",
+    "has_tone",
+    "gallery_asset",
+    "persona_has_brand",
+    "brand_has_briefing",
+    "briefing_has_campaign",
+    "campaign_has_audience",
+    "audience_has_product_group",
+    "product_group_has_product",
+    "product_has_faq",
+    "product_has_copy",
+    "copy_has_faq",
+    "briefed_by",
+  ].includes(rt)) {
     return edge.source === parentId && edge.target === childId;
   }
   if (["belongs_to", "part_of", "derived_from", "product_of", "audience_of", "campaign_of", "brand_of"].includes(rt)) {
@@ -219,10 +242,11 @@ function relationPriority(edge: Edge<GraphEdgeData>): number {
   if (rt === "persona_has_brand") return 0;
   if (rt === "brand_has_briefing") return 1;
   if (rt === "briefing_has_campaign") return 2;
-  if (rt === "campaign_has_audience") return 3;
+  if (rt === "campaign_has_audience" || rt === "targets_audience") return 3;
   if (rt === "audience_has_product_group") return 4;
   if (rt === "product_group_has_product") return 5;
-  if (rt === "product_has_faq" || rt === "copy_has_faq") return 6;
+  if (rt === "product_has_copy") return 6;
+  if (rt === "product_has_faq" || rt === "copy_has_faq") return 7;
   if (rt === "manual") return 0;
   if (rt === "contains" || rt === "parent_of") return 1;
   if (rt === "part_of_campaign" || rt === "campaign_of") return 2;

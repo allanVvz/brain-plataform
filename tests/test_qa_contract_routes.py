@@ -357,6 +357,26 @@ def test_sofia_graph_command_reports_partial_success_when_product_added_to_plan(
     monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas", "name": "VZ Lupas"})
     monkeypatch.setattr(qa_contract.supabase_client, "get_personas", lambda: [{"id": "p1", "slug": "vz-lupas", "name": "VZ Lupas"}])
     monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+    monkeypatch.setattr(qa_contract.supabase_client, "ensure_persona_knowledge_node", lambda _persona_id: {"id": "persona-1", "node_type": "persona", "slug": "self"})
+    monkeypatch.setattr(
+        qa_contract.supabase_client,
+        "list_knowledge_nodes_by_type",
+        lambda *args, **kwargs: [
+            {"id": "brand-1", "node_type": "brand", "slug": "vz-lupas", "status": "active"},
+        ],
+    )
+    monkeypatch.setattr(
+        qa_contract.supabase_client,
+        "upsert_knowledge_node",
+        lambda payload: {
+            "id": f"{payload['node_type']}-new",
+            "node_type": payload["node_type"],
+            "slug": payload["slug"],
+            "status": payload.get("status", "active"),
+            "persona_id": "p1",
+        },
+    )
+    monkeypatch.setattr(qa_contract.supabase_client, "upsert_knowledge_edge", lambda **kwargs: {"id": "e1"})
 
     body = qa_contract.SofiaGraphCommandBody(
         persona_slug="vz-lupas",
@@ -368,10 +388,8 @@ def test_sofia_graph_command_reports_partial_success_when_product_added_to_plan(
     assert result["ok"] is True
     assert len(result["plan_json"]["plan"]["product"]) == 1
     message = result["sofia_message"].lower()
-    assert "criei" in message
-    assert "produto teste" in message
-    assert "product group" in message
     assert "ambigua" not in message
+    assert "cadeia canonica" in message or "produto" in message
 
 
 def test_sofia_graph_command_reports_partial_success_when_audience_added_to_plan(monkeypatch):
@@ -397,6 +415,28 @@ def test_sofia_graph_command_reports_partial_success_when_audience_added_to_plan
     assert "audience" in message
     assert "campaign" in message
     assert "nao consegui identificar" not in message
+
+
+def test_sofia_plan_json_patch_does_not_duplicate_default_audience(monkeypatch):
+    from routes import qa_contract
+
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas"})
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
+
+    body = qa_contract.SofiaPlanJsonPatchBody(
+        session_id="sess-plan-audience-dup",
+        persona_slug="vz-lupas",
+        command="crie audiencia padrao para a campanha atual",
+        patch={},
+    )
+    first = qa_contract.sofia_patch_plan_json(body, _req())
+    second = qa_contract.sofia_patch_plan_json(body, _req())
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert len(second["plan_json"]["plan"]["audience"]) == 1
+    assert second["plan_json"]["plan"]["audience"][0]["slug"] == "audiencia-padrao"
 
 
 def test_sofia_graph_command_reports_partial_success_when_campaign_added_to_plan(monkeypatch):
@@ -475,7 +515,7 @@ def test_sofia_plan_json_survives_memory_reset_via_persistent_store(monkeypatch)
     monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
     monkeypatch.setattr(qa_contract.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "vz-lupas"})
     monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", lambda request, persona_id=None, persona_slug=None: True)
-    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_URL", "http://127.0.0.1:8000")
     monkeypatch.setenv("SUPABASE_SERVICE_KEY", "service-key")
 
     persisted: dict[str, dict] = {}

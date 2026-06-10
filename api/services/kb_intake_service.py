@@ -112,7 +112,27 @@ def get_agent_profile(agent_key: str | None = None) -> dict:
     return AGENT_PROFILES.get((agent_key or "sofia").strip().lower(), AGENT_PROFILES["sofia"])
 
 
-_SYSTEM_PROMPT = """Você é uma agente especializada em classificar materiais para a base de conhecimento da plataforma Brain AI.
+def _load_agent_prompt(name: str, fallback: str) -> str:
+    """Load a Sofia agent prompt from the repo-root `agents/` dir at runtime.
+
+    D2: the Sofia Criar/Orquestrar system prompts live in `agents/*.md` and are
+    composed at runtime. The inline constant remains the fallback so the backend
+    keeps working when the file is absent (fresh checkout / container without the
+    agents dir mounted)."""
+    try:
+        from pathlib import Path as _Path
+
+        path = _Path(__file__).resolve().parents[2] / "agents" / name
+        if path.exists():
+            text = path.read_text(encoding="utf-8").strip()
+            if text:
+                return text
+    except Exception:
+        pass
+    return fallback
+
+
+_INLINE_SYSTEM_PROMPT = """Você é uma agente especializada em classificar materiais para a base de conhecimento da plataforma Brain AI.
 
 Sua identidade de conversa vem do estado da sessão. Por padrão, a agente é Sofia, agente de inteligência marketing comercial. Em fluxos futuros, a identidade pode mudar organicamente para Zaya, agente de marketing visual. Nunca se apresente como "Criar"; Criar é o nome da ferramenta/tela, não da agente.
 
@@ -290,7 +310,7 @@ NÃO use rótulos como "Classe atual:" ou "Estado:". Inclua apenas o bloco de es
 Quando TODAS as informações estiverem coletadas E confirmadas pelo usuário, marque "complete": true.
 """
 
-_SYSTEM_PROMPT += """
+_INLINE_SYSTEM_PROMPT += """
 
 === FLUXO CAPTURAR / MARKETING GRAPH ===
 Quando a sessão trouxer um contexto inicial confirmado pelo operador, leia esse contexto como briefing operacional. Antes de acionar qualquer salvamento, proponha:
@@ -447,7 +467,7 @@ Apos a geracao inicial de cards, ofereca proativamente ideias de melhorias ou co
 """
 
 
-_SYSTEM_PROMPT += """
+_INLINE_SYSTEM_PROMPT += """
 
 === FAQ EM MODO CRIAR ===
 Você não escreve o conteúdo do FAQ. Quando o operador pedir FAQ, emita 1 entry `faq` placeholder com `metadata.parent_slug` apontando para o `copy` correto e `metadata.generate_via=\"branch\"`. O backend chama `generate_faq_from_branch(parent_slug)` ao salvar e preenche perguntas/respostas a partir do galho real. Marque essa entry como `status: pendente_validacao` para passar pela curadoria.
@@ -456,7 +476,7 @@ Você não escreve o conteúdo do FAQ. Quando o operador pedir FAQ, emita 1 entr
 Catálogo com várias categorias e dezenas/centenas de produtos: emita 1 product_group por categoria informada (não invente) e 1 product por SKU. Não tente gerar copy/offer/faq automaticamente para cada um — espere o operador pedir o galho que ele quer hoje.
 """
 
-_SYSTEM_PROMPT += """
+_INLINE_SYSTEM_PROMPT += """
 
 === CONTRATO CANÔNICO DO MODO CRIAR / SOFIA ===
 Esta seção substitui qualquer regra anterior sobre multiplicação automática de FAQ, expansão piramidal forçada ou políticas de count.
@@ -490,6 +510,10 @@ Status: bloqueado
 Motivo: faltam dados para X
 Ação: responder os campos pendentes (máx 2 perguntas)
 """
+
+
+# D2: prefer agents/sofia_criar.md when present; fall back to the inline default.
+_SYSTEM_PROMPT = _load_agent_prompt("sofia_criar.md", _INLINE_SYSTEM_PROMPT)
 
 
 def _extract_cls(text: str) -> Optional[dict]:
@@ -5625,6 +5649,32 @@ def chat(session_id: str, user_message: str, file_info: Optional[dict] = None, i
                 "kb_intake_chat_wrapper",
                 f"chat() escaped exception session={(session_id or '')[:8]}: {exc}",
                 exc,
+            )
+        except Exception:
+            pass
+        # Persist the escaped traceback to system_events. The inner handlers
+        # (_chat_impl LLM/post-LLM) already persist their failures, but an
+        # exception escaping _chat_impl's SETUP phase only reached sre_logger
+        # (stdout) — undiagnosable after the fact. This closes that gap so an
+        # edit-turn crash leaves a queryable record with the full traceback.
+        try:
+            from services import supabase_client as _sb
+            _sb.insert_event(
+                {
+                    "event_type": "kb_intake_chat_crashed",
+                    "entity_type": "kb_intake_session",
+                    "entity_id": session_id,
+                    "level": "error",
+                    "source": "kb-intake.chat.wrapper",
+                    "payload": {
+                        "session_id": session_id,
+                        "exception_type": type(exc).__name__,
+                        "message": str(exc)[:500],
+                        "user_message_preview": (user_message or "")[:200],
+                        "traceback_tail": tb_text.splitlines()[-20:],
+                    },
+                },
+                source="kb-intake.chat.wrapper",
             )
         except Exception:
             pass

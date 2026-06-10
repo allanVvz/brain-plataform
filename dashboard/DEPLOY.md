@@ -1,109 +1,77 @@
-# Deploy Vercel + Cloud Run
+﻿# Docker Deploy / Local Run
 
-Este dashboard usa Next.js com proxy `/api-brain/*` para o backend publicado no Cloud Run.
+This project is now operated locally through Docker Compose. The backend is a
+separate service from the database, so you can audit each layer independently.
 
-## Frontend na Vercel
+## Services
 
-Configure no projeto da Vercel:
+- `db` - local Postgres
+- `storage` - local storage API
+- `rest` - local PostgREST
+- `kong` - local gateway
+- `migrate` - bootstrap + migrations
+- `api` - FastAPI backend on `localhost:8080`
+- `workers` - background jobs in a separate container
 
-```env
-NEXT_PUBLIC_API_URL=https://SEU-BACKEND-CLOUD-RUN.run.app
-NEXT_PUBLIC_SUPABASE_URL=https://SEU-PROJETO.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=SEU_SUPABASE_ANON_KEY
-NEXT_PUBLIC_SUPABASE_ANON_KEY=SEU_SUPABASE_ANON_KEY
+## Start
+
+```bash
+python infra/generate_keys.py --write .env.compose
+docker compose --env-file .env.compose up -d --build
 ```
 
-Notas:
-- `NEXT_PUBLIC_API_URL` e o nome canonico atual.
-- O frontend ainda aceita o legado `NEXT_PUBLIC_AI_BRAIN_URL` como fallback, mas deploy novo deve usar `NEXT_PUBLIC_API_URL`.
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY` e opcional quando `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` estiver presente.
-- Nao use `SUPABASE_SERVICE_KEY` no frontend.
-- Se voce alterar envs na Vercel, faca novo deploy do frontend. A mudanca nao entra em um deploy ja pronto.
+## Audit
 
-Deploy:
+```bash
+docker compose --env-file .env.compose ps
+docker compose --env-file .env.compose logs -f db api workers
+curl http://localhost:8080/health
+curl http://localhost:8080/api/menu/baita-conveniencia
+```
+
+## Dashboard Environments
+
+For Sofia QA from `localhost:3000`, point the dashboard at the host backend:
+
+```env
+API_INTERNAL_BASE_URL=http://127.0.0.1:8001
+NEXT_PUBLIC_API_BASE_URL=/api-brain
+```
+
+Switch targets without editing ports by hand:
+
+```powershell
+# QA backend on the host
+.\scripts\set-dashboard-env.ps1 -Target local-qa
+
+# Docker backend
+.\scripts\set-dashboard-env.ps1 -Target docker
+
+# Vercel build target; backend must be public, not localhost
+.\scripts\set-dashboard-env.ps1 -Target vercel -BackendUrl https://YOUR-BACKEND-DOMAIN
+```
+
+Then run:
 
 ```bash
 cd dashboard
-npm install
-npm run build
-vercel --prod
+npm run dev:local
 ```
 
-## Backend no Cloud Run
+## Docker Deploy
 
-Configure no Cloud Run:
-
-```env
-SUPABASE_URL=https://SEU-PROJETO.supabase.co
-SUPABASE_SERVICE_KEY=SEU_SERVICE_ROLE_KEY
-ALLOWED_ORIGINS=https://SEU_FRONT.vercel.app,http://localhost:3000
-VAULT_SOURCE_MODE=github
-GITHUB_VAULT_REPO=owner/ai-brain-vault
-GITHUB_VAULT_BRANCH=main
-GITHUB_VAULT_ROOT=
-GITHUB_TOKEN=SEU_TOKEN_READ_ONLY
+```powershell
+.\scripts\deploy-docker.ps1
 ```
 
-Notas criticas:
-- `SUPABASE_SERVICE_KEY` precisa ser a `service_role` real do Supabase.
-- Se voce usar a `anon key` no lugar da `service_role`, `GET /health/ready` pode ate responder `200`, mas o login tende a falhar porque `app_users` pode voltar vazio no fluxo de auth.
-- Inclua todos os dominios Vercel realmente usados em `ALLOWED_ORIGINS`, por exemplo o dominio estavel e eventuais dominios temporarios de producao/preview.
+The script switches the dashboard to `http://localhost:8080`, starts the Docker
+services, and checks `/health`.
 
-Deploy:
+## Vercel Deploy
 
-```bash
-gcloud run deploy ai-brain-api \
-  --source ./api \
-  --region us-central1 \
-  --allow-unauthenticated
+```powershell
+.\scripts\deploy-vercel.ps1 -BackendUrl https://YOUR-BACKEND-DOMAIN -Prod
 ```
 
-## Ordem recomendada
-
-1. Publique ou atualize o backend no Cloud Run.
-2. Valide `GET /health` e `GET /health/ready` no backend.
-3. Configure `NEXT_PUBLIC_API_URL` na Vercel apontando para a URL do Cloud Run.
-4. Publique o frontend na Vercel.
-
-## Diagnostico rapido
-
-Use estes sintomas para identificar o ponto da falha:
-
-- `GET /api-brain/health` falha:
-  o frontend nao esta chegando no backend correto. Revise `NEXT_PUBLIC_API_URL`.
-- `GET /api-brain/health` responde `200`, mas `POST /api-brain/auth/login` responde `500` ou `503`:
-  o backend chegou no Supabase mas falhou no fluxo de auth. Revise `SUPABASE_SERVICE_KEY`, logs do Cloud Run e disponibilidade do Supabase.
-- `GET /api-brain/auth/me` responde `401` na pagina `/login` antes de autenticar:
-  isso e esperado.
-- `POST /api-brain/auth/login` responde `401` com `Email/usuario ou senha invalidos.`:
-  a infra esta funcional; o problema e credencial do usuario.
-
-## Comandos de verificacao
-
-Backend:
-
-```bash
-curl https://SEU-BACKEND.run.app/health
-curl https://SEU-BACKEND.run.app/health/ready
-```
-
-Logs do Cloud Run em tempo real:
-
-```bash
-gcloud beta run services logs tail ai-brain-api --region us-central1
-```
-
-Fallback sem streaming:
-
-```bash
-gcloud run services logs read ai-brain-api --region us-central1 --limit 100
-```
-
-## Validacao final
-
-Depois do deploy:
-1. Abrir `/login`.
-2. Tentar autenticar e confirmar `POST /api-brain/auth/login -> 200`.
-3. Confirmar `GET /api-brain/auth/me -> 200` apos o login.
-4. Abrir `/knowledge/graph`, `/messages` e `/pipeline`.
-5. Confirmar que as chamadas `/api-brain/*` nao retornam erro de configuracao.
+The Vercel backend URL must be publicly reachable. A local Docker URL such as
+`localhost:8080` will not work from Vercel.

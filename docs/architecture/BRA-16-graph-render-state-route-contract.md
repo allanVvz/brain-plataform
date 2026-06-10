@@ -9,7 +9,7 @@ Preserve current stack and expose QA graph render-state validation through Next.
 
 - Frontend contract route: `GET /api/qa/graph-render-state`
 - Runtime owner: `dashboard` (Next.js on Vercel)
-- Data source owner: `api` (`/knowledge/graph-data` in FastAPI on Cloud Run)
+- Data source owner: `api` (`/knowledge/graph-data` in FastAPI/Docker)
 - Intelligence authority: AI Brain graph (`knowledge_nodes` + `knowledge_edges`), not Catalog
 
 This keeps frontend preflight stable while backend remains source of validated graph truth.
@@ -17,7 +17,7 @@ This keeps frontend preflight stable while backend remains source of validated g
 ## Environment Boundary
 - Non-prod `FrontendBaseUrl` for BRA-10: `https://baita-cardapio-qa.vercel.app`
 - QA deployment is Vercel SSO-protected; preflight runner must use authenticated access (Vercel bypass/share token path where needed).
-- Backend target for QA must resolve through `NEXT_PUBLIC_API_URL` to `ai-brain-api-qa` Cloud Run.
+- Backend target for QA must resolve through `API_INTERNAL_BASE_URL` to an approved backend URL.
 
 ## Contract (Request/Response)
 Request:
@@ -49,7 +49,7 @@ Error handling:
 ## Risks and Validation Plan
 Risks:
 - QA SSO can be mistaken for route regression (false 401/403/404 signals).
-- Wrong backend env mapping (`NEXT_PUBLIC_API_URL`) can point to prod or local fallback.
+- Wrong backend env mapping (`API_INTERNAL_BASE_URL`) can point to the wrong backend or local fallback.
 - Persona mismatch can produce empty graph and fail 3/9 assertions.
 
 Validation:

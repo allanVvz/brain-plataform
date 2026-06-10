@@ -1,9 +1,7 @@
 import { type NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/middleware";
 
 export async function proxy(request: NextRequest) {
-  const { supabaseResponse } = createClient(request);
   const { pathname } = request.nextUrl;
   const isLogin = pathname === "/login";
   const hasSession = Boolean(request.cookies.get("ai_brain_session")?.value);
@@ -15,7 +13,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  return supabaseResponse;
+  return NextResponse.next({ request: { headers: request.headers } });
 }
 
 export const config = {

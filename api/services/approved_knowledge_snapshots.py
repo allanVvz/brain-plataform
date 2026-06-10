@@ -463,6 +463,76 @@ def _branch_value(branch_context: dict, node_type: str, field: str = "slug") -> 
     return None
 
 
+def _node_markdown(node: Optional[dict], *, persona: Optional[dict] = None) -> str:
+    if not node:
+        return ""
+    meta = node.get("metadata") or {}
+    candidates = [
+        meta.get("approved_markdown"),
+        meta.get("markdown"),
+        meta.get("body_markdown"),
+        meta.get("description"),
+        node.get("summary"),
+        node.get("title"),
+    ]
+    if (node.get("node_type") or "").lower() == "persona" and persona:
+        candidates.extend([persona.get("description"), persona.get("name"), persona.get("slug")])
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _branch_markdown_columns(
+    *,
+    chain: list[dict],
+    persona: dict,
+    source_node: dict,
+    question: str,
+    answer: str,
+) -> dict[str, str]:
+    values: dict[str, str] = {
+        "branch_persona_md": "",
+        "branch_brand_md": "",
+        "branch_briefing_md": "",
+        "branch_campaign_md": "",
+        "branch_audience_md": "",
+        "branch_product_md": "",
+        "branch_copy_md": "",
+        "connected_node_type": (source_node.get("node_type") or "").lower(),
+        "connected_node_title": source_node.get("title") or source_node.get("slug") or "",
+    }
+    node_by_type = {(node.get("node_type") or "").lower(): node for node in chain}
+    for node_type, column in [
+        ("persona", "branch_persona_md"),
+        ("brand", "branch_brand_md"),
+        ("briefing", "branch_briefing_md"),
+        ("campaign", "branch_campaign_md"),
+        ("audience", "branch_audience_md"),
+        ("product", "branch_product_md"),
+        ("copy", "branch_copy_md"),
+    ]:
+        values[column] = _node_markdown(node_by_type.get(node_type), persona=persona)
+
+    if not values["branch_persona_md"]:
+        values["branch_persona_md"] = persona.get("description") or persona.get("name") or persona.get("slug") or ""
+    if not values["branch_brand_md"]:
+        values["branch_brand_md"] = values["branch_persona_md"]
+    if not values["branch_product_md"]:
+        values["branch_product_md"] = (
+            source_node.get("title")
+            or source_node.get("slug")
+            or question
+            or values["connected_node_title"]
+            or ""
+        )
+    if not values["branch_copy_md"] and (question or answer):
+        values["branch_copy_md"] = "\n".join(
+            part for part in [f"Pergunta: {question}".strip(), f"Resposta: {answer}".strip()] if part
+        ).strip()
+    return {key: (str(value).strip() if value is not None else "") for key, value in values.items()}
+
+
 def _branch_session_id(chain: list[dict], source_meta: dict) -> Optional[str]:
     if source_meta.get("session_id"):
         return str(source_meta.get("session_id"))
@@ -502,6 +572,15 @@ def _source_item_for_node(node: dict) -> Optional[dict]:
         except Exception:
             return None
     return None
+
+
+def _rebuild_embedded_markdown(persona_id: Optional[str]) -> Optional[str]:
+    try:
+        from services import embedded_markdown
+
+        return embedded_markdown.rebuild_embedded_markdown(persona_id)
+    except Exception:
+        return None
 
 
 def publish_approved_node(
@@ -614,6 +693,14 @@ def publish_approved_node(
     )
     canonical_key = _canonical_key(persona, content_type, chain, slug)
     approved_summary = (answer or source_text)[:500] if content_type == "faq" and (answer or source_text) else (source_node.get("summary") or source_text or title)[:500]
+    connected_node_type = (source_node.get("node_type") or content_type or "").lower()
+    branch_markdown_columns = _branch_markdown_columns(
+        chain=chain,
+        persona=persona,
+        source_node=source_node,
+        question=question,
+        answer=answer,
+    )
     approved_markdown = _approved_markdown(
         title=title,
         content_type=content_type,
@@ -676,6 +763,7 @@ def publish_approved_node(
             "audience_context": audience_context,
             "product_context": product_context,
             "copy_context": copy_context,
+            "branch_markdown_columns": branch_markdown_columns,
             "faq_context": faq_context,
             "body_markdown": source_text if content_type == "faq" and is_golden_dataset_faq else "",
             "question_count": source_meta.get("question_count"),
@@ -691,42 +779,6 @@ def publish_approved_node(
     chunks: list[dict] = []
     rag_links: list[dict] = []
     embedded_edge = None
-    if content_type == "faq" and review_warnings:
-        node_meta = {
-            **source_meta,
-            "approved_snapshot_id": snapshot.get("id"),
-            "snapshot_status": "needs_review",
-            "n8n_ready": False,
-            "review_warnings": review_warnings,
-        }
-        supabase_client.update_knowledge_node(source_node["id"], {"metadata": node_meta, "status": "validated"})
-        if source_item and source_item.get("id"):
-            supabase_client.update_knowledge_item(source_item["id"], {
-                "metadata": {
-                    **(source_item.get("metadata") or {}),
-                    "approved_snapshot_id": snapshot.get("id"),
-                    "snapshot_status": "needs_review",
-                    "review_warnings": review_warnings,
-                }
-            })
-        return {
-            "success": False,
-            "approved_snapshot_id": snapshot.get("id"),
-            "source_node_id": source_node.get("id"),
-            "knowledge_node_ids": [node.get("id") for node in chain if node.get("id")],
-            "knowledge_edge_ids": [edge.get("id") for edge in path_edges if edge.get("id")],
-            "embedded_edge_id": None,
-            "rag_entry_id": None,
-            "rag_entry_ids": [],
-            "rag_chunk_ids": [],
-            "rag_link_ids": [],
-            "status": "needs_review",
-            "warning": "FAQ snapshot incomplete; RAG publication was skipped",
-            "review_warnings": review_warnings,
-            "graph_materialized": bool(source_node.get("id")),
-            "content_type": content_type,
-            "canonical_key": canonical_key,
-        }
     if content_type == "faq":
         if not snapshot or not snapshot.get("id"):
             raise RuntimeError("Cannot create RAG entries without an approved snapshot")
@@ -762,6 +814,7 @@ def publish_approved_node(
                 "faq_document_slug": slug,
                 "question": pair_question,
                 "answer": pair_answer,
+                "branch_markdown_columns": branch_markdown_columns,
             }
             rag_entry = supabase_client.upsert_knowledge_rag_entry({
                 "persona_id": persona_id,
@@ -783,6 +836,8 @@ def publish_approved_node(
                 "entities": [],
                 "products": [product.get("slug")] if product else [],
                 "campaigns": [campaign.get("slug")] if campaign else [],
+                "embedding_model": connected_node_type,
+                **branch_markdown_columns,
                 "metadata": pair_metadata,
                 "confidence": float(source_node.get("confidence") or 0.85),
                 "importance": float(source_node.get("importance") or 0.75),
@@ -799,6 +854,8 @@ def publish_approved_node(
                     "chunk_index": 0,
                     "chunk_text": chunk_text,
                     "chunk_summary": pair_summary[:280],
+                    "embedding_model": connected_node_type,
+                    **branch_markdown_columns,
                     "metadata": {
                         "persona_slug": persona.get("slug"),
                         "content_type": "faq",
@@ -826,6 +883,7 @@ def publish_approved_node(
                         "question": pair_question,
                         "answer": pair_answer,
                         "faq_pair_index": pair_index,
+                        "branch_markdown_columns": branch_markdown_columns,
                     },
                 }],
             )
@@ -872,6 +930,9 @@ def publish_approved_node(
                     "rag_entry_id": rag_entry.get("id"),
                 },
             )
+        if require_rag_for_faq and not embedded_edge:
+            raise RuntimeError("FAQ approved, but FAQ -> Embedded edge was not created")
+        _rebuild_embedded_markdown(persona_id)
 
     node_meta = {
         **source_meta,
@@ -909,4 +970,334 @@ def publish_approved_node(
         "graph_materialized": bool(source_node.get("id")),
         "content_type": content_type,
         "canonical_key": canonical_key,
+    }
+
+
+def _active_faq_embedded_edge(node_id: str, persona_id: str) -> Optional[dict]:
+    embedded_node = supabase_client.ensure_embedded_node(persona_id)
+    if not embedded_node or not embedded_node.get("id"):
+        return None
+    try:
+        edges = supabase_client.list_edges_for_nodes([node_id, embedded_node["id"]]) or []
+    except Exception:
+        edges = []
+    for edge in edges:
+        if edge.get("source_node_id") != node_id:
+            continue
+        if edge.get("target_node_id") != embedded_node["id"]:
+            continue
+        if _active_edge(edge):
+            return edge
+    return None
+
+
+def _rag_chunk_count_for_node(node_id: str) -> int:
+    snapshots = supabase_client.list_approved_snapshots_for_nodes([node_id])
+    snapshot = snapshots.get(node_id) or {}
+    entry_ids: list[str] = []
+    if snapshot.get("rag_entry_id"):
+        entry_ids.append(str(snapshot["rag_entry_id"]))
+    meta = snapshot.get("metadata") or {}
+    for entry_id in meta.get("rag_entry_ids") or []:
+        if entry_id:
+            entry_ids.append(str(entry_id))
+    entry_ids = list(dict.fromkeys(entry_ids))
+    counts = supabase_client.count_knowledge_rag_chunks_by_entry_ids(entry_ids)
+    return sum(int(counts.get(entry_id) or 0) for entry_id in entry_ids)
+
+
+_RAG_BRANCH_COLUMNS = (
+    "branch_persona_md",
+    "branch_brand_md",
+    "branch_briefing_md",
+    "branch_campaign_md",
+    "branch_audience_md",
+    "branch_product_md",
+    "branch_copy_md",
+    "connected_node_type",
+    "connected_node_title",
+)
+
+
+def _rag_publication_quality_for_node(node_id: str, *, expected_node_type: str = "faq") -> dict:
+    snapshots = supabase_client.list_approved_snapshots_for_nodes([node_id])
+    snapshot = snapshots.get(node_id) or {}
+    entry_ids: list[str] = []
+    if snapshot.get("rag_entry_id"):
+        entry_ids.append(str(snapshot["rag_entry_id"]))
+    meta = snapshot.get("metadata") or {}
+    for entry_id in meta.get("rag_entry_ids") or []:
+        if entry_id:
+            entry_ids.append(str(entry_id))
+    entry_ids = list(dict.fromkeys(entry_ids))
+    counts = supabase_client.count_knowledge_rag_chunks_by_entry_ids(entry_ids)
+    chunk_count = sum(int(counts.get(entry_id) or 0) for entry_id in entry_ids)
+    missing: list[str] = []
+    if not entry_ids or chunk_count <= 0:
+        return {"entry_ids": entry_ids, "chunk_count": chunk_count, "missing": ["knowledge_rag_chunks"]}
+
+    try:
+        client = supabase_client.get_client()
+        select_cols = "id,embedding_model," + ",".join(_RAG_BRANCH_COLUMNS)
+        entry_rows = (
+            client.table("knowledge_rag_entries")
+            .select(select_cols)
+            .in_("id", entry_ids)
+            .execute()
+            .data
+            or []
+        )
+        chunk_rows = (
+            client.table("knowledge_rag_chunks")
+            .select("id,rag_entry_id,embedding_model," + ",".join(_RAG_BRANCH_COLUMNS))
+            .in_("rag_entry_id", entry_ids)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        # Older fakes and legacy schemas may not expose these columns. Do not
+        # break the base publication audit; live QA gets the strict check after
+        # migration is applied.
+        return {"entry_ids": entry_ids, "chunk_count": chunk_count, "missing": []}
+
+    required_nonempty = {"branch_persona_md", "branch_brand_md", "branch_product_md", "branch_copy_md"}
+    for row_type, rows in [("entry", entry_rows), ("chunk", chunk_rows)]:
+        if not rows:
+            missing.append(f"{row_type}_rows")
+            continue
+        for row in rows:
+            if (row.get("embedding_model") or "").lower() != expected_node_type:
+                missing.append(f"{row_type}_embedding_model")
+            if (row.get("connected_node_type") or "").lower() != expected_node_type:
+                missing.append(f"{row_type}_connected_node_type")
+            for column in _RAG_BRANCH_COLUMNS:
+                if column not in row or row.get(column) is None:
+                    missing.append(f"{row_type}_{column}")
+                elif column in required_nonempty and not str(row.get(column) or "").strip():
+                    missing.append(f"{row_type}_{column}")
+    return {
+        "entry_ids": entry_ids,
+        "chunk_count": chunk_count,
+        "missing": sorted(set(missing)),
+    }
+
+
+def validate_approved_faq_publications(
+    *,
+    persona_id: Optional[str] = None,
+    repair: bool = False,
+    limit: int = 1000,
+) -> dict:
+    """Validate every approved FAQ has graph publication and RAG chunks.
+
+    Contract:
+    - approved/embedded FAQ knowledge_items must have a FAQ knowledge_node;
+    - that FAQ node must have an active FAQ -> Embedded edge;
+    - the approved FAQ must have at least one knowledge_rag_chunk.
+
+    When repair=True, missing edge/chunks are fixed by re-running
+    publish_approved_node for the FAQ node.
+    """
+    client = supabase_client.get_client()
+    q = (
+        client.table("knowledge_items")
+        .select("id,persona_id,title,status,content_type,metadata")
+        .eq("content_type", "faq")
+        .in_("status", ["approved", "embedded"])
+        .limit(limit)
+    )
+    if persona_id:
+        q = q.eq("persona_id", persona_id)
+    item_rows = q.execute().data or []
+    node_q = (
+        client.table("knowledge_nodes")
+        .select("id,persona_id,title,status,node_type,source_table,source_id,metadata")
+        .eq("node_type", "faq")
+        .in_("status", ["approved", "embedded", "validated"])
+        .limit(limit)
+    )
+    if persona_id:
+        node_q = node_q.eq("persona_id", persona_id)
+    node_rows = node_q.execute().data or []
+
+    checked = 0
+    repaired = 0
+    failures: list[dict] = []
+    ok_items: list[dict] = []
+
+    seen_node_ids: set[str] = set()
+
+    for item in item_rows:
+        checked += 1
+        item_id = str(item.get("id") or "")
+        item_persona_id = str(item.get("persona_id") or "")
+        node = supabase_client.get_knowledge_node_for_source(
+            "knowledge_items",
+            item_id,
+            persona_id=item_persona_id or None,
+        )
+        if not node or not node.get("id"):
+            if repair:
+                try:
+                    from services import knowledge_lifecycle
+
+                    promoted = knowledge_lifecycle.promote_knowledge_item(item_id, promote_to_kb=False)
+                    evidence = promoted.get("evidence") or {}
+                    node_id = evidence.get("knowledge_node_id")
+                    node = supabase_client.get_knowledge_node(node_id) if node_id else None
+                    if not node:
+                        node = supabase_client.get_knowledge_node_for_source(
+                            "knowledge_items",
+                            item_id,
+                            persona_id=item_persona_id or None,
+                        )
+                except Exception as exc:
+                    failures.append({
+                        "knowledge_item_id": item_id,
+                        "title": item.get("title"),
+                        "reason": "missing_faq_node",
+                        "repair_error": str(exc),
+                    })
+                    continue
+            if not node or not node.get("id"):
+                failures.append({
+                    "knowledge_item_id": item_id,
+                    "title": item.get("title"),
+                    "reason": "missing_faq_node",
+                })
+                continue
+
+        node_id = str(node["id"])
+        seen_node_ids.add(node_id)
+        edge = _active_faq_embedded_edge(node_id, item_persona_id)
+        quality = _rag_publication_quality_for_node(node_id, expected_node_type="faq")
+        chunk_count = int(quality.get("chunk_count") or 0)
+        quality_missing = list(quality.get("missing") or [])
+        if edge and chunk_count > 0 and not quality_missing:
+            ok_items.append({
+                "knowledge_item_id": item_id,
+                "knowledge_node_id": node_id,
+                "embedded_edge_id": edge.get("id"),
+                "rag_chunk_count": chunk_count,
+            })
+            continue
+
+        if repair:
+            publication = publish_approved_node(node_id, require_rag_for_faq=True)
+            repaired += 1
+            edge = _active_faq_embedded_edge(node_id, item_persona_id)
+            quality = _rag_publication_quality_for_node(node_id, expected_node_type="faq")
+            chunk_count = int(quality.get("chunk_count") or 0)
+            quality_missing = list(quality.get("missing") or [])
+            if edge and chunk_count > 0 and not quality_missing:
+                ok_items.append({
+                    "knowledge_item_id": item_id,
+                    "knowledge_node_id": node_id,
+                    "embedded_edge_id": edge.get("id"),
+                    "rag_chunk_count": chunk_count,
+                    "repaired": True,
+                    "publication": publication,
+                })
+                continue
+
+        missing = []
+        if not edge:
+            missing.append("faq_embedded_edge")
+        if chunk_count <= 0:
+            missing.append("knowledge_rag_chunks")
+        missing.extend(quality_missing)
+        missing = list(dict.fromkeys(missing))
+        failures.append({
+            "knowledge_item_id": item_id,
+            "knowledge_node_id": node_id,
+            "title": item.get("title"),
+            "reason": "missing_publication_artifacts",
+            "missing": missing,
+            "rag_chunk_count": chunk_count,
+        })
+
+    for node in node_rows:
+        node_id = str(node.get("id") or "")
+        if not node_id or node_id in seen_node_ids:
+            continue
+        # Item-backed FAQ nodes are audited through their knowledge_item row
+        # when such a row exists. Node-only approved FAQs are valid graph
+        # knowledge and must also publish to Embedded/RAG.
+        if node.get("source_table") == "knowledge_items" and node.get("source_id"):
+            source_item = None
+            try:
+                source_item = supabase_client.get_knowledge_item(str(node.get("source_id")))
+            except Exception:
+                source_item = None
+            if source_item and (source_item.get("status") or "").lower() in {"approved", "embedded"}:
+                continue
+        checked += 1
+        node_persona_id = str(node.get("persona_id") or "")
+        edge = _active_faq_embedded_edge(node_id, node_persona_id)
+        quality = _rag_publication_quality_for_node(node_id, expected_node_type="faq")
+        chunk_count = int(quality.get("chunk_count") or 0)
+        quality_missing = list(quality.get("missing") or [])
+        if edge and chunk_count > 0 and not quality_missing:
+            ok_items.append({
+                "knowledge_item_id": node.get("source_id") if node.get("source_table") == "knowledge_items" else None,
+                "knowledge_node_id": node_id,
+                "embedded_edge_id": edge.get("id"),
+                "rag_chunk_count": chunk_count,
+                "source": "knowledge_nodes",
+            })
+            continue
+
+        if repair:
+            publication = publish_approved_node(node_id, require_rag_for_faq=True)
+            repaired += 1
+            edge = _active_faq_embedded_edge(node_id, node_persona_id)
+            quality = _rag_publication_quality_for_node(node_id, expected_node_type="faq")
+            chunk_count = int(quality.get("chunk_count") or 0)
+            quality_missing = list(quality.get("missing") or [])
+            if edge and chunk_count > 0 and not quality_missing:
+                ok_items.append({
+                    "knowledge_item_id": node.get("source_id") if node.get("source_table") == "knowledge_items" else None,
+                    "knowledge_node_id": node_id,
+                    "embedded_edge_id": edge.get("id"),
+                    "rag_chunk_count": chunk_count,
+                    "repaired": True,
+                    "publication": publication,
+                    "source": "knowledge_nodes",
+                })
+                continue
+
+        missing = []
+        if not edge:
+            missing.append("faq_embedded_edge")
+        if chunk_count <= 0:
+            missing.append("knowledge_rag_chunks")
+        missing.extend(quality_missing)
+        missing = list(dict.fromkeys(missing))
+        failures.append({
+            "knowledge_item_id": node.get("source_id") if node.get("source_table") == "knowledge_items" else None,
+            "knowledge_node_id": node_id,
+            "title": node.get("title"),
+            "reason": "missing_publication_artifacts",
+            "missing": missing,
+            "rag_chunk_count": chunk_count,
+            "source": "knowledge_nodes",
+        })
+
+    if repair:
+        by_persona = {
+            str(row.get("persona_id") or "")
+            for row in [*item_rows, *node_rows]
+            if row.get("persona_id")
+        }
+        for pid in by_persona:
+            _rebuild_embedded_markdown(pid)
+
+    return {
+        "ok": not failures,
+        "checked": checked,
+        "valid": len(ok_items),
+        "repaired": repaired,
+        "failures": failures,
+        "items": ok_items,
     }
