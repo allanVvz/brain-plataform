@@ -1,5 +1,11 @@
 {
+  "updatedAt": "2026-05-30T20:41:46.194Z",
+  "createdAt": "2026-05-30T20:20:33.735Z",
+  "id": "AXbHNktr6VYvG4DA",
   "name": "Tock Vitoria Crm Low",
+  "description": null,
+  "active": false,
+  "isArchived": false,
   "nodes": [
     {
       "parameters": {
@@ -54,13 +60,13 @@
         },
         "options": {}
       },
-      "id": "c83ff576-71f1-45bd-b7e3-553440cd943c",
+      "id": "50c6af05-3427-49a3-a79e-079a3fee0f3c",
       "name": "Classificar Agente",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.4,
       "position": [
-        2944,
-        1680
+        -1840,
+        320
       ]
     },
     {
@@ -73,18 +79,18 @@
         "builtInTools": {},
         "options": {}
       },
-      "id": "853c129d-59a9-4008-b2aa-d2a1e923e9ae",
+      "id": "b1cc770d-02ca-4e5e-96ac-f5bb8482362b",
       "name": "Model SDR",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.3,
       "position": [
-        4416,
-        2240
+        -368,
+        880
       ],
       "credentials": {
         "openAiApi": {
-          "id": "RGThohEfF9qZkcBj",
-          "name": "OpenAi account"
+          "id": "VvstY9Azqv2KBAbA",
+          "name": "OpenAI account"
         }
       }
     },
@@ -99,18 +105,18 @@
         "builtInTools": {},
         "options": {}
       },
-      "id": "0436ad78-eaea-4e4a-9411-92898f4f89d5",
+      "id": "2987ee02-bba9-4887-8f0a-70118ea0b002",
       "name": "Model Closer",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.3,
       "position": [
-        4864,
-        1536
+        80,
+        176
       ],
       "credentials": {
         "openAiApi": {
-          "id": "RGThohEfF9qZkcBj",
-          "name": "OpenAi account"
+          "id": "VvstY9Azqv2KBAbA",
+          "name": "OpenAI account"
         }
       }
     },
@@ -121,17 +127,17 @@
         "tableName": "chat_history",
         "contextWindowLength": 30
       },
-      "id": "be8cf65e-a91d-4343-b015-a1c2b278601d",
+      "id": "7a1d7cd2-ea30-4fc0-861d-5135eab3fc8c",
       "name": "Memory Conversacional",
       "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
       "typeVersion": 1.3,
       "position": [
-        5056,
-        1648
+        272,
+        288
       ],
       "credentials": {
         "postgres": {
-          "id": "BBlBCf0VMk3atMqh",
+          "id": "us4KDynCbjGM4Y5L",
           "name": "Postgres account"
         }
       }
@@ -144,13 +150,13 @@
           "systemMessage": "=# PAPEL\n\nVocê é um SDR comercial em um fluxo de CRM de vendas de roupas.\n\nSeu papel é:\n\n1. Responder o cliente com clareza\n2. Fazer a conversa avançar comercialmente\n3. Coletar e completar as informações necessárias do lead\n\nVocê deve soar humano, direto e comercial.\n\n---\n\n# CONTEXTO DO CLIENTE\n\nNome da lead: {{ $json.name || \"não informado\" }}\nMensagem do cliente: {{ $json.last_message || \"mensagem não informada\" }}\n\n---\n\n# DADOS EXTRAÍDOS (PODEM ESTAR ERRADOS)\n\nCidade: {{ $json.cidade || \"não informada\" }}\nCEP: {{ $json.cep || \"não informado\" }}\nProduto de interesse: {{ $json.product_interest || \"não informado\" }}\n\n---\n\n# CONTEXTO DA BASE (FAQ)\n\n{{ $json.contexto_kb || \"base não informada\" }}\n\n---\n\n# OBJETIVO CENTRAL\n\nVocê deve sempre:\n\n1. Resolver a intenção atual do cliente\n2. Identificar o que ainda falta\n3. Perguntar a próxima informação necessária para avançar a venda\n\n---\n\n# INFORMAÇÕES A COLETAR\n\n1. Produto de interesse\n2. Se já conhece a loja ou os produtos\n3. Quantidade de peças\n4. Cidade ou CEP\n5. Endereço, quando fizer sentido para envio\n\n---\n\n# REGRAS\n\n- Sempre avançar a conversa\n- Nunca responder seco\n- Se não souber algo, não inventar\n- Se faltar informação, perguntar a próxima mais útil\n- Se enviar catálogo, pedir CEP e endereço na sequência\n\n---\n\n# ESTILO\n\n- curto\n- direto\n- comercial\n- humano\n- 1 a 2 frases\n\n---\n\n# REGRA DE STAGE\n\nUse apenas um destes valores:\n\n- novo\n- engajado\n- qualificado\n- oportunidade\n\n---\n\n# REGRA CRÍTICA DE SAÍDA\n\nResponda somente com um objeto JSON válido.\n\nNão escreva texto antes do JSON.\nNão escreva texto depois do JSON.\nNão explique a resposta.\nNão use markdown.\n\nVocê deve retornar exatamente esta estrutura:\n\n{\n  \"reply\": \"string\",\n  \"detected_fields\": {\n    \"nome\": null,\n    \"produto\": null,\n    \"cidade\": null,\n    \"cep\": null,\n    \"endereco\": null\n  },\n  \"stage_sugerido\": \"novo\"\n}\n\nTodos os campos devem existir.\nSe não souber, use null.\nNunca use arrays.\nNunca adicione campos extras."
         }
       },
-      "id": "29b289b8-f532-489d-8b2e-31bb46b072df",
+      "id": "90b55013-c7ae-4bd0-937b-fcd4fad193ca",
       "name": "Agente SDR",
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        4480,
-        2016
+        -304,
+        656
       ]
     },
     {
@@ -161,13 +167,13 @@
           "systemMessage": "=# PAPEL\n\nVocê é um CLOSER em um fluxo de CRM comercial.\n\n🚨 REGRA ABSOLUTA\n\nVocê NÃO é um classificador.\n\nVocê NÃO pode retornar:\n- intent\n- interest_level\n- urgency\n- fit\n- summary\n- route_hint\n\nSe retornar qualquer um desses campos, sua resposta está ERRADA.\n\nSeu único objetivo é:\n- responder o cliente\n- remover objeções\n- conduzir para fechamento\n\n---\n\n# CONTEXTO DO CLIENTE\n\nNome da lead: {{ $json.nome }}\nStage atual: {{ $json.stage }}\nUltimo produto mensionado: {{ $json.product_interest }}\nMensagem do cliente: {{ $json.texto }}\n\n---\n\n# CONTEXTO DO LEAD (RESUMO)\n\n{{ $json.summary }}\n\n---\n\n# TAREFA\n\nVocê deve:\n\n1. Responder diretamente a mensagem do cliente\n2. Reduzir qualquer fricção ou dúvida\n3. Conduzir para a próxima ação\n4. Encaminhar para humano se necessário\n\n---\n\n# REGRA DE OBJEÇÃO\n\nSe houver objeção:\n\n- responda com segurança\n- simplifique decisão\n- reduza risco percebido\n- conduza para ação\n\n---\n\n# REGRA DE ENCAMINHAMENTO\n\nEncaminhe para humano APENAS se:\n\n- cliente pedir falar com alguém\n- negociação complexa\n- problema real\n- dúvida fora da base\n\n---\n\n# ESTILO\n\n- 1 a 3 frases\n- direto\n- comercial\n- humano\n- sempre conduzindo próximo passo\n\n---\n\n# REGRA DE STAGE\n\nDefina baseado na situação:\n\n- engajado → ainda avaliando\n- qualificado → interesse claro\n- oportunidade → pronto para fechar\n- fechado → já comprou / confirmou ação\n\n---\n\n# 🚨 FORMATO OBRIGATÓRIO\n\nVocê DEVE responder EXATAMENTE assim:\n\n{\n  \"reply\": \"string\",\n  \"encaminhar_humano\": boolean,\n  \"motivo_encaminhamento\": string | null,\n  \"stage_sugerido\": \"engajado\" | \"qualificado\" | \"oportunidade\" | \"fechado\"\n}\n\n---\n\n# 🚨 REGRAS DE VALIDAÇÃO\n\n- NÃO adicionar campos\n- NÃO remover campos\n- NÃO usar arrays\n- NÃO retornar texto fora do JSON\n- NÃO usar markdown\n- NÃO quebrar estrutura\n- Se não souber → null\n\n---\n\n# EXEMPLO CORRETO\n\n{\n  \"reply\": \"Temos essas cores disponíveis sim. Quer que eu já te passe o link pra garantir o teu?\",\n  \"encaminhar_humano\": false,\n  \"motivo_encaminhamento\": null,\n  \"stage_sugerido\": \"oportunidade\"\n}\n\n---\n\nRetorne apenas o JSON final."
         }
       },
-      "id": "fb8dff53-e48c-4e6d-85f1-7c2ca1040267",
+      "id": "73dbae25-28d7-4991-aef3-838cf7f41e32",
       "name": "Agente Closer",
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        4976,
-        1360
+        192,
+        0
       ]
     },
     {
@@ -176,13 +182,13 @@
         "jsonOutput": "={\n  \"lead_context\": {\n    \"name\": \"{{$('Unify Lead Data').item.json.nome ||'Lead' || $('Unify Lead Data').item.json.nome }}\"\n    \"lead_id\": {{ $('Unify Lead Data').item.json.lead_id }},\n    \"lead_ref\": {{ $json.lead.ref }}\n    \"product_interest\": \"{{ $('Unify Lead Data').item.json.interesse_produto || 'Não informado' }}\",\n    \"current_stage\": \"{{ $json.stage || 'novo' }}\",\n    \"channel\": \"{{ $json.canal || 'whatsapp' }}\",\n    \"city\": \"{{ $json.cidade || 'não informada' }}\",\n    \"cep\": \"{{ $json.cep || 'não informado' }}\"\n  },\n  \"conversation\": {\n    \"last_message\": \"{{ $('Unify Lead Data').item.json.mensagem || '' }}\",\n    \"history\": \"sem histórico\"\n  },\n  \"classification\": {\n    \"intent\": \"{{ $json.classifier?.intent || '' }}\",\n    \"interest_level\": \"{{ $json.classifier?.interest_level || '' }}\",\n    \"urgency\": \"{{ $json.classifier?.urgency || '' }}\",\n    \"fit\": \"{{ $json.classifier?.fit || '' }}\",\n    \"objections\": {{ JSON.stringify($json.classifier?.objections || []) }},\n    \"summary\": \"{{ $json.classifier?.summary || '' }}\",\n    \"route_hint\": \"{{ $json.classifier?.route_hint || 'SDR' }}\"\n  },\n  \"crm_context\": {\n    \"score\": {{ $json.crm?.score || 0 }},\n    \"tags\": {{ JSON.stringify($json.crm?.tags || []) }},\n    \"new_funnel_stage\": \"{{ $json.crm?.funnel_stage || 'novo' }}\"\n  }\n}",
         "options": {}
       },
-      "id": "91de4c00-abae-47ab-be3c-75a513989379",
+      "id": "6eaf2c6d-df83-4d1a-8dd7-e472bc3d03f1",
       "name": "Preparar Contexto SDR",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        3168,
-        1840
+        -1616,
+        480
       ]
     },
     {
@@ -191,13 +197,13 @@
         "jsonOutput": "={\n  \"lead_ref\": \"{{ $json.lead?.ref || '' }}\",\n  \"lead_id\": \"{{ $json.lead?.id || '' }}\",\n  \"nome\": \"{{ $json.lead?.name || '' }}\",\n  \"stage\": \"{{ $json.lead?.stage || 'novo' }}\",\n  \"ai_enabled\": {{ $json.lead?.ai_enabled || false }},\n  \"product_interest\": \"{{ $json.lead?.product_interest || 'não informado' }}\",\n  \"cidade\": \"{{ $json.lead?.city || 'não informada' }}\",\n  \"cep\": \"{{ $json.lead?.cep || 'não informado' }}\",\n  \"canal\": \"{{ $json.lead?.channel || 'whatsapp' }}\",\n  \"texto\": \"{{ $json.message?.text || '' }}\",\n  \"intent\": \"{{ $json.classifier?.intent || '' }}\",\n  \"interest_level\": \"{{ $json.classifier?.interest_level || '' }}\",\n  \"urgency\": \"{{ $json.classifier?.urgency || '' }}\",\n  \"fit\": \"{{ $json.classifier?.fit || '' }}\",\n  \"summary\": \"{{ $json.classifier?.summary || '' }}\",\n  \"route_hint\": \"{{ $json.classifier?.route_hint || '' }}\",\n  \"score\": {{ $json.crm?.score || 0 }},\n  \"contexto_closer\": \"{{ \n    'LEAD:\\\\n' +\n    'Nome: ' + ($json.lead?.name || '') + '\\\\n' +\n    'Stage: ' + ($json.lead?.stage || 'novo') + '\\\\n' +\n    'Produto de interesse: ' + ($json.lead?.product_interest || 'não informado') + '\\\\n' +\n    'Cidade: ' + ($json.lead?.city || 'não informada') + '\\\\n' +\n    'CEP: ' + ($json.lead?.cep || 'não informado') + '\\\\n\\\\n' +\n    'MENSAGEM DO CLIENTE:\\\\n' +\n    ($json.message?.text || '') + '\\\\n\\\\n' +\n    'CLASSIFICAÇÃO:\\\\n' +\n    'Intent: ' + ($json.classifier?.intent || '') + '\\\\n' +\n    'Urgência: ' + ($json.classifier?.urgency || '') + '\\\\n' +\n    'Score: ' + ($json.crm?.score || 0)\n  }}\"\n}",
         "options": {}
       },
-      "id": "8b9da540-413b-4cd4-a0e2-d19b02d514f7",
+      "id": "b650f578-f90a-43dc-8596-669d9a014543",
       "name": "Preparar Contexto Closer",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        4784,
-        1360
+        0,
+        0
       ]
     },
     {
@@ -256,13 +262,13 @@
         },
         "options": {}
       },
-      "id": "9ac22723-ee2a-4bbc-b079-01db36933819",
+      "id": "53201522-5a52-41f4-9945-6dab4221d1de",
       "name": "Preparar Resposta SDR",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        5712,
-        1840
+        928,
+        480
       ]
     },
     {
@@ -339,13 +345,13 @@
         },
         "options": {}
       },
-      "id": "9163cf5b-d7f5-466f-b234-1030f1f62ca4",
+      "id": "9c653cf3-a191-4899-b826-c4e0d82da3b4",
       "name": "Preparar Resposta Closer",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        5712,
-        1360
+        928,
+        0
       ]
     },
     {
@@ -354,55 +360,39 @@
         "fieldsUi": {
           "fieldValues": [
             {
-              "fieldId": "lead_ref",
+              "fieldId": "lead_id",
               "fieldValue": "={{ $json.lead_ref }}"
             },
             {
-              "fieldId": "message_id",
-              "fieldValue": "={{ 'ai_' + $now.toMillis() + '_' + $json.lead_ref }}"
-            },
-            {
-              "fieldId": "sender_type",
-              "fieldValue": "=chat gpt 4.1 - lite"
-            },
-            {
-              "fieldId": "canal",
-              "fieldValue": "=whatsapp"
-            },
-            {
-              "fieldId": "texto",
+              "fieldId": "content",
               "fieldValue": "={{ $json.texto ||  $json.Resposta}}"
+            },
+            {
+              "fieldId": "channel",
+              "fieldValue": "=whatsapp"
             },
             {
               "fieldId": "direction",
               "fieldValue": "=outbound"
             },
             {
-              "fieldId": "sender_type",
-              "fieldValue": "=agent"
-            },
-            {
-              "fieldId": "Lead_Stage",
-              "fieldValue": "={{\n$('Code in JavaScript').isExecuted\n  ? $('Code in JavaScript').item.json.stage\n  : (\n      $('Edit Fields').isExecuted\n        ? $('Edit Fields').item.json.Stage\n        : 'novo'\n    )\n}}"
-            },
-            {
-              "fieldId": "nome",
-              "fieldValue": "={{ $json.nome }}"
+              "fieldId": "role",
+              "fieldValue": "=assistant"
             }
           ]
         }
       },
-      "id": "ec07f66e-4971-49bf-bd75-a0274742569a",
+      "id": "307bd05d-c586-4b97-95b1-834619dc12d7",
       "name": "Salvar Resposta IA",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        5936,
-        1616
+        1152,
+        256
       ],
       "credentials": {
         "supabaseApi": {
-          "id": "4ZZ75vDJ5j4YIMZt",
+          "id": "gv5bg3jcgITFXCjw",
           "name": "Supabase account"
         }
       }
@@ -424,18 +414,12 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        -320,
-        2544
+        -5104,
+        1184
       ],
-      "id": "2fa7aef8-afb8-406b-9504-9efa66342901",
+      "id": "3faf571b-208e-4845-9dc8-16fea193a86d",
       "name": "Get FAQ Data",
-      "alwaysOutputData": true,
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "E5EnoGSQA8JIvuiR",
-          "name": "Google Sheets account"
-        }
-      }
+      "alwaysOutputData": true
     },
     {
       "parameters": {
@@ -443,13 +427,13 @@
         "jsonOutput": "={\n  \"pageContent\": \"Tipo: {{ ($json.tipo || 'faq').toLowerCase() }}\\nCategoria: {{ $json.categoria || 'geral' }}\\nProduto: {{ $json.produto || 'geral' }}\\nIntenção: {{ $json.intencao || 'duvida_geral' }}\\nPergunta: {{ $json.titulo }}\\nResposta: {{ $json.conteudo }}{{ $json.link ? ('\\nLink: ' + $json.link) : '' }}\",\n  \"metadata\": {\n    \"kb_id\": \"{{ $json.kb_id || '' }}\",\n    \"prioridade\": {{ Number($json.prioridade || 99) }},\n    \"row_number\": {{ Number($json.row_number || 0) }},\n    \"tipo\": \"{{ ($json.tipo || 'faq').toLowerCase() }}\",\n    \"categoria\": \"{{ $json.categoria || 'geral' }}\",\n    \"intencao\": \"{{ $json.intencao || 'duvida_geral' }}\",\n    \"produto\": \"{{ $json.produto || 'geral' }}\",\n    \"status\": \"{{ $json.status || 'ATIVO' }}\",\n    \"link\": {{ $json.link ? '\"' + $json.link + '\"' : 'null' }}\n  }\n}",
         "options": {}
       },
-      "id": "e2216bae-90ba-4440-976c-fef05a0f3680",
+      "id": "6cd92519-78e6-42c1-9cdc-c1ea33fd8a35",
       "name": "Format FAQ for Vector Store",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -96,
-        2544
+        -4880,
+        1184
       ]
     },
     {
@@ -462,13 +446,13 @@
           ]
         }
       },
-      "id": "ec72cb39-2180-4b25-9ddb-ff519eb943e2",
+      "id": "12f70815-8a65-41a0-b8a2-02381970ca7e",
       "name": "Load FAQ Schedule",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.3,
       "position": [
-        -544,
-        2544
+        -5328,
+        1184
       ]
     },
     {
@@ -477,13 +461,13 @@
         "jsonOutput": "={\n  \"lead_id\": \"{{ $json.lead_id }}\",\n  \"nome\": \"{{ $json.nome }}\",\n  \"text\": \"{{ $json.text}}\",\n  \"msg_id\": \"{{ $json.msg_id }}\",\n  \"timestamp\": \"{{ $json.timestamp }}\",\n  \"has_text\": {{ $json.has_text }},\n  \"has_media\": {{ $json.has_media }},\n  \"media_id\": \"{{ $json.media_id || '' }}\",\n  \"direct_url\": \"{{ $json.direct_url || '' }}\",\n  \"filename\": \"{{ $json.filename || '' }}\",\n  \"is_heic\": {{ $json.is_heic || false }}\n}",
         "options": {}
       },
-      "id": "12301708-da1d-43b5-bb78-02a03f7907fb",
+      "id": "d723c355-bee8-4fc0-9108-ce96ad83444c",
       "name": "Normalize Message Data",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        352,
-        1776
+        -4432,
+        416
       ]
     },
     {
@@ -500,18 +484,18 @@
           ]
         }
       },
-      "id": "c17cbd0c-a9d0-4515-a57c-845701b4e37a",
+      "id": "a8870756-cd11-480d-aa53-782f5b5cca8b",
       "name": "Check Lead Exists",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        576,
-        1776
+        -4208,
+        416
       ],
       "alwaysOutputData": true,
       "credentials": {
         "supabaseApi": {
-          "id": "4ZZ75vDJ5j4YIMZt",
+          "id": "gv5bg3jcgITFXCjw",
           "name": "Supabase account"
         }
       }
@@ -540,13 +524,13 @@
         },
         "options": {}
       },
-      "id": "ee831d2e-966d-40c6-b796-698e8529a022",
+      "id": "abe74352-8635-4f23-b704-5c4be468cfd1",
       "name": "Lead Exists?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        800,
-        1776
+        -3984,
+        416
       ]
     },
     {
@@ -573,17 +557,17 @@
           ]
         }
       },
-      "id": "c90ffc9e-4c3c-4dcd-81a4-6dfca89617ef",
+      "id": "cc44b73d-2fdf-4dc3-bd67-babc2d478e3f",
       "name": "Create New Lead",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        1248,
-        1872
+        -3536,
+        512
       ],
       "credentials": {
         "supabaseApi": {
-          "id": "4ZZ75vDJ5j4YIMZt",
+          "id": "gv5bg3jcgITFXCjw",
           "name": "Supabase account"
         }
       }
@@ -618,17 +602,17 @@
           ]
         }
       },
-      "id": "9d563b39-9af9-4721-80eb-748082fda1e9",
+      "id": "b6a1cee8-636f-4418-9f91-6f4f1c6d794e",
       "name": "Update Existing Lead",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        1248,
-        1680
+        -3536,
+        320
       ],
       "credentials": {
         "supabaseApi": {
-          "id": "4ZZ75vDJ5j4YIMZt",
+          "id": "gv5bg3jcgITFXCjw",
           "name": "Supabase account"
         }
       }
@@ -639,13 +623,13 @@
         "jsonOutput": "={\n  \"lead_id\": \"{{ $('Normalize Message Data').item.json.lead_id }}\",\n  \"nome\": \"{{ $('Normalize Message Data').item.json.nome }}\",\n  \"ultima_mensagem\": \"{{ $('Normalize Message Data').item.json.text }}\",\n  \"last_update\": \"{{ new Date().toISOString() }}\"\n}",
         "options": {}
       },
-      "id": "8037333b-85d0-4eaf-a030-4cc5b862bd50",
+      "id": "06ddc7d6-6669-456f-bfe1-0659a97ebaf6",
       "name": "Prepare New Lead Data",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1024,
-        1872
+        -3760,
+        512
       ]
     },
     {
@@ -654,13 +638,13 @@
         "jsonOutput": "={\n   \"id\": {{ $item(\"0\").$node[\"Lead Exists?\"].json[\"id\"] }},\n  \"nome\": \"{{ $('Normalize Message Data').item.json.nome }}\",\n  \"ultima_mensagem\": \"{{ $('Normalize Message Data').item.json.text }}\",\n  \"last_update\": \"{{ new Date().toISOString() }}\"\n}",
         "options": {}
       },
-      "id": "89911509-a58d-4666-be01-675b287e2680",
+      "id": "a7d0a9ac-e3f9-4ae5-8a1f-531e02a5e51d",
       "name": "Prepare Lead Update Data",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1024,
-        1680
+        -3760,
+        320
       ]
     },
     {
@@ -737,13 +721,13 @@
         },
         "options": {}
       },
-      "id": "07fa570d-eea5-4a48-ae2a-16fab03309aa",
+      "id": "1cb6cd20-5ab6-42c0-be7d-637011c27796",
       "name": "Prepare Message Data",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1920,
-        1872
+        -2864,
+        512
       ]
     },
     {
@@ -752,11 +736,11 @@
         "fieldsUi": {
           "fieldValues": [
             {
-              "fieldId": "lead_ref",
+              "fieldId": "lead_id",
               "fieldValue": "={{ $json.lead_ref }}"
             },
             {
-              "fieldId": "texto",
+              "fieldId": "content",
               "fieldValue": "={{ $json.texto }}"
             },
             {
@@ -764,15 +748,7 @@
               "fieldValue": "={{ $item(\"0\").$node[\"Prepare Message Data\"].json[\"created_at\"] }}"
             },
             {
-              "fieldId": "message_id",
-              "fieldValue": "={{ $item(\"0\").$node[\"Prepare Message Data\"].json[\"message_id\"] }}"
-            },
-            {
-              "fieldId": "sender_type",
-              "fieldValue": "={{ $json.sender_type || 'lead' }}"
-            },
-            {
-              "fieldId": "canal",
+              "fieldId": "channel",
               "fieldValue": "={{ $item(\"0\").$node[\"Prepare Message Data\"].json[\"canal\"] }}"
             },
             {
@@ -780,27 +756,23 @@
               "fieldValue": "={{ $item(\"0\").$node[\"Prepare Message Data\"].json[\"direction\"] }}"
             },
             {
-              "fieldId": "Lead_Stage",
-              "fieldValue": "={{ $json.stage }}"
-            },
-            {
-              "fieldId": "nome",
-              "fieldValue": "={{ $('Unify Lead Data').item.json.nome }}"
+              "fieldId": "role",
+              "fieldValue": "={{ ($json.sender_type === 'agent' || $json.sender_type === 'ai') ? 'assistant' : 'user' }}"
             }
           ]
         }
       },
-      "id": "4e4fadc3-c4e6-4b33-bdad-1326730e5add",
+      "id": "dda8a3cc-c95c-4e5c-a4b8-193702924e2e",
       "name": "Insert Message",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        2144,
-        1872
+        -2640,
+        512
       ],
       "credentials": {
         "supabaseApi": {
-          "id": "4ZZ75vDJ5j4YIMZt",
+          "id": "gv5bg3jcgITFXCjw",
           "name": "Supabase account"
         }
       }
@@ -837,13 +809,13 @@
         },
         "options": {}
       },
-      "id": "dfd5f894-77ef-4286-8428-59faa1129def",
+      "id": "73534363-f0a5-46ec-87cc-3fadc8eee3e9",
       "name": "Normalize Lead After Update",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1472,
-        1680
+        -3312,
+        320
       ]
     },
     {
@@ -884,13 +856,13 @@
         },
         "options": {}
       },
-      "id": "ec9ab679-0063-4d97-9fae-211f313aef69",
+      "id": "af01e203-c225-4bf0-9372-1a2e02fdf242",
       "name": "Normalize Lead After Create",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1472,
-        1872
+        -3312,
+        512
       ]
     },
     {
@@ -899,13 +871,13 @@
         "jsonOutput": "={\n  \"lead_ref\": {{\n    $('Update Existing Lead').isExecuted\n      ? $('Update Existing Lead').item.json.id\n      : $('Create New Lead').item.json.id\n  }},\n\n  \"lead_id\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.lead_id || '')\n      : ($('Create New Lead').item.json.lead_id || '')\n  }}\",\n\n  \"nome\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.nome || '')\n      : ($('Create New Lead').item.json.nome || '')\n  }}\",\n\n  \"stage\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.stage || 'novo')\n      : ($('Create New Lead').item.json.stage || 'novo')\n  }}\",\n\n  \"ai_enabled\": {{\n    $('Update Existing Lead').isExecuted\n      ? Boolean($('Update Existing Lead').item.json.ai_enabled)\n      : Boolean($('Create New Lead').item.json.ai_enabled)\n  }},\n\n  \"interesse_produto\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.interesse_produto || '')\n      : ($('Create New Lead').item.json.interesse_produto || '')\n  }}\",\n\n  \"cidade\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.cidade || '')\n      : ($('Create New Lead').item.json.cidade || '')\n  }}\",\n\n  \"cep\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.cep || '')\n      : ($('Create New Lead').item.json.cep || '')\n  }}\",\n\n  \"canal\": \"{{ $('Normalize Message Data').item.json.canal || 'whatsapp' }}\",\n\n  \"mensagem\": \"{{ $('Normalize Message Data').item.json.text }}\",\n\n  \"ultima_mensagem\": \"{{ $('Normalize Message Data').item.json.mensagem || '' }}\",\n\n  \"created_at\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.created_at || '')\n      : ($('Create New Lead').item.json.created_at || '')\n  }}\",\n\n  \"updated_at\": \"{{ \n    $('Update Existing Lead').isExecuted\n      ? ($('Update Existing Lead').item.json.updated_at || '')\n      : ($('Create New Lead').item.json.updated_at || '')\n  }}\"\n}",
         "options": {}
       },
-      "id": "2d50d5a5-288b-42a2-ae9c-0f319301564b",
+      "id": "e112db55-bc77-4506-92cb-bc8e82c1dc19",
       "name": "Unify Lead Data",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1696,
-        1776
+        -3088,
+        416
       ]
     },
     {
@@ -919,18 +891,12 @@
       "type": "n8n-nodes-base.whatsApp",
       "typeVersion": 1.1,
       "position": [
-        6384,
-        1712
+        1600,
+        352
       ],
-      "id": "2f52da2c-6444-4a56-a3ca-672d286eb391",
+      "id": "5afcf359-8174-419f-9736-1e89a93ee754",
       "name": "Send message",
-      "webhookId": "45cbd18e-5d42-4efe-a464-04c1be0678bf",
-      "credentials": {
-        "whatsAppApi": {
-          "id": "86wjjSQKLF41HmuD",
-          "name": "WhatsApp account"
-        }
-      }
+      "webhookId": "45cbd18e-5d42-4efe-a464-04c1be0678bf"
     },
     {
       "parameters": {
@@ -952,13 +918,13 @@
         },
         "options": {}
       },
-      "id": "5d854ca9-6cd0-4505-833c-592d63c41e6d",
+      "id": "95fac823-5ab4-4560-9417-da5f25a4e764",
       "name": "Preparar Envio WhatsApp",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        6160,
-        1712
+        1376,
+        352
       ]
     },
     {
@@ -971,18 +937,12 @@
       "type": "n8n-nodes-base.whatsAppTrigger",
       "typeVersion": 1,
       "position": [
-        -544,
-        1680
+        -5328,
+        320
       ],
-      "id": "3273604d-23ce-46ac-ac19-5f69e659d6b9",
+      "id": "5e36d6a7-8059-428d-ac31-18d785475ad0",
       "name": "WhatsApp Trigger",
-      "webhookId": "4d179da4-fb6c-4924-86c2-56af2acbcbcd",
-      "credentials": {
-        "whatsAppTriggerApi": {
-          "id": "Jgzde9lVOwk34O0n",
-          "name": "WhatsApp OAuth account"
-        }
-      }
+      "webhookId": "4d179da4-fb6c-4924-86c2-56af2acbcbcd"
     },
     {
       "parameters": {
@@ -991,10 +951,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3392,
-        1760
+        -1392,
+        400
       ],
-      "id": "2955269e-f93a-4773-bf2f-41ea80c0c93a",
+      "id": "813c7faf-9e73-497f-81f6-834e83f8e4af",
       "name": "Extrair campos"
     },
     {
@@ -1011,10 +971,10 @@
       "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
       "typeVersion": 1.3,
       "position": [
-        3616,
-        1616
+        -1136,
+        320
       ],
-      "id": "94ae8615-2147-4a15-ba6f-a88ae298cd3c",
+      "id": "9f3c7962-adfc-4942-b161-f5179677a52d",
       "name": "Simple Vector Store"
     },
     {
@@ -1023,13 +983,13 @@
         "combineBy": "combineByPosition",
         "options": {}
       },
-      "id": "c1f3ce18-859e-4583-b167-0096a2c1de23",
+      "id": "52aa327a-603c-4110-9929-dd7a2f1147ea",
       "name": "Merge Contexto + Stage + KB",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        4000,
-        1936
+        -784,
+        624
       ]
     },
     {
@@ -1078,17 +1038,17 @@
           ]
         }
       },
-      "id": "5e991dd7-8284-4acb-9aee-555192d2ee2d",
+      "id": "7e49a25a-fd20-43ef-8fe1-790cb96d5546",
       "name": "Atualizar Lead Supabase",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        6160,
-        1520
+        1376,
+        160
       ],
       "credentials": {
         "supabaseApi": {
-          "id": "4ZZ75vDJ5j4YIMZt",
+          "id": "gv5bg3jcgITFXCjw",
           "name": "Supabase account"
         }
       }
@@ -1100,10 +1060,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3968,
-        1616
+        -816,
+        256
       ],
-      "id": "2dab2a22-1267-4a45-94a5-d16b9d196057",
+      "id": "34220484-4e79-4990-9c68-e5618ecf32a0",
       "name": "Deduplicar"
     },
     {
@@ -1113,10 +1073,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4880,
-        1984
+        96,
+        624
       ],
-      "id": "cf773f2e-b4e1-4428-8515-a5c03ad78449",
+      "id": "41218c9b-01c7-46f2-8be7-5181bd9cebad",
       "name": "normalize"
     },
     {
@@ -1160,10 +1120,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        4896,
-        1792
+        112,
+        432
       ],
-      "id": "72cf55c0-65c0-4399-a3bc-e8c2b26e1dc2",
+      "id": "273eb511-d2eb-454d-9f06-9504a08d579d",
       "name": "Edit Fields"
     },
     {
@@ -1175,10 +1135,10 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        5200,
-        1840
+        416,
+        480
       ],
-      "id": "34453e10-2967-436c-8fe5-46e0fbf1ac27",
+      "id": "838b0d8a-180d-42d1-b453-15dac8fe9f7b",
       "name": "Merge"
     },
     {
@@ -1190,10 +1150,10 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        2368,
-        1680
+        -2416,
+        320
       ],
-      "id": "e4a7fd9d-2bcd-4d57-94c5-71f60454b4f8",
+      "id": "3ff761c5-6de8-4bad-aa66-ca02a079db19",
       "name": "Classifier Agent"
     },
     {
@@ -1203,10 +1163,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2720,
-        1680
+        -2064,
+        320
       ],
-      "id": "1ddd2381-a250-48c7-89f6-3daa5feda748",
+      "id": "027601c8-1d94-4420-b4e4-a6458ae47b19",
       "name": "Compute Score & Tags"
     },
     {
@@ -1216,10 +1176,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5488,
-        1840
+        704,
+        480
       ],
-      "id": "94a722a2-0d1e-421d-a01d-e64af2104c23",
+      "id": "86563f42-9dfd-4448-b1a1-7501ebd23bb4",
       "name": "Finalize Funnel Decision"
     },
     {
@@ -1236,15 +1196,15 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.3,
       "position": [
-        2384,
-        1904
+        -2400,
+        544
       ],
-      "id": "cdfe40a8-0ec3-4110-9ba8-bf3992530511",
+      "id": "897ae39c-95a8-420a-abbf-f2d2c0552b2a",
       "name": "OpenAI Chat Model",
       "credentials": {
         "openAiApi": {
-          "id": "RGThohEfF9qZkcBj",
-          "name": "OpenAi account"
+          "id": "VvstY9Azqv2KBAbA",
+          "name": "OpenAI account"
         }
       }
     },
@@ -1255,10 +1215,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        128,
-        1776
+        -4656,
+        416
       ],
-      "id": "7bb2f70d-e6ab-41e0-928b-e3d7faaaa8d2",
+      "id": "7b36ced0-c1e4-4899-8cfe-41a1589b9502",
       "name": "Validation Messages"
     },
     {
@@ -1268,10 +1228,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5392,
-        1360
+        608,
+        0
       ],
-      "id": "9e2ccc0b-403d-4863-9ff1-6d0f66a8af5b",
+      "id": "3a092929-604f-4b04-9c3b-683846fa57af",
       "name": "Code in JavaScript"
     },
     {
@@ -1284,31 +1244,31 @@
         },
         "clearStore": true
       },
-      "id": "a5a2766c-7c7d-431a-aab6-44d774492d51",
+      "id": "a2ca91a5-0c21-4e02-9456-bdf6240b1f65",
       "name": "Insert FAQ into Vector Store1",
       "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
       "typeVersion": 1.3,
       "position": [
-        128,
-        2544
+        -4656,
+        1184
       ]
     },
     {
       "parameters": {
         "options": {}
       },
-      "id": "65a33306-d6d2-41d7-a4d5-ca2bf49a1b06",
+      "id": "befd76bd-6a6b-4503-80c2-287b648d74bd",
       "name": "Embeddings OpenAI Insert1",
       "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
       "typeVersion": 1.2,
       "position": [
-        144,
-        2768
+        -4640,
+        1408
       ],
       "credentials": {
         "openAiApi": {
-          "id": "RGThohEfF9qZkcBj",
-          "name": "OpenAi account"
+          "id": "VvstY9Azqv2KBAbA",
+          "name": "OpenAI account"
         }
       }
     },
@@ -1316,18 +1276,18 @@
       "parameters": {
         "options": {}
       },
-      "id": "71aef53c-dce3-4ba4-90f6-cb4fe7ed6e2a",
+      "id": "545c3326-5efb-4f3a-9f76-ec4273ad4e1d",
       "name": "Embeddings OpenAI Insert",
       "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
       "typeVersion": 1.2,
       "position": [
-        3696,
-        1840
+        -992,
+        496
       ],
       "credentials": {
         "openAiApi": {
-          "id": "RGThohEfF9qZkcBj",
-          "name": "OpenAi account"
+          "id": "VvstY9Azqv2KBAbA",
+          "name": "OpenAI account"
         }
       }
     },
@@ -1343,13 +1303,13 @@
         },
         "topK": 3
       },
-      "id": "7bab1b9e-5fd8-49df-b2d6-e014f8dae939",
+      "id": "ab5603ba-996a-4f24-9b4c-5685610dc6b3",
       "name": "Vector Store KB (Cache)",
       "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
       "typeVersion": 1.3,
       "position": [
-        4560,
-        2240
+        -224,
+        880
       ]
     },
     {
@@ -1361,28 +1321,28 @@
       "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
       "typeVersion": 1.1,
       "position": [
-        272,
-        2768
+        -4512,
+        1408
       ],
-      "id": "22f8931f-1be9-41df-b216-8b96046a4219",
+      "id": "ae00cbe2-8e08-42fb-ac39-b4eb0e8ce14c",
       "name": "Default Data Loader"
     },
     {
       "parameters": {
         "options": {}
       },
-      "id": "48ecff9c-50d9-4e89-b040-a003b3325ada",
+      "id": "4eb5f063-ca58-4bc6-ac05-2c66a31e2516",
       "name": "Embeddings OpenAI Insert2",
       "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
       "typeVersion": 1.2,
       "position": [
-        4624,
-        2448
+        -160,
+        1088
       ],
       "credentials": {
         "openAiApi": {
-          "id": "RGThohEfF9qZkcBj",
-          "name": "OpenAi account"
+          "id": "VvstY9Azqv2KBAbA",
+          "name": "OpenAI account"
         }
       }
     },
@@ -1393,10 +1353,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -320,
-        1680
+        -5104,
+        320
       ],
-      "id": "0c8b57ce-c06a-41b8-9bb1-62c4ec220247",
+      "id": "130060fe-7a86-4d75-b54d-5c7a4d03f65f",
       "name": "normalize inbound"
     },
     {
@@ -1427,10 +1387,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        -96,
-        1584
+        -4880,
+        224
       ],
-      "id": "6d0240ec-b77b-4903-9970-521bc07eb1c1",
+      "id": "637dec5f-5288-4af0-9b13-ea284c3df467",
       "name": "If1"
     },
     {
@@ -1461,10 +1421,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        -96,
-        1776
+        -4880,
+        416
       ],
-      "id": "029621ec-1ce0-4e6e-a7b6-3a01eba12f09",
+      "id": "a40892bc-f337-4e3d-9240-0feeeab18ba7",
       "name": "If2"
     },
     {
@@ -1477,10 +1437,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1920,
-        1680
+        -2864,
+        320
       ],
-      "id": "d0263aaa-7fa6-4c7a-a63b-207183228ff4",
+      "id": "16605d03-bda7-4c2c-8292-45f3e692c33f",
       "name": "Map Input Classifier"
     },
     {
@@ -1510,10 +1470,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        2144,
-        1680
+        -2640,
+        320
       ],
-      "id": "c6267fd1-41cc-441c-a012-16d383247b76",
+      "id": "ecdacf5f-6925-457e-bc72-6a34606b223f",
       "name": "On maker?"
     },
     {
@@ -1524,10 +1484,10 @@
       "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
       "typeVersion": 1.3,
       "position": [
-        2752,
-        1920
+        -2032,
+        560
       ],
-      "id": "dc1abb56-b843-401c-ab97-e64b84024a2a",
+      "id": "c9629089-b611-43fd-b93d-850b191375ac",
       "name": "Structured Output Parser1"
     },
     {
@@ -1537,10 +1497,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3552,
-        2096
+        -1392,
+        672
       ],
-      "id": "78ea737f-0683-4086-b860-85d85d1c1586",
+      "id": "ceae0c85-0765-4668-a22f-9333e8c3d5b5",
       "name": "extruturar input"
     },
     {
@@ -1596,10 +1556,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        4224,
-        2016
+        -560,
+        656
       ],
-      "id": "e862b685-ebc6-45f7-b929-d5490184e92b",
+      "id": "dff4e8dc-f754-4f9e-a8fe-97532a730340",
       "name": "Edit Fields1"
     },
     {
@@ -1609,60 +1569,22 @@
         "tableName": "chat_history",
         "contextWindowLength": 10
       },
-      "id": "bce6ec3f-7c9c-4810-a4b3-d272e638027b",
+      "id": "3d4087cd-3bd8-4749-92ac-c62f0a5d5e53",
       "name": "Memory Conversacional1",
       "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
       "typeVersion": 1.3,
       "position": [
-        2544,
-        2080
+        -2240,
+        720
       ],
       "credentials": {
         "postgres": {
-          "id": "BBlBCf0VMk3atMqh",
+          "id": "us4KDynCbjGM4Y5L",
           "name": "Postgres account"
         }
       }
     }
   ],
-  "pinData": {
-    "WhatsApp Trigger": [
-      {
-        "json": {
-          "messaging_product": "whatsapp",
-          "metadata": {
-            "display_phone_number": "555131916538",
-            "phone_number_id": "949967854877404"
-          },
-          "contacts": [
-            {
-              "profile": {
-                "name": "Allan"
-              },
-              "wa_id": "555182608510",
-              "user_id": "BR.2166817064078896"
-            }
-          ],
-          "messages": [
-            {
-              "from": "555182608510",
-              "from_user_id": "BR.2166817064078896",
-              "id": "wamid.HBgMNTU1MTgyNjA4NTEwFQIAEhgWM0VCMEU1MzhEMTI2RkU3QUE4RDhCOAA=",
-              "timestamp": "1776706849",
-              "text": {
-                "body": "olaa quais as novidades"
-              },
-              "type": "text"
-            }
-          ],
-          "field": "messages"
-        },
-        "pairedItem": {
-          "item": 0
-        }
-      }
-    ]
-  },
   "connections": {
     "Model SDR": {
       "ai_languageModel": [
@@ -1935,11 +1857,6 @@
         ]
       ]
     },
-    "Insert Message": {
-      "main": [
-        []
-      ]
-    },
     "Normalize Lead After Update": {
       "main": [
         [
@@ -2022,11 +1939,6 @@
         ]
       ]
     },
-    "Send message": {
-      "main": [
-        []
-      ]
-    },
     "Merge Contexto + Stage + KB": {
       "main": [
         [
@@ -2063,11 +1975,6 @@
             "index": 1
           }
         ]
-      ]
-    },
-    "Atualizar Lead Supabase": {
-      "main": [
-        []
       ]
     },
     "Edit Fields": {
@@ -2229,12 +2136,6 @@
         ]
       ]
     },
-    "If1": {
-      "main": [
-        [],
-        []
-      ]
-    },
     "If2": {
       "main": [
         [
@@ -2269,16 +2170,6 @@
         ]
       ]
     },
-    "Structured Output Parser1": {
-      "ai_outputParser": [
-        []
-      ]
-    },
-    "extruturar input": {
-      "main": [
-        []
-      ]
-    },
     "Edit Fields1": {
       "main": [
         [
@@ -2302,17 +2193,76 @@
       ]
     }
   },
-  "active": false,
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate",
-    "availableInMCP": false
+    "binaryMode": "separate"
   },
-  "versionId": "6338ee64-f667-45a1-9686-59e05cbca4e0",
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "d27d9c9e0615200bdece87c4003737514f58ce543d53f5433870e51fbdcc4710"
+  "staticData": null,
+  "meta": null,
+  "pinData": {
+    "WhatsApp Trigger": [
+      {
+        "json": {
+          "messaging_product": "whatsapp",
+          "metadata": {
+            "display_phone_number": "555131916538",
+            "phone_number_id": "949967854877404"
+          },
+          "contacts": [
+            {
+              "profile": {
+                "name": "Allan"
+              },
+              "wa_id": "555182608510",
+              "user_id": "BR.2166817064078896"
+            }
+          ],
+          "messages": [
+            {
+              "from": "555182608510",
+              "from_user_id": "BR.2166817064078896",
+              "id": "wamid.HBgMNTU1MTgyNjA4NTEwFQIAEhgWM0VCMEU1MzhEMTI2RkU3QUE4RDhCOAA=",
+              "timestamp": "1776706849",
+              "text": {
+                "body": "olaa quais as novidades"
+              },
+              "type": "text"
+            }
+          ],
+          "field": "messages"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
   },
-  "id": "na8QqA7afBBVRaN9",
-  "tags": []
+  "versionId": "0864267d-035e-4f91-aae3-3d8330944b6e",
+  "activeVersionId": null,
+  "versionCounter": 9,
+  "triggerCount": 0,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-05-30T20:20:33.738Z",
+      "createdAt": "2026-05-30T20:20:33.738Z",
+      "role": "workflow:owner",
+      "workflowId": "AXbHNktr6VYvG4DA",
+      "projectId": "o91H6AjHSnS9F2rV",
+      "project": {
+        "updatedAt": "2026-05-30T20:12:06.430Z",
+        "createdAt": "2026-05-30T20:11:21.387Z",
+        "id": "o91H6AjHSnS9F2rV",
+        "name": "allan rodrigues <allanulise027@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "4a01e699-c901-477d-a2dd-4cbd5d5f84e3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
 }
