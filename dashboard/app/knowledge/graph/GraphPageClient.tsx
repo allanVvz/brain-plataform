@@ -18,6 +18,10 @@ import {
 } from "lucide-react";
 import NodeDrawer from "@/components/graph/NodeDrawer";
 import { getVisualHierarchyRank } from "@/components/graph/knowledgeGraphLayout";
+import { parseGraphJsonV2Payload } from "@/lib/graph-json-v2";
+import SofiaChatPanel, { SofiaChatMessage } from "./SofiaChatPanel";
+import { resolveSofiaToolFromInput, SOFIA_REACT_FLOW_TOOLS } from "./sofiaReactFlowTools";
+import { chooseAddBlockParent, compatibleParentTypes, relationForParentChild } from "./graphParenting";
 
 const GraphView = dynamic(() => import("@/components/graph/GraphView"), { ssr: false });
 
@@ -79,24 +83,86 @@ const MODES: { value: ViewMode; label: string; icon: React.ReactNode; help: stri
   { value: "semantic_tree", label: "Árvore",    icon: <GitBranch size={11} />, help: "Hierarquia automatica por aresta principal" },
   { value: "graph",         label: "Grafo",     icon: <Network size={11} />,   help: "Rede organica estilo Obsidian/neural" },
 ];
+function applySofiaGraphPatch(base: GraphPayload, patch: any, persisted: boolean): GraphPayload {
+  const nodeById = new Map((base.nodes || []).map((node) => [node.id, node]));
+  const edgeById = new Map((base.edges || []).map((edge) => [edge.id, edge]));
+  const markNode = (node: any) => ({
+    ...node,
+    data: {
+      ...(node?.data || {}),
+      pending_visual: !persisted,
+      metadata: { ...(node?.data?.metadata || {}), pending_visual: !persisted },
+    },
+  });
+  const markEdge = (edge: any) => ({
+    ...edge,
+    data: {
+      ...(edge?.data || {}),
+      pending_visual: !persisted,
+      metadata: { ...(edge?.data?.metadata || {}), pending_visual: !persisted },
+    },
+  });
+  const operations = Array.isArray(patch?.operations) ? patch.operations : [];
+  for (const op of operations) {
+    const kind = String(op?.kind || "").toLowerCase();
+    if (kind === "upsert_node" && op?.node?.id) nodeById.set(op.node.id, { ...(nodeById.get(op.node.id) || {}), ...markNode(op.node) });
+    if (kind === "remove_node") nodeById.delete(String(op.node_id || ""));
+    if (kind === "upsert_edge" && op?.edge?.id) edgeById.set(op.edge.id, { ...(edgeById.get(op.edge.id) || {}), ...markEdge(op.edge) });
+    if (kind === "remove_edge") edgeById.delete(String(op.edge_id || ""));
+  }
+  for (const node of Array.isArray(patch?.nodes) ? patch.nodes : []) if (node?.id) nodeById.set(node.id, { ...(nodeById.get(node.id) || {}), ...markNode(node) });
+  for (const edge of Array.isArray(patch?.edges) ? patch.edges : []) if (edge?.id) edgeById.set(edge.id, { ...(edgeById.get(edge.id) || {}), ...markEdge(edge) });
+  for (const nodeId of Array.isArray(patch?.remove_node_ids) ? patch.remove_node_ids : []) nodeById.delete(String(nodeId));
+  for (const edgeId of Array.isArray(patch?.remove_edge_ids) ? patch.remove_edge_ids : []) edgeById.delete(String(edgeId));
+  return { ...base, nodes: Array.from(nodeById.values()), edges: Array.from(edgeById.values()) };
+}
 
+function normalizeToolName(raw: unknown): string {
+  return String(raw || "").toLowerCase().replace(/-/g, "_");
+}
+
+function parseToolArgs(call: any): Record<string, any> {
+  const raw = call?.args ?? call?.arguments ?? call?.input ?? {};
+  if (raw && typeof raw === "object") return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
 export default function GraphPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const [personas, setPersonas] = useState<any[]>([]);
   const [data, setData] = useState<GraphPayload | null>(null);
+  // Raw canonical graph_json document (only when GRAPH_JSON_V2 is on). Edits are
+  // applied to this document and re-published (write-through), which triggers the
+  // backend reindex of the derived knowledge_nodes/knowledge_edges.
+  const [docGraph, setDocGraph] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
+  const useGraphJsonV2 = process.env.NEXT_PUBLIC_GRAPH_JSON_V2 !== "0";
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [selectedNodes, setSelectedNodes] = useState<any[]>([]);
   const [addPanelOpen, setAddPanelOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [headerPersonaSlug, setHeaderPersonaSlug] = useState("");
   const [graphNotice, setGraphNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [sofiaOpen, setSofiaOpen] = useState(false);
+  const [sofiaLoading, setSofiaLoading] = useState(false);
+  const [sofiaMessages, setSofiaMessages] = useState<SofiaChatMessage[]>([]);
+  const [hasPendingVisualChanges, setHasPendingVisualChanges] = useState(false);
+  const [pendingGraphSnapshot, setPendingGraphSnapshot] = useState<GraphPayload | null>(null);
+  const [sharedSessionId, setSharedSessionId] = useState<string | null>(null);
+  const [sharedPlanJson, setSharedPlanJson] = useState<any | null>(null);
 
   // ── URL-driven state ──────────────────────────────────────────
   const focus = searchParams.get("focus") || "";
-  const mode = (searchParams.get("mode") as ViewMode) || "graph";
+  const mode = (searchParams.get("mode") as ViewMode) || "semantic_tree";
   const includeTags = searchParams.get("tags") === "1";
   const includeMentions = searchParams.get("mentions") === "1";
   const includeTechnical = searchParams.get("tech") === "1";
@@ -126,9 +192,34 @@ export default function GraphPageClient() {
     return () => window.removeEventListener("ai-brain-persona-change", syncFromHeader as EventListener);
   }, []);
 
+  useEffect(() => {
+    const sessionId = window.localStorage.getItem("active_criar_session_id");
+    if (!sessionId) return;
+    setSharedSessionId(sessionId);
+    api.kbIntakeSession(sessionId)
+      .then((session: any) => {
+        const planJson = session?.plan_json || session?.state?.plan_json || null;
+        if (planJson) setSharedPlanJson(planJson);
+      })
+      .catch(() => {
+        // Graph sidebar keeps working even if no active CRIAR session exists.
+      });
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      if (useGraphJsonV2 && headerPersonaSlug) {
+        const currentDoc = await api.getGraphDocument(headerPersonaSlug);
+        const parsed = parseGraphJsonV2Payload(currentDoc);
+        if (parsed) {
+          const v2Payload = parsed as GraphPayload;
+          setDocGraph(currentDoc?.graph_json || null);
+          setData(v2Payload);
+          return v2Payload;
+        }
+        setDocGraph(null);
+      }
       const d = await api.graphData(headerPersonaSlug || undefined, {
         focus: focus || undefined,
         max_depth: 5,
@@ -143,7 +234,39 @@ export default function GraphPageClient() {
     } finally {
       setLoading(false);
     }
-  }, [headerPersonaSlug, focus, includeTags, includeMentions, includeTechnical, includeEmbedded, mode]);
+  }, [headerPersonaSlug, focus, includeTags, includeMentions, includeTechnical, includeEmbedded, mode, useGraphJsonV2]);
+
+  // Write-through: apply an edit to the canonical graph_json and re-publish it.
+  // The backend validates the whole document and reindexes the derived tables.
+  const publishEditedGraph = useCallback(
+    async (mutate: (graph: any) => void, successText: string): Promise<boolean> => {
+      if (!docGraph || !headerPersonaSlug) {
+        setGraphNotice({ tone: "error", text: "Documento canônico do grafo indisponível para edição." });
+        return false;
+      }
+      const next = JSON.parse(JSON.stringify(docGraph));
+      mutate(next);
+      try {
+        await api.publishGraphDocument({
+          persona_slug: headerPersonaSlug,
+          brand_slug: next.brand_slug ?? null,
+          graph_json: next,
+          source: "graph_ui",
+        });
+        await load();
+        setGraphNotice({ tone: "success", text: successText });
+        window.setTimeout(() => setGraphNotice(null), 2200);
+        return true;
+      } catch (error) {
+        setGraphNotice({
+          tone: "error",
+          text: error instanceof Error ? error.message : "Falha ao publicar a alteração no grafo.",
+        });
+        return false;
+      }
+    },
+    [docGraph, headerPersonaSlug, load],
+  );
 
   useEffect(() => {
     api.personas().then((p: any) => setPersonas(p));
@@ -244,6 +367,27 @@ export default function GraphPageClient() {
       const targetNode = byId.get(targetId);
       const sourceType = String(sourceNode?.data?.node_type || sourceNode?.data?.content_type || "");
       const targetType = String(targetNode?.data?.node_type || targetNode?.data?.content_type || "");
+
+      // V2 write-through: add the edge to the canonical graph_json and re-publish.
+      // The backend validator enforces the graph law (FAQ->Embedded, etc.) and the
+      // publish reindex updates the derived tables.
+      if (useGraphJsonV2 && docGraph) {
+        const relation =
+          targetType === "gallery" ? "gallery_asset" : targetType === "embedded" ? "visible_to_agent" : targetType === "faq" ? "answers_question" : "contains";
+        const finalReceiver = targetType === "gallery" || targetType === "embedded";
+        await publishEditedGraph((graph) => {
+          graph.edges = Array.isArray(graph.edges) ? graph.edges : [];
+          graph.edges.push({
+            id: `edge:ui:${Date.now()}`,
+            source: sourceId,
+            target: targetId,
+            relation,
+            primary_tree: !finalReceiver,
+            metadata: { created_from: "graph_ui", active: true },
+          });
+        }, targetType === "embedded" ? "FAQ publicado no Golden Dataset." : "Conexão criada.");
+        return;
+      }
       const allowedRef = (id: string) => id.startsWith("gn:") || id.startsWith("ki:") || id.startsWith("persona:") || id.startsWith("embedded:");
       if (!allowedRef(sourceId) || !allowedRef(targetId)) {
         setGraphNotice({ tone: "error", text: "Conexao permitida apenas entre blocos persistidos do grafo." });
@@ -319,12 +463,22 @@ export default function GraphPageClient() {
         });
       }
     },
-    [data?.nodes, effectivePersona?.id, load],
+    [data?.nodes, effectivePersona?.id, load, useGraphJsonV2, docGraph, publishEditedGraph],
   );
 
   const handleDeleteEdge = useCallback(
     async (edgeId: string) => {
       const rawEdgeId = String(edgeId || "");
+
+      // V2 write-through: drop the edge from the canonical graph_json and re-publish.
+      if (useGraphJsonV2 && docGraph) {
+        await publishEditedGraph((graph) => {
+          graph.edges = (Array.isArray(graph.edges) ? graph.edges : []).filter(
+            (edge: any) => String(edge?.id) !== rawEdgeId,
+          );
+        }, "Conexão apagada.");
+        return;
+      }
       const geIndex = rawEdgeId.indexOf("ge:");
       const resolvedEdgeId = rawEdgeId.startsWith("ge:")
         ? rawEdgeId
@@ -359,7 +513,7 @@ export default function GraphPageClient() {
         });
       }
     },
-    [load],
+    [load, useGraphJsonV2, docGraph, publishEditedGraph],
   );
 
   const handleDeleteNode = useCallback(
@@ -396,6 +550,159 @@ export default function GraphPageClient() {
     [data?.nodes, load, selectedNode?.id],
   );
 
+  const appendSofiaMessage = useCallback((role: SofiaChatMessage["role"], text: string, pending = false) => {
+    setSofiaMessages((current) => [
+      ...current,
+      { id: `${Date.now()}-${Math.random()}`, role, text, pending, createdAt: Date.now() },
+    ]);
+  }, []);
+
+  const handleSofiaSubmit = useCallback(async (text: string) => {
+    if (!data) return;
+    appendSofiaMessage("user", text);
+    setSofiaLoading(true);
+    try {
+      const resolvedTool = resolveSofiaToolFromInput(text);
+      const command = resolvedTool
+        ? SOFIA_REACT_FLOW_TOOLS[resolvedTool.tool].command({
+            message: text,
+            personaSlug: effectivePersonaSlug || undefined,
+            value: resolvedTool.value,
+          })
+        : SOFIA_REACT_FLOW_TOOLS.apply_patch_visual.command({
+            message: text,
+            personaSlug: effectivePersonaSlug || undefined,
+          });
+      const response = await api.sofiaGraphCommand({
+        action: "command",
+        message: command,
+        persona_slug: effectivePersonaSlug || undefined,
+        active_persona_slug: effectivePersonaSlug || undefined,
+        selected_node_id: selectedNode?.id || null,
+        selected_node_ids: selectedNodes.map((node) => String(node.id)).filter(Boolean),
+        session_id: sharedSessionId || undefined,
+        plan_json: sharedPlanJson || undefined,
+      });
+      if (response?.session_id && response.session_id !== sharedSessionId) {
+        setSharedSessionId(String(response.session_id));
+        window.localStorage.setItem("active_criar_session_id", String(response.session_id));
+      }
+      if (response?.plan_json) setSharedPlanJson(response.plan_json);
+      const persisted = Boolean(response?.persisted);
+      const replyText = String(response?.sofia_message || response?.text || response?.message || response?.reply || "Comando processado.");
+      const toolCalls = Array.isArray(response?.tool_calls) ? response.tool_calls : [];
+      let patch = response?.patch || response?.graph_patch || null;
+      let shouldHighlight = false;
+      let shouldSelect: string | null = null;
+      let shouldFocus: string | null = null;
+      let shouldSwitchToTree = false;
+      for (const call of toolCalls) {
+        const tool = normalizeToolName(call?.tool || call?.name);
+        const args = parseToolArgs(call);
+        if (tool === "apply_patch_visual" && !patch && args?.patch) patch = args.patch;
+        if (tool === "highlight_edges") shouldHighlight = true;
+        if (tool === "select_node" && !shouldSelect) shouldSelect = String(args?.slug_or_id || args?.node_id || args?.id || "").trim() || null;
+        if (tool === "focus_node" && !shouldFocus) shouldFocus = String(args?.slug_or_id || args?.node_id || args?.id || "").trim() || null;
+        if (tool === "update_layout") shouldSwitchToTree = true;
+      }
+      if (patch) {
+        if (!persisted && !pendingGraphSnapshot) setPendingGraphSnapshot(data);
+        setData((current) => (current ? applySofiaGraphPatch(current, patch, persisted) : current));
+        setHasPendingVisualChanges(!persisted);
+        if (!persisted) {
+          appendSofiaMessage("system", SOFIA_REACT_FLOW_TOOLS.mark_pending.command({ personaSlug: effectivePersonaSlug || undefined }));
+        }
+      }
+      if (shouldSwitchToTree) updateParam({ mode: "semantic_tree" });
+      if (shouldHighlight) setGraphNotice({ tone: "success", text: "Arestas destacadas para revisao." });
+      if (shouldSelect && data) {
+        const lookup = shouldSelect.toLowerCase();
+        const found = (data.nodes || []).find((n) => {
+          const id = String(n?.id || "").toLowerCase();
+          const slug = String(n?.data?.slug || "").toLowerCase();
+          return id === lookup || slug === lookup || id.endsWith(`:${lookup}`);
+        });
+        if (found) {
+          setSelectedNodes([found]);
+          setSelectedNode(found);
+        }
+      }
+      if (shouldFocus) {
+        const lookup = shouldFocus.toLowerCase();
+        const found = (data?.nodes || []).find((n) => {
+          const id = String(n?.id || "").toLowerCase();
+          const slug = String(n?.data?.slug || "").toLowerCase();
+          return id === lookup || slug === lookup || id.endsWith(`:${lookup}`);
+        });
+        if (found) onFocusNode(found);
+      }
+      appendSofiaMessage("sofia", replyText, !persisted);
+      if (persisted) {
+        setPendingGraphSnapshot(null);
+        setHasPendingVisualChanges(false);
+        await load();
+      }
+    } catch (error) {
+      appendSofiaMessage("system", error instanceof Error ? error.message : "Falha ao enviar comando.");
+    } finally {
+      setSofiaLoading(false);
+    }
+  }, [appendSofiaMessage, data, effectivePersonaSlug, load, onFocusNode, pendingGraphSnapshot, selectedNode?.id, selectedNodes, sharedPlanJson, sharedSessionId, updateParam]);
+
+  const handleConfirmPending = useCallback(async () => {
+    setSofiaLoading(true);
+    try {
+      const response = await api.sofiaGraphCommand({
+        action: "confirm_pending",
+        message: SOFIA_REACT_FLOW_TOOLS.confirm_pending.command({ personaSlug: effectivePersonaSlug || undefined }),
+        persona_slug: effectivePersonaSlug || undefined,
+        session_id: sharedSessionId || undefined,
+        plan_json: sharedPlanJson || undefined,
+      });
+      if (response?.plan_json) setSharedPlanJson(response.plan_json);
+      appendSofiaMessage("sofia", String(response?.text || response?.message || "Alteracoes confirmadas."));
+      setPendingGraphSnapshot(null);
+      setHasPendingVisualChanges(false);
+      await load();
+    } catch (error) {
+      appendSofiaMessage("system", error instanceof Error ? error.message : "Falha ao confirmar pendencias.");
+    } finally {
+      setSofiaLoading(false);
+    }
+  }, [appendSofiaMessage, effectivePersonaSlug, load, sharedPlanJson, sharedSessionId]);
+
+  const handleUndoPending = useCallback(async () => {
+    try {
+      await api.sofiaGraphCommand({
+        action: "undo_pending",
+        message: SOFIA_REACT_FLOW_TOOLS.undo_pending.command({ personaSlug: effectivePersonaSlug || undefined }),
+        persona_slug: effectivePersonaSlug || undefined,
+        session_id: sharedSessionId || undefined,
+        plan_json: sharedPlanJson || undefined,
+      });
+    } catch {
+      // rollback local mantido mesmo sem suporte backend.
+    }
+    if (pendingGraphSnapshot) setData(pendingGraphSnapshot);
+    setPendingGraphSnapshot(null);
+    setHasPendingVisualChanges(false);
+    appendSofiaMessage("system", "Alteracoes visuais pendentes desfeitas.");
+  }, [appendSofiaMessage, effectivePersonaSlug, pendingGraphSnapshot, sharedPlanJson, sharedSessionId]);
+
+  const sharedPlanSummary = useMemo(() => {
+    if (!sharedPlanJson || typeof sharedPlanJson !== "object") return null;
+    const ctx = sharedPlanJson.active_context || {};
+    const blocking = Array.isArray(sharedPlanJson.blocking_issues) ? sharedPlanJson.blocking_issues.length : 0;
+    const queue = Array.isArray(sharedPlanJson.graph_patch_queue) ? sharedPlanJson.graph_patch_queue.length : 0;
+    return {
+      persona: String(sharedPlanJson.persona_slug || effectivePersonaSlug || ""),
+      brand: ctx.brand_slug ? String(ctx.brand_slug) : null,
+      selectedNodeId: ctx.selected_node_id ? String(ctx.selected_node_id) : null,
+      queueSize: queue,
+      blockingCount: blocking,
+    };
+  }, [effectivePersonaSlug, sharedPlanJson]);
+
   return (
     <div className="flex flex-col h-[calc(100vh-96px)] -mx-6 -mt-6 overflow-hidden">
       {/* ── Top bar (3 rows) ──────────────────────────────────── */}
@@ -429,7 +736,7 @@ export default function GraphPageClient() {
               <button
                 key={m.value}
                 title={m.help}
-                onClick={() => updateParam({ mode: m.value === "graph" ? null : m.value })}
+                onClick={() => updateParam({ mode: m.value === "semantic_tree" ? null : m.value })}
                 className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition ${
                   mode === m.value
                     ? "bg-obs-violet/20 border-obs-violet text-obs-violet"
@@ -572,6 +879,18 @@ export default function GraphPageClient() {
 
       {/* ── Graph canvas ─────────────────────────────────────── */}
       <div className="flex-1 relative overflow-hidden">
+        <SofiaChatPanel
+          open={sofiaOpen}
+          loading={sofiaLoading}
+          messages={sofiaMessages}
+          hasPendingVisualChanges={hasPendingVisualChanges}
+          sessionId={sharedSessionId}
+          planSummary={sharedPlanSummary}
+          onToggle={() => setSofiaOpen((v) => !v)}
+          onSubmit={handleSofiaSubmit}
+          onConfirmPending={handleConfirmPending}
+          onUndoPending={handleUndoPending}
+        />
         {loading && !data && (
           <div className="absolute inset-0 flex items-center justify-center text-obs-subtle text-sm">
             Carregando grafo...
@@ -638,6 +957,8 @@ export default function GraphPageClient() {
         <NodeDrawer
           node={selectedNode}
           selectedNodes={selectedNodes}
+          personaSlug={effectivePersonaSlug || undefined}
+          sessionId={sharedSessionId || undefined}
           onClose={() => {
             setSelectedNode(null);
             setSelectedNodes([]);
@@ -671,6 +992,7 @@ export default function GraphPageClient() {
             nodes={data?.nodes || []}
             edges={data?.edges || []}
             persona={effectivePersona}
+            selectedNode={selectedNode}
             onClose={() => setAddPanelOpen(false)}
             onCreated={async (created) => {
               setAddPanelOpen(false);
@@ -693,12 +1015,14 @@ function AddBlockPanel({
   nodes,
   edges,
   persona,
+  selectedNode,
   onClose,
   onCreated,
 }: {
   nodes: any[];
   edges: any[];
   persona?: any;
+  selectedNode?: any;
   onClose: () => void;
   onCreated: (created?: any) => void | Promise<void>;
 }) {
@@ -747,6 +1071,15 @@ function AddBlockPanel({
       "supports_copy",
       "uses_asset",
       "belongs_to_persona",
+      "persona_has_brand",
+      "brand_has_briefing",
+      "briefing_has_campaign",
+      "campaign_has_audience",
+      "audience_has_product_group",
+      "product_group_has_product",
+      "product_has_copy",
+      "product_has_faq",
+      "copy_has_faq",
     ]);
     const out = new Map<string, typeof parentOptions>();
     for (const edge of edges || []) {
@@ -770,10 +1103,6 @@ function AddBlockPanel({
     }
     return out;
   }, [edges, graphNodesById]);
-  const campaignOptions = useMemo(() => {
-    const campaigns = parentOptions.filter((node) => node.type === "campaign");
-    return campaigns.length ? campaigns : parentOptions.filter((node) => ["brand", "campaign", "briefing"].includes(node.type));
-  }, [parentOptions]);
   const [contentType, setContentType] = useState("product");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -787,19 +1116,31 @@ function AddBlockPanel({
   const parentNodeId = selectedParent?.id || "";
 
   useEffect(() => {
-    if (!pathIds.length && campaignOptions[0]?.graphId) setPathIds([campaignOptions[0].graphId]);
-  }, [campaignOptions, pathIds.length]);
+    if (pathIds.length) return;
+    const chosen = chooseAddBlockParent(contentType, parentOptions, selectedNode?.id);
+    if (chosen?.graphId) setPathIds([chosen.graphId]);
+  }, [contentType, parentOptions, pathIds.length, selectedNode?.id]);
+
+  useEffect(() => {
+    if (!pathIds.length) return;
+    const selected = parentOptions.find((node) => node.graphId === pathIds[pathIds.length - 1]);
+    if (selected && compatibleParentTypes(contentType).includes(selected.type)) return;
+    const chosen = chooseAddBlockParent(contentType, parentOptions, selectedNode?.id);
+    setPathIds(chosen?.graphId ? [chosen.graphId] : []);
+  }, [contentType, parentOptions, pathIds, selectedNode?.id]);
 
   const selectPathNode = (level: number, graphId: string) => {
     setPathIds((current) => [...current.slice(0, level), graphId]);
   };
 
   const pathColumns = useMemo(() => {
+    const allowedRootTypes = new Set(compatibleParentTypes(contentType));
+    const rootOptions = parentOptions.filter((node) => allowedRootTypes.has(node.type));
     const columns: Array<{ title: string; helper: string; options: typeof parentOptions; selected?: string }> = [
       {
-        title: "Campanha",
-        helper: "Clique para escolher o galho raiz.",
-        options: campaignOptions,
+        title: "Parent compativel",
+        helper: "Escolha onde o novo bloco deve entrar.",
+        options: rootOptions,
         selected: pathIds[0],
       },
     ];
@@ -819,7 +1160,7 @@ function AddBlockPanel({
       });
     }
     return columns;
-  }, [campaignOptions, childOptionsByParent, pathIds]);
+  }, [contentType, parentOptions, childOptionsByParent, pathIds]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -846,12 +1187,12 @@ function AddBlockPanel({
           slug: title,
           markdown_document: true,
           parent_node_id: parentNodeId || undefined,
-          parent_relation_type: "manual",
+          parent_relation_type: selectedParent ? relationForParentChild(selectedParent.type, contentType) : "contains",
         },
         submitted_by: "graph_ui",
         validate: true,
         parent_node_id: parentNodeId || undefined,
-        parent_relation_type: "manual",
+        parent_relation_type: selectedParent ? relationForParentChild(selectedParent.type, contentType) : "contains",
       });
       await onCreated(created);
     } catch (err) {

@@ -81,3 +81,22 @@ Validated:
   - `PYTHONDONTWRITEBYTECODE=1 api/.venv/Scripts/python.exe -m pytest tests/test_graph_json_v2_integration.py -q` passed: 6 tests.
   - `npm run build` in `dashboard/` passed.
 - Remaining integration risk: the full Sofia/CRIAR Graph JSON v2 loop from `study-branch-state-audit-20260628` still has large overlaps in `kb_intake_service.py`, `assets.py`, `knowledge.py`, `graph.py`, migrations 039-046, product import, QA contract routes, and dashboard graph/capture UI. Bring these in by feature slices, not as one merge.
+
+## Sofia Graph Tab Integration - 2026-06-28
+
+- Integrated Sofia side panel into `/knowledge/graph` from `origin/study-branch-state-audit-20260628`.
+- Graph tab now attempts Graph JSON v2 by default (`NEXT_PUBLIC_GRAPH_JSON_V2 !== "0"`) and falls back to v1 `/knowledge/graph-data` when no v2 document is published.
+- Added local-first `/sofia/graph-command` backend route with session/plan_json response, persona access guard, visual patch commands, confirm and undo support.
+- Dashboard API now has compatibility methods used by the restored Graph UI: `getGraphDocument`, `publishGraphDocument`, `sofiaGraphCommand`.
+- Validation run:
+  - `api/.venv/Scripts/python.exe -m pytest tests/test_graph_json_v2_integration.py -q` passed: 9 tests.
+  - `py_compile` for `sofia_graph.py`, `graph_documents.py`, `main.py` passed.
+  - `npm run build` in `dashboard/` passed.
+  - `docker compose up -d --build` rebuilt/restarted `brain-api`.
+  - Real API checks with login cookie passed:
+    - `GET /health/ready` -> 200.
+    - `POST /auth/login` with local admin -> 200.
+    - `GET /graph-documents/current?persona_slug=baita-conveniencia` -> 200.
+    - `POST /sofia/graph-command` -> 200 with visual patch + `plan_json`.
+  - Real dashboard route `GET http://localhost:3000/knowledge/graph` after login -> 200.
+- Remaining limitation: Sofia Graph route is deterministic/local-first and does not yet pull the full `qa_contract.py` + `sofia_orchestrator.py` LLM/tool orchestration from the audit branch.

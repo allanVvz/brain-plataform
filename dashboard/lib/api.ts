@@ -464,6 +464,11 @@ export const api = {
     if (brandSlug) params.set("brand_slug", brandSlug);
     return req<any>(`/graph-documents/current?${params.toString()}`);
   },
+  getGraphDocument: (personaSlug: string, brandSlug?: string) => {
+    const params = new URLSearchParams({ persona_slug: personaSlug });
+    if (brandSlug) params.set("brand_slug", brandSlug);
+    return req<any>(`/graph-documents/current?${params.toString()}`);
+  },
   graphDocumentVersions: (personaSlug: string, brandSlug?: string) => {
     const params = new URLSearchParams({ persona_slug: personaSlug });
     if (brandSlug) params.set("brand_slug", brandSlug);
@@ -471,6 +476,8 @@ export const api = {
   },
   graphDocumentPublish: (body: { persona_slug: string; brand_slug?: string; graph_json: any; source?: string; note?: string }) =>
     req<any>("/graph-documents/publish", { method: "POST", body: JSON.stringify(body) }),
+  publishGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json: any; source?: string; note?: string }) =>
+    req<any>("/graph-documents/publish", { method: "POST", body: JSON.stringify({ source: "graph_ui", ...body }) }),
   graphDocumentApplyPatch: (body: { persona_slug: string; graph_json: any; source?: string; note?: string }) =>
     req<any>("/graph-documents/apply-patch", { method: "POST", body: JSON.stringify(body) }),
   graphDocumentImportJson: (body: { persona_slug: string; graph_json: any; source?: string; session_id?: string; note?: string }) =>
@@ -479,6 +486,16 @@ export const api = {
     req<any>("/graph-documents/reindex", { method: "POST", body: JSON.stringify(body) }),
   graphDocumentRollback: (body: { persona_slug: string; version: number; note?: string }) =>
     req<any>("/graph-documents/rollback", { method: "POST", body: JSON.stringify(body) }),
+  sofiaGraphCommand: (body: {
+    message?: string;
+    action?: "command" | "confirm_pending" | "undo_pending";
+    persona_slug?: string;
+    active_persona_slug?: string;
+    selected_node_id?: string | null;
+    selected_node_ids?: string[];
+    session_id?: string;
+    plan_json?: any;
+  }) => req<any>("/sofia/graph-command", { method: "POST", body: JSON.stringify(body) }),
 
   // Knowledge — Chat sidebar context (semantic graph + KB fallback)
   knowledgeChatContext: (leadRef: number, q?: string, personaId?: string) => {

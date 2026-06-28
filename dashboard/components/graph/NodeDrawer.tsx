@@ -34,6 +34,8 @@ function formatLastModified(value: unknown): string | null {
 interface NodeDrawerProps {
   node: any | null;
   selectedNodes?: any[];
+  personaSlug?: string;
+  sessionId?: string;
   onClose: () => void;
   onUpdated?: (itemId: string) => void | Promise<any>;
   directLinks?: Array<{
