@@ -459,6 +459,26 @@ export const api = {
     req<any>(`/knowledge/graph-edges/${encodeURIComponent(edgeId)}`, { method: "DELETE" }),
   deleteGraphNode: (nodeId: string) =>
     req<any>(`/knowledge/graph-nodes/${encodeURIComponent(nodeId)}`, { method: "DELETE" }),
+  graphDocumentCurrent: (personaSlug: string, brandSlug?: string) => {
+    const params = new URLSearchParams({ persona_slug: personaSlug });
+    if (brandSlug) params.set("brand_slug", brandSlug);
+    return req<any>(`/graph-documents/current?${params.toString()}`);
+  },
+  graphDocumentVersions: (personaSlug: string, brandSlug?: string) => {
+    const params = new URLSearchParams({ persona_slug: personaSlug });
+    if (brandSlug) params.set("brand_slug", brandSlug);
+    return req<any>(`/graph-documents/versions?${params.toString()}`);
+  },
+  graphDocumentPublish: (body: { persona_slug: string; brand_slug?: string; graph_json: any; source?: string; note?: string }) =>
+    req<any>("/graph-documents/publish", { method: "POST", body: JSON.stringify(body) }),
+  graphDocumentApplyPatch: (body: { persona_slug: string; graph_json: any; source?: string; note?: string }) =>
+    req<any>("/graph-documents/apply-patch", { method: "POST", body: JSON.stringify(body) }),
+  graphDocumentImportJson: (body: { persona_slug: string; graph_json: any; source?: string; session_id?: string; note?: string }) =>
+    req<any>("/graph-documents/import-json", { method: "POST", body: JSON.stringify(body) }),
+  graphDocumentReindex: (body: { persona_slug: string; note?: string }) =>
+    req<any>("/graph-documents/reindex", { method: "POST", body: JSON.stringify(body) }),
+  graphDocumentRollback: (body: { persona_slug: string; version: number; note?: string }) =>
+    req<any>("/graph-documents/rollback", { method: "POST", body: JSON.stringify(body) }),
 
   // Knowledge — Chat sidebar context (semantic graph + KB fallback)
   knowledgeChatContext: (leadRef: number, q?: string, personaId?: string) => {

@@ -3387,6 +3387,28 @@ def get_events(
     return _q(q)
 
 
+def list_system_events(
+    *,
+    entity_type: Optional[str] = None,
+    event_types: Optional[list[str]] = None,
+    persona_id: Optional[str] = None,
+    limit: int = 100,
+) -> list[dict]:
+    q = (
+        get_client().table("system_events")
+        .select("*")
+        .order("created_at", desc=True)
+        .limit(max(1, min(int(limit or 100), 1000)))
+    )
+    if entity_type:
+        q = q.eq("entity_type", entity_type)
+    if event_types:
+        q = q.in_("event_type", event_types)
+    if persona_id:
+        q = q.eq("persona_id", persona_id)
+    return _q(q)
+
+
 # â”€â”€ Pipeline Status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def get_pipeline_statuses() -> list:

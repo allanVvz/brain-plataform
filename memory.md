@@ -65,3 +65,19 @@ Validated:
   - `brain-db`
   - `brain-postgrest`
   - `brain-supabase-gateway`
+
+## Graph JSON v2 Integration Slice - 2026-06-28
+
+- Integrated the first local-first slice from `origin/study-branch-state-audit-20260628` into `study-merge-local-first-sofia-qa`.
+- Added Graph JSON v2 schema, canonical validator, local draft/version store, importer, `/graph-documents/*` routes, dashboard API clients and `dashboard/lib/graph-json-v2.ts`.
+- Security corrections applied during integration:
+  - Reads use `auth_service.assert_persona_access(... persona_slug=...)`.
+  - Writes require admin or `user_persona_access.can_edit=true`.
+  - Request `persona_slug` must match `graph_json.persona_slug`.
+  - Published payload is revalidated before event persistence and v1 materialization.
+- Current implementation is intentionally parallel to v1: published v2 docs are stored as `system_events`; draft/apply-patch versions are local files under `data/graph_documents`; v1 `knowledge_nodes/knowledge_edges` remain the serving fallback.
+- Validation run:
+  - `PYTHONDONTWRITEBYTECODE=1 api/.venv/Scripts/python.exe -m py_compile ...` passed for the new/changed backend files.
+  - `PYTHONDONTWRITEBYTECODE=1 api/.venv/Scripts/python.exe -m pytest tests/test_graph_json_v2_integration.py -q` passed: 6 tests.
+  - `npm run build` in `dashboard/` passed.
+- Remaining integration risk: the full Sofia/CRIAR Graph JSON v2 loop from `study-branch-state-audit-20260628` still has large overlaps in `kb_intake_service.py`, `assets.py`, `knowledge.py`, `graph.py`, migrations 039-046, product import, QA contract routes, and dashboard graph/capture UI. Bring these in by feature slices, not as one merge.
