@@ -83,6 +83,8 @@ export default function McpIntegrationsWorkspace({
   const [spreadsheetId, setSpreadsheetId] = useState("");
   const [airtableKey, setAirtableKey] = useState("");
   const [airtableBaseId, setAirtableBaseId] = useState("");
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [anthropicKey, setAnthropicKey] = useState("");
 
   const grouped = useMemo(
     () => ({
@@ -113,6 +115,8 @@ export default function McpIntegrationsWorkspace({
     setSpreadsheetId("");
     setAirtableKey("");
     setAirtableBaseId("");
+    setOpenaiKey("");
+    setAnthropicKey("");
     setFormError(null);
   }
 
@@ -163,12 +167,24 @@ export default function McpIntegrationsWorkspace({
           service_account_json: googleJson,
           spreadsheet_id: spreadsheetId || undefined,
         });
-      } else {
+      } else if (modal.service === "airtable") {
         await api.updateUserIntegration(modal.service, {
           enabled: true,
           api_key: airtableKey,
           base_id: airtableBaseId,
         });
+      } else if (modal.service === "openai") {
+        await api.updateUserIntegration(modal.service, {
+          enabled: true,
+          api_key: openaiKey,
+        });
+      } else if (modal.service === "anthropic") {
+        await api.updateUserIntegration(modal.service, {
+          enabled: true,
+          api_key: anthropicKey,
+        });
+      } else {
+        throw new Error(`Integracao sem formulario de credenciais: ${modal.label}`);
       }
       closeModal();
       startTransition(() => {
@@ -237,7 +253,7 @@ export default function McpIntegrationsWorkspace({
           <KeyRound size={15} className="text-emerald-300" />
           <div>
             <h2 className="text-sm font-semibold text-white">Conectores do usuario</h2>
-            <p className="text-xs text-zinc-400">Cada usuario controla suas proprias credenciais para Google Sheets e Airtable.</p>
+            <p className="text-xs text-zinc-400">Cada usuario controla suas proprias credenciais para Sofia, Claude, Google Sheets e Airtable.</p>
           </div>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
@@ -375,7 +391,7 @@ export default function McpIntegrationsWorkspace({
                     />
                   </label>
                 </>
-              ) : (
+              ) : modal.service === "airtable" ? (
                 <>
                   <label className="block space-y-2">
                     <span className="text-sm text-zinc-200">API key / token</span>
@@ -396,6 +412,40 @@ export default function McpIntegrationsWorkspace({
                     />
                   </label>
                 </>
+              ) : modal.service === "openai" ? (
+                <label className="block space-y-2">
+                  <span className="text-sm text-zinc-200">OpenAI API key</span>
+                  <input
+                    type="password"
+                    value={openaiKey}
+                    onChange={(event) => setOpenaiKey(event.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-emerald-400/40"
+                    placeholder="sk-..."
+                    autoComplete="off"
+                  />
+                  <span className="block text-xs leading-5 text-zinc-500">
+                    A chave fica criptografada no banco local e usada somente pelo backend para operar a Sofia.
+                  </span>
+                </label>
+              ) : modal.service === "anthropic" ? (
+                <label className="block space-y-2">
+                  <span className="text-sm text-zinc-200">Anthropic / Claude API key</span>
+                  <input
+                    type="password"
+                    value={anthropicKey}
+                    onChange={(event) => setAnthropicKey(event.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-emerald-400/40"
+                    placeholder="sk-ant-..."
+                    autoComplete="off"
+                  />
+                  <span className="block text-xs leading-5 text-zinc-500">
+                    A chave fica criptografada no banco local e usada somente pelo backend como fallback Claude.
+                  </span>
+                </label>
+              ) : (
+                <div className="rounded-2xl border border-amber-400/15 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+                  Esta integracao ainda nao possui formulario de credenciais.
+                </div>
               )}
 
               {formError && (

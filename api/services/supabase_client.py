@@ -3,6 +3,8 @@ import re
 import time
 import unicodedata
 import json
+from pathlib import Path
+from urllib.parse import quote
 from datetime import datetime, timezone
 import httpx
 from supabase import create_client, Client, ClientOptions
@@ -2003,6 +2005,8 @@ def mark_gallery_asset_inactive_by_edge(edge_id: str) -> None:
 def _storage_signed_url(bucket: str | None, path: str | None, expires_in: int = 86400) -> Optional[str]:
     if not bucket or not path:
         return None
+    if _local_storage_enabled():
+        return _local_storage_public_url(bucket, path)
     try:
         signed = get_client().storage.from_(bucket).create_signed_url(path, expires_in)
         signed_url = signed.get("signedURL") if isinstance(signed, dict) else getattr(signed, "signed_url", None) or getattr(signed, "signedURL", None)
@@ -2264,11 +2268,13 @@ def get_relation_type_registry() -> list[dict]:
 
 # â”€â”€ Insights â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def get_insights(status: Optional[str] = None, limit: int = 50) -> list:
+def get_insights(status: Optional[str] = None, limit: int = 50, persona_id: Optional[str] = None) -> list:
     try:
         q = get_client().table("flow_insights").select("*").order("created_at", desc=True).limit(limit)
         if status:
             q = q.eq("status", status)
+        if persona_id:
+            q = q.eq("persona_id", persona_id)
         return _q(q)
     except Exception as exc:
         try:
@@ -2752,16 +2758,18 @@ def insert_agent_log(data: dict) -> None:
         raise last_exc
 
 
-def get_agent_logs(lead_id: Optional[str] = None, limit: int = 50) -> list:
+def get_agent_logs(lead_id: Optional[str] = None, limit: int = 50, persona_id: Optional[str] = None) -> list:
     q = get_client().table("agent_logs").select("*").order("created_at", desc=True).limit(limit)
     if lead_id:
         q = q.eq("lead_id", lead_id)
+    if persona_id:
+        q = q.eq("persona_id", persona_id)
     rows = _q(q)
     return [_normalize_agent_log_row(row) for row in rows]
 
 
-def get_error_logs(component: Optional[str] = None, limit: int = 100) -> list:
-    rows = get_agent_logs(limit=limit)
+def get_error_logs(component: Optional[str] = None, limit: int = 100, persona_id: Optional[str] = None) -> list:
+    rows = get_agent_logs(limit=limit, persona_id=persona_id)
     filtered = []
     for row in rows:
         level = str(row.get("level") or "").upper()
@@ -3431,7 +3439,7 @@ def get_pipeline_metrics(persona_id: Optional[str] = None) -> dict:
     kb_rows = _q(kb_q)
     asset_rows = _q(asset_q)
     error_rows = [
-        row for row in get_error_logs(limit=500)
+        row for row in get_error_logs(limit=500, persona_id=persona_id)
         if str(row.get("created_at") or row.get("ts") or "") >= today
     ]
 
@@ -3446,15 +3454,56 @@ def get_pipeline_metrics(persona_id: Optional[str] = None) -> dict:
 
 # â”€â”€ Storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+def _local_storage_root() -> Optional[Path]:
+    raw = (os.environ.get("LOCAL_STORAGE_DIR") or "").strip()
+    return Path(raw).resolve() if raw else None
+
+
+def _local_storage_enabled() -> bool:
+    return _local_storage_root() is not None
+
+
+def _safe_local_storage_path(bucket: str, path: str) -> Path:
+    root = _local_storage_root()
+    if root is None:
+        raise RuntimeError("LOCAL_STORAGE_DIR is not configured.")
+    bucket = (bucket or "").strip().strip("/\\")
+    object_path = (path or "").strip().lstrip("/\\")
+    if not bucket or not object_path:
+        raise ValueError("Storage bucket and path are required.")
+    target = (root / bucket / object_path).resolve()
+    allowed_root = (root / bucket).resolve()
+    if not str(target).startswith(str(allowed_root)):
+        raise ValueError("Invalid storage path.")
+    return target
+
+
+def _local_storage_public_url(bucket: str, path: str) -> str:
+    base = (
+        os.environ.get("PUBLIC_API_URL")
+        or os.environ.get("NEXT_PUBLIC_API_URL")
+        or "http://localhost:8000"
+    ).rstrip("/")
+    storage_ref = quote(f"{bucket}:{path}", safe="")
+    return f"{base}/knowledge/file?path={storage_ref}"
+
+
 def upload_to_storage(bucket: str, path: str, data: bytes, content_type: str = "application/octet-stream") -> str:
-    """Upload bytes to Supabase Storage; returns the public URL."""
+    """Upload bytes to the configured storage backend; returns a preview URL."""
+    if _local_storage_enabled():
+        target = _safe_local_storage_path(bucket, path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        return _local_storage_public_url(bucket, path)
     client = get_client()
     client.storage.from_(bucket).upload(path, data, {"content-type": content_type, "upsert": "true"})
     return client.storage.from_(bucket).get_public_url(path)
 
 
 def download_from_storage(bucket: str, path: str) -> bytes:
-    """Download bytes from Supabase Storage using the backend service client."""
+    """Download bytes from the configured storage backend."""
+    if _local_storage_enabled():
+        return _safe_local_storage_path(bucket, path).read_bytes()
     return get_client().storage.from_(bucket).download(path)
 
 

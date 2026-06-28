@@ -24,7 +24,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
-from services import auth_service, knowledge_graph, supabase_client
+from services import auth_service, integration_service, knowledge_graph, supabase_client
 from services.asset_pipeline import AssetPipelineContext, compose_markdown, run_pipeline
 
 logger = logging.getLogger("routes.assets")
@@ -320,7 +320,9 @@ async def upload_asset(
         raise HTTPException(404, f"Parent node nao encontrado para slug/id={branch_hint}")
 
     try:
-        return await _upload_asset_impl(file, persona_id, persona_slug, parent_node, asset_function)
+        user = auth_service.current_user(request)
+        openai_api_key = integration_service.get_enabled_user_secret(user.get("id") or "", "openai")
+        return await _upload_asset_impl(file, persona_id, persona_slug, parent_node, asset_function, openai_api_key=openai_api_key)
     except HTTPException:
         raise
     except Exception as exc:
@@ -388,6 +390,7 @@ async def _upload_asset_impl(
     persona_slug: Optional[str],
     parent_node: dict,
     asset_function: Optional[str],
+    openai_api_key: Optional[str] = None,
 ):
     content = await file.read()
     fname = file.filename or "upload"
@@ -415,6 +418,7 @@ async def _upload_asset_impl(
         branch_hint=parent_node.get("slug"),
         branch_label=parent_node.get("title") or parent_node.get("slug"),
         asset_function=asset_function or None,
+        openai_api_key=openai_api_key,
     )
     bundle = run_pipeline(content, ctx)
 

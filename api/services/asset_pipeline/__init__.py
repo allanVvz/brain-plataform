@@ -181,7 +181,7 @@ def run_pipeline(file_bytes: bytes, ctx: AssetPipelineContext) -> AssetReadingBu
             ocr_res = _ocr.run(file_bytes)
             extracted_text = ocr_res.extracted_text or ""
         if (not extracted_text) or (ocr_res and ocr_res.needs_ai_fallback):
-            ai_res = _ai.run(file_bytes, ctx.mime, prior_text=extracted_text)
+            ai_res = _ai.run(file_bytes, ctx.mime, prior_text=extracted_text, openai_api_key=ctx.openai_api_key)
             if ai_res and ai_res.extracted_text:
                 extracted_text = ai_res.extracted_text
             if ai_res and ai_res.visual_summary:
@@ -206,6 +206,7 @@ def run_pipeline(file_bytes: bytes, ctx: AssetPipelineContext) -> AssetReadingBu
         visual_summary,
         ctx.original_filename,
         allow_model_refine=True,
+        openai_api_key=ctx.openai_api_key,
     )
 
     rows = _build_rows(ctx.persona_id, classification, ocr_res, pdf_res, video_res, ai_res, rename_res)

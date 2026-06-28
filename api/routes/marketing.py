@@ -20,7 +20,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from services import auth_service, supabase_client
+from services import auth_service, integration_service, supabase_client
 from services.model_router import ModelRouter, ModelRouterError, AVAILABLE_MODELS
 
 logger = logging.getLogger("marketing")
@@ -370,7 +370,12 @@ def generate(body: GenerateRequest, request: Request):
     persona_block = _persona_block(body.persona_id)
     system_prompt = (persona_block + "\n" if persona_block else "") + spec.system_prompt
 
-    router_ = ModelRouter()
+    user = auth_service.current_user(request)
+    user_id = user.get("id") or ""
+    router_ = ModelRouter(
+        openai_api_key=integration_service.get_enabled_user_secret(user_id, "openai"),
+        anthropic_api_key=integration_service.get_enabled_user_secret(user_id, "anthropic"),
+    )
     requested_model = body.model or "gpt-4o-mini"
     try:
         content = router_.messages_create(

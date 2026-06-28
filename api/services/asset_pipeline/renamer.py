@@ -98,11 +98,18 @@ def _heuristic(
     )
 
 
-def _model_refine(initial: RenameResult, persona_slug: Optional[str], branch_label: Optional[str], extracted_text: str, visual_summary: str) -> RenameResult:
+def _model_refine(
+    initial: RenameResult,
+    persona_slug: Optional[str],
+    branch_label: Optional[str],
+    extracted_text: str,
+    visual_summary: str,
+    openai_api_key: Optional[str] = None,
+) -> RenameResult:
     """Call a cheap text model to refine title/slug/tags. Best effort."""
     try:
-        from services.model_router import get_router
-        router = get_router()
+        from services.model_router import ModelRouter, get_router
+        router = ModelRouter(openai_api_key=openai_api_key) if openai_api_key else get_router()
         prompt = (
             "Voce e um renomeador de assets. Receba o contexto e devolva JSON estrito.\n"
             f"persona_slug: {persona_slug or '-'}\n"
@@ -163,6 +170,7 @@ def run(
     original_filename: str,
     *,
     allow_model_refine: bool = True,
+    openai_api_key: Optional[str] = None,
 ) -> RenameResult:
     initial = _heuristic(persona_slug, branch_label, kind, extracted_text, visual_summary, original_filename)
 
@@ -172,4 +180,4 @@ def run(
     if len(initial.tags) >= 3 and len(initial.title) >= 12:
         return initial
 
-    return _model_refine(initial, persona_slug, branch_label, extracted_text, visual_summary)
+    return _model_refine(initial, persona_slug, branch_label, extracted_text, visual_summary, openai_api_key=openai_api_key)

@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from services import supabase_client
+from services import integration_service, supabase_client
 from services import knowledge_graph
 from services import knowledge_lifecycle
 from services.catalog_crawler import crawl_catalog_url
@@ -4298,6 +4298,7 @@ def create_session(
     initial_context: str = "",
     agent_key: str = "sofia",
     initial_state: Optional[dict[str, Any]] = None,
+    user_id: Optional[str] = None,
 ) -> dict:
     sid = str(uuid.uuid4())
     agent = get_agent_profile(agent_key)
@@ -4358,6 +4359,7 @@ def create_session(
             "file_bytes": None,
         },
         "created_at": created_at,
+        "user_id": user_id,
     }
     if initial_plan:
         try:
@@ -4426,6 +4428,7 @@ def start_bootstrap_session(
     agent_key: str = "sofia",
     initial_state: Optional[dict[str, Any]] = None,
     bootstrap_llm: bool = True,
+    user_id: Optional[str] = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     if str((initial_state or {}).get("mode") or "").strip().lower() == "criar" and _invalid_criar_persona((initial_state or {}).get("persona_slug")):
@@ -4434,7 +4437,7 @@ def start_bootstrap_session(
             "error_code": "VALIDATION_ERROR",
             "message": "Selecione uma persona especifica antes de criar conhecimento.",
         }
-    session = create_session(model, initial_context=initial_context, agent_key=agent_key, initial_state=initial_state)
+    session = create_session(model, initial_context=initial_context, agent_key=agent_key, initial_state=initial_state, user_id=user_id)
     if not bootstrap_llm:
         message = _deterministic_bootstrap_message(session)
         session["bootstrap_llm"] = False
@@ -4876,7 +4879,10 @@ Estado atual:
             state_ctx += "Perguntas obrigatorias antes do plano final:\n" + "\n".join(f"- {q}" for q in qs[:4]) + "\n"
 
     try:
-        router = ModelRouter()
+        user_id = session.get("user_id") or ""
+        openai_api_key = integration_service.get_enabled_user_secret(user_id, "openai")
+        anthropic_api_key = integration_service.get_enabled_user_secret(user_id, "anthropic")
+        router = ModelRouter(openai_api_key=openai_api_key, anthropic_api_key=anthropic_api_key)
         raw = router.messages_create(
             model=session["model"],
             messages=session["messages"],

@@ -10,13 +10,13 @@ from .schemas import AiFallbackResult
 logger = logging.getLogger("asset_pipeline.ai_fallback")
 
 
-def run(file_bytes: bytes, mime: Optional[str], prior_text: str = "") -> Optional[AiFallbackResult]:
+def run(file_bytes: bytes, mime: Optional[str], prior_text: str = "", openai_api_key: Optional[str] = None) -> Optional[AiFallbackResult]:
     """Try to extract text + visual summary using a vision-capable model.
 
     Returns None when no vision provider is configured (offline / CI).
     """
     try:
-        from services.model_router import get_router
+        from services.model_router import ModelRouter, get_router
     except Exception as exc:
         logger.warning("model_router import failed: %s", exc)
         return None
@@ -33,7 +33,7 @@ def run(file_bytes: bytes, mime: Optional[str], prior_text: str = "") -> Optiona
         )
 
     try:
-        router = get_router()
+        router = ModelRouter(openai_api_key=openai_api_key) if openai_api_key else get_router()
         out = router.vision_extract(file_bytes, mime or "image/png", prompt=prompt)
     except Exception as exc:
         logger.warning("vision_extract raised: %s", exc)

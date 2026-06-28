@@ -1,10 +1,11 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Any, Optional
 import os
 import time
 
+from services import auth_service, integration_service
 from services.catalog_crawler import crawl_catalog_url
 from services.kb_intake_service import (
     start_bootstrap_session,
@@ -58,13 +59,39 @@ class PlanUpdateBody(BaseModel):
     last_change: Optional[str] = None
 
 
+def _assert_session_access(session_id: str, request: Request) -> dict[str, Any]:
+    user = auth_service.current_user(request)
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    owner_id = session.get("user_id")
+    if owner_id and owner_id != user.get("id"):
+        raise HTTPException(403, "Sessao pertence a outro usuario.")
+    return session
+
+
 @router.get("/models")
-def list_models():
-    return [{"id": k, "name": v} for k, v in AVAILABLE_MODELS.items()]
+def list_models(request: Request):
+    user = auth_service.current_user(request)
+    user_openai = bool(integration_service.get_enabled_user_secret(user.get("id") or "", "openai"))
+    user_anthropic = bool(integration_service.get_enabled_user_secret(user.get("id") or "", "anthropic"))
+    system_openai = integration_service.system_service_has_runtime_credentials("openai")
+    system_anthropic = integration_service.system_service_has_runtime_credentials("anthropic")
+    return [
+        {
+            "id": k,
+            "name": v,
+            "provider": "anthropic" if k.startswith("claude-") else "openai",
+            "configured": bool(user_anthropic or system_anthropic) if k.startswith("claude-") else bool(user_openai or system_openai),
+            "credential_source": "user" if k.startswith("claude-") and user_anthropic else "system" if k.startswith("claude-") and system_anthropic else "user" if user_openai and not k.startswith("claude-") else "system" if system_openai and not k.startswith("claude-") else None,
+        }
+        for k, v in AVAILABLE_MODELS.items()
+    ]
 
 
 @router.post("/start")
-def start_session(body: StartBody):
+def start_session(body: StartBody, request: Request):
+    user = auth_service.current_user(request)
     if body.model not in AVAILABLE_MODELS:
         raise HTTPException(400, f"Modelo nao disponivel: {body.model}")
     initial_state = {
@@ -83,11 +110,13 @@ def start_session(body: StartBody):
         agent_key=body.agent_key,
         initial_state=initial_state,
         bootstrap_llm=body.bootstrap_llm,
+        user_id=user.get("id"),
     )
 
 
 @router.post("/message")
-def send_message(body: MessageBody):
+def send_message(body: MessageBody, request: Request):
+    _assert_session_access(body.session_id, request)
     try:
         result = chat(body.session_id, body.message)
         return result
@@ -144,7 +173,9 @@ def send_message(body: MessageBody):
 
 
 @router.post("/crawl-preview")
-def crawl_preview(body: CrawlBody):
+def crawl_preview(body: CrawlBody, request: Request):
+    if body.session_id:
+        _assert_session_access(body.session_id, request)
     try:
         result = crawl_catalog_url(body.url)
     except ValueError as exc:
@@ -158,10 +189,13 @@ def crawl_preview(body: CrawlBody):
 
 @router.post("/upload")
 async def upload_file(
+    request: Request,
     session_id: str = Form(...),
     message: str = Form(""),
     file: UploadFile = File(...),
 ):
+    session_for_access = _assert_session_access(session_id, request)
+    openai_api_key = integration_service.get_enabled_user_secret(session_for_access.get("user_id") or "", "openai")
     upload_started = time.perf_counter()
     last_mark = upload_started
     timings_ms: dict[str, int] = {}
@@ -261,6 +295,7 @@ async def upload_file(
             mime=file.content_type or "",
             branch_hint=None,
             branch_label=None,
+            openai_api_key=openai_api_key,
         )
         bundle = run_pipeline(content, ctx)
         mark_timing("asset_pipeline")
@@ -428,10 +463,8 @@ def _bundle_to_asset_type(kind: str) -> str:
 
 
 @router.get("/session/{session_id}")
-def get_session_info(session_id: str):
-    session = get_session(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
+def get_session_info(session_id: str, request: Request):
+    session = _assert_session_access(session_id, request)
     prune_unpersisted_asset_readings(session)
     live_state = _session_public_state(session)
     return {
@@ -449,7 +482,8 @@ def get_session_info(session_id: str):
 
 
 @router.patch("/session/{session_id}/plan")
-def patch_session_plan(session_id: str, body: PlanUpdateBody):
+def patch_session_plan(session_id: str, body: PlanUpdateBody, request: Request):
+    _assert_session_access(session_id, request)
     result = update_session_plan(
         session_id,
         body.knowledge_plan,
@@ -463,7 +497,8 @@ def patch_session_plan(session_id: str, body: PlanUpdateBody):
 
 
 @router.post("/save")
-def save_knowledge(body: SaveBody):
+def save_knowledge(body: SaveBody, request: Request):
+    _assert_session_access(body.session_id, request)
     try:
         result = save(body.session_id, body.content, body.plan_override)
     except Exception as exc:

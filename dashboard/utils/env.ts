@@ -1,5 +1,5 @@
 function missing(name: string): never {
-  throw new Error(`Env ausente: ${name}. Configure nas variaveis do projeto (Vercel).`);
+  throw new Error(`Env ausente: ${name}. Configure no .env.local ou no docker-compose.yml.`);
 }
 
 export function getPublicApiUrl(): string {

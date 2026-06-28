@@ -35,6 +35,7 @@ class AssetPipelineContext:
     branch_hint: Optional[str] = None  # parent slug
     branch_label: Optional[str] = None
     asset_function: Optional[str] = None
+    openai_api_key: Optional[str] = None
 
 
 @dataclass

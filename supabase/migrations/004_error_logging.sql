@@ -28,6 +28,12 @@ CREATE TABLE IF NOT EXISTS public.agent_logs (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE public.agent_logs
+    ADD COLUMN IF NOT EXISTS agent_type TEXT,
+    ADD COLUMN IF NOT EXISTS action TEXT,
+    ADD COLUMN IF NOT EXISTS decision TEXT,
+    ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+
 -- Add index on agent_type for component-filtered queries in GET /logs/errors
 CREATE INDEX IF NOT EXISTS idx_agent_logs_agent_type   ON public.agent_logs (agent_type);
 CREATE INDEX IF NOT EXISTS idx_agent_logs_created_at   ON public.agent_logs (created_at DESC);

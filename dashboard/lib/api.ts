@@ -3,7 +3,7 @@ import { getPublicApiUrl } from "@/utils/env";
 
 export const BASE = "/api-brain";
 export const API_URL = BASE;
-const API_ENV_ERROR = "Backend nao configurado. Defina NEXT_PUBLIC_API_URL na Vercel.";
+const API_ENV_ERROR = "Backend nao configurado. Defina NEXT_PUBLIC_API_URL no ambiente local/Docker.";
 const API_OFFLINE_ERROR =
   "Backend indisponivel agora. Verifique NEXT_PUBLIC_API_URL, confirme o endpoint /health e tente novamente.";
 

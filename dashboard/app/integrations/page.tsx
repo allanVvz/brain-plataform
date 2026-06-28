@@ -3,9 +3,8 @@ import McpIntegrationsWorkspace from "@/components/integrations/mcp-integrations
 export default function IntegrationsPage() {
   return (
     <McpIntegrationsWorkspace
-      readOnly
       title="Integracoes"
-      subtitle="Visao resumida do mesmo contrato do MCP, sem edicao de credenciais nesta tela."
+      subtitle="Conecte credenciais por usuario para a Sofia e demais ferramentas do runtime local."
     />
   );
 }

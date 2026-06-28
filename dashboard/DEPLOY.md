@@ -1,109 +1,73 @@
-# Deploy Vercel + Cloud Run
+# Dashboard Local-First
 
-Este dashboard usa Next.js com proxy `/api-brain/*` para o backend publicado no Cloud Run.
+Este dashboard deve rodar contra a stack local/self-hosted do repositorio. Nao use servicos SaaS como caminho padrao de execucao.
 
-## Frontend na Vercel
+## Dev Docker
 
-Configure no projeto da Vercel:
+Suba tudo a partir da raiz:
 
-```env
-NEXT_PUBLIC_API_URL=https://SEU-BACKEND-CLOUD-RUN.run.app
-NEXT_PUBLIC_SUPABASE_URL=https://SEU-PROJETO.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=SEU_SUPABASE_ANON_KEY
-NEXT_PUBLIC_SUPABASE_ANON_KEY=SEU_SUPABASE_ANON_KEY
+```powershell
+docker compose up --build
 ```
 
-Notas:
-- `NEXT_PUBLIC_API_URL` e o nome canonico atual.
-- O frontend ainda aceita o legado `NEXT_PUBLIC_AI_BRAIN_URL` como fallback, mas deploy novo deve usar `NEXT_PUBLIC_API_URL`.
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY` e opcional quando `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` estiver presente.
-- Nao use `SUPABASE_SERVICE_KEY` no frontend.
-- Se voce alterar envs na Vercel, faca novo deploy do frontend. A mudanca nao entra em um deploy ja pronto.
+URLs vistas pelo operador/browser:
 
-Deploy:
+- Dashboard: `http://localhost:3000`
+- Backend: `http://localhost:8000`
+- Gateway Supabase-compatible: `http://localhost:54321`
 
-```bash
+URLs vistas de dentro da rede Docker:
+
+- Backend: `http://api:8000`
+- Gateway Supabase-compatible: `http://supabase-gateway:8000`
+
+## Variaveis Do Dashboard
+
+Use variaveis separadas para evitar o erro de `localhost` dentro de container:
+
+```env
+API_INTERNAL_URL=http://api:8000
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<local anon jwt>
+```
+
+`API_INTERNAL_URL` e usada pelo rewrite server-side do Next para `/api-brain/*`. `NEXT_PUBLIC_API_URL` e a URL publica vista pelo browser/host.
+
+## Dev Fora Do Docker
+
+Se rodar o dashboard direto no host:
+
+```powershell
 cd dashboard
 npm install
-npm run build
-vercel --prod
+npm run dev -- --hostname 0.0.0.0 --port 3000
 ```
 
-## Backend no Cloud Run
+Nesse caso `API_INTERNAL_URL=http://localhost:8000` porque o processo Next tambem roda no host.
 
-Configure no Cloud Run:
+## Producao Self-Hosted
 
-```env
-SUPABASE_URL=https://SEU-PROJETO.supabase.co
-SUPABASE_SERVICE_KEY=SEU_SERVICE_ROLE_KEY
-ALLOWED_ORIGINS=https://SEU_FRONT.vercel.app,http://localhost:3000
-VAULT_SOURCE_MODE=github
-GITHUB_VAULT_REPO=owner/ai-brain-vault
-GITHUB_VAULT_BRANCH=main
-GITHUB_VAULT_ROOT=
-GITHUB_TOKEN=SEU_TOKEN_READ_ONLY
+Use o compose de producao:
+
+```powershell
+copy .env.prod.example .env.prod
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 ```
 
-Notas criticas:
-- `SUPABASE_SERVICE_KEY` precisa ser a `service_role` real do Supabase.
-- Se voce usar a `anon key` no lugar da `service_role`, `GET /health/ready` pode ate responder `200`, mas o login tende a falhar porque `app_users` pode voltar vazio no fluxo de auth.
-- Inclua todos os dominios Vercel realmente usados em `ALLOWED_ORIGINS`, por exemplo o dominio estavel e eventuais dominios temporarios de producao/preview.
+O build de producao usa `dashboard/Dockerfile` e nao executa `npm install` em runtime.
 
-Deploy:
+## Verificacao
 
-```bash
-gcloud run deploy ai-brain-api \
-  --source ./api \
-  --region us-central1 \
-  --allow-unauthenticated
+```powershell
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:3000/login
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:8000/health/ready
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:54321/health
 ```
 
-## Ordem recomendada
+Login seed de dev:
 
-1. Publique ou atualize o backend no Cloud Run.
-2. Valide `GET /health` e `GET /health/ready` no backend.
-3. Configure `NEXT_PUBLIC_API_URL` na Vercel apontando para a URL do Cloud Run.
-4. Publique o frontend na Vercel.
-
-## Diagnostico rapido
-
-Use estes sintomas para identificar o ponto da falha:
-
-- `GET /api-brain/health` falha:
-  o frontend nao esta chegando no backend correto. Revise `NEXT_PUBLIC_API_URL`.
-- `GET /api-brain/health` responde `200`, mas `POST /api-brain/auth/login` responde `500` ou `503`:
-  o backend chegou no Supabase mas falhou no fluxo de auth. Revise `SUPABASE_SERVICE_KEY`, logs do Cloud Run e disponibilidade do Supabase.
-- `GET /api-brain/auth/me` responde `401` na pagina `/login` antes de autenticar:
-  isso e esperado.
-- `POST /api-brain/auth/login` responde `401` com `Email/usuario ou senha invalidos.`:
-  a infra esta funcional; o problema e credencial do usuario.
-
-## Comandos de verificacao
-
-Backend:
-
-```bash
-curl https://SEU-BACKEND.run.app/health
-curl https://SEU-BACKEND.run.app/health/ready
+```text
+allan@brain.com
+123456
 ```
-
-Logs do Cloud Run em tempo real:
-
-```bash
-gcloud beta run services logs tail ai-brain-api --region us-central1
-```
-
-Fallback sem streaming:
-
-```bash
-gcloud run services logs read ai-brain-api --region us-central1 --limit 100
-```
-
-## Validacao final
-
-Depois do deploy:
-1. Abrir `/login`.
-2. Tentar autenticar e confirmar `POST /api-brain/auth/login -> 200`.
-3. Confirmar `GET /api-brain/auth/me -> 200` apos o login.
-4. Abrir `/knowledge/graph`, `/messages` e `/pipeline`.
-5. Confirmar que as chamadas `/api-brain/*` nao retornam erro de configuracao.

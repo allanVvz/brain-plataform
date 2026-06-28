@@ -49,18 +49,18 @@ CATALOG: list[dict[str, Any]] = [
     {
         "service": "openai",
         "label": "OpenAI",
-        "description": "Modelos auxiliares e pipelines de embeddings.",
-        "scope": "system",
-        "requires_credentials": False,
-        "user_managed": False,
+        "description": "Conta usada pela Sofia para criacao, alteracao, cards, grafo e estrutura.",
+        "scope": "user",
+        "requires_credentials": True,
+        "user_managed": True,
     },
     {
         "service": "anthropic",
         "label": "Anthropic",
-        "description": "Modelos Claude e classificadores operacionais.",
-        "scope": "system",
-        "requires_credentials": False,
-        "user_managed": False,
+        "description": "Conta usada como fallback Claude individual por usuario.",
+        "scope": "user",
+        "requires_credentials": True,
+        "user_managed": True,
     },
     {
         "service": "whatsapp",
@@ -82,7 +82,7 @@ CATALOG: list[dict[str, Any]] = [
 
 CATALOG_BY_SERVICE = {item["service"]: item for item in CATALOG}
 _GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-_PLACEHOLDER_MARKERS = {"", "your-airtable-key", "your-api-key", "changeme", "placeholder"}
+_PLACEHOLDER_MARKERS = {"", "your-airtable-key", "your-openai-key", "your-anthropic-key", "your-api-key", "changeme", "placeholder"}
 
 
 class IntegrationValidationError(ValueError):
@@ -138,12 +138,30 @@ def _normalize_airtable_payload(payload: dict[str, Any]) -> tuple[str, dict[str,
     return api_key, {"base_id": base_id}
 
 
+def _normalize_openai_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    api_key = (payload.get("api_key") or "").strip()
+    if not api_key:
+        raise IntegrationValidationError("api_key is required.")
+    return api_key, {}
+
+
+def _normalize_anthropic_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    api_key = (payload.get("api_key") or "").strip()
+    if not api_key:
+        raise IntegrationValidationError("api_key is required.")
+    return api_key, {}
+
+
 def normalize_credentials(service: str, payload: Optional[dict[str, Any]]) -> tuple[Optional[str], dict[str, Any]]:
     body = dict(payload or {})
     if service == "google_sheets":
         return _normalize_google_payload(body)
     if service == "airtable":
         return _normalize_airtable_payload(body)
+    if service == "openai":
+        return _normalize_openai_payload(body)
+    if service == "anthropic":
+        return _normalize_anthropic_payload(body)
     return None, {}
 
 
@@ -187,12 +205,34 @@ def validate_airtable(api_key: str, base_id: str) -> tuple[str, Optional[str], O
         raise IntegrationValidationError(f"Airtable validation failed: {exc}") from exc
 
 
+def validate_openai(api_key: str) -> tuple[str, Optional[str], Optional[int]]:
+    key = (api_key or "").strip()
+    if key.lower() in _PLACEHOLDER_MARKERS:
+        raise IntegrationValidationError("OpenAI credential is a placeholder.")
+    if not key.startswith("sk-") or len(key) < 20:
+        raise IntegrationValidationError("OpenAI credential does not look like a valid API key.")
+    return "connected", None, None
+
+
+def validate_anthropic(api_key: str) -> tuple[str, Optional[str], Optional[int]]:
+    key = (api_key or "").strip()
+    if key.lower() in _PLACEHOLDER_MARKERS:
+        raise IntegrationValidationError("Anthropic credential is a placeholder.")
+    if not key.startswith("sk-ant-") or len(key) < 20:
+        raise IntegrationValidationError("Anthropic credential does not look like a valid API key.")
+    return "connected", None, None
+
+
 def validate_credentials(service: str, *, secret_value: str, config_json: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     config = dict(config_json or {})
     if service == "google_sheets":
         status, error, latency = validate_google_sheets(secret_value, config.get("spreadsheet_id"))
     elif service == "airtable":
         status, error, latency = validate_airtable(secret_value, str(config.get("base_id") or ""))
+    elif service == "openai":
+        status, error, latency = validate_openai(secret_value)
+    elif service == "anthropic":
+        status, error, latency = validate_anthropic(secret_value)
     else:
         raise IntegrationValidationError(f"Unsupported user-managed service: {service}")
     return {
@@ -383,6 +423,15 @@ def delete_user_credentials(user_id: str, service: str) -> dict[str, Any]:
         }
     )
     return get_user_integration_state(user_id, service)
+
+
+def get_enabled_user_secret(user_id: str, service: str) -> Optional[str]:
+    if not is_user_managed(service):
+        return None
+    row = supabase_client.get_user_integration_connection(user_id, service)
+    if not row or not row.get("enabled") or not row.get("secret_ciphertext"):
+        return None
+    return secret_store.decrypt_secret(row.get("secret_ciphertext"))
 
 
 def system_service_has_runtime_credentials(service: str) -> bool:
