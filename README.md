@@ -52,6 +52,19 @@ cd dashboard
 npm run test:frontend-proxy
 ```
 
+## Testes Locais
+
+Use o Python do ambiente da API, nao o Python global:
+
+```powershell
+.\api\.venv\Scripts\python.exe -m pytest
+.\api\.venv\Scripts\python.exe scripts\check_python_syntax.py
+```
+
+O `pytest` default roda apenas testes `tests/test_*.py`, que devem ser unitarios/contratuais e nao depender de Docker,
+rede ou servicos externos. Testes `integration_*.py`, `e2e_*.py` e `smoke_*.py` ficam fora do default ate terem
+markers/skips explicitos e ambiente local declarado.
+
 ## Producao Self-Hosted
 
 O alvo oficial de producao e Docker self-hosted.
