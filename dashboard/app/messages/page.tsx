@@ -1259,7 +1259,7 @@ export function MessagesLayout({
             }
           },
         )
-        .subscribe((status) => setLiveSync(status === "SUBSCRIBED"));
+        .subscribe((status: string) => setLiveSync(status === "SUBSCRIBED"));
     } catch {
       setLiveSync(false);
     }

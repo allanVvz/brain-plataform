@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { ImagePlus, X } from "lucide-react";
 import { api } from "@/lib/api";
 
+function effectiveStatus(asset: any) {
+  const status = String(asset?.metadata?.validation_status || asset?.status || "pending_validation").toLowerCase();
+  if (status === "ready" || status === "reading" || status === "pending") return "pending_validation";
+  return status;
+}
+
 export function LinkAssetDrawer({
   open,
   personaId,
@@ -26,7 +32,7 @@ export function LinkAssetDrawer({
     if (!open || !personaId) return;
     setLoading(true);
     api.assetList({ persona_id: personaId, limit: 200 })
-      .then(setAssets)
+      .then((rows) => setAssets((rows || []).filter((asset: any) => asset?.status !== "archived")))
       .finally(() => setLoading(false));
   }, [open, personaId]);
 
@@ -78,7 +84,9 @@ export function LinkAssetDrawer({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs font-medium text-obs-text">{asset.name || asset.original_filename || "Asset"}</p>
-                <p className="truncate text-[10px] text-obs-faint">{asset.status || "ready"}</p>
+                <p className="truncate text-[10px] text-obs-faint">
+                  {effectiveStatus(asset)} {asset.landing_path?.label ? `- ${asset.landing_path.label}` : ""}
+                </p>
               </div>
               <span className="text-[10px] text-obs-violet">{linking === asset.id ? "..." : "vincular"}</span>
             </button>

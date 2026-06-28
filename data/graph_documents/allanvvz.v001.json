@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "persona_slug": "allanvvz",
+  "published_at": "2026-05-29T06:19:27.486466+00:00",
+  "checksum": "b288087cf72fe5ce",
+  "graph_json": {
+    "schema_version": "1.0",
+    "graph_id": "allanvvz-main",
+    "tenant": "qa",
+    "persona_slug": "allanvvz",
+    "brand_slug": null,
+    "status": "published",
+    "nodes": [
+      {
+        "id": "node:persona:allanvvz",
+        "node_type": "persona",
+        "slug": "allanvvz",
+        "label": "AllanVvz",
+        "parent_id": null,
+        "data": {}
+      },
+      {
+        "id": "node:brand:vz-lupas",
+        "node_type": "brand",
+        "slug": "vz-lupas",
+        "label": "VZ Lupas",
+        "parent_id": "node:persona:allanvvz",
+        "data": {
+          "seeded_by": "bra-75-mvp"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge:001",
+        "source": "node:persona:allanvvz",
+        "target": "node:brand:vz-lupas",
+        "relation": "persona_has_brand",
+        "primary_tree": true,
+        "metadata": {}
+      }
+    ],
+    "layout": {
+      "engine": "top-down-canonical",
+      "positions": {}
+    },
+    "validation": {
+      "is_valid": true,
+      "errors": []
+    }
+  }
+}

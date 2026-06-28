@@ -13,7 +13,7 @@ for path in (API_DIR, ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from routes import graph_documents, sofia_graph  # noqa: E402
+from routes import graph_documents, qa_contract  # noqa: E402
 from schemas.graph_json_v2 import GraphJson  # noqa: E402
 from services import graph_json_v2_validator  # noqa: E402
 
@@ -122,48 +122,27 @@ def test_publish_persists_event_and_reindexes(monkeypatch):
     assert "reindex" in calls
 
 
-def test_sofia_graph_command_requires_persona_access():
+def test_sofia_graph_command_requires_persona_access(monkeypatch):
     request = _request(
         role="user",
         access=[{"persona_slug": "tock-fatal", "can_view": True, "can_edit": True}],
     )
-    body = sofia_graph.SofiaGraphCommandBody(
+    monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
+    monkeypatch.setattr(
+        qa_contract.supabase_client,
+        "get_persona",
+        lambda slug: {"id": "p1", "slug": slug},
+    )
+
+    def deny_access(request, persona_id=None, persona_slug=None):
+        raise HTTPException(403, "Persona access denied")
+
+    monkeypatch.setattr(qa_contract.auth_service, "assert_persona_access", deny_access)
+    body = qa_contract.SofiaGraphCommandBody(
         persona_slug="baita-conveniencia",
-        message="focus_node node:brand:baita",
+        command="focus_node node:brand:baita",
+        context=qa_contract.SofiaGraphCommandContext(selected_node_id="node:brand:baita"),
     )
     with pytest.raises(HTTPException) as exc:
-        sofia_graph.sofia_graph_command(body, request)
+        qa_contract.sofia_graph_command(body, request)
     assert exc.value.status_code == 403
-
-
-def test_sofia_graph_command_returns_visual_patch_for_graph_tab():
-    request = _request(
-        role="user",
-        access=[{"persona_slug": "baita-conveniencia", "can_view": True, "can_edit": True}],
-    )
-    body = sofia_graph.SofiaGraphCommandBody(
-        persona_slug="baita-conveniencia",
-        selected_node_id="node:brand:baita",
-        message="crie produto Oakley Radar",
-    )
-    result = sofia_graph.sofia_graph_command(body, request)
-    assert result["ok"] is True
-    assert result["persisted"] is False
-    assert result["session_id"]
-    assert result["plan_json"]["persona_slug"] == "baita-conveniencia"
-    assert result["patch"]["nodes"][0]["id"].startswith("sofia:draft:")
-    assert result["tool_calls"][0]["name"] == "apply_patch_visual"
-
-
-def test_sofia_graph_confirm_clears_pending_queue():
-    request = _request(role="admin")
-    body = sofia_graph.SofiaGraphCommandBody(
-        persona_slug="baita-conveniencia",
-        action="confirm_pending",
-        session_id="sess-1",
-        plan_json={"graph_patch_queue": [{"command": "x"}]},
-    )
-    result = sofia_graph.sofia_graph_command(body, request)
-    assert result["persisted"] is True
-    assert result["session_id"] == "sess-1"
-    assert result["plan_json"]["graph_patch_queue"] == []

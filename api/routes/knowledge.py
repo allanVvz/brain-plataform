@@ -8,15 +8,33 @@ from pydantic import BaseModel
 from typing import Optional
 from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
 from services import approved_knowledge_snapshots
+from services import integration_service, product_import_service
 from services.knowledge_rag_backfill import backfill_knowledge_rag
 from services.knowledge_rag_intake import process_intake, process_intake_plan
 from services.vault_sync import run_sync, scan_vault
 from services.event_emitter import emit
+from services.audit_helpers import current_actor, summarize_diff
+from services import knowledge_taxonomy
+from core.landing_slots import LandingSlot, edge_metadata_for_slot, slot_config
 
 VAULT_SOURCE_MODE = os.environ.get("VAULT_SOURCE_MODE")
 OBSIDIAN_LOCAL_PATH = os.environ.get("OBSIDIAN_LOCAL_PATH")
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+
+
+@router.get("/taxonomy")
+def get_canonical_taxonomy(canonical_only: bool = False):
+    """Returns the canonical fractal graph taxonomy.
+
+    Single source of truth used by the dashboard, the canonical middleware
+    and Sofia's tools. `canonical_only=true` filters out legacy aliases.
+    """
+    snapshot = knowledge_taxonomy.taxonomy_snapshot()
+    if canonical_only:
+        snapshot["node_types"] = [n for n in snapshot["node_types"] if n.get("canonical")]
+        snapshot["relations"] = [r for r in snapshot["relations"] if r.get("canonical")]
+    return snapshot
 
 
 class RagIntakeBody(BaseModel):
@@ -339,6 +357,26 @@ class ItemUpdate(BaseModel):
     asset_function: Optional[str] = None
 
 
+_FAQ_REVERT_STATUSES = {"approved", "embedded"}
+_FAQ_CONTENT_FIELDS = ("title", "content")
+
+
+def _should_revert_faq_to_draft(existing: Optional[dict], data: dict) -> bool:
+    """An already-approved/embedded FAQ whose content is edited must go back to
+    draft (rascunho) so it is re-approved and re-published before it can live in
+    Embedded again. A patch that explicitly sets `status` is left untouched."""
+    if not existing or "status" in data:
+        return False
+    if str(existing.get("content_type") or "").lower() != "faq":
+        return False
+    if str(existing.get("status") or "").lower() not in _FAQ_REVERT_STATUSES:
+        return False
+    return any(
+        field in data and data[field] is not None and data[field] != existing.get(field)
+        for field in _FAQ_CONTENT_FIELDS
+    )
+
+
 @router.patch("/queue/{item_id}")
 def update_queue_item(item_id: str, body: ItemUpdate, request: Request):
     data = body.model_dump(exclude_none=True)
@@ -365,7 +403,30 @@ def update_queue_item(item_id: str, body: ItemUpdate, request: Request):
             if cached_item and cached_item.get("status") == "needs_category":
                 data["status"] = "pending"
 
+        # Editing an approved/embedded FAQ document withdraws it from Embedded and
+        # sends it back to draft until it is re-approved and re-published.
+        reverted_faq = _should_revert_faq_to_draft(existing, data)
+        if reverted_faq:
+            data["status"] = "pending"
+            data["curation_status"] = "draft"
+
         supabase_client.update_knowledge_item(item_id, data)
+        if reverted_faq:
+            try:
+                supabase_client.withdraw_faq_from_embedded(item_id)
+                # The withdrawn FAQ must drop out of the Embedded body too.
+                from services import embedded_markdown
+                embedded_markdown.rebuild_embedded_markdown((existing or {}).get("persona_id"))
+            except Exception as exc:
+                emit(
+                    "faq_withdraw_from_embedded_failed",
+                    entity_type="knowledge_item",
+                    entity_id=item_id,
+                    persona_id=(existing or {}).get("persona_id"),
+                    payload={"error": str(exc)},
+                    level="warn",
+                    source="routes.knowledge",
+                )
         updated = supabase_client.get_knowledge_item(item_id)
     except HTTPException:
         raise
@@ -374,6 +435,23 @@ def update_queue_item(item_id: str, body: ItemUpdate, request: Request):
 
     if not updated:
         raise HTTPException(404, "Item not found after update")
+
+    before_view = {k: (existing or {}).get(k) for k in data.keys()}
+    after_view = {k: (updated or {}).get(k) for k in data.keys()}
+    emit(
+        "knowledge_item_updated",
+        entity_type="knowledge_item",
+        entity_id=item_id,
+        persona_id=(updated or {}).get("persona_id") or (existing or {}).get("persona_id"),
+        payload={
+            "actor": current_actor(request),
+            "before": before_view,
+            "after": after_view,
+            "diff": summarize_diff(before_view, after_view),
+            "context": {"content_type": (updated or {}).get("content_type")},
+        },
+        source="routes.knowledge",
+    )
     return updated
 
 
@@ -836,6 +914,98 @@ def create_product(body: ProductBody, request: Request):
     return _decorate_products([product])[0]
 
 
+class ProductImportPreviewBody(BaseModel):
+    provider: str
+    persona_id: Optional[str] = None
+    persona_slug: Optional[str] = None
+    config: Optional[dict] = None
+
+
+@router.post("/products/import/preview")
+def import_products_preview_route(body: ProductImportPreviewBody, request: Request):
+    """Crawl/list products WITHOUT importing, grouped by collection.
+
+    Powers the audit screen so the operator can toggle collections/products
+    before confirming. No nodes are created."""
+    persona_id, _persona = _resolve_persona_scope(request, persona_id=body.persona_id, persona_slug=body.persona_slug)
+    if not persona_id:
+        raise HTTPException(400, "persona_id or persona_slug is required")
+    provider = (body.provider or "").strip().lower()
+    config = dict(body.config or {})
+    try:
+        return product_import_service.preview_products(provider=provider, config=config)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class ProductImportBody(BaseModel):
+    provider: str
+    persona_id: Optional[str] = None
+    persona_slug: Optional[str] = None
+    config: Optional[dict] = None
+    items: Optional[list[dict]] = None
+    download_images: Optional[bool] = None
+
+
+@router.post("/products/import")
+def import_products_route(body: ProductImportBody, request: Request):
+    """Import products from Meta / Shopify / Scraper(mock) into pending nodes.
+
+    The response NEVER includes credentials. Meta credentials are read
+    decrypted from the per-user integration (configured in Tools). When `items`
+    is provided (audit confirmation), only those products are imported."""
+    persona_id, persona = _resolve_persona_scope(request, persona_id=body.persona_id, persona_slug=body.persona_slug)
+    if not persona_id:
+        raise HTTPException(400, "persona_id or persona_slug is required")
+    provider = (body.provider or "").strip().lower()
+    config = dict(body.config or {})
+    if provider == "meta" and not body.items:
+        user = auth_service.current_user(request) or {}
+        config = {**config, **integration_service.get_meta_credentials(user.get("id") or "")}
+    try:
+        result = product_import_service.import_products(
+            provider=provider,
+            persona_id=persona_id,
+            persona_slug=(persona or {}).get("slug"),
+            config=config,
+            items=body.items,
+            download_images=bool(body.download_images),
+        )
+    except integration_service.IntegrationValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    emit("products_imported", entity_type="persona", entity_id=persona_id, persona_id=persona_id,
+         payload={"provider": provider, "created": result["created"], "updated": result["updated"],
+                  "skipped": result["skipped"], "images_downloaded": result.get("images_downloaded", 0)})
+    return result
+
+
+@router.post("/products/import/csv")
+async def import_products_csv_route(
+    request: Request,
+    file: UploadFile = File(...),
+    persona_id: Optional[str] = Form(None),
+    persona_slug: Optional[str] = Form(None),
+):
+    resolved_persona_id, persona = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    if not resolved_persona_id:
+        raise HTTPException(400, "persona_id or persona_slug is required")
+    content = await file.read()
+    try:
+        result = product_import_service.import_products(
+            provider="csv",
+            persona_id=resolved_persona_id,
+            persona_slug=(persona or {}).get("slug"),
+            file_bytes=content,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    emit("products_imported", entity_type="persona", entity_id=resolved_persona_id, persona_id=resolved_persona_id,
+         payload={"provider": "csv", "created": result["created"], "updated": result["updated"], "skipped": result["skipped"]})
+    return result
+
+
 @router.get("/products/{slug}")
 def get_product(slug: str, request: Request, persona_slug: Optional[str] = Query(None), persona_id: Optional[str] = Query(None)):
     resolved_persona_id, _ = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
@@ -857,7 +1027,23 @@ def update_product(slug: str, body: ProductPatchBody, request: Request, persona_
     patch = body.model_dump(exclude_none=True)
     if "metadata" in patch:
         patch["metadata"] = {**(product.get("metadata") or {}), **(patch["metadata"] or {})}
+    before_view = {k: product.get(k) for k in patch.keys()}
     updated = supabase_client.update_knowledge_node(product["id"], patch)
+    after_view = {k: (updated or {**product, **patch}).get(k) for k in patch.keys()}
+    emit(
+        "product_node_updated",
+        entity_type="knowledge_node",
+        entity_id=product.get("id"),
+        persona_id=product.get("persona_id"),
+        payload={
+            "actor": current_actor(request),
+            "before": before_view,
+            "after": after_view,
+            "diff": summarize_diff(before_view, after_view),
+            "context": {"slug": slug},
+        },
+        source="routes.knowledge",
+    )
     return _decorate_products([updated or {**product, **patch}])[0]
 
 
@@ -869,7 +1055,11 @@ def approve_product(slug: str, request: Request, persona_slug: Optional[str] = Q
         raise HTTPException(404, "Product not found")
     auth_service.assert_persona_access(request, persona_id=product.get("persona_id"))
     metadata = {**(product.get("metadata") or {}), "validated_at": datetime.now(timezone.utc).isoformat(), "validated_by": (auth_service.current_user(request) or {}).get("id")}
-    updated = supabase_client.update_knowledge_node(product["id"], {"status": "validated", "metadata": metadata})
+    updated = supabase_client.update_knowledge_node(
+        product["id"],
+        {"status": "validated", "metadata": metadata},
+        mark_related_faqs=False,
+    )
     emit("product_node_approved", entity_type="knowledge_node", entity_id=product.get("id"), persona_id=product.get("persona_id"), payload={"slug": slug})
     return {"ok": True, "product": _decorate_products([updated or product])[0]}
 
@@ -892,8 +1082,58 @@ def link_product_asset(slug: str, body: LinkAssetBody, request: Request, persona
     asset_node = _asset_node_from_link_body(body, product.get("persona_id"))
     if not asset_node or asset_node.get("node_type") != "asset":
         raise HTTPException(404, "Asset node not found")
-    metadata = {**(body.metadata or {}), "status": "pending_validation", "proposed_by": (body.metadata or {}).get("proposed_by") or "manual", "created_from": "product_link_asset", "primary_tree": False}
-    edge = supabase_client.upsert_knowledge_edge(asset_node["id"], product["id"], body.relation_type or "product_image", persona_id=product.get("persona_id"), weight=0.85, metadata=metadata)
+    slot_meta = edge_metadata_for_slot(LandingSlot.PRODUCT_IMAGE, label=product.get("title") or product.get("slug"))
+    binding = dict(slot_meta.get("page_binding") or {})
+    binding["slot_key"] = f"{LandingSlot.PRODUCT_IMAGE.value}:{product['slug']}"
+    binding["target_slug"] = product["slug"]
+    slot_meta["page_binding"] = binding
+    removed_edge_ids: list[str] = []
+    for edge in supabase_client.list_edges_for_nodes([product["id"]], relation_types=["product_image", "product_has_asset"], limit=1000):
+        if edge.get("source_node_id") == product["id"] or edge.get("target_node_id") == product["id"]:
+            if supabase_client.delete_knowledge_edge(edge.get("id")):
+                removed_edge_ids.append(edge.get("id"))
+    metadata = {
+        **(body.metadata or {}),
+        **slot_meta,
+        "status": "active",
+        "proposed_by": (body.metadata or {}).get("proposed_by") or "manual",
+        "created_from": "product_link_asset",
+        "primary_tree": True,
+        "direction": "product_to_asset",
+        "parent_slug": product.get("slug"),
+        "parent_type": "product",
+    }
+    edge = supabase_client.upsert_knowledge_edge(product["id"], asset_node["id"], body.relation_type or "product_image", persona_id=product.get("persona_id"), weight=0.85, metadata=metadata)
+    emit(
+        "product_asset_linked",
+        entity_type="knowledge_edge",
+        entity_id=(edge or {}).get("id") if isinstance(edge, dict) else None,
+        persona_id=product.get("persona_id"),
+        payload={
+            "product_slug": product.get("slug"),
+            "product_node_id": product.get("id"),
+            "asset_node_id": asset_node.get("id"),
+            "asset_id": body.asset_id,
+            "relation_type": body.relation_type or "product_image",
+            "slot_key": binding.get("slot_key"),
+            "removed_previous_edge_ids": removed_edge_ids,
+        },
+        source="routes.knowledge",
+    )
+    asset = supabase_client.get_asset(body.asset_id) if body.asset_id else None
+    if asset:
+        asset_metadata = {
+            **(asset.get("metadata") or {}),
+            "asset_function": slot_config(LandingSlot.PRODUCT_IMAGE)["asset_function"],
+            "asset_type": asset.get("type") or (asset.get("metadata") or {}).get("asset_type") or "image",
+            "parent_node_id": product["id"],
+            "parent_edge_id": edge.get("id") if isinstance(edge, dict) else None,
+        }
+        supabase_client.update_asset(body.asset_id, {"metadata": {k: v for k, v in asset_metadata.items() if v is not None}})
+        try:
+            supabase_client.update_knowledge_node(asset_node["id"], {"metadata": {**(asset_node.get("metadata") or {}), **asset_metadata}})
+        except Exception:
+            pass
     return {"ok": True, "edge": edge, "product": _decorate_products([product])[0]}
 
 
@@ -1027,4 +1267,23 @@ def get_brand(persona_id: str, request: Request):
 @router.put("/brand/{persona_id}")
 def upsert_brand(persona_id: str, body: dict, request: Request):
     auth_service.assert_persona_access(request, persona_id=persona_id)
-    return supabase_client.upsert_brand_profile({"persona_id": persona_id, **body})
+    before = supabase_client.get_brand_profile(persona_id) or {}
+    updated = supabase_client.upsert_brand_profile({"persona_id": persona_id, **body})
+    after = updated or {**before, **(body or {})}
+    keys = set((body or {}).keys()) | set(before.keys() if isinstance(before, dict) else [])
+    before_view = {k: before.get(k) if isinstance(before, dict) else None for k in keys}
+    after_view = {k: after.get(k) for k in keys}
+    emit(
+        "brand_profile_updated",
+        entity_type="brand_profile",
+        entity_id=persona_id,
+        persona_id=persona_id,
+        payload={
+            "actor": current_actor(request),
+            "before": before_view,
+            "after": after_view,
+            "diff": summarize_diff(before_view, after_view),
+        },
+        source="routes.knowledge",
+    )
+    return updated

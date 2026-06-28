@@ -29,6 +29,12 @@ interface Props {
   onClose: () => void;
   onEdit?: () => void;
   onRegenerate?: () => void;
+  // Disparado quando o operador clica em uma opcao de uma SofiaQuestion.
+  // O pai decide se envia mensagem para Sofia, abre file picker, etc.
+  onOptionSelect?: (q: SofiaQuestion, opt: SofiaQuestionOption) => void;
+  // Quando true, esconde brevemente as opcoes (loading spinner) enquanto a
+  // mensagem associada esta sendo processada pelo backend.
+  applyingAction?: boolean;
 }
 
 const STATUS_ORDER: PlanDiagnosticNodeStatus[] = [
@@ -144,10 +150,12 @@ function SofiaQuestionCard({
   question,
   index,
   onOptionSelect,
+  applying,
 }: {
   question: SofiaQuestion;
   index: number;
   onOptionSelect?: (q: SofiaQuestion, opt: SofiaQuestionOption) => void;
+  applying?: boolean;
 }) {
   const [showTech, setShowTech] = useState(false);
   return (
@@ -184,8 +192,10 @@ function SofiaQuestionCard({
             <li key={`${question.kind}-opt-${idx}`}>
               <button
                 type="button"
+                disabled={applying || !onOptionSelect}
                 onClick={() => onOptionSelect?.(question, opt)}
-                className="w-full text-left rounded border border-white/20 bg-obs-base px-2 py-1 text-[11px] text-obs-text hover:bg-blue-500/10 hover:border-blue-400/40 transition"
+                title={!onOptionSelect ? "Acao nao disponivel nesta tela." : opt.prompt_to_sofia || ""}
+                className="w-full text-left rounded border border-white/20 bg-obs-base px-2 py-1 text-[11px] text-obs-text hover:bg-blue-500/10 hover:border-blue-400/40 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span className="font-mono text-obs-faint mr-1.5">{String.fromCharCode(65 + idx)}.</span>
                 {opt.label}
@@ -243,7 +253,7 @@ function RootCauseCard({ cause }: { cause: PlanDiagnosticRootCause }) {
   );
 }
 
-export default function BlockedPlanDiagnosticModal({ diagnostic, onClose, onEdit, onRegenerate }: Props) {
+export default function BlockedPlanDiagnosticModal({ diagnostic, onClose, onEdit, onRegenerate, onOptionSelect, applyingAction }: Props) {
   const grouped = useMemo(() => {
     const byStatus: Record<PlanDiagnosticNodeStatus, PlanDiagnosticNode[]> = {
       valid: [],
@@ -371,6 +381,8 @@ export default function BlockedPlanDiagnosticModal({ diagnostic, onClose, onEdit
                   key={`${q.kind}-${q.affected_entry_index ?? "k"}-${idx}`}
                   question={q}
                   index={idx + 1}
+                  onOptionSelect={onOptionSelect}
+                  applying={applyingAction}
                 />
               ))}
               {diagnostic.sofia_questions.length === 0 && (

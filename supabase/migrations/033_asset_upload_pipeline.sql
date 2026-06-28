@@ -3,11 +3,14 @@
 -- Adds storage buckets, extends public.assets, creates public.asset_readings.
 
 -- ── Storage buckets ──────────────────────────────────────────────────────
+-- Public buckets: the cardapio menu (/api/menu, /cardapio) is auth-exempt and
+-- emits /object/public/ asset URLs, so the buckets must be public for images
+-- to resolve. ON CONFLICT keeps this idempotent and self-healing on re-apply.
 INSERT INTO storage.buckets (id, name, public)
 VALUES
-  ('assets-raw',     'assets-raw',     false),
-  ('assets-derived', 'assets-derived', false)
-ON CONFLICT (id) DO NOTHING;
+  ('assets-raw',     'assets-raw',     true),
+  ('assets-derived', 'assets-derived', true)
+ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
 
 -- ── public.assets — expand columns ───────────────────────────────────────
 ALTER TABLE public.assets

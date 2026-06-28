@@ -100,3 +100,28 @@ Validated:
     - `POST /sofia/graph-command` -> 200 with visual patch + `plan_json`.
   - Real dashboard route `GET http://localhost:3000/knowledge/graph` after login -> 200.
 - Remaining limitation: Sofia Graph route is deterministic/local-first and does not yet pull the full `qa_contract.py` + `sofia_orchestrator.py` LLM/tool orchestration from the audit branch.
+
+## Sofia Graph Audit Branch Full Incorporation - 2026-06-28
+
+- Merged the remaining `origin/study-branch-state-audit-20260628` surface into `study-merge-local-first-sofia-qa`.
+- Replaced the temporary local-first `api/routes/sofia_graph.py` route with the audit branch `api/routes/qa_contract.py` contract mounted at both `/sofia/graph-command` and `/api/sofia/graph-command`.
+- Integrated the Sofia graph orchestration stack used by the Graph tab: `sofia_orchestrator`, `sofia_tools`, `sofia_faq_tool`, FAQ generation panel, graph render state QA route, product import views, taxonomy helpers, and the related QA/migration/docs package.
+- Security correction found during validation: the merged `graph_documents` route had regressed to `current_user()` only. It now enforces persona view access on reads, edit access on mutations, and rejects `persona_slug` mismatch between request body and Graph JSON v2 payload.
+- Validation run:
+  - Python syntax checks passed for `api/main.py`, `qa_contract.py`, `graph_documents.py`, Sofia services, Graph JSON v2 store/importer/validator and Supabase client.
+  - Focused backend tests passed in stable groups:
+    - Graph JSON v2 integration: 7 passed.
+    - Graph documents/importer/validator: 21 passed.
+    - Graph JSON + route mapping group: 29 passed.
+    - Sofia QA/orchestrator/FAQ group: 51 passed.
+  - A single combined pytest invocation over all focused files still hit the 180s timeout without output, while the same files passed split by group.
+  - `npm run build` in `dashboard/` passed.
+  - `npm test` in `dashboard/` passed: 12 files, 50 tests. It requires non-sandbox execution on Windows because Vitest/Vite hit `spawn EPERM` inside the sandbox.
+  - `npm audit --omit=dev` found 0 production vulnerabilities.
+  - `docker compose up -d --build` rebuilt and started `brain-api`; `GET /health` returned 200 and `GET /knowledge/graph` on dashboard returned 200.
+  - Real authenticated API validation passed with local admin session:
+    - `POST /sofia/graph-command` for `vz-lupas` returned 200 with `plan_json.graph_json.schema_version = "2.0"`.
+    - `POST /graph-documents/apply-patch` returned 200.
+    - `POST /graph-documents/publish` returned 200 with `reindex_ok=true`, `nodes_imported=2`, `edges_imported=1`.
+    - `GET /graph-documents/current?persona_slug=vz-lupas` returned version 1 with Graph JSON v2 payload.
+- Remaining plan: no large branch slice remains unmerged from `study-branch-state-audit-20260628` in this worktree. What remains is hardening: resolve the combined pytest timeout, decide whether QA docs/artifacts/tmp screenshots should stay versioned, and run browser-level interaction on the Sofia panel after the next UI pass.

@@ -33,11 +33,19 @@ import { Database, Images } from "lucide-react";
 import {
   buildNeuronGraphLayout,
   buildTreeFromGraph,
+  compactRankMap,
   GraphEdgeData,
   GraphNodeData,
   getVisualHierarchyRank,
   KnowledgeViewMode,
 } from "./knowledgeGraphLayout";
+import {
+  collectPositions,
+  overlayPositions,
+  positionsDiffer,
+  readPositions,
+  writePositions,
+} from "@/lib/graphPositions";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -115,29 +123,36 @@ function nodeSize(data: GraphNodeData): { w: number; h: number } {
 }
 
 function nodeToRank(data: GraphNodeData): number {
+  // Canonical fractal hierarchy (taxonomy migration 039 + knowledge_taxonomy.py):
+  //   persona -> brand -> briefing -> campaign -> audience
+  //           -> product_group -> product -> offer -> copy
+  //           -> {faq, gallery}
+  // Asset is a lateral layer (no specific rank — sits next to its parent).
+  // Legacy aliases (product_collection / category) collapse to product_group.
   const nodeType = String(data.node_type || data.content_type || "").toLowerCase();
   const topDownRank: Record<string, number> = {
     persona: 0,
     brand: 1,
     briefing: 2,
     campaign: 3,
-    product_collection: 4,
+    audience: 4,
+    product_group: 5,
+    product_collection: 5,
     category: 5,
     product: 6,
-    audience: 7,
-    offer: 8,
-    copy: 9,
-    faq: 10,
-    asset: 10,
-    embedded: 11,
-    gallery: 11,
-    rule: 12,
-    tone: 12,
-    entity: 13,
+    offer: 7,
+    copy: 8,
+    faq: 9,
+    gallery: 9,
+    asset: 9,
+    embedded: 10,
+    rule: 10,
+    tone: 10,
+    entity: 11,
   };
   if (topDownRank[nodeType] !== undefined) return topDownRank[nodeType];
-  if (nodeType === "knowledge_item" || nodeType === "kb_entry") return 13;
-  if (nodeType === "tag" || nodeType === "mention") return 14;
+  if (nodeType === "knowledge_item" || nodeType === "kb_entry") return 11;
+  if (nodeType === "tag" || nodeType === "mention") return 12;
   return getVisualHierarchyRank(nodeType);
 }
 
@@ -230,6 +245,9 @@ function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Nod
     ranks.get(rank)!.push(node);
   }
   const mirroredPositions = new Map<string, { x: number; y: number }>();
+  // Compact occupied ranks to consecutive levels so empty bands (e.g. no
+  // offer/copy between product and FAQ) don't open an ugly vertical gap.
+  const compactRank = compactRankMap(ranks.keys());
   Array.from(ranks.entries()).sort(([a], [b]) => a - b).forEach(([rank, rankNodes]) => {
     const sorted = [...rankNodes].sort((a, b) => {
       const ax = a.position.x;
@@ -238,7 +256,7 @@ function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Nod
       return a.id.localeCompare(b.id);
     });
     const rankWidth = (sorted.length - 1) * (118 + spacing.nodeSep);
-    const y = rank * (74 + spacing.rankSep * 0.72);
+    const y = (compactRank.get(rank) ?? 0) * (74 + spacing.rankSep * 0.72);
     sorted.forEach((node, index) => {
       const x = index * (118 + spacing.nodeSep) - rankWidth / 2;
       mirroredPositions.set(node.id, { x, y });
@@ -280,12 +298,27 @@ function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Nod
 
 // ── Filtering by mode ──────────────────────────────────────────
 
+function _isPendingCuration(edge: Edge): boolean {
+  const data = (edge.data || {}) as GraphEdgeData;
+  const meta = (data.metadata || {}) as Record<string, unknown>;
+  const status = String(meta.curation_status || meta.status || "").toLowerCase();
+  return (
+    (data as any).draft_terminal_edge === true ||
+    status === "pending" ||
+    status === "pending_validation" ||
+    status === "pending_supersede" ||
+    String(meta.edge_kind || "").toLowerCase() === "asset_pending"
+  );
+}
+
 function filterEdgesForMode(edges: Edge[], mode: ViewMode): Edge[] {
   return edges.filter((edge) => {
     const data = (edge.data || {}) as GraphEdgeData;
     const metadata = (data.metadata || {}) as Record<string, unknown>;
     if (metadata.active === false) return false;
     if (metadata.visual_hidden === true) return false;
+    // Janela 5: pending edges are ALWAYS visible (operator visibility rule).
+    if (_isPendingCuration(edge)) return true;
     if (mode !== "graph") {
       return data.primary_tree === true || metadata.primary_tree === true || data.embedded_edge === true || data.gallery_edge === true || (data as any).draft_terminal_edge === true;
     }
@@ -294,41 +327,77 @@ function filterEdgesForMode(edges: Edge[], mode: ViewMode): Edge[] {
 }
 
 // ── Edge style by tier ─────────────────────────────────────────
+//
+// Canonical palette (Janela 5):
+//   primary (sólido cyan)     -> hierarchy backbone
+//   secondary (slate dashed)  -> opcional, opacity alta o suficiente pra ler
+//   asset_approved (magenta)  -> asset publicado na Gallery
+//   asset_pending  (violet)   -> asset proposto, pendente de curadoria
+//   draft / pending           -> amber dashed com pulse leve
+//   branch_complete_validated -> verde forte (mantém)
+//
+// Anti-padrão antigo: opacity ~0.2 em pending fazia desaparecer a edge.
+// Agora todas as edges relevantes pro operador ficam ≥0.55 de opacity.
 
 function edgeStyle(data: GraphEdgeData | undefined, isInPath: boolean): Edge["style"] {
   const tier = data?.tier || "auxiliary";
   if ((data as any)?.branch_complete_validated) {
-    return { stroke: "#22c55e", strokeWidth: 2.7, strokeOpacity: 0.9 };
+    return { stroke: "#22c55e", strokeWidth: 2.7, strokeOpacity: 0.95 };
   }
   if (isInPath) {
-    return { stroke: "#7c6fff", strokeWidth: 2.6, strokeOpacity: 0.86 };
+    return { stroke: "#7c6fff", strokeWidth: 2.6, strokeOpacity: 0.92 };
   }
-  if ((data as any)?.draft_terminal_edge) {
-    return { stroke: "rgba(148,163,184,0.64)", strokeWidth: 1.9, strokeOpacity: 0.68, strokeDasharray: "6 5" };
+  // Pending / draft / asset_pending: amber dashed bem visível + pulse via CSS.
+  const meta = (data?.metadata || {}) as Record<string, unknown>;
+  const status = String(meta.curation_status || meta.status || "").toLowerCase();
+  const pendingVisual = Boolean((data as any)?.pending_visual || meta.pending_visual);
+  const isAssetPending = String(meta.edge_kind || "").toLowerCase() === "asset_pending";
+  const isAssetApproved = String(meta.edge_kind || "").toLowerCase() === "asset_approved";
+  if (isAssetApproved) {
+    return { stroke: "#d946ef", strokeWidth: 2.4, strokeOpacity: 0.95 };
+  }
+  if (isAssetPending) {
+    return {
+      stroke: "rgba(167,139,250,0.95)",
+      strokeWidth: 2,
+      strokeOpacity: 0.95,
+      strokeDasharray: "8 4",
+      animation: "edgePulse 2s ease-in-out infinite",
+    } as Edge["style"];
+  }
+  if (pendingVisual || (data as any)?.draft_terminal_edge || status === "pending" || status === "pending_validation" || status === "pending_supersede") {
+    return {
+      stroke: "rgba(251,191,36,0.95)",
+      strokeWidth: 2,
+      strokeOpacity: 0.95,
+      strokeDasharray: "8 4",
+      animation: "edgePulse 2s ease-in-out infinite",
+    } as Edge["style"];
   }
   if (data?.embedded_edge) {
-    return { stroke: "var(--rf-edge-active)", strokeWidth: 2.3, strokeOpacity: 0.78 };
+    return { stroke: "var(--rf-edge-active)", strokeWidth: 2.3, strokeOpacity: 0.85 };
   }
   if (data?.gallery_edge) {
-    return { stroke: "rgba(217,70,239,0.66)", strokeWidth: 2.2, strokeOpacity: 0.74 };
+    return { stroke: "rgba(217,70,239,0.85)", strokeWidth: 2.2, strokeOpacity: 0.85 };
   }
   if (data?.primary) {
-    return { stroke: "var(--rf-edge)", strokeWidth: 2.2, strokeOpacity: 0.78 };
+    return { stroke: "var(--rf-edge)", strokeWidth: 2.2, strokeOpacity: 0.88 };
   }
   if (data?.secondary) {
-    return { stroke: "rgba(170,190,220,0.22)", strokeWidth: 1, strokeOpacity: 0.28, strokeDasharray: "5 5" };
+    // Janela 5: secondary fica visível (era opacity 0.28). Slate dashed.
+    return { stroke: "rgba(148,163,184,0.78)", strokeWidth: 1.2, strokeOpacity: 0.7, strokeDasharray: "6 4" };
   }
   if (tier === "strong") {
-    return { stroke: "rgba(125,211,252,0.55)", strokeWidth: 2.2, strokeOpacity: 0.72 };
+    return { stroke: "rgba(125,211,252,0.75)", strokeWidth: 2.2, strokeOpacity: 0.85 };
   }
   if (tier === "structural") {
-    return { stroke: "var(--rf-edge)", strokeWidth: 1.3, strokeOpacity: 0.42 };
+    return { stroke: "var(--rf-edge)", strokeWidth: 1.3, strokeOpacity: 0.6 };
   }
   if (tier === "curation") {
-    return { stroke: "#f87171", strokeWidth: 2, strokeOpacity: 0.7 };
+    return { stroke: "#f87171", strokeWidth: 2, strokeOpacity: 0.85 };
   }
-  // auxiliary
-  return { stroke: "var(--rf-edge)", strokeWidth: 1, strokeOpacity: 0.22, strokeDasharray: "4 4" };
+  // auxiliary — subiu de 0.22 para 0.55 pra não sumir.
+  return { stroke: "var(--rf-edge)", strokeWidth: 1, strokeOpacity: 0.55, strokeDasharray: "4 4" };
 }
 
 // ── Node component ─────────────────────────────────────────────
@@ -368,7 +437,7 @@ function KnowledgeNode({ data, selected }: NodeProps) {
   const isAuxiliary = !!d.is_auxiliary;
   const isEmbedded = d.node_type === "embedded";
   const isGallery = d.node_type === "gallery";
-  const isPending = d.validated === false;
+  const isPending = d.validated === false || Boolean((d as any)?.pending_visual || (d as any)?.metadata?.pending_visual);
   const branchComplete = Boolean((d as any).branch_complete_validated);
   const color = branchComplete
     ? "#22c55e"
@@ -560,14 +629,24 @@ const edgeTypes: EdgeTypes = {
 // ── Main component ─────────────────────────────────────────────
 
 function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConnectNodes, onDeleteEdge, mode, searchQuery, focusNodeId, showAllEdges = false, branchDistance = 48 }: GraphViewProps) {
-  const { fitView, getViewport, setViewport } = useReactFlow();
+  const { fitView, getViewport, setViewport, getNodes } = useReactFlow();
   const [panActive, setPanActive] = useState(false);
   const [graphNodeOpacity, setGraphNodeOpacity] = useState(false);
   const [theme, setTheme] = useState<AppTheme>("clean");
-  const viewportKey = useMemo(() => {
-    const personaIds = Array.from(new Set((rawNodes || []).map((n: any) => n?.data?.persona_slug || n?.data?.persona_id || n?.id).filter(Boolean))).slice(0, 3).join("|");
-    return `knowledge-graph-viewport:${personaIds || "global"}:${mode}:${focusNodeId || "all"}`;
-  }, [rawNodes, mode, focusNodeId]);
+  const personaScope = useMemo(
+    () => Array.from(new Set((rawNodes || []).map((n: any) => n?.data?.persona_slug || n?.data?.persona_id || n?.id).filter(Boolean))).slice(0, 3).join("|") || "global",
+    [rawNodes],
+  );
+  const viewportKey = useMemo(
+    () => `knowledge-graph-viewport:${personaScope}:${mode}:${focusNodeId || "all"}`,
+    [personaScope, mode, focusNodeId],
+  );
+  // Saved node positions are per persona + mode (not per focus): a manual
+  // arrangement should hold regardless of which node is focused.
+  const positionsKey = useMemo(
+    () => `knowledge-graph-positions:${personaScope}:${mode}`,
+    [personaScope, mode],
+  );
   const initialViewportDone = useRef(false);
   const lastFocusNodeId = useRef<string | null | undefined>(undefined);
   const visibleEdges = useMemo(
@@ -676,8 +755,10 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
 
   const laid = useMemo<Node[]>(() => {
     const layoutFn = mode === "graph" ? applyLayoutGraphSeed : mode === "semantic_tree" ? applyLayoutTree : applyLayoutLayered;
-    return layoutFn(decoratedNodes, styledEdges, branchDistance);
-  }, [decoratedNodes, styledEdges, mode, branchDistance]);
+    const computed = layoutFn(decoratedNodes, styledEdges, branchDistance);
+    // Overlay any saved per-persona arrangement on top of the computed layout.
+    return overlayPositions(computed, readPositions(positionsKey));
+  }, [decoratedNodes, styledEdges, mode, branchDistance, positionsKey]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(laid);
   const [edges, setEdges, onEdgesChange] = useEdgesState(styledEdges);
@@ -735,6 +816,17 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
     }));
   }, [getViewport, viewportKey]);
 
+  // Persist node positions per persona whenever the user moves a node, but only
+  // when they actually changed (diff guard) so storage/screen stay quiet otherwise.
+  const persistNodePositions = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const current = getNodes();
+    if (!current.length) return;
+    const saved = readPositions(positionsKey);
+    if (!positionsDiffer(current, saved)) return;
+    writePositions(positionsKey, collectPositions(current));
+  }, [getNodes, positionsKey]);
+
   const handleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       onNodeClick(node);
@@ -780,6 +872,7 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
       onNodeClick={handleClick}
       onSelectionChange={({ nodes: selected }) => onSelectionChange?.(selected)}
       onMoveEnd={saveViewport}
+      onNodeDragStop={persistNodePositions}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       connectionMode={ConnectionMode.Loose}

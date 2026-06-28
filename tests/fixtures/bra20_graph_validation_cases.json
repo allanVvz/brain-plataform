@@ -1,0 +1,136 @@
+{
+  "issue": "BRA-20",
+  "persona_slug": "qa-bra20-persona",
+  "graph_assertion_endpoint": "/knowledge/graph?mode=semantic_tree&all_edges=1",
+  "minimum_node_properties": [
+    "persona_slug",
+    "node_type",
+    "slug",
+    "title",
+    "status",
+    "source",
+    "metadata.active"
+  ],
+  "knowledge_inserted_acceptance": {
+    "requires_persisted_node_ids": true,
+    "requires_persisted_edge_ids": true,
+    "requires_semantic_tree_visibility": true,
+    "requires_rejected_edges_absent_from_graph": true,
+    "requires_validation_event_for_each_reject": true
+  },
+  "node_types_order": [
+    "persona",
+    "brand",
+    "briefing",
+    "campaign",
+    "audience",
+    "product_group",
+    "product",
+    "offer",
+    "copy",
+    "faq",
+    "embed"
+  ],
+  "nodes": [
+    { "slug": "p0", "title": "Persona QA BRA20", "node_type": "persona", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 0 } },
+    { "slug": "b0", "title": "Brand QA BRA20", "node_type": "brand", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 10 } },
+    { "slug": "br0", "title": "Briefing QA BRA20", "node_type": "briefing", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 20 } },
+    { "slug": "c0", "title": "Campaign QA BRA20", "node_type": "campaign", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 30 } },
+    { "slug": "a0", "title": "Audience QA BRA20", "node_type": "audience", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 40 } },
+    { "slug": "pg0", "title": "Product Group QA BRA20", "node_type": "product_group", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 50 } },
+    { "slug": "pr0", "title": "Product QA BRA20", "node_type": "product", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 60 } },
+    { "slug": "of0", "title": "Offer QA BRA20", "node_type": "offer", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 70 } },
+    { "slug": "cp0", "title": "Copy QA BRA20", "node_type": "copy", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 80 } },
+    { "slug": "fq_approved", "title": "FAQ Approved QA BRA20", "node_type": "faq", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 90 } },
+    { "slug": "fq_pending", "title": "FAQ Pending QA BRA20", "node_type": "faq", "status": "pending_validation", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 90 } },
+    { "slug": "em0", "title": "Embed QA BRA20", "node_type": "embed", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 100 } },
+    { "slug": "as0", "title": "Asset QA BRA20", "node_type": "asset", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 95 } },
+    { "slug": "gl0", "title": "Gallery QA BRA20", "node_type": "gallery", "status": "approved", "source": "fixture_bra20", "metadata": { "active": true, "level_hint": 95 } }
+  ],
+  "cases": [
+    {
+      "id": "valid_main_chain",
+      "expect": "allow",
+      "edges": [
+        ["p0", "b0", "main"],
+        ["b0", "br0", "main"],
+        ["br0", "c0", "main"],
+        ["c0", "a0", "main"],
+        ["a0", "pg0", "main"],
+        ["pg0", "pr0", "main"],
+        ["pr0", "of0", "main"],
+        ["of0", "cp0", "main"],
+        ["cp0", "fq_approved", "main"],
+        ["fq_approved", "em0", "main"]
+      ]
+    },
+    {
+      "id": "block_product_to_embed",
+      "expect": "reject",
+      "error_code": "EMBED_SOURCE_NOT_FAQ",
+      "edge": ["pr0", "em0", "main"]
+    },
+    {
+      "id": "block_campaign_to_embed",
+      "expect": "reject",
+      "error_code": "EMBED_SOURCE_NOT_FAQ",
+      "edge": ["c0", "em0", "main"]
+    },
+    {
+      "id": "block_copy_to_embed",
+      "expect": "reject",
+      "error_code": "EMBED_SOURCE_NOT_FAQ",
+      "edge": ["cp0", "em0", "main"]
+    },
+    {
+      "id": "block_asset_to_embed",
+      "expect": "reject",
+      "error_code": "EMBED_SOURCE_NOT_FAQ",
+      "edge": ["as0", "em0", "reference"]
+    },
+    {
+      "id": "block_gallery_to_embed",
+      "expect": "reject",
+      "error_code": "EMBED_SOURCE_NOT_FAQ",
+      "edge": ["gl0", "em0", "reference"]
+    },
+    {
+      "id": "block_unapproved_faq_to_embed",
+      "expect": "reject",
+      "error_code": "FAQ_NOT_APPROVED_FOR_EMBED",
+      "edge": ["fq_pending", "em0", "main"]
+    },
+    {
+      "id": "block_backward_main",
+      "expect": "reject",
+      "error_code": "MAIN_EDGE_BACKWARD",
+      "edge": ["pr0", "a0", "main"]
+    },
+    {
+      "id": "block_main_cycle",
+      "expect": "reject",
+      "error_code": "MAIN_EDGE_CYCLE",
+      "setup_edges": [
+        ["p0", "b0", "main"],
+        ["b0", "br0", "main"],
+        ["br0", "c0", "main"]
+      ],
+      "edge": ["c0", "p0", "main"]
+    },
+    {
+      "id": "block_multi_parent_main",
+      "expect": "reject",
+      "error_code": "MULTIPLE_ACTIVE_MAIN_PARENTS",
+      "setup_edges": [
+        ["cp0", "fq_approved", "main"]
+      ],
+      "edge": ["of0", "fq_approved", "main"]
+    },
+    {
+      "id": "legacy_embedded_alias",
+      "expect": "allow_with_canonicalization",
+      "legacy_node_type": "embedded",
+      "edge": ["fq_approved", "em0", "reference"]
+    }
+  ]
+}

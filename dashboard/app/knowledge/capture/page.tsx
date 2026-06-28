@@ -35,10 +35,11 @@ const MODELS = [
 const TYPE_OPTIONS = [
   { value: "brand", label: "Brand / Identidade" },
   { value: "briefing", label: "Briefing" },
+  { value: "product_group", label: "Grupo de Produtos" },
   { value: "product", label: "Produto" },
   { value: "campaign", label: "Campanha" },
   { value: "copy", label: "Copy / Texto" },
-  { value: "faq", label: "FAQ / Golden Dataset" },
+  { value: "faq", label: "FAQ / Atendimento" },
   { value: "tone", label: "Tom de Voz" },
   { value: "rule", label: "Regra / Padrao" },
   { value: "asset", label: "Asset Visual" },
@@ -46,7 +47,7 @@ const TYPE_OPTIONS = [
 ];
 
 const DEFAULT_OBJECTIVE =
-  "Criar conhecimento de marketing em grafo a partir da fonte informada, com briefing, publico, produto, copy e FAQ.";
+  "Criar conhecimento de marketing em grafo a partir da fonte informada, com cards conectados top-down apos confirmacao.";
 
 const DEFAULT_SOURCE = "";
 
@@ -55,17 +56,18 @@ const KNOWLEDGE_BLOCKS = [
   { id: "briefing", label: "Briefing", description: "Contexto bruto, objetivo, fonte e restricoes da captura." },
   { id: "campaign", label: "Campanha", description: "Colecoes, lancamentos, sazonalidade e angulos comerciais." },
   { id: "audience", label: "Publico", description: "Segmentos, dores, desejos, linguagem e objecoes." },
+  { id: "product_group", label: "Grupo de produtos", description: "Agrupador opcional: quando existe, produtos ficam dentro dele." },
   { id: "product", label: "Produto", description: "Itens, beneficios, precos, disponibilidade e atributos." },
-  { id: "offer", label: "Oferta", description: "Preco, quantidade, pacote, plano ou variacao comercial." },
+  { id: "offer", label: "Oferta", description: "Condicao comercial opcional; nao e camada obrigatoria do galho." },
   { id: "entity", label: "Entidades", description: "Cores, materiais, categorias, variantes e termos relacionados." },
-  { id: "copy", label: "Copy", description: "Textos comerciais por canal, publico, etapa e oferta." },
-  { id: "faq", label: "FAQ", description: "Perguntas e respostas recuperaveis pelo Golden Dataset." },
-  { id: "rule", label: "Regras", description: "Politicas comerciais, limites, validacoes e padroes operacionais." },
+  { id: "copy", label: "Copy", description: "Card opcional que adiciona contexto comercial a produto ou grupo." },
+  { id: "faq", label: "FAQ", description: "Perguntas e respostas de atendimento ligadas ao card mais especifico." },
+  { id: "rule", label: "Regras", description: "Card opcional de politica, limite ou padrao operacional." },
   { id: "tone", label: "Tom de voz", description: "Estilo, delicadeza, vocabulario e restricoes de linguagem." },
   { id: "asset", label: "Assets", description: "Imagens, referencias visuais, criativos e materiais de apoio." },
 ];
 
-const DEFAULT_SELECTED_BLOCKS = ["briefing", "audience", "product", "copy", "faq"];
+const DEFAULT_SELECTED_BLOCKS = ["briefing", "audience", "product"];
 
 interface Message {
   role: "user" | "assistant" | "system";
@@ -208,10 +210,11 @@ interface PlanState {
     }>;
   };
   plan_hash: string;
+  graph_json?: Record<string, any> | null;
   diagnostic?: PlanDiagnostic | null;
 }
 
-const COUNTED_BLOCK_IDS = ["brand", "briefing", "campaign", "audience", "product", "offer", "copy", "faq", "rule", "tone", "asset"];
+const COUNTED_BLOCK_IDS = ["brand", "briefing", "campaign", "audience", "product_group", "product", "offer", "copy", "faq", "rule", "tone", "asset"];
 const SIDEBAR_TREE_BLOCKS = [
   { id: "persona", label: "Persona", description: "Raiz da sessao CRIAR." },
   ...KNOWLEDGE_BLOCKS,
@@ -248,7 +251,7 @@ function planEntriesOfType(plan: KnowledgePlan | null | undefined, type: string)
 function buildExpansionSummary(plan: KnowledgePlan | null | undefined) {
   const counts = countBlocksByType(plan?.entries || []);
   const parentTypeFor = (blockId: "faq" | "asset") => {
-    if (blockId === "faq") return plan?.faq_parent_type || (counts.rule ? "rule" : counts.copy ? "copy" : counts.offer ? "offer" : "product");
+    if (blockId === "faq") return plan?.faq_parent_type || (counts.copy ? "copy" : counts.product ? "product" : counts.product_group ? "product_group" : "audience");
     return plan?.asset_parent_type || "product";
   };
   const parentCountFor = (blockId: "faq" | "asset") => planEntriesOfType(plan, parentTypeFor(blockId)).length;
@@ -291,6 +294,12 @@ function normalizeContentTypeAlias(value: any) {
     regras: "rule",
     rules: "rule",
     regra: "rule",
+    grupo: "product_group",
+    grupos: "product_group",
+    productgroup: "product_group",
+    product_group: "product_group",
+    product_collection: "product_group",
+    category: "product_group",
     ofertas: "offer",
     oferta: "offer",
     offers: "offer",
@@ -317,19 +326,56 @@ function labelForBlockId(blockId: string) {
   return SIDEBAR_TREE_BLOCKS.find((block) => block.id === blockId)?.label || blockId;
 }
 
+function buildOperatorEdgeTranslations(plan: KnowledgePlan): string[] {
+  const entries = plan.entries || [];
+  const bySlug = new Map(entries.filter((entry) => entry.slug).map((entry) => [entry.slug, entry]));
+  const lines: string[] = [];
+  const relationFor = (entry: KnowledgePlanEntry, parent: KnowledgePlanEntry) => {
+    const childType = normalizeContentTypeAlias(entry.content_type);
+    const parentType = normalizeContentTypeAlias(parent.content_type);
+    const childTitle = repairText(entry.title || entry.slug);
+    const parentTitle = repairText(parent.title || parent.slug);
+    if (parentType === "product_group" && childType === "product") {
+      return `Esse produto "${childTitle}" deve ficar dentro do grupo de produtos "${parentTitle}".`;
+    }
+    if (childType === "product_group") {
+      return `Esse grupo de produtos "${childTitle}" fica dentro de "${parentTitle}".`;
+    }
+    if (childType === "copy") {
+      return `Essa copy "${childTitle}" adiciona contexto para "${parentTitle}".`;
+    }
+    if (childType === "faq") {
+      return `Essa FAQ "${childTitle}" responde sobre "${parentTitle}".`;
+    }
+    if (childType === "rule") {
+      return `Essa regra "${childTitle}" limita ou orienta "${parentTitle}".`;
+    }
+    return `"${childTitle}" fica dentro de "${parentTitle}".`;
+  };
+  for (const entry of entries) {
+    const parentSlug = normalizeParentSlug(parentSlugOf(entry), plan.persona_slug);
+    if (!parentSlug || parentSlug === "self") continue;
+    const parent = bySlug.get(parentSlug);
+    if (!parent) continue;
+    lines.push(relationFor(entry, parent));
+  }
+  return lines.slice(0, 12);
+}
+
 function createManualDraftEntry(blockId: string, index: number, personaSlug: string, currentPlan: KnowledgePlan | null): KnowledgePlanEntry {
   const title = `${labelForBlockId(blockId)} ${index}`;
   const slug = `${slugifyPlanValue(blockId)}-manual-${Date.now().toString(36)}-${index}`;
   const entries = currentPlan?.entries || [];
   const latestOf = (type: string) => [...entries].reverse().find((entry) => entry.content_type === type)?.slug;
   const parentByType: Record<string, string | undefined> = {
-    briefing: "self",
-    campaign: latestOf("briefing"),
-    audience: latestOf("campaign") || latestOf("briefing"),
-    product: latestOf("audience"),
+    briefing: latestOf("brand") || "self",
+    campaign: latestOf("briefing") || latestOf("brand"),
+    audience: latestOf("campaign") || latestOf("briefing") || latestOf("brand"),
+    product_group: latestOf("audience") || latestOf("campaign") || latestOf("briefing"),
+    product: latestOf("product_group") || latestOf("audience"),
     offer: latestOf("product"),
-    copy: latestOf("offer") || latestOf("product"),
-    faq: latestOf("copy") || latestOf("product"),
+    copy: latestOf("product") || latestOf("product_group"),
+    faq: latestOf("copy") || latestOf("product") || latestOf("product_group"),
     rule: latestOf("campaign") || latestOf("briefing") || latestOf("brand"),
     tone: latestOf("brand") || latestOf("briefing"),
     asset: latestOf("product") || latestOf("brand"),
@@ -366,6 +412,9 @@ function formatChatRequestError(error: unknown): string {
   const parsed = parseApiErrorBody(message);
   const bodyMessage = typeof parsed?.message === "string" ? parsed.message : null;
   const bodyDetail = typeof parsed?.detail === "string" ? parsed.detail : null;
+  if (isKbIntakeSessionNotFound(error)) {
+    return "Sessao da Sofia nao encontrada neste backend. Limpei a sessao local; tente enviar novamente.";
+  }
   if (bodyMessage) return bodyMessage;
   if (bodyDetail) return bodyDetail;
   if (message.includes("/kb-intake/message")) {
@@ -377,14 +426,98 @@ function formatChatRequestError(error: unknown): string {
   return "Nao consegui processar agora. Tente novamente.";
 }
 
+function isKbIntakeSessionNotFound(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return (
+    (message.includes("404") && message.includes("/kb-intake/session"))
+    || (message.includes("404") && message.includes("Session not found"))
+  );
+}
+
 function formatSaveError(body: Record<string, unknown> | null | undefined): string {
   if (!body) return "Erro ao salvar.";
   const error = (body.error as string) || (body.detail as string) || "Erro ao salvar.";
+  const graphValidation = body.graph_json_validation as { blocking?: string[]; questions?: string[] } | undefined;
+  if (body.requires_sofia_intervention && graphValidation) {
+    const blocking = Array.isArray(graphValidation.blocking) ? graphValidation.blocking : [];
+    const questions = Array.isArray(graphValidation.questions) ? graphValidation.questions : [];
+    return [
+      `Sofia precisa corrigir o JSON do grafo antes de salvar: ${error}`,
+      ...blocking.map((item) => `- ${item}`),
+      ...questions.map((item) => `? ${item}`),
+    ].join("\n");
+  }
   const violations = body.violations as string[] | undefined;
   if (Array.isArray(violations) && violations.length > 0) {
     return `Erro: ${error}\n- ${violations.join("\n- ")}`;
   }
   return `Erro: ${error}`;
+}
+
+// Deriva o prompt que sera enviado para a Sofia quando o operador clica numa
+// opcao do diagnostico. Hoje o backend emite `action`+`payload` como contrato
+// declarativo sem handler; ate ele expor `prompt_to_sofia` direto em cada
+// opcao, este helper traduz as combinacoes conhecidas em mensagens que a
+// Sofia ja entende e devolve a opcao com `prompt_to_sofia` populado.
+function ensureSofiaOptionPrompt(question: SofiaQuestion, option: SofiaQuestionOption): SofiaQuestionOption {
+  if (option.prompt_to_sofia && option.prompt_to_sofia.trim()) return option;
+  const payload = option.payload || {};
+  const targetSlug = (payload as any).slug ? String((payload as any).slug) : "";
+  const scope = (payload as any).scope ? String((payload as any).scope) : "";
+  const productSlug = (payload as any).product_slug ? String((payload as any).product_slug) : "";
+  const newTarget = (payload as any).new_target;
+  const affectedTitle = question.affected_title || "";
+  const affectedType = question.affected_type || "";
+  const ui_hook: SofiaQuestionOption["ui_hook"] | undefined =
+    option.action === "upload_asset" ? "open_file_picker" : undefined;
+  let prompt = "";
+  switch (option.action) {
+    case "upload_asset":
+      prompt = "Vou subir um novo asset agora. Quando o upload terminar, conecte o asset a partir de session.asset_readings ao produto principal do plano usando uses_asset e marque o asset como pendente_validacao.";
+      break;
+    case "attach_existing_asset":
+      prompt = `Conecte o asset existente ${targetSlug || "(slug pendente)"} ao ${scope || "produto principal"} do plano usando relation_type=uses_asset. Atualize o normalized_plan adicionando a entry asset com metadata.parent_slug apontando para o ${scope || "produto"}.`;
+      break;
+    case "drop_asset_requirement":
+      prompt = "Remova a exigencia de asset deste plano: ajuste asset_count_policy para per_parent e asset_count_per_parent=0 no normalized_plan, mantendo as outras politicas.";
+      break;
+    case "regenerate_missing_faqs":
+      prompt = "Gere os FAQs faltantes a partir das copies/produtos terminais do plano atual, mantendo o parent_type configurado.";
+      break;
+    case "lower_faq_target":
+      prompt = `Ajuste faq_count_per_parent para ${typeof newTarget === "number" ? newTarget : 1} no normalized_plan e mantenha os FAQs ja gerados.`;
+      break;
+    case "drop_faq_target":
+      prompt = "Remova a exigencia de FAQ deste plano: faq_count_policy=total. Mantenha os FAQs ja criados.";
+      break;
+    case "create_offer":
+      prompt = `Crie uma oferta abaixo do produto ${productSlug || "principal"} com title/content concretos e parent_slug=${productSlug || "<produto principal>"}.`;
+      break;
+    case "drop_offer_requirement":
+      prompt = "Remova a exigencia de oferta deste plano e prossiga sem offers.";
+      break;
+    case "create_rule":
+      prompt = `Crie uma regra comercial abaixo do ${scope || "briefing"} com title/content concretos, marcando como pendente_validacao.`;
+      break;
+    case "drop_rule_requirement":
+      prompt = "Remova a exigencia de rule deste plano e prossiga sem rules.";
+      break;
+    case "change_parent": {
+      const newParent = (payload as any).new_parent_slug ? String((payload as any).new_parent_slug) : "";
+      const entrySlug = (payload as any).entry_slug ? String((payload as any).entry_slug) : "";
+      if (entrySlug && newParent) {
+        prompt = `Mude o metadata.parent_slug da entry ${entrySlug} para ${newParent} e atualize os links correspondentes. Re-emita o knowledge_plan completo com a correcao aplicada.`;
+      } else {
+        prompt = `Corrija o parent da entry ${affectedTitle || affectedType} para alcancar a persona. Re-emita o knowledge_plan inteiro.`;
+      }
+      break;
+    }
+    default:
+      prompt = option.label
+        ? `Aplique a opcao "${option.label}" para resolver "${question.human_summary || question.kind}". Re-emita o knowledge_plan corrigido.`
+        : `Resolva o problema "${question.human_summary || question.kind}" e re-emita o knowledge_plan corrigido.`;
+  }
+  return { ...option, prompt_to_sofia: prompt, ui_hook: option.ui_hook || ui_hook };
 }
 
 function repairText(value: string) {
@@ -479,7 +612,7 @@ function normalizeKnowledgePlan(plan: any, personaSlug: string): KnowledgePlan |
     tree_mode: String(plan.tree_mode || "pyramidal"),
     branch_policy: String(plan.branch_policy || "top_down_pyramidal"),
     faq_count_policy: String(plan.faq_count_policy || "grouped"),
-    faq_parent_type: String(plan.faq_parent_type || "rule"),
+    faq_parent_type: String(plan.faq_parent_type || "copy"),
     faq_count_per_parent: Number(plan.faq_count_per_parent ?? 1),
     asset_count_policy: String(plan.asset_count_policy || "per_parent"),
     asset_parent_type: String(plan.asset_parent_type || "product"),
@@ -538,6 +671,7 @@ function normalizePlanState(raw: any, personaSlug: string): PlanState | null {
   if (!normalizedPlan) return null;
   const summary = source.summary || raw?.plan_summary || {};
   const validation = source.validation || raw?.plan_validation || {};
+  const normalizedCounts = countBlocksByType(normalizedPlan.entries);
   return {
     normalized_plan: normalizedPlan,
     validation: {
@@ -546,9 +680,9 @@ function normalizePlanState(raw: any, personaSlug: string): PlanState | null {
       warnings: Array.isArray(validation.warnings) ? validation.warnings.map((item: any) => String(item)) : [],
     },
     summary: {
-      entry_count: Number(summary.entry_count ?? normalizedPlan.entries.length),
-      current_block_counts: normalizeBlockCounts(summary.current_block_counts || raw?.current_block_counts || countBlocksByType(normalizedPlan.entries)),
-      link_count: Number(summary.link_count ?? normalizedPlan.links.length),
+      entry_count: Number(normalizedPlan.entries.length),
+      current_block_counts: normalizeBlockCounts(normalizedCounts),
+      link_count: Number(Array.isArray(normalizedPlan.links) ? normalizedPlan.links.length : 0),
       tree_mode: String(summary.tree_mode || (normalizedPlan as any).tree_mode || "pyramidal"),
       branch_policy: String(summary.branch_policy || (normalizedPlan as any).branch_policy || "top_down_pyramidal"),
       faq_count_policy: String(summary.faq_count_policy || (normalizedPlan as any).faq_count_policy || "grouped"),
@@ -630,13 +764,13 @@ function planStateCountsMatch(planState: PlanState | null) {
 }
 
 function summarizePlanStateForChat(planState: PlanState): string {
-  const counts = normalizeBlockCounts(planState.summary.current_block_counts);
+  const counts = normalizeBlockCounts(countBlocksByType(planState.normalized_plan.entries));
   const lines = [
     planState.summary.entry_count > 0 ? "Status: plano gerado" : "Status: bloqueado",
     planState.summary.entry_count > 0
-      ? `Resumo: briefing ${counts.briefing || 0}, publico ${counts.audience || 0}, produto ${counts.product || 0}, oferta ${counts.offer || 0}, copy ${counts.copy || 0}, FAQ ${counts.faq || 0}, asset ${counts.asset || 0}, regra ${counts.rule || 0}.`
+      ? `Resumo: briefing ${counts.briefing || 0}, publico ${counts.audience || 0}, grupo ${counts.product_group || 0}, produto ${counts.product || 0}, copy ${counts.copy || 0}, FAQ ${counts.faq || 0}, asset ${counts.asset || 0}, regra ${counts.rule || 0}.`
       : "Motivo: Estrutura ainda nao gerada.",
-    `Politica: arvore piramidal; FAQ agrupado por ${planState.summary.faq_parent_type || "rule"}; Asset por parent.`,
+    `Politica: arvore top-down; cards opcionais adicionam contexto; Asset por parent.`,
   ];
   const violations = planState.validation.blocking_violations || [];
   if (violations.length > 0) {
@@ -674,10 +808,8 @@ function validatePreviewPlan(plan: KnowledgePlan | null | undefined): string[] {
   const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
   const slugs = entries.map((entry) => entry.slug).filter(Boolean);
   if (new Set(slugs).size !== slugs.length) errors.push("Plano contem slugs duplicados.");
-  const hasOffer = entries.some((entry) => entry.content_type === "offer");
   const hasCopy = entries.some((entry) => entry.content_type === "copy");
-  const hasAudience = entries.some((entry) => entry.content_type === "audience");
-  const hasRule = entries.some((entry) => entry.content_type === "rule");
+  const hasProductGroup = entries.some((entry) => entry.content_type === "product_group");
   const parentByChild = new Map(entries.map((entry) => [entry.slug, normalizeParentSlug(parentSlugOf(entry), plan.persona_slug)]));
   for (const entry of entries) {
     const parentSlug = normalizeParentSlug(parentSlugOf(entry), plan.persona_slug);
@@ -711,32 +843,31 @@ function validatePreviewPlan(plan: KnowledgePlan | null | undefined): string[] {
     if (entry.content_type === "audience" && parentType && !["campaign", "briefing", "brand", "persona"].includes(parentType)) {
       errors.push(`Publico ${entry.slug} precisa estar abaixo de briefing/campaign.`);
     }
-    if (entry.content_type === "product" && hasAudience && parentType !== "audience") {
-      errors.push(`Produto ${entry.slug} precisa estar abaixo de audience.`);
+    if (entry.content_type === "product_group" && parentType && !["audience", "campaign", "briefing", "brand", "persona"].includes(parentType)) {
+      errors.push(`Grupo de produtos ${entry.slug} precisa ficar abaixo de publico, campanha, briefing ou brand.`);
+    }
+    if (entry.content_type === "product" && hasProductGroup && parentType !== "product_group") {
+      errors.push(`Produto ${entry.slug} deve ficar dentro de um grupo de produtos existente.`);
     }
     if (entry.content_type === "offer" && parentType !== "product") {
       errors.push(`Oferta ${entry.slug} precisa estar abaixo de product.`);
     }
     if (entry.content_type === "copy") {
-      if (hasOffer && parentType === "offer" && plan.copy_policy !== "per_offer") errors.push(`Copy ${entry.slug} deve ficar agrupada por product/publico por padrao.`);
-      if (parentType && !["product", "offer", "campaign", "briefing", "brand"].includes(parentType)) {
+      if (parentType && !["product", "product_group", "campaign", "briefing", "brand"].includes(parentType)) {
         errors.push(`Copy ${entry.slug} tem parent invalido.`);
       }
     }
-    if (entry.content_type === "faq" && hasRule && parentType !== "rule") {
-      errors.push(`FAQ ${entry.slug} precisa estar abaixo de rule.`);
+    if (entry.content_type === "faq" && hasCopy && parentType !== "copy") {
+      errors.push(`FAQ ${entry.slug} precisa responder a copy mais especifica do ramo.`);
     }
-    if (entry.content_type === "faq" && !["rule", "copy", "offer", "product"].includes(parentType)) {
-      errors.push(`FAQ ${entry.slug} precisa estar abaixo de rule, copy, offer ou product.`);
+    if (entry.content_type === "faq" && !["copy", "product", "product_group", "audience", "campaign", "briefing", "brand"].includes(parentType)) {
+      errors.push(`FAQ ${entry.slug} precisa estar ligada ao card semantico que ela responde.`);
     }
     if (entry.content_type === "rule" && parentType && !["campaign", "briefing", "brand", "persona"].includes(parentType)) {
       errors.push(`Rule ${entry.slug} precisa estar abaixo de campaign/briefing/brand.`);
     }
   }
   const expansion = buildExpansionSummary(plan);
-  if (expansion.faq.count_policy !== "total" && expansion.faq.created < expansion.faq.expected) {
-    errors.push(`FAQ insuficiente: esperado ${expansion.faq.expected}, criado ${expansion.faq.created}.`);
-  }
   if (expansion.asset.expected > 0 && expansion.asset.created < expansion.asset.expected) {
     errors.push(`Asset insuficiente: esperado ${expansion.asset.expected}, criado ${expansion.asset.created}.`);
   }
@@ -982,10 +1113,11 @@ function buildInitialContext(plan: CapturePlan, uploads: SessionUpload[]) {
     "- O plano inicial e apenas ponto de partida; se o operador expandir para 2 publicos, 4 produtos e 8 FAQs, manter esse plano vivo.",
     "- Sempre usar o knowledge_plan atual como fonte para salvar; nunca voltar ao plano inicial apos expansao.",
     "- Sempre criar uma estrutura de conhecimento em arvore piramidal, nao uma lista de cards soltos.",
-    "- Gerar conhecimento hierarquizado como grafo quando houver relacoes entre brand, briefing, campanha, publico, produto, oferta, copy, FAQ, regra, asset ou tom.",
+    "- Gerar conhecimento hierarquizado como grafo quando houver relacoes entre brand, briefing, campanha, publico, grupo de produtos, produto, copy, FAQ, regra, asset ou tom.",
     "- FAQ deve ser um Markdown agrupado de atendimento real, sem expor termos internos do grafo.",
-    "- RULE fica antes de FAQ: copy -> rule -> faq quando houver orientacao comercial geral.",
-    "- normalizedPlan deve usar faq_count_policy=grouped, faq_parent_type=rule, asset_count_policy=per_parent e copy_policy=per_product_context por padrao.",
+    "- Rule, Copy e Product Group sao opcionais: quando existirem, adicionam contexto; quando ausentes, nao bloqueiam o plano.",
+    "- Se Product Group existir, traduza a ligacao como produto dentro do grupo e conecte product_group -> product.",
+    "- normalizedPlan deve usar faq_count_policy=grouped, asset_count_policy=per_parent e copy_policy=per_product_context por padrao.",
     "- Separar primary_tree_edges de secondary_semantic_edges; tags nunca entram na primary_tree.",
     "- Nao inventar precos, cores, disponibilidade ou URLs.",
     "- CRIAR exige persona especifica; nao usar Todos/global para criar conhecimento.",
@@ -1285,11 +1417,13 @@ function ChatPanel({
   const [resumeSummary, setResumeSummary] = useState<string | null>(null);
   const [showRawMarkdown, setShowRawMarkdown] = useState(false);
   const [planConfirmed, setPlanConfirmed] = useState(false);
+  const [planSyncPending, setPlanSyncPending] = useState(false);
   const [selectedFaqSlug, setSelectedFaqSlug] = useState<string | null>(null);
   const [selectedProductSlug, setSelectedProductSlug] = useState<string | null>(null);
+  const [applyingSofiaAction, setApplyingSofiaAction] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const draftPlan = planState?.normalized_plan || currentKnowledgePlan;
+  const draftPlan = currentKnowledgePlan || planState?.normalized_plan || null;
   const blockingViolations = planState?.validation?.blocking_violations || [];
   const planStateValid = Boolean(planState && planState.validation.valid && blockingViolations.length === 0 && planStateCountsMatch(planState));
   const previewViolations = planState
@@ -1301,6 +1435,7 @@ function ChatPanel({
     setPlanState(nextState);
     setCurrentKnowledgePlan(nextState?.normalized_plan || null);
     setCurrentBlockCounts(normalizeBlockCounts(nextState?.summary?.current_block_counts || undefined));
+    setPlanSyncPending(false);
     setPlanConfirmed(false);
     setConfirmedPlanHash(null);
     setSelectedFaqSlug(null);
@@ -1324,10 +1459,25 @@ function ChatPanel({
     }
   }, [confirmedPlanHash, planState?.plan_hash, planStateValid]);
 
-  async function start() {
+  function resetLocalSession(message?: string) {
+    window.localStorage.removeItem("active_criar_session_id");
+    setSessionId(null);
+    setSessionStatus("collecting");
+    setStage("idle");
+    applyPlanState(null);
+    setMissionState(null);
+    setResumeSummary(null);
+    setPlanConfirmed(false);
+    if (message) {
+      setMessages([{ role: "system", content: message }]);
+      setFriendlyError(message);
+    }
+  }
+
+  async function openSession(bootstrapLlm = true): Promise<string | null> {
     if (isInvalidCriarPersona(plan.personaSlug)) {
       setFriendlyError("Selecione uma persona antes de criar conhecimento.");
-      return;
+      return null;
     }
     setLoading(true);
     try {
@@ -1337,10 +1487,11 @@ function ChatPanel({
         source_url: plan.sourceUrl,
         initial_block_counts: normalizeBlockCounts(plan.variationCounts),
         knowledge_plan: planState?.normalized_plan,
+        bootstrap_llm: bootstrapLlm,
       });
       if (d?.ok === false) {
         setFriendlyError(d?.message || "Nao consegui iniciar a conversa agora.");
-        return;
+        return null;
       }
       setSessionId(d.session_id);
       window.localStorage.setItem("active_criar_session_id", d.session_id);
@@ -1357,15 +1508,26 @@ function ChatPanel({
         setCurrentBlockCounts(normalizeBlockCounts(d.current_block_counts || plan.variationCounts));
       }
       setFriendlyError(null);
+      return d.session_id || null;
     } catch (e: any) {
       setFriendlyError(formatChatRequestError(e));
+      return null;
     } finally {
       setLoading(false);
     }
   }
 
+  async function start() {
+    await openSession(true);
+  }
+
   async function send() {
-    if (!sessionId || (!input.trim() && !file)) return;
+    if (!input.trim() && !file) return;
+    let effectiveSessionId = sessionId;
+    if (!effectiveSessionId) {
+      effectiveSessionId = await openSession(false);
+      if (!effectiveSessionId) return;
+    }
     setLoading(true);
     const userMsg = input.trim();
     setLastAttempt(userMsg);
@@ -1375,22 +1537,14 @@ function ChatPanel({
     try {
       let d: any;
       if (file) {
-        d = await api.kbIntakeMessage(sessionId, userMsg, file || undefined);
+        d = await api.kbIntakeMessage(effectiveSessionId, userMsg, file || undefined);
         setFile(null);
         if (fileRef.current) fileRef.current.value = "";
       } else {
-        d = await api.kbIntakeMessage(sessionId, userMsg);
+        d = await api.kbIntakeMessage(effectiveSessionId, userMsg);
       }
       if (d?.reset_session) {
-        window.localStorage.removeItem("active_criar_session_id");
-        setSessionId(null);
-        setSessionStatus("collecting");
-        setStage("idle");
-        applyPlanState(null);
-        setMissionState(null);
-        setResumeSummary(null);
-        setMessages([{ role: "system", content: d.message || "Sessao reiniciada porque o arquivo nao foi persistido nos assets." }]);
-        setFriendlyError(d.message || "Arquivo nao persistido. Inicie uma nova sessao da Sofia.");
+        resetLocalSession(d.message || "Sessao reiniciada porque o arquivo nao foi persistido nos assets.");
         return;
       }
       if (d?.state) {
@@ -1441,6 +1595,10 @@ function ChatPanel({
         setCurrentBlockCounts(normalizeBlockCounts(d.current_block_counts));
       }
     } catch (e: any) {
+      if (isKbIntakeSessionNotFound(e)) {
+        resetLocalSession("Sessao anterior da Sofia expirou neste backend. Tente enviar novamente para iniciar uma nova conversa.");
+        return;
+      }
       setFriendlyError(formatChatRequestError(e));
     } finally {
       setLoading(false);
@@ -1449,6 +1607,10 @@ function ChatPanel({
 
   async function save() {
     if (!sessionId || !planState || !planConfirmed) return;
+    if (planSyncPending) {
+      setFriendlyError("Aguarde a sincronizacao da ultima edicao antes de salvar.");
+      return;
+    }
     if (!planStateValid || confirmedPlanHash !== planState.plan_hash) {
       setFriendlyError(
         "Plano ainda não pode ser salvo. Corrija as pendências bloqueantes primeiro."
@@ -1462,6 +1624,7 @@ function ChatPanel({
       const d = await api.kbIntakeSave(sessionId, contentText, {
         plan_hash: planState.plan_hash,
         normalized_plan: planState.normalized_plan,
+        graph_json: planState.graph_json || null,
       });
       setStage("done");
       setMessages((p) => [...p, {
@@ -1495,6 +1658,112 @@ function ChatPanel({
     }
   }
 
+  // Handler dos atalhos do modal de diagnostico. Cada opcao da SofiaQuestion
+  // vira uma mensagem para a Sofia (via /kb-intake/message). O backend cuida
+  // de mutar o plano e devolver um plan_state novo, que ja entra no estado da
+  // pagina via send(). UI hooks (ex: open_file_picker) executam efeito local
+  // antes da mensagem ser enviada.
+  async function handleSofiaAction(q: SofiaQuestion, optRaw: SofiaQuestionOption) {
+    const effectiveSessionId = sessionId || await openSession(false);
+    if (!effectiveSessionId) {
+      setFriendlyError("Sessao da Sofia nao iniciada.");
+      return;
+    }
+    const opt = ensureSofiaOptionPrompt(q, optRaw);
+    const prompt = opt.prompt_to_sofia || "";
+    if (opt.ui_hook === "open_file_picker") {
+      // Fecha o modal para o operador escolher o arquivo. Depois que ele
+      // anexa, o paperclip + send() ja envia o arquivo para a Sofia.
+      setDiagnosticOpen(false);
+      setMessages((p) => [...p, {
+        role: "system",
+        content: "Selecione o asset no botao de upload do chat. Apos enviar, a Sofia conecta o asset ao produto pendente.",
+      }]);
+      fileRef.current?.click();
+      return;
+    }
+    if (!prompt) {
+      setFriendlyError("Nao consegui montar a mensagem para a Sofia. Tente digitar manualmente no chat.");
+      return;
+    }
+    setApplyingSofiaAction(true);
+    try {
+      setMessages((p) => [...p, { role: "user", content: `[atalho] ${opt.label}` }]);
+      const d: any = await api.kbIntakeMessage(effectiveSessionId, prompt);
+      if (d?.ok === false) {
+        setFriendlyError(d?.message || "A Sofia nao conseguiu aplicar o atalho agora.");
+        return;
+      }
+      if (d?.state) setMissionState(d.state);
+      setStage(d.stage || stage);
+      setSessionStatus(d.status || d.stage || sessionStatus);
+      if (d.classification) setCls(d.classification);
+      const nextState = normalizePlanState(d, d.classification?.persona_slug || plan.personaSlug);
+      if (nextState) {
+        applyPlanState(nextState);
+        if (nextState.validation.valid && nextState.validation.blocking_violations.length === 0) {
+          setDiagnosticOpen(false);
+          setFriendlyError(null);
+        } else if (nextState.diagnostic) {
+          // Mantem o modal aberto e atualizado com o diagnostico mais recente.
+          setFriendlyError("A Sofia aplicou parte do reparo; ainda ha pendencias bloqueantes.");
+        }
+      }
+      if ((d.message || "").trim()) {
+        setMessages((p) => [...p, { role: "assistant", content: d.message }]);
+      }
+    } catch (e: any) {
+      if (isKbIntakeSessionNotFound(e)) {
+        resetLocalSession("Sessao anterior da Sofia expirou neste backend. Tente o atalho novamente para iniciar outra sessao.");
+        return;
+      }
+      setFriendlyError(formatChatRequestError(e));
+    } finally {
+      setApplyingSofiaAction(false);
+    }
+  }
+
+  // Atalho "Regerar estrutura": pede para a Sofia reaplicar os reparos
+  // sugeridos pelo diagnostico atual em uma unica rodada.
+  async function handleSofiaRegenerate() {
+    const effectiveSessionId = sessionId || await openSession(false);
+    if (!effectiveSessionId) {
+      setFriendlyError("Sessao da Sofia nao iniciada.");
+      return;
+    }
+    setApplyingSofiaAction(true);
+    try {
+      setMessages((p) => [...p, { role: "user", content: "[atalho] Regerar estrutura aplicando o diagnostico atual" }]);
+      const d: any = await api.kbIntakeMessage(
+        effectiveSessionId,
+        "Regere a arvore de conhecimento aplicando todos os reparos sugeridos pelo diagnostico atual (parent slugs, expansion policies, links). Mantenha as entries ja confirmadas e re-emita o knowledge_plan completo.",
+      );
+      if (d?.ok === false) {
+        setFriendlyError(d?.message || "A Sofia nao conseguiu regerar agora.");
+        return;
+      }
+      const nextState = normalizePlanState(d, d.classification?.persona_slug || plan.personaSlug);
+      if (nextState) {
+        applyPlanState(nextState);
+        if (nextState.validation.valid && nextState.validation.blocking_violations.length === 0) {
+          setDiagnosticOpen(false);
+          setFriendlyError(null);
+        }
+      }
+      if ((d.message || "").trim()) {
+        setMessages((p) => [...p, { role: "assistant", content: d.message }]);
+      }
+    } catch (e: any) {
+      if (isKbIntakeSessionNotFound(e)) {
+        resetLocalSession("Sessao anterior da Sofia expirou neste backend. Tente regerar novamente para iniciar outra sessao.");
+        return;
+      }
+      setFriendlyError(formatChatRequestError(e));
+    } finally {
+      setApplyingSofiaAction(false);
+    }
+  }
+
   function reset() {
     setSessionId(null);
     setMessages([]);
@@ -1523,6 +1792,8 @@ function ChatPanel({
     const nextPlan = mutator(draftPlan);
     setCurrentKnowledgePlan(nextPlan);
     setCurrentBlockCounts(countBlocksByType(nextPlan.entries));
+    setPlanState(null);
+    setPlanSyncPending(true);
     if (sessionId) {
       api.kbIntakeUpdatePlan(sessionId, {
         knowledge_plan: nextPlan,
@@ -1530,7 +1801,9 @@ function ChatPanel({
       }).then((result: any) => {
         const nextState = normalizePlanState(result, plan.personaSlug);
         if (nextState) applyPlanState(nextState);
-      }).catch(() => {});
+      }).catch(() => {
+        setPlanSyncPending(false);
+      });
     }
     setPlanConfirmed(false);
     setConfirmedPlanHash(null);
@@ -1729,10 +2002,13 @@ function ChatPanel({
             )}
           </div>
         )}
-        {stage === "ready_to_save" && draftPlan && planStateValid && (
+        {stage === "ready_to_save" && draftPlan && (
           <GraphPreviewPanel
             plan={draftPlan}
             confirmed={planConfirmed}
+            canSave={planStateValid}
+            blockingReasons={previewViolations}
+            onOpenDiagnostic={planState?.diagnostic ? () => setDiagnosticOpen(true) : undefined}
             selectedFaqSlug={selectedFaqSlug}
             selectedProductSlug={selectedProductSlug}
             onSelectFaq={(slug) => {
@@ -1751,6 +2027,7 @@ function ChatPanel({
                 setFriendlyError("Plano ainda nao pode ser confirmado. Corrija as pendencias bloqueantes primeiro.");
                 return;
               }
+              setPlanSyncPending(true);
               try {
                 const result = await api.kbIntakeUpdatePlan(sessionId, {
                   knowledge_plan: planState.normalized_plan,
@@ -1762,8 +2039,10 @@ function ChatPanel({
                   setFriendlyError("Plano ainda nao pode ser confirmado. Corrija as pendencias bloqueantes primeiro.");
                   setPlanConfirmed(false);
                   setConfirmedPlanHash(null);
+                  setPlanSyncPending(false);
                   return;
                 }
+                setPlanSyncPending(false);
                 setPlanState(nextState);
                 setCurrentKnowledgePlan(nextState.normalized_plan);
                 setCurrentBlockCounts(normalizeBlockCounts(nextState.summary.current_block_counts));
@@ -1772,6 +2051,7 @@ function ChatPanel({
                 setSessionStatus(result.status || "ready_to_save");
                 setFriendlyError(null);
               } catch (error: any) {
+                setPlanSyncPending(false);
                 setFriendlyError(formatChatRequestError(error));
                 setPlanConfirmed(false);
                 setConfirmedPlanHash(null);
@@ -1779,6 +2059,7 @@ function ChatPanel({
             }}
             onSaveKnowledge={save}
             loading={loading}
+            planSyncPending={planSyncPending}
           />
         )}
         <div ref={bottomRef} />
@@ -1855,7 +2136,9 @@ function ChatPanel({
         <BlockedPlanDiagnosticModal
           diagnostic={planState.diagnostic}
           onClose={() => setDiagnosticOpen(false)}
-          onEdit={() => setShowContent(true)}
+          onOptionSelect={handleSofiaAction}
+          onRegenerate={handleSofiaRegenerate}
+          applyingAction={applyingSofiaAction}
         />
       )}
     </div>
@@ -2109,6 +2392,9 @@ function UploadPanel({
 function GraphPreviewPanel({
   plan,
   confirmed,
+  canSave,
+  blockingReasons,
+  onOpenDiagnostic,
   selectedFaqSlug,
   selectedProductSlug,
   onSelectFaq,
@@ -2119,9 +2405,13 @@ function GraphPreviewPanel({
   onConfirmStructure,
   onSaveKnowledge,
   loading,
+  planSyncPending,
 }: {
   plan: KnowledgePlan;
   confirmed: boolean;
+  canSave: boolean;
+  blockingReasons: string[];
+  onOpenDiagnostic?: () => void;
   selectedFaqSlug: string | null;
   selectedProductSlug: string | null;
   onSelectFaq: (slug: string) => void;
@@ -2132,6 +2422,7 @@ function GraphPreviewPanel({
   onConfirmStructure: () => void;
   onSaveKnowledge: () => void;
   loading: boolean;
+  planSyncPending: boolean;
 }) {
   const previewPlan = plan;
   const entries = previewPlan.entries || [];
@@ -2161,13 +2452,14 @@ function GraphPreviewPanel({
   // connected to the persona Embedded node automatically, so the preview
   // surfaces an info message about FAQ pending instead of a "no exit" alert.
   const leafAlerts = entries
-    .filter((entry) => entry.slug && !["asset", "embedded", "gallery", "faq"].includes(entry.content_type))
+    .filter((entry) => entry.slug && !["asset", "embedded", "gallery", "faq", "persona"].includes(entry.content_type))
     .filter((entry) => !(childrenByParent.get(entry.slug) || []).length && !outgoingLinkSources.has(entry.slug))
     .slice(0, 6);
   const faqPendingTerminals = entries
     .filter((entry) => entry.slug && entry.content_type === "faq")
     .filter((entry) => !(childrenByParent.get(entry.slug) || []).length && !outgoingLinkSources.has(entry.slug))
     .slice(0, 4);
+  const operatorEdges = buildOperatorEdgeTranslations(previewPlan);
 
   const renderEntry = (entry: KnowledgePlanEntry, depth = 0): ReactNode => {
     const children = childrenByParent.get(entry.slug) || [];
@@ -2226,9 +2518,20 @@ function GraphPreviewPanel({
           <p className="text-[10px] uppercase tracking-[0.2em] text-obs-faint">Previa visual</p>
           <p className="text-sm font-semibold text-white">Estrutura piramidal antes do save</p>
         </div>
-        <span className={`rounded-full px-2.5 py-1 text-[10px] border ${confirmed ? "border-green-400/30 text-green-300 bg-green-500/10" : "border-obs-amber/25 text-obs-amber bg-obs-amber/10"}`}>
-          {confirmed ? "estrutura confirmada" : "aguardando confirmacao"}
-        </span>
+        <div className="flex items-center gap-2">
+          {!canSave && onOpenDiagnostic && (
+            <button
+              type="button"
+              onClick={onOpenDiagnostic}
+              className="rounded-full border border-red-400/40 bg-red-500/15 px-2.5 py-1 text-[10px] font-semibold text-red-200 hover:bg-red-500/25"
+            >
+              {blockingReasons.length} pendencia(s) - abrir diagnostico
+            </button>
+          )}
+          <span className={`rounded-full px-2.5 py-1 text-[10px] border ${confirmed ? "border-green-400/30 text-green-300 bg-green-500/10" : canSave ? "border-obs-amber/25 text-obs-amber bg-obs-amber/10" : "border-red-400/40 text-red-200 bg-red-500/10"}`}>
+            {confirmed ? "estrutura confirmada" : canSave ? "aguardando confirmacao" : "bloqueada"}
+          </span>
+        </div>
       </div>
 
       <div className="node-actions flex flex-wrap gap-2">
@@ -2258,19 +2561,43 @@ function GraphPreviewPanel({
         <button
           type="button"
           onClick={onConfirmStructure}
-          className="rounded-lg border border-green-400/25 px-3 py-1.5 text-xs text-green-300"
+          disabled={!canSave}
+          title={canSave ? "" : `Confirme apos resolver: ${blockingReasons.slice(0, 4).join("; ")}${blockingReasons.length > 4 ? ` (+${blockingReasons.length - 4})` : ""}`}
+          className="rounded-lg border border-green-400/25 px-3 py-1.5 text-xs text-green-300 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Confirmar estrutura
         </button>
         <button
           type="button"
           onClick={onSaveKnowledge}
-          disabled={!confirmed || loading}
-          className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+          disabled={!confirmed || !canSave || loading || planSyncPending}
+          title={
+            !canSave
+              ? `Plano bloqueado: ${blockingReasons.slice(0, 4).join("; ")}${blockingReasons.length > 4 ? ` (+${blockingReasons.length - 4})` : ""}`
+              : !confirmed
+                ? "Clique em Confirmar estrutura antes de salvar"
+                : planSyncPending
+                  ? "Aguarde a sincronizacao da ultima edicao"
+                : ""
+          }
+          className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Salvar conhecimento
         </button>
       </div>
+
+      {!!operatorEdges.length && (
+        <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-300 mb-2">Confirmacao operacional</p>
+          <div className="space-y-1">
+            {operatorEdges.map((line, index) => (
+              <p key={`${line}-${index}`} className="text-xs leading-5 text-obs-text">
+                {line}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
 
       {selectedLabel && (
         <p className="text-[11px] text-obs-subtle">
@@ -2333,6 +2660,7 @@ function CaptureSidebar({
   uploads,
   crawlerRuns,
   assetReadings,
+  sessionPlanJson,
   planState,
   currentKnowledgePlan,
   currentBlockCounts,
@@ -2343,6 +2671,7 @@ function CaptureSidebar({
   uploads: SessionUpload[];
   crawlerRuns: CrawlerRun[];
   assetReadings: any[];
+  sessionPlanJson: any | null;
   planState: PlanState | null;
   currentKnowledgePlan: KnowledgePlan | null;
   currentBlockCounts: BlockCounts;
@@ -2355,13 +2684,19 @@ function CaptureSidebar({
   );
   const latestCrawler = crawlerRuns[0];
   const initialCounts = normalizeBlockCounts(plan.variationCounts);
-  const blockingViolations = planState?.validation?.blocking_violations || [];
+  const planJsonPlan = sessionPlanJson?.plan && typeof sessionPlanJson.plan === "object" ? sessionPlanJson.plan : null;
+  const planJsonCounts = planJsonPlan
+    ? normalizeBlockCounts(Object.fromEntries(Object.keys(initialCounts).map((key) => [key, Array.isArray(planJsonPlan[key]) ? planJsonPlan[key].length : 0])))
+    : null;
+  const blockingViolations: string[] = Array.isArray(sessionPlanJson?.validation?.errors)
+    ? sessionPlanJson.validation.errors.map((item: any) => repairText(String(item || "")))
+    : (planState?.validation?.blocking_violations || []);
   const liveCounts = planState
     ? normalizeBlockCounts(planState.summary.current_block_counts)
     : currentKnowledgePlan?.entries?.length
       ? countBlocksByType(currentKnowledgePlan.entries)
       : normalizeBlockCounts(currentBlockCounts);
-  const displayCounts = planState || currentKnowledgePlan?.entries?.length ? liveCounts : initialCounts;
+  const displayCounts = planJsonCounts || (planState || currentKnowledgePlan?.entries?.length ? liveCounts : initialCounts);
   const expansion = planState?.summary?.expansion || buildExpansionSummary(currentKnowledgePlan);
   const totalInitial = Object.values(initialCounts).reduce((sum, value) => sum + value, 0);
   const totalCurrent = Number(planState?.summary?.entry_count ?? Object.values(displayCounts).reduce((sum, value) => sum + value, 0));
@@ -2372,7 +2707,7 @@ function CaptureSidebar({
     planState || currentKnowledgePlan?.entries?.length ? "Plano em construcao" :
     "Plano inicial";
   const createdCountFor = (id: string) => {
-    if (id === "persona") return plan.personaSlug ? 1 : 0;
+    if (id === "persona") return String(sessionPlanJson?.persona_slug || plan.personaSlug || "").trim() ? 1 : 0;
     if (id === "embedded" || id === "gallery") {
       return (planState?.normalized_plan.entries || currentKnowledgePlan?.entries || [])
         .filter((entry) => normalizeContentTypeAlias(entry.content_type) === id).length;
@@ -2595,6 +2930,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
   const [assetReadings, setAssetReadings] = useState<any[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [planState, setPlanState] = useState<PlanState | null>(null);
+  const [sessionPlanJson, setSessionPlanJson] = useState<any | null>(null);
   const [confirmedPlanHash, setConfirmedPlanHash] = useState<string | null>(null);
   const [currentKnowledgePlan, setCurrentKnowledgePlan] = useState<KnowledgePlan | null>(null);
   const [currentBlockCounts, setCurrentBlockCounts] = useState<BlockCounts>(normalizeBlockCounts(DEFAULT_VARIATION_COUNTS));
@@ -2618,6 +2954,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
     setConfirmedPlanHash(null);
     setCurrentKnowledgePlan(null);
     setCurrentBlockCounts(normalizeBlockCounts(plan.variationCounts));
+    setSessionPlanJson(null);
     setAssetReadings([]);
     setUploads((prev) => prev.filter((upload) => upload.source !== "session_attach"));
     if (message) {
@@ -2682,6 +3019,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
           variationCounts: normalizeBlockCounts(session.initial_block_counts || prev.variationCounts),
         }));
         const restoredState = normalizePlanState(session, personaSlug || plan.personaSlug);
+        setSessionPlanJson(session?.plan_json || session?.state?.plan_json || null);
         const restoredPlan = restoredState?.normalized_plan || normalizeKnowledgePlan(session.knowledge_plan, personaSlug || plan.personaSlug);
         setPlanState(restoredState);
         setConfirmedPlanHash(session.confirmed_plan_hash || null);
@@ -2692,7 +3030,11 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
           || (restoredPlan ? countBlocksByType(restoredPlan.entries) : undefined),
         ));
       })
-      .catch(() => {
+      .catch((error) => {
+        if (isKbIntakeSessionNotFound(error)) {
+          resetCriarSession("Sessao anterior da Sofia expirou neste backend. Envie uma nova mensagem para iniciar outra sessao.");
+          return;
+        }
         window.localStorage.removeItem("active_criar_session_id");
       });
   // Restore once on mount; persona fallback is intentionally best-effort.
@@ -2741,6 +3083,16 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
       window.localStorage.setItem("ai-brain-persona-id", selected.id);
     } else {
       window.localStorage.removeItem("ai-brain-persona-id");
+    }
+    if (activeSessionId && nextSlug && nextSlug !== plan.personaSlug) {
+      window.localStorage.removeItem("active_criar_session_id");
+      setActiveSessionId(null);
+      setSessionStatus("collecting");
+      setPlanState(null);
+      setCurrentKnowledgePlan(null);
+      setSessionPlanJson(null);
+      setConfirmedPlanHash(null);
+      setCurrentBlockCounts(normalizeBlockCounts(plan.variationCounts));
     }
     window.dispatchEvent(new CustomEvent("ai-brain-persona-change", {
       detail: { slug: nextSlug, id: selected?.id || "" },
@@ -2858,6 +3210,7 @@ export function CaptureWorkspace({ embedded = false }: { embedded?: boolean }) {
         uploads={uploads}
         crawlerRuns={crawlerRuns}
         assetReadings={assetReadings}
+        sessionPlanJson={sessionPlanJson}
         planState={planState}
         currentKnowledgePlan={currentKnowledgePlan}
         currentBlockCounts={currentBlockCounts}

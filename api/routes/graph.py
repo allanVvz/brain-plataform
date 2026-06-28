@@ -8,13 +8,18 @@ without re-deriving the ontology in JS.
 """
 
 import logging
+import json
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 
 from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle, approved_knowledge_snapshots
+from services import embedded_markdown
+from services.event_emitter import emit
+from services.audit_helpers import current_actor
 
 router = APIRouter(prefix="/knowledge", tags=["graph"])
 logger = logging.getLogger("ai_brain.graph")
@@ -27,6 +32,131 @@ class GraphEdgeCreateBody(BaseModel):
     persona_id: Optional[str] = None
     weight: float = 1.0
     metadata: dict = {}
+
+
+class GraphPreflightBody(BaseModel):
+    graph: Optional[dict] = None
+    tree_edge_ids: list[str] = []
+
+
+def _contract_node(node_id: str, node_type: str, approved: bool = False) -> dict:
+    return {"id": node_id, "type": node_type, "approved": approved}
+
+
+def _contract_edge(edge_id: str, src: str, tgt: str, edge_type: str = "main", active: bool = True) -> dict:
+    return {"id": edge_id, "source": src, "target": tgt, "edge_type": edge_type, "active": active}
+
+
+def _build_vzlupas_contract_graph() -> tuple[dict, list[str]]:
+    fixture = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "vzlupas-products-9.json"
+    products = json.loads(fixture.read_text(encoding="utf-8"))
+
+    nodes = [
+        _contract_node("persona-vzlupas", "persona"),
+        _contract_node("brand-vzlupas", "brand"),
+        _contract_node("briefing-vzlupas", "briefing"),
+        _contract_node("campaign-vzlupas", "campaign"),
+        _contract_node("audience-vzlupas", "audience"),
+        _contract_node("pg-clipon", "product_group"),
+        _contract_node("pg-grau", "product_group"),
+        _contract_node("pg-sol", "product_group"),
+        _contract_node("embed-vzlupas", "embed"),
+    ]
+    edges = [
+        _contract_edge("e1", "persona-vzlupas", "brand-vzlupas"),
+        _contract_edge("e2", "brand-vzlupas", "briefing-vzlupas"),
+        _contract_edge("e3", "briefing-vzlupas", "campaign-vzlupas"),
+        _contract_edge("e4", "campaign-vzlupas", "audience-vzlupas"),
+        _contract_edge("e5", "audience-vzlupas", "pg-clipon"),
+        _contract_edge("e6", "audience-vzlupas", "pg-grau"),
+        _contract_edge("e7", "audience-vzlupas", "pg-sol"),
+    ]
+    group_for_idx = {0: "pg-clipon", 1: "pg-clipon", 2: "pg-clipon", 3: "pg-grau", 4: "pg-grau", 5: "pg-grau", 6: "pg-sol", 7: "pg-sol", 8: "pg-sol"}
+    tree_edge_ids = [e["id"] for e in edges]
+
+    for i, prod in enumerate(products):
+        product_id = f"product-{prod['slug']}"
+        faq1 = f"faq-{prod['slug']}-1"
+        faq2 = f"faq-{prod['slug']}-2"
+        nodes.extend([
+            _contract_node(product_id, "product"),
+            _contract_node(faq1, "faq", approved=True),
+            _contract_node(faq2, "faq", approved=True),
+        ])
+        edges.extend([
+            _contract_edge(f"ep-{i}", group_for_idx[i], product_id),
+            _contract_edge(f"ef1-{i}", product_id, faq1),
+            _contract_edge(f"ef2-{i}", product_id, faq2),
+            _contract_edge(f"ee1-{i}", faq1, "embed-vzlupas"),
+            _contract_edge(f"ee2-{i}", faq2, "embed-vzlupas", edge_type="reference"),
+        ])
+        tree_edge_ids.extend([f"ep-{i}", f"ef1-{i}", f"ef2-{i}", f"ee1-{i}"])
+
+    edges.append(_contract_edge("ref-brand-campaign", "brand-vzlupas", "campaign-vzlupas", edge_type="reference"))
+    return {"nodes": nodes, "edges": edges}, tree_edge_ids
+
+
+def _run_vzlupas_preflight(graph: dict, tree_edge_ids: list[str]) -> tuple[bool, list[dict], list[str]]:
+    nodes = {n.get("id"): n for n in graph.get("nodes", [])}
+    edges = graph.get("edges", [])
+    main_edges = [e for e in edges if e.get("edge_type", "main") == "main"]
+    active_edges = [e for e in edges if e.get("active", True)]
+    level = {
+        "persona": 0, "brand": 1, "briefing": 2, "campaign": 3, "audience": 4,
+        "product_group": 5, "product": 6, "offer": 7, "copy": 8, "faq": 9, "embed": 10,
+    }
+    main_next = {
+        "persona": {"brand"}, "brand": {"briefing"}, "briefing": {"campaign"}, "campaign": {"audience"},
+        "audience": {"product_group"}, "product_group": {"product"}, "product": {"offer", "faq", "copy"},
+        "offer": {"copy", "faq"}, "copy": {"faq"}, "faq": {"embed"},
+    }
+    checks: list[dict] = []
+    errors: list[str] = []
+
+    invalid_main = []
+    for e in main_edges:
+        src_type = str((nodes.get(e.get("source")) or {}).get("type") or "")
+        tgt_type = str((nodes.get(e.get("target")) or {}).get("type") or "")
+        if tgt_type not in main_next.get(src_type, set()):
+            invalid_main.append(f"{src_type}->{tgt_type}:{e.get('id')}")
+    checks.append({"name": "main_hierarchy", "ok": len(invalid_main) == 0, "errors": invalid_main})
+    errors.extend(invalid_main)
+
+    forbidden = []
+    for e in active_edges:
+        src = nodes.get(e.get("source")) or {}
+        tgt = nodes.get(e.get("target")) or {}
+        src_type = str(src.get("type") or "")
+        tgt_type = str(tgt.get("type") or "")
+        if tgt_type == "embed" and src_type != "faq":
+            forbidden.append(f"EMBED_SOURCE_NOT_FAQ:{e.get('id')}")
+        if src_type == "faq" and tgt_type == "embed" and not bool(src.get("approved", False)):
+            forbidden.append(f"FAQ_NOT_APPROVED_FOR_EMBED:{e.get('id')}")
+    checks.append({"name": "embed_gate", "ok": len(forbidden) == 0, "errors": forbidden})
+    errors.extend(forbidden)
+
+    tree_errors = []
+    edge_by_id = {e.get("id"): e for e in edges}
+    for edge_id in tree_edge_ids:
+        edge = edge_by_id.get(edge_id)
+        if not edge:
+            tree_errors.append(f"missing_tree_edge:{edge_id}")
+            continue
+        if edge.get("edge_type", "main") != "main":
+            tree_errors.append(f"tree_not_main:{edge_id}")
+    checks.append({"name": "tree_main_only", "ok": len(tree_errors) == 0, "errors": tree_errors})
+    errors.extend(tree_errors)
+
+    depth_errors = []
+    for e in main_edges:
+        src_type = str((nodes.get(e.get("source")) or {}).get("type") or "")
+        tgt_type = str((nodes.get(e.get("target")) or {}).get("type") or "")
+        if level.get(tgt_type, 999) <= level.get(src_type, -1):
+            depth_errors.append(f"non_increasing_depth:{e.get('id')}")
+    checks.append({"name": "layout_depth", "ok": len(depth_errors) == 0, "errors": depth_errors})
+    errors.extend(depth_errors)
+
+    return len(errors) == 0, checks, errors
 
 
 def _raw_graph_node_id(value: str) -> str:
@@ -185,6 +315,8 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
                 approved_by=(auth_service.current_user(request) or {}).get("id"),
                 require_rag_for_faq=True,
             )
+            # The Embedded body must list every connected FAQ.
+            embedded_markdown.rebuild_embedded_markdown(target_node.get("persona_id") or edge_persona_id)
         if edge:
             evidence = {}
             if publication:
@@ -219,8 +351,40 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
                 source="graph.create_edge",
             )
     except Exception as exc:
+        emit(
+            "graph_edge_create_failed",
+            entity_type="knowledge_edge",
+            persona_id=edge_persona_id,
+            payload={
+                "actor": current_actor(request),
+                "context": {
+                    "source_node_id": source_id,
+                    "target_node_id": target_id,
+                    "relation_type": relation_type,
+                },
+                "reason": str(exc)[:400],
+            },
+            level="error",
+            source="routes.graph",
+        )
         raise HTTPException(502, f"Could not create graph edge: {exc}") from exc
     if not edge:
+        emit(
+            "graph_edge_create_failed",
+            entity_type="knowledge_edge",
+            persona_id=edge_persona_id,
+            payload={
+                "actor": current_actor(request),
+                "context": {
+                    "source_node_id": source_id,
+                    "target_node_id": target_id,
+                    "relation_type": relation_type,
+                },
+                "reason": "upsert returned no row",
+            },
+            level="warn",
+            source="routes.graph",
+        )
         raise HTTPException(400, "Graph edge was not created")
     if publication:
         return {
@@ -251,6 +415,10 @@ def delete_graph_edge(edge_id: str, request: Request):
     edge = supabase_client.get_knowledge_edge(raw_edge_id)
     if edge and edge.get("persona_id"):
         auth_service.assert_persona_access(request, persona_id=edge.get("persona_id"))
+    # When the edge being removed published a FAQ to Embedded, the Embedded body
+    # must drop that FAQ's section after the soft-delete.
+    target_node_before = supabase_client.get_knowledge_node((edge or {}).get("target_node_id")) if edge else None
+    disconnects_embedded = bool(target_node_before and str(target_node_before.get("node_type") or "").lower() == "embedded")
     try:
         ok = supabase_client.delete_knowledge_edge(raw_edge_id)
     except Exception as exc:
@@ -258,8 +426,34 @@ def delete_graph_edge(edge_id: str, request: Request):
         raise HTTPException(502, f"Could not delete graph edge: {exc}") from exc
     if not ok:
         logger.warning("Graph edge not found for delete", extra={"edge_id": edge_id, "raw_edge_id": raw_edge_id})
+        emit(
+            "graph_edge_delete_failed",
+            entity_type="knowledge_edge",
+            entity_id=raw_edge_id,
+            persona_id=(edge or {}).get("persona_id"),
+            payload={"requested_edge_id": edge_id, "reason": "not_found"},
+            level="warn",
+            source="routes.graph",
+        )
         raise HTTPException(404, "Graph edge not found")
     logger.info("Graph edge soft-deleted", extra={"edge_id": edge_id, "raw_edge_id": raw_edge_id})
+    emit(
+        "graph_edge_deleted",
+        entity_type="knowledge_edge",
+        entity_id=raw_edge_id,
+        persona_id=(edge or {}).get("persona_id"),
+        payload={
+            "requested_edge_id": edge_id,
+            "source_node_id": (edge or {}).get("source_node_id"),
+            "target_node_id": (edge or {}).get("target_node_id"),
+            "relation_type": (edge or {}).get("relation_type"),
+            "metadata": (edge or {}).get("metadata") or {},
+        },
+        level="warn",
+        source="routes.graph",
+    )
+    if disconnects_embedded:
+        embedded_markdown.rebuild_embedded_markdown((edge or {}).get("persona_id") or (target_node_before or {}).get("persona_id"))
     return {"ok": True, "edge_id": raw_edge_id}
 
 
@@ -269,21 +463,188 @@ def delete_graph_node(node_id: str, request: Request):
     node = supabase_client.get_knowledge_node(raw_node_id)
     if node and node.get("persona_id"):
         auth_service.assert_persona_access(request, persona_id=node.get("persona_id"))
+    persona_id = (node or {}).get("persona_id")
+    before_snapshot = {
+        "node_type": (node or {}).get("node_type"),
+        "slug": (node or {}).get("slug"),
+        "title": (node or {}).get("title"),
+        "status": (node or {}).get("status"),
+        "source_table": (node or {}).get("source_table"),
+        "source_id": (node or {}).get("source_id"),
+    }
+    actor = current_actor(request)
     if node and node.get("source_table") == "knowledge_items" and node.get("source_id"):
         try:
             evidence = knowledge_lifecycle.delete_knowledge_item_cascade(str(node.get("source_id")))
         except ValueError as exc:
+            emit(
+                "graph_node_delete_failed",
+                entity_type="knowledge_node",
+                entity_id=raw_node_id,
+                persona_id=persona_id,
+                payload={"actor": actor, "before": before_snapshot, "reason": str(exc)[:400], "stage": "cascade"},
+                level="warn",
+                source="routes.graph",
+            )
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
+            emit(
+                "graph_node_delete_failed",
+                entity_type="knowledge_node",
+                entity_id=raw_node_id,
+                persona_id=persona_id,
+                payload={"actor": actor, "before": before_snapshot, "reason": str(exc)[:400], "stage": "cascade"},
+                level="error",
+                source="routes.graph",
+            )
             raise HTTPException(502, f"Could not delete knowledge item graph node: {exc}") from exc
+        emit(
+            "graph_node_deleted",
+            entity_type="knowledge_node",
+            entity_id=raw_node_id,
+            persona_id=persona_id,
+            payload={
+                "actor": actor,
+                "before": before_snapshot,
+                "context": {"strategy": "knowledge_item_cascade", "evidence": evidence},
+            },
+            level="warn",
+            source="routes.graph",
+        )
         return {"ok": True, "node_id": raw_node_id, "evidence": evidence}
     try:
         ok = supabase_client.delete_knowledge_node(raw_node_id)
     except Exception as exc:
+        emit(
+            "graph_node_delete_failed",
+            entity_type="knowledge_node",
+            entity_id=raw_node_id,
+            persona_id=persona_id,
+            payload={"actor": actor, "before": before_snapshot, "reason": str(exc)[:400], "stage": "direct"},
+            level="error",
+            source="routes.graph",
+        )
         raise HTTPException(502, f"Could not delete graph node: {exc}") from exc
     if not ok:
+        emit(
+            "graph_node_delete_failed",
+            entity_type="knowledge_node",
+            entity_id=raw_node_id,
+            persona_id=persona_id,
+            payload={"actor": actor, "before": before_snapshot, "reason": "not_found", "stage": "direct"},
+            level="warn",
+            source="routes.graph",
+        )
         raise HTTPException(404, "Graph node not found")
+    emit(
+        "graph_node_deleted",
+        entity_type="knowledge_node",
+        entity_id=raw_node_id,
+        persona_id=persona_id,
+        payload={
+            "actor": actor,
+            "before": before_snapshot,
+            "context": {"strategy": "direct"},
+        },
+        level="warn",
+        source="routes.graph",
+    )
     return {"ok": True, "node_id": raw_node_id}
+
+
+class GraphNodeUpdateBody(BaseModel):
+    title: Optional[str] = None
+    markdown: Optional[str] = None
+    summary: Optional[str] = None
+    tags: Optional[list] = None
+    status: Optional[str] = None
+
+
+_PROTECTED_NODE_TYPES = {"persona", "embedded", "gallery"}
+_FAQ_REVERT_STATUSES = {"approved", "embedded"}
+
+
+@router.patch("/graph-nodes/{node_id}")
+def update_graph_node(node_id: str, body: GraphNodeUpdateBody, request: Request):
+    """Edit a node's contextual Markdown body (and title/summary/tags).
+
+    The Markdown body is the node's real context: it is stored in
+    `knowledge_nodes.metadata.markdown` (surfaced by graph-data) and, when the
+    node mirrors a knowledge_item, mirrored into the item's content. Editing an
+    approved/embedded FAQ reverts it to draft and withdraws it from Embedded
+    (its section is removed from the Embedded body)."""
+    raw_node_id = _raw_graph_node_id(node_id)
+    node = supabase_client.get_knowledge_node(raw_node_id)
+    if not node:
+        raise HTTPException(404, "Graph node not found")
+    persona_id = node.get("persona_id")
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+    node_type = str(node.get("node_type") or "").lower()
+    if node_type in _PROTECTED_NODE_TYPES:
+        raise HTTPException(400, f"Node type '{node_type}' has an auto-managed body and cannot be edited directly")
+
+    data = body.model_dump(exclude_none=True)
+    if not data:
+        raise HTTPException(400, "Nothing to update")
+
+    item = _knowledge_item_for_graph_node(node)
+    item_status = str((item or {}).get("status") or "").lower()
+    markdown_changed = "markdown" in data
+    reverted = bool(
+        node_type == "faq"
+        and markdown_changed
+        and "status" not in data
+        and item_status in _FAQ_REVERT_STATUSES
+    )
+
+    node_payload: dict = {}
+    if "title" in data:
+        node_payload["title"] = data["title"]
+    if "summary" in data:
+        node_payload["summary"] = data["summary"]
+    if "tags" in data:
+        node_payload["tags"] = data["tags"]
+    if markdown_changed:
+        node_payload["metadata"] = {**(node.get("metadata") or {}), "markdown": data["markdown"]}
+    if "status" in data:
+        node_payload["status"] = data["status"]
+    elif reverted:
+        node_payload["status"] = "pending_validation"
+
+    updated = supabase_client.update_knowledge_node(raw_node_id, node_payload, mark_related_faqs=False)
+
+    if item and item.get("id"):
+        item_payload: dict = {}
+        if "title" in data:
+            item_payload["title"] = data["title"]
+        if markdown_changed:
+            item_payload["content"] = data["markdown"]
+        if "tags" in data:
+            item_payload["tags"] = data["tags"]
+        if reverted:
+            item_payload["status"] = "pending"
+            item_payload["curation_status"] = "draft"
+        if item_payload:
+            supabase_client.update_knowledge_item(item["id"], item_payload)
+
+    if reverted and item and item.get("id"):
+        try:
+            supabase_client.withdraw_faq_from_embedded(item["id"])
+        except Exception:
+            pass
+        embedded_markdown.rebuild_embedded_markdown(persona_id)
+
+    emit(
+        "graph_node_markdown_updated",
+        entity_type="knowledge_node",
+        entity_id=raw_node_id,
+        persona_id=persona_id,
+        payload={"actor": current_actor(request), "fields": list(data.keys()), "reverted_to_draft": reverted},
+        source="routes.graph",
+    )
+    return {"ok": True, "node": updated, "reverted_to_draft": reverted}
+
 
 # knowledge_items statuses → nodeClass
 _KI_STATUS: dict[str, str] = {
@@ -304,6 +665,18 @@ _KB_STATUS: dict[str, str] = {
 # Auxiliary node_types: hidden by default in the UI, but data is preserved.
 _AUXILIARY_NODE_TYPES: set[str] = {"tag", "mention"}
 _TECHNICAL_NODE_TYPES: set[str] = {"knowledge_item", "kb_entry"}
+
+
+def _is_import_audience_node(node: dict) -> bool:
+    """The `import` leads bucket is operational, not a semantic audience. If an
+    older mirror exists in knowledge_nodes we hide it from the tree (data is
+    preserved in DB; this is a visibility filter only, never a delete)."""
+    if (node.get("node_type") or "").strip().lower() != "audience":
+        return False
+    slug = str(node.get("slug") or "").strip().lower()
+    meta = node.get("metadata") or {}
+    source_type = str(meta.get("source_type") or "").strip().lower()
+    return slug == "import" or source_type == "import"
 
 
 def _canonicalize_semantic_node_types(sem_nodes: list[dict], nt_by_type: dict[str, dict]) -> list[dict]:
@@ -412,10 +785,17 @@ _STRUCTURAL_RELATIONS: set[str] = {
     "belongs_to_persona",
     "contains",
     "part_of_campaign",
+    "targets_audience",
+    "campaign_has_audience",
+    "audience_has_product_group",
+    "product_group_has_product",
     "about_product",
     "offers_product",
     "briefed_by",
     "answers_question",
+    "product_has_copy",
+    "product_has_faq",
+    "copy_has_faq",
     "supports_copy",
     "uses_asset",
     "manual",
@@ -731,6 +1111,7 @@ def get_graph_data(
         sem_nodes = [n for n in sem_nodes if (n.get("node_type") or "").lower() not in _TECHNICAL_NODE_TYPES]
     sem_nodes = [n for n in sem_nodes if n.get("status") != "archived"]
     sem_nodes = [n for n in sem_nodes if not _is_quarantined_metadata(n.get("metadata"))]
+    sem_nodes = [n for n in sem_nodes if not _is_import_audience_node(n)]
 
     surviving_ids = {n["id"] for n in sem_nodes}
     sem_edges = [
@@ -739,7 +1120,8 @@ def get_graph_data(
     ]
     sem_edges = [
         e for e in sem_edges
-        if not (e.get("metadata") or {}).get("visual_hidden")
+        if (e.get("metadata") or {}).get("active") is not False
+        and not (e.get("metadata") or {}).get("visual_hidden")
         and not (
             (e.get("relation_type") or "").lower() == "belongs_to_persona"
             and (e.get("metadata") or {}).get("primary_tree") is not True
@@ -1148,6 +1530,14 @@ def get_graph_data(
         # Map semantic node_type → ReactFlow nodeClass for legacy color/shape.
         semantic_state = knowledge_graph._validation_state(n)
         source_status = str(meta.get("source_status") or n.get("status") or "").lower()
+        asset_validation_status = str(meta.get("validation_status") or meta.get("approval_status") or "").lower()
+        if ntype == "asset" and asset_validation_status:
+            if asset_validation_status in {"approved", "embedded", "validated"}:
+                semantic_state = "validated"
+                source_status = asset_validation_status
+            else:
+                semantic_state = "pending"
+                source_status = asset_validation_status
         approved_snapshot = snapshot_by_node.get(n.get("id")) or {}
         approved_snapshot_id = approved_snapshot.get("id") or meta.get("approved_snapshot_id")
         rag_entry_id = approved_snapshot.get("rag_entry_id") or meta.get("knowledge_rag_entry_id")
@@ -1179,7 +1569,7 @@ def get_graph_data(
             "id": nid, "type": "knowledgeNode", "position": {"x": 0, "y": 0},
             "data": {
                 "label": n.get("title") or n.get("slug") or ntype,
-                "status": n.get("status") or "active",
+                "status": source_status or n.get("status") or "active",
                 "content_type": ntype,
                 "file_type": _metadata_file_type(meta),
                 "file_path": meta.get("file_path") or meta.get("storage_path"),
@@ -1536,4 +1926,34 @@ def get_graph_data(
                 ],
             },
         },
+    }
+
+
+@router.post("/dev/preflight/vzlupas")
+def graph_contract_preflight_vzlupas(body: GraphPreflightBody):
+    graph, default_tree = _build_vzlupas_contract_graph()
+    if body.graph:
+        graph = body.graph
+    tree_edge_ids = body.tree_edge_ids or default_tree
+    ok, checks, errors = _run_vzlupas_preflight(graph, tree_edge_ids)
+    return {
+        "ok": ok,
+        "contract": {
+            "name": "vzlupas_catalog_to_hierarchical_graph",
+            "version": "2026-05-25",
+            "rules": [
+                "invalid graph edges are rejected before persistence",
+                "direct product->embed is impossible",
+                "unapproved faq->embed is impossible",
+                "tree view includes only main edges",
+            ],
+        },
+        "graph_summary": {
+            "node_count": len(graph.get("nodes", [])),
+            "edge_count": len(graph.get("edges", [])),
+            "tree_edge_count": len(tree_edge_ids),
+        },
+        "checks": checks,
+        "errors": errors,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }

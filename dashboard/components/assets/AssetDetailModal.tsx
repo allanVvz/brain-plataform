@@ -1,7 +1,63 @@
 "use client";
-import { useEffect, useState } from "react";
-import { X, Loader2, CheckCircle2, AlertTriangle, Link2, Maximize2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { X, Loader2, CheckCircle2, AlertTriangle, Link2, Maximize2, Trash2 } from "lucide-react";
 import { api, API_URL } from "@/lib/api";
+
+interface AssetConnection {
+  edge_id: string;
+  relation_type: string;
+  slot_key: string | null;
+  page_section: string | null;
+  label: string | null;
+  position: number | null;
+  role: string | null;
+  parent_node: {
+    id: string;
+    slug: string | null;
+    node_type: string | null;
+    title: string | null;
+    collection_slug: string | null;
+  };
+  slot_options: Array<{ slot_key: string; label: string }>;
+}
+
+interface LandingTarget {
+  slot_key: string;
+  slot_label: string;
+  parent_node_type: string;
+  target_slug: string | null;
+  collection_slug: string | null;
+  label: string;
+  node_id: string;
+}
+
+const PARENT_TYPE_LABEL: Record<string, string> = {
+  brand: "Brand",
+  campaign: "Campanha",
+  category: "Grupo de produto",
+  product: "Produto",
+};
+
+const SELECT_CLASS =
+  "mt-1 w-full rounded-md border border-white/15 bg-obs-base px-2 py-2 text-[12px] text-obs-text outline-none focus:border-obs-violet/50 disabled:opacity-60";
+
+function bindBodyFor(connection: AssetConnection, slotKey: string) {
+  const parentType = connection.parent_node.node_type || "";
+  if (parentType === "campaign") {
+    return {
+      slot: slotKey,
+      collection_slug: connection.parent_node.collection_slug || undefined,
+    };
+  }
+  return {
+    slot: slotKey,
+    target_slug: connection.parent_node.slug || undefined,
+  };
+}
+
+function targetKey(target: LandingTarget) {
+  return `${target.slot_key}:${target.node_id}`;
+}
 
 interface Props {
   assetId: string;
@@ -93,6 +149,18 @@ export default function AssetDetailModal({
   const [ensuring, setEnsuring] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [imgZoom, setImgZoom] = useState(false);
+  const [connections, setConnections] = useState<AssetConnection[]>([]);
+  const [connectionsLoading, setConnectionsLoading] = useState(false);
+  const [busyEdgeId, setBusyEdgeId] = useState<string | null>(null);
+  const [slotError, setSlotError] = useState<string | null>(null);
+  const [targets, setTargets] = useState<LandingTarget[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState("");
+  const [selectedTargetKey, setSelectedTargetKey] = useState("");
+  const [pathSaving, setPathSaving] = useState(false);
+  const [validatingPath, setValidatingPath] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [pathValidation, setPathValidation] = useState<{ ok: boolean; errors: string[] } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -107,10 +175,172 @@ export default function AssetDetailModal({
     }
   }
 
+  async function loadConnections() {
+    setConnectionsLoading(true);
+    setSlotError(null);
+    try {
+      const payload = await api.assetConnections(assetId);
+      setConnections(payload.connections || []);
+    } catch (exc: any) {
+      // Surface as inline slot section error; main asset load is independent.
+      setSlotError(exc?.message || "Falha ao carregar conexoes.");
+      setConnections([]);
+    } finally {
+      setConnectionsLoading(false);
+    }
+  }
+
+  async function loadTargets() {
+    try {
+      const payload = await api.assetLandingTargets(assetId);
+      setTargets(payload.targets || []);
+    } catch {
+      setTargets([]);
+    }
+  }
+
   useEffect(() => {
     load();
+    loadConnections();
+    loadTargets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assetId]);
+
+  const slotChoices = useMemo(() => {
+    const bySlot = new Map<string, string>();
+    for (const target of targets) {
+      if (!bySlot.has(target.slot_key)) bySlot.set(target.slot_key, target.slot_label);
+    }
+    return Array.from(bySlot.entries()).map(([slot_key, label]) => ({ slot_key, label }));
+  }, [targets]);
+
+  const targetChoices = useMemo(
+    () => targets.filter((target) => target.slot_key === selectedSlot),
+    [targets, selectedSlot],
+  );
+
+  useEffect(() => {
+    const currentConnection = connections[0];
+    if (!currentConnection || !targets.length || selectedSlot || selectedTargetKey) return;
+    const currentSlot = currentConnection.slot_key || "";
+    const currentTarget = targets.find(
+      (target) => target.slot_key === currentSlot && target.node_id === currentConnection.parent_node.id,
+    );
+    if (currentSlot) setSelectedSlot(currentSlot);
+    if (currentTarget) setSelectedTargetKey(targetKey(currentTarget));
+  }, [connections, selectedSlot, selectedTargetKey, targets]);
+
+  async function applyPath() {
+    const target = targets.find((candidate) => targetKey(candidate) === selectedTargetKey);
+    if (!target) return;
+    setPathSaving(true);
+    setSlotError(null);
+    try {
+      await api.assetRebindPath(assetId, {
+        slot: target.slot_key,
+        target_slug: target.target_slug,
+        collection_slug: target.collection_slug,
+        label: target.label,
+        remove_existing: true,
+      });
+      await load();
+      await loadConnections();
+      setPathValidation(null);
+      onChanged?.();
+    } catch (exc: any) {
+      setSlotError(exc?.message || "Falha ao alterar caminho do asset.");
+    } finally {
+      setPathSaving(false);
+    }
+  }
+
+  async function validatePath() {
+    setValidatingPath(true);
+    setSlotError(null);
+    try {
+      const result = await api.assetValidatePath(assetId);
+      setPathValidation({ ok: result.ok, errors: result.errors || [] });
+      await loadConnections();
+    } catch (exc: any) {
+      setPathValidation({ ok: false, errors: [exc?.message || "Falha ao validar caminho."] });
+    } finally {
+      setValidatingPath(false);
+    }
+  }
+
+  async function approveAsset() {
+    setApproving(true);
+    setError(null);
+    setSlotError(null);
+    try {
+      const result = await api.assetApprove(assetId);
+      setData((prev) => (prev ? { ...prev, asset: result.asset || prev.asset } : prev));
+      setPathValidation({ ok: true, errors: [] });
+      await load();
+      await loadConnections();
+      onChanged?.();
+    } catch (exc: any) {
+      setSlotError(exc?.message || "Falha ao aprovar asset.");
+    } finally {
+      setApproving(false);
+    }
+  }
+
+  async function deleteAsset() {
+    if (!window.confirm("Excluir este asset, o card de asset e todas as ligacoes do grafo?")) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await api.assetDelete(assetId);
+      onChanged?.();
+      onClose();
+    } catch (exc: any) {
+      setError(exc?.message || "Falha ao excluir asset.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function changeSlot(connection: AssetConnection, nextSlotKey: string) {
+    if (!nextSlotKey || nextSlotKey === connection.slot_key) return;
+    setBusyEdgeId(connection.edge_id);
+    setSlotError(null);
+    try {
+      if (connection.slot_key) {
+        await api.assetUnbindSlot(
+          assetId,
+          connection.slot_key,
+          connection.parent_node.slug,
+        );
+      }
+      await api.assetBindSlot(assetId, bindBodyFor(connection, nextSlotKey));
+      await loadConnections();
+      onChanged?.();
+    } catch (exc: any) {
+      setSlotError(exc?.message || "Falha ao alterar slot.");
+    } finally {
+      setBusyEdgeId(null);
+    }
+  }
+
+  async function removeConnection(connection: AssetConnection) {
+    if (!connection.slot_key) return;
+    setBusyEdgeId(connection.edge_id);
+    setSlotError(null);
+    try {
+      await api.assetUnbindSlot(
+        assetId,
+        connection.slot_key,
+        connection.parent_node.slug,
+      );
+      await loadConnections();
+      onChanged?.();
+    } catch (exc: any) {
+      setSlotError(exc?.message || "Falha ao remover slot.");
+    } finally {
+      setBusyEdgeId(null);
+    }
+  }
 
   async function ensureGallery() {
     if (!data) return;
@@ -145,15 +375,29 @@ export default function AssetDetailModal({
   }
 
   const asset = data?.asset;
+  const assetMeta = asset?.metadata || {};
   const storagePath =
-    asset?.storage_bucket && asset?.storage_path
+    assetMeta?.preview_bucket && assetMeta?.preview_path
+      ? `${assetMeta.preview_bucket}:${assetMeta.preview_path}`
+      : asset?.storage_bucket && asset?.storage_path
       ? `${asset.storage_bucket}:${asset.storage_path}`
       : null;
   const fileUrl = storagePath && API_URL
     ? `${API_URL}/knowledge/file?path=${encodeURIComponent(storagePath)}`
-    : initialPreviewUrl || asset?.url || null;
+    : initialPreviewUrl || assetMeta?.preview_url || asset?.url || null;
   const mt = mediaType || (asset?.type === "video" ? "video" : asset?.type === "image" ? "image" : "document");
   const inGraph = !!data?.graph?.in_graph;
+  const primaryConnection = connections[0];
+  const currentPathLabel = primaryConnection
+    ? [
+        PARENT_TYPE_LABEL[primaryConnection.parent_node.node_type || ""] ||
+          primaryConnection.parent_node.node_type ||
+          "Destino",
+        primaryConnection.parent_node.title ||
+          primaryConnection.parent_node.slug ||
+          primaryConnection.parent_node.id.slice(0, 8),
+      ].filter(Boolean).join(" - ")
+    : "";
   const reasonLabel: Record<string, string> = {
     missing_node: "Sem node no grafo de conhecimento.",
     missing_gallery_edge: "Node existe, mas falta a conexao com Gallery.",
@@ -162,10 +406,10 @@ export default function AssetDetailModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm p-4">
       <div
-        className="w-full max-w-5xl max-h-[92vh] flex flex-col rounded-2xl border border-white/15 shadow-xl"
-        style={{ background: "rgba(255,255,255,0.97)" }}
+        className="w-full max-w-5xl max-h-[92vh] flex flex-col rounded-2xl border border-white/12 shadow-xl shadow-black/40 text-obs-text"
+        style={{ background: "rgba(15,18,28,0.97)" }}
       >
-        <header className="flex items-center justify-between gap-3 border-b border-white/15 px-5 py-3">
+        <header className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3">
           <div>
             <h2 className="text-sm font-semibold text-obs-text truncate max-w-[40rem]">
               {asset?.name || asset?.original_filename || "Asset"}
@@ -178,7 +422,7 @@ export default function AssetDetailModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-white/20 bg-obs-base px-2 py-1 text-obs-text hover:bg-white/10"
+            className="rounded-md border border-white/15 bg-white/5 px-2 py-1 text-obs-text hover:bg-white/10"
             aria-label="Fechar"
           >
             <X size={14} />
@@ -220,8 +464,8 @@ export default function AssetDetailModal({
             <div
               className={`rounded-lg border px-3 py-2 text-[12px] ${
                 inGraph
-                  ? "border-emerald-400/40 bg-emerald-500/8 text-emerald-700"
-                  : "border-amber-400/40 bg-amber-500/10 text-amber-800"
+                  ? "border-emerald-400/35 bg-emerald-500/10 text-emerald-100"
+                  : "border-amber-400/35 bg-amber-500/10 text-amber-100"
               }`}
             >
               <div className="flex items-start gap-2">
@@ -247,14 +491,14 @@ export default function AssetDetailModal({
                       type="button"
                       onClick={() => setConfirming(true)}
                       disabled={ensuring || loading}
-                      className="mt-2 inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-800 hover:bg-amber-500/25 disabled:opacity-60"
+                      className="mt-2 inline-flex items-center gap-1 rounded-md border border-amber-300/40 bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-100 hover:bg-amber-500/25 disabled:opacity-60"
                     >
                       <Link2 size={11} />
                       Criar node md e conectar ao Gallery
                     </button>
                   )}
                   {!inGraph && confirming && (
-                    <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-900">
+                    <div className="mt-2 rounded-md border border-amber-300/40 bg-amber-500/10 p-2 text-amber-100">
                       <p className="text-[11px] font-medium">
                         Conectar este asset ao grafo da Sofia agora?
                       </p>
@@ -266,7 +510,7 @@ export default function AssetDetailModal({
                           type="button"
                           onClick={ensureGallery}
                           disabled={ensuring}
-                          className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-500/25 disabled:opacity-60"
+                          className="inline-flex items-center gap-1 rounded-md border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-60"
                         >
                           {ensuring ? (
                             <Loader2 size={11} className="animate-spin" />
@@ -279,7 +523,7 @@ export default function AssetDetailModal({
                           type="button"
                           onClick={() => setConfirming(false)}
                           disabled={ensuring}
-                          className="inline-flex items-center gap-1 rounded-md border border-white/25 bg-obs-base px-2 py-1 text-[11px] text-obs-text hover:bg-white/15"
+                          className="inline-flex items-center gap-1 rounded-md border border-white/20 bg-white/5 px-2 py-1 text-[11px] text-obs-text hover:bg-white/10"
                         >
                           Cancelar
                         </button>
@@ -297,9 +541,157 @@ export default function AssetDetailModal({
             </div>
 
             {error && (
-              <div className="rounded-md border border-red-400/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-800">
+              <div className="rounded-md border border-red-400/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-100">
                 {error}
               </div>
+            )}
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[12px] font-semibold uppercase tracking-wider text-obs-text">
+                Classificacao e caminho
+              </h3>
+              {connectionsLoading && <Loader2 size={11} className="animate-spin text-obs-subtle" />}
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+              <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-obs-subtle">Caminho ate Gallery / cardapio</p>
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                      primaryConnection
+                        ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
+                        : "border-amber-400/30 bg-amber-500/10 text-amber-100"
+                    }`}>
+                      {primaryConnection ? "definido" : "pendente"}
+                    </span>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                    <div>
+                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-obs-subtle">
+                        Tipo de asset / posicao
+                      </label>
+                      <select
+                        value={selectedSlot}
+                        onChange={(e) => {
+                          setSelectedSlot(e.target.value);
+                          setSelectedTargetKey("");
+                        }}
+                        disabled={pathSaving || slotChoices.length === 0}
+                        className={SELECT_CLASS}
+                      >
+                        <option value="">Selecionar...</option>
+                        {slotChoices.map((slot) => (
+                          <option key={slot.slot_key} value={slot.slot_key}>{slot.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-obs-subtle">
+                        Funcao / destino
+                      </label>
+                      <select
+                        value={selectedTargetKey}
+                        onChange={(e) => setSelectedTargetKey(e.target.value)}
+                        disabled={pathSaving || !selectedSlot || targetChoices.length === 0}
+                        className={SELECT_CLASS}
+                      >
+                        <option value="">Selecionar...</option>
+                        {targetChoices.map((target) => (
+                          <option key={targetKey(target)} value={targetKey(target)}>{target.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={applyPath}
+                      disabled={!selectedTargetKey || pathSaving}
+                      className="inline-flex items-center justify-center gap-1 rounded-md border border-emerald-300/35 bg-emerald-500/15 px-3 py-2 text-[12px] font-semibold text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-50"
+                    >
+                      {pathSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                      Alterar
+                    </button>
+                  </div>
+                  <div className="rounded-md border border-white/10 bg-black/15 px-3 py-2 text-[11px] text-obs-subtle">
+                    {primaryConnection ? (
+                      <>
+                        Atual: <span className="text-obs-text">{currentPathLabel}</span>
+                        {primaryConnection.slot_key && (
+                          <span className="ml-2 font-mono text-obs-faint">{primaryConnection.slot_key}</span>
+                        )}
+                      </>
+                    ) : (
+                      "Escolha posicao e destino para criar o caminho deste asset."
+                    )}
+                  </div>
+              </div>
+            </div>
+            {slotError && (
+              <div className="rounded-md border border-red-400/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-100">
+                {slotError}
+              </div>
+            )}
+            {pathValidation && (
+              <div
+                className={`rounded-md border px-3 py-2 text-[11px] ${
+                  pathValidation.ok
+                    ? "border-emerald-400/35 bg-emerald-500/10 text-emerald-100"
+                    : "border-amber-400/35 bg-amber-500/10 text-amber-100"
+                }`}
+              >
+                {pathValidation.ok ? (
+                  "Caminho valido para catalogo/cardapio."
+                ) : (
+                  <span>{pathValidation.errors.join(" ")}</span>
+                )}
+              </div>
+            )}
+            {!connectionsLoading && connections.length === 0 && (
+              <p className="text-[11px] text-obs-faint italic">
+                Asset ainda nao esta ligado a nenhum destino de landing.
+              </p>
+            )}
+            {false && connections.length > 0 && (
+              <ul className="space-y-2">
+                {connections.map((connection) => {
+                  const parentType = connection.parent_node.node_type || "";
+                  const typeLabel = PARENT_TYPE_LABEL[parentType] || parentType || "Parent";
+                  const parentLabel =
+                    connection.parent_node.title ||
+                    connection.parent_node.slug ||
+                    connection.parent_node.id.slice(0, 8);
+                  const busy = busyEdgeId === connection.edge_id;
+                  return (
+                    <li
+                      key={connection.edge_id}
+                      className="rounded-lg border border-white/10 bg-white/[0.035] p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] uppercase tracking-wider text-obs-subtle">
+                          {typeLabel}
+                        </p>
+                        <p className="text-[13px] font-medium text-obs-text truncate">
+                          {parentLabel}
+                        </p>
+                        <p className="text-[10px] font-mono text-obs-faint truncate">
+                          {connection.slot_key || connection.relation_type}
+                          {connection.parent_node.collection_slug ? ` · ${connection.parent_node.collection_slug}` : ""}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeConnection(connection)}
+                        disabled={busy || !connection.slot_key}
+                        className="inline-flex items-center justify-center gap-1 rounded-md border border-red-400/35 bg-red-500/10 px-2 py-1 text-[11px] text-red-100 hover:bg-red-500/20 disabled:opacity-50"
+                        title="Remover este asset desta posicao"
+                      >
+                        {busy ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                        Remover
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </section>
 
@@ -323,11 +715,38 @@ export default function AssetDetailModal({
           </section>
         </div>
 
-        <footer className="border-t border-white/15 px-5 py-3 flex items-center justify-end gap-2">
+        <footer className="border-t border-white/10 px-5 py-3 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={deleteAsset}
+            disabled={deleting}
+            className="mr-auto inline-flex items-center gap-1 rounded-md border border-red-400/35 bg-red-500/10 px-3 py-1.5 text-[12px] font-semibold text-red-100 hover:bg-red-500/20 disabled:opacity-60"
+          >
+            {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+            Excluir asset
+          </button>
+          <button
+            type="button"
+            onClick={validatePath}
+            disabled={validatingPath}
+            className="inline-flex items-center gap-1 rounded-md border border-white/15 px-3 py-1.5 text-[12px] text-obs-text hover:bg-white/10 disabled:opacity-60"
+          >
+            {validatingPath ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+            Validar caminho
+          </button>
+          <button
+            type="button"
+            onClick={approveAsset}
+            disabled={approving}
+            className="inline-flex items-center gap-1 rounded-md border border-emerald-300/35 bg-emerald-500/15 px-3 py-1.5 text-[12px] font-semibold text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-60"
+          >
+            {approving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+            Aprovar asset
+          </button>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-white/20 px-3 py-1.5 text-[12px] text-obs-text hover:bg-white/10"
+            className="rounded-md border border-white/15 px-3 py-1.5 text-[12px] text-obs-text hover:bg-white/10"
           >
             Fechar
           </button>

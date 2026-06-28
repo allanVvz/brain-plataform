@@ -31,7 +31,7 @@ jobs:
       - name: Configurar Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20.11"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: dashboard/package-lock.json
 
@@ -42,8 +42,6 @@ jobs:
       - name: Build frontend
         working-directory: dashboard
         env:
-          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
-          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder
+          API_INTERNAL_BASE_URL: http://127.0.0.1:8080
+          NEXT_PUBLIC_API_BASE_URL: /api-brain
         run: npm run build

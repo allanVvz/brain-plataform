@@ -18,9 +18,40 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger("model_router")
+
+
+def _llm_insecure_ssl() -> bool:
+    """Should LLM HTTP clients skip SSL verification?
+
+    Workaround for Windows boxes where SChannel can't verify CRL revocation
+    on api.openai.com / api.anthropic.com. Turn on via env
+    `INSECURE_LLM_SSL=1` only on local/QA machines that already need
+    similar workarounds for Supabase. Production never sets this.
+    """
+    raw = (os.environ.get("INSECURE_LLM_SSL") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+_LLM_HTTP_CLIENT = None
+
+
+def _llm_http_client():
+    """Returns a shared httpx.Client honoring INSECURE_LLM_SSL, or None."""
+    global _LLM_HTTP_CLIENT
+    if _LLM_HTTP_CLIENT is not None:
+        return _LLM_HTTP_CLIENT
+    if not _llm_insecure_ssl():
+        return None
+    try:
+        import httpx
+    except Exception:
+        return None
+    _LLM_HTTP_CLIENT = httpx.Client(verify=False, timeout=120)
+    logger.warning("ModelRouter using INSECURE LLM HTTP client (SSL verify off). Do NOT set in production.")
+    return _LLM_HTTP_CLIENT
 
 # OpenAI cascade - tried in this exact order on model-not-found / permission errors
 _OPENAI_CHAIN: list[str] = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
@@ -75,6 +106,32 @@ def _looks_like_anthropic_key(key: Optional[str]) -> bool:
         return False
     k = str(key).strip()
     return k.startswith("sk-ant-") and len(k) >= 20
+
+
+def _to_openai_tools(anthropic_tools: list[dict]) -> list[dict]:
+    """Converte a schema canonical (formato Anthropic) para o formato que a
+    OpenAI Chat Completions API espera: {"type":"function","function":{name,description,parameters}}.
+
+    Mantemos `SOFIA_TOOLS_SCHEMA` no formato Anthropic porque ele e mais
+    sucinto (`input_schema` direto), e fazemos a traducao aqui na hora do
+    request OpenAI.
+    """
+    result: list[dict] = []
+    for tool in anthropic_tools or []:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("name") or "").strip()
+        if not name:
+            continue
+        result.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": str(tool.get("description") or ""),
+                "parameters": tool.get("input_schema") or {"type": "object", "properties": {}},
+            },
+        })
+    return result
 
 
 def _error_status_code(exc: Exception) -> Optional[int]:
@@ -157,34 +214,41 @@ class ModelRouter:
         messages: list,
         system: str = "",
         max_tokens: int = 1024,
-    ) -> str:
+        tools: Optional[list[dict]] = None,
+    ) -> Any:
         """Multi-turn conversation with cascade fallback.
         messages must follow the Anthropic format:
             [{"role": "user"|"assistant", "content": str}]
+
+        When `tools` is provided, returns dict:
+            {"text": str, "tool_calls": [{"id": str, "name": str, "arguments": dict}], "stop_reason": str, "provider": "openai|anthropic"}
+        Quando `tools` e None, mantem retorno legado (str) para nao quebrar
+        callers existentes.
+
         Raises ModelRouterError only if ALL providers fail."""
         errors: list[str] = []
 
         # If caller asked for an Anthropic model explicitly, do NOT route through
         # OpenAI first (it would be a wasted 404 / wrong-provider call).
         if _is_anthropic_model(model):
-            result = self._try_anthropic_messages(model, messages, system, max_tokens, errors)
+            result = self._try_anthropic_messages(model, messages, system, max_tokens, errors, tools=tools)
             if result is not None:
                 return result
             # Anthropic explicit failure -> still try OpenAI as a last resort,
             # but only with a known OpenAI model (never a claude-* id).
-            result = self._try_openai_messages(_OPENAI_CHAIN[0], messages, system, max_tokens, errors)
+            result = self._try_openai_messages(_OPENAI_CHAIN[0], messages, system, max_tokens, errors, tools=tools)
             if result is not None:
                 return result
             raise ModelRouterError(self._final_error_message(errors))
 
         # Default: OpenAI cascade first, Anthropic fallback second.
-        result = self._try_openai_messages(model, messages, system, max_tokens, errors)
+        result = self._try_openai_messages(model, messages, system, max_tokens, errors, tools=tools)
         if result is not None:
             return result
 
         # Anthropic fallback - ignore the OpenAI model name entirely.
         result = self._try_anthropic_messages(
-            _anthropic_fallback_model(), messages, system, max_tokens, errors
+            _anthropic_fallback_model(), messages, system, max_tokens, errors, tools=tools
         )
         if result is not None:
             return result
@@ -194,8 +258,14 @@ class ModelRouter:
     # -- Provider implementations ----------------------------------------------
 
     def _try_openai_messages(
-        self, model: str, messages: list, system: str, max_tokens: int, errors: list[str]
-    ) -> Optional[str]:
+        self,
+        model: str,
+        messages: list,
+        system: str,
+        max_tokens: int,
+        errors: list[str],
+        tools: Optional[list[dict]] = None,
+    ) -> Optional[Any]:
         if not self._openai_key:
             errors.append("OpenAI: no OPENAI_API_KEY configured")
             logger.warning(
@@ -218,7 +288,7 @@ class ModelRouter:
             logger.warning("ModelRouter provider=openai error_type=ImportError msg=%s", exc)
             return None
 
-        client = OpenAI(api_key=self._openai_key)
+        client = OpenAI(api_key=self._openai_key, http_client=_llm_http_client())
         oai_msgs: list = []
         if system:
             oai_msgs.append({"role": "system", "content": system})
@@ -229,19 +299,54 @@ class ModelRouter:
         resolved = model if _is_openai_model(model) else _OPENAI_CHAIN[0]
         order = [resolved] + [m for m in _OPENAI_CHAIN if m != resolved]
 
+        oai_tools = _to_openai_tools(tools) if tools else None
+
         for attempt in order:
             try:
                 logger.info(
-                    "ModelRouter call provider=openai model=%s key=%s",
-                    attempt, _mask_key(self._openai_key),
+                    "ModelRouter call provider=openai model=%s key=%s tools=%s",
+                    attempt, _mask_key(self._openai_key), bool(oai_tools),
                 )
-                resp = client.chat.completions.create(
-                    model=attempt,
-                    max_tokens=max_tokens,
-                    messages=oai_msgs,
-                )
+                kwargs: dict = {
+                    "model": attempt,
+                    "max_tokens": max_tokens,
+                    "messages": oai_msgs,
+                }
+                if oai_tools:
+                    kwargs["tools"] = oai_tools
+                    kwargs["tool_choice"] = "auto"
+                resp = client.chat.completions.create(**kwargs)
                 logger.info("ModelRouter ok provider=openai model=%s", attempt)
-                return resp.choices[0].message.content.strip()
+                if tools is None:
+                    return (resp.choices[0].message.content or "").strip()
+                msg = resp.choices[0].message
+                tool_calls_raw = getattr(msg, "tool_calls", None) or []
+                tool_calls: list[dict] = []
+                for call in tool_calls_raw:
+                    fn = getattr(call, "function", None)
+                    name = getattr(fn, "name", None) if fn else None
+                    args_raw = getattr(fn, "arguments", None) if fn else None
+                    parsed_args: dict = {}
+                    if isinstance(args_raw, str) and args_raw.strip():
+                        try:
+                            import json as _json
+                            parsed_args = _json.loads(args_raw)
+                        except Exception:
+                            parsed_args = {"_raw": args_raw}
+                    elif isinstance(args_raw, dict):
+                        parsed_args = args_raw
+                    tool_calls.append({
+                        "id": getattr(call, "id", "") or "",
+                        "name": name or "",
+                        "arguments": parsed_args,
+                    })
+                return {
+                    "text": (msg.content or "").strip(),
+                    "tool_calls": tool_calls,
+                    "stop_reason": resp.choices[0].finish_reason or "stop",
+                    "provider": "openai",
+                    "model": attempt,
+                }
 
             except AuthenticationError as exc:
                 status = _error_status_code(exc) or 401
@@ -304,8 +409,14 @@ class ModelRouter:
         return None  # all OpenAI models exhausted
 
     def _try_anthropic_messages(
-        self, model: str, messages: list, system: str, max_tokens: int, errors: list[str]
-    ) -> Optional[str]:
+        self,
+        model: str,
+        messages: list,
+        system: str,
+        max_tokens: int,
+        errors: list[str],
+        tools: Optional[list[dict]] = None,
+    ) -> Optional[Any]:
         if not self._anthropic_key:
             errors.append("Anthropic: no ANTHROPIC_API_KEY configured")
             logger.warning(
@@ -327,16 +438,44 @@ class ModelRouter:
 
         try:
             logger.info(
-                "ModelRouter call provider=anthropic model=%s key=%s",
-                target, _mask_key(self._anthropic_key),
+                "ModelRouter call provider=anthropic model=%s key=%s tools=%s",
+                target, _mask_key(self._anthropic_key), bool(tools),
             )
-            client = anthropic.Anthropic(api_key=self._anthropic_key)
+            client = anthropic.Anthropic(api_key=self._anthropic_key, http_client=_llm_http_client())
             kwargs: dict = {"model": target, "max_tokens": max_tokens, "messages": messages}
             if system:
                 kwargs["system"] = system
+            if tools:
+                # Anthropic ja aceita o formato {name, description, input_schema}
+                # nativamente -- mesmo formato que SOFIA_TOOLS_SCHEMA exporta.
+                kwargs["tools"] = list(tools)
             resp = client.messages.create(**kwargs)
             logger.info("ModelRouter ok provider=anthropic model=%s", target)
-            return resp.content[0].text.strip()
+            if tools is None:
+                # Compatibilidade legado: devolve apenas a primeira mensagem de texto.
+                for block in resp.content or []:
+                    if getattr(block, "type", "") == "text":
+                        return (getattr(block, "text", "") or "").strip()
+                return ""
+            text_parts: list[str] = []
+            tool_calls: list[dict] = []
+            for block in resp.content or []:
+                btype = getattr(block, "type", "")
+                if btype == "text":
+                    text_parts.append(getattr(block, "text", "") or "")
+                elif btype == "tool_use":
+                    tool_calls.append({
+                        "id": getattr(block, "id", "") or "",
+                        "name": getattr(block, "name", "") or "",
+                        "arguments": getattr(block, "input", {}) or {},
+                    })
+            return {
+                "text": "".join(text_parts).strip(),
+                "tool_calls": tool_calls,
+                "stop_reason": getattr(resp, "stop_reason", "") or "end_turn",
+                "provider": "anthropic",
+                "model": target,
+            }
 
         except Exception as exc:
             status = _error_status_code(exc)
@@ -400,7 +539,7 @@ class ModelRouter:
 
             b64 = _b64.b64encode(file_bytes).decode("ascii")
             data_url = f"data:{mime or 'image/png'};base64,{b64}"
-            client = OpenAI(api_key=self._openai_key)
+            client = OpenAI(api_key=self._openai_key, http_client=_llm_http_client())
             resp = client.chat.completions.create(
                 model=model,
                 max_tokens=max_tokens,

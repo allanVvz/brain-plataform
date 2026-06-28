@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Cpu, ExternalLink, Plug, Wrench } from "lucide-react";
+import { Cpu, ExternalLink, Plug, Settings, Wrench } from "lucide-react";
 import { api } from "@/lib/api";
 import LegacyToolsOverview from "../validacao/tools/page";
+import { IntegrationConfigModal } from "@/components/tools/IntegrationConfigModal";
 
 type ToolsTab = "overview" | "integrations";
 
@@ -11,6 +12,7 @@ const STATUS_STYLE: Record<string, string> = {
   healthy: "text-green-400",
   degraded: "text-yellow-400",
   down: "text-red-400",
+  error: "text-red-400",
   unknown: "text-obs-faint",
 };
 
@@ -18,23 +20,26 @@ const STATUS_DOT: Record<string, string> = {
   healthy: "bg-green-400",
   degraded: "bg-yellow-400",
   down: "bg-red-400",
+  error: "bg-red-400",
   unknown: "bg-obs-faint",
 };
 
+// Ordem desejada: Meta, Supabase, n8n, OpenAI, Anthropic, Airtable (entradas)
+// e Assets/Gallery, FAQ Routing, Catalogo API, Figma MCP (saidas).
 const INPUTS = [
+  { key: "meta", label: "Meta", desc: "Catalogo WhatsApp Business", configurable: true },
   { key: "supabase", label: "Supabase", desc: "Banco de dados e autenticação" },
   { key: "n8n", label: "n8n", desc: "Automação de fluxos e execuções" },
-  { key: "airtable", label: "Airtable", desc: "CRM e dados estruturados" },
   { key: "openai", label: "OpenAI", desc: "Embeddings e modelos auxiliares" },
   { key: "anthropic", label: "Anthropic", desc: "Claude API e classificadores" },
+  { key: "airtable", label: "Airtable", desc: "CRM e dados estruturados" },
 ];
 
 const OUTPUTS = [
   { key: "assets", label: "Assets / Gallery", desc: "Assets aprovados disponiveis para MCP e API" },
   { key: "faq", label: "FAQ Routing", desc: "FAQ como contexto de roteamento de mensagens" },
-  { key: "baita_cardapio_api", label: "Baita Cardapio API", desc: "Branch de produto para cardapio e landing page" },
+  { key: "catalogo_api", label: "Catalogo API", desc: "Branch de produto para o catalogo/landing page multi-persona" },
   { key: "figma_mcp", label: "Figma MCP", desc: "Diagramas e designs" },
-  { key: "whatsapp", label: "WhatsApp", desc: "Canal de saída para leads" },
 ];
 
 const MCP_TOOLS = [
@@ -68,10 +73,12 @@ function ServiceCard({
   service,
   data,
   compact = false,
+  onConfigure,
 }: {
   service: { key: string; label: string; desc: string };
   data: any;
   compact?: boolean;
+  onConfigure?: () => void;
 }) {
   const status = statusOf(data);
   return (
@@ -90,6 +97,17 @@ function ServiceCard({
           <p className="text-xs text-obs-faint">{data.response_ms}ms</p>
         )}
       </div>
+      {!compact && onConfigure && (
+        <button
+          type="button"
+          onClick={onConfigure}
+          aria-label={`Configurar ${service.label}`}
+          title={`Configurar ${service.label}`}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/08 text-obs-subtle transition hover:border-white/20 hover:text-obs-text"
+        >
+          <Settings size={14} />
+        </button>
+      )}
     </div>
   );
 }
@@ -129,7 +147,13 @@ function IntegrationsSummary({ byService }: { byService: Record<string, any> }) 
   );
 }
 
-function FullIntegrations({ byService }: { byService: Record<string, any> }) {
+function FullIntegrations({
+  byService,
+  onConfigure,
+}: {
+  byService: Record<string, any>;
+  onConfigure: (service: { key: string; label: string; desc: string }) => void;
+}) {
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.75fr)]">
       <div className="space-y-5">
@@ -137,7 +161,7 @@ function FullIntegrations({ byService }: { byService: Record<string, any> }) {
           <p className="mb-3 text-[10px] uppercase tracking-widest text-obs-faint">Entradas - fontes de dados</p>
           <div className="grid gap-3">
             {INPUTS.map((service) => (
-              <ServiceCard key={service.key} service={service} data={byService[service.key]} />
+              <ServiceCard key={service.key} service={service} data={byService[service.key]} onConfigure={() => onConfigure(service)} />
             ))}
           </div>
         </section>
@@ -146,7 +170,7 @@ function FullIntegrations({ byService }: { byService: Record<string, any> }) {
           <p className="mb-3 text-[10px] uppercase tracking-widest text-obs-faint">Saídas - destinos e canais</p>
           <div className="grid gap-3">
             {OUTPUTS.map((service) => (
-              <ServiceCard key={service.key} service={service} data={byService[service.key]} />
+              <ServiceCard key={service.key} service={service} data={byService[service.key]} onConfigure={() => onConfigure(service)} />
             ))}
           </div>
         </section>
@@ -243,9 +267,14 @@ function McpPanel() {
 export default function ToolsPage() {
   const [activeTab, setActiveTab] = useState<ToolsTab>("overview");
   const [integrations, setIntegrations] = useState<any[]>([]);
+  const [configService, setConfigService] = useState<{ key: string; label: string; desc: string } | null>(null);
+
+  function refreshIntegrations() {
+    api.integrations().then(setIntegrations).catch(console.error);
+  }
 
   useEffect(() => {
-    api.integrations().then(setIntegrations).catch(console.error);
+    refreshIntegrations();
   }, []);
 
   const byService = useMemo(
@@ -293,7 +322,16 @@ export default function ToolsPage() {
           <LegacyToolsOverview />
         </>
       ) : (
-        <FullIntegrations byService={byService} />
+        <FullIntegrations byService={byService} onConfigure={setConfigService} />
+      )}
+
+      {configService && (
+        <IntegrationConfigModal
+          service={configService}
+          data={byService[configService.key]}
+          onClose={() => setConfigService(null)}
+          onSaved={refreshIntegrations}
+        />
       )}
     </div>
   );

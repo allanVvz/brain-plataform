@@ -1,19 +1,18 @@
-// Browser requests go through the Next.js rewrite proxy.
-import { getPublicApiUrl } from "@/utils/env";
-
-export const BASE = "/api-brain";
+// Browser requests go through the Next.js rewrite proxy (same-origin).
+// The relative prefix below is rewritten server-side to the real backend
+// (API_INTERNAL_BASE_URL) by next.config.js, so the browser never needs the
+// backend host and no secret is exposed. Override the prefix only if you mount
+// the proxy under a different path.
+export const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "/api-brain";
 export const API_URL = BASE;
-const API_ENV_ERROR = "Backend nao configurado. Defina NEXT_PUBLIC_API_URL no ambiente local/Docker.";
 const API_OFFLINE_ERROR =
-  "Backend indisponivel agora. Verifique NEXT_PUBLIC_API_URL, confirme o endpoint /health e tente novamente.";
+  "Backend indisponivel agora. Confirme o backend (API_INTERNAL_BASE_URL), o endpoint /health e tente novamente.";
 
 function assertApiConfigured() {
-  if (process.env.NODE_ENV === "production") {
-    try {
-      getPublicApiUrl();
-    } catch {
-      throw new Error(API_ENV_ERROR);
-    }
+  // With the same-origin proxy the browser only needs a relative prefix, which
+  // always has a default. Guard only against an explicitly blanked prefix.
+  if (!BASE) {
+    throw new Error("Proxy base ausente. Defina NEXT_PUBLIC_API_BASE_URL (padrao /api-brain).");
   }
 }
 
@@ -194,7 +193,18 @@ export const api = {
 
   // Personas
   personas: () => req<any[]>("/personas"),
+  createPersona: (body: {
+    slug: string;
+    name: string;
+    tone?: string | null;
+    products?: string[];
+    prompts?: Record<string, string>;
+    config?: Record<string, any>;
+    catalog_url?: string | null;
+  }) => req<any>("/personas", { method: "POST", body: JSON.stringify(body) }),
   persona: (slug: string) => req<any>(`/personas/${slug}`),
+  updatePersonaCatalogUrl: (slug: string, catalog_url: string | null) =>
+    req<any>(`/personas/${slug}`, { method: "PATCH", body: JSON.stringify({ catalog_url }) }),
   audiences: (personaId: string) => req<any[]>(`/audiences?persona_id=${encodeURIComponent(personaId)}`),
   createAudience: (body: { persona_id: string; name: string; slug?: string; description?: string; source_type?: string }) =>
     req<any>("/audiences", { method: "POST", body: JSON.stringify(body) }),
@@ -222,6 +232,9 @@ export const api = {
       spreadsheet_id?: string;
       api_key?: string;
       base_id?: string;
+      access_token?: string;
+      business_id?: string;
+      catalog_id?: string;
     },
   ) => req<any>(`/integrations/user/${encodeURIComponent(service)}`, { method: "PUT", body: JSON.stringify(body) }),
   validateUserIntegration: (
@@ -231,12 +244,38 @@ export const api = {
       spreadsheet_id?: string;
       api_key?: string;
       base_id?: string;
+      access_token?: string;
+      business_id?: string;
+      catalog_id?: string;
     },
   ) => req<any>(`/integrations/user/${encodeURIComponent(service)}/validate`, { method: "POST", body: JSON.stringify(body || {}) }),
   deleteUserIntegrationCredentials: (service: string) =>
     req<any>(`/integrations/user/${encodeURIComponent(service)}/credentials`, { method: "DELETE" }),
   n8nLogs: (limit = 100, status?: string) => req<any[]>(`/logs/n8n?limit=${limit}${status ? `&status=${status}` : ""}`),
   agentLogs: (leadId?: string, limit = 50) => req<any[]>(`/logs/agents?limit=${limit}${leadId ? `&lead_id=${leadId}` : ""}`),
+  auditLogs: (params: {
+    entity_type?: string;
+    event_type?: string;
+    persona_id?: string;
+    entity_id?: string;
+    since?: string;
+    search?: string;
+    limit?: number;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.entity_type) qs.set("entity_type", params.entity_type);
+    if (params.event_type) qs.set("event_type", params.event_type);
+    if (params.persona_id) qs.set("persona_id", params.persona_id);
+    if (params.entity_id) qs.set("entity_id", params.entity_id);
+    if (params.since) qs.set("since", params.since);
+    if (params.search) qs.set("search", params.search);
+    qs.set("limit", String(params.limit ?? 200));
+    return req<any[]>(`/logs/audit?${qs.toString()}`);
+  },
+
+  // Knowledge — Canonical taxonomy (single source of truth)
+  knowledgeTaxonomy: (canonicalOnly = false) =>
+    req<any>(`/knowledge/taxonomy${canonicalOnly ? "?canonical_only=true" : ""}`),
 
   // Knowledge — Vault Sync
   knowledgePreview: () => req<any>("/knowledge/sync/preview"),
@@ -294,6 +333,36 @@ export const api = {
   },
   createProduct: (body: any) =>
     req<any>("/knowledge/products", { method: "POST", body: JSON.stringify(body) }),
+  importProducts: (
+    provider: "meta" | "shopify" | "scraper",
+    opts: { persona_id?: string; persona_slug?: string; config?: Record<string, any>; items?: any[]; download_images?: boolean },
+  ) =>
+    req<any>("/knowledge/products/import", {
+      method: "POST",
+      body: JSON.stringify({
+        provider,
+        persona_id: opts.persona_id,
+        persona_slug: opts.persona_slug,
+        config: opts.config,
+        items: opts.items,
+        download_images: opts.download_images,
+      }),
+    }),
+  previewImport: (
+    provider: "meta" | "shopify" | "scraper",
+    opts: { persona_id?: string; persona_slug?: string; config?: Record<string, any> },
+  ) =>
+    req<any>("/knowledge/products/import/preview", {
+      method: "POST",
+      body: JSON.stringify({ provider, persona_id: opts.persona_id, persona_slug: opts.persona_slug, config: opts.config }),
+    }),
+  importProductsCsv: (file: File, opts: { persona_id?: string; persona_slug?: string }) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (opts.persona_id) form.append("persona_id", opts.persona_id);
+    if (opts.persona_slug) form.append("persona_slug", opts.persona_slug);
+    return reqForm<any>("/knowledge/products/import/csv", form);
+  },
   product: (slug: string, opts?: { persona_id?: string; persona_slug?: string }) => {
     const params = new URLSearchParams();
     if (opts?.persona_id) params.set("persona_id", opts.persona_id);
@@ -354,10 +423,96 @@ export const api = {
     return req<any[]>(`/assets${qs ? `?${qs}` : ""}`);
   },
   assetGet: (id: string) => req<any>(`/assets/${encodeURIComponent(id)}`),
+  assetUpdate: (id: string, body: { asset_type?: string | null; asset_function?: string | null }) =>
+    req<any>(`/assets/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
   assetConnect: (id: string, body: { parent_node_id: string; relation_type?: string }) =>
     req<any>(`/assets/${encodeURIComponent(id)}/connect`, { method: "POST", body: JSON.stringify(body) }),
   assetEnsureGallery: (id: string) =>
     req<any>(`/assets/${encodeURIComponent(id)}/ensure-gallery`, { method: "POST", body: "{}" }),
+  assetConnections: (id: string) =>
+    req<{
+      asset_id: string;
+      knowledge_node_id: string | null;
+      connections: Array<{
+        edge_id: string;
+        relation_type: string;
+        slot_key: string | null;
+        page_section: string | null;
+        label: string | null;
+        position: number | null;
+        role: string | null;
+        parent_node: {
+          id: string;
+          slug: string | null;
+          node_type: string | null;
+          title: string | null;
+          collection_slug: string | null;
+        };
+        slot_options: Array<{ slot_key: string; label: string }>;
+      }>;
+    }>(`/assets/${encodeURIComponent(id)}/connections`),
+  assetBindSlot: (
+    id: string,
+    body: {
+      slot: string;
+      persona_slug?: string;
+      target_slug?: string | null;
+      collection_slug?: string | null;
+      position?: number;
+      label?: string | null;
+    },
+  ) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/bind-slot`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  assetRebindPath: (
+    id: string,
+    body: {
+      slot: string;
+      persona_slug?: string;
+      target_slug?: string | null;
+      collection_slug?: string | null;
+      position?: number;
+      label?: string | null;
+      remove_existing?: boolean;
+    },
+  ) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/rebind-path`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  assetLandingTargets: (id: string) =>
+    req<{
+      asset_id: string;
+      targets: Array<{
+        slot_key: string;
+        slot_label: string;
+        parent_node_type: string;
+        target_slug: string | null;
+        collection_slug: string | null;
+        label: string;
+        node_id: string;
+      }>;
+    }>(`/assets/${encodeURIComponent(id)}/landing-targets`),
+  assetValidatePath: (id: string) =>
+    req<{ asset_id: string; ok: boolean; errors: string[]; connections: any[] }>(
+      `/assets/${encodeURIComponent(id)}/validate-path`,
+      { method: "POST", body: "{}" },
+    ),
+  assetApprove: (id: string) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/approve`, { method: "POST", body: "{}" }),
+  assetReject: (id: string) =>
+    req<any>(`/assets/${encodeURIComponent(id)}/reject`, { method: "POST", body: "{}" }),
+  assetUnbindSlot: (id: string, slotKey: string, targetSlug?: string | null) => {
+    const qs = targetSlug ? `?target_slug=${encodeURIComponent(targetSlug)}` : "";
+    return req<{ success: boolean; removed: number; edge_ids?: string[] }>(
+      `/assets/${encodeURIComponent(id)}/bind-slot/${encodeURIComponent(slotKey)}${qs}`,
+      { method: "DELETE" },
+    );
+  },
+  assetDelete: (id: string) =>
+    req<any>(`/assets/${encodeURIComponent(id)}`, { method: "DELETE" }),
   knowledgeCounts: (personaId?: string) =>
     req<any>(`/knowledge/queue/counts${personaId ? `?persona_id=${personaId}` : ""}`),
   updateQueueItem: (id: string, data: Record<string, any>) =>
@@ -453,49 +608,105 @@ export const api = {
     const qs = params.toString();
     return req<any>(`/knowledge/graph-data${qs ? `?${qs}` : ""}`);
   },
+  getGraphDocument: (personaSlug: string) => {
+    const params = new URLSearchParams();
+    params.set("persona_slug", personaSlug);
+    return req<any>(`/graph-documents/current?${params.toString()}`);
+  },
+  // Canonical write path: publish the edited graph_json. The backend validates
+  // the whole document and materializes the derived knowledge_nodes/edges (reindex).
+  publishGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json: any; source?: string; note?: string }) =>
+    req<any>("/graph-documents/publish", { method: "POST", body: JSON.stringify({ source: "graph_ui", ...body }) }),
+  applyGraphPatch: (body: { persona_slug: string; graph_json: any; source?: string; note?: string }) =>
+    req<any>("/graph-documents/apply-patch", { method: "POST", body: JSON.stringify({ source: "graph_ui_patch", ...body }) }),
   createGraphEdge: (body: { source_node_id: string; target_node_id: string; relation_type?: string; persona_id?: string; weight?: number; metadata?: any }) =>
     req<any>("/knowledge/graph-edges", { method: "POST", body: JSON.stringify(body) }),
   deleteGraphEdge: (edgeId: string) =>
     req<any>(`/knowledge/graph-edges/${encodeURIComponent(edgeId)}`, { method: "DELETE" }),
   deleteGraphNode: (nodeId: string) =>
     req<any>(`/knowledge/graph-nodes/${encodeURIComponent(nodeId)}`, { method: "DELETE" }),
-  graphDocumentCurrent: (personaSlug: string, brandSlug?: string) => {
-    const params = new URLSearchParams({ persona_slug: personaSlug });
-    if (brandSlug) params.set("brand_slug", brandSlug);
-    return req<any>(`/graph-documents/current?${params.toString()}`);
-  },
-  getGraphDocument: (personaSlug: string, brandSlug?: string) => {
-    const params = new URLSearchParams({ persona_slug: personaSlug });
-    if (brandSlug) params.set("brand_slug", brandSlug);
-    return req<any>(`/graph-documents/current?${params.toString()}`);
-  },
-  graphDocumentVersions: (personaSlug: string, brandSlug?: string) => {
-    const params = new URLSearchParams({ persona_slug: personaSlug });
-    if (brandSlug) params.set("brand_slug", brandSlug);
-    return req<any>(`/graph-documents/versions?${params.toString()}`);
-  },
-  graphDocumentPublish: (body: { persona_slug: string; brand_slug?: string; graph_json: any; source?: string; note?: string }) =>
-    req<any>("/graph-documents/publish", { method: "POST", body: JSON.stringify(body) }),
-  publishGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json: any; source?: string; note?: string }) =>
-    req<any>("/graph-documents/publish", { method: "POST", body: JSON.stringify({ source: "graph_ui", ...body }) }),
-  graphDocumentApplyPatch: (body: { persona_slug: string; graph_json: any; source?: string; note?: string }) =>
-    req<any>("/graph-documents/apply-patch", { method: "POST", body: JSON.stringify(body) }),
-  graphDocumentImportJson: (body: { persona_slug: string; graph_json: any; source?: string; session_id?: string; note?: string }) =>
-    req<any>("/graph-documents/import-json", { method: "POST", body: JSON.stringify(body) }),
-  graphDocumentReindex: (body: { persona_slug: string; note?: string }) =>
-    req<any>("/graph-documents/reindex", { method: "POST", body: JSON.stringify(body) }),
-  graphDocumentRollback: (body: { persona_slug: string; version: number; note?: string }) =>
-    req<any>("/graph-documents/rollback", { method: "POST", body: JSON.stringify(body) }),
+  updateGraphNode: (
+    nodeId: string,
+    body: { title?: string; markdown?: string; summary?: string; tags?: string[]; status?: string },
+  ) =>
+    req<any>(`/knowledge/graph-nodes/${encodeURIComponent(nodeId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   sofiaGraphCommand: (body: {
     message?: string;
     action?: "command" | "confirm_pending" | "undo_pending";
     persona_slug?: string;
+    tenant?: string;
+    session_id?: string;
+    plan_json?: Record<string, any> | null;
+    pending_context?: Record<string, any>;
     active_persona_slug?: string;
     selected_node_id?: string | null;
     selected_node_ids?: string[];
-    session_id?: string;
-    plan_json?: any;
-  }) => req<any>("/sofia/graph-command", { method: "POST", body: JSON.stringify(body) }),
+  }) => {
+    const action = body.action || "command";
+    const explicit = String(body.message || "").trim();
+    const command = explicit || (action === "command" ? "" : action);
+    return req<any>("/sofia/graph-command", {
+      method: "POST",
+      body: JSON.stringify({
+        persona_slug: body.persona_slug,
+        command,
+        context: {
+          client_action: action === "command" ? "natural_language" : "ui_action",
+          session_id: body.session_id || null,
+          active_persona_slug: body.active_persona_slug || body.persona_slug || null,
+          selected_node_id: body.selected_node_id || null,
+          selected_node_ids: body.selected_node_ids || [],
+          plan_json: body.plan_json || null,
+          pending_context: body.pending_context || {},
+        },
+      }),
+    });
+  },
+
+  // Sofia FAQ tool (adaptar_faqs_universais_ao_grafo)
+  sofiaFaqGenerate: (body: {
+    persona_slug?: string;
+    session_id?: string | null;
+    selected_node_id?: string | null;
+    count?: number;
+  }) => {
+    const qty = body.count && body.count > 0 ? ` ${body.count}` : "";
+    return req<any>("/sofia/graph-command", {
+      method: "POST",
+      body: JSON.stringify({
+        persona_slug: body.persona_slug,
+        command: `gere${qty} perguntas de FAQ para esse node`,
+        context: {
+          client_action: "natural_language",
+          session_id: body.session_id || null,
+          active_persona_slug: body.persona_slug || null,
+          selected_node_id: body.selected_node_id || null,
+          selected_node_ids: body.selected_node_id ? [body.selected_node_id] : [],
+        },
+      }),
+    });
+  },
+  sofiaFaqAccept: (body: {
+    persona_slug?: string;
+    parent_node_id: string;
+    parent_node_type?: string;
+    faq_generation_count?: number;
+    source_context?: Record<string, any>;
+    generated_from_node_id?: string;
+    generated_from_node_slug?: string;
+    suggestions: Array<{ question: string; answer?: string }>;
+  }) =>
+    req<any>("/sofia/faq/accept", { method: "POST", body: JSON.stringify(body) }),
+  // "Gerar" on a FAQ node appends accepted suggestions to that same FAQ's body.
+  sofiaFaqAppend: (body: {
+    persona_slug?: string;
+    faq_node_id: string;
+    suggestions: Array<{ question: string; answer?: string }>;
+  }) =>
+    req<any>("/sofia/faq/append", { method: "POST", body: JSON.stringify(body) }),
 
   // Knowledge — Chat sidebar context (semantic graph + KB fallback)
   knowledgeChatContext: (leadRef: number, q?: string, personaId?: string) => {

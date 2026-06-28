@@ -49,18 +49,18 @@ CATALOG: list[dict[str, Any]] = [
     {
         "service": "openai",
         "label": "OpenAI",
-        "description": "Conta usada pela Sofia para criacao, alteracao, cards, grafo e estrutura.",
-        "scope": "user",
-        "requires_credentials": True,
-        "user_managed": True,
+        "description": "Modelos auxiliares e pipelines de embeddings.",
+        "scope": "system",
+        "requires_credentials": False,
+        "user_managed": False,
     },
     {
         "service": "anthropic",
         "label": "Anthropic",
-        "description": "Conta usada como fallback Claude individual por usuario.",
-        "scope": "user",
-        "requires_credentials": True,
-        "user_managed": True,
+        "description": "Modelos Claude e classificadores operacionais.",
+        "scope": "system",
+        "requires_credentials": False,
+        "user_managed": False,
     },
     {
         "service": "whatsapp",
@@ -78,11 +78,19 @@ CATALOG: list[dict[str, Any]] = [
         "requires_credentials": False,
         "user_managed": False,
     },
+    {
+        "service": "meta",
+        "label": "Meta",
+        "description": "Catalogo WhatsApp Business (Graph API).",
+        "scope": "user",
+        "requires_credentials": True,
+        "user_managed": True,
+    },
 ]
 
 CATALOG_BY_SERVICE = {item["service"]: item for item in CATALOG}
 _GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-_PLACEHOLDER_MARKERS = {"", "your-airtable-key", "your-openai-key", "your-anthropic-key", "your-api-key", "changeme", "placeholder"}
+_PLACEHOLDER_MARKERS = {"", "your-airtable-key", "your-api-key", "changeme", "placeholder"}
 
 
 class IntegrationValidationError(ValueError):
@@ -138,18 +146,15 @@ def _normalize_airtable_payload(payload: dict[str, Any]) -> tuple[str, dict[str,
     return api_key, {"base_id": base_id}
 
 
-def _normalize_openai_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    api_key = (payload.get("api_key") or "").strip()
-    if not api_key:
-        raise IntegrationValidationError("api_key is required.")
-    return api_key, {}
-
-
-def _normalize_anthropic_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    api_key = (payload.get("api_key") or "").strip()
-    if not api_key:
-        raise IntegrationValidationError("api_key is required.")
-    return api_key, {}
+def _normalize_meta_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    access_token = (payload.get("access_token") or "").strip()
+    business_id = (payload.get("business_id") or "").strip()
+    catalog_id = (payload.get("catalog_id") or "").strip()
+    if not access_token:
+        raise IntegrationValidationError("access_token is required.")
+    if not catalog_id:
+        raise IntegrationValidationError("catalog_id is required.")
+    return access_token, {"business_id": business_id or None, "catalog_id": catalog_id}
 
 
 def normalize_credentials(service: str, payload: Optional[dict[str, Any]]) -> tuple[Optional[str], dict[str, Any]]:
@@ -158,10 +163,8 @@ def normalize_credentials(service: str, payload: Optional[dict[str, Any]]) -> tu
         return _normalize_google_payload(body)
     if service == "airtable":
         return _normalize_airtable_payload(body)
-    if service == "openai":
-        return _normalize_openai_payload(body)
-    if service == "anthropic":
-        return _normalize_anthropic_payload(body)
+    if service == "meta":
+        return _normalize_meta_payload(body)
     return None, {}
 
 
@@ -205,22 +208,55 @@ def validate_airtable(api_key: str, base_id: str) -> tuple[str, Optional[str], O
         raise IntegrationValidationError(f"Airtable validation failed: {exc}") from exc
 
 
-def validate_openai(api_key: str) -> tuple[str, Optional[str], Optional[int]]:
-    key = (api_key or "").strip()
-    if key.lower() in _PLACEHOLDER_MARKERS:
-        raise IntegrationValidationError("OpenAI credential is a placeholder.")
-    if not key.startswith("sk-") or len(key) < 20:
-        raise IntegrationValidationError("OpenAI credential does not look like a valid API key.")
-    return "connected", None, None
+def validate_meta(
+    access_token: str,
+    catalog_id: str,
+    *,
+    fetch: Optional[Any] = None,
+) -> tuple[str, Optional[str], Optional[int]]:
+    """Validate Meta catalog credentials by listing one product.
+
+    `fetch(access_token, catalog_id)` is injectable so tests run offline.
+    Returns ("healthy", None, latency) on success.
+    """
+    if (access_token or "").strip().lower() in _PLACEHOLDER_MARKERS:
+        raise IntegrationValidationError("Meta access token is a placeholder.")
+    if not catalog_id:
+        raise IntegrationValidationError("Meta catalog_id is required.")
+    started = time.monotonic()
+    try:
+        if fetch is not None:
+            fetch(access_token, catalog_id)
+        else:
+            with _http_client(timeout=8.0) as client:
+                response = client.get(
+                    f"https://graph.facebook.com/v19.0/{catalog_id}/products",
+                    params={"access_token": access_token, "limit": 1},
+                )
+                if response.status_code in {401, 403}:
+                    raise IntegrationValidationError("Meta rejected the credentials.")
+                if response.status_code != 200:
+                    raise IntegrationValidationError(f"Meta validation failed with HTTP {response.status_code}.")
+        latency_ms = int((time.monotonic() - started) * 1000)
+        return "healthy", None, latency_ms
+    except IntegrationValidationError:
+        raise
+    except Exception as exc:
+        raise IntegrationValidationError(f"Meta validation failed: {exc}") from exc
 
 
-def validate_anthropic(api_key: str) -> tuple[str, Optional[str], Optional[int]]:
-    key = (api_key or "").strip()
-    if key.lower() in _PLACEHOLDER_MARKERS:
-        raise IntegrationValidationError("Anthropic credential is a placeholder.")
-    if not key.startswith("sk-ant-") or len(key) < 20:
-        raise IntegrationValidationError("Anthropic credential does not look like a valid API key.")
-    return "connected", None, None
+def get_meta_credentials(user_id: str) -> dict[str, Any]:
+    """Return decrypted Meta credentials for the import service. Never logged."""
+    row = supabase_client.get_user_integration_connection(user_id, "meta") or {}
+    access_token = secret_store.decrypt_secret(row.get("secret_ciphertext"))
+    if not access_token:
+        raise IntegrationValidationError("Meta integration is not configured. Configure it in Tools first.")
+    config = row.get("config_json") or {}
+    return {
+        "access_token": access_token,
+        "business_id": config.get("business_id"),
+        "catalog_id": config.get("catalog_id"),
+    }
 
 
 def validate_credentials(service: str, *, secret_value: str, config_json: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -229,10 +265,8 @@ def validate_credentials(service: str, *, secret_value: str, config_json: Option
         status, error, latency = validate_google_sheets(secret_value, config.get("spreadsheet_id"))
     elif service == "airtable":
         status, error, latency = validate_airtable(secret_value, str(config.get("base_id") or ""))
-    elif service == "openai":
-        status, error, latency = validate_openai(secret_value)
-    elif service == "anthropic":
-        status, error, latency = validate_anthropic(secret_value)
+    elif service == "meta":
+        status, error, latency = validate_meta(secret_value, str(config.get("catalog_id") or ""))
     else:
         raise IntegrationValidationError(f"Unsupported user-managed service: {service}")
     return {
@@ -266,6 +300,7 @@ def _merge_user_integration(service: str, row: Optional[dict[str, Any]]) -> dict
         "status": status,
         "requires_credentials": True,
         "configured": configured,
+        "config_json": connection.get("config_json") or {},
         "last_validated_at": connection.get("last_validated_at"),
         "last_error": connection.get("last_error"),
     }
@@ -423,15 +458,6 @@ def delete_user_credentials(user_id: str, service: str) -> dict[str, Any]:
         }
     )
     return get_user_integration_state(user_id, service)
-
-
-def get_enabled_user_secret(user_id: str, service: str) -> Optional[str]:
-    if not is_user_managed(service):
-        return None
-    row = supabase_client.get_user_integration_connection(user_id, service)
-    if not row or not row.get("enabled") or not row.get("secret_ciphertext"):
-        return None
-    return secret_store.decrypt_secret(row.get("secret_ciphertext"))
 
 
 def system_service_has_runtime_credentials(service: str) -> bool:

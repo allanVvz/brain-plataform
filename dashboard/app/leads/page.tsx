@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { AudiencePill } from "@/components/leads/AudiencePill";
 import { CreateAudiencePrompt } from "@/components/leads/CreateAudiencePrompt";
 import { MoveShareModal, MoveShareMode } from "@/components/leads/MoveShareModal";
+import { ALL_AUDIENCE_KEY, buildLeadsFilters } from "@/lib/leads";
 
 type Audience = {
   id: string;
@@ -49,7 +50,7 @@ const STAGE_COLOR: Record<string, string> = {
   perdido: "text-rose-400",
 };
 
-const ALL_KEY = "__all__";
+const ALL_KEY = ALL_AUDIENCE_KEY;
 
 function canStartConversation(lead: Lead): boolean {
   return Boolean(lead?.id) && Boolean(lead?.lead_id || lead?.telefone);
@@ -245,26 +246,25 @@ function LeadsPageInner() {
       {personaSelected && (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <AudiencePill
-              data={{ slug: ALL_KEY, name: "Todos", count: audienceCounts[ALL_KEY], isSystem: true }}
-              active={audienceParam === ALL_KEY}
-              onActivate={() => setAudienceParam(ALL_KEY)}
-            />
-            {audiences.map((audience) => (
-              <AudiencePill
-                key={audience.id}
-                data={{
-                  id: audience.id,
-                  slug: audience.slug,
-                  name: audience.name,
-                  count: audienceCounts[audience.slug] || 0,
-                  isSystem: audience.is_system,
-                }}
-                active={audienceParam === audience.slug}
-                onActivate={() => setAudienceParam(audience.slug)}
-                onRename={(next) => renameAudience(audience, next)}
-              />
-            ))}
+            {buildLeadsFilters(audiences).map((f) => {
+              const backing = f.isAll ? null : audiences.find((a) => a.slug === f.slug);
+              const canRename = Boolean(backing && !(backing as any).from_graph_node);
+              return (
+                <AudiencePill
+                  key={f.key}
+                  data={{
+                    id: backing?.id,
+                    slug: f.slug,
+                    name: f.name,
+                    count: audienceCounts[f.slug] || 0,
+                    isSystem: f.isSystem,
+                  }}
+                  active={audienceParam === f.slug}
+                  onActivate={() => setAudienceParam(f.slug)}
+                  onRename={canRename ? (next) => renameAudience(backing!, next) : undefined}
+                />
+              );
+            })}
             <button
               type="button"
               onClick={() => setCreatingAudience(true)}

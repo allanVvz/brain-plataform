@@ -181,7 +181,9 @@ def test_graph_edge_api_blocks_faq_outgoing_except_embedded() -> None:
 
 def test_frontend_layout_treats_answers_question_as_inbound_to_faq() -> None:
     layout = (ROOT / "dashboard" / "components" / "graph" / "knowledgeGraphLayout.ts").read_text(encoding="utf-8")
-    _assert('faq: ["copy", "offer", "product"]' in layout, "frontend expected FAQ parents are copy, offer, product")
+    faq_parent_line = next((line for line in layout.splitlines() if line.strip().startswith("faq: [")), "")
+    for parent_type in ['"copy"', '"offer"', '"product"']:
+        _assert(parent_type in faq_parent_line, f"frontend expected FAQ parent includes {parent_type}")
     child_to_parent_block = layout.split("if (edge.source === childId && edge.target === parentId)", 1)[1].split("if (edge.source === parentId && edge.target === childId)", 1)[0]
     parent_to_child_block = layout.split("if (edge.source === parentId && edge.target === childId)", 1)[1].split("return 0;", 1)[0]
     _assert('"answers_question"' not in child_to_parent_block, "answers_question is not accepted as FAQ -> parent")
@@ -196,11 +198,26 @@ def test_migration_repairs_inverted_faq_edges() -> None:
     _assert("'active', false" in migration and "'visual_hidden', true" in migration, "migration soft-deletes invalid edge")
 
 
+def test_graph_payload_filters_inactive_edges() -> None:
+    graph_route = (ROOT / "api" / "routes" / "graph.py").read_text(encoding="utf-8")
+    _assert('get("active") is not False' in graph_route, "graph-data filters soft-deleted edges before tree rendering")
+
+
+def test_reparented_primary_edges_stop_being_visual_primary() -> None:
+    client = (ROOT / "api" / "services" / "supabase_client.py").read_text(encoding="utf-8")
+    block = client.split('def deactivate_primary_paths_for_target', 1)[1].split('def delete_knowledge_edge', 1)[0]
+    _assert('"active": False' in block, "reparent soft-deletes previous primary edge")
+    _assert('"primary_tree": False' in block, "reparented edge is no longer a primary tree edge")
+    _assert('"visual_hidden": True' in block, "reparented edge is hidden from graph visuals")
+
+
 def main() -> None:
     test_bootstrap_faq_references_point_into_faq()
     test_graph_edge_api_blocks_faq_outgoing_except_embedded()
     test_frontend_layout_treats_answers_question_as_inbound_to_faq()
     test_migration_repairs_inverted_faq_edges()
+    test_graph_payload_filters_inactive_edges()
+    test_reparented_primary_edges_stop_being_visual_primary()
     print("PASS integration_faq_edge_direction_contract")
 
 

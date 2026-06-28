@@ -421,7 +421,7 @@ function TextUploadForm({
           required
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="Ex: Briefing Baita Conveniencia 2025"
+          placeholder="Ex: Briefing da persona ativa"
           className="w-full bg-brain-bg border border-brain-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-brain-accent"
         />
       </div>

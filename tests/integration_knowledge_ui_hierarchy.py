@@ -206,6 +206,7 @@ def validate_static_header_and_messages() -> None:
     _assert("ragChunkIds.length === 0" in node_drawer, "node drawer blocks false success without RAG chunks")
     _assert('includeTags = searchParams.get("tags") === "1"' in graph_page, "graph tags hidden by default")
     _assert('includeMentions = searchParams.get("mentions") === "1"' in graph_page, "graph mentions hidden by default")
+    _assert('const mode = (searchParams.get("mode") as ViewMode) || "semantic_tree";' in graph_page, "graph defaults to semantic tree mode")
     _assert('value: "semantic_tree"' in graph_page, "graph exposes semantic tree mode")
     _assert('setEdges(styledEdges)' in graph_view, "graph updates edge state when payload changes")
 

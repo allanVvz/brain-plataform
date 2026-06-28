@@ -19,15 +19,18 @@ interface Props {
 }
 
 const ASSET_FUNCTIONS = [
-  { value: "",                  label: "(automatica)" },
-  { value: "visual_reference",  label: "Referencia visual" },
-  { value: "product_reference", label: "Referencia de produto" },
-  { value: "campaign_reference",label: "Referencia de campanha" },
-  { value: "text_reference",    label: "Referencia de texto" },
+  { value: "",                   label: "Definir depois" },
+  { value: "brand_logo",         label: "Logo da marca" },
+  { value: "brand_cover",        label: "Capa da marca" },
+  { value: "brand_secondary",    label: "Asset secundario da marca" },
+  { value: "campaign_hero",      label: "Hero da landing" },
+  { value: "campaign_footer",    label: "Campanha de rodape" },
+  { value: "category_cover",     label: "Capa de grupo de produto" },
+  { value: "product_image",      label: "Imagem de produto" },
 ];
 
 const SELECTABLE_PARENT_TYPES = new Set([
-  "brand", "briefing", "campaign", "product", "audience", "copy", "faq", "offer", "rule", "tone",
+  "brand", "briefing", "campaign", "product_collection", "category", "product", "audience", "copy", "faq", "offer", "rule", "tone",
 ]);
 
 export default function AssetUploadDialog({ open, onClose, onUploaded, personas, initialPersonaId }: Props) {
@@ -166,14 +169,14 @@ export default function AssetUploadDialog({ open, onClose, onUploaded, personas,
               ref={fileInputRef}
               type="file"
               className="hidden"
-              accept="image/*,video/*,application/pdf,text/plain,text/markdown,.md,.txt"
+              accept="image/*,.heic,.heif,video/*,application/pdf,text/plain,text/markdown,.md,.txt"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); }}
             />
             {!file && (
               <>
                 <Upload size={20} className="mx-auto text-obs-subtle mb-2" />
                 <p className="text-sm text-obs-text">Solte um arquivo aqui ou clique para selecionar</p>
-                <p className="mt-1 text-[11px] text-obs-faint">PNG, JPG, WEBP, MP4, MOV, PDF, TXT, MD</p>
+                <p className="mt-1 text-[11px] text-obs-faint">PNG, JPG, WEBP, HEIC, HEIF, MP4, MOV, PDF, TXT, MD</p>
               </>
             )}
             {file && (

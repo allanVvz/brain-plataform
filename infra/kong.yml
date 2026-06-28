@@ -1,0 +1,27 @@
+_format_version: "2.1"
+_transform: true
+
+# Minimal API gateway for the self-hosted Supabase data plane.
+#
+# supabase-py builds every request as `${SUPABASE_URL}/rest/v1/...` and
+# `${SUPABASE_URL}/storage/v1/...`, so Kong's only job here is to strip those
+# prefixes and forward to PostgREST / Storage. Request authorization is enforced
+# downstream by each service via the shared HS256 JWT (PGRST_JWT_SECRET / the
+# storage AUTH_JWT_SECRET), so no key-auth plugin is needed at the gateway.
+
+services:
+  - name: rest-v1
+    url: http://rest:3000/
+    routes:
+      - name: rest-v1-route
+        strip_path: true
+        paths:
+          - /rest/v1/
+
+  - name: storage-v1
+    url: http://storage:5000/
+    routes:
+      - name: storage-v1-route
+        strip_path: true
+        paths:
+          - /storage/v1/

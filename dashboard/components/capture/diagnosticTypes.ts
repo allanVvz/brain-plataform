@@ -27,6 +27,14 @@ export interface SofiaQuestionOption {
   label: string;
   action: string;
   payload?: Record<string, unknown>;
+  // Mensagem que o front envia para a Sofia quando o operador clica nessa
+  // opcao. Quando ausente, o front deriva um prompt a partir de action+payload
+  // como fallback ate o backend popular essa chave em todas as opcoes.
+  prompt_to_sofia?: string;
+  // Efeito colateral local que o front executa antes/depois de enviar a
+  // mensagem. Hoje suportamos abrir o file picker do paperclip; futuros
+  // hooks podem abrir drawers de selecao de asset/produto, etc.
+  ui_hook?: "open_file_picker" | "open_asset_drawer";
 }
 
 export interface SofiaQuestion {

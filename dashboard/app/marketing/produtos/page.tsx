@@ -1,11 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Package, Plus } from "lucide-react";
+import { Columns3, LayoutGrid, List, Loader2, Package, Plus } from "lucide-react";
 import { api } from "@/lib/api";
 import { ProductCard } from "@/components/products/ProductCard";
 import { ProductMdModal } from "@/components/products/ProductMdModal";
 import { LinkAssetDrawer } from "@/components/products/LinkAssetDrawer";
+import { ImportMenu } from "@/components/products/ImportMenu";
+import { ImportModal, type ImportProvider } from "@/components/products/ImportModal";
+import { ProductListView } from "@/components/products/ProductListView";
+import { ProductKanbanView } from "@/components/products/ProductKanbanView";
+
+type ProductView = "cards" | "list" | "kanban";
 
 export default function ProdutosPage() {
   const [personaId, setPersonaId] = useState("");
@@ -21,6 +27,8 @@ export default function ProdutosPage() {
   const [linkProduct, setLinkProduct] = useState<any | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importProvider, setImportProvider] = useState<ImportProvider | null>(null);
+  const [view, setView] = useState<ProductView>("cards");
 
   function personaOpts() {
     return { persona_id: personaId || undefined, persona_slug: personaSlug || undefined };
@@ -124,9 +132,12 @@ export default function ProdutosPage() {
           </div>
           <p className="mt-0.5 text-xs text-obs-subtle">Produtos, categorias, assets e cards MD espelhados no Knowledge Graph.</p>
         </div>
-        <button type="button" onClick={newProduct} disabled={creating} className="lg-btn lg-btn-primary rounded-lg">
-          {creating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Novo Produto
-        </button>
+        <div className="flex items-center gap-2">
+          <ImportMenu onSelect={(provider) => setImportProvider(provider)} />
+          <button type="button" onClick={newProduct} disabled={creating} className="lg-btn lg-btn-primary rounded-lg">
+            {creating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Novo Produto
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
@@ -158,6 +169,29 @@ export default function ProdutosPage() {
           <option value="pending_validation">pending_validation</option>
           <option value="validated">validated</option>
         </select>
+        <div className="ml-auto flex gap-1 rounded-lg border border-white/06 bg-white/[0.03] p-1" role="tablist" aria-label="Visualizacao">
+          {([
+            { id: "cards", label: "Cards", icon: LayoutGrid },
+            { id: "list", label: "Lista", icon: List },
+            { id: "kanban", label: "Kanban", icon: Columns3 },
+          ] as const).map((opt) => {
+            const Icon = opt.icon;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                role="tab"
+                aria-selected={view === opt.id}
+                onClick={() => setView(opt.id)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                  view === opt.id ? "bg-white/10 text-obs-text" : "text-obs-subtle hover:text-obs-text"
+                }`}
+              >
+                <Icon size={13} /> {opt.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {error && <div className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{error}</div>}
@@ -167,18 +201,33 @@ export default function ProdutosPage() {
         <div className="glass rounded-xl px-6 py-14 text-center text-sm text-obs-subtle">Nenhum produto encontrado.</div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {products.map((product) => (
-          <ProductCard
-            key={product.id}
-            product={product}
-            onOpenMd={() => setSelectedMd(product)}
-            onApprove={() => approve(product)}
-            onLinkAsset={() => setLinkProduct(product)}
-            onSofia={() => sofia(product)}
-          />
-        ))}
-      </div>
+      {!loading && products.length > 0 && view === "cards" && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {products.map((product) => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              onOpenMd={() => setSelectedMd(product)}
+              onApprove={() => approve(product)}
+              onLinkAsset={() => setLinkProduct(product)}
+              onSofia={() => sofia(product)}
+            />
+          ))}
+        </div>
+      )}
+
+      {!loading && products.length > 0 && view === "list" && (
+        <ProductListView
+          products={products}
+          onOpenMd={(p) => setSelectedMd(p)}
+          onApprove={(p) => approve(p)}
+          onLinkAsset={(p) => setLinkProduct(p)}
+        />
+      )}
+
+      {!loading && products.length > 0 && view === "kanban" && (
+        <ProductKanbanView products={products} onOpenMd={(p) => setSelectedMd(p)} />
+      )}
 
       {selectedMd && (
         <ProductMdModal
@@ -193,6 +242,14 @@ export default function ProdutosPage() {
         product={linkProduct}
         onClose={() => setLinkProduct(null)}
         onLinked={load}
+      />
+      <ImportModal
+        open={Boolean(importProvider)}
+        initialProvider={importProvider || "meta"}
+        personaId={personaId}
+        personaSlug={personaSlug}
+        onClose={() => setImportProvider(null)}
+        onImported={load}
       />
     </div>
   );

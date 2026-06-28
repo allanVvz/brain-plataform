@@ -1,0 +1,15 @@
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+tmp
+n8n-workflows
+*.log
+logs-dev.txt
+logs-dev-restart.err.txt
+logs-dev-restart.out.txt
+codex-8001.err.log
+codex-8001.out.log
+qa-8001.err.log
+qa-8001.out.log
+requirements-dev.txt

@@ -145,7 +145,7 @@ export default function GraphPageClient() {
   // backend reindex of the derived knowledge_nodes/knowledge_edges.
   const [docGraph, setDocGraph] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
-  const useGraphJsonV2 = process.env.NEXT_PUBLIC_GRAPH_JSON_V2 !== "0";
+  const useGraphJsonV2 = process.env.NEXT_PUBLIC_GRAPH_JSON_V2 === "1";
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [selectedNodes, setSelectedNodes] = useState<any[]>([]);
   const [addPanelOpen, setAddPanelOpen] = useState(false);

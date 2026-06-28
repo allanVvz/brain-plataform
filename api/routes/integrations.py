@@ -16,6 +16,10 @@ class IntegrationCredentialsBody(BaseModel):
     spreadsheet_id: Optional[str] = None
     api_key: Optional[str] = None
     base_id: Optional[str] = None
+    # Meta (WhatsApp Business catalog)
+    access_token: Optional[str] = None
+    business_id: Optional[str] = None
+    catalog_id: Optional[str] = None
 
     model_config = ConfigDict(extra="ignore")
 
@@ -25,6 +29,9 @@ class IntegrationValidateBody(BaseModel):
     spreadsheet_id: Optional[str] = None
     api_key: Optional[str] = None
     base_id: Optional[str] = None
+    access_token: Optional[str] = None
+    business_id: Optional[str] = None
+    catalog_id: Optional[str] = None
 
     model_config = ConfigDict(extra="ignore")
 

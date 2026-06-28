@@ -1,0 +1,71 @@
+{
+  "version": 2,
+  "persona_slug": "allanvvz",
+  "published_at": "2026-05-29T06:19:27.488618+00:00",
+  "checksum": "c2deadd92873e474",
+  "graph_json": {
+    "schema_version": "1.0",
+    "graph_id": "allanvvz-main",
+    "tenant": "qa",
+    "persona_slug": "allanvvz",
+    "brand_slug": null,
+    "status": "published",
+    "nodes": [
+      {
+        "id": "node:persona:allanvvz",
+        "node_type": "persona",
+        "slug": "allanvvz",
+        "label": "AllanVvz",
+        "parent_id": null,
+        "data": {}
+      },
+      {
+        "id": "node:brand:vz-lupas",
+        "node_type": "brand",
+        "slug": "vz-lupas",
+        "label": "VZ Lupas",
+        "parent_id": "node:persona:allanvvz",
+        "data": {
+          "seeded_by": "bra-75-mvp"
+        }
+      },
+      {
+        "id": "node:brand:allan-rodrigues",
+        "node_type": "brand",
+        "slug": "allan-rodrigues",
+        "label": "Allan Rodrigues",
+        "parent_id": "node:persona:allanvvz",
+        "data": {
+          "added_by": "sofia",
+          "via": "bra-75-mvp"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge:001",
+        "source": "node:persona:allanvvz",
+        "target": "node:brand:vz-lupas",
+        "relation": "persona_has_brand",
+        "primary_tree": true,
+        "metadata": {}
+      },
+      {
+        "id": "edge:002",
+        "source": "node:persona:allanvvz",
+        "target": "node:brand:allan-rodrigues",
+        "relation": "persona_has_brand",
+        "primary_tree": true,
+        "metadata": {}
+      }
+    ],
+    "layout": {
+      "engine": "top-down-canonical",
+      "positions": {}
+    },
+    "validation": {
+      "is_valid": true,
+      "errors": []
+    }
+  }
+}

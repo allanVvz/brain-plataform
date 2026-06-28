@@ -105,12 +105,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const savedExists = saved && list.some((p: any) => p.slug === saved);
         setPersona(savedExists ? saved : "");
       })
-      .catch(() => {
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error || "");
+        if (message.includes("401")) {
+          router.replace("/login");
+          return;
+        }
         setUser(null);
         setPersonas([]);
         setPersona(saved || "");
       });
-  }, [pathname]);
+  }, [pathname, router]);
 
   useEffect(() => {
     function handleLanguageChange(event: Event) {

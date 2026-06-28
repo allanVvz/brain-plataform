@@ -1,0 +1,132 @@
+{
+  "version": 2,
+  "persona_slug": "test-rules",
+  "published_at": "2026-05-30T04:52:01.334430+00:00",
+  "checksum": "6d963c50eab17a13",
+  "graph_json": {
+    "schema_version": "2.0",
+    "graph_id": "probe-business-rules",
+    "tenant": "qa",
+    "persona_slug": "test-rules",
+    "brand_slug": "brand-test",
+    "status": "draft",
+    "nodes": [
+      {
+        "id": "persona-test",
+        "node_type": "persona",
+        "slug": "test-rules",
+        "label": "Test Rules",
+        "parent_id": null,
+        "data": {}
+      },
+      {
+        "id": "brand-test",
+        "node_type": "brand",
+        "slug": "brand-test",
+        "label": "Brand Test",
+        "parent_id": "persona-test",
+        "data": {}
+      },
+      {
+        "id": "briefing-brand-test",
+        "node_type": "briefing",
+        "slug": "briefing-brand-test",
+        "label": "Briefing Brand",
+        "parent_id": "brand-test",
+        "data": {}
+      },
+      {
+        "id": "campaign-test",
+        "node_type": "campaign",
+        "slug": "campaign-test",
+        "label": "Campaign Test",
+        "parent_id": "briefing-brand-test",
+        "data": {}
+      },
+      {
+        "id": "audience-test",
+        "node_type": "audience",
+        "slug": "audience-test",
+        "label": "Audience Test",
+        "parent_id": "campaign-test",
+        "data": {}
+      },
+      {
+        "id": "pg-test",
+        "node_type": "product_group",
+        "slug": "pg-test",
+        "label": "Product Group Test",
+        "parent_id": "audience-test",
+        "data": {}
+      },
+      {
+        "id": "faq-test",
+        "node_type": "faq",
+        "slug": "faq-test",
+        "label": "FAQ Test",
+        "parent_id": "pg-test",
+        "data": {
+          "validation_status": "pending_validation"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-persona-brand",
+        "source": "persona-test",
+        "target": "brand-test",
+        "relation": "persona_has_brand",
+        "primary_tree": true,
+        "metadata": {}
+      },
+      {
+        "id": "edge-brand-briefing",
+        "source": "brand-test",
+        "target": "briefing-brand-test",
+        "relation": "brand_has_briefing",
+        "primary_tree": true,
+        "metadata": {}
+      },
+      {
+        "id": "edge-briefing-campaign",
+        "source": "briefing-brand-test",
+        "target": "campaign-test",
+        "relation": "briefing_has_campaign",
+        "primary_tree": true,
+        "metadata": {}
+      },
+      {
+        "id": "edge-campaign-audience",
+        "source": "campaign-test",
+        "target": "audience-test",
+        "relation": "campaign_has_audience",
+        "primary_tree": true,
+        "metadata": {}
+      },
+      {
+        "id": "edge-audience-pg",
+        "source": "audience-test",
+        "target": "pg-test",
+        "relation": "audience_has_product_group",
+        "primary_tree": true,
+        "metadata": {}
+      },
+      {
+        "id": "edge-pg-faq",
+        "source": "pg-test",
+        "target": "faq-test",
+        "relation": "product_group_has_faq",
+        "primary_tree": true,
+        "metadata": {}
+      }
+    ],
+    "layout": {
+      "engine": "top-down-canonical",
+      "positions": {}
+    },
+    "validation": {
+      "is_valid": true,
+      "errors": []
+    }
+  }
+}

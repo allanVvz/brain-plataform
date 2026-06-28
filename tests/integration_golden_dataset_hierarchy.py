@@ -279,7 +279,7 @@ def test_mentions_cannot_publish() -> None:
         supabase_client.get_knowledge_node = original
 
 
-def test_incomplete_faq_snapshot_needs_review_without_rag() -> None:
+def test_approved_incomplete_faq_snapshot_publishes_with_warnings() -> None:
     from services import approved_knowledge_snapshots, knowledge_graph, supabase_client
 
     store = FakeHierarchyStore()
@@ -312,10 +312,10 @@ def test_incomplete_faq_snapshot_needs_review_without_rag() -> None:
             setattr(supabase_client, name, fn)
         knowledge_graph._ensure_persona_root = original_root
 
-    _assert(result["success"] is False, "incomplete FAQ publication returns success=false")
-    _assert(result["status"] == "needs_review", "incomplete FAQ snapshot is marked needs_review")
-    _assert(not result["rag_chunk_ids"] and not store.chunks, "incomplete FAQ does not create active RAG chunks")
-    _assert("faq_answer_not_useful" in result["review_warnings"], "incomplete FAQ returns review warning")
+    _assert(result["success"] is True, "approved incomplete FAQ publication returns success=true")
+    _assert(result["status"] == "active", "approved incomplete FAQ snapshot is active")
+    _assert(result["rag_chunk_ids"] and store.chunks, "approved incomplete FAQ creates RAG chunks")
+    _assert("faq_answer_not_useful" in (store.snapshots[0].get("metadata") or {}).get("review_warnings", []), "incomplete FAQ preserves review warning")
 
 
 def test_classification_content_type_contract() -> None:
@@ -516,7 +516,7 @@ def main() -> int:
     print("\n-- Mentions --")
     test_mentions_cannot_publish()
     print("\n-- Incomplete FAQ gate --")
-    test_incomplete_faq_snapshot_needs_review_without_rag()
+    test_approved_incomplete_faq_snapshot_publishes_with_warnings()
     print("\n-- Classification metadata --")
     test_classification_content_type_contract()
     print("\n-- Flexible variations --")

@@ -1,0 +1,1061 @@
+{
+  "version": 3,
+  "persona_slug": "allanvvz",
+  "published_at": "2026-05-29T17:27:58.656800+00:00",
+  "checksum": "c69ca8dfea11c522",
+  "graph_json": {
+    "schema_version": "2.0",
+    "graph_id": "allanvvz-vz-lupas-v2-runtime",
+    "tenant": "qa",
+    "persona_slug": "allanvvz",
+    "brand_slug": "vz-lupas",
+    "status": "published",
+    "nodes": [
+      {
+        "id": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "node_type": "persona",
+        "slug": "allanvvz",
+        "label": "AllanVvz",
+        "parent_id": null,
+        "data": {}
+      },
+      {
+        "id": "gn:2b91b0a1-6903-4f59-a358-e6b8f270e062",
+        "node_type": "briefing",
+        "slug": "briefing-vz-lupas-real-crawl-2026-05-28",
+        "label": "Briefing VZ Lupas Real Crawl 2026-05-28",
+        "parent_id": "gn:ffe17f20-95ff-40cc-9bfb-a5b9c8ea99ce",
+        "data": {
+          "source": "vzlupas.com.br",
+          "crawl_date": "2026-05-28"
+        }
+      },
+      {
+        "id": "gn:a5e1e7e8-bab4-477d-9e14-8f03e5d23a70",
+        "node_type": "campaign",
+        "slug": "campaign-vz-lupas-real-crawl-2026-05-28",
+        "label": "Campaign VZ Lupas Real Crawl 2026-05-28",
+        "parent_id": "gn:2b91b0a1-6903-4f59-a358-e6b8f270e062",
+        "data": {
+          "source": "vzlupas.com.br",
+          "crawl_date": "2026-05-28"
+        }
+      },
+      {
+        "id": "gn:39fbd0af-035a-4a62-9021-6988641fdb37",
+        "node_type": "brand",
+        "slug": "allan-rodrigues",
+        "label": "Allan Rodrigues",
+        "parent_id": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "data": {
+          "content_type": "brand",
+          "rag_eligible": false,
+          "positioning_summary": "Marca pessoal Allan Rodrigues"
+        }
+      },
+      {
+        "id": "gn:ffe17f20-95ff-40cc-9bfb-a5b9c8ea99ce",
+        "node_type": "brand",
+        "slug": "vz-lupas",
+        "label": "VZ Lupas",
+        "parent_id": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "data": {
+          "content_type": "brand",
+          "rag_eligible": false,
+          "positioning_summary": "Marca de oculos VZ Lupas sob AllanVvz"
+        }
+      },
+      {
+        "id": "gn:2019328a-0492-48be-b161-35cf943f096d",
+        "node_type": "audience",
+        "slug": "audiencia-padrao-vz-lupas",
+        "label": "Audiencia Padrao VZ Lupas",
+        "parent_id": "gn:a5e1e7e8-bab4-477d-9e14-8f03e5d23a70",
+        "data": {
+          "is_default": true,
+          "content_type": "audience",
+          "rag_eligible": true,
+          "summary_markdown": "Audiencia padrao ativa para VZ Lupas enquanto briefing/campaign nao estiverem definidos."
+        }
+      },
+      {
+        "id": "gn:2b2c7fb1-5ee0-47a4-b9f5-f95f8f65df38",
+        "node_type": "audience",
+        "slug": "audiencia-padrao-allan-rodrigues",
+        "label": "Audiencia Padrao Allan Rodrigues",
+        "parent_id": "gn:a5e1e7e8-bab4-477d-9e14-8f03e5d23a70",
+        "data": {
+          "is_default": true,
+          "summary_markdown": "Audiencia padrao inicial para a brand Allan Rodrigues. Recomendacao Sofia: criar segmentacao individualizada quando houver dados de leads.",
+          "recommendation_pending": true
+        }
+      },
+      {
+        "id": "gn:5f0e0c40-95a4-46eb-aa86-1fe89ded95b8",
+        "node_type": "faq",
+        "slug": "faq-oculos-plantaris-marrom-brown-tungsten",
+        "label": "FAQ Óculos Plantaris Marrom - Brown Tungsten",
+        "parent_id": "gn:3da16402-7cb5-491c-a04f-774d9164c573",
+        "data": {
+          "question": "FAQ gerada de produto real crawleado",
+          "source_url": "https://www.vzlupas.com/products/oculos-plantaris-marrom-brown-tungsten"
+        }
+      },
+      {
+        "id": "gn:3da16402-7cb5-491c-a04f-774d9164c573",
+        "node_type": "product",
+        "slug": "prod-oculos-plantaris-marrom-brown-tungsten",
+        "label": "Óculos Plantaris Marrom - Brown Tungsten",
+        "parent_id": "gn:46e70765-9f03-49e0-be36-c84f7e92b396",
+        "data": {
+          "image_url": "https://cdn.shopify.com/s/files/1/0846/0281/4759/files/185190CD-01D0-45EF-B6FF-05E53156DEE9.jpg?v=1770207719",
+          "source_url": "https://www.vzlupas.com/products/oculos-plantaris-marrom-brown-tungsten",
+          "collection_url": "https://www.vzlupas.com/collections/disponiveis",
+          "collection_slug": "disponiveis"
+        }
+      },
+      {
+        "id": "gn:9e93e140-8b2c-4f90-8110-80da1b18495b",
+        "node_type": "product",
+        "slug": "prod-radar-preta",
+        "label": "Óculos Radar Preto - Radar Ev Path Matte Black Black Iridium",
+        "parent_id": "gn:dec8902c-be93-49c6-bef9-7531ed670098",
+        "data": {
+          "image_url": "https://cdn.shopify.com/s/files/1/0846/0281/4759/files/IMG_6136-Edit.jpg?v=1734198669",
+          "source_url": "https://www.vzlupas.com/products/radar-preta",
+          "collection_url": "https://www.vzlupas.com/collections/softs",
+          "collection_slug": "softs"
+        }
+      },
+      {
+        "id": "gn:e9018e4f-cb4d-4acb-b614-ecd812614e23",
+        "node_type": "faq",
+        "slug": "faq-radar-preta",
+        "label": "FAQ Óculos Radar Preto - Radar Ev Path Matte Black Black Iridium",
+        "parent_id": "gn:9e93e140-8b2c-4f90-8110-80da1b18495b",
+        "data": {
+          "question": "FAQ gerada de produto real crawleado",
+          "source_url": "https://www.vzlupas.com/products/radar-preta"
+        }
+      },
+      {
+        "id": "gn:46e70765-9f03-49e0-be36-c84f7e92b396",
+        "node_type": "product_group",
+        "slug": "pg-plantaris",
+        "label": "Plantaris",
+        "parent_id": "gn:2019328a-0492-48be-b161-35cf943f096d",
+        "data": {
+          "source_url": "https://www.vzlupas.com/collections/plantaris"
+        }
+      },
+      {
+        "id": "gn:8a84686f-66d3-490e-8f39-4dc8dc2969e8",
+        "node_type": "product",
+        "slug": "prod-plantaris-matte-sand-prizm-tungsten",
+        "label": "Plantaris\tmatte sand prizm tungsten",
+        "parent_id": "gn:46e70765-9f03-49e0-be36-c84f7e92b396",
+        "data": {
+          "price": "234.87",
+          "image_url": "https://cdn.shopify.com/s/files/1/0846/0281/4759/files/Prancheta2vz-pp_3c0aa7a4-3593-4713-96de-646afefba58b.jpg?v=1769439316",
+          "source_url": "https://www.vzlupas.com/products/plantaris-matte-sand-prizm-tungsten",
+          "collection_url": "https://www.vzlupas.com/collections/plantaris",
+          "collection_slug": "plantaris"
+        }
+      },
+      {
+        "id": "gn:057acd09-408c-4a0a-b2b6-0b777635ee90",
+        "node_type": "faq",
+        "slug": "faq-plantaris-matte-sand-prizm-tungsten",
+        "label": "FAQ Plantaris\tmatte sand prizm tungsten",
+        "parent_id": "gn:8a84686f-66d3-490e-8f39-4dc8dc2969e8",
+        "data": {
+          "question": "FAQ gerada de produto real crawleado",
+          "source_url": "https://www.vzlupas.com/products/plantaris-matte-sand-prizm-tungsten"
+        }
+      },
+      {
+        "id": "gn:10d1526e-628a-4d82-8b6d-bd21b1add37b",
+        "node_type": "product",
+        "slug": "prod-plantaris-silver-mettalic-liquid-metal",
+        "label": "Plantaris Silver Mettalic Liquid Metal",
+        "parent_id": "gn:46e70765-9f03-49e0-be36-c84f7e92b396",
+        "data": {
+          "price": "198.87",
+          "image_url": "https://cdn.shopify.com/s/files/1/0846/0281/4759/files/Prancheta2vz-pp.jpg?v=1765338062",
+          "source_url": "https://www.vzlupas.com/products/plantaris-silver-mettalic-liquid-metal",
+          "collection_url": "https://www.vzlupas.com/collections/plantaris",
+          "collection_slug": "plantaris"
+        }
+      },
+      {
+        "id": "gn:6c330568-8d29-4628-9d5a-857230112c0a",
+        "node_type": "faq",
+        "slug": "faq-plantaris-silver-mettalic-liquid-metal",
+        "label": "FAQ Plantaris Silver Mettalic Liquid Metal",
+        "parent_id": "gn:10d1526e-628a-4d82-8b6d-bd21b1add37b",
+        "data": {
+          "question": "FAQ gerada de produto real crawleado",
+          "source_url": "https://www.vzlupas.com/products/plantaris-silver-mettalic-liquid-metal"
+        }
+      },
+      {
+        "id": "gn:dec8902c-be93-49c6-bef9-7531ed670098",
+        "node_type": "product_group",
+        "slug": "pg-radar",
+        "label": "Esportivas (Radar)",
+        "parent_id": "gn:2019328a-0492-48be-b161-35cf943f096d",
+        "data": {
+          "source_url": "https://www.vzlupas.com/collections/radar"
+        }
+      },
+      {
+        "id": "gn:9a5e3100-b342-44e1-808a-062633473b6b",
+        "node_type": "product",
+        "slug": "prod-radar-ev-preta-tanzanite",
+        "label": "Óculos Radar Preta Tanzanite - Ev Path Matte Black Tanzanite",
+        "parent_id": "gn:dec8902c-be93-49c6-bef9-7531ed670098",
+        "data": {
+          "price": "227.80",
+          "image_url": "https://cdn.shopify.com/s/files/1/0846/0281/4759/files/RadarEVTanz.jpg?v=1731545883",
+          "source_url": "https://www.vzlupas.com/products/radar-ev-preta-tanzanite",
+          "collection_url": "https://www.vzlupas.com/collections/radar",
+          "collection_slug": "radar"
+        }
+      },
+      {
+        "id": "gn:6e4e39d0-7872-4a48-ab7b-a63ebf1ad184",
+        "node_type": "faq",
+        "slug": "faq-radar-ev-preta-tanzanite",
+        "label": "FAQ Óculos Radar Preta Tanzanite - Ev Path Matte Black Tanzanite",
+        "parent_id": "gn:9a5e3100-b342-44e1-808a-062633473b6b",
+        "data": {
+          "question": "FAQ gerada de produto real crawleado",
+          "source_url": "https://www.vzlupas.com/products/radar-ev-preta-tanzanite"
+        }
+      },
+      {
+        "id": "gn:da86c971-47bf-49bc-acf4-34155378abe4",
+        "node_type": "product",
+        "slug": "prod-radar-brown-prizm",
+        "label": "Óculos Radar Marrom - Ev Path Matte Brown Prizm Tungsten",
+        "parent_id": "gn:dec8902c-be93-49c6-bef9-7531ed670098",
+        "data": {
+          "price": "189.30",
+          "image_url": "https://cdn.shopify.com/s/files/1/0846/0281/4759/files/Radar_Marrom.heic?v=1770864876",
+          "source_url": "https://www.vzlupas.com/products/radar-brown-prizm",
+          "collection_url": "https://www.vzlupas.com/collections/radar",
+          "collection_slug": "radar"
+        }
+      },
+      {
+        "id": "gn:3f373bdc-87ca-4204-b9b0-92a342956ac9",
+        "node_type": "faq",
+        "slug": "faq-radar-brown-prizm",
+        "label": "FAQ Óculos Radar Marrom - Ev Path Matte Brown Prizm Tungsten",
+        "parent_id": "gn:da86c971-47bf-49bc-acf4-34155378abe4",
+        "data": {
+          "question": "FAQ gerada de produto real crawleado",
+          "source_url": "https://www.vzlupas.com/products/radar-brown-prizm"
+        }
+      },
+      {
+        "id": "gn:a0d2db80-a022-44cb-a186-1d796b63373b",
+        "node_type": "product_group",
+        "slug": "pg-juliet",
+        "label": "X-Metal (Juliet)",
+        "parent_id": "gn:2019328a-0492-48be-b161-35cf943f096d",
+        "data": {
+          "source_url": "https://www.vzlupas.com/collections/juliet"
+        }
+      },
+      {
+        "id": "gn:aff13b9a-bffa-4d98-8eac-44f7530844e7",
+        "node_type": "product",
+        "slug": "prod-juliet-preta",
+        "label": "Óculos Juliet Preta - Juliet Carbon Black Iridium",
+        "parent_id": "gn:a0d2db80-a022-44cb-a186-1d796b63373b",
+        "data": {
+          "price": "237.00",
+          "image_url": "https://cdn.shopify.com/s/files/1/0846/0281/4759/files/IMG_4601.jpg?v=1766395721",
+          "source_url": "https://www.vzlupas.com/products/juliet-preta",
+          "collection_url": "https://www.vzlupas.com/collections/juliet",
+          "collection_slug": "juliet"
+        }
+      },
+      {
+        "id": "gn:b2d61181-897e-43b6-81ad-e4a8f7918bbd",
+        "node_type": "faq",
+        "slug": "faq-juliet-preta",
+        "label": "FAQ Óculos Juliet Preta - Juliet Carbon Black Iridium",
+        "parent_id": "gn:aff13b9a-bffa-4d98-8eac-44f7530844e7",
+        "data": {
+          "question": "FAQ gerada de produto real crawleado",
+          "source_url": "https://www.vzlupas.com/products/juliet-preta"
+        }
+      },
+      {
+        "id": "gn:8dc190ee-527c-43b5-b650-1875b42a28f5",
+        "node_type": "product",
+        "slug": "prod-juliet-plasma-liquid-metal",
+        "label": "Óculos Juliet Prata - Juliet Plasma Liquid Metal",
+        "parent_id": "gn:a0d2db80-a022-44cb-a186-1d796b63373b",
+        "data": {
+          "price": "238.78",
+          "image_url": "https://cdn.shopify.com/s/files/1/0846/0281/4759/files/JulietPlasma2.png?v=1701177483",
+          "source_url": "https://www.vzlupas.com/products/juliet-plasma-liquid-metal",
+          "collection_url": "https://www.vzlupas.com/collections/juliet",
+          "collection_slug": "juliet"
+        }
+      },
+      {
+        "id": "gn:778b668e-fb78-49bb-82de-55b9ea076c19",
+        "node_type": "faq",
+        "slug": "faq-juliet-plasma-liquid-metal",
+        "label": "FAQ Óculos Juliet Prata - Juliet Plasma Liquid Metal",
+        "parent_id": "gn:8dc190ee-527c-43b5-b650-1875b42a28f5",
+        "data": {
+          "question": "FAQ gerada de produto real crawleado",
+          "source_url": "https://www.vzlupas.com/products/juliet-plasma-liquid-metal"
+        }
+      },
+      {
+        "id": "gn:d44ea6c7-c3b1-45f7-82e5-d818bc60c214",
+        "node_type": "product",
+        "slug": "prod-juliet-plasma-violet",
+        "label": "Óculos Juliet Roxa - Plasma Violet (Polarizado)",
+        "parent_id": "gn:a0d2db80-a022-44cb-a186-1d796b63373b",
+        "data": {
+          "price": "197.30",
+          "image_url": "https://cdn.shopify.com/s/files/1/0846/0281/4759/files/IMG_5571.heic?v=1770873403",
+          "source_url": "https://www.vzlupas.com/products/juliet-plasma-violet",
+          "collection_url": "https://www.vzlupas.com/collections/juliet",
+          "collection_slug": "juliet"
+        }
+      },
+      {
+        "id": "gn:88ea19ac-7d13-411d-b9a5-fe6909f85164",
+        "node_type": "faq",
+        "slug": "faq-juliet-plasma-violet",
+        "label": "FAQ Óculos Juliet Roxa - Plasma Violet (Polarizado)",
+        "parent_id": "gn:d44ea6c7-c3b1-45f7-82e5-d818bc60c214",
+        "data": {
+          "question": "FAQ gerada de produto real crawleado",
+          "source_url": "https://www.vzlupas.com/products/juliet-plasma-violet"
+        }
+      },
+      {
+        "id": "gallery:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "node_type": "gallery",
+        "slug": "gallery-default",
+        "label": "Gallery",
+        "parent_id": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "data": {}
+      },
+      {
+        "id": "embedded:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "node_type": "embedded",
+        "slug": "embedded-default",
+        "label": "Embedded",
+        "parent_id": "gn:5f0e0c40-95a4-46eb-aa86-1fe89ded95b8",
+        "data": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "ge:8007f304-7b09-4ac8-8877-4e4ca8e1bd63",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:3da16402-7cb5-491c-a04f-774d9164c573",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:88ed5665-3f42-4b34-b116-2bd475edb9bf",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:5f0e0c40-95a4-46eb-aa86-1fe89ded95b8",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:2d4d8853-3701-411c-9382-bc5e5dd69b7f",
+        "source": "gn:3da16402-7cb5-491c-a04f-774d9164c573",
+        "target": "gn:5f0e0c40-95a4-46eb-aa86-1fe89ded95b8",
+        "relation": "product_has_faq",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_real_crawl_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:e2fb06d6-21d0-474e-8d83-f2e7ff675d27",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:39fbd0af-035a-4a62-9021-6988641fdb37",
+        "relation": "manual",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "gallery": false,
+          "direction": "source_to_target",
+          "created_from": "graph_ui",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:e129d0c3-b25b-4775-aec1-f12e1000faa6",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:2019328a-0492-48be-b161-35cf943f096d",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:b8c69974-9704-46cb-8fbe-d66da9f48ac0",
+        "source": "gn:ffe17f20-95ff-40cc-9bfb-a5b9c8ea99ce",
+        "target": "gn:2019328a-0492-48be-b161-35cf943f096d",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra_36_audience_backfill",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:e7e055d9-aebc-49b9-801f-4ee24c70ce5f",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:2b2c7fb1-5ee0-47a4-b9f5-f95f8f65df38",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:c3fe565a-034b-450a-b162-1269baaea1a1",
+        "source": "gn:39fbd0af-035a-4a62-9021-6988641fdb37",
+        "target": "gn:2b2c7fb1-5ee0-47a4-b9f5-f95f8f65df38",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "BRA-35_audiencia_padrao_completion",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:8c2e380e-fe76-4025-b040-9c725c2f15d8",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:a5e1e7e8-bab4-477d-9e14-8f03e5d23a70",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:d1edc302-8c04-4c77-9563-8560454aaa2a",
+        "source": "gn:a5e1e7e8-bab4-477d-9e14-8f03e5d23a70",
+        "target": "gn:2019328a-0492-48be-b161-35cf943f096d",
+        "relation": "campaign_has_audience",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_real_crawl_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:0683829a-b783-48bd-8b2f-cae1068c92b1",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:9e93e140-8b2c-4f90-8110-80da1b18495b",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:3513c4d5-0f36-4f60-9036-a42757ef4f25",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:e9018e4f-cb4d-4acb-b614-ecd812614e23",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:557139e4-fead-4146-ab83-6c49522b7c84",
+        "source": "gn:9e93e140-8b2c-4f90-8110-80da1b18495b",
+        "target": "gn:e9018e4f-cb4d-4acb-b614-ecd812614e23",
+        "relation": "product_has_faq",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_real_crawl_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:be572de4-a21e-4630-b913-ffb37b7297ab",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:46e70765-9f03-49e0-be36-c84f7e92b396",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:993c4615-2284-44f0-aaa6-14082e2db4b7",
+        "source": "gn:2019328a-0492-48be-b161-35cf943f096d",
+        "target": "gn:46e70765-9f03-49e0-be36-c84f7e92b396",
+        "relation": "audience_has_product_group",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:9de6a84a-01ba-4290-abd5-d9572cd308a3",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:8a84686f-66d3-490e-8f39-4dc8dc2969e8",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:738486dd-1471-41d7-95d8-e37d26635657",
+        "source": "gn:46e70765-9f03-49e0-be36-c84f7e92b396",
+        "target": "gn:8a84686f-66d3-490e-8f39-4dc8dc2969e8",
+        "relation": "product_group_has_product",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:49317039-7e46-445d-9b1c-1bae0a866e19",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:057acd09-408c-4a0a-b2b6-0b777635ee90",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:cbe824e8-eda9-4d38-9dde-e30ceb6eb7b0",
+        "source": "gn:8a84686f-66d3-490e-8f39-4dc8dc2969e8",
+        "target": "gn:057acd09-408c-4a0a-b2b6-0b777635ee90",
+        "relation": "product_has_faq",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:f4718ad1-f087-4733-832a-b93cd4f9d90e",
+        "source": "gn:46e70765-9f03-49e0-be36-c84f7e92b396",
+        "target": "gn:3da16402-7cb5-491c-a04f-774d9164c573",
+        "relation": "product_group_has_product",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:568fc38c-d2bb-4896-b6cc-72fe0e968cf0",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:10d1526e-628a-4d82-8b6d-bd21b1add37b",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:9de110fd-1b1c-4dfa-9d5b-919d6c9134bb",
+        "source": "gn:46e70765-9f03-49e0-be36-c84f7e92b396",
+        "target": "gn:10d1526e-628a-4d82-8b6d-bd21b1add37b",
+        "relation": "product_group_has_product",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:075a2cf8-b000-496a-8b0f-5694af77e952",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:6c330568-8d29-4628-9d5a-857230112c0a",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:3aa0e9be-defe-4c8f-8ce0-f3c8ccbc6104",
+        "source": "gn:10d1526e-628a-4d82-8b6d-bd21b1add37b",
+        "target": "gn:6c330568-8d29-4628-9d5a-857230112c0a",
+        "relation": "product_has_faq",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:afcd29e1-9f9f-463e-8944-7d1b9a01d79e",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:dec8902c-be93-49c6-bef9-7531ed670098",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:92efab4b-4226-429e-b2c5-fd4c30064cd7",
+        "source": "gn:2019328a-0492-48be-b161-35cf943f096d",
+        "target": "gn:dec8902c-be93-49c6-bef9-7531ed670098",
+        "relation": "audience_has_product_group",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:f882ca76-5d7c-41bc-a56d-cf648c5b77df",
+        "source": "gn:dec8902c-be93-49c6-bef9-7531ed670098",
+        "target": "gn:9e93e140-8b2c-4f90-8110-80da1b18495b",
+        "relation": "product_group_has_product",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:f852ce97-765a-461d-8c8f-b23ec012ff7d",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:9a5e3100-b342-44e1-808a-062633473b6b",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:c98e3459-40c8-4a71-a8b9-f10e2fec480a",
+        "source": "gn:dec8902c-be93-49c6-bef9-7531ed670098",
+        "target": "gn:9a5e3100-b342-44e1-808a-062633473b6b",
+        "relation": "product_group_has_product",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:0ed1c14c-e0c8-487c-9dd9-95607446ddf4",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:6e4e39d0-7872-4a48-ab7b-a63ebf1ad184",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:95112a19-9414-431b-859c-e6cd10ef05be",
+        "source": "gn:9a5e3100-b342-44e1-808a-062633473b6b",
+        "target": "gn:6e4e39d0-7872-4a48-ab7b-a63ebf1ad184",
+        "relation": "product_has_faq",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:8395b596-e3d3-427d-82b4-5d03ddaf06a3",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:da86c971-47bf-49bc-acf4-34155378abe4",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:0e42a18c-f3d0-4160-b973-c5b5481c9b41",
+        "source": "gn:dec8902c-be93-49c6-bef9-7531ed670098",
+        "target": "gn:da86c971-47bf-49bc-acf4-34155378abe4",
+        "relation": "product_group_has_product",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:6e105ce4-309c-4be6-98cf-5f91df86119b",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:3f373bdc-87ca-4204-b9b0-92a342956ac9",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:8b06dcdc-92f2-45cb-a849-64657053fc18",
+        "source": "gn:da86c971-47bf-49bc-acf4-34155378abe4",
+        "target": "gn:3f373bdc-87ca-4204-b9b0-92a342956ac9",
+        "relation": "product_has_faq",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:e8460b74-15b4-4443-9963-ab29b489703a",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:a0d2db80-a022-44cb-a186-1d796b63373b",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:3c6b188a-a041-4949-b16e-e04003b6c779",
+        "source": "gn:2019328a-0492-48be-b161-35cf943f096d",
+        "target": "gn:a0d2db80-a022-44cb-a186-1d796b63373b",
+        "relation": "audience_has_product_group",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:6a5f201e-0144-437a-908a-c2c6983bc3ca",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:aff13b9a-bffa-4d98-8eac-44f7530844e7",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:b51e8149-4218-4f70-a3e5-807030d4e0db",
+        "source": "gn:a0d2db80-a022-44cb-a186-1d796b63373b",
+        "target": "gn:aff13b9a-bffa-4d98-8eac-44f7530844e7",
+        "relation": "product_group_has_product",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:5a4be677-f84f-4d32-9961-14f4f4a75eb1",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:b2d61181-897e-43b6-81ad-e4a8f7918bbd",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:48fc35a5-e0d9-4e2e-9c01-656259c16cbe",
+        "source": "gn:aff13b9a-bffa-4d98-8eac-44f7530844e7",
+        "target": "gn:b2d61181-897e-43b6-81ad-e4a8f7918bbd",
+        "relation": "product_has_faq",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:c2f1c9e2-0565-4c53-aace-77e2bf5d134e",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:8dc190ee-527c-43b5-b650-1875b42a28f5",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:de38b568-f1d2-456c-aacb-567a34a28865",
+        "source": "gn:a0d2db80-a022-44cb-a186-1d796b63373b",
+        "target": "gn:8dc190ee-527c-43b5-b650-1875b42a28f5",
+        "relation": "product_group_has_product",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:6c0cf1ba-45d2-4289-8307-6d3a9d3f2a23",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:778b668e-fb78-49bb-82de-55b9ea076c19",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:a0c3c4e3-0c7a-48c7-8482-e938d541601e",
+        "source": "gn:8dc190ee-527c-43b5-b650-1875b42a28f5",
+        "target": "gn:778b668e-fb78-49bb-82de-55b9ea076c19",
+        "relation": "product_has_faq",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:8f9e3a9d-6288-47ee-94a4-22ecdb6e9b8c",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:d44ea6c7-c3b1-45f7-82e5-d818bc60c214",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:c0e170d3-3bbe-4dd5-ba0d-9f3f641d5ebe",
+        "source": "gn:a0d2db80-a022-44cb-a186-1d796b63373b",
+        "target": "gn:d44ea6c7-c3b1-45f7-82e5-d818bc60c214",
+        "relation": "product_group_has_product",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:92a9a7d4-953b-4e31-8372-f5a79d1fbac5",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:88ea19ac-7d13-411d-b9a5-fe6909f85164",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "db_primary_tree_guard",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:8cab49b2-9a1a-4ed2-b53f-7f6ab1f6dc51",
+        "source": "gn:d44ea6c7-c3b1-45f7-82e5-d818bc60c214",
+        "target": "gn:88ea19ac-7d13-411d-b9a5-fe6909f85164",
+        "relation": "product_has_faq",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "created_from": "bra43_correction_2026_05_28",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:82a6cf91-1e47-4527-ad14-acaf1b321071",
+        "source": "gn:ffe17f20-95ff-40cc-9bfb-a5b9c8ea99ce",
+        "target": "gn:2b91b0a1-6903-4f59-a358-e6b8f270e062",
+        "relation": "manual",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "gallery": false,
+          "direction": "source_to_target",
+          "created_from": "graph_ui",
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "ge:4c2c567e-2902-470f-ac0d-5c62ad1e12f1",
+        "source": "persona:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "target": "gn:ffe17f20-95ff-40cc-9bfb-a5b9c8ea99ce",
+        "relation": "persona_has_brand",
+        "primary_tree": true,
+        "metadata": {
+          "active": true,
+          "primary_tree": true
+        }
+      },
+      {
+        "id": "draft:embedded:5f0e0c40-95a4-46eb-aa86-1fe89ded95b8",
+        "source": "gn:5f0e0c40-95a4-46eb-aa86-1fe89ded95b8",
+        "target": "embedded:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "relation": "embedded_pending",
+        "primary_tree": false,
+        "metadata": {}
+      },
+      {
+        "id": "draft:embedded:e9018e4f-cb4d-4acb-b614-ecd812614e23",
+        "source": "gn:e9018e4f-cb4d-4acb-b614-ecd812614e23",
+        "target": "embedded:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "relation": "embedded_pending",
+        "primary_tree": false,
+        "metadata": {}
+      },
+      {
+        "id": "draft:embedded:057acd09-408c-4a0a-b2b6-0b777635ee90",
+        "source": "gn:057acd09-408c-4a0a-b2b6-0b777635ee90",
+        "target": "embedded:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "relation": "embedded_pending",
+        "primary_tree": false,
+        "metadata": {}
+      },
+      {
+        "id": "draft:embedded:6c330568-8d29-4628-9d5a-857230112c0a",
+        "source": "gn:6c330568-8d29-4628-9d5a-857230112c0a",
+        "target": "embedded:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "relation": "embedded_pending",
+        "primary_tree": false,
+        "metadata": {}
+      },
+      {
+        "id": "draft:embedded:6e4e39d0-7872-4a48-ab7b-a63ebf1ad184",
+        "source": "gn:6e4e39d0-7872-4a48-ab7b-a63ebf1ad184",
+        "target": "embedded:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "relation": "embedded_pending",
+        "primary_tree": false,
+        "metadata": {}
+      },
+      {
+        "id": "draft:embedded:3f373bdc-87ca-4204-b9b0-92a342956ac9",
+        "source": "gn:3f373bdc-87ca-4204-b9b0-92a342956ac9",
+        "target": "embedded:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "relation": "embedded_pending",
+        "primary_tree": false,
+        "metadata": {}
+      },
+      {
+        "id": "draft:embedded:b2d61181-897e-43b6-81ad-e4a8f7918bbd",
+        "source": "gn:b2d61181-897e-43b6-81ad-e4a8f7918bbd",
+        "target": "embedded:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "relation": "embedded_pending",
+        "primary_tree": false,
+        "metadata": {}
+      },
+      {
+        "id": "draft:embedded:778b668e-fb78-49bb-82de-55b9ea076c19",
+        "source": "gn:778b668e-fb78-49bb-82de-55b9ea076c19",
+        "target": "embedded:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "relation": "embedded_pending",
+        "primary_tree": false,
+        "metadata": {}
+      },
+      {
+        "id": "draft:embedded:88ea19ac-7d13-411d-b9a5-fe6909f85164",
+        "source": "gn:88ea19ac-7d13-411d-b9a5-fe6909f85164",
+        "target": "embedded:3d2c15f9-208d-474f-bc1e-f6bedee35e3b",
+        "relation": "embedded_pending",
+        "primary_tree": false,
+        "metadata": {}
+      }
+    ],
+    "layout": {
+      "engine": "top-down-canonical",
+      "positions": {}
+    },
+    "validation": {
+      "is_valid": true,
+      "errors": []
+    }
+  }
+}

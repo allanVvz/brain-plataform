@@ -35,8 +35,10 @@ def get_backend_env() -> dict[str, Any]:
         for origin in default_dev_origins:
             if origin not in configured_origins:
                 configured_origins.append(origin)
+    allowed_origin_regex = (os.environ.get("ALLOWED_ORIGIN_REGEX") or "").strip() or None
     return {
         "allowed_origins": configured_origins,
+        "allowed_origin_regex": allowed_origin_regex,
         "supabase_url": (os.environ.get("SUPABASE_URL") or "").strip(),
         "supabase_service_key": (os.environ.get("SUPABASE_SERVICE_KEY") or "").strip(),
         "is_production": is_production_runtime(),

@@ -20,7 +20,7 @@ from services.model_router import AVAILABLE_MODELS, get_router
 _MODEL_DEFAULT = "gpt-4o-mini"
 _WA_BOT_DIR = os.environ.get("WA_BOT_DIR", r"C:\Users\Alan\Documents\repositorios\wa-wscrap-bot")
 _WA_PYTHON  = os.environ.get("WA_PYTHON", r"C:\Users\Alan\Documents\repositorios\wa-wscrap-bot\.venv\Scripts\python.exe")
-_BRAIN_API_URL = os.environ.get("BRAIN_API_URL", "http://localhost:8000")
+_BRAIN_API_URL = os.environ.get("BRAIN_API_URL", "http://localhost:8080")
 
 # In-memory session store  {session_id: session_dict}
 _sessions: dict[str, dict] = {}

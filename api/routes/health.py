@@ -48,3 +48,40 @@ def health_score():
     history = supabase_client.get_health_history(limit=1)
     latest = history[-1] if history else None
     return latest or {"score_total": 0, "message": "no snapshot yet"}
+
+
+@router.get("/health/storage")
+def health_storage():
+    """Diagnostic for /assets/upload: which Supabase project the API actually
+    talks to, and whether the required buckets are visible to it.
+
+    Useful when an upload returns "Bucket not found" — this endpoint pins down
+    if the API is hitting a different project than expected (env mix-up) or if
+    the bucket truly is missing from the right project.
+    """
+    url = os.environ.get("SUPABASE_URL") or ""
+    project_ref = url.replace("https://", "").split(".", 1)[0] if url else None
+    bucket_names: list[str] = []
+    bucket_error = None
+    try:
+        client = supabase_client.get_client()
+        rows = client.storage.list_buckets() or []
+        for b in rows:
+            name = b.get("name") if isinstance(b, dict) else getattr(b, "name", None)
+            if name:
+                bucket_names.append(name)
+    except Exception as exc:
+        bucket_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+    required = ["assets-raw", "assets-derived"]
+    missing = [b for b in required if b not in bucket_names]
+    payload = {
+        "supabase_url": url,
+        "project_ref": project_ref,
+        "buckets_visible": bucket_names,
+        "required": required,
+        "missing": missing,
+        "ok": not missing and not bucket_error,
+        "bucket_error": bucket_error,
+    }
+    status_code = 200 if payload["ok"] else 503
+    return JSONResponse(payload, status_code=status_code)

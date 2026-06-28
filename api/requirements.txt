@@ -17,6 +17,7 @@ pyyaml>=6.0.0
 python-multipart>=0.0.9
 # Asset pipeline — local classifier + PDF text extraction.
 pillow>=10.0.0
+pillow-heif>=0.16.0
 pypdf>=4.0.0
 # Optional local OCR backends (install in prod via Dockerfile if desired):
 #   paddleocr, easyocr, pytesseract — selected at runtime via ASSET_OCR_BACKEND env.

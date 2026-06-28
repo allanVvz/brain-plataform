@@ -1,0 +1,156 @@
+{
+  "issue": "BRA-82",
+  "generated_at": "2026-05-30T01:41:27.920082+00:00",
+  "base_url": "http://127.0.0.1:8001",
+  "session_prefix": "bra82-live-0cf0d060",
+  "persona_slug": "vz-lupas",
+  "objective": "Three-bucket severity validator + patch-apply/persist rejection (live :8001).",
+  "frozen_contract": "paperclip/docs/architecture/sofia-plan-json-contract-frozen-decision-2026-05-29.md",
+  "steps": [
+    {
+      "step": "acceptance_1_product_create_is_pending_not_blocking",
+      "status": 200,
+      "validation": {
+        "is_valid": true,
+        "suggestions": [
+          {
+            "code": "FAQ_RECOMMENDED",
+            "message": "Adicionar FAQ melhora cobertura de objeções, mas não bloqueia criação."
+          },
+          {
+            "code": "RULE_RECOMMENDED",
+            "message": "Adicionar regra comercial é recomendado, mas não bloqueia criação."
+          }
+        ],
+        "pending": [
+          {
+            "code": "MISSING_PARENT",
+            "message": "product[0] sem parent_slug."
+          }
+        ],
+        "blocking": []
+      }
+    },
+    {
+      "step": "acceptance_2a_all_seven_blocking_markers_trigger_validation_blocking",
+      "marker_results": [
+        {
+          "marker": "cycle",
+          "expected_code": "CYCLE",
+          "is_valid": false,
+          "blocking_codes": [
+            "CYCLE"
+          ]
+        },
+        {
+          "marker": "orphan",
+          "expected_code": "ORPHAN",
+          "is_valid": false,
+          "blocking_codes": [
+            "ORPHAN"
+          ]
+        },
+        {
+          "marker": "edge_inverted",
+          "expected_code": "EDGE_INVERTED",
+          "is_valid": false,
+          "blocking_codes": [
+            "EDGE_INVERTED"
+          ]
+        },
+        {
+          "marker": "product_above_product_group",
+          "expected_code": "PRODUCT_ABOVE_PRODUCT_GROUP",
+          "is_valid": false,
+          "blocking_codes": [
+            "PRODUCT_ABOVE_PRODUCT_GROUP"
+          ]
+        },
+        {
+          "marker": "embed_without_approved_faq",
+          "expected_code": "EMBED_WITHOUT_APPROVED_FAQ",
+          "is_valid": false,
+          "blocking_codes": [
+            "EMBED_WITHOUT_APPROVED_FAQ"
+          ]
+        },
+        {
+          "marker": "persistence_failure",
+          "expected_code": "PERSISTENCE_FAILURE",
+          "is_valid": false,
+          "blocking_codes": [
+            "PERSISTENCE_FAILURE"
+          ]
+        },
+        {
+          "marker": "critical_duplication",
+          "expected_code": "CRITICAL_DUPLICATION",
+          "is_valid": false,
+          "blocking_codes": [
+            "CRITICAL_DUPLICATION"
+          ]
+        }
+      ]
+    },
+    {
+      "step": "acceptance_2b_patch_apply_rejects_inverted_edge",
+      "status": 422,
+      "body": {
+        "detail": {
+          "ok": false,
+          "code": "GRAPH_VALIDATION_FAILED",
+          "message": "Command violates canonical graph constraints.",
+          "violations": [
+            {
+              "code": "CANONICAL_CHAIN_VIOLATION",
+              "message": "Primary edge violates canonical chain.",
+              "edge": {
+                "from": "slug:produto-bra82-live-0cf0d060",
+                "to": "slug:grupo-bra82-live-0cf0d060",
+                "relation": "product_group_has_product"
+              },
+              "sourceType": "product",
+              "targetType": "product_group"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "acceptance_needs_clarification_short_circuits_persist",
+      "status": 200,
+      "persisted": false,
+      "needs_clarification": true,
+      "graph_patch": null
+    },
+    {
+      "step": "session_refetch_preserves_product",
+      "status": 200,
+      "product_count": 1
+    },
+    {
+      "step": "acceptance_3a_persisted_canonical_patch",
+      "status": 200,
+      "persisted": true,
+      "sofia_message": "Comando aplicado com cadeia canonica validada."
+    },
+    {
+      "step": "acceptance_3b_semantic_tree_refetch",
+      "status": 200,
+      "root_keys": [
+        "nodes",
+        "edges",
+        "meta"
+      ],
+      "graph_payload_present": true
+    }
+  ],
+  "assertions": {
+    "acceptance_1_product_create_pending_not_blocking": true,
+    "acceptance_2a_all_seven_blocking_markers_recognised": true,
+    "acceptance_2b_inverted_edge_persist_rejected_422": true,
+    "needs_clarification_short_circuits_persist": true,
+    "session_refetch_preserves_product": true,
+    "acceptance_3_semantic_tree_refetch_responds_200": true
+  }
+}

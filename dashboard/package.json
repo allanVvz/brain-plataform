@@ -4,12 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:local": "next dev -p 3000",
     "build": "next build",
+    "vercel-build": "next build",
     "build:check": "npm run env:check && next build",
     "env:check": "node scripts/check-env.mjs",
+    "start": "next start",
+    "test": "vitest run",
     "test:api-health": "node scripts/test-api-health.mjs",
-    "test:frontend-proxy": "node scripts/test-frontend-proxy.mjs",
-    "start": "next start"
+    "test:frontend-proxy": "node scripts/test-frontend-proxy.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.0",
@@ -26,13 +29,17 @@
     "recharts": "^2.12.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/dagre": "^0.7.54",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10",
+    "jsdom": "^29.1.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.7"
   }
 }

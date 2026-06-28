@@ -7,7 +7,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from schemas.graph_json_v2 import GraphJson
-from services import auth_service, graph_json_importer, graph_json_v2_store, graph_json_v2_validator, supabase_client
+from services import graph_json_importer, graph_json_v2_store, graph_json_v2_validator
+from services import auth_service, supabase_client
 
 router = APIRouter(prefix="/graph-documents", tags=["graph-documents"])
 
@@ -78,25 +79,31 @@ def _validate_graph_json_or_422(graph_json: dict) -> GraphJson:
     return graph
 
 
-def _assert_body_matches_graph(body_persona_slug: str, graph: GraphJson) -> None:
+def _assert_persona_view(request: Request, persona_slug: str) -> None:
+    auth_service.assert_persona_access(request, persona_slug=persona_slug)
+
+
+def _assert_persona_edit(request: Request, persona_slug: str) -> None:
+    user = auth_service.current_user(request)
+    if auth_service.is_admin(user):
+        return
+    for row in auth_service.allowed_access(request):
+        if row.get("persona_slug") == persona_slug and row.get("can_edit"):
+            return
+    raise HTTPException(status_code=403, detail="Acesso de edicao negado para esta persona.")
+
+
+def _assert_graph_persona_matches(body_persona_slug: str, graph: GraphJson) -> None:
     if graph.persona_slug != body_persona_slug:
         raise HTTPException(
             422,
             {
                 "code": "GRAPH_PERSONA_MISMATCH",
-                "errors": [f"body persona_slug={body_persona_slug} differs from graph_json persona_slug={graph.persona_slug}"],
+                "errors": [
+                    f"body persona_slug={body_persona_slug} differs from graph_json persona_slug={graph.persona_slug}"
+                ],
             },
         )
-
-
-def _assert_edit_access(request: Request, persona_slug: str) -> None:
-    user = auth_service.current_user(request)
-    if auth_service.is_admin(user):
-        return
-    access = auth_service.allowed_access(request)
-    if any(row.get("persona_slug") == persona_slug and row.get("can_edit") for row in access):
-        return
-    raise HTTPException(403, "Acesso de edicao negado para esta persona.")
 
 
 @router.get("/current")
@@ -105,7 +112,7 @@ def graph_document_current(
     persona_slug: str = Query(...),
     brand_slug: Optional[str] = Query(None),
 ):
-    auth_service.assert_persona_access(request, persona_slug=persona_slug)
+    _assert_persona_view(request, persona_slug)
     evt = _latest_event(persona_slug, brand_slug)
     if not evt:
         return {
@@ -137,7 +144,7 @@ def graph_document_versions(
     persona_slug: str = Query(...),
     brand_slug: Optional[str] = Query(None),
 ):
-    auth_service.assert_persona_access(request, persona_slug=persona_slug)
+    _assert_persona_view(request, persona_slug)
     rows = supabase_client.list_system_events(
         entity_type="graph_document",
         event_types=["graph_document_published"],
@@ -165,10 +172,9 @@ def graph_document_versions(
 
 @router.post("/publish")
 def graph_document_publish(body: PublishGraphDocumentBody, request: Request):
-    _assert_edit_access(request, body.persona_slug)
+    _assert_persona_edit(request, body.persona_slug)
     graph = _validate_graph_json_or_422(body.graph_json)
-    _assert_body_matches_graph(body.persona_slug, graph)
-
+    _assert_graph_persona_matches(body.persona_slug, graph)
     current = _latest_event(body.persona_slug, body.brand_slug)
     current_payload = (current or {}).get("payload") or {}
     next_version = int(current_payload.get("version") or 0) + 1
@@ -177,10 +183,10 @@ def graph_document_publish(body: PublishGraphDocumentBody, request: Request):
         "persona_slug": body.persona_slug,
         "brand_slug": body.brand_slug,
         "version": next_version,
-        "graph_json": graph.model_dump(),
+        "graph_json": body.graph_json,
         "source": body.source,
         "note": body.note,
-        "published_by": auth_service.current_user(request).get("id"),
+        "published_by": (auth_service.current_user(request) or {}).get("id"),
         "published_at": datetime.now(timezone.utc).isoformat(),
     }
     evt = supabase_client.insert_event(
@@ -197,8 +203,16 @@ def graph_document_publish(body: PublishGraphDocumentBody, request: Request):
     if not evt:
         raise HTTPException(502, "Failed to persist graph document event")
 
+    # Publishing the canonical document materializes the derived knowledge_nodes /
+    # knowledge_edges / vault rows (this is what "aciona os serviços de atualizar o
+    # banco" when the front-end edits the graph). A reindex failure does NOT lose
+    # the published document — it is surfaced as `reindex_error`.
+    reindex: dict = {}
     try:
-        reindex = graph_json_importer.import_graph_json(graph_json=graph, source=f"graph_documents.publish:{body.source}") or {}
+        reindex = graph_json_importer.import_graph_json(
+            graph_json=graph,
+            source=f"graph_documents.publish:{body.source}",
+        ) or {}
     except Exception as exc:  # pragma: no cover - defensive
         reindex = {"ok": False, "reindex_error": str(exc)}
 
@@ -217,9 +231,9 @@ def graph_document_publish(body: PublishGraphDocumentBody, request: Request):
 
 @router.post("/apply-patch")
 def graph_document_apply_patch(body: ApplyPatchBody, request: Request):
-    _assert_edit_access(request, body.persona_slug)
+    _assert_persona_edit(request, body.persona_slug)
     graph = _validate_graph_json_or_422(body.graph_json)
-    _assert_body_matches_graph(body.persona_slug, graph)
+    _assert_graph_persona_matches(body.persona_slug, graph)
     current = graph_json_v2_store.load_current(body.persona_slug)
     next_version = 1 if not current else current[0] + 1
     checksum = graph_json_v2_store.save_version(body.persona_slug, next_version, graph)
@@ -235,21 +249,30 @@ def graph_document_apply_patch(body: ApplyPatchBody, request: Request):
 
 @router.post("/import-json")
 def graph_document_import_json(body: ImportGraphDocumentBody, request: Request):
-    _assert_edit_access(request, body.persona_slug)
+    _assert_persona_edit(request, body.persona_slug)
     graph = _validate_graph_json_or_422(body.graph_json)
-    _assert_body_matches_graph(body.persona_slug, graph)
-    result = graph_json_importer.import_graph_json(graph_json=graph, source=body.source, session_id=body.session_id)
+    _assert_graph_persona_matches(body.persona_slug, graph)
+    result = graph_json_importer.import_graph_json(
+        graph_json=graph,
+        source=body.source,
+        session_id=body.session_id,
+    )
     if result.get("ok") is False:
         raise HTTPException(422, result)
     current = graph_json_v2_store.load_current(body.persona_slug)
     next_version = 1 if not current else current[0] + 1
     checksum = graph_json_v2_store.save_version(body.persona_slug, next_version, graph)
-    return {**result, "version": next_version, "checksum": checksum, "note": body.note}
+    return {
+        **result,
+        "version": next_version,
+        "checksum": checksum,
+        "note": body.note,
+    }
 
 
 @router.post("/rollback")
 def graph_document_rollback(body: RollbackBody, request: Request):
-    _assert_edit_access(request, body.persona_slug)
+    _assert_persona_edit(request, body.persona_slug)
     target = graph_json_v2_store.load_version(body.persona_slug, body.version)
     if target is None:
         raise HTTPException(404, "Requested rollback version not found")
@@ -268,16 +291,24 @@ def graph_document_rollback(body: RollbackBody, request: Request):
 
 @router.post("/reindex")
 def graph_document_reindex(body: ReindexBody, request: Request):
-    _assert_edit_access(request, body.persona_slug)
+    _assert_persona_edit(request, body.persona_slug)
     current = graph_json_v2_store.load_current(body.persona_slug)
     if current is None:
         raise HTTPException(404, "No graph document available for reindex")
     version, graph = current
+    # Re-validate current state to mirror backend reindex guard semantics.
     is_valid, errors = graph_json_v2_validator.validate_graph_json(graph)
     if not is_valid:
         raise HTTPException(422, {"code": "GRAPH_VALIDATION_FAILED", "errors": errors})
+    # Materialize the canonical document into the derived tables (knowledge_nodes /
+    # knowledge_edges / knowledge_items + vault). Tolerant: a materialization error
+    # is reported but does not 500 the reindex.
+    reindex: dict = {}
     try:
-        reindex = graph_json_importer.import_graph_json(graph_json=graph, source=f"graph_documents.reindex:{body.persona_slug}") or {}
+        reindex = graph_json_importer.import_graph_json(
+            graph_json=graph,
+            source=f"graph_documents.reindex:{body.persona_slug}",
+        ) or {}
     except Exception as exc:  # pragma: no cover - defensive
         reindex = {"ok": False, "reindex_error": str(exc)}
     return {
@@ -299,7 +330,7 @@ def graph_document_events(
     brand_slug: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
 ):
-    auth_service.assert_persona_access(request, persona_slug=persona_slug)
+    _assert_persona_view(request, persona_slug)
     rows = supabase_client.list_system_events(
         entity_type="graph_document",
         event_types=[
