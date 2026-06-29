@@ -156,6 +156,21 @@ def _by_type(entries: list[dict]) -> dict[str, list[dict]]:
     return out
 
 
+def test_start_bootstrap_session_accepts_user_id() -> None:
+    started = svc.start_bootstrap_session(
+        "gpt-4o-mini",
+        initial_context="Missao: teste de ownership",
+        agent_key="sofia",
+        initial_state={"mode": "legacy"},
+        bootstrap_llm=False,
+        user_id="user-test-1",
+    )
+    sid = started.get("session_id") or started.get("id")
+    sess = svc.get_session(sid)
+    expect(started.get("ok") is not False, "start with user_id does not fail")
+    expect(sess.get("user_id") == "user-test-1", "session stores owner user_id")
+
+
 def test_full_tree_materializes_from_source() -> None:
     with _mocked_backends():
         result = _run_flow()

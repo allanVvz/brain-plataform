@@ -4795,6 +4795,7 @@ def create_session(
     initial_context: str = "",
     agent_key: str = "sofia",
     initial_state: Optional[dict[str, Any]] = None,
+    user_id: Optional[str] = None,
 ) -> dict:
     sid = str(uuid.uuid4())
     agent = get_agent_profile(agent_key)
@@ -4828,6 +4829,7 @@ def create_session(
         "stage": "chatting",
         "mode": mode,
         "status": "collecting",
+        "user_id": user_id,
         "persona_id": persona_id,
         "persona_slug": persona_slug or None,
         "source_url": source_url,
@@ -4923,6 +4925,7 @@ def start_bootstrap_session(
     agent_key: str = "sofia",
     initial_state: Optional[dict[str, Any]] = None,
     bootstrap_llm: bool = True,
+    user_id: Optional[str] = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     if str((initial_state or {}).get("mode") or "").strip().lower() == "criar" and _invalid_criar_persona((initial_state or {}).get("persona_slug")):
@@ -4931,7 +4934,13 @@ def start_bootstrap_session(
             "error_code": "VALIDATION_ERROR",
             "message": "Selecione uma persona especifica antes de criar conhecimento.",
         }
-    session = create_session(model, initial_context=initial_context, agent_key=agent_key, initial_state=initial_state)
+    session = create_session(
+        model,
+        initial_context=initial_context,
+        agent_key=agent_key,
+        initial_state=initial_state,
+        user_id=user_id,
+    )
     if not bootstrap_llm:
         message = _deterministic_bootstrap_message(session)
         session["bootstrap_llm"] = False
