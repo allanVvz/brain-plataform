@@ -54,10 +54,11 @@ export default function SofiaChatPanel({
       <button
         type="button"
         onClick={onToggle}
-        className="pointer-events-auto absolute left-3 top-1/2 -translate-y-1/2 rounded-r-lg rounded-l-md border border-white/10 bg-obs-violet/25 px-2 py-3 text-obs-violet hover:bg-obs-violet/35"
+        className="pointer-events-auto absolute left-3 top-1/2 flex -translate-y-1/2 items-center gap-1.5 rounded-r-lg rounded-l-md border border-white/10 bg-obs-violet/25 px-2.5 py-3 text-xs font-semibold text-obs-violet shadow-lg shadow-black/20 hover:bg-obs-violet/35"
         title={open ? "Fechar Sofia" : "Abrir Sofia"}
       >
         <MessageCircle size={16} />
+        {!open && <span>Sofia</span>}
       </button>
 
       {open && (

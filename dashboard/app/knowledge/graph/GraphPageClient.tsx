@@ -152,7 +152,7 @@ export default function GraphPageClient() {
   const [searchQuery, setSearchQuery] = useState("");
   const [headerPersonaSlug, setHeaderPersonaSlug] = useState("");
   const [graphNotice, setGraphNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
-  const [sofiaOpen, setSofiaOpen] = useState(false);
+  const [sofiaOpen, setSofiaOpen] = useState(true);
   const [sofiaLoading, setSofiaLoading] = useState(false);
   const [sofiaMessages, setSofiaMessages] = useState<SofiaChatMessage[]>([]);
   const [hasPendingVisualChanges, setHasPendingVisualChanges] = useState(false);
