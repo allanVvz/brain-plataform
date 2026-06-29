@@ -4,13 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   BookOpenCheck,
-  Database,
+  ChevronDown,
   Globe2,
   Image,
   KeyRound,
   Keyboard,
   Moon,
-  PlugZap,
   RefreshCw,
   Route,
   Settings,
@@ -18,6 +17,7 @@ import {
   SlidersHorizontal,
   Sun,
   Trash2,
+  UserPlus,
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -281,185 +281,84 @@ export default function SettingsPage() {
           className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-white/10 bg-obs-surface px-3 text-xs font-medium text-obs-text transition hover:bg-white/[0.06] disabled:opacity-50"
         >
           <RefreshCw size={14} className={loadingIntegrations ? "animate-spin" : ""} />
-          Atualizar conexoes
+          Atualizar
         </button>
       </header>
 
-      <section className="grid gap-4 lg:grid-cols-2">
+      <section className="rounded-2xl border border-white/10 bg-obs-surface p-4 shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatusTile label="API" value={apiOnline ? "conectada" : "pendente"} ok={apiOnline} detail={formatUpdate(lastUpdate)} />
+          <StatusTile label="Menu" value={menuConnected ? "ativo" : "erro"} ok={menuConnected} detail={menuError || `/api/menu/${personaSlug || "persona"}`} />
+          <StatusTile label="Produtos" value={String(countItems(products))} ok={countItems(products) > 0} detail={`${countItems(categories)} categorias`} />
+          <StatusTile label="Assets" value={String(countItems(galleryAssets))} ok={galleryConnected} detail="Gallery aprovada" />
+        </div>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
           <div className="mb-4 flex items-center gap-2">
-            <PlugZap size={15} className="text-obs-violet" />
-            <h2 className="text-sm font-semibold text-obs-text">Tools - integracoes</h2>
+            <UserPlus size={15} className="text-obs-violet" />
+            <h2 className="text-sm font-semibold text-obs-text">Persona</h2>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <StatusTile label="API" value={apiOnline ? "conectada" : "pendente"} ok={apiOnline} detail={formatUpdate(lastUpdate)} />
-            <StatusTile label="Supabase" value={byService.supabase?.status || "unknown"} ok={byService.supabase?.status === "healthy"} detail={byService.supabase?.response_ms ? `${byService.supabase.response_ms}ms` : "sem metrica"} />
-            <StatusTile label="Colecao" value={String(countItems(collections))} ok={countItems(collections) > 0} detail={menuPayload?.persona?.collections?.[0]?.slug || "auto (config da persona)"} />
-            <StatusTile label="Menu API" value={menuConnected ? "ativa" : "erro"} ok={menuConnected} detail={menuError || `/api/menu/${personaSlug}`} />
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
-          <div className="mb-4 flex items-center gap-2">
-            <Database size={15} className="text-obs-violet" />
-            <h2 className="text-sm font-semibold text-obs-text">Cardapio - landing page</h2>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <StatusTile label="Categorias" value={String(countItems(categories))} ok={countItems(categories) > 0} detail="category + entity" />
-            <StatusTile label="Produtos" value={String(countItems(products))} ok={countItems(products) > 0} detail="copy + category + asset" />
-            <StatusTile label="Payload" value={menuPayload?.collection?.slug || "sem payload"} ok={menuConnected} detail={formatUpdate(menuPayload?.generated_at)} />
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-2">
-        <OutputBox
-          icon={<Image size={15} className="text-obs-amber" />}
-          title="Saida - Assets"
-          status={galleryConnected ? "conectada" : "sem assets"}
-          ok={galleryConnected}
-          lines={[
-            `${countItems(galleryAssets)} assets em Gallery`,
-            "Aprovado + vinculado em Gallery fica disponivel para MCP e API.",
-            "Capas mudam quando a conexao do asset no grafo muda.",
-          ]}
-        />
-        <OutputBox
-          icon={<BookOpenCheck size={15} className="text-green-300" />}
-          title="Saida - FAQ"
-          status={tockFatalConnected ? "conectada" : "pendente"}
-          ok={tockFatalConnected}
-          lines={[
-            tockFatalConnected ? "Tock Fatal validado para FAQ." : "Somente Tock Fatal esta validado hoje.",
-            "FAQ fica visivel como saida conectada quando a persona possui contexto aprovado.",
-            "A configuracao detalhada da persona permanece na aba Persona.",
-          ]}
-        />
-      </section>
-
-      <section className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
-        <div className="mb-4 flex items-center gap-2">
-          <Settings size={15} className="text-obs-violet" />
-          <h2 className="text-sm font-semibold text-obs-text">Criar persona</h2>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <input
-            value={newPersonaName}
-            onChange={(event) => handlePersonaNameChange(event.target.value)}
-            placeholder="Nome da persona"
-            className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
-          />
-          <input
-            value={newPersonaSlug}
-            onChange={(event) => {
-              setNewPersonaSlug(slugifyPersona(event.target.value));
-              setCreatePersonaError("");
-              setCreatePersonaSuccess("");
-            }}
-            placeholder="slug-da-persona"
-            className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
-          />
-          <button
-            type="button"
-            onClick={handleCreatePersona}
-            disabled={creatingPersona}
-            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-obs-violet/30 bg-obs-violet/15 px-3 text-sm font-medium text-obs-violet transition hover:bg-obs-violet/20 disabled:opacity-50"
-          >
-            {creatingPersona ? "Criando..." : "Criar persona"}
-          </button>
-        </div>
-        {createPersonaError && (
-          <p className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
-            {createPersonaError}
-          </p>
-        )}
-        {createPersonaSuccess && (
-          <p className="mt-3 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs text-green-200">
-            {createPersonaSuccess}
-          </p>
-        )}
-      </section>
-
-      <section className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
-        <div className="mb-4 flex items-center gap-2">
-          <Route size={15} className="text-obs-violet" />
-          <h2 className="text-sm font-semibold text-obs-text">Integracao Catalogo API</h2>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <StatusTile label="Endpoint" value={`/api/menu/${personaSlug}`} ok={menuConnected} detail="publico para landing page" />
-          <StatusTile label="Branch do produto" value={menuConnected ? "resolvido" : "pendente"} ok={menuConnected} detail="copy, category, asset" />
-          <StatusTile label="Assets aprovados" value={String(countItems(galleryAssets))} ok={galleryConnected} detail="fonte das capas" />
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
-        <div className="mb-4 flex items-center gap-2">
-          <SlidersHorizontal size={15} className="text-obs-violet" />
-          <h2 className="text-sm font-semibold text-obs-text">Geral</h2>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="flex items-center justify-between rounded-xl border border-white/10 bg-obs-base/60 px-3 py-2 text-sm">
-            <span className="flex items-center gap-2 text-obs-text">
-              {theme === "dark" ? <Moon size={14} className="text-obs-violet" /> : <Sun size={14} className="text-obs-amber" />}
-              Modo escuro
-            </span>
-            <input type="checkbox" checked={theme === "dark"} onChange={(e) => toggleTheme(e.target.checked)} className="h-4 w-4 accent-obs-violet" />
-          </label>
-          <Toggle label="Selecao multipla no grafo" checked={toggles.multiSelect} onChange={(checked) => setToggles((t) => ({ ...t, multiSelect: checked }))} />
-          <Toggle label="Mostrar controles avancados" checked={toggles.advanced} onChange={(checked) => setToggles((t) => ({ ...t, advanced: checked }))} />
-          <Toggle label="Confirmar exclusoes" checked={toggles.confirmDelete} onChange={(checked) => setToggles((t) => ({ ...t, confirmDelete: checked }))} />
-        </div>
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
-          <div className="mb-4 flex items-center gap-2">
-            <Globe2 size={15} className="text-obs-violet" />
-            <h2 className="text-sm font-semibold text-obs-text">Idioma</h2>
-          </div>
-          <select
-            value={language}
-            onChange={(event) => updateLanguage(event.target.value as UiLanguage)}
-            className="w-full rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
-          >
-            {LANGUAGE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
-          <div className="mb-4 flex items-center gap-2">
-            <Keyboard size={15} className="text-obs-violet" />
-            <h2 className="text-sm font-semibold text-obs-text">Grafo</h2>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <select
-              value={panKey}
-              onChange={(event) => updatePanKey(event.target.value)}
+          <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+            <input
+              value={newPersonaName}
+              onChange={(event) => handlePersonaNameChange(event.target.value)}
+              placeholder="Nome da persona"
               className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+            />
+            <input
+              value={newPersonaSlug}
+              onChange={(event) => {
+                setNewPersonaSlug(slugifyPersona(event.target.value));
+                setCreatePersonaError("");
+                setCreatePersonaSuccess("");
+              }}
+              placeholder="slug-da-persona"
+              className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+            />
+            <button
+              type="button"
+              onClick={handleCreatePersona}
+              disabled={creatingPersona}
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-obs-violet/30 bg-obs-violet/15 px-4 text-sm font-medium text-obs-violet transition hover:bg-obs-violet/20 disabled:opacity-50"
             >
-              <option value="Control">Ctrl</option>
-              <option value="Alt">Alt</option>
-              <option value="Shift">Shift</option>
-            </select>
-            <Toggle label="Usar opacidade nos nodes" checked={graphNodeOpacity} onChange={toggleGraphNodeOpacity} />
+              {creatingPersona ? "Criando..." : "Criar"}
+            </button>
+          </div>
+          {createPersonaError && (
+            <p className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+              {createPersonaError}
+            </p>
+          )}
+          {createPersonaSuccess && (
+            <p className="mt-3 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs text-green-200">
+              {createPersonaSuccess}
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
+          <div className="mb-4 flex items-center gap-2">
+            <Route size={15} className="text-obs-violet" />
+            <h2 className="text-sm font-semibold text-obs-text">Catalogo API</h2>
+          </div>
+          <div className="grid gap-3">
+            <StatusTile label="Endpoint" value={`/api/menu/${personaSlug || "persona"}`} ok={menuConnected} detail="landing page" />
+            <StatusTile label="Colecao" value={menuPayload?.persona?.collections?.[0]?.slug || "auto"} ok={countItems(collections) > 0} detail={menuPayload?.collection?.slug || "config da persona"} />
           </div>
         </div>
       </section>
 
-      <section className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
-        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="flex items-start gap-2">
-            <KeyRound size={15} className="mt-1 text-obs-violet" />
-            <div>
-              <h2 className="text-sm font-semibold text-obs-text">Vault de chaves de API</h2>
-              <p className="mt-1 max-w-2xl text-xs leading-5 text-obs-subtle">
-                Cada usuario possui um vault independente. As chaves sao enviadas ao backend, criptografadas e nunca retornam para o navegador.
-              </p>
-            </div>
+      <SettingsDropdown
+        icon={<KeyRound size={15} />}
+        title="Chaves de API"
+        status={`${apiKeyStatus(byService.openai).label} / ${apiKeyStatus(byService.anthropic).label}`}
+        defaultOpen
+      >
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="text-xs leading-5 text-obs-subtle">
+            Vault por usuario para OpenAI e Anthropic. O frontend exibe apenas status.
           </div>
           <button
             type="button"
@@ -471,13 +370,13 @@ export default function SettingsPage() {
             className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-obs-violet/30 bg-obs-violet/15 px-3 text-xs font-medium text-obs-violet transition hover:bg-obs-violet/20"
           >
             <KeyRound size={13} />
-            Configurar chave
+            Abrir seletor
           </button>
         </div>
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
           <ApiKeyStatusCard
             label="OpenAI"
-            description="Usada pela Sofia, marketing, leitura de assets e pipelines OpenAI."
+            description="Sofia, marketing, assets e embeddings."
             item={byService.openai}
             busy={apiKeyBusy}
             onConfigure={() => openApiKeyForm("openai")}
@@ -485,7 +384,7 @@ export default function SettingsPage() {
           />
           <ApiKeyStatusCard
             label="Anthropic"
-            description="Usada como fallback Claude quando modelos Anthropic forem selecionados."
+            description="Claude e fallback de modelo."
             item={byService.anthropic}
             busy={apiKeyBusy}
             onConfigure={() => openApiKeyForm("anthropic")}
@@ -502,6 +401,89 @@ export default function SettingsPage() {
             {apiKeySuccess}
           </p>
         )}
+      </SettingsDropdown>
+
+      <SettingsDropdown
+        icon={<Keyboard size={15} />}
+        title="Configuracao do grafo"
+        status={`Pan ${panKey}`}
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="grid gap-2 rounded-xl border border-white/10 bg-obs-base/60 px-3 py-3 text-sm">
+            <span className="text-xs font-medium text-obs-subtle">Tecla de pan</span>
+            <select
+              value={panKey}
+              onChange={(event) => updatePanKey(event.target.value)}
+              className="rounded-lg border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+            >
+              <option value="Control">Ctrl</option>
+              <option value="Alt">Alt</option>
+              <option value="Shift">Shift</option>
+            </select>
+          </label>
+          <Toggle label="Usar opacidade nos nodes" checked={graphNodeOpacity} onChange={toggleGraphNodeOpacity} />
+          <Toggle label="Selecao multipla no grafo" checked={toggles.multiSelect} onChange={(checked) => setToggles((t) => ({ ...t, multiSelect: checked }))} />
+          <Toggle label="Mostrar controles avancados" checked={toggles.advanced} onChange={(checked) => setToggles((t) => ({ ...t, advanced: checked }))} />
+          <Toggle label="Confirmar exclusoes" checked={toggles.confirmDelete} onChange={(checked) => setToggles((t) => ({ ...t, confirmDelete: checked }))} />
+        </div>
+      </SettingsDropdown>
+
+      <SettingsDropdown
+        icon={<SlidersHorizontal size={15} />}
+        title="Interface"
+        status={theme === "dark" ? "escuro" : "claro"}
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="flex items-center justify-between rounded-xl border border-white/10 bg-obs-base/60 px-3 py-2 text-sm">
+            <span className="flex items-center gap-2 text-obs-text">
+              {theme === "dark" ? <Moon size={14} className="text-obs-violet" /> : <Sun size={14} className="text-obs-amber" />}
+              Modo escuro
+            </span>
+            <input type="checkbox" checked={theme === "dark"} onChange={(e) => toggleTheme(e.target.checked)} className="h-4 w-4 accent-obs-violet" />
+          </label>
+          <label className="grid gap-2 rounded-xl border border-white/10 bg-obs-base/60 px-3 py-3 text-sm">
+            <span className="flex items-center gap-2 text-obs-text">
+              <Globe2 size={14} className="text-obs-violet" />
+              Idioma
+            </span>
+            <select
+              value={language}
+              onChange={(event) => updateLanguage(event.target.value as UiLanguage)}
+              className="rounded-lg border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+            >
+              {LANGUAGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </SettingsDropdown>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <OutputBox
+          icon={<Image size={15} className="text-obs-amber" />}
+          title="Saida - Assets"
+          status={galleryConnected ? "conectada" : "sem assets"}
+          ok={galleryConnected}
+          lines={[
+            `${countItems(galleryAssets)} assets em Gallery`,
+            "Assets aprovados alimentam MCP e API.",
+            "Capas seguem a conexao vigente no grafo.",
+          ]}
+        />
+        <OutputBox
+          icon={<BookOpenCheck size={15} className="text-green-300" />}
+          title="Saida - FAQ"
+          status={tockFatalConnected ? "conectada" : "pendente"}
+          ok={tockFatalConnected}
+          lines={[
+            tockFatalConnected ? "Tock Fatal validado para FAQ." : "FAQ depende de contexto aprovado.",
+            "Publicacao segue o Golden Dataset.",
+            "Aba Persona controla o roteamento detalhado.",
+          ]}
+        />
       </section>
 
       {apiKeyModal && (
@@ -539,6 +521,45 @@ function StatusTile({ label, value, detail, ok }: { label: string; value: string
       <p className="mt-2 truncate text-sm font-semibold text-obs-text">{value}</p>
       <p className="mt-1 truncate text-[11px] text-obs-faint">{detail}</p>
     </div>
+  );
+}
+
+function SettingsDropdown({
+  icon,
+  title,
+  status,
+  defaultOpen = false,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  status: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  return (
+    <details
+      open={isOpen}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+      className="group rounded-2xl border border-white/10 bg-obs-surface shadow-sm"
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-obs-violet/25 bg-obs-violet/10 text-obs-violet">
+            {icon}
+          </span>
+          <span className="truncate text-sm font-semibold text-obs-text">{title}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="max-w-[160px] truncate rounded-full border border-white/10 bg-obs-base/60 px-2 py-1 text-[11px] text-obs-subtle">
+            {status}
+          </span>
+          <ChevronDown size={15} className="text-obs-faint transition group-open:rotate-180" />
+        </span>
+      </summary>
+      <div className="border-t border-white/10 px-5 py-4">{children}</div>
+    </details>
   );
 }
 
