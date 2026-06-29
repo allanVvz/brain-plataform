@@ -60,8 +60,7 @@ describe("GraphPageClient v2 loading", () => {
     vi.spyOn(api, "sofiaGraphCommand").mockResolvedValue({});
   });
 
-  it("uses graph_json v2 document when feature flag is enabled and payload is valid", async () => {
-    vi.stubEnv("NEXT_PUBLIC_GRAPH_JSON_V2", "1");
+  it("uses graph_json v2 document when payload is valid", async () => {
     const getGraphDocument = vi.spyOn(api, "getGraphDocument").mockResolvedValue({
       graph_json: {
         nodes: [{ id: "gn:1", slug: "allanvvz", node_type: "persona", title: "Allan" }],
@@ -77,8 +76,7 @@ describe("GraphPageClient v2 loading", () => {
     expect(graphData).not.toHaveBeenCalledWith("allanvvz", expect.anything());
   });
 
-  it("falls back to v1 graphData when v2 payload is unavailable", async () => {
-    vi.stubEnv("NEXT_PUBLIC_GRAPH_JSON_V2", "1");
+  it("does not fall back to v1 graphData when v2 payload is unavailable", async () => {
     const getGraphDocument = vi.spyOn(api, "getGraphDocument").mockResolvedValue({});
     const graphData = vi.spyOn(api, "graphData").mockResolvedValue({ nodes: [], edges: [], meta: {} });
 
@@ -86,6 +84,7 @@ describe("GraphPageClient v2 loading", () => {
     await screen.findByText("Grafo de Conhecimento");
 
     await waitFor(() => expect(getGraphDocument).toHaveBeenCalledWith("allanvvz"));
-    await waitFor(() => expect(graphData).toHaveBeenCalled());
+    expect(graphData).not.toHaveBeenCalled();
+    await screen.findByText("Nenhum Graph JSON v2 publicado para esta persona.");
   });
 });

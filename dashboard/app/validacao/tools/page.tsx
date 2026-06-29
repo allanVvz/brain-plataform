@@ -62,7 +62,7 @@ const SECTIONS: Section[] = [
       { name: "/leads",                     where: "api/routes/leads.py",           purpose: "Listagem com filtro por persona." },
       { name: "/knowledge/*",               where: "api/routes/knowledge.py",       purpose: "Upload, queue, Golden Dataset, chat-context.",
         notes: "Inclui /chat-context com inferência de persona pelo grafo." },
-      { name: "/knowledge/graph-data",      where: "api/routes/graph.py",           purpose: "Payload do grafo (focus/depth/filters/registry)." },
+      { name: "/graph-documents/current",   where: "api/routes/graph_documents.py", purpose: "Graph JSON v2 publicado para a aba Graph." },
       { name: "/marketing/generate",        where: "api/routes/marketing.py",       purpose: "Geração de copy via ModelRouter.",
         notes: "8 modos: copy, cold-email, email-sequence, ad-creative, lead-magnet, social, content-strategy, marketing-psychology." },
       { name: "/generate",                  where: "api/routes/generation.py",       purpose: "Campaign JSON (campanhas Figma)." },

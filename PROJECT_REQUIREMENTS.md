@@ -60,9 +60,11 @@ Testes obrigatorios:
 
 ## 4. Fonte de verdade do grafo
 
-Graph JSON v2 e a fonte canonica para o grafo publicado quando existir documento
-v2 publicado. O v1 (`knowledge_nodes`, `knowledge_edges`, RAG e tabelas antigas)
-permanece como indice derivado/fallback enquanto a migracao nao tiver corte final.
+Graph JSON v2 e a fonte canonica para o grafo publicado. A aba Graph e as
+rotas QA de renderizacao nao podem cair para `/knowledge/graph-data`.
+O v1 (`knowledge_nodes`, `knowledge_edges`, RAG e tabelas antigas) permanece
+apenas como indice derivado/legado de backend enquanto houver consumidores
+internos, nunca como fallback visual do Graph.
 
 Requisitos:
 
@@ -245,8 +247,9 @@ Testes obrigatorios:
 
 ## 10. UI do grafo
 
-- `/knowledge/graph` deve carregar Graph JSON v2 quando houver documento publicado.
-- Se nao houver documento v2, pode cair para o grafo v1 sem quebrar a pagina.
+- `/knowledge/graph` deve carregar somente Graph JSON v2.
+- Se nao houver documento v2, deve mostrar estado vazio/erro acionavel sem chamar
+  `/knowledge/graph-data`.
 - O painel Sofia deve estar visivel e utilizavel na aba Graph.
 - O usuario deve conseguir enviar comando, ver resposta, ver estado pendente quando
   houver patch visual e confirmar/desfazer quando aplicavel.
@@ -258,7 +261,7 @@ Testes obrigatorios:
 - Render da pagina Graph com Sofia visivel.
 - Chamada frontend para `/sofia/graph-command` com `command` e `context`.
 - Chamada para `/graph-documents/current?persona_slug=...`.
-- Fallback v1 quando v2 nao existe.
+- Ausencia de fallback v1 quando v2 nao existe.
 - Edge/order visual de `audience -> product_group -> product`.
 
 ## 11. WhatsApp, Meta Business e n8n self-hosted
@@ -490,7 +493,8 @@ com `spawn EPERM`.
   `sofia_orchestrator.py`, FAQ generator, product import e testes de QA da branch auditada.
 - A rota provisoria `api/routes/sofia_graph.py` foi removida; o contrato final e
   `/sofia/graph-command`.
-- Graph JSON v2 roda em paralelo ao v1; ainda nao ha corte destrutivo.
+- Graph JSON v2 e o contrato da aba Graph; o fallback v1 foi removido do
+  frontend e da rota QA de renderizacao.
 - A validacao real confirmou Sofia retornando `plan_json.graph_json.schema_version = "2.0"`.
 - `graph_documents` teve uma regressao de seguranca encontrada e corrigida:
   agora le por persona, escreve so com permissao de edicao e rejeita mismatch de persona.

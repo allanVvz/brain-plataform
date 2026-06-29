@@ -140,12 +140,10 @@ export default function GraphPageClient() {
 
   const [personas, setPersonas] = useState<any[]>([]);
   const [data, setData] = useState<GraphPayload | null>(null);
-  // Raw canonical graph_json document (only when GRAPH_JSON_V2 is on). Edits are
-  // applied to this document and re-published (write-through), which triggers the
-  // backend reindex of the derived knowledge_nodes/knowledge_edges.
+  // Raw canonical graph_json document. Edits are applied to this document and
+  // re-published, which triggers the backend reindex of derived tables.
   const [docGraph, setDocGraph] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
-  const useGraphJsonV2 = process.env.NEXT_PUBLIC_GRAPH_JSON_V2 === "1";
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [selectedNodes, setSelectedNodes] = useState<any[]>([]);
   const [addPanelOpen, setAddPanelOpen] = useState(false);
@@ -209,32 +207,30 @@ export default function GraphPageClient() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      if (useGraphJsonV2 && headerPersonaSlug) {
-        const currentDoc = await api.getGraphDocument(headerPersonaSlug);
-        const parsed = parseGraphJsonV2Payload(currentDoc);
-        if (parsed) {
-          const v2Payload = parsed as GraphPayload;
-          setDocGraph(currentDoc?.graph_json || null);
-          setData(v2Payload);
-          return v2Payload;
-        }
+      if (!headerPersonaSlug) {
+        const emptyPayload = { nodes: [], edges: [], meta: {} } as GraphPayload;
         setDocGraph(null);
+        setData(emptyPayload);
+        setGraphNotice({ tone: "error", text: "Selecione uma persona para carregar o Graph JSON v2." });
+        return emptyPayload;
       }
-      const d = await api.graphData(headerPersonaSlug || undefined, {
-        focus: focus || undefined,
-        max_depth: 5,
-        include_tags: includeTags,
-        include_mentions: includeMentions,
-        include_technical: includeTechnical,
-        include_embedded: includeEmbedded,
-        mode,
-      });
-      setData(d as GraphPayload);
-      return d as GraphPayload;
+      const currentDoc = await api.getGraphDocument(headerPersonaSlug);
+      const parsed = parseGraphJsonV2Payload(currentDoc);
+      if (parsed) {
+        const v2Payload = parsed as GraphPayload;
+        setDocGraph(currentDoc?.graph_json || currentDoc?.document?.graph_json || null);
+        setData(v2Payload);
+        return v2Payload;
+      }
+      const emptyPayload = { nodes: [], edges: [], meta: {} } as GraphPayload;
+      setDocGraph(null);
+      setData(emptyPayload);
+      setGraphNotice({ tone: "error", text: "Nenhum Graph JSON v2 publicado para esta persona." });
+      return emptyPayload;
     } finally {
       setLoading(false);
     }
-  }, [headerPersonaSlug, focus, includeTags, includeMentions, includeTechnical, includeEmbedded, mode, useGraphJsonV2]);
+  }, [headerPersonaSlug]);
 
   // Write-through: apply an edit to the canonical graph_json and re-publish it.
   // The backend validates the whole document and reindexes the derived tables.
@@ -363,15 +359,13 @@ export default function GraphPageClient() {
   const handleConnectNodes = useCallback(
     async (sourceId: string, targetId: string) => {
       const byId = new Map((data?.nodes || []).map((node) => [node.id, node]));
-      const sourceNode = byId.get(sourceId);
       const targetNode = byId.get(targetId);
-      const sourceType = String(sourceNode?.data?.node_type || sourceNode?.data?.content_type || "");
       const targetType = String(targetNode?.data?.node_type || targetNode?.data?.content_type || "");
 
       // V2 write-through: add the edge to the canonical graph_json and re-publish.
       // The backend validator enforces the graph law (FAQ->Embedded, etc.) and the
       // publish reindex updates the derived tables.
-      if (useGraphJsonV2 && docGraph) {
+      if (docGraph) {
         const relation =
           targetType === "gallery" ? "gallery_asset" : targetType === "embedded" ? "visible_to_agent" : targetType === "faq" ? "answers_question" : "contains";
         const finalReceiver = targetType === "gallery" || targetType === "embedded";
@@ -388,82 +382,10 @@ export default function GraphPageClient() {
         }, targetType === "embedded" ? "FAQ publicado no Golden Dataset." : "Conexão criada.");
         return;
       }
-      const allowedRef = (id: string) => id.startsWith("gn:") || id.startsWith("ki:") || id.startsWith("persona:") || id.startsWith("embedded:");
-      if (!allowedRef(sourceId) || !allowedRef(targetId)) {
-        setGraphNotice({ tone: "error", text: "Conexao permitida apenas entre blocos persistidos do grafo." });
-        return;
-      }
-      if ((sourceId.startsWith("ki:") || targetId.startsWith("ki:")) && targetType !== "embedded") {
-        setGraphNotice({ tone: "error", text: "Itens pendentes nao podem ser conectados pelo grafo antes da aprovacao." });
-        return;
-      }
-      if (targetType === "embedded" && sourceType === "knowledge_item") {
-        setGraphNotice({ tone: "error", text: "Aprove o FAQ primeiro. A publicacao no Golden Dataset parte do node FAQ aprovado." });
-        return;
-      }
-      if (targetType === "embedded" && sourceType !== "faq") {
-        setGraphNotice({ tone: "error", text: "Somente nodes FAQ aprovados podem ser publicados no Golden Dataset." });
-        return;
-      }
-      if (targetType === "embedded" && sourceNode?.data?.validated === false) {
-        setGraphNotice({ tone: "error", text: "Aprove o FAQ primeiro. Rascunhos cinza ainda nao podem ir para o Golden Dataset." });
-        return;
-      }
-      if (sourceType === "faq" && targetType !== "embedded") {
-        setGraphNotice({ tone: "error", text: "FAQ e destino final. Conecte produto, oferta ou copy para o FAQ; FAQ so publica no Embedded." });
-        return;
-      }
-      if (sourceType === "gallery" || targetType === "gallery") {
-        const assetNode = sourceType === "gallery" ? targetNode : sourceNode;
-        const assetType = String(assetNode?.data?.node_type || assetNode?.data?.content_type || "");
-        if (assetType !== "asset") {
-          setGraphNotice({ tone: "error", text: "Gallery aceita apenas assets validados." });
-          return;
-        }
-        if (assetNode?.data?.validated === false) {
-          setGraphNotice({ tone: "error", text: "Aprove o asset antes de enviar para Gallery." });
-          return;
-        }
-      }
-      const finalReceiverTypes = new Set(["gallery", "embedded"]);
-      const finalReceiver = finalReceiverTypes.has(targetType);
-      const involvesGallery = sourceType === "gallery" || targetType === "gallery";
-      const relationType = targetType === "gallery" ? "gallery_asset" : targetType === "faq" ? "answers_question" : "manual";
-      try {
-        setGraphNotice(null);
-        await api.createGraphEdge({
-          source_node_id: sourceId,
-          target_node_id: targetId,
-          relation_type: relationType,
-          persona_id: effectivePersona?.id,
-          weight: finalReceiver || involvesGallery ? 0.9 : 1,
-          metadata: {
-            direction: "source_to_target",
-            created_from: finalReceiver ? "graph_ui_final_receiver" : involvesGallery ? "gallery_ui" : "graph_ui",
-            primary_tree: !finalReceiver && !involvesGallery,
-            gallery: involvesGallery,
-          },
-        });
-        await load();
-        setGraphNotice({
-          tone: "success",
-          text: targetType === "embedded"
-            ? "FAQ publicado no Golden Dataset."
-            : finalReceiver
-              ? "Conexao criada para node final."
-              : involvesGallery
-                ? "Node adicionado a Gallery e Assets."
-                : "Conexao criada.",
-        });
-        window.setTimeout(() => setGraphNotice(null), 2200);
-      } catch (error) {
-        setGraphNotice({
-          tone: "error",
-          text: error instanceof Error ? error.message : "Nao foi possivel criar a conexao.",
-        });
-      }
+      setGraphNotice({ tone: "error", text: "Edicao do Graph requer documento Graph JSON v2 publicado." });
+      return;
     },
-    [data?.nodes, effectivePersona?.id, load, useGraphJsonV2, docGraph, publishEditedGraph],
+    [data?.nodes, docGraph, publishEditedGraph],
   );
 
   const handleDeleteEdge = useCallback(
@@ -471,7 +393,7 @@ export default function GraphPageClient() {
       const rawEdgeId = String(edgeId || "");
 
       // V2 write-through: drop the edge from the canonical graph_json and re-publish.
-      if (useGraphJsonV2 && docGraph) {
+      if (docGraph) {
         await publishEditedGraph((graph) => {
           graph.edges = (Array.isArray(graph.edges) ? graph.edges : []).filter(
             (edge: any) => String(edge?.id) !== rawEdgeId,
@@ -479,49 +401,20 @@ export default function GraphPageClient() {
         }, "Conexão apagada.");
         return;
       }
-      const geIndex = rawEdgeId.indexOf("ge:");
-      const resolvedEdgeId = rawEdgeId.startsWith("ge:")
-        ? rawEdgeId
-        : geIndex >= 0
-          ? rawEdgeId.slice(geIndex)
-          : rawEdgeId;
-      if (!resolvedEdgeId.startsWith("ge:")) {
-        console.error("[graph-edge-delete] invalid edge id", { edgeId, resolvedEdgeId });
-        setGraphNotice({ tone: "error", text: `Esta conexao nao pode ser apagada pela UI (${rawEdgeId || "sem id"}).` });
-        return;
-      }
-      setData((current) => current ? {
-        ...current,
-        edges: (current.edges || []).filter((edge) => {
-          const candidate = String(edge?.data?.original_edge_id || edge?.id || "");
-          return candidate !== resolvedEdgeId && edge?.id !== resolvedEdgeId;
-        }),
-      } : current);
-      try {
-        console.info("[graph-edge-delete] deleting", { edgeId, resolvedEdgeId });
-        await api.deleteGraphEdge(resolvedEdgeId);
-        await load();
-        console.info("[graph-edge-delete] deleted", { resolvedEdgeId });
-        setGraphNotice({ tone: "success", text: "Conexao apagada." });
-        window.setTimeout(() => setGraphNotice(null), 2200);
-      } catch (error) {
-        console.error("[graph-edge-delete] failed", { edgeId, resolvedEdgeId, error });
-        await load();
-        setGraphNotice({
-          tone: "error",
-          text: error instanceof Error ? error.message : "Nao foi possivel apagar a conexao.",
-        });
-      }
+      setGraphNotice({ tone: "error", text: "Exclusao de aresta requer documento Graph JSON v2 publicado." });
+      return;
     },
-    [load, useGraphJsonV2, docGraph, publishEditedGraph],
+    [docGraph, publishEditedGraph],
   );
 
   const handleDeleteNode = useCallback(
     async (nodeId: string) => {
+      if (!docGraph) {
+        setGraphNotice({ tone: "error", text: "Exclusao de node requer documento Graph JSON v2 publicado." });
+        return;
+      }
       const node = data?.nodes?.find((item) => item.id === nodeId);
-      const sourceTable = String(node?.data?.source_table || "");
-      const sourceId = String(node?.data?.source_id || node?.data?.item_id || "");
-      if (!nodeId.startsWith("gn:") && !(sourceTable === "knowledge_items" && sourceId)) {
+      if (!node) {
         setGraphNotice({ tone: "error", text: "Este card nao pode ser apagado pela UI." });
         return;
       }
@@ -531,15 +424,15 @@ export default function GraphPageClient() {
         return;
       }
       try {
-        if (sourceTable === "knowledge_items" && sourceId) {
-          await api.deleteKnowledgeItem(sourceId);
-        } else {
-          await api.deleteGraphNode(nodeId);
-        }
+        await publishEditedGraph((graph) => {
+          graph.nodes = (Array.isArray(graph.nodes) ? graph.nodes : []).filter(
+            (item: any) => String(item?.id) !== nodeId,
+          );
+          graph.edges = (Array.isArray(graph.edges) ? graph.edges : []).filter(
+            (edge: any) => String(edge?.source) !== nodeId && String(edge?.target) !== nodeId,
+          );
+        }, "Card apagado.");
         if (selectedNode?.id === nodeId) setSelectedNode(null);
-        await load();
-        setGraphNotice({ tone: "success", text: "Card apagado." });
-        window.setTimeout(() => setGraphNotice(null), 2200);
       } catch (error) {
         setGraphNotice({
           tone: "error",
@@ -547,7 +440,7 @@ export default function GraphPageClient() {
         });
       }
     },
-    [data?.nodes, load, selectedNode?.id],
+    [data?.nodes, docGraph, publishEditedGraph, selectedNode?.id],
   );
 
   const appendSofiaMessage = useCallback((role: SofiaChatMessage["role"], text: string, pending = false) => {

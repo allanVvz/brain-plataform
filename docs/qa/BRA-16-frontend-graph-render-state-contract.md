@@ -9,7 +9,7 @@ Product Sign-off: CEO / Product Owner
 
 - Keep current stack and boundaries:
   - Frontend QA route in Next.js: `dashboard/app/api/qa/graph-render-state/route.ts`
-  - Graph source in AI Brain backend (FastAPI + Supabase graph tables), fetched via `/knowledge/graph-data`
+  - Graph source in AI Brain backend (FastAPI), fetched via `/graph-documents/current`
   - No schema migration, no new table, no Catalog-owned embedding path.
 - AI Brain remains source of validated intelligence.
 - Catalog remains source of commercial input only; it does not own embedding generation.
@@ -58,8 +58,8 @@ Error envelopes:
   - Responsibility: contract normalization and QA assertion surface.
   - No graph truth authored in frontend.
 - Backend ownership:
-  - `/knowledge/graph-data` is canonical graph read contract used by route.
-  - Graph truth comes from `knowledge_nodes` and `knowledge_edges`.
+  - `/graph-documents/current` is the canonical graph read contract used by route.
+  - Graph truth comes from published Graph JSON v2.
 - Graph/business rule ownership:
   - Tree layout and protected-node semantics remain governed by existing graph rules in `AGENTS.md`.
   - No BRA-16 permission to alter graph category/relation semantics.
@@ -101,7 +101,7 @@ Validation plan:
 - Graph Validator + Migration Agent:
   - Validate any future contract-impacting graph persistence changes before deploy.
 - Backend Agent:
-  - Own `/knowledge/graph-data` contract stability and persona-scoped auth behavior.
+  - Own `/graph-documents/current` contract stability and persona-scoped auth behavior.
 - Frontend Agent:
   - Maintain route response envelope and assertion fields used by BRA-10.
 - QA Lead / Environment Owner:

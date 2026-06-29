@@ -293,7 +293,7 @@ Catalog products, copy nodes, asset nodes, briefing text — **none** of these g
 | 2 | Implement `GET /graph-documents/current` (returns empty if no document exists yet) | remove route |
 | 3 | Implement `POST /graph-documents/apply-patch` against in-memory document | remove route |
 | 4 | Sofia learns to edit `graph_json` via the new endpoints (BRA-71 chain integration) | revert Sofia to v1 path |
-| 5 | Frontend Graph reads `graph_json` when present, falls back to v1 `/knowledge/graph-data` | switch flag |
+| 5 | Frontend Graph reads only `graph_json`; no v1 `/knowledge/graph-data` fallback | restore previous commit |
 | 6 | Create derived indices and reindex hook; v1 tables become read-only mirrors | switch flag |
 | 7 | Embeddings pipeline reads from `knowledge_faq_index` instead of v1 RAG tables | switch flag |
 | 8 | Approve cutover; v1 endpoints documented as legacy | rollback to phase 5 if needed |

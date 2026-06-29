@@ -9,8 +9,8 @@ Preserve current stack and expose QA graph render-state validation through Next.
 
 - Frontend contract route: `GET /api/qa/graph-render-state`
 - Runtime owner: `dashboard` (Next.js on Vercel)
-- Data source owner: `api` (`/knowledge/graph-data` in FastAPI/Docker)
-- Intelligence authority: AI Brain graph (`knowledge_nodes` + `knowledge_edges`), not Catalog
+- Data source owner: `api` (`/graph-documents/current` in FastAPI/Docker)
+- Intelligence authority: published Graph JSON v2, not Catalog
 
 This keeps frontend preflight stable while backend remains source of validated graph truth.
 
@@ -61,6 +61,6 @@ Validation:
 ## Specialist Handoff
 - Tree/Data Architect: no schema change requested; confirm node type normalization coverage for `product_group`.
 - Graph Validator + Migration Agent: validate rebuilt VZ Lupas graph cardinality upstream (3 groups / 9 products).
-- Backend Agent: keep `/knowledge/graph-data` contract stable for layered mode.
+- Backend Agent: keep `/graph-documents/current` contract stable for published Graph JSON v2.
 - Frontend Agent: keep route contract backward-compatible for BRA-10 preflight.
 - QA Lead: execute BRA-10 preflight against QA URL with SSO-aware access and attach evidence.

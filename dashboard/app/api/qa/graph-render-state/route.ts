@@ -13,6 +13,12 @@ type GraphNode = {
   };
 };
 
+type GraphEdge = {
+  id?: string;
+  source?: string;
+  target?: string;
+};
+
 function resolveBackendBase(): string {
   const configured = process.env.API_INTERNAL_BASE_URL;
   const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
@@ -58,7 +64,7 @@ export async function GET(req: NextRequest) {
   }
 
   const backendBase = resolveBackendBase();
-  const upstreamUrl = `${backendBase}/knowledge/graph-data?persona_slug=${encodeURIComponent(personaSlug)}&mode=layered&max_depth=8`;
+  const upstreamUrl = `${backendBase}/graph-documents/current?persona_slug=${encodeURIComponent(personaSlug)}`;
 
   let upstream: Response;
   try {
@@ -96,8 +102,9 @@ export async function GET(req: NextRequest) {
   }
 
   const payload = await upstream.json().catch(() => ({}));
-  const nodes: GraphNode[] = Array.isArray(payload?.nodes) ? payload.nodes : [];
-  const edges = Array.isArray(payload?.edges) ? payload.edges : [];
+  const graphJson = payload?.graph_json || payload?.document?.graph_json || payload?.document || payload;
+  const nodes: GraphNode[] = Array.isArray(graphJson?.nodes) ? graphJson.nodes : [];
+  const edges: GraphEdge[] = Array.isArray(graphJson?.edges) ? graphJson.edges : [];
 
   const productGroups = new Set<string>();
   const products = new Set<string>();
@@ -135,8 +142,8 @@ export async function GET(req: NextRequest) {
         expectedProducts: products.size === 9,
       },
       upstream: {
-        endpoint: "/knowledge/graph-data",
-        mode: "layered",
+        endpoint: "/graph-documents/current",
+        schema: String(graphJson?.schema_version || graphJson?.version || "2.0"),
       },
     },
     { status: 200 },
