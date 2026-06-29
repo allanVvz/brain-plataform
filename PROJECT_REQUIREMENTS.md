@@ -57,6 +57,10 @@ Testes obrigatorios:
 - Nenhum teste ou fixture deve depender de segredo real.
 - GET de routing/integracao deve mascarar segredo e retornar apenas flags de presenca.
 - Webhook com token invalido deve retornar 401 e nao persistir mensagem.
+- Chaves de API OpenAI/Anthropic sao vault por usuario, nao globais de UI.
+- GET de integracoes nunca retorna `secret_ciphertext`, chave em claro ou preview reversivel.
+- Sofia, CRIAR, marketing e pipelines de asset devem preferir chave do usuario autenticado
+  antes de fallback de ambiente.
 
 ## 4. Fonte de verdade do grafo
 

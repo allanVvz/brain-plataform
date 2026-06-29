@@ -49,18 +49,18 @@ CATALOG: list[dict[str, Any]] = [
     {
         "service": "openai",
         "label": "OpenAI",
-        "description": "Modelos auxiliares e pipelines de embeddings.",
-        "scope": "system",
-        "requires_credentials": False,
-        "user_managed": False,
+        "description": "Modelos GPT, embeddings e Sofia por usuario.",
+        "scope": "user",
+        "requires_credentials": True,
+        "user_managed": True,
     },
     {
         "service": "anthropic",
         "label": "Anthropic",
-        "description": "Modelos Claude e classificadores operacionais.",
-        "scope": "system",
-        "requires_credentials": False,
-        "user_managed": False,
+        "description": "Modelos Claude e fallback de Sofia por usuario.",
+        "scope": "user",
+        "requires_credentials": True,
+        "user_managed": True,
     },
     {
         "service": "whatsapp",
@@ -157,12 +157,28 @@ def _normalize_meta_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any
     return access_token, {"business_id": business_id or None, "catalog_id": catalog_id}
 
 
+def _normalize_llm_api_key_payload(service: str, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    api_key = (payload.get("api_key") or "").strip()
+    if not api_key:
+        raise IntegrationValidationError("api_key is required.")
+    lower = api_key.lower()
+    if lower in _PLACEHOLDER_MARKERS:
+        raise IntegrationValidationError(f"{service} credential is a placeholder.")
+    if service == "openai" and not api_key.startswith(("sk-", "sk-proj-", "sk-svcacct-")):
+        raise IntegrationValidationError("OpenAI api_key has an invalid format.")
+    if service == "anthropic" and not api_key.startswith("sk-ant-"):
+        raise IntegrationValidationError("Anthropic api_key has an invalid format.")
+    return api_key, {}
+
+
 def normalize_credentials(service: str, payload: Optional[dict[str, Any]]) -> tuple[Optional[str], dict[str, Any]]:
     body = dict(payload or {})
     if service == "google_sheets":
         return _normalize_google_payload(body)
     if service == "airtable":
         return _normalize_airtable_payload(body)
+    if service in {"openai", "anthropic"}:
+        return _normalize_llm_api_key_payload(service, body)
     if service == "meta":
         return _normalize_meta_payload(body)
     return None, {}
@@ -265,6 +281,9 @@ def validate_credentials(service: str, *, secret_value: str, config_json: Option
         status, error, latency = validate_google_sheets(secret_value, config.get("spreadsheet_id"))
     elif service == "airtable":
         status, error, latency = validate_airtable(secret_value, str(config.get("base_id") or ""))
+    elif service in {"openai", "anthropic"}:
+        _normalize_llm_api_key_payload(service, {"api_key": secret_value})
+        status, error, latency = "connected", None, None
     elif service == "meta":
         status, error, latency = validate_meta(secret_value, str(config.get("catalog_id") or ""))
     else:

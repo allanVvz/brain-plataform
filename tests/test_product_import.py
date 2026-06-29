@@ -303,3 +303,51 @@ def test_normalize_credentials_meta_splits_secret_and_config() -> None:
     )
     assert secret == "tok"
     assert config == {"business_id": "biz", "catalog_id": "cat"}
+
+
+def test_llm_integrations_are_user_managed_and_validate_format() -> None:
+    openai = integration_service.get_catalog_item("openai")
+    anthropic = integration_service.get_catalog_item("anthropic")
+    assert openai["scope"] == "user"
+    assert openai["user_managed"] is True
+    assert anthropic["scope"] == "user"
+    assert anthropic["user_managed"] is True
+
+    secret, config = integration_service.normalize_credentials("openai", {"api_key": "sk-test-123"})
+    assert secret == "sk-test-123"
+    assert config == {}
+
+    with pytest.raises(integration_service.IntegrationValidationError):
+        integration_service.normalize_credentials("openai", {"api_key": "changeme"})
+    with pytest.raises(integration_service.IntegrationValidationError):
+        integration_service.normalize_credentials("anthropic", {"api_key": "sk-test-123"})
+
+
+def test_user_llm_secret_is_not_returned_from_state(monkeypatch) -> None:
+    rows: dict[tuple[str, str], dict] = {}
+
+    def fake_upsert(payload: dict) -> dict:
+        rows[(payload["user_id"], payload["service"])] = dict(payload)
+        return rows[(payload["user_id"], payload["service"])]
+
+    def fake_get(user_id: str, service: str) -> dict | None:
+        row = rows.get((user_id, service))
+        return dict(row) if row else None
+
+    monkeypatch.setattr(integration_service.supabase_client, "upsert_user_integration_connection", fake_upsert)
+    monkeypatch.setattr(integration_service.supabase_client, "get_user_integration_connection", fake_get)
+
+    state = integration_service.save_user_integration(
+        "user-1",
+        "openai",
+        enabled=True,
+        credentials={"api_key": "sk-test-secret"},
+    )
+
+    stored = rows[("user-1", "openai")]
+    assert stored["secret_ciphertext"] != "sk-test-secret"
+    assert state["configured"] is True
+    assert state["enabled"] is True
+    assert state["status"] == "connected"
+    assert "secret_ciphertext" not in state
+    assert "sk-test-secret" not in str(state)

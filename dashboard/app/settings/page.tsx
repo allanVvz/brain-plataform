@@ -7,14 +7,18 @@ import {
   Database,
   Globe2,
   Image,
+  KeyRound,
   Keyboard,
   Moon,
   PlugZap,
   RefreshCw,
   Route,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
   Sun,
+  Trash2,
+  X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { applyLanguage, getStoredLanguage, LANGUAGE_OPTIONS, type UiLanguage } from "@/lib/language";
@@ -91,6 +95,11 @@ export default function SettingsPage() {
   const [creatingPersona, setCreatingPersona] = useState(false);
   const [createPersonaError, setCreatePersonaError] = useState("");
   const [createPersonaSuccess, setCreatePersonaSuccess] = useState("");
+  const [apiKeyModal, setApiKeyModal] = useState<null | "selector" | "openai" | "anthropic">(null);
+  const [apiKeyValue, setApiKeyValue] = useState("");
+  const [apiKeyBusy, setApiKeyBusy] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState("");
+  const [apiKeySuccess, setApiKeySuccess] = useState("");
 
   useEffect(() => {
     setPanKey(window.localStorage.getItem(PAN_KEY_STORAGE) || "Control");
@@ -206,6 +215,50 @@ export default function SettingsPage() {
       setLastUpdate(new Date());
     } finally {
       setLoadingIntegrations(false);
+    }
+  }
+
+  function openApiKeyForm(service: "openai" | "anthropic") {
+    setApiKeyValue("");
+    setApiKeyError("");
+    setApiKeySuccess("");
+    setApiKeyModal(service);
+  }
+
+  async function saveApiKey(service: "openai" | "anthropic") {
+    const key = apiKeyValue.trim();
+    setApiKeyError("");
+    setApiKeySuccess("");
+    if (!key) {
+      setApiKeyError("Informe a chave de API.");
+      return;
+    }
+    setApiKeyBusy(true);
+    try {
+      await api.updateUserIntegration(service, { enabled: true, api_key: key });
+      setApiKeySuccess(`${service === "openai" ? "OpenAI" : "Anthropic"} configurado para este usuario.`);
+      setApiKeyValue("");
+      setApiKeyModal(null);
+      await refreshIntegrationState();
+    } catch (error: any) {
+      setApiKeyError(error?.message || "Falha ao salvar a chave.");
+    } finally {
+      setApiKeyBusy(false);
+    }
+  }
+
+  async function removeApiKey(service: "openai" | "anthropic") {
+    setApiKeyError("");
+    setApiKeySuccess("");
+    setApiKeyBusy(true);
+    try {
+      await api.deleteUserIntegrationCredentials(service);
+      setApiKeySuccess(`${service === "openai" ? "OpenAI" : "Anthropic"} removido deste usuario.`);
+      await refreshIntegrationState();
+    } catch (error: any) {
+      setApiKeyError(error?.message || "Falha ao remover a chave.");
+    } finally {
+      setApiKeyBusy(false);
     }
   }
 
@@ -396,6 +449,82 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+
+      <section className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="flex items-start gap-2">
+            <KeyRound size={15} className="mt-1 text-obs-violet" />
+            <div>
+              <h2 className="text-sm font-semibold text-obs-text">Vault de chaves de API</h2>
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-obs-subtle">
+                Cada usuario possui um vault independente. As chaves sao enviadas ao backend, criptografadas e nunca retornam para o navegador.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setApiKeyError("");
+              setApiKeySuccess("");
+              setApiKeyModal("selector");
+            }}
+            className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-obs-violet/30 bg-obs-violet/15 px-3 text-xs font-medium text-obs-violet transition hover:bg-obs-violet/20"
+          >
+            <KeyRound size={13} />
+            Configurar chave
+          </button>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <ApiKeyStatusCard
+            label="OpenAI"
+            description="Usada pela Sofia, marketing, leitura de assets e pipelines OpenAI."
+            item={byService.openai}
+            busy={apiKeyBusy}
+            onConfigure={() => openApiKeyForm("openai")}
+            onRemove={() => removeApiKey("openai")}
+          />
+          <ApiKeyStatusCard
+            label="Anthropic"
+            description="Usada como fallback Claude quando modelos Anthropic forem selecionados."
+            item={byService.anthropic}
+            busy={apiKeyBusy}
+            onConfigure={() => openApiKeyForm("anthropic")}
+            onRemove={() => removeApiKey("anthropic")}
+          />
+        </div>
+        {apiKeyError && (
+          <p className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+            {apiKeyError}
+          </p>
+        )}
+        {apiKeySuccess && (
+          <p className="mt-3 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs text-green-200">
+            {apiKeySuccess}
+          </p>
+        )}
+      </section>
+
+      {apiKeyModal && (
+        <ApiKeyModal
+          mode={apiKeyModal}
+          value={apiKeyValue}
+          busy={apiKeyBusy}
+          error={apiKeyError}
+          onChange={setApiKeyValue}
+          onClose={() => {
+            setApiKeyModal(null);
+            setApiKeyValue("");
+            setApiKeyError("");
+          }}
+          onBack={() => {
+            setApiKeyModal("selector");
+            setApiKeyValue("");
+            setApiKeyError("");
+          }}
+          onSelect={openApiKeyForm}
+          onSave={saveApiKey}
+        />
+      )}
     </div>
   );
 }
@@ -409,6 +538,181 @@ function StatusTile({ label, value, detail, ok }: { label: string; value: string
       </div>
       <p className="mt-2 truncate text-sm font-semibold text-obs-text">{value}</p>
       <p className="mt-1 truncate text-[11px] text-obs-faint">{detail}</p>
+    </div>
+  );
+}
+
+function apiKeyStatus(item: any) {
+  if (!item) return { label: "carregando", ok: false };
+  if (item.configured && item.enabled && ["connected", "healthy"].includes(String(item.status))) return { label: "ativa", ok: true };
+  if (item.configured) return { label: item.enabled ? String(item.status || "configurada") : "desativada", ok: false };
+  return { label: "nao configurada", ok: false };
+}
+
+function ApiKeyStatusCard({
+  label,
+  description,
+  item,
+  busy,
+  onConfigure,
+  onRemove,
+}: {
+  label: string;
+  description: string;
+  item: any;
+  busy: boolean;
+  onConfigure: () => void;
+  onRemove: () => void;
+}) {
+  const status = apiKeyStatus(item);
+  return (
+    <article className="rounded-xl border border-white/10 bg-obs-base/60 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className={`h-2.5 w-2.5 rounded-full ${statusDot(status.ok)}`} />
+            <h3 className="text-sm font-semibold text-obs-text">{label}</h3>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-obs-subtle">{description}</p>
+        </div>
+        <span className="rounded-full border border-white/10 bg-obs-raised px-2 py-1 text-[11px] text-obs-subtle">
+          {status.label}
+        </span>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onConfigure}
+          disabled={busy}
+          className="inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-white/10 bg-obs-raised px-3 text-xs font-medium text-obs-text transition hover:bg-white/[0.06] disabled:opacity-50"
+        >
+          <KeyRound size={12} />
+          {item?.configured ? "Substituir" : "Adicionar"}
+        </button>
+        {item?.configured && (
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={busy}
+            className="inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 text-xs font-medium text-rose-200 transition hover:bg-rose-500/15 disabled:opacity-50"
+          >
+            <Trash2 size={12} />
+            Remover
+          </button>
+        )}
+      </div>
+      <p className="mt-3 flex items-center gap-2 text-[11px] text-obs-faint">
+        <ShieldCheck size={12} />
+        Valor mascarado por contrato: esta tela mostra apenas status, nunca a chave.
+      </p>
+    </article>
+  );
+}
+
+function ApiKeyModal({
+  mode,
+  value,
+  busy,
+  error,
+  onChange,
+  onClose,
+  onBack,
+  onSelect,
+  onSave,
+}: {
+  mode: "selector" | "openai" | "anthropic";
+  value: string;
+  busy: boolean;
+  error: string;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onBack: () => void;
+  onSelect: (service: "openai" | "anthropic") => void;
+  onSave: (service: "openai" | "anthropic") => void;
+}) {
+  const serviceLabel = mode === "openai" ? "OpenAI" : "Anthropic";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-obs-faint">Vault de API</p>
+            <h3 className="mt-1 text-lg font-semibold text-obs-text">
+              {mode === "selector" ? "Escolha a chave para configurar" : `Configurar ${serviceLabel}`}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-white/10 bg-obs-raised p-2 text-obs-subtle transition hover:text-obs-text"
+            aria-label="Fechar"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {mode === "selector" ? (
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => onSelect("openai")}
+              className="rounded-xl border border-white/10 bg-obs-base/60 p-4 text-left transition hover:border-obs-violet/40 hover:bg-obs-violet/10"
+            >
+              <KeyRound size={16} className="text-obs-violet" />
+              <p className="mt-3 text-sm font-semibold text-obs-text">OpenAI</p>
+              <p className="mt-1 text-xs leading-5 text-obs-subtle">GPT, embeddings, assets e Sofia.</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelect("anthropic")}
+              className="rounded-xl border border-white/10 bg-obs-base/60 p-4 text-left transition hover:border-obs-violet/40 hover:bg-obs-violet/10"
+            >
+              <KeyRound size={16} className="text-obs-violet" />
+              <p className="mt-3 text-sm font-semibold text-obs-text">Anthropic</p>
+              <p className="mt-1 text-xs leading-5 text-obs-subtle">Claude e fallback de modelo.</p>
+            </button>
+          </div>
+        ) : (
+          <div className="mt-5 space-y-4">
+            <label className="block space-y-2">
+              <span className="text-sm text-obs-text">Chave de API {serviceLabel}</span>
+              <input
+                type="password"
+                value={value}
+                onChange={(event) => onChange(event.target.value)}
+                placeholder={mode === "openai" ? "sk-..." : "sk-ant-..."}
+                autoComplete="off"
+                className="w-full rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+              />
+            </label>
+            <div className="rounded-xl border border-white/10 bg-obs-base/60 px-3 py-2 text-xs leading-5 text-obs-subtle">
+              A chave sera enviada somente para o backend autenticado, criptografada no banco e usada apenas nas chamadas do usuario atual.
+            </div>
+            {error && (
+              <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                {error}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onBack}
+                className="rounded-lg border border-white/10 bg-obs-raised px-3 py-2 text-xs text-obs-subtle transition hover:text-obs-text"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={() => onSave(mode)}
+                disabled={busy}
+                className="rounded-lg border border-obs-violet/30 bg-obs-violet/15 px-3 py-2 text-xs font-medium text-obs-violet transition hover:bg-obs-violet/20 disabled:opacity-50"
+              >
+                {busy ? "Salvando..." : "Salvar chave"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
