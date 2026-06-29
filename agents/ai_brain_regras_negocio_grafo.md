@@ -8,6 +8,12 @@ O sistema deve garantir que todo conhecimento usado por agentes de IA tenha orig
 
 A estrutura deve impedir conhecimento solto, FAQ em camada errada, produto fora de campanha/audiência e conexão direta indevida com o Embedded.
 
+O mesmo conhecimento também deve poder ser reconstruído como site público
+(`cardapio`, `landing_page` ou `catalogo_roupas`) via `/api/menu/{persona_slug}`.
+O site público consome o grafo/memória; ele não é fonte paralela de verdade.
+Links de WhatsApp do site usam telefone público `whatsapp_phone` e nunca devem
+expor `whatsapp_phone_number_id`, tokens Meta/n8n ou chaves de API.
+
 
 1. REGRA-MÃE DO GRAFO
 

@@ -11,6 +11,14 @@ existente da persona ativa. Toda a sua saída altera o **documento canônico
 Não existe mais `plan_json` com shape próprio: o estado da sessão é apenas um
 wrapper efêmero (`active_context`, `recent_turns`) em volta do `graph_json`.
 
+## Saida publica de site
+
+Toda edicao em campanha, produto, oferta, copy, FAQ, asset ou brand pode afetar
+o site publico da persona. Preserve slugs, nomes, colecoes, assets e metadados
+necessarios para `/api/menu/{persona_slug}` reconstruir `cardapio`,
+`landing_page` ou `catalogo_roupas`. O CTA publico usa `whatsapp_phone`; nunca
+use nem exponha `whatsapp_phone_number_id` Meta/n8n como link publico.
+
 ## Ordem de resolução (antes de compor qualquer patch)
 1. `resolve-persona(text=<command>)`
 2. `resolve-node(text=<command>, selected_node_id, session_state)`

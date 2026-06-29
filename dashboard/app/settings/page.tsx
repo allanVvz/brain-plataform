@@ -9,9 +9,12 @@ import {
   Image,
   KeyRound,
   Keyboard,
+  Link2,
+  MessageCircle,
   Moon,
   RefreshCw,
   Route,
+  Save,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
@@ -33,6 +36,25 @@ const PERSONA_SLUG_STORAGE = "ai-brain-persona-slug";
 const PERSONA_ID_STORAGE = "ai-brain-persona-id";
 
 type Theme = "clean" | "dark";
+type PublicSiteDraft = {
+  site_slug: string;
+  site_name: string;
+  format_key: string;
+  default_collection_slug: string;
+  whatsapp_phone: string;
+  whatsapp_message_template: string;
+  catalog_url: string;
+};
+
+const emptySiteDraft: PublicSiteDraft = {
+  site_slug: "",
+  site_name: "",
+  format_key: "cardapio",
+  default_collection_slug: "",
+  whatsapp_phone: "",
+  whatsapp_message_template: "",
+  catalog_url: "",
+};
 
 function applyTheme(theme: Theme) {
   if (typeof document === "undefined") return;
@@ -90,6 +112,12 @@ export default function SettingsPage() {
   const [galleryAssets, setGalleryAssets] = useState<any[]>([]);
   const [menuPayload, setMenuPayload] = useState<any>(null);
   const [menuError, setMenuError] = useState("");
+  const [siteFormats, setSiteFormats] = useState<any[]>([]);
+  const [publicSite, setPublicSite] = useState<any>(null);
+  const [siteDraft, setSiteDraft] = useState<PublicSiteDraft>(emptySiteDraft);
+  const [savingSite, setSavingSite] = useState(false);
+  const [siteError, setSiteError] = useState("");
+  const [siteSuccess, setSiteSuccess] = useState("");
   const [newPersonaName, setNewPersonaName] = useState("");
   const [newPersonaSlug, setNewPersonaSlug] = useState("");
   const [creatingPersona, setCreatingPersona] = useState(false);
@@ -123,6 +151,11 @@ export default function SettingsPage() {
   const tockFatalConnected = personaSlug === "tock-fatal";
   const galleryConnected = countItems(galleryAssets) > 0;
   const menuConnected = !menuError && Boolean(menuPayload?.ok);
+  const siteConnected = Boolean(publicSite?.site?.slug || menuPayload?.site?.slug);
+  const activeSiteFormat = useMemo(
+    () => siteFormats.find((format) => format.key === siteDraft.format_key),
+    [siteFormats, siteDraft.format_key],
+  );
 
   function updatePanKey(value: string) {
     setPanKey(value);
@@ -188,23 +221,38 @@ export default function SettingsPage() {
     setLoadingIntegrations(true);
     setMenuError("");
     try {
-      const [session, healthData, integrationsData, collectionsData, categoriesData, productsData, menuData] =
+      const [session, healthData, integrationsData, formatsData, publicSiteData, collectionsData, categoriesData, productsData, menuData] =
         await Promise.all([
           api.me().catch(() => null),
           api.health().catch(() => null),
           api.integrations().catch(() => []),
+          api.publicSiteFormats().catch(() => []),
+          personaSlug ? api.personaPublicSite(personaSlug).catch(() => null) : Promise.resolve(null),
           api.productCollections({ persona_slug: personaSlug }).catch(() => []),
           api.productCategories({ persona_slug: personaSlug }).catch(() => []),
           api.products({ persona_slug: personaSlug }).catch(() => []),
-          api.menuPayload(personaSlug).catch((error) => {
+          personaSlug ? api.menuPayload(personaSlug).catch((error) => {
             setMenuError(error?.message || "Menu API indisponivel");
             return null;
-          }),
+          }) : Promise.resolve(null),
         ]);
       const list = session?.personas || [];
       setPersonas(list);
       setApiOnline(Boolean(healthData));
       setIntegrations(integrationsData || []);
+      setSiteFormats(formatsData || []);
+      setPublicSite(publicSiteData);
+      if (publicSiteData?.config) {
+        setSiteDraft({
+          site_slug: publicSiteData.config.site_slug || "",
+          site_name: publicSiteData.config.site_name || "",
+          format_key: publicSiteData.config.format_key || "cardapio",
+          default_collection_slug: publicSiteData.config.default_collection_slug || "",
+          whatsapp_phone: publicSiteData.config.whatsapp_phone || "",
+          whatsapp_message_template: publicSiteData.config.whatsapp_message_template || "",
+          catalog_url: publicSiteData.catalog_url || publicSiteData.site?.catalog_url || "",
+        });
+      }
       setCollections(collectionsData || []);
       setCategories(categoriesData || []);
       setProducts(productsData || []);
@@ -215,6 +263,59 @@ export default function SettingsPage() {
       setLastUpdate(new Date());
     } finally {
       setLoadingIntegrations(false);
+    }
+  }
+
+  function updateSiteDraft<K extends keyof PublicSiteDraft>(key: K, value: PublicSiteDraft[K]) {
+    setSiteDraft((draft) => ({ ...draft, [key]: value }));
+    setSiteError("");
+    setSiteSuccess("");
+  }
+
+  async function savePublicSite() {
+    setSiteError("");
+    setSiteSuccess("");
+    if (!personaSlug) {
+      setSiteError("Selecione ou crie uma persona antes de configurar o site.");
+      return;
+    }
+    if (!siteDraft.site_name.trim()) {
+      setSiteError("Informe o nome do site.");
+      return;
+    }
+    if (!siteDraft.site_slug.trim()) {
+      setSiteError("Informe o slug do site.");
+      return;
+    }
+    setSavingSite(true);
+    try {
+      const updated = await api.updatePersonaPublicSite(personaSlug, {
+        site_name: siteDraft.site_name.trim(),
+        site_slug: slugifyPersona(siteDraft.site_slug),
+        format_key: siteDraft.format_key || "cardapio",
+        default_collection_slug: slugifyPersona(siteDraft.default_collection_slug || `cardapio-${personaSlug}-v1`),
+        whatsapp_phone: siteDraft.whatsapp_phone,
+        whatsapp_message_template: siteDraft.whatsapp_message_template,
+        catalog_url: siteDraft.catalog_url.trim() || null,
+      });
+      setPublicSite(updated);
+      if (updated?.config) {
+        setSiteDraft({
+          site_slug: updated.config.site_slug || "",
+          site_name: updated.config.site_name || "",
+          format_key: updated.config.format_key || "cardapio",
+          default_collection_slug: updated.config.default_collection_slug || "",
+          whatsapp_phone: updated.config.whatsapp_phone || "",
+          whatsapp_message_template: updated.config.whatsapp_message_template || "",
+          catalog_url: updated.catalog_url || updated.site?.catalog_url || "",
+        });
+      }
+      setSiteSuccess("Configuracao do site salva.");
+      await refreshIntegrationState();
+    } catch (error: any) {
+      setSiteError(error?.message || "Falha ao salvar o site.");
+    } finally {
+      setSavingSite(false);
     }
   }
 
@@ -286,9 +387,10 @@ export default function SettingsPage() {
       </header>
 
       <section className="rounded-2xl border border-white/10 bg-obs-surface p-4 shadow-sm">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <StatusTile label="API" value={apiOnline ? "conectada" : "pendente"} ok={apiOnline} detail={formatUpdate(lastUpdate)} />
           <StatusTile label="Menu" value={menuConnected ? "ativo" : "erro"} ok={menuConnected} detail={menuError || `/api/menu/${personaSlug || "persona"}`} />
+          <StatusTile label="Site" value={siteConnected ? siteDraft.site_slug || "configurado" : "pendente"} ok={siteConnected} detail={activeSiteFormat?.label || "formato"} />
           <StatusTile label="Produtos" value={String(countItems(products))} ok={countItems(products) > 0} detail={`${countItems(categories)} categorias`} />
           <StatusTile label="Assets" value={String(countItems(galleryAssets))} ok={galleryConnected} detail="Gallery aprovada" />
         </div>
@@ -349,6 +451,131 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+
+      <SettingsDropdown
+        icon={<Globe2 size={15} />}
+        title="Output do site"
+        status={siteConnected ? `${activeSiteFormat?.label || siteDraft.format_key} · ${siteDraft.site_slug || "sem slug"}` : "pendente"}
+        defaultOpen
+      >
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="grid gap-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-2 text-sm">
+                <span className="text-xs font-medium text-obs-subtle">Nome do site</span>
+                <input
+                  value={siteDraft.site_name}
+                  onChange={(event) => updateSiteDraft("site_name", event.target.value)}
+                  placeholder="Baita Cardapio"
+                  className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+                />
+              </label>
+              <label className="grid gap-2 text-sm">
+                <span className="text-xs font-medium text-obs-subtle">Slug publico</span>
+                <input
+                  value={siteDraft.site_slug}
+                  onChange={(event) => updateSiteDraft("site_slug", slugifyPersona(event.target.value))}
+                  placeholder="baita-cardapio"
+                  className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 font-mono text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+                />
+              </label>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-2 text-sm">
+                <span className="text-xs font-medium text-obs-subtle">Formato</span>
+                <select
+                  value={siteDraft.format_key}
+                  onChange={(event) => updateSiteDraft("format_key", event.target.value)}
+                  className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+                >
+                  {(siteFormats.length ? siteFormats : [{ key: "cardapio", label: "Cardapio" }]).map((format) => (
+                    <option key={format.key} value={format.key}>
+                      {format.label || format.key}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-2 text-sm">
+                <span className="text-xs font-medium text-obs-subtle">Colecao padrao</span>
+                <input
+                  value={siteDraft.default_collection_slug}
+                  onChange={(event) => updateSiteDraft("default_collection_slug", slugifyPersona(event.target.value))}
+                  placeholder={`cardapio-${personaSlug || "persona"}-v1`}
+                  className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 font-mono text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+                />
+              </label>
+            </div>
+            <label className="grid gap-2 text-sm">
+              <span className="text-xs font-medium text-obs-subtle">URL publicada</span>
+              <input
+                value={siteDraft.catalog_url}
+                onChange={(event) => updateSiteDraft("catalog_url", event.target.value)}
+                placeholder="https://site-publico.vercel.app/cardapio/baita-cardapio"
+                className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+              />
+            </label>
+            <div className="grid gap-3 md:grid-cols-[0.75fr_1.25fr]">
+              <label className="grid gap-2 text-sm">
+                <span className="text-xs font-medium text-obs-subtle">WhatsApp publico</span>
+                <input
+                  value={siteDraft.whatsapp_phone}
+                  onChange={(event) => updateSiteDraft("whatsapp_phone", event.target.value)}
+                  placeholder="5511999999999"
+                  className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 font-mono text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+                />
+              </label>
+              <label className="grid gap-2 text-sm">
+                <span className="text-xs font-medium text-obs-subtle">Mensagem automatica</span>
+                <input
+                  value={siteDraft.whatsapp_message_template}
+                  onChange={(event) => updateSiteDraft("whatsapp_message_template", event.target.value)}
+                  placeholder="Ola, vim pelo site e quero mais informacoes."
+                  className="rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={savePublicSite}
+                disabled={savingSite || !personaSlug}
+                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-obs-violet/30 bg-obs-violet/15 px-3 text-xs font-medium text-obs-violet transition hover:bg-obs-violet/20 disabled:opacity-50"
+              >
+                <Save size={13} />
+                {savingSite ? "Salvando..." : "Salvar output"}
+              </button>
+              {siteSuccess && <span className="text-xs text-green-300">{siteSuccess}</span>}
+              {siteError && <span className="text-xs text-rose-200">{siteError}</span>}
+            </div>
+          </div>
+
+          <div className="grid gap-3">
+            <StatusTile label="Formato ativo" value={activeSiteFormat?.label || siteDraft.format_key || "cardapio"} ok={Boolean(siteDraft.format_key)} detail="registry do banco" />
+            <StatusTile label="Rota sugerida" value={publicSite?.site?.route_path || `/${siteDraft.format_key || "site"}/${siteDraft.site_slug || "slug"}`} ok={Boolean(siteDraft.site_slug)} detail="consumida pelo repo publico" />
+            <div className="rounded-xl border border-white/10 bg-obs-base/60 p-3">
+              <div className="flex items-center gap-2 text-xs font-medium text-obs-subtle">
+                <MessageCircle size={13} className="text-green-300" />
+                Preview WhatsApp
+              </div>
+              {publicSite?.site?.whatsapp?.href ? (
+                <a
+                  href={publicSite.site.whatsapp.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-flex max-w-full items-center gap-2 truncate rounded-lg border border-green-400/20 bg-green-400/10 px-3 py-2 text-xs text-green-200"
+                >
+                  <Link2 size={12} />
+                  {publicSite.site.whatsapp.href}
+                </a>
+              ) : (
+                <p className="mt-3 text-xs leading-5 text-obs-subtle">
+                  Salve um telefone publico para gerar o link wa.me. Tokens Meta/n8n nao aparecem neste payload.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </SettingsDropdown>
 
       <SettingsDropdown
         icon={<KeyRound size={15} />}

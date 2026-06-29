@@ -205,6 +205,17 @@ export const api = {
   persona: (slug: string) => req<any>(`/personas/${slug}`),
   updatePersonaCatalogUrl: (slug: string, catalog_url: string | null) =>
     req<any>(`/personas/${slug}`, { method: "PATCH", body: JSON.stringify({ catalog_url }) }),
+  publicSiteFormats: () => req<any[]>("/api/public-site-formats"),
+  personaPublicSite: (slug: string) => req<any>(`/personas/${encodeURIComponent(slug)}/public-site`),
+  updatePersonaPublicSite: (slug: string, body: {
+    site_slug?: string;
+    site_name?: string;
+    format_key?: string;
+    default_collection_slug?: string;
+    whatsapp_phone?: string;
+    whatsapp_message_template?: string;
+    catalog_url?: string | null;
+  }) => req<any>(`/personas/${encodeURIComponent(slug)}/public-site`, { method: "PATCH", body: JSON.stringify(body) }),
   audiences: (personaId: string) => req<any[]>(`/audiences?persona_id=${encodeURIComponent(personaId)}`),
   createAudience: (body: { persona_id: string; name: string; slug?: string; description?: string; source_type?: string }) =>
     req<any>("/audiences", { method: "POST", body: JSON.stringify(body) }),

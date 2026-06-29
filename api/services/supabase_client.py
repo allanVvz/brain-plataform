@@ -8,7 +8,10 @@ import httpx
 from supabase import create_client, Client, ClientOptions
 from typing import Any, Optional
 
+from services.public_site import DEFAULT_FORMATS
+
 _client: Optional[Client] = None
+_UNSET = object()
 _TRANSIENT_ERROR_MARKERS = (
     "Server disconnected",
     "RemoteProtocolError",
@@ -2613,6 +2616,31 @@ def get_persona_by_id(persona_id: str) -> Optional[dict]:
 
 def upsert_persona(data: dict) -> None:
     get_client().table("personas").upsert(data, on_conflict="slug").execute()
+
+
+def list_public_site_formats(enabled_only: bool = True) -> list:
+    q = get_client().table("public_site_formats").select("*").order("sort_order").order("label")
+    if enabled_only:
+        q = q.eq("enabled", True)
+    rows = _q(q)
+    return rows or [dict(row) for row in DEFAULT_FORMATS if row.get("enabled") or not enabled_only]
+
+
+def get_public_site_format(key: str) -> Optional[dict]:
+    if not key:
+        return None
+    row = _one(get_client().table("public_site_formats").select("*").eq("key", key).eq("enabled", True).maybe_single())
+    if row:
+        return row
+    return next((dict(fmt) for fmt in DEFAULT_FORMATS if fmt.get("key") == key and fmt.get("enabled")), None)
+
+
+def update_persona_config(slug: str, config: dict, *, catalog_url: Any = _UNSET) -> Optional[dict]:
+    payload: dict[str, Any] = {"config": config or {}}
+    if catalog_url is not _UNSET:
+        payload["catalog_url"] = catalog_url
+    _execute_with_retry(get_client().table("personas").update(payload).eq("slug", slug))
+    return get_persona(slug)
 
 
 _PERSONA_ROUTING_FIELDS = (

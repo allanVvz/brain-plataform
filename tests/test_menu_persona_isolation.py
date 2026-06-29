@@ -172,3 +172,35 @@ def test_baita_menu_shows_only_baita_products(store: _Store) -> None:
     names = _menu_product_names(payload)
     assert names and all(n.startswith(("Bebidas", "Doces")) for n in names)
     assert not any(n.startswith(("Radar", "Juliet")) for n in names)
+
+
+def test_menu_payload_exposes_public_site_contract(store: _Store, monkeypatch) -> None:
+    persona = {
+        "id": "p-vz",
+        "slug": "vz-lupas",
+        "name": "VZ Lupas",
+        "catalog_url": "https://catalog.example/vz-lupas",
+        "config": {
+            "public_site": {
+                "site_slug": "vitrine-vz",
+                "site_name": "Vitrine VZ",
+                "format_key": "landing_page",
+                "default_collection_slug": "campanha-vz-v1",
+                "whatsapp_phone": "+55 (11) 99999-8888",
+                "whatsapp_message_template": "Ola, vim pela landing e quero comprar.",
+            }
+        },
+    }
+    monkeypatch.setattr(menu_route.supabase_client, "get_persona", lambda slug: persona if slug == "vz-lupas" else None)
+
+    payload = menu_route.build_menu_payload("vz-lupas")
+
+    assert payload["site"]["slug"] == "vitrine-vz"
+    assert payload["site"]["name"] == "Vitrine VZ"
+    assert payload["site"]["format_key"] == "landing_page"
+    assert payload["site"]["route_path"] == "/landing/vitrine-vz"
+    assert payload["site"]["catalog_url"] == "https://catalog.example/vz-lupas"
+    assert payload["site"]["default_collection_slug"] == "campanha-vz-v1"
+    assert payload["site"]["whatsapp"]["phone"] == "5511999998888"
+    assert payload["site"]["whatsapp"]["href"].startswith("https://wa.me/5511999998888?text=")
+    assert payload["persona"]["collections"][0]["slug"] == "campanha-vz-v1"

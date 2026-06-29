@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from core.landing_slots import LandingSlot, slot_for_metadata
-from services import supabase_client
+from services import public_site, supabase_client
 from utils.rich_text import to_clean_markdown
 
 router = APIRouter(tags=["menu"])
@@ -446,7 +446,12 @@ def _resolve_persona(persona_slug: str) -> dict:
 def _default_collection_slug(persona: dict, persona_slug: str) -> str:
     config = persona.get("config") or {}
     if isinstance(config, dict):
-        explicit = config.get("default_collection_slug") or config.get("collection_slug")
+        public_config = config.get("public_site") if isinstance(config.get("public_site"), dict) else {}
+        explicit = (
+            public_config.get("default_collection_slug")
+            or config.get("default_collection_slug")
+            or config.get("collection_slug")
+        )
         if explicit:
             return str(explicit)
     return f"cardapio-{persona_slug}-v1"
@@ -647,11 +652,17 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
     persona_display_name = persona.get("name") or persona_slug
 
     brand = _brand_payload(persona, persona_slug, cache=cache)
+    formats = supabase_client.list_public_site_formats(enabled_only=True)
 
     return {
         "ok": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "active_collection_id": collection["id"],
+        "site": public_site.public_site_payload(
+            persona,
+            formats,
+            catalog_url=persona.get("catalog_url"),
+        ),
         "persona": {
             "id": persona_id,
             "slug": persona_slug,

@@ -1,6 +1,6 @@
 # Brain Platform Memory
 
-Updated: 2026-06-28
+Updated: 2026-06-29
 
 ## Current Direction
 
@@ -9,6 +9,9 @@ Updated: 2026-06-28
 - The database is local Postgres in Docker (`brain-db`) exposed on `localhost:54322`.
 - A local Supabase-compatible gateway remains as a compatibility layer, using Nginx + PostgREST on `localhost:54321`; it is not Supabase Cloud.
 - Dashboard runs on `localhost:3000`; API runs on `localhost:8000`.
+- Public site outputs are unified under `personas.config.public_site` plus the
+  `public_site_formats` registry. The current public payload is still
+  `/api/menu/{persona_slug}`, now extended with a top-level `site` object.
 
 ## Authentication And Privacy
 
@@ -20,6 +23,20 @@ Updated: 2026-06-28
 - OpenAI and Anthropic credentials are user-managed integrations stored encrypted in `user_integration_connections`.
 - Model calls use the logged-in user's OpenAI/Anthropic credential first, with server env vars only as fallback.
 - API keys must never be exposed through `NEXT_PUBLIC_*` or browser payloads.
+
+## Public Site Output
+
+- Every campaign/product/FAQ/copy/asset memory can feed a public site output.
+- The backend contract is `/api/menu/{persona_slug}` with legacy
+  `persona.collections[]` preserved and new `site` metadata added.
+- Per-persona site config lives in `personas.config.public_site`:
+  `site_slug`, `site_name`, `format_key`, `default_collection_slug`,
+  `whatsapp_phone`, `whatsapp_message_template`.
+- Fixed site formats live in `public_site_formats`; initial keys are `cardapio`,
+  `landing_page` and `catalogo_roupas`.
+- `whatsapp_phone` is public CTA data for `wa.me`; it must not be confused with
+  Meta `whatsapp_phone_number_id` used by n8n/Business routing.
+- `personas.catalog_url` remains the external published URL pointer.
 
 ## Local Validation Results
 
@@ -85,7 +102,7 @@ Validated:
 ## Sofia Graph Tab Integration - 2026-06-28
 
 - Integrated Sofia side panel into `/knowledge/graph` from `origin/study-branch-state-audit-20260628`.
-- Graph tab now attempts Graph JSON v2 by default (`NEXT_PUBLIC_GRAPH_JSON_V2 !== "0"`) and falls back to v1 `/knowledge/graph-data` when no v2 document is published.
+- Graph tab uses Graph JSON v2 as the UI contract; v1 tables remain backend-derived/legacy indexes, not the Graph UI fallback.
 - Added local-first `/sofia/graph-command` backend route with session/plan_json response, persona access guard, visual patch commands, confirm and undo support.
 - Dashboard API now has compatibility methods used by the restored Graph UI: `getGraphDocument`, `publishGraphDocument`, `sofiaGraphCommand`.
 - Validation run:

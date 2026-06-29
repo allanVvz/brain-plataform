@@ -81,6 +81,24 @@ A operacao corrente do projeto e local-first e auditavel via Docker Compose.
 - Criacao operacional de login via banco/script: `cd api && python scripts/create_auth_user.py --email operador@empresa.com --username operador --password <senha> --role operator --persona tock-fatal --can-edit`.
 - Admin inicial deve ser criado com envs `AI_BRAIN_SEED_ADMIN_EMAIL` e `AI_BRAIN_SEED_ADMIN_PASSWORD`, sem senha fixa em producao.
 
+## Output publico de site
+
+- Toda memoria de campanha, produto, oferta, copy, FAQ, asset e brand deve poder
+  ser reconstruida como site publico.
+- O contrato publico atual e `/api/menu/{persona_slug}`. Ele deve preservar
+  `persona.collections[]` e expor tambem o objeto `site`.
+- A configuracao por persona fica em `personas.config.public_site`: `site_slug`,
+  `site_name`, `format_key`, `default_collection_slug`, `whatsapp_phone` e
+  `whatsapp_message_template`.
+- `whatsapp_phone` e telefone publico para link `wa.me`; nao usar como substituto
+  de `whatsapp_phone_number_id` Meta/n8n.
+- Formatos fixos de output ficam em `public_site_formats`. A criacao desta tabela
+  foi aprovada explicitamente para registry de formatos; novos formatos entram
+  pelo banco/migration por enquanto, nao pela UI.
+- Seeds obrigatorios: `cardapio`, `landing_page`, `catalogo_roupas`.
+- Nunca expor token Meta, segredo n8n, chave OpenAI/Anthropic ou
+  `whatsapp_phone_number_id` no payload publico do site.
+
 ## 1. Regra central
 
 Brain AI e um sistema de CRM + Knowledge Graph + RAG.

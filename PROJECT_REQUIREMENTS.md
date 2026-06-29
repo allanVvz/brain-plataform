@@ -553,3 +553,45 @@ Antes de salvar, publicar, renderizar ou alimentar agente:
     `persona_slug` e `whatsapp_phone_number_id` em todo salto Meta/n8n/Brain.
 11. Em n8n, validar token/assinatura antes de aceitar inbound ou marcar outbound
     como enviado.
+12. Em site publico, expor somente dados publicos de renderizacao e CTA; nunca
+    expor segredos Meta, n8n, OpenAI/Anthropic ou identificadores internos de
+    roteamento como `whatsapp_phone_number_id`.
+
+## 16. Output publico de site/cardapio/catalogo
+
+Toda memoria comercial da persona deve poder ser reconstruida como um site
+publico: campanhas, produtos, ofertas, FAQs, copies, assets, brand e informacoes
+gerais. O site publico e um consumidor do grafo/memoria, nao uma nova fonte
+paralela de verdade.
+
+Contrato atual:
+
+- O backend expõe `/api/menu/{persona_slug}` e `/menu/{persona_slug}` como payload
+  publico compatível com o cardapio existente.
+- O payload deve preservar `persona.collections[]` para compatibilidade e tambem
+  expor `site` com `slug`, `name`, `format_key`, `format_label`, `route_path`,
+  `catalog_url`, `default_collection_slug` e `whatsapp`.
+- A configuracao por persona fica em `personas.config.public_site`.
+- Campos por persona: `site_slug`, `site_name`, `format_key`,
+  `default_collection_slug`, `whatsapp_phone`, `whatsapp_message_template`.
+- `personas.catalog_url` continua sendo a URL publicada/externa do site.
+- O CTA WhatsApp publico usa `https://wa.me/<digits>?text=<encoded_template>`.
+- `whatsapp_phone` do site e telefone publico de contato. Ele nao substitui
+  `whatsapp_phone_number_id`, que continua sendo identificador Meta/Business para
+  roteamento operacional.
+- Os formatos fixos ficam no registry `public_site_formats`; a UI apenas escolhe
+  formatos ativos. Novos formatos entram pelo banco/migration por enquanto.
+- Seeds obrigatorios: `cardapio`, `landing_page`, `catalogo_roupas`.
+- A tela Configuracoes deve ter um dropdown "Output do site" com nome, slug,
+  formato, colecao padrao, URL publicada e CTA WhatsApp.
+- O futuro repositorio de sites deve consumir o objeto `site` e `format_key` para
+  renderizar/exportar os formatos possiveis.
+
+Testes obrigatorios:
+
+- `/api/menu/{persona}` preserva o contrato antigo e adiciona `site`.
+- `format_key` invalido e rejeitado em rota autenticada de configuracao.
+- `site_slug` deve ser normalizado e unico.
+- Link WhatsApp deve remover caracteres nao numericos do telefone e codificar
+  a mensagem.
+- Payload publico nao retorna tokens, secrets ou chaves de API.

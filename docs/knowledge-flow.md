@@ -399,6 +399,40 @@ Etapa 3: Brain AI executa -> n8n removido ou reduzido
 
 Importante: `services/vault_sync.py` nao alimenta o n8n diretamente. Ele sincroniza vault local para `knowledge_items` e grafo semantico. Workflows n8n que usam vector store em memoria nao ficam automaticamente conectados ao vault/grafo novo.
 
+## Output publico: site, cardapio e catalogo
+
+O fluxo atual de sites publicos parte da mesma memoria/grafo da persona:
+
+```text
+Sofia / imports / vault / crawler
+-> knowledge_items
+-> knowledge_nodes + knowledge_edges
+-> assets com slots de landing
+-> /api/menu/{persona_slug}
+-> repositorio/renderizador publico de sites
+```
+
+Estado implementado:
+
+- `/api/menu/{persona_slug}` continua retornando `persona.collections[]` para o
+  cardapio existente.
+- O mesmo payload agora inclui `site`, com nome, slug, formato, URL publicada,
+  colecao padrao e CTA WhatsApp publico.
+- A configuracao por persona fica em `personas.config.public_site`.
+- Os formatos fixos ficam em `public_site_formats`: `cardapio`, `landing_page`,
+  `catalogo_roupas`.
+- Assets visuais seguem os slots de `api/core/landing_slots.py` e continuam
+  ligados por metadata/edges do grafo.
+- `whatsapp_phone` e `whatsapp_message_template` constroem link `wa.me`; tokens
+  Meta/n8n e `whatsapp_phone_number_id` nao fazem parte do payload publico.
+
+Obrigacao futura do repositorio de sites:
+
+- Consumir `site.format_key` para escolher renderer/export.
+- Aceitar novos formatos adicionados pelo banco sem alterar a UI interna.
+- Preservar URLs publicas por `site.slug` e manter compatibilidade com
+  `personas.catalog_url`.
+
 ## Fluxo Completo Esperado
 
 ```text

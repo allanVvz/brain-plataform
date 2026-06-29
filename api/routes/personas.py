@@ -1,12 +1,14 @@
 import logging
 import secrets
 import time
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from schemas.persona import PersonaCreate, PersonaUpdate
+from services import public_site
 from services import auth_service, supabase_client, vault_sync
 
 router = APIRouter(prefix="/personas", tags=["personas"])
@@ -19,6 +21,16 @@ class RoutingUpdate(BaseModel):
     outbound_webhook_secret: str | None = None
     inbound_webhook_token: str | None = None
     rotate_inbound_token: bool | None = None
+
+
+class PublicSiteUpdate(BaseModel):
+    site_slug: Optional[str] = None
+    site_name: Optional[str] = None
+    format_key: Optional[str] = None
+    default_collection_slug: Optional[str] = None
+    whatsapp_phone: Optional[str] = None
+    whatsapp_message_template: Optional[str] = None
+    catalog_url: Optional[str] = None
 
 
 def _mask_routing(routing: dict) -> dict:
@@ -68,6 +80,70 @@ def update_persona(slug: str, body: PersonaUpdate, request: Request):
         raise HTTPException(403, "Apenas admin pode editar personas")
     supabase_client.upsert_persona({"slug": slug, **body.model_dump(exclude_none=True)})
     return supabase_client.get_persona(slug)
+
+
+def _public_site_response(persona: dict) -> dict:
+    formats = supabase_client.list_public_site_formats(enabled_only=True)
+    return {
+        "persona_slug": persona.get("slug"),
+        "persona_id": persona.get("id"),
+        "catalog_url": persona.get("catalog_url"),
+        "formats": formats,
+        "config": public_site.normalize_public_site_config(persona, formats),
+        "site": public_site.public_site_payload(persona, formats, catalog_url=persona.get("catalog_url")),
+    }
+
+
+def _assert_unique_site_slug(persona_slug: str, site_slug: str, formats: list[dict]) -> None:
+    for row in supabase_client.get_personas():
+        if row.get("slug") == persona_slug:
+            continue
+        existing = public_site.normalize_public_site_config(row, formats).get("site_slug")
+        if existing == site_slug:
+            raise HTTPException(409, "site_slug ja esta em uso por outra persona")
+
+
+@router.get("/{slug}/public-site")
+def get_public_site(slug: str, request: Request):
+    persona = supabase_client.get_persona(slug)
+    if not persona:
+        raise HTTPException(404, "Persona not found")
+    auth_service.assert_persona_access(request, persona_id=persona.get("id"), persona_slug=slug)
+    return _public_site_response(persona)
+
+
+@router.patch("/{slug}/public-site")
+def update_public_site(slug: str, body: PublicSiteUpdate, request: Request):
+    if not auth_service.is_admin(auth_service.current_user(request)):
+        raise HTTPException(403, "Apenas admin pode editar o site publico")
+    persona = supabase_client.get_persona(slug)
+    if not persona:
+        raise HTTPException(404, "Persona not found")
+    formats = supabase_client.list_public_site_formats(enabled_only=True)
+    current = public_site.normalize_public_site_config(persona, formats)
+    patch = body.model_dump(exclude_unset=True)
+    catalog_url_provided = "catalog_url" in patch
+    catalog_url = patch.pop("catalog_url", None)
+    if "format_key" in patch and not public_site.format_by_key(formats, str(patch["format_key"] or "")):
+        raise HTTPException(422, "format_key deve existir em public_site_formats e estar ativo")
+    next_config = {**current, **patch}
+    next_config = public_site.normalize_public_site_config(
+        {"slug": persona.get("slug"), "name": persona.get("name"), "config": {"public_site": next_config}},
+        formats,
+    )
+    if not next_config.get("site_slug"):
+        raise HTTPException(422, "site_slug obrigatorio")
+    if not next_config.get("site_name"):
+        raise HTTPException(422, "site_name obrigatorio")
+    _assert_unique_site_slug(slug, next_config["site_slug"], formats)
+    merged_config = dict(persona.get("config") or {})
+    merged_config["public_site"] = next_config
+    merged_config["default_collection_slug"] = next_config["default_collection_slug"]
+    if catalog_url_provided:
+        updated = supabase_client.update_persona_config(slug, merged_config, catalog_url=(catalog_url or None))
+    else:
+        updated = supabase_client.update_persona_config(slug, merged_config)
+    return _public_site_response(updated or {**persona, "config": merged_config})
 
 
 @router.get("/{slug}/routing")
