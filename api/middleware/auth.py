@@ -6,24 +6,13 @@ from fastapi.responses import JSONResponse
 from services import auth_service
 
 PUBLIC_EXACT_PATHS = {
-    "/",
     "/health",
     "/health/live",
     "/health/ready",
-    "/health/score",
-    "/health/storage",
     "/auth/login",
     "/auth/logout",
-    "/docs",
-    "/openapi.json",
-    "/redoc",
-}
-
-PUBLIC_PREFIXES = (
     "/process",
-    "/api/menu",
-    "/menu",
-)
+}
 
 ADMIN_TOKEN_HEADER = "x-ai-brain-admin-token"
 AUTHORIZATION_HEADER = "authorization"
@@ -31,7 +20,14 @@ ADMIN_TOKEN_ENV_NAMES = ("QA", "qa", "preview", "PREVIEW", "test", "TEST")
 
 
 def is_public_path(path: str) -> bool:
-    return path in PUBLIC_EXACT_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
+    if path in PUBLIC_EXACT_PATHS:
+        return True
+    # Only the public site contract is anonymous. Nested admin endpoints under
+    # the same prefix must still pass through session/persona authorization.
+    if path.startswith("/api/menu/"):
+        remainder = path.removeprefix("/api/menu/").strip("/")
+        return bool(remainder) and "/" not in remainder
+    return False
 
 
 def _admin_test_token_user(request: Request) -> dict | None:

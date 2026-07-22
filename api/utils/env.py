@@ -15,6 +15,7 @@ def is_production_runtime() -> bool:
         or bool((os.environ.get("CLOUD_RUN_JOB") or "").strip())
         or (os.environ.get("ENV", "").strip().lower() == "production")
         or (os.environ.get("PYTHON_ENV", "").strip().lower() == "production")
+        or (os.environ.get("ENVIRONMENT", "").strip().lower() == "production")
     )
 
 

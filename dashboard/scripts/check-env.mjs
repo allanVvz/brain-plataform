@@ -1,16 +1,8 @@
-const required = ["NEXT_PUBLIC_SUPABASE_URL"];
-
-const oneOf = [["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY"]];
-const apiOneOf = ["API_INTERNAL_URL", "NEXT_PUBLIC_API_URL", "NEXT_PUBLIC_AI_BRAIN_URL"];
+const required = ["API_INTERNAL_BASE_URL", "NEXT_PUBLIC_API_BASE_URL"];
 
 const missing = required.filter((name) => !process.env[name]);
-if (!apiOneOf.some((name) => process.env[name])) {
-  missing.push(`${apiOneOf[0]} (ou ${apiOneOf[1]} / legado ${apiOneOf[2]})`);
-}
-for (const pair of oneOf) {
-  if (!pair.some((name) => process.env[name])) {
-    missing.push(`${pair[0]} (ou ${pair[1]})`);
-  }
+if (process.env.NEXT_PUBLIC_API_BASE_URL && process.env.NEXT_PUBLIC_API_BASE_URL !== "/api-brain") {
+  missing.push("NEXT_PUBLIC_API_BASE_URL=/api-brain");
 }
 
 if (missing.length === 0) {

@@ -3,6 +3,7 @@ const nextConfig = {
   allowedDevOrigins: ["192.168.0.182", "localhost", "127.0.0.1"],
   async rewrites() {
     const configured =
+      process.env.API_INTERNAL_BASE_URL ||
       process.env.API_INTERNAL_URL ||
       process.env.NEXT_PUBLIC_API_URL ||
       process.env.NEXT_PUBLIC_AI_BRAIN_URL;

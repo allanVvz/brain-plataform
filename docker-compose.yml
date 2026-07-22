@@ -1,102 +1,247 @@
+name: brain-ai
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-backend-environment: &backend-environment
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  PORT: "8080"
+  SUPABASE_URL: http://kong:8000
+  SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:?set SUPABASE_PUBLIC_URL}
+  SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY}
+  SUPABASE_SSL_VERIFY: "false"
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS}
+  ALLOWED_ORIGIN_REGEX: ${ALLOWED_ORIGIN_REGEX:-}
+  AI_BRAIN_AUTH_SECRET: ${AI_BRAIN_AUTH_SECRET:?set AI_BRAIN_AUTH_SECRET}
+  AI_BRAIN_WEBHOOK_TOKEN: ${AI_BRAIN_WEBHOOK_TOKEN:?set AI_BRAIN_WEBHOOK_TOKEN}
+  AI_BRAIN_COOKIE_SECURE: ${AI_BRAIN_COOKIE_SECURE:-true}
+  LOCAL_STORAGE_DIR: /data/local-storage
+  VAULT_PATH: /data/vault
+  VAULT_SOURCE_MODE: local
+  RUN_EMBEDDED_WORKERS: "false"
+  SOFIA_TOOLS_ENABLED: ${SOFIA_TOOLS_ENABLED:-true}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
 services:
   db:
     image: pgvector/pgvector:pg16
-    container_name: brain-db
     environment:
-      POSTGRES_DB: brain
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "54322:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-brain}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
-      - brain_postgres_data:/var/lib/postgresql/data
-      - ./docker/local-supabase/init:/docker-entrypoint-initdb.d:ro
-      - ./supabase/migrations:/app/supabase/migrations:ro
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d brain"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 30
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [backend]
+
+  migrate:
+    image: ${MIGRATE_IMAGE:-brain-migrate}:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: infra/migrate.Dockerfile
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-brain}
+      PGSSLMODE: disable
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      APPLY_LEGACY_BOOTSTRAP: ${APPLY_LEGACY_BOOTSTRAP:-1}
+      APPLY_SEED: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    restart: "no"
+    logging: *default-logging
+    networks: [backend]
 
   rest:
     image: postgrest/postgrest:v12.2.8
-    container_name: brain-postgrest
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
-      PGRST_DB_URI: postgres://authenticator:postgres@db:5432/brain
+      PGRST_DB_URI: postgresql://authenticator:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-brain}
       PGRST_DB_SCHEMAS: public,storage
       PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: local-dev-jwt-secret-at-least-32-chars-change-me
+      PGRST_JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       PGRST_DB_USE_LEGACY_GUCS: "false"
-    restart: unless-stopped
-
-  supabase-gateway:
-    image: nginx:1.27-alpine
-    container_name: brain-supabase-gateway
     depends_on:
-      - rest
-    ports:
-      - "54321:8000"
-    volumes:
-      - ./docker/local-supabase/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
+    logging: *default-logging
+    networks: [backend]
 
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: brain-api
+  storage:
+    image: supabase/storage-api:v1.11.13
+    environment:
+      ANON_KEY: ${ANON_KEY:?set ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-brain}
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-52428800}
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: brain-ai
+      REGION: local
+      GLOBAL_S3_BUCKET: brain-ai
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - storage-data:/var/lib/storage
     depends_on:
       db:
         condition: service_healthy
-      supabase-gateway:
-        condition: service_started
-    environment:
-      PORT: "8000"
-      SUPABASE_URL: http://supabase-gateway:8000
-      SUPABASE_SERVICE_KEY: ${LOCAL_SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhaS1icmFpbi1sb2NhbCIsInJlZiI6ImxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwfQ.v0SAbD0EDzJ4V1r_7c2O0-elmx5EoIAB50ky3ShmrNw}
-      SUPABASE_SSL_VERIFY: "false"
-      ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
-      AI_BRAIN_AUTH_SECRET: local-dev-auth-secret-change-me
-      LOCAL_STORAGE_DIR: /app/local-storage
-      PUBLIC_API_URL: http://localhost:8000
-      VAULT_SOURCE_MODE: local
-      RUN_EMBEDDED_WORKERS: "false"
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    ports:
-      - "8000:8000"
-    volumes:
-      - brain_local_storage:/app/local-storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5000/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     restart: unless-stopped
+    logging: *default-logging
+    networks: [backend]
 
-  dashboard:
-    image: node:24-bookworm-slim
-    container_name: brain-dashboard
-    depends_on:
-      - api
-      - supabase-gateway
-    working_dir: /app
-    command: sh -c "npm install --strict-ssl=false && npm run dev -- --hostname 0.0.0.0 --port 3000"
+  kong:
+    image: kong:3.8
     environment:
-      NPM_CONFIG_STRICT_SSL: "false"
-      API_INTERNAL_URL: http://api:8000
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-      NEXT_PUBLIC_SUPABASE_URL: http://localhost:54321
-      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${LOCAL_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhaS1icmFpbi1sb2NhbCIsInJlZiI6ImxvY2FsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMH0.Rkedc_mLxgOvplPbhwZvT0xCDBYnFm1hnWbcjRW8oxE}
-      NEXT_TELEMETRY_DISABLED: "1"
-    ports:
-      - "3000:3000"
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: bundled
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: "off"
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
     volumes:
-      - ./dashboard:/app
-      - brain_dashboard_node_modules:/app/node_modules
-      - brain_dashboard_next:/app/.next
+      - ./infra/kong.yml:/kong/kong.yml:ro
+    depends_on:
+      rest:
+        condition: service_started
+      storage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
     restart: unless-stopped
+    logging: *default-logging
+    networks: [backend]
+
+  api:
+    image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    environment:
+      <<: *backend-environment
+    volumes:
+      - local-storage:/data/local-storage
+      - vault-data:/data/vault
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kong:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [backend]
+
+  workers:
+    image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    command: ["python", "-m", "workers.runner", "--all"]
+    environment:
+      <<: *backend-environment
+    volumes:
+      - local-storage:/data/local-storage
+      - vault-data:/data/vault
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kong:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [backend]
+
+  seed-admin:
+    image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    command: ["python", "scripts/ensure_seed_admin.py"]
+    environment:
+      <<: *backend-environment
+      AI_BRAIN_SEED_ADMIN_EMAIL: ${AI_BRAIN_SEED_ADMIN_EMAIL:-}
+      AI_BRAIN_SEED_ADMIN_USERNAME: ${AI_BRAIN_SEED_ADMIN_USERNAME:-admin}
+      AI_BRAIN_SEED_ADMIN_PASSWORD: ${AI_BRAIN_SEED_ADMIN_PASSWORD:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: "no"
+    logging: *default-logging
+    networks: [backend]
+
+  caddy:
+    image: caddy:2.8-alpine
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
+      STORAGE_DOMAIN: ${STORAGE_DOMAIN:?set STORAGE_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      kong:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [backend]
 
 volumes:
-  brain_postgres_data:
-  brain_local_storage:
-  brain_dashboard_node_modules:
-  brain_dashboard_next:
+  postgres-data:
+  storage-data:
+  local-storage:
+  vault-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  backend:
+    driver: bridge

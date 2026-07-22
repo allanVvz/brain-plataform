@@ -1,5 +1,7 @@
 __pycache__
 **/__pycache__
+*.env
+.env*
 *.pyc
 .pytest_cache
 tmp

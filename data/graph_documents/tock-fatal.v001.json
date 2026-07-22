@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "persona_slug": "tock-fatal",
+  "published_at": "2026-06-28T23:43:30.615511+00:00",
+  "checksum": "890ad8d01cf1cd5d",
+  "graph_json": {
+    "schema_version": "2.0",
+    "graph_id": "baita-conveniencia-main",
+    "tenant": "local",
+    "persona_slug": "baita-conveniencia",
+    "brand_slug": null,
+    "status": "draft",
+    "nodes": [
+      {
+        "id": "node:persona:baita",
+        "node_type": "persona",
+        "slug": "baita-conveniencia",
+        "label": "Baita",
+        "parent_id": null,
+        "data": {}
+      },
+      {
+        "id": "node:brand:baita",
+        "node_type": "brand",
+        "slug": "baita",
+        "label": "Baita",
+        "parent_id": "node:persona:baita",
+        "data": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge:persona-brand",
+        "source": "node:persona:baita",
+        "target": "node:brand:baita",
+        "relation": "belongs_to_persona",
+        "primary_tree": true,
+        "metadata": {}
+      }
+    ],
+    "layout": {
+      "engine": "top-down-canonical",
+      "positions": {}
+    },
+    "validation": {
+      "is_valid": true,
+      "errors": []
+    }
+  }
+}

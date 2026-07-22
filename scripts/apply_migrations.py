@@ -58,6 +58,61 @@ def _bool_env(name: str, default: bool) -> bool:
 LEDGER_TABLE = "public._compose_migrations"
 
 
+def ensure_platform_bootstrap(conn, password: str) -> None:
+    """Create the Supabase-compatible roles and minimal Storage bootstrap.
+
+    Production deliberately does not mount the old local init directory because
+    it contains a known development login. This bootstrap is password-driven,
+    idempotent, and runs before the versioned application migrations.
+    """
+    sql = """
+        create extension if not exists vector;
+        create extension if not exists pgcrypto;
+        do $$
+        begin
+          if not exists (select 1 from pg_roles where rolname = 'anon') then
+            create role anon nologin;
+          end if;
+          if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+            create role authenticated nologin;
+          end if;
+          if not exists (select 1 from pg_roles where rolname = 'service_role') then
+            create role service_role nologin bypassrls;
+          end if;
+          if not exists (select 1 from pg_roles where rolname = 'authenticator') then
+            create role authenticator noinherit login;
+          end if;
+        end
+        $$;
+        grant anon, authenticated, service_role to authenticator;
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        cur.execute("alter role authenticator password %s", (password,))
+    conn.commit()
+
+
+def finalize_platform_grants(conn) -> None:
+    """Keep PostgREST grants aligned after new migrations create objects."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            grant usage on schema public, storage to anon, authenticated, service_role;
+            grant select on all tables in schema public to anon, authenticated;
+            grant select on all tables in schema storage to anon, authenticated;
+            grant select, insert, update, delete on all tables in schema public to service_role;
+            grant select, insert, update, delete on all tables in schema storage to service_role;
+            grant usage, select on all sequences in schema public to anon, authenticated, service_role;
+            grant usage, select on all sequences in schema storage to anon, authenticated, service_role;
+            alter default privileges in schema public grant select on tables to anon, authenticated;
+            alter default privileges in schema public grant select, insert, update, delete on tables to service_role;
+            alter default privileges in schema storage grant select on tables to anon, authenticated;
+            alter default privileges in schema storage grant select, insert, update, delete on tables to service_role;
+            """
+        )
+    conn.commit()
+
+
 def ensure_ledger(conn) -> set[str]:
     """Create the applied-migrations ledger and return the set of applied names.
 
@@ -125,6 +180,10 @@ def main() -> int:
         raise SystemExit(f"no migrations found in {MIGRATIONS_DIR}")
 
     conn = connect_with_retry(dsn)
+    bootstrap_password = os.environ.get("POSTGRES_PASSWORD") or dsn["password"]
+    if not bootstrap_password:
+        raise SystemExit("POSTGRES_PASSWORD is required for the authenticator role")
+    ensure_platform_bootstrap(conn, bootstrap_password)
     applied = ensure_ledger(conn)
     print(f"connected to {dsn['host']}:{dsn['port']}/{dsn['dbname']}, "
           f"{len(migrations)} migrations on disk, {len(applied)} already applied")
@@ -162,6 +221,8 @@ def main() -> int:
                 return 1
         else:
             print(f"warning: SEED_FILE {seed_path} not found, skipping seed")
+
+    finalize_platform_grants(conn)
 
     with conn.cursor() as cur:
         cur.execute(

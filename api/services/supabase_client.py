@@ -2202,9 +2202,13 @@ def _storage_signed_url(bucket: str | None, path: str | None, expires_in: int = 
         signed_url = signed.get("signedURL") if isinstance(signed, dict) else getattr(signed, "signed_url", None) or getattr(signed, "signedURL", None)
         if not signed_url:
             return None
+        internal_base = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+        public_base = (os.environ.get("SUPABASE_PUBLIC_URL") or internal_base).rstrip("/")
         if signed_url.startswith("http"):
+            if internal_base and signed_url.startswith(internal_base):
+                return f"{public_base}{signed_url[len(internal_base):]}"
             return signed_url
-        base = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+        base = public_base
         if signed_url.startswith("/object"):
             return f"{base}/storage/v1{signed_url}"
         return f"{base}{signed_url}"

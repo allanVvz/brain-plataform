@@ -1,5 +1,5 @@
 # One-shot migration runner for the self-hosted stack.
-# Applies docs/qa legacy bootstrap + supabase/migrations/*.sql to the db service.
+# Applies docs/qa legacy bootstrap + all supabase/migrations/*.sql to the db service.
 # Build context is the repo root (needs scripts/, supabase/, docs/qa/).
 FROM python:3.12-slim
 

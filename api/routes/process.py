@@ -1,4 +1,7 @@
+import hmac
+import json
 import logging
+import os
 import re
 import time
 from fastapi import APIRouter, Header, HTTPException
@@ -45,10 +48,18 @@ async def process(
         except Exception as exc:
             logger.warning("get_persona_routing failed: %s", exc)
             persona_routing = None
+    expected_webhook_token = (
+        (persona_routing or {}).get("inbound_webhook_token")
+        or (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
+    )
+    is_production = (os.environ.get("ENVIRONMENT") or "").strip().lower() == "production"
+    if is_production and not expected_webhook_token:
+        raise HTTPException(503, "webhook token is not configured")
+    if expected_webhook_token and not hmac.compare_digest(
+        (x_webhook_token or "").encode("utf-8"), str(expected_webhook_token).encode("utf-8")
+    ):
+        raise HTTPException(401, "invalid webhook token")
     if persona_routing and persona_routing.get("process_mode") == "n8n":
-        expected = persona_routing.get("inbound_webhook_token")
-        if expected and x_webhook_token != expected:
-            raise HTTPException(401, "invalid webhook token")
         # Resolve/create lead bound to the persona, persist inbound message,
         # then hand control back to n8n.
         try:

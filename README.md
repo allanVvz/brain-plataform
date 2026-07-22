@@ -67,19 +67,16 @@ markers/skips explicitos e ambiente local declarado.
 
 ## Producao Self-Hosted
 
-O alvo oficial de producao e Docker self-hosted.
+O dashboard permanece na Vercel. O alvo oficial do backend e uma VPS com Docker Compose e Caddy.
 
 ```powershell
-copy .env.prod.example .env.prod
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+copy .env.compose.example .env.compose
+python infra/generate_keys.py --write .env.compose
+docker compose --env-file .env.compose up -d --build
 ```
 
-Antes de usar em producao real:
-
-- Troque `POSTGRES_PASSWORD`.
-- Troque `AI_BRAIN_AUTH_SECRET`.
-- Gere novos JWTs locais e atualize `LOCAL_SUPABASE_JWT_SECRET`, `LOCAL_SUPABASE_ANON_KEY` e `LOCAL_SUPABASE_SERVICE_ROLE_KEY`.
-- Configure `NEXT_PUBLIC_API_URL`, `PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL` e `ALLOWED_ORIGINS` com o dominio final.
+O procedimento completo de provisionamento, migracao em ate 30 minutos, backup, restore e rollback esta em
+[`docs/VPS_PRODUCTION_RUNBOOK.md`](docs/VPS_PRODUCTION_RUNBOOK.md).
 
 ## Variaveis De URL
 
@@ -87,16 +84,16 @@ Use nomes diferentes para URLs internas e publicas:
 
 | Variavel | Quem usa | Exemplo Docker |
 |---|---|---|
-| `API_INTERNAL_URL` | Next server/rewrite `/api-brain/*` | `http://api:8000` |
-| `NEXT_PUBLIC_API_URL` | Browser/host | `http://localhost:8000` |
-| `SUPABASE_URL` | API | `http://supabase-gateway:8000` |
-| `NEXT_PUBLIC_SUPABASE_URL` | Browser/host | `http://localhost:54321` |
+| `API_INTERNAL_BASE_URL` | Next server/rewrite `/api-brain/*` | `https://api.example.com` |
+| `NEXT_PUBLIC_API_BASE_URL` | Browser | `/api-brain` |
+| `SUPABASE_URL` | API/workers, rede Docker | `http://kong:8000` |
+| `SUPABASE_PUBLIC_URL` | URLs de assets | `https://storage.example.com` |
 
-O codigo pode usar `supabase-py`, `@supabase/ssr` e `@supabase/supabase-js` como bibliotecas cliente, mas elas devem apontar para a stack local/self-hosted.
+O navegador nao acessa PostgREST diretamente nem recebe `SERVICE_ROLE_KEY`.
 
 ## Storage Local
 
-A API usa `LOCAL_STORAGE_DIR=/app/local-storage` no Docker. Arquivos enviados ficam no volume `brain_local_storage`, sem dependencia de Supabase Storage online.
+A API usa `/data/local-storage`; Storage usa volume proprio e o vault usa `/data/vault`.
 
 ## Legado SaaS
 
