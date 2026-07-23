@@ -27,6 +27,18 @@ Per persona config lives in `personas.config.public_site`:
 
 The externally published URL remains `personas.catalog_url`.
 
+## Baita deployment
+
+The Baita public renderer is the separate `Card-pio` repository. Its production
+build must use `VITE_MENU_SOURCE=api` and an absolute
+`VITE_AI_BRAIN_API_URL` for the approved public Brain API. The backend must
+allow `https://baita-cardapio.vercel.app` in `ALLOWED_ORIGINS`. This prevents a
+Vercel static rewrite from masking a failed API request with the local mock.
+
+The current canonical Baita public route is
+`https://baita-cardapio.vercel.app/cardapio/baita`; its Brain persona remains
+`baita-conveniencia` and its default collection is `cardapio-baita-v14`.
+
 ## Format Registry
 
 Formats are stored in `public_site_formats`; the dashboard only selects active

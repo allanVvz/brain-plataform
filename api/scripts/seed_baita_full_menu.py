@@ -665,7 +665,10 @@ def seed_full_menu(image_dir: Path, persona_slug: str = "baita-conveniencia") ->
     for spec in CATEGORY_SPECS:
         category = supabase_client.upsert_knowledge_node({
             "persona_id": persona_id,
-            "node_type": "category",
+            # The public menu contract reads canonical product_group nodes.
+            # Keep the human-facing category vocabulary in the metadata/title,
+            # but materialize the graph with the canonical taxonomy.
+            "node_type": "product_group",
             "slug": spec["slug"],
             "title": spec["title"],
             "summary": f"Categoria do cardapio Baita: {spec['title']}.",
