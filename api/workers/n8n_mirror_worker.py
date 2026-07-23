@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timezone
 from workers.base_worker import BaseWorker
-from services import n8n_client, supabase_client, sre_logger
+from services import integration_service, n8n_client, supabase_client, sre_logger
 
 
 def _walk_values(value):
@@ -30,6 +30,9 @@ class N8nMirrorWorker(BaseWorker):
     interval = int(os.environ.get("N8N_MIRROR_INTERVAL", 300))
 
     def _run_cycle(self):
+        if not integration_service.system_service_has_runtime_credentials("n8n"):
+            sre_logger.info(self.name, "skipped: n8n integration credentials are not configured")
+            return
         executions = n8n_client.get_executions(limit=50)
         synced = 0
         for ex in executions:

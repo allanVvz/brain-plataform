@@ -72,7 +72,12 @@ def test_current_success_and_auth_error(monkeypatch):
 def test_apply_patch_success_and_validation_error(monkeypatch):
     monkeypatch.setattr(graph_documents.auth_service, "current_user", lambda request: {"id": "u1", "role": "admin"})
     monkeypatch.setattr(graph_documents.graph_json_v2_store, "load_current", lambda persona_slug: None)
-    monkeypatch.setattr(graph_documents.graph_json_v2_store, "save_version", lambda persona_slug, version, graph: "abc123")
+    monkeypatch.setattr(graph_documents.graph_json_v2_store, "save_version", lambda persona_slug, version, graph, **kwargs: "abc123")
+    monkeypatch.setattr(
+        graph_documents.graph_json_importer,
+        "import_graph_json",
+        lambda **kwargs: {"ok": True, "nodes_imported": 2, "edges_imported": 1},
+    )
 
     body = graph_documents.ApplyPatchBody(persona_slug="allanvvz", graph_json=_graph_json())
     ok = graph_documents.graph_document_apply_patch(body, _req())
@@ -91,7 +96,11 @@ def test_apply_patch_success_and_validation_error(monkeypatch):
 def test_publish_success_and_validation_error(monkeypatch):
     monkeypatch.setattr(graph_documents.auth_service, "current_user", lambda request: {"id": "u1", "role": "admin"})
     monkeypatch.setattr(graph_documents, "_latest_event", lambda persona_slug, brand_slug: None)
-    monkeypatch.setattr(graph_documents.supabase_client, "insert_event", lambda payload, source=None: {"id": "evt1"})
+    monkeypatch.setattr(
+        graph_documents.graph_json_v2_store,
+        "save_version",
+        lambda persona_slug, version, graph, **kwargs: "pub123",
+    )
     reindex_calls = []
     monkeypatch.setattr(
         graph_documents.graph_json_importer,
@@ -127,7 +136,7 @@ def test_import_json_success_and_validation_error(monkeypatch):
     calls = []
     monkeypatch.setattr(graph_documents.auth_service, "current_user", lambda request: {"id": "u1", "role": "admin"})
     monkeypatch.setattr(graph_documents.graph_json_v2_store, "load_current", lambda persona_slug: None)
-    monkeypatch.setattr(graph_documents.graph_json_v2_store, "save_version", lambda persona_slug, version, graph: "imp123")
+    monkeypatch.setattr(graph_documents.graph_json_v2_store, "save_version", lambda persona_slug, version, graph, **kwargs: "imp123")
     monkeypatch.setattr(
         graph_documents.graph_json_importer,
         "import_graph_json",
@@ -177,7 +186,12 @@ def test_rollback_success_and_not_found(monkeypatch):
         lambda persona_slug, version: graph_obj if version == 1 else None,
     )
     monkeypatch.setattr(graph_documents.graph_json_v2_store, "load_current", lambda persona_slug: (1, graph_obj))
-    monkeypatch.setattr(graph_documents.graph_json_v2_store, "save_version", lambda persona_slug, version, graph: "rb123")
+    monkeypatch.setattr(graph_documents.graph_json_v2_store, "save_version", lambda persona_slug, version, graph, **kwargs: "rb123")
+    monkeypatch.setattr(
+        graph_documents.graph_json_importer,
+        "import_graph_json",
+        lambda **kwargs: {"ok": True, "nodes_imported": 2, "edges_imported": 1},
+    )
 
     ok = graph_documents.graph_document_rollback(
         graph_documents.RollbackBody(persona_slug="allanvvz", version=1),

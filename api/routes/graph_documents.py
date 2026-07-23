@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -48,23 +47,7 @@ class ReindexBody(BaseModel):
 
 
 def _latest_event(persona_slug: str, brand_slug: Optional[str]) -> Optional[dict]:
-    rows = supabase_client.list_system_events(
-        entity_type="graph_document",
-        event_types=["graph_document_published"],
-        limit=200,
-    )
-    filtered: list[dict] = []
-    for row in rows:
-        payload = row.get("payload") or {}
-        if payload.get("persona_slug") != persona_slug:
-            continue
-        if (payload.get("brand_slug") or None) != (brand_slug or None):
-            continue
-        filtered.append(row)
-    if not filtered:
-        return None
-    filtered.sort(key=lambda x: x.get("created_at") or "", reverse=True)
-    return filtered[0]
+    return graph_json_v2_store.latest_event(persona_slug, brand_slug)
 
 
 def _validate_graph_json_or_422(graph_json: dict) -> GraphJson:
@@ -155,7 +138,7 @@ def graph_document_versions(
         payload = row.get("payload") or {}
         if payload.get("persona_slug") != persona_slug:
             continue
-        if (payload.get("brand_slug") or None) != (brand_slug or None):
+        if brand_slug is not None and (payload.get("brand_slug") or None) != brand_slug:
             continue
         out.append(
             {
@@ -175,33 +158,23 @@ def graph_document_publish(body: PublishGraphDocumentBody, request: Request):
     _assert_persona_edit(request, body.persona_slug)
     graph = _validate_graph_json_or_422(body.graph_json)
     _assert_graph_persona_matches(body.persona_slug, graph)
-    current = _latest_event(body.persona_slug, body.brand_slug)
+    document_brand = body.brand_slug if body.brand_slug is not None else graph.brand_slug
+    current = _latest_event(body.persona_slug, document_brand)
     current_payload = (current or {}).get("payload") or {}
     next_version = int(current_payload.get("version") or 0) + 1
-    doc_id = f"{body.persona_slug}:{body.brand_slug or 'default'}:v{next_version}"
-    payload = {
-        "persona_slug": body.persona_slug,
-        "brand_slug": body.brand_slug,
-        "version": next_version,
-        "graph_json": body.graph_json,
-        "source": body.source,
-        "note": body.note,
-        "published_by": (auth_service.current_user(request) or {}).get("id"),
-        "published_at": datetime.now(timezone.utc).isoformat(),
-    }
-    evt = supabase_client.insert_event(
-        {
-            "event_type": "graph_document_published",
-            "entity_type": "graph_document",
-            "entity_id": doc_id,
-            "payload": payload,
-            "level": "info",
-            "source": "graph_documents.publish",
-        },
-        source="graph_documents.publish",
-    )
-    if not evt:
-        raise HTTPException(502, "Failed to persist graph document event")
+    doc_id = f"{body.persona_slug}:{document_brand or 'default'}:v{next_version}"
+    try:
+        graph_json_v2_store.save_version(
+            body.persona_slug,
+            next_version,
+            graph,
+            brand_slug=document_brand,
+            source=f"graph_documents.publish:{body.source}",
+            note=body.note,
+            published_by=(auth_service.current_user(request) or {}).get("id"),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
     # Publishing the canonical document materializes the derived knowledge_nodes /
     # knowledge_edges / vault rows (this is what "aciona os serviços de atualizar o
@@ -220,7 +193,7 @@ def graph_document_publish(body: PublishGraphDocumentBody, request: Request):
         "ok": True,
         "id": doc_id,
         "persona_slug": body.persona_slug,
-        "brand_slug": body.brand_slug,
+        "brand_slug": document_brand,
         "version": next_version,
         "reindex_ok": bool(reindex.get("ok", False)),
         "nodes_imported": reindex.get("nodes_imported"),
@@ -236,7 +209,21 @@ def graph_document_apply_patch(body: ApplyPatchBody, request: Request):
     _assert_graph_persona_matches(body.persona_slug, graph)
     current = graph_json_v2_store.load_current(body.persona_slug)
     next_version = 1 if not current else current[0] + 1
-    checksum = graph_json_v2_store.save_version(body.persona_slug, next_version, graph)
+    checksum = graph_json_v2_store.save_version(
+        body.persona_slug,
+        next_version,
+        graph,
+        source=f"graph_documents.apply_patch:{body.source}",
+        note=body.note,
+        published_by=(auth_service.current_user(request) or {}).get("id"),
+    )
+    try:
+        reindex = graph_json_importer.import_graph_json(
+            graph_json=graph,
+            source=f"graph_documents.apply_patch:{body.source}",
+        ) or {}
+    except Exception as exc:  # pragma: no cover - defensive
+        reindex = {"ok": False, "reindex_error": str(exc)}
     return {
         "ok": True,
         "persona_slug": body.persona_slug,
@@ -244,6 +231,10 @@ def graph_document_apply_patch(body: ApplyPatchBody, request: Request):
         "checksum": checksum,
         "source": body.source,
         "note": body.note,
+        "reindex_ok": bool(reindex.get("ok", False)),
+        "nodes_imported": reindex.get("nodes_imported"),
+        "edges_imported": reindex.get("edges_imported"),
+        "reindex_error": reindex.get("reindex_error"),
     }
 
 
@@ -261,7 +252,14 @@ def graph_document_import_json(body: ImportGraphDocumentBody, request: Request):
         raise HTTPException(422, result)
     current = graph_json_v2_store.load_current(body.persona_slug)
     next_version = 1 if not current else current[0] + 1
-    checksum = graph_json_v2_store.save_version(body.persona_slug, next_version, graph)
+    checksum = graph_json_v2_store.save_version(
+        body.persona_slug,
+        next_version,
+        graph,
+        source=f"graph_documents.import_json:{body.source}",
+        note=body.note,
+        published_by=(auth_service.current_user(request) or {}).get("id"),
+    )
     return {
         **result,
         "version": next_version,
@@ -278,7 +276,21 @@ def graph_document_rollback(body: RollbackBody, request: Request):
         raise HTTPException(404, "Requested rollback version not found")
     current = graph_json_v2_store.load_current(body.persona_slug)
     next_version = 1 if not current else current[0] + 1
-    checksum = graph_json_v2_store.save_version(body.persona_slug, next_version, target)
+    checksum = graph_json_v2_store.save_version(
+        body.persona_slug,
+        next_version,
+        target,
+        source="graph_documents.rollback",
+        note=body.note,
+        published_by=(auth_service.current_user(request) or {}).get("id"),
+    )
+    try:
+        reindex = graph_json_importer.import_graph_json(
+            graph_json=target,
+            source=f"graph_documents.rollback:{body.persona_slug}:v{body.version}",
+        ) or {}
+    except Exception as exc:  # pragma: no cover - defensive
+        reindex = {"ok": False, "reindex_error": str(exc)}
     return {
         "ok": True,
         "persona_slug": body.persona_slug,
@@ -286,6 +298,8 @@ def graph_document_rollback(body: RollbackBody, request: Request):
         "new_version": next_version,
         "checksum": checksum,
         "note": body.note,
+        "reindex_ok": bool(reindex.get("ok", False)),
+        "reindex_error": reindex.get("reindex_error"),
     }
 
 
@@ -346,7 +360,7 @@ def graph_document_events(
         payload = row.get("payload") or {}
         if payload.get("persona_slug") != persona_slug:
             continue
-        if (payload.get("brand_slug") or None) != (brand_slug or None):
+        if brand_slug is not None and (payload.get("brand_slug") or None) != brand_slug:
             continue
         out.append(
             {

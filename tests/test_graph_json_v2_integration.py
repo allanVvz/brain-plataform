@@ -108,7 +108,11 @@ def test_apply_patch_rejects_body_graph_persona_mismatch(monkeypatch):
 def test_publish_persists_event_and_reindexes(monkeypatch):
     calls: dict[str, object] = {}
     monkeypatch.setattr(graph_documents, "_latest_event", lambda persona_slug, brand_slug: None)
-    monkeypatch.setattr(graph_documents.supabase_client, "insert_event", lambda payload, source=None: {"id": "evt1"})
+    monkeypatch.setattr(
+        graph_documents.graph_json_v2_store,
+        "save_version",
+        lambda persona_slug, version, graph, **kwargs: "pub123",
+    )
     def fake_import_graph_json(**kwargs):
         calls["reindex"] = kwargs
         return {"ok": True, "nodes_imported": len(kwargs["graph_json"].nodes), "edges_imported": len(kwargs["graph_json"].edges)}

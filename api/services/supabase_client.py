@@ -705,51 +705,42 @@ def get_leads_for_audience_scope(
 def get_messages(lead_id: str, limit: int = 30) -> list:
     """
     Fetch messages for a lead, ordered ascending (chronological chat order).
-    Primary key: lead_ref (integer) â€” the messages table has NO lead_id column.
-    Accepts either the integer id as string ("117") or a nome string as fallback.
+    The self-hosted schema uses ``messages.lead_id``.  ``lead_ref`` remains a
+    response compatibility alias through ``_normalize_message_row``.
     """
     client = get_client()
 
-    # Primary: lead_ref (legacy integer) or lead_id (local Docker schema).
+    # Primary: lead_id in the self-hosted/local-first schema.
     try:
         import re as _re
         digits = _re.sub(r"\D", "", lead_id or "")
-        # Only use digits if they look like an integer DB id (not a phone number > 12 digits)
         if digits and len(digits) <= 10:
-            try:
-                rows = _q(
-                    client.table("messages")
-                    .select("*")
-                    .eq("lead_ref", int(digits))
-                    .order("created_at", desc=False)
-                    .order("id", desc=False)
-                    .limit(limit)
-                )
-            except Exception:
-                rows = _q(
-                    client.table("messages")
-                    .select("*")
-                    .eq("lead_id", int(digits))
-                    .order("created_at", desc=False)
-                    .order("id", desc=False)
-                    .limit(limit)
-                )
+            rows = _q(
+                client.table("messages")
+                .select("*")
+                .eq("lead_id", int(digits))
+                .order("created_at", desc=False)
+                .order("id", desc=False)
+                .limit(limit)
+            )
             if rows:
                 return _sort_messages_for_chat([_normalize_message_row(row) for row in rows])
     except Exception:
         pass
 
-    # Fallback: filter by nome if a name string was passed
+    # Name lookup belongs to leads; messages do not carry a duplicated nome.
     if lead_id and not lead_id.isdigit():
-        rows = _q(
-            client.table("messages")
-            .select("*")
-            .eq("nome", lead_id)
-            .order("created_at", desc=False)
-            .order("id", desc=False)
-            .limit(limit)
-        )
-        return _sort_messages_for_chat(rows)
+        lead = _one(client.table("leads").select("id").eq("nome", lead_id).maybe_single())
+        if lead and lead.get("id") is not None:
+            rows = _q(
+                client.table("messages")
+                .select("*")
+                .eq("lead_id", lead["id"])
+                .order("created_at", desc=False)
+                .order("id", desc=False)
+                .limit(limit)
+            )
+            return _sort_messages_for_chat([_normalize_message_row(row) for row in rows])
 
     return []
 
@@ -827,7 +818,7 @@ def get_recent_messages(hours: int = 24, limit: int = 500, persona_id: Optional[
     if lead_refs is not None:
         if not lead_refs:
             return []
-        q = q.in_("lead_ref", lead_refs)
+        q = q.in_("lead_id", lead_refs)
     elif persona_id:
         leads = _q(
             client.table("leads")
@@ -837,24 +828,30 @@ def get_recent_messages(hours: int = 24, limit: int = 500, persona_id: Optional[
         lead_refs = [lead.get("id") for lead in leads if lead.get("id") is not None]
         if not lead_refs:
             return []
-        q = q.in_("lead_ref", lead_refs)
-    return _q(q)
+        q = q.in_("lead_id", lead_refs)
+    return [_normalize_message_row(row) for row in _q(q)]
 
 
 def get_conversations(hours: int = 168, limit: int = 1000, persona_id: Optional[str] = None, lead_refs: Optional[list[int]] = None) -> list:
     """
     Returns the last message per unique conversation.
 
-    lead_ref is the canonical conversation key. Names are only a fallback for
-    orphan messages because the same contact name can exist under different
-    personas.
+    ``messages.lead_id`` is the canonical key.  The response retains
+    ``lead_ref`` for dashboard compatibility.
     """
     from datetime import datetime, timedelta
     since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
     client = get_client()
+    requested_lead_refs = list(lead_refs) if lead_refs is not None else None
+    if lead_refs is None and persona_id:
+        scoped_leads = _q(client.table("leads").select("id").eq("persona_id", persona_id))
+        lead_refs = [lead.get("id") for lead in scoped_leads if lead.get("id") is not None]
+        if not lead_refs:
+            return []
+
     messages_q = (
         client.table("messages")
-        .select("id,nome,lead_ref,Lead_Stage,texto,created_at,direction,sender_type,status")
+        .select("id,lead_id,role,content,created_at,direction,status,channel,sender_id")
         .gte("created_at", since)
         .order("created_at", desc=True)
         .limit(limit)
@@ -862,9 +859,8 @@ def get_conversations(hours: int = 168, limit: int = 1000, persona_id: Optional[
     if lead_refs is not None:
         if not lead_refs:
             return []
-        messages_q = messages_q.in_("lead_ref", lead_refs)
-    rows = _q(messages_q)
-    # Group by conversation key (nome â†’ lead_ref â†’ lead_id), keep latest message
+        messages_q = messages_q.in_("lead_id", lead_refs)
+    rows = [_normalize_message_row(row) for row in _q(messages_q)]
     lead_refs = sorted({row.get("lead_ref") for row in rows if row.get("lead_ref") is not None})
     leads_by_ref: dict = {}
     for idx in range(0, len(lead_refs), 200):
@@ -876,31 +872,23 @@ def get_conversations(hours: int = 168, limit: int = 1000, persona_id: Optional[
         ):
             leads_by_ref[lead.get("id")] = lead
 
-    known_lead_names = {
-        (lead.get("nome") or "").strip().lower()
-        for lead in leads_by_ref.values()
-        if lead.get("nome")
-    }
     seen: dict = {}
     for row in rows:
         lead_ref = row.get("lead_ref")
         lead = leads_by_ref.get(lead_ref) or {}
-        if persona_id and lead.get("persona_id") != persona_id and lead_refs is None:
+        if persona_id and lead.get("persona_id") != persona_id and requested_lead_refs is None:
             continue
-        row_name = (row.get("nome") or "").strip()
-        if lead_ref is None and row_name.lower() in known_lead_names:
-            continue
-        key = f"lead:{lead_ref}" if lead_ref is not None else (row.get("nome") or "unknown")
+        key = f"lead:{lead_ref}" if lead_ref is not None else f"message:{row.get('id') or 'unknown'}"
         if key not in seen:
             seen[key] = {
                 "key": key,
-                "nome": lead.get("nome") or row.get("nome") or key,
+                "nome": lead.get("nome") or key,
                 "lead_id": lead.get("lead_id"),
                 "lead_ref": lead_ref,
                 "persona_id": lead.get("persona_id"),
                 "interesse_produto": lead.get("interesse_produto"),
-                "Lead_Stage": row.get("Lead_Stage") or lead.get("stage") or "novo",
-                "last_message": row.get("texto") or "",
+                "Lead_Stage": lead.get("stage") or "novo",
+                "last_message": row.get("texto") or row.get("content") or "",
                 "last_direction": row.get("direction") or "",
                 "last_sender_type": row.get("sender_type") or "",
                 "last_at": row.get("created_at") or "",
@@ -910,25 +898,6 @@ def get_conversations(hours: int = 168, limit: int = 1000, persona_id: Optional[
 
 def insert_message(data: dict) -> None:
     client = get_client()
-    try:
-        _execute_with_retry(client.table("messages").insert(data))
-        return
-    except Exception as exc:
-        text = str(exc)
-        legacy_column_mismatch = any(
-            marker in text
-            for marker in (
-                "messages.lead_ref does not exist",
-                "messages.message_id does not exist",
-                "messages.sender_type does not exist",
-                "messages.texto does not exist",
-                "messages.canal does not exist",
-                "messages.nome does not exist",
-            )
-        )
-        if not legacy_column_mismatch:
-            raise
-
     sender_type = str(data.get("sender_type") or "").lower()
     direction = str(data.get("direction") or "").lower()
     role = data.get("role")
@@ -947,7 +916,25 @@ def insert_message(data: dict) -> None:
         "created_at": data.get("created_at"),
     }
     mapped = {k: v for k, v in mapped.items() if v is not None}
-    _execute_with_retry(client.table("messages").insert(mapped))
+    try:
+        _execute_with_retry(client.table("messages").insert(mapped))
+        return
+    except Exception as exc:
+        text = str(exc)
+        current_column_mismatch = any(
+            marker in text
+            for marker in (
+                "messages.lead_id does not exist",
+                "messages.role does not exist",
+                "messages.content does not exist",
+                "messages.channel does not exist",
+                "messages.sender_id does not exist",
+            )
+        )
+        if not current_column_mismatch:
+            raise
+    # Compatibility fallback for a legacy remote schema.
+    _execute_with_retry(client.table("messages").insert(data))
 
 
 # â”€â”€ Knowledge Graph: nodes & edges (migration 008) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
