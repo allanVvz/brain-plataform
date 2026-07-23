@@ -73,6 +73,9 @@ describe("GraphPageClient v2 loading", () => {
     await screen.findByText("Grafo de Conhecimento");
 
     await waitFor(() => expect(getGraphDocument).toHaveBeenCalledWith("allanvvz"));
+    await waitFor(() =>
+      expect(screen.queryByText("Selecione uma persona para carregar o Graph JSON v2.")).not.toBeInTheDocument(),
+    );
     expect(graphData).not.toHaveBeenCalledWith("allanvvz", expect.anything());
   });
 

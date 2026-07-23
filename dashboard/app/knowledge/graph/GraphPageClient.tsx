@@ -218,6 +218,7 @@ export default function GraphPageClient() {
       const parsed = parseGraphJsonV2Payload(currentDoc);
       if (parsed) {
         const v2Payload = parsed as GraphPayload;
+        setGraphNotice(null);
         setDocGraph(currentDoc?.graph_json || currentDoc?.document?.graph_json || null);
         setData(v2Payload);
         return v2Payload;
