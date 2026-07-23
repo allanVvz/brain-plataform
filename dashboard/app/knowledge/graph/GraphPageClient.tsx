@@ -80,7 +80,7 @@ interface GraphFilterOption {
 }
 
 const MODES: { value: ViewMode; label: string; icon: React.ReactNode; help: string }[] = [
-  { value: "semantic_tree", label: "Árvore",    icon: <GitBranch size={11} />, help: "Hierarquia automatica por aresta principal" },
+  { value: "semantic_tree", label: "Tree",       icon: <GitBranch size={11} />, help: "Hierarquia automatica por aresta principal" },
   { value: "graph",         label: "Grafo",     icon: <Network size={11} />,   help: "Rede organica estilo Obsidian/neural" },
 ];
 function applySofiaGraphPatch(base: GraphPayload, patch: any, persisted: boolean): GraphPayload {
@@ -157,10 +157,15 @@ export default function GraphPageClient() {
   const [pendingGraphSnapshot, setPendingGraphSnapshot] = useState<GraphPayload | null>(null);
   const [sharedSessionId, setSharedSessionId] = useState<string | null>(null);
   const [sharedPlanJson, setSharedPlanJson] = useState<any | null>(null);
+  const [viewRevision, setViewRevision] = useState(0);
 
   // ── URL-driven state ──────────────────────────────────────────
   const focus = searchParams.get("focus") || "";
-  const mode = (searchParams.get("mode") as ViewMode) || "semantic_tree";
+  const requestedMode = searchParams.get("mode");
+  const mode: ViewMode =
+    requestedMode === "graph" || requestedMode === "layered"
+      ? requestedMode
+      : "semantic_tree";
   const includeTags = searchParams.get("tags") === "1";
   const includeMentions = searchParams.get("mentions") === "1";
   const includeTechnical = searchParams.get("tech") === "1";
@@ -178,6 +183,14 @@ export default function GraphPageClient() {
       router.replace(`/knowledge/graph${next.toString() ? `?${next}` : ""}`);
     },
     [router, searchParams],
+  );
+
+  const selectViewMode = useCallback(
+    (nextMode: ViewMode) => {
+      setViewRevision((revision) => revision + 1);
+      updateParam({ mode: nextMode, focus: null });
+    },
+    [updateParam],
   );
 
   useEffect(() => {
@@ -625,12 +638,16 @@ export default function GraphPageClient() {
             </select>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" role="tablist" aria-label="Visualização do grafo">
             {MODES.map((m) => (
               <button
                 key={m.value}
+                type="button"
+                role="tab"
+                aria-selected={mode === m.value}
+                aria-controls="knowledge-graph-canvas"
                 title={m.help}
-                onClick={() => updateParam({ mode: m.value === "semantic_tree" ? null : m.value })}
+                onClick={() => selectViewMode(m.value)}
                 className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition ${
                   mode === m.value
                     ? "bg-obs-violet/20 border-obs-violet text-obs-violet"
@@ -772,7 +789,12 @@ export default function GraphPageClient() {
       </div>
 
       {/* ── Graph canvas ─────────────────────────────────────── */}
-      <div className="flex-1 relative overflow-hidden">
+      <div
+        id="knowledge-graph-canvas"
+        className="flex-1 relative overflow-hidden"
+        role="tabpanel"
+        aria-label={mode === "semantic_tree" ? "Visualização Tree" : "Visualização Grafo"}
+      >
         <SofiaChatPanel
           open={sofiaOpen}
           loading={sofiaLoading}
@@ -793,7 +815,7 @@ export default function GraphPageClient() {
 
         {data && (
           <GraphView
-            key={`${effectivePersonaSlug || "global"}:${mode}:${docGraph?.graph_id || data.nodes[0]?.id || "empty"}`}
+            key={`${effectivePersonaSlug || "global"}:${mode}:${docGraph?.graph_id || data.nodes[0]?.id || "empty"}:${viewRevision}`}
             rawNodes={data.nodes}
             rawEdges={data.edges}
             onNodeClick={(node) => {

@@ -1,16 +1,21 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GraphPageClient from "@/app/knowledge/graph/GraphPageClient";
 import { api } from "@/lib/api";
+
+const navigationMocks = vi.hoisted(() => ({
+  replaceMock: vi.fn(),
+  searchParams: "",
+}));
 
 vi.mock("next/dynamic", () => ({
   default: () => () => <div data-testid="graph-view">graph-view</div>,
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(""),
+  useRouter: () => ({ replace: navigationMocks.replaceMock }),
+  useSearchParams: () => new URLSearchParams(navigationMocks.searchParams),
 }));
 
 vi.mock("lucide-react", () => {
@@ -55,6 +60,8 @@ vi.mock("@/app/knowledge/graph/sofiaReactFlowTools", () => ({
 describe("GraphPageClient v2 loading", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    navigationMocks.replaceMock.mockReset();
+    navigationMocks.searchParams = "";
     window.localStorage.setItem("ai-brain-persona-slug", "allanvvz");
     vi.spyOn(api, "personas").mockResolvedValue([{ id: "p1", slug: "allanvvz", name: "Allan" }]);
     vi.spyOn(api, "sofiaGraphCommand").mockResolvedValue({});
@@ -89,5 +96,26 @@ describe("GraphPageClient v2 loading", () => {
     await waitFor(() => expect(getGraphDocument).toHaveBeenCalledWith("allanvvz"));
     expect(graphData).not.toHaveBeenCalled();
     await screen.findByText("Nenhum Graph JSON v2 publicado para esta persona.");
+  });
+
+  it("opens Tree explicitly and clears any stale focus", async () => {
+    navigationMocks.searchParams = "mode=graph&focus=product%3Atest";
+    vi.spyOn(api, "getGraphDocument").mockResolvedValue({
+      graph_json: {
+        graph_id: "allanvvz-main",
+        nodes: [{ id: "gn:1", slug: "allanvvz", node_type: "persona", label: "Allan" }],
+        edges: [],
+      },
+    });
+
+    render(<GraphPageClient />);
+    const treeTab = await screen.findByRole("tab", { name: "Tree" });
+    expect(treeTab).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.click(treeTab);
+
+    expect(navigationMocks.replaceMock).toHaveBeenCalledWith(
+      "/knowledge/graph?mode=semantic_tree",
+    );
   });
 });
