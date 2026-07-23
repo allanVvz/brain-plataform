@@ -793,6 +793,7 @@ export default function GraphPageClient() {
 
         {data && (
           <GraphView
+            key={`${effectivePersonaSlug || "global"}:${mode}:${docGraph?.graph_id || data.nodes[0]?.id || "empty"}`}
             rawNodes={data.nodes}
             rawEdges={data.edges}
             onNodeClick={(node) => {

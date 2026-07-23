@@ -638,7 +638,7 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
     [rawNodes],
   );
   const viewportKey = useMemo(
-    () => `knowledge-graph-viewport:${personaScope}:${mode}:${focusNodeId || "all"}`,
+    () => `knowledge-graph-viewport:v2:${personaScope}:${mode}:${focusNodeId || "all"}`,
     [personaScope, mode, focusNodeId],
   );
   // Saved node positions are per persona + mode (not per focus): a manual

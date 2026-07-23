@@ -6,6 +6,7 @@ export interface GraphJsonV2Node {
   title?: string;
   status?: string;
   validated?: boolean;
+  data?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   position?: { x?: number; y?: number };
 }
@@ -14,6 +15,7 @@ export interface GraphJsonV2Edge {
   id: string;
   source: string;
   target: string;
+  relation?: string;
   relation_type?: string;
   primary_tree?: boolean;
   invalid?: boolean;
@@ -24,38 +26,67 @@ export interface GraphJsonV2Document {
   version?: string;
   nodes?: GraphJsonV2Node[];
   edges?: GraphJsonV2Edge[];
-  layout?: { positions?: Record<string, { x?: number; y?: number }> };
+  layout?: { positions?: Record<string, { x?: number; y?: number } | [number, number]> };
   meta?: Record<string, unknown>;
 }
 
-function toGraphNode(node: GraphJsonV2Node, positions: Record<string, { x?: number; y?: number }>) {
-  const pos = positions[node.id] || node.position || {};
+function normalizePosition(position: { x?: number; y?: number } | [number, number] | undefined) {
+  if (Array.isArray(position)) {
+    return {
+      x: Number.isFinite(Number(position[0])) ? Number(position[0]) : 0,
+      y: Number.isFinite(Number(position[1])) ? Number(position[1]) : 0,
+    };
+  }
+  return {
+    x: Number.isFinite(Number(position?.x)) ? Number(position?.x) : 0,
+    y: Number.isFinite(Number(position?.y)) ? Number(position?.y) : 0,
+  };
+}
+
+function toGraphNode(
+  node: GraphJsonV2Node,
+  positions: Record<string, { x?: number; y?: number } | [number, number]>,
+) {
+  const flexibleData = {
+    ...(node.data || {}),
+    ...(node.metadata || {}),
+  };
+  const nodeType = node.node_type || String(flexibleData.node_type || "");
+  const label = node.label || node.title || String(flexibleData.label || "") || node.slug || node.id;
   return {
     id: node.id,
-    position: { x: Number(pos.x || 0), y: Number(pos.y || 0) },
+    type: nodeType === "persona" ? "personaNode" : "knowledgeNode",
+    position: normalizePosition(positions[node.id] || node.position),
     data: {
-      slug: node.slug,
-      node_type: node.node_type,
-      label: node.label || node.title || node.slug || node.id,
-      validated: node.validated,
-      status: node.status,
-      ...(node.metadata || {}),
-      metadata: node.metadata || {},
+      ...flexibleData,
+      slug: node.slug || flexibleData.slug,
+      node_type: nodeType,
+      label,
+      validated: node.validated ?? flexibleData.validated,
+      status: node.status || flexibleData.status,
+      metadata: flexibleData,
     },
   };
 }
 
 function toGraphEdge(edge: GraphJsonV2Edge) {
+  const metadata = edge.metadata || {};
+  const relationType =
+    edge.relation_type ||
+    edge.relation ||
+    String(metadata.relation_type || metadata.relation || "") ||
+    "contains";
+  const primaryTree = edge.primary_tree === true || metadata.primary_tree === true;
   return {
     id: edge.id,
     source: edge.source,
     target: edge.target,
     data: {
-      relation_type: edge.relation_type || "main",
-      primary_tree: edge.primary_tree === true,
+      ...metadata,
+      relation_type: relationType,
+      primary_tree: primaryTree,
       invalid: edge.invalid === true,
-      ...(edge.metadata || {}),
-      metadata: edge.metadata || {},
+      metadata,
     },
   };
 }
