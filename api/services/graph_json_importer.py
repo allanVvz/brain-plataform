@@ -104,7 +104,11 @@ def _node_status(node: Node) -> str:
 def _item_status(node: Node) -> str:
     status = str((node.data or {}).get("validation_status") or (node.data or {}).get("status") or "pending").lower()
     if status in {"validated", "approved", "active", "ativo"}:
-        return "approved" if node.node_type == "faq" else "validated"
+        # knowledge_items has its own legacy enum and does not accept the
+        # graph-node status ``validated``.  Keep the graph node validated, but
+        # materialize the source item as ``approved`` (the closest allowed
+        # canonical state).
+        return "approved"
     return "pending"
 
 

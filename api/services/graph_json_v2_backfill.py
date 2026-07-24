@@ -122,6 +122,9 @@ def build_from_derived_graph(persona_slug: str, *, tenant: str = "production") -
     for row in rows:
         node_type = str(row.get("node_type") or "").strip().lower()
         slug = str(row.get("slug") or "").strip().lower()
+        if str(row.get("status") or "").strip().lower() == "archived":
+            skipped.append({"id": str(row.get("id") or ""), "reason": "archived node"})
+            continue
         if node_type == "persona":
             if row.get("id"):
                 legacy_to_doc_id[str(row["id"])] = root.id
@@ -183,6 +186,21 @@ def build_from_derived_graph(persona_slug: str, *, tenant: str = "production") -
 
     def choose_parent(row: dict, node_type: str) -> Node | None:
         allowed_types = _PREFERRED_PARENT_TYPES[node_type]
+        # Product imports carry their canonical group in metadata. Prefer that
+        # explicit source over whichever group happens to be encountered first
+        # when legacy edges are incomplete or use retired relation names.
+        if node_type == "product":
+            meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            group_slug = str(
+                meta.get("product_group_slug")
+                or meta.get("category_slug")
+                or meta.get("parent_group")
+                or ""
+            ).strip().lower()
+            if group_slug:
+                for candidate in nodes_by_type.get("product_group", []):
+                    if candidate.slug == group_slug:
+                        return candidate
         for edge in incoming.get(str(row.get("id") or ""), []):
             source_doc_id = legacy_to_doc_id.get(str(edge.get("source_node_id") or ""))
             source = nodes_by_id.get(source_doc_id or "")

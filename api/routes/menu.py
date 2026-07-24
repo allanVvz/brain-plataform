@@ -533,6 +533,12 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
         node_type="product_group",
         limit=500,
     )
+    # Archived legacy groups remain in the database until the destructive
+    # cleanup window. They must not leak into the public menu projection.
+    all_groups = [
+        row for row in all_groups
+        if str(row.get("status") or "").lower() != "archived"
+    ]
     filtered_groups = [
         row for row in all_groups
         if _meta(row).get("collection_slug") == effective_collection_slug
