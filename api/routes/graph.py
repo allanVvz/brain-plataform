@@ -233,6 +233,93 @@ def _require_graph_promotion_evidence(evidence: dict) -> None:
         raise HTTPException(502, f"Golden Dataset publication incomplete: missing {', '.join(missing)}")
 
 
+def _prepare_faq_for_embedded(source_node: dict) -> tuple[dict, dict]:
+    """Make a FAQ graph node publishable without losing its graph provenance.
+
+    Legacy/imported FAQ nodes can exist before a matching ``knowledge_item``
+    exists.  Connecting one to Embedded is an explicit approval action, so we
+    first materialize the canonical item and its complete structural path.  Do
+    this *before* the publisher creates the terminal edge: an invalid branch
+    must never leave an FAQ -> Embedded edge behind.
+    """
+    if str(source_node.get("node_type") or "").lower() != "faq":
+        raise HTTPException(400, "Only FAQ nodes can be published to the Golden Dataset")
+    persona_id = source_node.get("persona_id")
+    if not persona_id:
+        raise HTTPException(422, "FAQ must belong to a persona before publication")
+
+    chain, path_edges = approved_knowledge_snapshots._build_hierarchy(source_node)
+    path_types = [str(node.get("node_type") or "").lower() for node in chain]
+    if (
+        len(chain) < 2
+        or not path_types
+        or path_types[0] != "persona"
+        or chain[-1].get("id") != source_node.get("id")
+    ):
+        raise HTTPException(422, "FAQ needs a complete active path from Persona before publication")
+
+    question, answer = approved_knowledge_snapshots._faq_parts(source_node, None)
+    if not question or not answer:
+        raise HTTPException(422, "FAQ needs a question and answer before publication")
+    if not approved_knowledge_snapshots._answer_is_useful(question, answer):
+        raise HTTPException(422, "FAQ answer is not sufficient for Golden Dataset publication")
+
+    persona = supabase_client.get_persona_by_id(persona_id) or {"id": persona_id, "slug": persona_id}
+    branch_context = approved_knowledge_snapshots._branch_context(chain, path_edges, persona)
+    branch_path = branch_context.get("path") or []
+    if not branch_path or branch_path[-1].get("node_id") != source_node.get("id"):
+        raise HTTPException(422, "FAQ branch path could not be reconstructed")
+
+    node_meta = source_node.get("metadata") or {}
+    parent = chain[-2]
+    next_meta = {
+        **node_meta,
+        "question": question,
+        "answer": answer,
+        "source": node_meta.get("source") or "pending_source",
+        "source_node_id": parent.get("id"),
+        "source_node_type": parent.get("node_type"),
+        "branch_path": branch_path,
+        "branch_context": branch_context,
+        "approved_from": "faq_embedded_connection",
+    }
+    source_item = _knowledge_item_for_graph_node(source_node)
+    body = f"Pergunta: {question}\nResposta: {answer}"
+    if source_item:
+        supabase_client.update_knowledge_item(source_item["id"], {
+            "status": "approved",
+            "title": source_node.get("title") or question,
+            "content": body,
+            "metadata": {**(source_item.get("metadata") or {}), **next_meta},
+        })
+    else:
+        slug = str(source_node.get("slug") or source_node.get("id"))
+        source_item = supabase_client.insert_knowledge_item({
+            "persona_id": persona_id,
+            "source_id": source_node["id"],
+            "status": "approved",
+            "content_type": "faq",
+            "title": source_node.get("title") or question,
+            "content": body,
+            "metadata": next_meta,
+            "file_path": f"generated/{persona.get('slug') or persona_id}/faq/{slug}.md",
+            "file_type": "md",
+            "tags": list(dict.fromkeys([*(source_node.get("tags") or []), "faq", "golden-dataset"])),
+            "agent_visibility": ["SDR", "Closer", "Classifier"],
+            "canonical_key": f"{persona.get('slug') or persona_id}:faq:{slug}",
+        })
+    if not source_item or not source_item.get("id"):
+        raise HTTPException(502, "Could not materialize FAQ knowledge item for publication")
+
+    updated = supabase_client.update_knowledge_node(source_node["id"], {
+        "source_table": "knowledge_items",
+        "source_id": source_item["id"],
+        "status": "approved",
+        "metadata": {**next_meta, "knowledge_item_id": source_item["id"]},
+    }, mark_related_faqs=False)
+    return (updated or {**source_node, "source_table": "knowledge_items", "source_id": source_item["id"], "metadata": next_meta}), source_item
+
+
 @router.post("/graph-edges")
 def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
     raw_source = (body.source_node_id or "").strip()
@@ -246,7 +333,7 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
     if (raw_source.startswith("ki:") or raw_target.startswith("ki:")) and not (raw_target.startswith("embedded:") or raw_target == "embedded"):
         raise HTTPException(400, "Pending knowledge items cannot be linked from the graph before approval")
     if raw_source.startswith("ki:") and (raw_target.startswith("embedded:") or raw_target == "embedded"):
-        raise HTTPException(400, "Approve the FAQ first. Publication to the Golden Dataset only works from an approved semantic FAQ node to Embedded.")
+        raise HTTPException(400, "Connect the semantic FAQ node to Embedded; a pending knowledge item cannot be published directly.")
 
     source_node = _resolve_graph_node_ref(body.source_node_id, body.persona_id)
     target_node = _resolve_graph_node_ref(body.target_node_id, body.persona_id)
@@ -285,38 +372,41 @@ def create_graph_edge(body: GraphEdgeCreateBody, request: Request):
     source_item = _knowledge_item_for_graph_node(source_node)
     if target_node.get("node_type") == "embedded":
         if source_node.get("node_type") != "faq":
-            raise HTTPException(400, "Only approved FAQ nodes can be published to the Golden Dataset")
-        if not source_item:
-            raise HTTPException(400, "Only approved FAQ nodes backed by knowledge_items can be published to the Golden Dataset")
-        source_status = str(source_item.get("status") or "").lower()
-        if source_status != "approved" and source_status != "embedded":
-            raise HTTPException(400, "Approve the FAQ before publishing it to the Golden Dataset")
+            raise HTTPException(400, "Only FAQ nodes can be published to the Golden Dataset")
     if "primary_tree" not in metadata:
         metadata["primary_tree"] = relation_type == "manual"
     if "embedded" in {source_node.get("node_type"), target_node.get("node_type")} or "gallery" in {source_node.get("node_type"), target_node.get("node_type")}:
         metadata["primary_tree"] = False
     try:
-        edge = supabase_client.upsert_knowledge_edge(
-            source_node_id=source_id,
-            target_node_id=target_id,
-            relation_type=relation_type,
-            persona_id=edge_persona_id,
-            weight=body.weight,
-            metadata=metadata,
-        )
-        gallery_asset = None
-        publication = None
-        if edge and relation_type == "gallery_asset":
-            gallery_content_node = target_node if source_node.get("node_type") == "gallery" else source_node
-            gallery_asset = supabase_client.sync_gallery_asset_node(gallery_content_node, edge)
-        if edge and target_node.get("node_type") == "embedded":
+        # FAQ -> Embedded is a publication command, not a plain edge insert.
+        # The publisher creates the terminal edge only after the FAQ has a
+        # materialized source, an approved status, and a traceable hierarchy.
+        if target_node.get("node_type") == "embedded":
+            source_node, source_item = _prepare_faq_for_embedded(source_node)
+            source_id = source_node["id"]
             publication = approved_knowledge_snapshots.publish_approved_node(
-                source_node.get("id"),
+                source_id,
                 approved_by=(auth_service.current_user(request) or {}).get("id"),
                 require_rag_for_faq=True,
             )
-            # The Embedded body must list every connected FAQ.
+            embedded_edge_id = publication.get("embedded_edge_id")
+            edge = supabase_client.get_knowledge_edge(embedded_edge_id) if embedded_edge_id else None
+            if not edge:
+                raise RuntimeError("Golden Dataset publication did not return an active FAQ -> Embedded edge")
             embedded_markdown.rebuild_embedded_markdown(target_node.get("persona_id") or edge_persona_id)
+        else:
+            edge = supabase_client.upsert_knowledge_edge(
+                source_node_id=source_id,
+                target_node_id=target_id,
+                relation_type=relation_type,
+                persona_id=edge_persona_id,
+                weight=body.weight,
+                metadata=metadata,
+            )
+        gallery_asset = None
+        if edge and relation_type == "gallery_asset":
+            gallery_content_node = target_node if source_node.get("node_type") == "gallery" else source_node
+            gallery_asset = supabase_client.sync_gallery_asset_node(gallery_content_node, edge)
         if edge:
             evidence = {}
             if publication:

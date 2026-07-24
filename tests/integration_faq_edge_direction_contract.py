@@ -123,27 +123,22 @@ def test_graph_edge_api_blocks_faq_outgoing_except_embedded() -> None:
     def resolve(value: str, persona_id=None):
         return {"faq": faq_node, "offer": offer_node, "embedded": embedded_node}.get(value)
 
-    created_edges: list[dict] = []
-
-    def upsert_knowledge_edge(source_node_id, target_node_id, relation_type, persona_id=None, weight=1, metadata=None):
-        edge = {
+    published_edge = {
             "id": "edge-1",
-            "source_node_id": source_node_id,
-            "target_node_id": target_node_id,
-            "relation_type": relation_type,
-            "persona_id": persona_id,
-            "weight": weight,
-            "metadata": metadata or {},
-        }
-        created_edges.append(edge)
-        return edge
+            "source_node_id": "n-faq",
+            "target_node_id": "n-embedded",
+            "relation_type": "manual",
+            "persona_id": "persona-1",
+            "metadata": {"active": True, "primary_tree": False},
+    }
 
     patched = [
         (graph_route, "_resolve_graph_node_ref", resolve),
         (graph_route, "_knowledge_item_for_graph_node", lambda _node: {"id": "item-faq", "status": "approved"}),
+        (graph_route, "_prepare_faq_for_embedded", lambda node: (faq_node, {"id": "item-faq", "status": "approved"})),
         (auth_service, "assert_persona_access", lambda *args, **kwargs: None),
         (auth_service, "current_user", lambda _request: {"id": "user-1"}),
-        (supabase_client, "upsert_knowledge_edge", upsert_knowledge_edge),
+        (supabase_client, "get_knowledge_edge", lambda edge_id: published_edge if edge_id == "edge-1" else None),
         (supabase_client, "insert_event", lambda *args, **kwargs: None),
         (approved_knowledge_snapshots, "publish_approved_node", lambda *args, **kwargs: {
             "approved_snapshot_id": "snapshot-1",
@@ -176,7 +171,7 @@ def test_graph_edge_api_blocks_faq_outgoing_except_embedded() -> None:
             setattr(obj, name, fn)
 
     _assert(result["success"] is True, "API allows FAQ -> embedded publication")
-    _assert(created_edges[-1]["source_node_id"] == "n-faq" and created_edges[-1]["target_node_id"] == "n-embedded", "embedded edge keeps FAQ as source")
+    _assert(result["edge"]["source_node_id"] == "n-faq" and result["edge"]["target_node_id"] == "n-embedded", "embedded edge keeps FAQ as source")
 
 
 def test_frontend_layout_treats_answers_question_as_inbound_to_faq() -> None:
