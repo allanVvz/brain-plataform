@@ -96,6 +96,11 @@ def _write_vault_file(relative_path: str, content: str) -> Path:
 
 def _node_status(node: Node) -> str:
     status = str((node.data or {}).get("validation_status") or (node.data or {}).get("status") or "pending").lower()
+    # Gallery and Embedded are protected terminal nodes.  They are operational
+    # infrastructure, not content awaiting curation, so keep the DB state that
+    # the public projection uses to discover them.
+    if node.node_type in {"gallery", "embedded"} and status in {"validated", "approved", "active", "ativo"}:
+        return "active"
     if status in {"validated", "approved", "active", "ativo"}:
         return "validated"
     return "pending"
@@ -428,12 +433,10 @@ def import_graph_json(*, graph_json: GraphJson, source: str = "graph_json.import
 
     edge_ids: list[str] = []
     for edge in graph_json.edges:
-        if edge.primary_tree is not True:
-            continue
         source_node = graph_nodes_by_doc_id.get(edge.source)
         target_node = graph_nodes_by_doc_id.get(edge.target)
         if not source_node or not target_node:
-            raise RuntimeError(f"primary edge {edge.id} references non-imported node")
+            raise RuntimeError(f"edge {edge.id} references non-imported node")
         relation = edge.relation if edge.relation and edge.relation != "main" else _default_relation(source_node.get("node_type"), target_node.get("node_type"))
         imported = supabase_client.upsert_knowledge_edge(
             source_node["id"],
@@ -442,7 +445,7 @@ def import_graph_json(*, graph_json: GraphJson, source: str = "graph_json.import
             persona_id=persona_id,
             metadata={
                 **(edge.metadata or {}),
-                "primary_tree": True,
+                "primary_tree": edge.primary_tree is True,
                 "active": True,
                 "graph_json_id": graph_json.graph_id,
                 "graph_json_edge_id": edge.id,

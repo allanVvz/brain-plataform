@@ -138,18 +138,6 @@ def _product_assets(products: list[dict], persona_id: str, cache: Optional[dict]
         relation_types=["product_image", "product_has_asset"],
         limit=5000,
     )
-    # Imported product images live as asset knowledge_nodes (metadata.url), not
-    # as approved gallery assets. Resolve those by id so freshly-imported
-    # catalogs render their photos before any gallery curation.
-    asset_node_ids = []
-    for edge in edges:
-        src, tgt = edge.get("source_node_id"), edge.get("target_node_id")
-        asset_node_ids.append(tgt if src in product_ids else src)
-    node_by_id = {
-        str(row["id"]): row
-        for row in supabase_client.list_knowledge_nodes_by_ids([nid for nid in asset_node_ids if nid])
-        if row.get("id") and row.get("node_type") == "asset"
-    }
     out: dict[str, list[dict]] = {}
     for edge in edges:
         source_id = edge.get("source_node_id")
@@ -159,8 +147,10 @@ def _product_assets(products: list[dict], persona_id: str, cache: Optional[dict]
         meta = edge.get("metadata") or {}
         if meta.get("active") is False:
             continue
-        # Prefer the curated gallery asset; fall back to the asset node itself.
-        asset = gallery_by_node.get(str(asset_node_id)) or node_by_id.get(str(asset_node_id))
+        # A public product image is valid only while it remains connected both
+        # to the product and to the Gallery terminal.  This makes graph edits
+        # immediately authoritative for the landing-page projection.
+        asset = gallery_by_node.get(str(asset_node_id))
         if product_id and asset:
             out.setdefault(product_id, []).append({**asset, "_edge": edge})
     return out

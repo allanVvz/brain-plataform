@@ -78,6 +78,37 @@ class _Store:
     def nodes_of(self, node_type, persona_id):
         return [n for (pid, t, _s), n in self.nodes.items() if t == node_type and pid == persona_id]
 
+    def ensure_gallery_node(self, persona_id):
+        return self.upsert_knowledge_node({
+            "persona_id": persona_id,
+            "node_type": "gallery",
+            "slug": "gallery-default",
+            "title": "Gallery",
+            "metadata": {},
+            "status": "active",
+        })
+
+    def list_gallery_assets(self, *, persona_id=None, limit=500):
+        galleries = {node["id"] for node in self.nodes_of("gallery", persona_id)}
+        asset_ids = {
+            edge["source_node_id"]
+            for edge in self.edges
+            if edge["relation_type"] == "gallery_asset"
+            and edge["target_node_id"] in galleries
+            and edge.get("metadata", {}).get("active") is not False
+        }
+        return [
+            {
+                "knowledge_node_id": node["id"],
+                "url": (node.get("metadata") or {}).get("url"),
+                "status": "approved",
+                "metadata": node.get("metadata") or {},
+                "title": node.get("title"),
+            }
+            for node in self.nodes.values()
+            if node["id"] in asset_ids
+        ]
+
 
 class _FakeChain:
     """No-op chainable for supabase_client.get_client().table(...).<...>.execute()."""
@@ -113,6 +144,7 @@ def store(monkeypatch) -> _Store:
     # import side
     monkeypatch.setattr(pis.supabase_client, "upsert_knowledge_node", s.upsert_knowledge_node)
     monkeypatch.setattr(pis.supabase_client, "upsert_knowledge_edge", s.upsert_knowledge_edge)
+    monkeypatch.setattr(pis.supabase_client, "ensure_gallery_node", s.ensure_gallery_node)
     monkeypatch.setattr(pis.supabase_client, "list_product_nodes", s.list_product_nodes)
     monkeypatch.setattr(pis.supabase_client, "upload_to_storage",
                         lambda b, p, d, content_type="application/octet-stream": f"https://storage.local/{b}/{p}")
@@ -125,7 +157,7 @@ def store(monkeypatch) -> _Store:
     monkeypatch.setattr(sc, "list_product_nodes", s.list_product_nodes)
     monkeypatch.setattr(sc, "list_edges_for_nodes", s.list_edges_for_nodes)
     monkeypatch.setattr(sc, "list_knowledge_nodes_by_ids", s.list_knowledge_nodes_by_ids)
-    monkeypatch.setattr(sc, "list_gallery_assets", lambda persona_id=None, limit=500: [])
+    monkeypatch.setattr(sc, "list_gallery_assets", s.list_gallery_assets)
     monkeypatch.setattr(sc, "get_client", lambda: _FakeChain())
     return s
 

@@ -72,6 +72,32 @@ def test_graph_json_v2_validator_rejects_cross_persona_payload():
     assert any("persona ownership mismatch" in error for error in errors)
 
 
+def test_graph_json_v2_validator_requires_asset_to_finish_at_gallery():
+    payload = _graph_json()
+    payload["nodes"] += [
+        {"id": "node:gallery:default", "node_type": "gallery", "slug": "gallery-default", "label": "Gallery", "parent_id": "node:persona:baita"},
+        {"id": "node:asset:brand", "node_type": "asset", "slug": "brand-image", "label": "Imagem", "parent_id": "node:brand:baita"},
+    ]
+    payload["edges"] += [
+        {"id": "edge:persona-gallery", "source": "node:persona:baita", "target": "node:gallery:default", "relation": "contains", "primary_tree": True},
+        {"id": "edge:brand-asset", "source": "node:brand:baita", "target": "node:asset:brand", "relation": "uses_asset", "primary_tree": True},
+    ]
+    graph = GraphJson.model_validate(payload)
+    valid, errors = graph_json_v2_validator.validate_graph_json(graph)
+    assert valid is False
+    assert any("must have a secondary asset -> gallery edge" in error for error in errors)
+
+
+def test_graph_json_v2_validator_allows_unfed_embedded_without_persona_edge():
+    payload = _graph_json()
+    payload["nodes"].append(
+        {"id": "node:embedded:default", "node_type": "embedded", "slug": "embedded-default", "label": "Embedded", "parent_id": "node:persona:baita"}
+    )
+    graph = GraphJson.model_validate(payload)
+    valid, errors = graph_json_v2_validator.validate_graph_json(graph)
+    assert valid is True, errors
+
+
 def test_current_requires_persona_access(monkeypatch):
     monkeypatch.setattr(graph_documents, "_latest_event", lambda persona_slug, brand_slug: None)
     request = _request(

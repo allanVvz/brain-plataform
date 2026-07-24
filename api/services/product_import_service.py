@@ -475,27 +475,68 @@ def _materialize_product(
                 persona_id=persona_id, weight=0.85,
                 metadata={"primary_tree": True, "direction": "product_to_asset", "created_from": "product_import", "is_product_image": True},
             )
+            # Gallery is the terminal curation sink.  The product remains the
+            # asset's primary parent; this secondary edge is what authorizes
+            # the image to appear in a public landing projection.
+            gallery = supabase_client.ensure_gallery_node(persona_id)
+            if gallery:
+                supabase_client.upsert_knowledge_edge(
+                    asset["id"], gallery["id"], "gallery_asset",
+                    persona_id=persona_id, weight=0.9,
+                    metadata={"primary_tree": False, "direction": "asset_to_gallery", "created_from": "product_import"},
+                )
             created_nodes["asset"] = asset.get("id")
 
-    if norm.get("description"):
-        copy_node = supabase_client.upsert_knowledge_node(
+    # Every imported product gets one conservative commercial copy.  It only
+    # repeats known product data and remains pending human validation.
+    copy_summary = (norm.get("description") or f"{norm['name']}.").strip()
+    copy_node = supabase_client.upsert_knowledge_node(
+        {
+            "persona_id": persona_id,
+            "node_type": "copy",
+            "slug": _slugify(f"copy-{slug}"),
+            "title": f"Copy - {norm['name']}",
+            "summary": copy_summary[:240],
+            "metadata": {"source": norm["source"], "parent_slug": slug, "parent_type": "product", "default_for_product": True},
+            "status": "pending_validation",
+        }
+    )
+    if copy_node:
+        supabase_client.upsert_knowledge_edge(
+            product["id"], copy_node["id"], "product_has_copy",
+            persona_id=persona_id, weight=0.7,
+            metadata={"primary_tree": True, "created_from": "product_import"},
+        )
+        created_nodes["copy"] = copy_node.get("id")
+
+        faq = supabase_client.upsert_knowledge_node(
             {
                 "persona_id": persona_id,
-                "node_type": "copy",
-                "slug": _slugify(f"copy-{slug}"),
-                "title": f"Copy - {norm['name']}",
-                "summary": norm["description"][:240],
-                "metadata": {"source": norm["source"], "parent_slug": slug, "parent_type": "product"},
+                "node_type": "faq",
+                "slug": _slugify(f"faq-{slug}-informacoes"),
+                "title": f"Quais informações estão confirmadas sobre {norm['name']}?",
+                "summary": copy_summary[:400],
+                "metadata": {
+                    "question": f"Quais informações estão confirmadas sobre {norm['name']}?",
+                    "answer": copy_summary[:400],
+                    "source": norm["source"],
+                    "parent_slug": copy_node.get("slug"),
+                    "parent_type": "copy",
+                    "source_node_id": copy_node.get("id"),
+                    "source_node_type": "copy",
+                    "branch_path": [],
+                    "default_for_product": True,
+                },
                 "status": "pending_validation",
             }
         )
-        if copy_node:
+        if faq:
             supabase_client.upsert_knowledge_edge(
-                copy_node["id"], product["id"], "supports_copy",
-                persona_id=persona_id, weight=0.6,
-                metadata={"primary_tree": False, "created_from": "product_import"},
+                copy_node["id"], faq["id"], "copy_has_faq",
+                persona_id=persona_id, weight=0.7,
+                metadata={"primary_tree": True, "created_from": "product_import"},
             )
-            created_nodes["copy"] = copy_node.get("id")
+            created_nodes["faq"] = faq.get("id")
 
     # OFFERS: every distinct price becomes its own canonical `offer` node, each
     # with its own FAQ and a separate gallery_asset connection (per spec:
@@ -504,8 +545,6 @@ def _materialize_product(
     offer_count = 0
     if offer_prices:
         currency = norm.get("currency") or "BRL"
-        image_asset_id = (asset or {}).get("id")
-        gallery = supabase_client.ensure_gallery_node(persona_id)
         for price in offer_prices:
             offer_slug = _slugify(f"offer-{slug}-{price}")
             offer = supabase_client.upsert_knowledge_node(
@@ -537,51 +576,14 @@ def _materialize_product(
                 persona_id=persona_id, weight=0.8,
                 metadata={"primary_tree": True, "created_from": "product_import"},
             )
-            # offer -> copy (canonical offer_has_copy; copy can sit above/below)
+            # Offer remains optional context.  The default Copy stays on the
+            # product branch so a catalogue with multiple prices does not give
+            # one Copy several primary parents.
             if copy_node:
                 supabase_client.upsert_knowledge_edge(
                     offer["id"], copy_node["id"], "offer_has_copy",
                     persona_id=persona_id, weight=0.6,
                     metadata={"primary_tree": False, "created_from": "product_import"},
-                )
-            # distinct FAQ per offer
-            faq = supabase_client.upsert_knowledge_node(
-                {
-                    "persona_id": persona_id,
-                    "node_type": "faq",
-                    "slug": _slugify(f"faq-{offer_slug}"),
-                    "title": f"Quanto custa {norm['name']}?",
-                    "summary": f"{norm['name']} custa {currency} {price}.",
-                    "metadata": {
-                        "question": f"Quanto custa {norm['name']} ({currency} {price})?",
-                        "answer": f"{norm['name']} custa {currency} {price}.",
-                        "source": norm["source"],
-                        "parent_slug": offer_slug,
-                        "parent_type": "offer",
-                    },
-                    "status": "pending_validation",
-                }
-            )
-            if faq:
-                supabase_client.upsert_knowledge_edge(
-                    offer["id"], faq["id"], "offer_has_faq",
-                    persona_id=persona_id, weight=0.5,
-                    metadata={"primary_tree": False, "created_from": "product_import"},
-                )
-            # connected separately in gallery: distinct gallery_asset edge per
-            # offer (gallery -> offer keeps each price its own gallery entry;
-            # the product image is referenced in metadata).
-            if gallery:
-                supabase_client.upsert_knowledge_edge(
-                    gallery["id"], offer["id"], "gallery_asset",
-                    persona_id=persona_id, weight=0.4,
-                    metadata={
-                        "created_from": "product_import",
-                        "offer_slug": offer_slug,
-                        "amount": price,
-                        "currency": currency,
-                        "image_asset_id": image_asset_id,
-                    },
                 )
         created_nodes["offers"] = offer_count
 

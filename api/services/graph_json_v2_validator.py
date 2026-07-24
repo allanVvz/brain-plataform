@@ -31,7 +31,10 @@ CANONICAL_PARENT: dict[str, tuple[str, ...]] = {
     "rule": ("campaign", "briefing", "brand", "persona"),
     "faq": ("copy", "product", "product_group", "audience", "briefing", "campaign", "brand", "persona", "rule"),
     "embedded": ("faq",),
-    "asset": ("product", "product_group", "campaign", "brand", "gallery"),
+    # Gallery is an output sink, never the hierarchical parent of an asset.
+    # The asset belongs below the commercial node it represents and reaches
+    # Gallery through a secondary ``asset -> gallery`` edge.
+    "asset": ("product", "product_group", "campaign", "brand"),
 }
 
 # Types that may attach to persona as a protected branch outside the main chain.
@@ -131,6 +134,13 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
                 )
             continue
 
+        # Embedded is a terminal multi-source sink.  Before the first FAQ is
+        # approved it is anchored to Persona for layout only, without a visual
+        # Persona -> Embedded edge.  Published FAQ -> Embedded edges remain the
+        # only semantic inputs.
+        if node.node_type == "embedded" and parent.node_type == "persona":
+            continue
+
         allowed = CANONICAL_PARENT.get(node.node_type)
         if allowed is None:
             errors.append(f"unknown node_type {node.node_type} on node {node.id}")
@@ -185,6 +195,17 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
         target = nodes_by_id.get(edge.target)
         if source and target and getattr(target, "node_type", None) == "embedded" and getattr(source, "node_type", None) != "faq":
             errors.append(f"embedded edge {edge.id} source must be FAQ, got {getattr(source, 'node_type', None)}")
+        if source and target and getattr(target, "node_type", None) == "gallery":
+            # Gallery itself hangs from Persona as a protected node.  Every
+            # other incoming connection is the terminal asset -> Gallery edge.
+            if getattr(source, "node_type", None) == "persona":
+                if not _is_primary(edge):
+                    errors.append(f"gallery root edge {edge.id} must be primary")
+            else:
+                if getattr(source, "node_type", None) != "asset" or getattr(edge, "relation", None) != "gallery_asset":
+                    errors.append(f"gallery edge {edge.id} must be asset -> gallery with relation gallery_asset")
+                if _is_primary(edge):
+                    errors.append(f"gallery edge {edge.id} must be secondary (primary_tree=false)")
         if source and target and _is_primary(edge):
             expected_parent = getattr(target, "parent_id", None)
             if expected_parent and edge.source != expected_parent:
@@ -199,7 +220,24 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
             continue
         if not node.parent_id:
             continue
+        if node.node_type == "embedded" and nodes_by_id[node.parent_id].node_type == "persona":
+            continue
         if node.id not in primary_parent_edges:
             errors.append(f"node {node.id} has no primary edge from its parent")
+
+    # Every asset surfaced by a public site must finish at Gallery.  This makes
+    # the Graph JSON sufficient to decide whether a disconnected image can be
+    # rendered by the landing-page projection.
+    gallery_links = {
+        edge.source
+        for edge in graph.edges
+        if not _is_primary(edge)
+        and getattr(edge, "relation", None) == "gallery_asset"
+        and getattr(nodes_by_id.get(edge.source), "node_type", None) == "asset"
+        and getattr(nodes_by_id.get(edge.target), "node_type", None) == "gallery"
+    }
+    for node in graph.nodes:
+        if node.node_type == "asset" and node.id not in gallery_links:
+            errors.append(f"asset node {node.id} must have a secondary asset -> gallery edge")
 
     return (not errors, errors)

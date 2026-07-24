@@ -47,7 +47,7 @@ _PREFERRED_PARENT_TYPES: dict[str, tuple[str, ...]] = {
     "faq": ("copy", "product", "product_group", "audience", "briefing", "campaign", "brand", "persona", "rule"),
     "gallery": ("persona",),
     "embedded": ("faq",),
-    "asset": ("gallery", "product", "product_group", "campaign", "brand"),
+    "asset": ("product", "product_group", "campaign", "brand"),
 }
 _SYNTHETIC_LABELS = {
     "brand": "Marca",
@@ -186,6 +186,21 @@ def build_from_derived_graph(persona_slug: str, *, tenant: str = "production") -
 
     def choose_parent(row: dict, node_type: str) -> Node | None:
         allowed_types = _PREFERRED_PARENT_TYPES[node_type]
+        # Imports persist an explicit parent reference in metadata.  Prefer it
+        # for every branch node because historical edge vocabularies may be
+        # absent or no longer primary-tree compatible.
+        meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        parent_legacy_id = str(meta.get("parent_node_id") or meta.get("source_node_id") or "")
+        parent_doc_id = legacy_to_doc_id.get(parent_legacy_id)
+        parent = nodes_by_id.get(parent_doc_id or "")
+        if parent and parent.node_type in allowed_types:
+            return parent
+        parent_slug = str(meta.get("parent_slug") or "").strip().lower()
+        parent_type = str(meta.get("parent_type") or meta.get("source_node_type") or "").strip().lower()
+        if parent_slug:
+            for candidate in nodes_by_type.get(parent_type, []) if parent_type else []:
+                if candidate.slug == parent_slug and candidate.node_type in allowed_types:
+                    return candidate
         # Product imports carry their canonical group in metadata. Prefer that
         # explicit source over whichever group happens to be encountered first
         # when legacy edges are incomplete or use retired relation names.
@@ -230,8 +245,12 @@ def build_from_derived_graph(persona_slug: str, *, tenant: str = "production") -
             return ensure_synthetic("brand")
         if node_type == "gallery":
             return root
+        if node_type == "embedded":
+            # Layout anchor only; do not create a prohibited Persona ->
+            # Embedded primary edge. Approved FAQ edges remain semantic inputs.
+            return root
         if node_type == "asset":
-            return ensure_synthetic("gallery")
+            return None
         return None
 
     for node_type in _TYPE_ORDER:
@@ -243,9 +262,9 @@ def build_from_derived_graph(persona_slug: str, *, tenant: str = "production") -
             slug = str(row["slug"]).strip().lower()
             data = _node_data(row)
             if node_type == "faq":
-                data.setdefault("source_node_id", parent.id)
-                data.setdefault("source_node_type", parent.node_type)
-                data.setdefault("branch_path", _branch_path(parent.id, nodes_by_id))
+                data["source_node_id"] = parent.id
+                data["source_node_type"] = parent.node_type
+                data["branch_path"] = _branch_path(parent.id, nodes_by_id)
             node = Node(
                 id=_node_id(node_type, slug),
                 node_type=node_type,
@@ -266,6 +285,8 @@ def build_from_derived_graph(persona_slug: str, *, tenant: str = "production") -
         if node.node_type == "persona" or not node.parent_id:
             continue
         parent = nodes_by_id[node.parent_id]
+        if node.node_type == "embedded" and parent.node_type == "persona":
+            continue
         relation = graph_json_importer.RELATION_BY_PAIR.get((parent.node_type, node.node_type), "contains")
         edges.append(
             Edge(
@@ -278,6 +299,22 @@ def build_from_derived_graph(persona_slug: str, *, tenant: str = "production") -
             )
         )
         primary_pairs.add((parent.id, node.id))
+
+    # Gallery is the terminal curation output.  Assets keep their commercial
+    # parent in the tree and gain a non-primary asset -> Gallery edge.
+    gallery = first_node("gallery")
+    if gallery:
+        for asset in nodes_by_type.get("asset", []):
+            edges.append(
+                Edge(
+                    id=f"edge:gallery:{asset.id}",
+                    source=asset.id,
+                    target=gallery.id,
+                    relation="gallery_asset",
+                    primary_tree=False,
+                    metadata={"created_from": "derived_graph_backfill", "active": True},
+                )
+            )
 
     # Keep valid active semantic relations as secondary edges.  Invalid legacy
     # primary-parent shapes remain in the audit DB but are not canonicalized.

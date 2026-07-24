@@ -24,6 +24,8 @@ def test_backfill_normalizes_legacy_tree_and_duplicate_persona(monkeypatch):
         {"id": "brand-1", "node_type": "brand", "slug": "baita", "title": "Baita", "status": "pending_validation"},
         {"id": "group-1", "node_type": "product_group", "slug": "cervejas", "title": "Cervejas", "status": "pending_validation"},
         {"id": "product-1", "node_type": "product", "slug": "ipa", "title": "IPA", "status": "pending_validation"},
+        {"id": "gallery-1", "node_type": "gallery", "slug": "gallery-default", "title": "Gallery", "status": "active"},
+        {"id": "asset-1", "node_type": "asset", "slug": "ipa-image", "title": "Imagem IPA", "status": "validated", "metadata": {"parent_node_id": "product-1"}},
     ]
     edges = [
         {
@@ -59,6 +61,12 @@ def test_backfill_normalizes_legacy_tree_and_duplicate_persona(monkeypatch):
     parent = next(node for node in graph.nodes if node.id == product.parent_id)
     assert parent.node_type == "product_group"
     assert any(node.node_type == "audience" for node in graph.nodes)
+    asset = next(node for node in graph.nodes if node.node_type == "asset")
+    assert next(node for node in graph.nodes if node.id == asset.parent_id).node_type == "product"
+    assert any(
+        edge.source == asset.id and edge.relation == "gallery_asset" and edge.primary_tree is False
+        for edge in graph.edges
+    )
 
 
 def test_backfill_empty_persona_publishes_valid_root(monkeypatch):
