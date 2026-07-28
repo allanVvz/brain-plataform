@@ -12,6 +12,14 @@ PUBLIC_EXACT_PATHS = {
     "/auth/login",
     "/auth/logout",
     "/process",
+    "/webhooks/whatsapp",
+    "/webhooks/whatsapp/inbound",
+    "/webhooks/whatsapp/status",
+    "/internal/whatsapp/outbound-result",
+    "/internal/conversations/context",
+    "/internal/conversations/decide",
+    "/internal/conversations/commit",
+    "/internal/conversations/fail-safe-handoff",
 }
 
 ADMIN_TOKEN_HEADER = "x-ai-brain-admin-token"

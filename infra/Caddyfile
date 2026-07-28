@@ -5,6 +5,11 @@
 
 {$API_DOMAIN} {
 	encode zstd gzip
+	# Access metadata only (method, path, status and latency); request bodies are not logged.
+	log {
+		output stdout
+		format json
+	}
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
@@ -12,7 +17,12 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
-	reverse_proxy api:8080
+	handle /webhooks/whatsapp* {
+		reverse_proxy api:8080
+	}
+	handle {
+		reverse_proxy api:8080
+	}
 }
 
 {$STORAGE_DOMAIN} {

@@ -67,10 +67,11 @@ def send_message(body: SendMessageBody, request: Request) -> dict:
         "lead_ref": body.lead_ref,
         "message_id": f"hum_{int(time.time() * 1000)}_{body.lead_ref}",
         "sender_type": "human",
+        "role": "human",
         "sender_id": body.sender_id,
         "canal": "whatsapp",
         "texto": body.texto,
-        "direction": "Outbounding",
+        "direction": "outbound",
         "nome": body.nome or body.sender_id or "Operador",
         "status": "pending",
         "whatsapp_phone_number_id": whatsapp_phone_number_id,
@@ -84,6 +85,30 @@ def send_message(body: SendMessageBody, request: Request) -> dict:
     except Exception as exc:
         logger.error("insert_message failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"insert_message failed: {exc}")
+
+    # Human messages use the same durable outbox as automated replies. n8n is
+    # notified by the dispatcher/worker after this commit, never inline from
+    # the dashboard request.
+    if persona_id and whatsapp_phone_number_id:
+        correlation_id = f"human:{msg_payload['message_id']}"
+        try:
+            item = supabase_client.enqueue_whatsapp_message({
+                "persona_id": persona_id,
+                "lead_ref": body.lead_ref,
+                "whatsapp_phone_number_id": whatsapp_phone_number_id,
+                "external_message_id": None,
+                "direction": "outbound",
+                "payload": {"text": body.texto, "sender_type": "human", "sender_id": body.sender_id},
+                "status": "pending_send",
+                "batch_key": f"{persona_id}:{body.lead_ref}",
+                "idempotency_key": f"human:{msg_payload['message_id']}",
+                "correlation_id": correlation_id,
+            })
+        except Exception as exc:
+            logger.error("outbox enqueue failed: %s", exc)
+            raise HTTPException(500, detail="Falha ao enfileirar mensagem") from exc
+        event_emitter.emit("message.new", entity_type="message", entity_id=msg_payload["message_id"], persona_id=persona_id, payload={"lead_ref": body.lead_ref, "sender_type": "human", "buffer_id": (item or {}).get("id")}, source="messages.send")
+        return {"ok": True, "message_id": msg_payload["message_id"], "status": "pending_send", "buffer_id": (item or {}).get("id")}
 
     # Outbound webhook precedence:
     #   1) persona.outbound_webhook_url (preferred — works for both

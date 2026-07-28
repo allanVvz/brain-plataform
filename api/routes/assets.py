@@ -25,6 +25,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
+from schemas.graph_json_v2 import Edge, GraphJson, Node
 
 from core.landing_slots import (
     LandingSlot,
@@ -34,7 +35,7 @@ from core.landing_slots import (
     slot_for_metadata,
     slots_for_parent_type,
 )
-from services import auth_service, knowledge_graph, supabase_client
+from services import auth_service, graph_document_publisher, graph_json_v2_store, knowledge_graph, supabase_client
 from services.asset_pipeline import AssetPipelineContext, compose_markdown, run_pipeline
 from services.event_emitter import emit
 from services.audit_helpers import current_actor, summarize_diff
@@ -42,6 +43,107 @@ from services.audit_helpers import current_actor, summarize_diff
 logger = logging.getLogger("routes.assets")
 
 router = APIRouter(prefix="/assets", tags=["assets"])
+
+
+def _publish_asset_path_to_canonical_graph(
+    *,
+    asset: dict,
+    parent: dict,
+    status: str,
+    actor_id: Optional[str],
+    source: str,
+) -> dict:
+    persona = supabase_client.get_persona_by_id(asset.get("persona_id")) or {}
+    persona_slug = persona.get("slug")
+    current = graph_json_v2_store.load_current(persona_slug) if persona_slug else None
+    if current is None:
+        raise RuntimeError("Asset mutation requires a published canonical Graph JSON")
+    version, graph = current
+    next_graph = GraphJson.model_validate(graph.model_dump())
+
+    def find_doc_node(knowledge_node: dict, node_type: str) -> Optional[Node]:
+        return next(
+            (
+                node
+                for node in next_graph.nodes
+                if node.node_type == node_type
+                and (
+                    node.slug == knowledge_node.get("slug")
+                    or str((node.data or {}).get("knowledge_node_id") or "") == str(knowledge_node.get("id") or "")
+                )
+            ),
+            None,
+        )
+
+    parent_doc = find_doc_node(parent, str(parent.get("node_type") or ""))
+    gallery_doc = next((node for node in next_graph.nodes if node.node_type == "gallery"), None)
+    if parent_doc is None or gallery_doc is None:
+        raise RuntimeError("Canonical commercial parent or Gallery was not found")
+    metadata = dict(asset.get("metadata") or {})
+    asset_slug = str(metadata.get("slug") or asset.get("slug") or f"asset-{asset.get('id')}").strip().lower()
+    asset_node_ref = {
+        "id": _asset_graph_ref(asset, "knowledge_node_id"),
+        "slug": asset_slug,
+    }
+    asset_doc = find_doc_node(asset_node_ref, "asset")
+    if asset_doc is None:
+        asset_doc = Node(
+            id=f"node:asset:{asset_slug}",
+            node_type="asset",
+            slug=asset_slug,
+            label=str(asset.get("name") or asset.get("filename") or metadata.get("original_filename") or asset_slug),
+            parent_id=parent_doc.id,
+            data={},
+        )
+        next_graph.nodes.append(asset_doc)
+    asset_doc.parent_id = parent_doc.id
+    asset_doc.data = {
+        **(asset_doc.data or {}),
+        **metadata,
+        "status": status,
+        "source": metadata.get("source") or "asset_upload",
+        "asset_id": asset.get("id"),
+        "knowledge_node_id": _asset_graph_ref(asset, "knowledge_node_id"),
+        "storage_path": asset.get("storage_path") or metadata.get("storage_path"),
+        "asset_type": asset.get("type") or metadata.get("asset_type") or "image",
+    }
+    next_graph.edges = [
+        edge
+        for edge in next_graph.edges
+        if not (
+            edge.target == asset_doc.id and edge.primary_tree
+            or edge.source == asset_doc.id and edge.target == gallery_doc.id
+        )
+    ]
+    next_graph.edges.extend(
+        [
+            Edge(
+                id=f"edge:asset-parent:{asset_doc.slug}",
+                source=parent_doc.id,
+                target=asset_doc.id,
+                relation="uses_asset",
+                primary_tree=True,
+                metadata={"active": True, "created_from": source},
+            ),
+            Edge(
+                id=f"edge:asset-gallery:{asset_doc.slug}",
+                source=asset_doc.id,
+                target=gallery_doc.id,
+                relation="gallery_asset",
+                primary_tree=False,
+                metadata={"active": True, "created_from": source},
+            ),
+        ]
+    )
+    return graph_document_publisher.publish(
+        graph=next_graph,
+        persona_slug=persona_slug,
+        brand_slug=next_graph.brand_slug,
+        source=source,
+        published_by=actor_id,
+        expected_version=version,
+        idempotency_key=f"{source}:{asset.get('id')}:{version}:{status}",
+    )
 
 
 def _log_asset_flow(
@@ -1165,13 +1267,20 @@ class ConnectBody(BaseModel):
     relation_type: str = "uses_asset"
 
 
-@router.post("/{asset_id}/connect")
+@router.post("/{asset_id}/connect", deprecated=True)
 def connect_asset(asset_id: str, body: ConnectBody, request: Request):
     asset = supabase_client.get_asset(asset_id)
     if not asset:
         raise HTTPException(404, "Asset nao encontrado")
     if asset.get("persona_id"):
         auth_service.assert_persona_access(request, persona_id=asset["persona_id"])
+    _log_asset_flow(
+        "asset_legacy_route_used",
+        asset_id=asset_id,
+        persona_id=asset.get("persona_id"),
+        payload={"route": "connect", "replacement": "rebind-path"},
+        level="warn",
+    )
 
     knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
     if not knowledge_node_id:
@@ -1676,7 +1785,7 @@ def _remove_existing_slot_edges(
     return removed
 
 
-@router.post("/{asset_id}/bind-slot")
+@router.post("/{asset_id}/bind-slot", deprecated=True)
 def bind_asset_to_slot(asset_id: str, body: BindSlotBody, request: Request):
     """Upsert a knowledge_edge that binds the asset to a landing-page slot."""
     slot = slot_for_key(body.slot)
@@ -1690,6 +1799,13 @@ def bind_asset_to_slot(asset_id: str, body: BindSlotBody, request: Request):
     if not persona_id:
         raise HTTPException(422, "Asset sem persona nao pode ser conectado a um slot.")
     auth_service.assert_persona_access(request, persona_id=persona_id)
+    _log_asset_flow(
+        "asset_legacy_route_used",
+        asset_id=asset_id,
+        persona_id=persona_id,
+        payload={"route": "bind-slot", "replacement": "rebind-path"},
+        level="warn",
+    )
 
     knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
     if not knowledge_node_id:
@@ -1929,6 +2045,13 @@ def rebind_asset_path(asset_id: str, body: RebindPathBody, request: Request):
             "relation_type": cfg["relation_type"],
         },
     )
+    canonical_publication = _publish_asset_path_to_canonical_graph(
+        asset=updated_asset or supabase_client.get_asset(asset_id) or asset,
+        parent=parent,
+        status="pending_validation",
+        actor_id=(auth_service.current_user(request) or {}).get("id"),
+        source="assets.rebind-path",
+    )
     return {
         "success": True,
         "asset": updated_asset,
@@ -1938,6 +2061,7 @@ def rebind_asset_path(asset_id: str, body: RebindPathBody, request: Request):
         "landing_path": _asset_primary_landing_path(updated_asset or supabase_client.get_asset(asset_id) or asset),
         "removed_existing_edge_ids": removed_existing,
         "removed_previous_edge_ids": removed_previous,
+        "canonical_publication": canonical_publication,
     }
 
 
@@ -2081,6 +2205,19 @@ def _validate_asset_approval(asset: dict) -> dict:
     errors = list(validation.get("errors") or [])
     if not asset_type:
         errors.append("Asset sem tipo definido.")
+    storage_ref = (
+        asset.get("storage_path")
+        or asset.get("url")
+        or metadata.get("storage_path")
+        or metadata.get("file_path")
+    )
+    if not storage_ref:
+        errors.append("Asset sem arquivo ou referencia de storage.")
+    item_id = metadata.get("knowledge_item_id")
+    sidecar = supabase_client.get_knowledge_item(item_id) if item_id else None
+    sidecar_path = (sidecar or {}).get("file_path") or metadata.get("sidecar_markdown_path")
+    if not sidecar or not sidecar_path or not str(sidecar_path).lower().endswith(".md"):
+        errors.append("Asset sem sidecar Markdown materializado.")
     return {**validation, "ok": not errors, "errors": errors}
 
 
@@ -2206,6 +2343,39 @@ def approve_asset_route(asset_id: str, request: Request):
         except Exception as exc:
             logger.warning("approve asset node update failed asset=%s node=%s: %s", asset_id, node_id, exc)
 
+    parent_info = ((validation.get("connections") or [{}])[0].get("parent_node") or {})
+    parent = supabase_client.get_knowledge_node(parent_info.get("id")) if parent_info.get("id") else None
+    try:
+        if not parent:
+            raise RuntimeError("Asset approval has no canonical commercial parent")
+        canonical_publication = _publish_asset_path_to_canonical_graph(
+            asset=updated or {**asset, "metadata": metadata},
+            parent=parent,
+            status="approved",
+            actor_id=user.get("id"),
+            source="assets.approve",
+        )
+    except Exception as exc:
+        try:
+            supabase_client.update_asset(
+                asset_id,
+                {"status": asset.get("status"), "metadata": asset.get("metadata") or {}},
+            )
+            if item_id:
+                supabase_client.update_knowledge_item(item_id, {"status": "pending"})
+            if node_id:
+                supabase_client.update_knowledge_node(
+                    node_id,
+                    {"status": "pending"},
+                    mark_related_faqs=False,
+                )
+        except Exception:
+            pass
+        raise HTTPException(
+            502,
+            {"code": "ASSET_CANONICAL_APPROVAL_FAILED", "error": str(exc)},
+        ) from exc
+
     _log_asset_flow(
         "asset_approved",
         asset_id=asset_id,
@@ -2223,6 +2393,7 @@ def approve_asset_route(asset_id: str, request: Request):
         "success": True,
         "asset": updated or {**asset, "metadata": metadata},
         "validation": validation,
+        "canonical_publication": canonical_publication,
     }
 
 

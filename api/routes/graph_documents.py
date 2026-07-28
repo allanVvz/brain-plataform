@@ -6,43 +6,50 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from schemas.graph_json_v2 import GraphJson
-from services import graph_json_importer, graph_json_v2_store, graph_json_v2_validator
-from services import auth_service, supabase_client
+from services import auth_service, graph_document_publisher, graph_json_importer, graph_json_v2_store
+from services import graph_json_v2_validator, supabase_client
 
 router = APIRouter(prefix="/graph-documents", tags=["graph-documents"])
 
 
-class PublishGraphDocumentBody(BaseModel):
+class _MutationBody(BaseModel):
     persona_slug: str = Field(..., min_length=1)
+    graph_json: dict
+    source: str
+    note: Optional[str] = None
+    expected_version: Optional[int] = Field(None, ge=0)
+    idempotency_key: Optional[str] = Field(None, min_length=1, max_length=200)
+
+
+class PublishGraphDocumentBody(_MutationBody):
     brand_slug: Optional[str] = None
-    graph_json: dict
     source: str = "import_v1_to_v2"
-    note: Optional[str] = None
 
 
-class ApplyPatchBody(BaseModel):
-    persona_slug: str = Field(..., min_length=1)
-    graph_json: dict
+class ApplyPatchBody(_MutationBody):
     source: str = "apply_patch"
-    note: Optional[str] = None
 
 
-class ImportGraphDocumentBody(BaseModel):
-    persona_slug: str = Field(..., min_length=1)
-    graph_json: dict
+class ImportGraphDocumentBody(_MutationBody):
     source: str = "graph_documents.import_json"
     session_id: Optional[str] = None
-    note: Optional[str] = None
 
 
 class RollbackBody(BaseModel):
     persona_slug: str = Field(..., min_length=1)
     version: int = Field(..., ge=1)
     note: Optional[str] = None
+    expected_version: Optional[int] = Field(None, ge=0)
+    idempotency_key: Optional[str] = Field(None, min_length=1, max_length=200)
 
 
-class ReindexBody(BaseModel):
+class SyncBody(BaseModel):
     persona_slug: str = Field(..., min_length=1)
+    brand_slug: Optional[str] = None
+    idempotency_key: Optional[str] = Field(None, min_length=1, max_length=200)
+
+
+class ReindexBody(SyncBody):
     note: Optional[str] = None
 
 
@@ -55,7 +62,6 @@ def _validate_graph_json_or_422(graph_json: dict) -> GraphJson:
         graph = GraphJson.model_validate(graph_json)
     except Exception as exc:
         raise HTTPException(422, f"Invalid graph_json payload: {exc}") from exc
-
     is_valid, errors = graph_json_v2_validator.validate_graph_json(graph)
     if not is_valid:
         raise HTTPException(422, {"code": "GRAPH_VALIDATION_FAILED", "errors": errors})
@@ -89,6 +95,22 @@ def _assert_graph_persona_matches(body_persona_slug: str, graph: GraphJson) -> N
         )
 
 
+def _publish_or_http(**kwargs):
+    try:
+        return graph_document_publisher.publish(**kwargs)
+    except graph_document_publisher.VersionConflict as exc:
+        raise HTTPException(
+            409,
+            {
+                "code": "GRAPH_VERSION_CONFLICT",
+                "expected_version": exc.expected,
+                "current_version": exc.current,
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
 @router.get("/current")
 def graph_document_current(
     request: Request,
@@ -103,10 +125,12 @@ def graph_document_current(
             "persona_slug": persona_slug,
             "brand_slug": brand_slug,
             "version": 0,
+            "checksum": None,
             "graph_json": {},
             "published_at": None,
             "source": None,
             "note": None,
+            "projections": {},
         }
     payload = evt.get("payload") or {}
     return {
@@ -114,10 +138,12 @@ def graph_document_current(
         "persona_slug": payload.get("persona_slug"),
         "brand_slug": payload.get("brand_slug"),
         "version": payload.get("version", 1),
+        "checksum": payload.get("checksum"),
         "graph_json": payload.get("graph_json") or {},
         "published_at": evt.get("created_at"),
         "source": payload.get("source"),
         "note": payload.get("note"),
+        "projections": payload.get("projections") or {},
     }
 
 
@@ -144,12 +170,13 @@ def graph_document_versions(
             {
                 "id": row.get("entity_id"),
                 "version": payload.get("version", 1),
+                "checksum": payload.get("checksum"),
                 "published_at": row.get("created_at"),
                 "source": payload.get("source"),
                 "note": payload.get("note"),
             }
         )
-    out.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+    out.sort(key=lambda item: item.get("published_at") or "", reverse=True)
     return {"persona_slug": persona_slug, "brand_slug": brand_slug, "versions": out}
 
 
@@ -159,47 +186,19 @@ def graph_document_publish(body: PublishGraphDocumentBody, request: Request):
     graph = _validate_graph_json_or_422(body.graph_json)
     _assert_graph_persona_matches(body.persona_slug, graph)
     document_brand = body.brand_slug if body.brand_slug is not None else graph.brand_slug
-    current = _latest_event(body.persona_slug, document_brand)
-    current_payload = (current or {}).get("payload") or {}
-    next_version = int(current_payload.get("version") or 0) + 1
-    doc_id = f"{body.persona_slug}:{document_brand or 'default'}:v{next_version}"
-    try:
-        graph_json_v2_store.save_version(
-            body.persona_slug,
-            next_version,
-            graph,
-            brand_slug=document_brand,
-            source=f"graph_documents.publish:{body.source}",
-            note=body.note,
-            published_by=(auth_service.current_user(request) or {}).get("id"),
-        )
-    except RuntimeError as exc:
-        raise HTTPException(502, str(exc)) from exc
-
-    # Publishing the canonical document materializes the derived knowledge_nodes /
-    # knowledge_edges / vault rows (this is what "aciona os serviços de atualizar o
-    # banco" when the front-end edits the graph). A reindex failure does NOT lose
-    # the published document — it is surfaced as `reindex_error`.
-    reindex: dict = {}
-    try:
-        reindex = graph_json_importer.import_graph_json(
-            graph_json=graph,
-            source=f"graph_documents.publish:{body.source}",
-        ) or {}
-    except Exception as exc:  # pragma: no cover - defensive
-        reindex = {"ok": False, "reindex_error": str(exc)}
-
-    return {
-        "ok": True,
-        "id": doc_id,
-        "persona_slug": body.persona_slug,
-        "brand_slug": document_brand,
-        "version": next_version,
-        "reindex_ok": bool(reindex.get("ok", False)),
-        "nodes_imported": reindex.get("nodes_imported"),
-        "edges_imported": reindex.get("edges_imported"),
-        "reindex_error": reindex.get("reindex_error") or (None if reindex.get("ok", True) else reindex.get("errors")),
-    }
+    current_event = _latest_event(body.persona_slug, document_brand)
+    current_version = int(((current_event or {}).get("payload") or {}).get("version") or 0)
+    return _publish_or_http(
+        graph=graph,
+        persona_slug=body.persona_slug,
+        brand_slug=document_brand,
+        source=f"graph_documents.publish:{body.source}",
+        note=body.note,
+        published_by=(auth_service.current_user(request) or {}).get("id"),
+        expected_version=body.expected_version,
+        idempotency_key=body.idempotency_key,
+        current_version_override=current_version,
+    )
 
 
 @router.post("/apply-patch")
@@ -207,35 +206,16 @@ def graph_document_apply_patch(body: ApplyPatchBody, request: Request):
     _assert_persona_edit(request, body.persona_slug)
     graph = _validate_graph_json_or_422(body.graph_json)
     _assert_graph_persona_matches(body.persona_slug, graph)
-    current = graph_json_v2_store.load_current(body.persona_slug)
-    next_version = 1 if not current else current[0] + 1
-    checksum = graph_json_v2_store.save_version(
-        body.persona_slug,
-        next_version,
-        graph,
+    return _publish_or_http(
+        graph=graph,
+        persona_slug=body.persona_slug,
+        brand_slug=graph.brand_slug,
         source=f"graph_documents.apply_patch:{body.source}",
         note=body.note,
         published_by=(auth_service.current_user(request) or {}).get("id"),
+        expected_version=body.expected_version,
+        idempotency_key=body.idempotency_key,
     )
-    try:
-        reindex = graph_json_importer.import_graph_json(
-            graph_json=graph,
-            source=f"graph_documents.apply_patch:{body.source}",
-        ) or {}
-    except Exception as exc:  # pragma: no cover - defensive
-        reindex = {"ok": False, "reindex_error": str(exc)}
-    return {
-        "ok": True,
-        "persona_slug": body.persona_slug,
-        "version": next_version,
-        "checksum": checksum,
-        "source": body.source,
-        "note": body.note,
-        "reindex_ok": bool(reindex.get("ok", False)),
-        "nodes_imported": reindex.get("nodes_imported"),
-        "edges_imported": reindex.get("edges_imported"),
-        "reindex_error": reindex.get("reindex_error"),
-    }
 
 
 @router.post("/import-json")
@@ -243,29 +223,17 @@ def graph_document_import_json(body: ImportGraphDocumentBody, request: Request):
     _assert_persona_edit(request, body.persona_slug)
     graph = _validate_graph_json_or_422(body.graph_json)
     _assert_graph_persona_matches(body.persona_slug, graph)
-    result = graph_json_importer.import_graph_json(
-        graph_json=graph,
+    return _publish_or_http(
+        graph=graph,
+        persona_slug=body.persona_slug,
+        brand_slug=graph.brand_slug,
         source=body.source,
-        session_id=body.session_id,
-    )
-    if result.get("ok") is False:
-        raise HTTPException(422, result)
-    current = graph_json_v2_store.load_current(body.persona_slug)
-    next_version = 1 if not current else current[0] + 1
-    checksum = graph_json_v2_store.save_version(
-        body.persona_slug,
-        next_version,
-        graph,
-        source=f"graph_documents.import_json:{body.source}",
         note=body.note,
         published_by=(auth_service.current_user(request) or {}).get("id"),
+        expected_version=body.expected_version,
+        idempotency_key=body.idempotency_key,
+        session_id=body.session_id,
     )
-    return {
-        **result,
-        "version": next_version,
-        "checksum": checksum,
-        "note": body.note,
-    }
 
 
 @router.post("/rollback")
@@ -274,65 +242,54 @@ def graph_document_rollback(body: RollbackBody, request: Request):
     target = graph_json_v2_store.load_version(body.persona_slug, body.version)
     if target is None:
         raise HTTPException(404, "Requested rollback version not found")
-    current = graph_json_v2_store.load_current(body.persona_slug)
-    next_version = 1 if not current else current[0] + 1
-    checksum = graph_json_v2_store.save_version(
-        body.persona_slug,
-        next_version,
-        target,
-        source="graph_documents.rollback",
+    result = _publish_or_http(
+        graph=target,
+        persona_slug=body.persona_slug,
+        brand_slug=target.brand_slug,
+        source=f"graph_documents.rollback:{body.persona_slug}:v{body.version}",
         note=body.note,
         published_by=(auth_service.current_user(request) or {}).get("id"),
+        expected_version=body.expected_version,
+        idempotency_key=body.idempotency_key,
     )
-    try:
-        reindex = graph_json_importer.import_graph_json(
-            graph_json=target,
-            source=f"graph_documents.rollback:{body.persona_slug}:v{body.version}",
-        ) or {}
-    except Exception as exc:  # pragma: no cover - defensive
-        reindex = {"ok": False, "reindex_error": str(exc)}
-    return {
-        "ok": True,
-        "persona_slug": body.persona_slug,
-        "rolled_back_from": body.version,
-        "new_version": next_version,
-        "checksum": checksum,
-        "note": body.note,
-        "reindex_ok": bool(reindex.get("ok", False)),
-        "reindex_error": reindex.get("reindex_error"),
-    }
+    return {**result, "rolled_back_from": body.version, "new_version": result["version"]}
 
 
-@router.post("/reindex")
-def graph_document_reindex(body: ReindexBody, request: Request):
+@router.post("/sync")
+def graph_document_sync(body: SyncBody, request: Request):
     _assert_persona_edit(request, body.persona_slug)
-    current = graph_json_v2_store.load_current(body.persona_slug)
-    if current is None:
-        raise HTTPException(404, "No graph document available for reindex")
-    version, graph = current
-    # Re-validate current state to mirror backend reindex guard semantics.
-    is_valid, errors = graph_json_v2_validator.validate_graph_json(graph)
-    if not is_valid:
-        raise HTTPException(422, {"code": "GRAPH_VALIDATION_FAILED", "errors": errors})
-    # Materialize the canonical document into the derived tables (knowledge_nodes /
-    # knowledge_edges / knowledge_items + vault). Tolerant: a materialization error
-    # is reported but does not 500 the reindex.
-    reindex: dict = {}
     try:
-        reindex = graph_json_importer.import_graph_json(
-            graph_json=graph,
-            source=f"graph_documents.reindex:{body.persona_slug}",
-        ) or {}
-    except Exception as exc:  # pragma: no cover - defensive
-        reindex = {"ok": False, "reindex_error": str(exc)}
+        return graph_document_publisher.sync(
+            persona_slug=body.persona_slug,
+            brand_slug=body.brand_slug,
+            source=f"graph_documents.sync:{body.persona_slug}",
+            idempotency_key=body.idempotency_key,
+        )
+    except graph_document_publisher.GraphValidationError as exc:
+        raise HTTPException(422, {"code": "GRAPH_VALIDATION_FAILED", "errors": exc.errors}) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+@router.post("/reindex", deprecated=True)
+def graph_document_reindex(body: ReindexBody, request: Request):
+    result = graph_document_sync(
+        SyncBody(
+            persona_slug=body.persona_slug,
+            brand_slug=body.brand_slug,
+            idempotency_key=body.idempotency_key,
+        ),
+        request,
+    )
+    projections = result.get("projections") or {}
     return {
-        "ok": True,
-        "persona_slug": body.persona_slug,
-        "version": version,
-        "indexed_nodes": reindex.get("nodes_imported", len(graph.nodes)),
-        "indexed_edges": reindex.get("edges_imported", len(graph.edges)),
-        "reindex_ok": bool(reindex.get("ok", False)),
-        "reindex_error": reindex.get("reindex_error"),
+        **result,
+        "indexed_nodes": projections.get("nodes_imported"),
+        "indexed_edges": projections.get("edges_imported"),
+        "reindex_ok": True,
+        "deprecation": "Use POST /graph-documents/sync.",
         "note": body.note,
     }
 
@@ -348,10 +305,10 @@ def graph_document_events(
     rows = supabase_client.list_system_events(
         entity_type="graph_document",
         event_types=[
+            "graph_document_publish_attempted",
             "graph_document_published",
-            "graph_document_apply_patch",
-            "graph_document_rollback",
-            "graph_document_reindex",
+            "graph_document_publish_failed",
+            "graph_document_synced",
         ],
         limit=limit,
     )
@@ -371,5 +328,5 @@ def graph_document_events(
                 "created_at": row.get("created_at"),
             }
         )
-    out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    out.sort(key=lambda item: item.get("created_at") or "", reverse=True)
     return {"persona_slug": persona_slug, "brand_slug": brand_slug, "events": out}

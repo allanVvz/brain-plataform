@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from services import supabase_client
 from services import graph_json_importer
+from services import graph_document_publisher
 from services import knowledge_graph
 from services import knowledge_lifecycle
 from services import graph_validation
@@ -6778,11 +6779,15 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
     if str(session.get("mode") or "").strip().lower() == "criar":
         try:
             graph_doc = GraphJson.model_validate(plan_state.get("graph_json") or normalized_plan_to_graph_json(plan_payload, session).model_dump())
-            import_result = graph_json_importer.import_graph_json(
-                graph_json=graph_doc,
+            publication = graph_document_publisher.publish(
+                graph=graph_doc,
+                persona_slug=graph_doc.persona_slug,
+                brand_slug=graph_doc.brand_slug,
                 source="kb-intake.save",
                 session_id=session_id,
+                idempotency_key=f"kb-intake.save:{session_id}:{plan_state.get('plan_hash') or 'current'}",
             )
+            import_result = {**publication, **(publication.get("projections") or {})}
         except Exception as exc:
             import_result = {
                 "ok": False,

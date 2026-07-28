@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 from datetime import datetime, timezone
@@ -12,10 +13,13 @@ from typing import Optional, Any
 from routes import graph as graph_routes
 from routes.process import process as process_route
 from schemas.events import LeadEvent
+from schemas.graph_json_v2 import GraphJson
 from services import (
     approved_knowledge_snapshots,
     auth_service,
     embedded_markdown,
+    graph_document_publisher,
+    graph_json_v2_store,
     knowledge_graph,
     knowledge_lifecycle,
     knowledge_taxonomy,
@@ -1116,7 +1120,6 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
     - Accepts X-AI-BRAIN-ADMIN-TOKEN.
     - Accepts Authorization: Bearer <same admin token> as a compatibility alias.
     """
-    _require_non_production()
     session_id = str(body.context.session_id or "").strip()
     session_state = sofia_orchestrator.get_session_state(session_id)
     active_persona_from_context = str(body.context.active_persona_slug or "").strip().lower()
@@ -1306,6 +1309,78 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         }
 
     patch = plan.get("graph_patch") or {}
+    destructive_requested = bool((patch.get("nodes_delete") or []) or (patch.get("edges_delete") or []))
+    if destructive_requested and not body.context.allow_destructive:
+        return {
+            "ok": True,
+            "sofia_message": "A alteração destrutiva está pronta, mas precisa de confirmação.",
+            "graph_patch": patch,
+            "persisted": False,
+            "needs_clarification": True,
+            "validation": {"canonical_chain_respected": True, "violations": []},
+            "pending_questions": ["Confirma remover os nodes/edges indicados?"],
+        }
+    current_doc = graph_json_v2_store.load_current(persona_slug)
+    if current_doc is None:
+        raise HTTPException(409, "Sofia Graph requires a published canonical Graph JSON for this persona")
+    current_version, current_graph = current_doc
+    try:
+        next_graph = graph_document_publisher.apply_sofia_patch(current_graph, patch)
+        publication = graph_document_publisher.publish(
+            graph=next_graph,
+            persona_slug=persona_slug,
+            brand_slug=next_graph.brand_slug,
+            source="sofia.graph-command",
+            published_by=(auth_service.current_user(request) or {}).get("id"),
+            expected_version=current_version,
+            idempotency_key=(
+                f"sofia:{session_id or 'stateless'}:{current_version}:"
+                f"{hashlib.sha256(effective_command.encode('utf-8')).hexdigest()[:16]}"
+            ),
+        )
+    except graph_document_publisher.VersionConflict as exc:
+        raise HTTPException(
+            409,
+            {"code": "GRAPH_VERSION_CONFLICT", "expected_version": exc.expected, "current_version": exc.current},
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(422, {"code": "SOFIA_CANONICAL_PATCH_FAILED", "error": str(exc)}) from exc
+    sofia_orchestrator.remember_turn(
+        session_id=session_id,
+        persona_slug=persona_slug,
+        command=effective_command,
+        operation_result=operation_tool,
+        last_referenced_node=last_referenced_node,
+    )
+    return {
+        "ok": True,
+        "sofia_message": plan.get("sofia_message") or "Alteração publicada no Graph JSON canônico.",
+        "graph_patch": patch,
+        "persisted": True,
+        "publication": publication,
+        "tool_calls": [
+            *(plan.get("tool_calls") or []),
+            {
+                "name": "publish-canonical-graph",
+                "score": 1.0,
+                "result": {
+                    "version": publication.get("version"),
+                    "checksum": publication.get("checksum"),
+                    "ok": True,
+                },
+            },
+        ],
+        "needs_clarification": False,
+        "validation": {"canonical_chain_respected": True, "violations": []},
+        "conversation_context": {
+            "session_id": session_id or None,
+            "active_persona_slug": persona_slug,
+        },
+    }
+
+    # Legacy direct knowledge_nodes/knowledge_edges path retained below only as
+    # dead compatibility reference during rollout. Canonical publication above
+    # always returns before reaching it.
     persona_node = supabase_client.ensure_persona_knowledge_node(persona_id)
     if not persona_node:
         raise HTTPException(502, "Unable to ensure persona root node")
@@ -1520,11 +1595,100 @@ def sofia_faq_accept(body: SofiaFaqAcceptBody, request: Request):
     """Persist accepted FAQ suggestions as pending/draft FAQ nodes connected to
     their branch parent. They are NOT sent to Embedded — they follow the normal
     approve -> publish-to-Embedded flow afterwards."""
-    _require_non_production()
     persona = _resolve_sofia_persona(request, _persona_ref(body.persona_slug, body.persona_ref))
     persona_id = persona.get("id")
     persona_slug = _persona_slug(persona)
     raw_parent = _strip_graph_id(body.parent_node_id)
+    current_doc = graph_json_v2_store.load_current(persona_slug)
+    if current_doc is None:
+        raise HTTPException(409, "A published canonical Graph JSON is required")
+    current_version, current_graph = current_doc
+    parent_doc = next(
+        (
+            node
+            for node in current_graph.nodes
+            if node.id == raw_parent
+            or node.id == body.parent_node_id
+            or str((node.data or {}).get("knowledge_node_id") or "") == raw_parent
+        ),
+        None,
+    )
+    if parent_doc is None:
+        raise HTTPException(404, "parent node not found in canonical Graph JSON")
+    accepted = [item for item in body.suggestions if str(item.question or "").strip()]
+    if not accepted:
+        raise HTTPException(400, "no accepted suggestions to persist")
+    count = sofia_faq_tool.clamp_count(body.faq_generation_count or len(accepted))
+    faq_slug = _slugify(
+        f"faq-{body.generated_from_node_slug or parent_doc.slug}-{hashlib.sha256('|'.join(item.question for item in accepted).encode('utf-8')).hexdigest()[:8]}"
+    )
+    faq_id = f"node:faq:{faq_slug}"
+    branch_nodes = []
+    cursor = parent_doc
+    nodes_by_id = {node.id: node for node in current_graph.nodes}
+    while cursor:
+        branch_nodes.insert(0, {"node_type": cursor.node_type, "slug": cursor.slug, "label": cursor.label})
+        cursor = nodes_by_id.get(cursor.parent_id or "")
+    markdown = "\n\n".join(
+        f"## {item.question.strip()}\n\n{str(item.answer or '').strip()}"
+        for item in accepted
+    ).strip()
+    patch = {
+        "nodes_upsert": [
+            {
+                "node_type": "faq",
+                "slug": faq_slug,
+                "title": f"FAQ — {parent_doc.label}",
+                "summary": markdown[:400],
+                "status": "pending_validation",
+                "metadata": {
+                    "markdown": markdown,
+                    "markdown_document": True,
+                    "question_count": len(accepted),
+                    "questions": [
+                        {"question": item.question.strip(), "answer": str(item.answer or "").strip()}
+                        for item in accepted
+                    ],
+                    "source": sofia_faq_tool.SOURCE_TOOL,
+                    "source_node_id": parent_doc.id,
+                    "source_node_type": parent_doc.node_type,
+                    "branch_path": branch_nodes,
+                    "source_context": body.source_context or {},
+                    "generated_from_node_id": body.generated_from_node_id,
+                    "generated_from_node_slug": body.generated_from_node_slug,
+                },
+            }
+        ],
+        "edges_upsert": [
+            {
+                "source_ref": f"id:{parent_doc.id}",
+                "target_ref": f"id:{faq_id}",
+                "relation_type": _faq_parent_relation(parent_doc.node_type),
+                "metadata": {"primary_tree": True},
+            }
+        ],
+    }
+    next_graph = graph_document_publisher.apply_sofia_patch(current_graph, patch)
+    publication = graph_document_publisher.publish(
+        graph=next_graph,
+        persona_slug=persona_slug,
+        brand_slug=next_graph.brand_slug,
+        source="sofia.faq.accept",
+        published_by=(auth_service.current_user(request) or {}).get("id"),
+        expected_version=current_version,
+        idempotency_key=f"sofia-faq:{persona_slug}:{current_version}:{faq_slug}",
+    )
+    return {
+        "ok": True,
+        "persona_slug": persona_slug,
+        "parent_node_id": parent_doc.id,
+        "faq_generation_count": count,
+        "created": [{"node_id": faq_id, "question_count": len(accepted), "status": "pending_validation"}],
+        "publication": publication,
+    }
+
+    # Legacy per-question direct-write implementation retained temporarily as
+    # unreachable reference during rollout.
     parent = supabase_client.get_knowledge_node(raw_parent)
     if not parent:
         raise HTTPException(404, "parent node not found")
@@ -1604,10 +1768,68 @@ def sofia_faq_append(body: SofiaFaqAppendBody, request: Request):
     new FAQ node. The FAQ stays/returns to pending (draft); if it was already
     published, it is withdrawn from Embedded (its section is removed from the
     Embedded body) and must be approved + published again."""
-    _require_non_production()
     persona = _resolve_sofia_persona(request, _persona_ref(body.persona_slug, body.persona_ref))
     persona_id = persona.get("id")
     raw_node = _strip_graph_id(body.faq_node_id)
+    persona_slug = _persona_slug(persona)
+    current_doc = graph_json_v2_store.load_current(persona_slug)
+    if current_doc is None:
+        raise HTTPException(409, "A published canonical Graph JSON is required")
+    current_version, current_graph = current_doc
+    faq_doc = next(
+        (
+            item
+            for item in current_graph.nodes
+            if item.id in {raw_node, body.faq_node_id}
+            or str((item.data or {}).get("knowledge_node_id") or "") == raw_node
+        ),
+        None,
+    )
+    if faq_doc is None or faq_doc.node_type != "faq":
+        raise HTTPException(404, "FAQ node not found in canonical Graph JSON")
+    accepted = [item for item in body.suggestions if str(item.question or "").strip()]
+    if not accepted:
+        raise HTTPException(400, "no accepted suggestions to append")
+    appended = _format_faq_sections(accepted)
+    existing_md = str((faq_doc.data or {}).get("markdown") or "").strip()
+    new_md = (f"{existing_md}\n\n{appended}".strip() if existing_md else appended).rstrip() + "\n"
+    next_graph = GraphJson.model_validate(current_graph.model_dump())
+    updated_faq = next(item for item in next_graph.nodes if item.id == faq_doc.id)
+    updated_faq.data = {
+        **(updated_faq.data or {}),
+        "markdown": new_md,
+        "status": "pending_validation",
+        "question_count": int((updated_faq.data or {}).get("question_count") or 0) + len(accepted),
+    }
+    next_graph.edges = [
+        edge
+        for edge in next_graph.edges
+        if not (
+            edge.source == faq_doc.id
+            and next((item for item in next_graph.nodes if item.id == edge.target), None)
+            and next(item for item in next_graph.nodes if item.id == edge.target).node_type == "embedded"
+        )
+    ]
+    publication = graph_document_publisher.publish(
+        graph=next_graph,
+        persona_slug=persona_slug,
+        brand_slug=next_graph.brand_slug,
+        source="sofia.faq.append",
+        published_by=(auth_service.current_user(request) or {}).get("id"),
+        expected_version=current_version,
+        idempotency_key=f"sofia-faq-append:{persona_slug}:{current_version}:{faq_doc.id}",
+    )
+    return {
+        "ok": True,
+        "faq_node_id": faq_doc.id,
+        "appended_count": len(accepted),
+        "status": "pending_validation",
+        "markdown": new_md,
+        "created_node": False,
+        "publication": publication,
+    }
+
+    # Legacy direct-write implementation retained as unreachable rollout reference.
     node = supabase_client.get_knowledge_node(raw_node)
     if not node:
         raise HTTPException(404, "FAQ node not found")
@@ -1659,7 +1881,6 @@ def sofia_get_plan_json(
     persona_slug: Optional[str] = Query(None),
     persona_ref: Optional[str] = Query(None),
 ):
-    _require_non_production()
     resolved_ref = _persona_ref(persona_slug, persona_ref) or "vz-lupas"
     persona = _resolve_sofia_persona(request, resolved_ref)
     slug = _persona_slug(persona)
@@ -1669,7 +1890,6 @@ def sofia_get_plan_json(
 
 @router.patch("/sofia/plan-json")
 def sofia_patch_plan_json(body: SofiaPlanJsonPatchBody, request: Request):
-    _require_non_production()
     resolved_ref = _persona_ref(body.persona_slug, body.persona_ref) or "vz-lupas"
     persona = _resolve_sofia_persona(request, resolved_ref)
     slug = _persona_slug(persona)

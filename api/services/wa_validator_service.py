@@ -12,14 +12,27 @@ import subprocess
 import threading
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
-from services import supabase_client
-from services.model_router import AVAILABLE_MODELS, get_router
+from services import conversation_runtime, graph_json_v2_store, supabase_client
 
-_MODEL_DEFAULT = "gpt-4o-mini"
-_WA_BOT_DIR = os.environ.get("WA_BOT_DIR", r"C:\Users\Alan\Documents\repositorios\wa-wscrap-bot")
-_WA_PYTHON  = os.environ.get("WA_PYTHON", r"C:\Users\Alan\Documents\repositorios\wa-wscrap-bot\.venv\Scripts\python.exe")
+_MODEL_DEFAULT = "none"
+AVAILABLE_MODELS = {
+    "none": "Determinístico — sem modelo",
+}
+_ROOT_DIR = Path(__file__).resolve().parents[2]
+_WA_EXECUTOR = _ROOT_DIR / "dashboard" / "scripts" / "wa-validator.mjs"
+_WA_NODE = os.environ.get("WA_VALIDATOR_NODE", "node")
+_WA_RUNTIME = _ROOT_DIR / ".runtime" / "wa-validator"
+_WA_PROFILE = Path(
+    os.environ.get(
+        "WA_VALIDATOR_PROFILE",
+        str(_ROOT_DIR / ".runtime" / "wa-validator-profile"),
+    )
+)
+_WA_ARTIFACTS = _ROOT_DIR / "test-artifacts" / "wa-validator"
+_WA_RUNNER_URL = (os.environ.get("WA_VALIDATOR_RUNNER_URL") or "").rstrip("/")
 _BRAIN_API_URL = os.environ.get("BRAIN_API_URL", "http://localhost:8080")
 
 # In-memory session store  {session_id: session_dict}
@@ -38,10 +51,43 @@ def bots() -> list:
         for p in supabase_client.get_personas():
             slug = p.get("slug", "")
             if slug and slug not in registered:
+                agent_name = p.get("name", slug)
+                agent_slug = "agent"
+                try:
+                    current = graph_json_v2_store.load_current(slug)
+                    graph = current[1] if current else None
+                    agent_node = next(
+                        (
+                            node
+                            for node in (graph.nodes if graph else [])
+                            if (node.data or {}).get("metadata", {}).get(
+                                "agent_slug"
+                            )
+                        ),
+                        None,
+                    )
+                    if agent_node:
+                        agent_name = agent_node.label
+                        agent_slug = str(
+                            (agent_node.data or {}).get("metadata", {}).get(
+                                "agent_slug"
+                            )
+                            or agent_node.slug
+                        )
+                except Exception:
+                    pass
                 result.append({
                     "id": slug,
-                    "bot_name": p.get("name", slug),
-                    "label": p.get("name", slug),
+                    "bot_name": agent_name,
+                    "agent_slug": agent_slug,
+                    "whatsapp_phone": (
+                        (agent_node.data or {}).get("metadata", {}).get(
+                            "whatsapp_phone"
+                        )
+                        if agent_node
+                        else None
+                    ),
+                    "label": f"{agent_name} — {p.get('name', slug)}",
                     "persona_slug": slug,
                     "description": p.get("description", ""),
                 })
@@ -51,15 +97,21 @@ def bots() -> list:
     return result
 
 
-def _chat(model: str, prompt: str, max_tokens: int = 1024) -> str:
-    return get_router().chat(model, prompt, max_tokens)
-
 _FLOWS = {
     "compra_simples": "Fluxo de compra simples: cliente pergunta sobre produto, recebe info, confirma compra.",
     "duvida_frete": "Fluxo de dúvida sobre frete/entrega: cliente pergunta prazo e valor de frete.",
     "saudacao_despedida": "Fluxo básico: saudação, pergunta simples, despedida.",
     "produto_especifico": "Fluxo de produto específico: cliente nomeia produto, bot responde com detalhes e CTA.",
     "reclamacao": "Fluxo de reclamação/insatisfação: cliente reclama, bot reconhece e escalona.",
+    "atendente_humano": "Pedido explícito de atendente com handoff.",
+    "produto_inexistente": "Produto inexistente após uma pergunta de esclarecimento.",
+    "sem_evidencia": "Pergunta comercial sem evidência aprovada no grafo.",
+    "produto_ambiguo": "Nome de produto ambíguo que exige esclarecimento.",
+    "mensagem_duplicada": "Retry idempotente da mesma mensagem Meta.",
+    "estagio_monotonic": "Mensagem curta não pode rebaixar o estágio.",
+    "classifier_failure": "Falha do classificador determinístico gera handoff.",
+    "invalid_decision_schema": "Saída fora do contrato gera handoff.",
+    "delivery_callback": "Callbacks sent/delivered/read/failed são reconciliados.",
 }
 
 
@@ -75,67 +127,113 @@ def _extract_json(text: str) -> dict:
     return json.loads(text)
 
 
-def _build_kb_context(persona_id: str) -> str:
-    entries = supabase_client.get_kb_entries(persona_id=persona_id, status="ATIVO")
-    if not entries:
-        return "(base de conhecimento vazia)"
+def _published_graph(persona_slug: str):
+    current = graph_json_v2_store.load_current(persona_slug)
+    if not current:
+        raise ValueError(
+            f"Nenhum Graph JSON v2 publicado para {persona_slug}"
+        )
+    version, graph = current
+    event = graph_json_v2_store.latest_event(persona_slug) or {}
+    checksum = (
+        (event.get("payload") or {}).get("checksum")
+        or graph_json_v2_store.checksum_graph(graph)
+    )
+    if graph.status != "published" or not graph.validation.is_valid:
+        raise ValueError("Graph JSON v2 publicado não está válido")
+    return version, checksum, graph
 
-    sections: dict[str, list[str]] = {}
-    for e in entries:
-        tipo = e.get("tipo", "geral")
-        text = f"[{e.get('titulo', '')}] {e.get('conteudo', '')}"
-        sections.setdefault(tipo, []).append(text)
 
+def _build_graph_context(persona_slug: str) -> tuple[str, int, str, object]:
+    version, checksum, graph = _published_graph(persona_slug)
     lines: list[str] = []
-    priority = ["brand", "tom", "produto", "regra", "faq"]
-    order = priority + [k for k in sections if k not in priority]
-    for tipo in order:
-        if tipo not in sections:
+    for node in graph.nodes:
+        data = node.data or {}
+        if data.get("active", True) is False:
             continue
-        lines.append(f"### {tipo.upper()}")
-        for item in sections[tipo][:5]:
-            lines.append(f"- {item[:300]}")
+        if str(data.get("status") or "").lower() not in {
+            "approved",
+            "validated",
+            "active",
+            "ativo",
+        }:
+            continue
+        lines.append(
+            f"[{node.id}] {node.node_type}/{node.slug}: "
+            f"{node.label} {str(data.get('markdown') or '')[:300]}"
+        )
+    return "\n".join(lines), version, str(checksum), graph
 
-    return "\n".join(lines)
 
-
-def _generate_script_with_openai(
-    persona_name: str,
-    kb_ctx: str,
+def _deterministic_script(
     flow_id: str,
-    model: str,
+    *,
+    product: object | None,
+    graph_version: int,
+    graph_checksum: str,
 ) -> dict:
-    flow_desc = _FLOWS.get(flow_id, flow_id)
-    prompt = f"""Você é um analista de QA para um bot de vendas via WhatsApp.
-Crie um script de conversa de validação para testar se o bot conhece bem os produtos e processos do cliente.
-
-=== CLIENTE ===
-{persona_name}
-
-=== BASE DE CONHECIMENTO ===
-{kb_ctx}
-
-=== FLUXO A TESTAR ===
-{flow_desc}
-
-Gere um script JSON com exatamente 5 a 8 mensagens que um cliente real enviaria.
-Cada mensagem deve testar se o bot conhece informações da base de conhecimento.
-Use linguagem informal e natural, como um cliente de verdade no WhatsApp.
-
-Responda APENAS com JSON válido nesse formato:
-{{
-  "flow_description": "descrição do que está sendo testado",
-  "expected_knowledge": ["item 1 que o bot deve saber", "item 2", ...],
-  "steps": [
-    {{"text": "mensagem do cliente", "wait": 15}},
-    ...
-  ]
-}}
-
-Não use markdown. JSON puro começando com {{."""
-
-    raw = _chat(model, prompt)
-    return _extract_json(raw)
+    product_id = getattr(product, "id", None)
+    product_data = getattr(product, "data", {}) or {}
+    product_metadata = product_data.get("metadata") or {}
+    product_name = (
+        product_metadata.get("display_name")
+        or getattr(product, "label", None)
+        or "o primeiro produto ativo"
+    )
+    price = product_data.get("price") or product_metadata.get("price") or {}
+    unit_price = (
+        float(price.get("amount"))
+        if isinstance(price, dict) and price.get("amount") is not None
+        else None
+    )
+    common_expected = [f"graph:{graph_version}:{graph_checksum}"]
+    if product_id:
+        common_expected.insert(0, f"evidence:{product_id}")
+    scenarios = {
+        "compra_simples": [
+            "Oi",
+            f"Quanto custa {product_name}?",
+            "quero 2",
+            "mude para 3",
+            "qual o total?",
+            "Cliente QA",
+            "Rua QA, 100, Canoas",
+            "Sim",
+        ],
+        "saudacao_despedida": ["Oi", "Quais categorias estão disponíveis?", "Obrigado"],
+        "produto_especifico": [f"Vocês têm {product_name}?", "quanto custa?", "quero 2"],
+        "duvida_frete": ["Oi", "Como funciona a entrega?"],
+        "reclamacao": ["Estou com um problema e quero fazer uma reclamação"],
+        "atendente_humano": ["Quero falar com um atendente humano"],
+        "produto_inexistente": ["Vocês têm o produto QA inexistente?", "É esse mesmo"],
+        "sem_evidencia": ["Qual é uma condição comercial que não está documentada?"],
+        "produto_ambiguo": ["Quero aquele produto", "Não sei o nome completo"],
+        "mensagem_duplicada": [f"Quanto custa {product_name}?", f"Quanto custa {product_name}?"],
+        "estagio_monotonic": [f"Quero 2 de {product_name}", "Oi"],
+        "classifier_failure": ["[QA_CLASSIFIER_FAILURE]"],
+        "invalid_decision_schema": ["[QA_INVALID_DECISION_SCHEMA]"],
+        "delivery_callback": [f"Quero 1 de {product_name}"],
+    }
+    messages = scenarios.get(flow_id)
+    if not messages:
+        raise ValueError(f"Fluxo determinístico desconhecido: {flow_id}")
+    expected_dialogue = {
+        "product_name": product_name,
+        "unit_price": unit_price,
+        "final_quantity": 3 if flow_id == "compra_simples" else None,
+        "final_total": (
+            round(unit_price * 3, 2)
+            if unit_price is not None and flow_id == "compra_simples"
+            else None
+        ),
+        "forbidden_terms": ["tock", "tock fatal"],
+    }
+    return {
+        "flow_description": _FLOWS.get(flow_id, flow_id),
+        "expected_knowledge": common_expected,
+        "steps": [{"text": text, "wait": 10} for text in messages],
+        "expected_dialogue": expected_dialogue,
+    }
 
 
 def generate_script(
@@ -150,9 +248,43 @@ def generate_script(
 
     persona_id = persona["id"]
     persona_name = persona.get("name", persona_slug)
-    kb_ctx = _build_kb_context(persona_id)
-
-    script_data = _generate_script_with_openai(persona_name, kb_ctx, flow_id, model)
+    if not str(target_contact or "").strip():
+        raise ValueError("Contato WhatsApp inválido")
+    kb_ctx, graph_version, graph_checksum, graph = _build_graph_context(
+        persona_slug
+    )
+    agent_node = next(
+        (
+            node
+            for node in graph.nodes
+            if (node.data or {}).get("metadata", {}).get("agent_slug")
+        ),
+        None,
+    )
+    agent_metadata = (agent_node.data or {}).get("metadata", {}) if agent_node else {}
+    agent_slug = str(agent_metadata.get("agent_slug") or "agent")
+    target_phone = str(agent_metadata.get("whatsapp_phone") or "").strip()
+    primary_product = next(
+        (
+            node
+            for node in graph.nodes
+            if node.node_type == "product"
+            and (node.data or {}).get("metadata", {}).get("qa_primary") is True
+        ),
+        None,
+    )
+    script_data = _deterministic_script(
+        flow_id,
+        product=primary_product,
+        graph_version=graph_version,
+        graph_checksum=graph_checksum,
+    )
+    routing = supabase_client.get_persona_routing(persona_slug) or {}
+    conversation_mode = (
+        "n8n_agents"
+        if routing.get("process_mode") == "n8n"
+        else "deterministic"
+    )
 
     session_id = str(uuid.uuid4())
     script = {
@@ -162,11 +294,19 @@ def generate_script(
             "flow": flow_id,
             "session_id": session_id,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "model": model,
+            "model": "none",
+            "classifier": "deterministic_v1",
+            "conversation_mode": conversation_mode,
+            "pipeline_contract": "conversation_v1",
+            "agent_slug": agent_slug,
+            "graph_version": graph_version,
+            "graph_checksum": graph_checksum,
         },
         "target": target_contact,
+        "target_phone": target_phone or None,
         "flow_description": script_data.get("flow_description", ""),
         "expected_knowledge": script_data.get("expected_knowledge", []),
+        "expected_dialogue": script_data.get("expected_dialogue", {}),
         "steps": script_data.get("steps", []),
     }
 
@@ -204,23 +344,51 @@ def run_session(session_id: str) -> dict:
         raise ValueError(f"Sessão não encontrada: {session_id}")
     if session["status"] == "running":
         raise ValueError("Sessão já está em execução")
+    if _WA_RUNNER_URL:
+        token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
+        response = httpx.post(
+            f"{_WA_RUNNER_URL}/run",
+            json={"session_id": session_id, "script": session["script"]},
+            headers={"X-Webhook-Token": token},
+            timeout=15,
+        )
+        response.raise_for_status()
+        with _sessions_lock:
+            _sessions[session_id]["status"] = "starting"
+            _sessions[session_id]["runner"] = _WA_RUNNER_URL
+            _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+        return get_session(session_id)
 
-    script_path = os.path.join(_WA_BOT_DIR, f"_validator_script_{session_id[:8]}.json")
-    output_path = os.path.join(_WA_BOT_DIR, f"_validator_output_{session_id[:8]}.json")
-
-    with open(script_path, "w", encoding="utf-8") as f:
-        json.dump(session["script"], f, ensure_ascii=False, indent=2)
+    runtime_dir = _WA_RUNTIME / session_id
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    script_path = runtime_dir / "script.json"
+    output_path = runtime_dir / "output.json"
+    artifact_dir = _WA_ARTIFACTS / session_id
+    script_path.write_text(
+        json.dumps(session["script"], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     def _run():
         import logging as _logging
         _log = _logging.getLogger("wa_validator_service")
         try:
-            python_bin = _WA_PYTHON if os.path.exists(_WA_PYTHON) else "python"
-            cmd = [python_bin, "wa_validator.py", "--script", script_path, "--output", output_path]
+            cmd = [
+                _WA_NODE,
+                str(_WA_EXECUTOR),
+                "--script",
+                str(script_path),
+                "--output",
+                str(output_path),
+                "--profile",
+                str(_WA_PROFILE),
+                "--artifacts",
+                str(artifact_dir),
+            ]
             _log.info("Iniciando subprocess: %s", " ".join(cmd))
             proc = subprocess.Popen(
                 cmd,
-                cwd=_WA_BOT_DIR,
+                cwd=_ROOT_DIR,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -238,9 +406,8 @@ def run_session(session_id: str) -> dict:
                 _log.info("wa_validator stdout [%s]:\n%s", session_id[:8], stdout_data[-3000:])
 
             output = {}
-            if os.path.exists(output_path):
-                with open(output_path, encoding="utf-8") as f:
-                    output = json.load(f)
+            if output_path.exists():
+                output = json.loads(output_path.read_text(encoding="utf-8"))
 
             if not output and proc.returncode != 0:
                 final_status = "error"
@@ -254,6 +421,8 @@ def run_session(session_id: str) -> dict:
                 _sessions[session_id]["status"] = final_status
                 _sessions[session_id]["error"] = error_msg
                 _sessions[session_id]["log"] = stdout_data[-4000:] if stdout_data else ""
+                _sessions[session_id]["output_path"] = str(output_path)
+                _sessions[session_id]["artifact_dir"] = str(artifact_dir)
                 _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
 
             supabase_client.insert_event({
@@ -287,12 +456,28 @@ def get_session(session_id: str) -> dict:
         session = _sessions.get(session_id)
     if not session:
         raise ValueError(f"Sessão não encontrada: {session_id}")
-
-    output_path = os.path.join(_WA_BOT_DIR, f"_validator_output_{session_id[:8]}.json")
-    if session["status"] in ("running", "starting") and os.path.exists(output_path):
+    if _WA_RUNNER_URL and session.get("runner"):
         try:
-            with open(output_path, encoding="utf-8") as f:
-                partial = json.load(f)
+            token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
+            response = httpx.get(
+                f"{_WA_RUNNER_URL}/sessions/{session_id}",
+                headers={"X-Webhook-Token": token},
+                timeout=5,
+            )
+            response.raise_for_status()
+            output = response.json()
+            with _sessions_lock:
+                _sessions[session_id]["output"] = output
+                _sessions[session_id]["status"] = output.get("status", "running")
+                _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+        except Exception as exc:
+            with _sessions_lock:
+                _sessions[session_id]["runner_error"] = str(exc)
+
+    output_path = _WA_RUNTIME / session_id / "output.json"
+    if session["status"] in ("running", "starting") and output_path.exists():
+        try:
+            partial = json.loads(output_path.read_text(encoding="utf-8"))
             with _sessions_lock:
                 _sessions[session_id]["output"] = partial
         except Exception:
@@ -327,46 +512,71 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
     if not conversation:
         return {**_EMPTY_INSIGHTS, "summary": "Sem conversa para analisar.", "session_id": session_id}
 
-    conv_text = "\n".join(
-        f"{turn['role'].upper()}: {turn.get('text', '(sem resposta)')}"
-        for turn in conversation
+    bot_turns = [turn for turn in conversation if turn.get("role") == "bot"]
+    failures = [
+        turn
+        for turn in bot_turns
+        if turn.get("timeout") or str(turn.get("text") or "").startswith("(erro:")
+    ]
+    evidence_used = {
+        str(node_id)
+        for turn in bot_turns
+        for node_id in (turn.get("evidence_node_ids") or [])
+    }
+    demonstrated: list[str] = []
+    gaps: list[dict] = []
+    for item in expected:
+        if item.startswith("evidence:"):
+            node_id = item.split(":", 1)[1]
+            if node_id in evidence_used:
+                demonstrated.append(item)
+            else:
+                gaps.append({
+                    "topic": item,
+                    "evidence": "Node não apareceu na evidência registrada.",
+                    "priority": "high",
+                })
+        elif item.startswith("graph:"):
+            expected_lineage = item.split(":", 1)[1]
+            actual_lineage = (
+                f"{script.get('meta', {}).get('graph_version')}:"
+                f"{script.get('meta', {}).get('graph_checksum')}"
+            )
+            if expected_lineage == actual_lineage:
+                demonstrated.append(item)
+            else:
+                gaps.append({
+                    "topic": item,
+                    "evidence": "Versão/checksum divergentes.",
+                    "priority": "high",
+                })
+    if failures:
+        gaps.append({
+            "topic": "transport_or_reply",
+            "evidence": f"{len(failures)} turno(s) sem resposta válida.",
+            "priority": "high",
+        })
+    response_ratio = len(bot_turns) / max(
+        1,
+        len([turn for turn in conversation if turn.get("role") == "validator"]),
     )
-    expected_str = "\n".join(f"- {e}" for e in expected)
-
-    prompt = f"""Analise esta conversa de validação de um bot de vendas WhatsApp.
-
-=== CONHECIMENTO ESPERADO ===
-{expected_str}
-
-=== CONVERSA REGISTRADA ===
-{conv_text}
-
-Identifique:
-1. Quais conhecimentos o bot demonstrou corretamente
-2. Quais conhecimentos estão faltando ou incorretos (gaps)
-3. Recomendações para preencher os gaps na base de conhecimento
-
-Responda APENAS com JSON:
-{{
-  "demonstrated": ["conhecimento 1 que o bot demonstrou", ...],
-  "gaps": [
-    {{"topic": "tópico ausente", "evidence": "o bot respondeu X quando deveria saber Y", "priority": "high/medium/low"}},
-    ...
-  ],
-  "recommendations": ["recomendação 1 para a base de conhecimento", ...],
-  "overall_score": 0-100,
-  "summary": "resumo de 2 linhas"
-}}"""
-
-    raw = _chat(model, prompt)
-    parsed = _extract_json(raw)
-
-    # Merge parsed result over defaults so any missing key never reaches the frontend as undefined
+    evidence_ratio = len(demonstrated) / max(1, len(expected))
+    score = round(max(0, min(100, (response_ratio * 50) + (evidence_ratio * 50))))
     insights = {
         **_EMPTY_INSIGHTS,
-        **{k: v for k, v in parsed.items() if v is not None},
+        "demonstrated": demonstrated,
+        "gaps": gaps,
+        "recommendations": [
+            "Corrigir somente a origem Markdown/Graph indicada pela evidência."
+        ] if gaps else [],
+        "overall_score": score,
+        "summary": (
+            "Validação determinística concluída sem uso de modelo. "
+            f"{len(failures)} falha(s) de resposta e {len(gaps)} gap(s)."
+        ),
         "session_id": session_id,
         "persona_slug": persona_slug,
+        "analyzer": "deterministic_v1",
     }
 
     with _sessions_lock:
@@ -387,12 +597,7 @@ Responda APENAS com JSON:
 
 
 async def run_session_direct(session_id: str) -> dict:
-    """
-    Execute a validation session by calling the platform's own /process endpoint
-    for each script step — no WhatsApp connection required.
-    Each bot reply comes from the real AI pipeline (context_builder → classifier
-    → decision_engine → SDR/CLOSER agent).
-    """
+    """Execute through the selected mode using the conversation_v1 contract."""
     with _sessions_lock:
         session = _sessions.get(session_id)
     if not session:
@@ -401,10 +606,45 @@ async def run_session_direct(session_id: str) -> dict:
         raise ValueError("Sessão já está em execução")
 
     script = session.get("script", {})
-    persona_slug = session.get("persona_slug", "global")
+    persona_slug = session.get("persona_slug", "")
+    persona = supabase_client.get_persona(persona_slug) or {}
+    routing = supabase_client.get_persona_routing(persona_slug) or {}
+    conversation_mode = (
+        "n8n_agents"
+        if routing.get("process_mode") == "n8n"
+        else "deterministic"
+    )
+    bindings = supabase_client.get_workflow_bindings(persona.get("id"))
+    binding = next(
+        (
+            row
+            for row in bindings
+            if row.get("active", True)
+            and (row.get("metadata") or {}).get("decision_owner")
+            in {"n8n_hybrid", "n8n_agents"}
+        ),
+        None,
+    )
+    binding_metadata = (binding or {}).get("metadata") or {}
+    workflow_url = str(
+        binding_metadata.get("conversation_webhook_url")
+        or binding_metadata.get("webhook_url")
+        or os.environ.get("N8N_CONVERSATION_TEST_URL")
+        or ""
+    ).strip()
+    if conversation_mode == "n8n_agents" and not workflow_url:
+        raise ValueError("Workflow n8n_agents ativo não configurado")
+    lead = supabase_client.ensure_lead_for_persona(
+        lead_id=f"validator_{session_id[:8]}",
+        persona_slug_or_id=persona_slug,
+        nome=f"Validador [{persona_slug}]",
+        stage="novo",
+        canal="whatsapp",
+    ) or {}
+    lead_ref = lead.get("id")
+    if not lead_ref:
+        raise ValueError("Não foi possível criar o lead de validação")
     steps = script.get("steps", [])
-    # Use a stable, readable lead_id for test messages in Supabase
-    test_lead_id = f"validator_{session_id[:8]}"
 
     with _sessions_lock:
         _sessions[session_id]["status"] = "running"
@@ -417,57 +657,87 @@ async def run_session_direct(session_id: str) -> dict:
         import logging as _logging
         _log = _logging.getLogger("wa_validator_service.direct")
         try:
+            token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
+            headers = {"X-Hub-Signature-256": ""} if not token else {}
             async with httpx.AsyncClient(timeout=60) as client:
                 for i, step in enumerate(steps):
                     text = step.get("text", "")
                     wait_s = min(step.get("wait", 10), 3)
-
                     ts_now = datetime.now(timezone.utc).isoformat()
+                    message_id = f"validator:{session_id}:{i}"
+                    correlation_id = f"validator:{session_id}:{i}"
                     conversation.append({
                         "role": "validator",
                         "text": text,
                         "ts": ts_now,
+                        "message_id": message_id,
                     })
-                    # Save validator's message to Supabase so conversation is visible
-                    try:
-                        supabase_client.insert_message({
-                            "message_id": f"val_{session_id[:8]}_{i}",
-                            "sender_type": "user",
-                            "canal": "whatsapp",
-                            "texto": text,
-                            "direction": "Inbounding",
-                            "Lead_Stage": "teste",
-                            "nome": f"Validador [{persona_slug}]",
-                            "created_at": ts_now,
-                        })
-                    except Exception as e:
-                        _log.debug("Could not save validator message: %s", e)
-
+                    supabase_client.insert_message({
+                        "lead_ref": lead_ref,
+                        "message_id": message_id,
+                        "external_message_id": message_id,
+                        "sender_type": "lead",
+                        "role": "user",
+                        "canal": "whatsapp",
+                        "texto": text,
+                        "direction": "inbound",
+                        "status": "received",
+                        "correlation_id": correlation_id,
+                        "created_at": ts_now,
+                    })
                     with _sessions_lock:
                         _sessions[session_id]["output"] = {
                             "conversation": list(conversation), "status": "running"
                         }
-
                     try:
-                        resp = await client.post(
-                            f"{_BRAIN_API_URL}/process",
-                            json={
-                                "lead_id": test_lead_id,
-                                "nome": f"Validador [{persona_slug}]",
-                                "stage": "novo",
-                                "canal": "whatsapp",
-                                "mensagem": text,
+                        event = {
                                 "persona_slug": persona_slug,
-                            },
-                        )
-                        resp.raise_for_status()
-                        data = resp.json()
-                        reply: str = data.get("reply") or ""
+                                "lead_ref": lead_ref,
+                                "buffer_id": f"validator:{session_id}:{i}",
+                                "external_message_id": message_id,
+                                "correlation_id": correlation_id,
+                                "phone_number_id": None,
+                                "message": text,
+                                "pipeline_contract": "conversation_v1",
+                                "decision_owner": conversation_mode,
+                            }
+                        if conversation_mode == "n8n_agents":
+                            resp = await client.post(
+                                workflow_url,
+                                json=event,
+                                headers=headers,
+                            )
+                            resp.raise_for_status()
+                            data = resp.json()
+                        else:
+                            data = conversation_runtime.execute_pipeline(
+                                persona_slug=persona_slug,
+                                lead_ref=int(lead_ref),
+                                message=text,
+                                message_id=message_id,
+                                correlation_id=correlation_id,
+                                phone_number_id=None,
+                                inbound_buffer_id=event["buffer_id"],
+                            )
+                        reply: str = data.get("reply_text") or ""
                         turn: dict = {
                             "role": "bot",
                             "ts": datetime.now(timezone.utc).isoformat(),
-                            "agent": data.get("agent_used", ""),
-                            "latency_ms": data.get("latency_ms"),
+                            "agent": script.get("meta", {}).get("agent_slug"),
+                            "route": data.get("route"),
+                            "intent": data.get("intent"),
+                            "handoff": data.get("handoff"),
+                            "message_id": data.get("message_id"),
+                            "classifier": data.get("classifier"),
+                            "conversation_mode": conversation_mode,
+                            "pipeline_contract": data.get("pipeline_contract")
+                            or "conversation_v1",
+                            "evidence_node_ids": data.get("evidence_node_ids")
+                            or [],
+                            "graph_version": data.get("graph_version")
+                            or script.get("meta", {}).get("graph_version"),
+                            "graph_checksum": data.get("graph_checksum")
+                            or script.get("meta", {}).get("graph_checksum"),
                         }
                         if reply:
                             turn["text"] = reply
@@ -475,7 +745,12 @@ async def run_session_direct(session_id: str) -> dict:
                             turn["text"] = "(sem resposta — agente não gerou reply)"
                             turn["timeout"] = True
                     except Exception as exc:
-                        _log.error("Step %d /process call failed: %s", i, exc)
+                        _log.error(
+                            "Step %d %s pipeline failed: %s",
+                            i,
+                            conversation_mode,
+                            exc,
+                        )
                         turn = {
                             "role": "bot",
                             "text": f"(erro: {exc})",
@@ -504,6 +779,11 @@ async def run_session_direct(session_id: str) -> dict:
                     "session_id": session_id,
                     "persona_slug": persona_slug,
                     "n_turns": len(conversation),
+                    "graph_version": script.get("meta", {}).get("graph_version"),
+                    "graph_checksum": script.get("meta", {}).get("graph_checksum"),
+                    "conversation_mode": conversation_mode,
+                    "classifier": "deterministic_v1",
+                    "pipeline_contract": "conversation_v1",
                 },
             })
 
@@ -513,7 +793,12 @@ async def run_session_direct(session_id: str) -> dict:
                 _sessions[session_id]["error"] = str(exc)
                 _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    asyncio.create_task(_do_run())
+    task = asyncio.create_task(_do_run())
+    # CLI and container QA runs have no long-lived ASGI loop after the command
+    # returns. Opt in to awaiting the deterministic scenario there, while the
+    # API route retains its non-blocking behaviour by default.
+    if os.environ.get("WA_VALIDATOR_DIRECT_WAIT", "").strip().lower() in {"1", "true", "yes"}:
+        await task
     return get_session(session_id)
 
 

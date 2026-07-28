@@ -1,0 +1,14 @@
+FROM mcr.microsoft.com/playwright:v1.62.0-noble
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY scripts/wa-validator.mjs scripts/wa-validator-server.mjs ./scripts/
+
+ENV PORT=3010 \
+    WA_VALIDATOR_RUNTIME=/runtime \
+    WA_VALIDATOR_ARTIFACTS=/artifacts \
+    WA_VALIDATOR_PROFILE=/profile
+
+EXPOSE 3010
+CMD ["node", "scripts/wa-validator-server.mjs"]

@@ -78,9 +78,8 @@ export default function WaValidatorPage() {
   // form state — bot is the primary selector (replaces persona + contact)
   const [selectedBotId, setSelectedBotId] = useState("");
   const [flowId, setFlowId] = useState("");
-  // default to gpt-4o-mini so generate works before models endpoint resolves
-  const [model, setModel] = useState("gpt-4o-mini");
-  const [analyzeModel, setAnalyzeModel] = useState("gpt-4o-mini");
+  const [model, setModel] = useState("none");
+  const [analyzeModel, setAnalyzeModel] = useState("none");
 
   const [generating, setGenerating] = useState(false);
   const [running, setRunning] = useState(false);
@@ -151,7 +150,7 @@ export default function WaValidatorPage() {
     setGenerating(true);
     try {
       const effectiveFlow = flowId || flows[0]?.id || "compra_simples";
-      const effectiveModel = model || "gpt-4o-mini";
+      const effectiveModel = model || "none";
       const result = await api.waGenerateScript({
         persona_slug: selectedBot.persona_slug,
         flow_id: effectiveFlow,
@@ -289,16 +288,17 @@ export default function WaValidatorPage() {
             </select>
           </div>
 
-          {/* Model selector */}
+          {/* Deterministic classifier */}
           <div className="space-y-1">
-            <label className="text-[11px] text-brain-muted uppercase tracking-wide">Modelo (geração do script)</label>
+            <label className="text-[11px] text-brain-muted uppercase tracking-wide">Classificador</label>
             <select
               className="w-full bg-brain-bg border border-brain-border text-sm text-white rounded px-2 py-1.5"
               value={model}
               onChange={(e) => setModel(e.target.value)}
+              disabled
             >
               {models.length === 0
-                ? <option value="gpt-4o-mini">GPT-4o Mini</option>
+                ? <option value="none">Determinístico — sem modelo</option>
                 : models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
             </select>
           </div>
@@ -411,7 +411,7 @@ export default function WaValidatorPage() {
                 <button
                   onClick={handleRunWA}
                   disabled={running || isRunning || isDone}
-                  title="Requer wa-wscrap-bot rodando e Sofia conectada ao WhatsApp via n8n"
+                  title="Requer o runner Playwright local e um perfil autenticado do WhatsApp Web"
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-green-700/60 hover:bg-green-700 text-white transition disabled:opacity-40"
                 >
                   <Play size={12} />
@@ -421,22 +421,13 @@ export default function WaValidatorPage() {
                 {/* Analyze gaps */}
                 {isDone && !insights && (
                   <div className="flex items-center gap-2 ml-auto">
-                    <select
-                      className="bg-brain-bg border border-brain-border text-xs text-white rounded px-2 py-1.5"
-                      value={analyzeModel}
-                      onChange={(e) => setAnalyzeModel(e.target.value)}
-                    >
-                      {models.length === 0
-                        ? <option value="gpt-4o-mini">GPT-4o Mini</option>
-                        : models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-                    </select>
                     <button
                       onClick={handleAnalyze}
                       disabled={analyzing}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-yellow-600/70 hover:bg-yellow-600 text-white transition disabled:opacity-40"
                     >
                       <Zap size={12} />
-                      {analyzing ? "Analisando..." : "Analisar Gaps"}
+                      {analyzing ? "Analisando..." : "Analisar Evidências"}
                     </button>
                   </div>
                 )}

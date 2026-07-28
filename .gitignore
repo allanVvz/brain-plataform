@@ -96,6 +96,7 @@ dashboard/modes.json
 
 # Local agent/runtime state
 .codex/
+.codex-run/
 .agents/
 .mcp.json
 .vault-dev/
@@ -131,7 +132,16 @@ scripts/sofia_resp.json
 scripts/sofia_tools_resp.json
 scripts/test_sofia_isotonicos_01.py
 scripts/validate_new_qa_rest.py
+# Runtime workflow contracts are versioned; exports with credentials remain
+# ignored. Only the sanitized local templates below are committed.
 api/n8n-workflows/*.json
+!api/n8n-workflows/whatsapp-inbound-gateway.json
+!api/n8n-workflows/whatsapp-conversation-dispatch.json
+!api/n8n-workflows/whatsapp-outbound-sender.json
+!api/n8n-workflows/whatsapp-error-handler.json
+!api/n8n-workflows/baita-whatsapp-test-sender.json
+!api/n8n-workflows/persona-conversation-template.json
+!api/n8n-workflows/baita-vitoria.json
 DEPLOY_SERVICES_PLAN.md
 api/prompts/claude_knowledge_graph_validation.md
 api/scripts/import_v1_to_v2_allanvvz.py

@@ -178,7 +178,7 @@ def _context_snippet(markdown: str) -> str:
         return ""
     if len(first) > 180:
         first = first[:177].rstrip() + "…"
-    return f"Detalhe do galho: {first}"
+    return f"Contexto confirmado: {first}"
 
 
 def _clean_branch_sentence(text: str) -> str:
@@ -547,7 +547,16 @@ def adaptar_faqs_universais_ao_grafo(
 
     label = _node_label(parent)
     brand = context.get("brand") or "loja"
-    context_snippet = _branch_customer_context(context, sellable) or _context_snippet(context.get("nearest_markdown") or "")
+    factual_markdown = (
+        (context.get("markdown_by_type") or {}).get((sellable or {}).get("type"))
+        or context.get("nearest_markdown")
+        or ""
+    )
+    context_parts = [
+        _branch_customer_context(context, sellable),
+        _context_snippet(factual_markdown),
+    ]
+    context_snippet = ". ".join(part for part in context_parts if part)
     nearest_md = context.get("nearest_markdown") or ""
 
     if category in {"product", "offer"}:

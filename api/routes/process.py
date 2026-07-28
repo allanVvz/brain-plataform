@@ -10,6 +10,8 @@ from core import context_builder, classifier, decision_engine, insight_engine
 from agents.sdr import SDRAgent
 from agents.closer import CloserAgent
 from services import agents_service, event_emitter, supabase_client
+from services.deterministic_sdr import load_catalog
+from pathlib import Path
 from datetime import datetime, timezone
 
 router = APIRouter(tags=["process"])
@@ -86,6 +88,7 @@ async def process(
                     "lead_ref": resolved_ref,
                     "message_id": f"n8n_in_{int(time.time() * 1000)}_{resolved_ref}",
                     "sender_type": "client",
+                    "role": "user",
                     "canal": event.canal or "whatsapp",
                     "texto": event.mensagem,
                     "direction": "inbound",
@@ -245,7 +248,8 @@ async def process(
         logger.warning("resolve_for_stage failed: %s", exc)
         agent_record, role = None, "sdr"
 
-    if agent_record is None and event.persona_slug:
+    deterministic_mode = bool(event.persona_slug and load_catalog(Path(__file__).resolve().parents[1].parent / "docs" / "sdr", event.persona_slug).products)
+    if agent_record is None and event.persona_slug and not deterministic_mode:
         # Nenhum agente atribuído a esse role para essa persona → humano.
         # Pausa o lead pra o /process não voltar a tentar enquanto operador
         # responde via dashboard. Manual resume via /leads/{id}/resume-ai.
@@ -308,6 +312,15 @@ async def process(
         except Exception:
             pass
 
+    # A guarded agent may send one acknowledgement while handing the lead to
+    # an operator.  Pause atomically before the outbox can process another
+    # inbound message, so no automated follow-up can leak past the handoff.
+    if agent_result.get("handoff") and ctx.lead.ref:
+        try:
+            supabase_client.handoff_whatsapp_lead(ctx.lead.ref)
+        except Exception as exc:
+            logger.warning("guarded handoff failed (non-fatal): %s", exc)
+
     if agent_result.get("reply"):
         try:
             supabase_client.insert_message({
@@ -316,11 +329,13 @@ async def process(
                 "sender_type": "agent",
                 "canal": ctx.lead.canal,
                 "texto": agent_result["reply"],
-                "direction": "Outbounding",
+                "role": "assistant",
+                "direction": "outbound",
                 "Lead_Stage": funnel_stage,
                 "nome": ctx.lead.nome,
                 "whatsapp_phone_number_id": lead_data.get("whatsapp_phone_number_id"),
                 "created_at": datetime.now(timezone.utc).isoformat(),
+                "metadata": {"sdr_state": (agent_result.get("detected_fields") or {}).get("sdr_state")},
             })
         except Exception as exc:
             logger.warning("insert_message failed (non-fatal): %s", exc)
@@ -337,6 +352,9 @@ async def process(
                     update["cep"] = df["cep"]
                 if df.get("nome"):
                     update["nome"] = df["nome"]
+                if df.get("sdr_state"):
+                    current_metadata = lead_data.get("metadata") or {}
+                    update["metadata"] = {**current_metadata, "sdr_state": df["sdr_state"]}
                 supabase_client.update_lead(ctx.lead.ref, update)
             except Exception as exc:
                 logger.warning("update_lead failed (non-fatal): %s", exc)

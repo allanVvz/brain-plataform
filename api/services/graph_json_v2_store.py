@@ -35,6 +35,10 @@ def _checksum(payload: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
+def checksum_graph(graph: "GraphJson") -> str:
+    return _checksum(graph.model_dump())
+
+
 def _events(persona_slug: str, brand_slug: str | None = None, *, limit: int = 500) -> list[dict]:
     rows = supabase_client.list_system_events(
         entity_type=_ENTITY_TYPE,
@@ -120,6 +124,8 @@ def save_version(
     source: str = "graph_json_v2_store",
     note: str | None = None,
     published_by: str | None = None,
+    idempotency_key: str | None = None,
+    projections: dict[str, Any] | None = None,
 ) -> str:
     graph_dict = graph.model_dump()
     checksum = _checksum(graph_dict)
@@ -135,6 +141,8 @@ def save_version(
         "source": source,
         "note": note,
         "published_by": published_by,
+        "idempotency_key": idempotency_key,
+        "projections": projections or {},
         "published_at": datetime.now(timezone.utc).isoformat(),
     }
     event = supabase_client.insert_event(

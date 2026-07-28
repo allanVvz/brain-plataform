@@ -6,6 +6,8 @@
 # ── Builder ───────────────────────────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
+ARG PIP_TRUSTED_HOST=""
+
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
@@ -18,7 +20,7 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST}" pip install -r requirements.txt
 
 # ── Runtime ───────────────────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime

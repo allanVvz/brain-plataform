@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GraphPageClient from "@/app/knowledge/graph/GraphPageClient";
 import { api } from "@/lib/api";
@@ -112,10 +112,7 @@ describe("GraphPageClient v2 loading", () => {
     const treeTab = await screen.findByRole("tab", { name: "Tree" });
     expect(treeTab).toHaveAttribute("aria-selected", "false");
 
-    fireEvent.click(treeTab);
-
-    expect(navigationMocks.replaceMock).toHaveBeenCalledWith(
-      "/knowledge/graph?mode=semantic_tree",
-    );
+    expect(treeTab).toHaveAttribute("href", "/knowledge/graph?mode=semantic_tree");
+    expect(navigationMocks.replaceMock).not.toHaveBeenCalled();
   });
 });

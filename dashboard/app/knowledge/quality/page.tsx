@@ -726,26 +726,6 @@ export default function QualityPage() {
                     </>
                   )}
 
-                  <div>
-                    <label className="text-[10px] text-obs-subtle block mb-1.5 uppercase tracking-wide">Agentes</label>
-                    <div className="flex gap-1.5 flex-wrap">
-                      {["SDR","Closer","Classifier","Maker"].map((agent) => {
-                        const active = (item.agent_visibility || []).includes(agent);
-                        return (
-                          <button key={agent}
-                            onClick={() => {
-                              const cur = item.agent_visibility || [];
-                              updateSingle({ agent_visibility: active ? cur.filter((a) => a !== agent) : [...cur, agent] });
-                            }}
-                            className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
-                              active ? "bg-obs-violet/15 border-obs-violet/50 text-obs-violet" : "border-white/06 text-obs-faint hover:text-obs-subtle"}`}>
-                            {agent}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
                   {!item.persona_id && needsAction && (
                     <p className="text-[10px] text-obs-amber bg-obs-amber/5 border border-obs-amber/15 rounded-lg px-3 py-2">
                       Atribua um cliente para aprovar

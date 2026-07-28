@@ -12,6 +12,7 @@ class Lead(BaseModel):
     cidade: Optional[str] = None
     cep: Optional[str] = None
     ai_enabled: bool = True
+    metadata: dict = {}
 
 
 class Context(BaseModel):
@@ -25,3 +26,4 @@ class Context(BaseModel):
     tags: List[str] = []
     route_hint: str = "SDR"
     funnel_stage: str = "novo"
+    metadata: dict = {}

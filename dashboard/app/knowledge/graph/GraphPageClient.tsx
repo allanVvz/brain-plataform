@@ -143,6 +143,7 @@ export default function GraphPageClient() {
   // Raw canonical graph_json document. Edits are applied to this document and
   // re-published, which triggers the backend reindex of derived tables.
   const [docGraph, setDocGraph] = useState<any | null>(null);
+  const [docVersion, setDocVersion] = useState(0);
   const [loading, setLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [selectedNodes, setSelectedNodes] = useState<any[]>([]);
@@ -157,7 +158,6 @@ export default function GraphPageClient() {
   const [pendingGraphSnapshot, setPendingGraphSnapshot] = useState<GraphPayload | null>(null);
   const [sharedSessionId, setSharedSessionId] = useState<string | null>(null);
   const [sharedPlanJson, setSharedPlanJson] = useState<any | null>(null);
-  const [viewRevision, setViewRevision] = useState(0);
 
   // ── URL-driven state ──────────────────────────────────────────
   const focus = searchParams.get("focus") || "";
@@ -185,12 +185,14 @@ export default function GraphPageClient() {
     [router, searchParams],
   );
 
-  const selectViewMode = useCallback(
+  const viewModeHref = useCallback(
     (nextMode: ViewMode) => {
-      setViewRevision((revision) => revision + 1);
-      updateParam({ mode: nextMode, focus: null });
+      const next = new URLSearchParams(searchParams.toString());
+      next.set("mode", nextMode);
+      next.delete("focus");
+      return `/knowledge/graph?${next.toString()}`;
     },
-    [updateParam],
+    [searchParams],
   );
 
   useEffect(() => {
@@ -223,6 +225,7 @@ export default function GraphPageClient() {
       if (!headerPersonaSlug) {
         const emptyPayload = { nodes: [], edges: [], meta: {} } as GraphPayload;
         setDocGraph(null);
+        setDocVersion(0);
         setData(emptyPayload);
         setGraphNotice({ tone: "error", text: "Selecione uma persona para carregar o Graph JSON v2." });
         return emptyPayload;
@@ -233,11 +236,13 @@ export default function GraphPageClient() {
         const v2Payload = parsed as GraphPayload;
         setGraphNotice(null);
         setDocGraph(currentDoc?.graph_json || currentDoc?.document?.graph_json || null);
+        setDocVersion(Number(currentDoc?.version || currentDoc?.document?.version || 0));
         setData(v2Payload);
         return v2Payload;
       }
       const emptyPayload = { nodes: [], edges: [], meta: {} } as GraphPayload;
       setDocGraph(null);
+      setDocVersion(0);
       setData(emptyPayload);
       setGraphNotice({ tone: "error", text: "Nenhum Graph JSON v2 publicado para esta persona." });
       return emptyPayload;
@@ -262,6 +267,8 @@ export default function GraphPageClient() {
           brand_slug: next.brand_slug ?? null,
           graph_json: next,
           source: "graph_ui",
+          expected_version: docVersion,
+          idempotency_key: `graph-ui:${headerPersonaSlug}:${crypto.randomUUID()}`,
         });
         await load();
         setGraphNotice({ tone: "success", text: successText });
@@ -275,7 +282,7 @@ export default function GraphPageClient() {
         return false;
       }
     },
-    [docGraph, headerPersonaSlug, load],
+    [docGraph, docVersion, headerPersonaSlug, load],
   );
 
   useEffect(() => {
@@ -640,14 +647,13 @@ export default function GraphPageClient() {
 
           <div className="flex items-center gap-1" role="tablist" aria-label="Visualização do grafo">
             {MODES.map((m) => (
-              <button
+              <a
                 key={m.value}
-                type="button"
+                href={viewModeHref(m.value)}
                 role="tab"
                 aria-selected={mode === m.value}
                 aria-controls="knowledge-graph-canvas"
                 title={m.help}
-                onClick={() => selectViewMode(m.value)}
                 className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition ${
                   mode === m.value
                     ? "bg-obs-violet/20 border-obs-violet text-obs-violet"
@@ -656,7 +662,7 @@ export default function GraphPageClient() {
               >
                 {m.icon}
                 <span>{m.label}</span>
-              </button>
+              </a>
             ))}
           </div>
 
@@ -815,7 +821,7 @@ export default function GraphPageClient() {
 
         {data && (
           <GraphView
-            key={`${effectivePersonaSlug || "global"}:${mode}:${docGraph?.graph_id || data.nodes[0]?.id || "empty"}:${viewRevision}`}
+            key={`${effectivePersonaSlug || "global"}:${mode}:${docGraph?.graph_id || data.nodes[0]?.id || "empty"}`}
             rawNodes={data.nodes}
             rawEdges={data.edges}
             onNodeClick={(node) => {

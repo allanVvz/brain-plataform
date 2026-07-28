@@ -503,9 +503,14 @@ def _materialize_product(
     )
     if copy_node:
         supabase_client.upsert_knowledge_edge(
-            product["id"], copy_node["id"], "product_has_copy",
+            product["id"], copy_node["id"], "contains",
             persona_id=persona_id, weight=0.7,
             metadata={"primary_tree": True, "created_from": "product_import"},
+        )
+        supabase_client.upsert_knowledge_edge(
+            copy_node["id"], product["id"], "supports_copy",
+            persona_id=persona_id, weight=0.7,
+            metadata={"primary_tree": False, "created_from": "product_import"},
         )
         created_nodes["copy"] = copy_node.get("id")
 
@@ -532,7 +537,7 @@ def _materialize_product(
         )
         if faq:
             supabase_client.upsert_knowledge_edge(
-                copy_node["id"], faq["id"], "copy_has_faq",
+                copy_node["id"], faq["id"], "answers_question",
                 persona_id=persona_id, weight=0.7,
                 metadata={"primary_tree": True, "created_from": "product_import"},
             )

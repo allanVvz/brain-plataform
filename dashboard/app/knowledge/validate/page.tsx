@@ -314,34 +314,6 @@ export default function ValidatePage() {
                   </div>
                 )}
 
-                <div>
-                  <label className="text-xs text-brain-muted block mb-2">Visibilidade para agentes</label>
-                  <div className="flex gap-2 flex-wrap">
-                    {["SDR", "Closer", "Classifier", "Maker"].map((agent) => {
-                      const active = (item.agent_visibility || []).includes(agent);
-                      return (
-                        <button
-                          key={agent}
-                          onClick={() => {
-                            const current = item.agent_visibility || [];
-                            const next = active
-                              ? current.filter((a) => a !== agent)
-                              : [...current, agent];
-                            updateItem(item.id, { agent_visibility: next });
-                          }}
-                          className={`text-xs px-3 py-1 rounded-full border transition-colors ${
-                            active
-                              ? "bg-brain-accent/20 border-brain-accent text-brain-accent"
-                              : "border-brain-border text-brain-muted hover:text-white"
-                          }`}
-                        >
-                          {agent}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
                 {!isImage(item) && item.content && (
                   <div>
                     <label className="text-xs text-brain-muted block mb-1">Conteudo</label>

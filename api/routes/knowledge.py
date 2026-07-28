@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from typing import Optional
 from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
 from services import approved_knowledge_snapshots
+from services import graph_document_publisher, graph_json_v2_store
+from schemas.graph_json_v2 import Edge, GraphJson
 from services import integration_service, product_import_service
 from services.knowledge_rag_backfill import backfill_knowledge_rag
 from services.knowledge_rag_intake import process_intake, process_intake_plan
@@ -190,8 +192,8 @@ async def backfill_rag_knowledge(body: RagBackfillBody):
     return result
 
 
-@router.post("/sync")
-async def trigger_sync(persona: str = Query(None)):
+@router.post("/import-vault")
+async def import_vault(persona: str = Query(None)):
     emit("vault_sync_started", entity_type="sync", payload={})
     result = await asyncio.to_thread(run_sync, persona_filter=persona)
     if "error" in result:
@@ -200,20 +202,50 @@ async def trigger_sync(persona: str = Query(None)):
     return result
 
 
-@router.get("/sync/preview")
-async def preview_sync():
+@router.post("/sync", deprecated=True)
+async def trigger_sync(persona: str = Query(None)):
+    emit(
+        "deprecated_route_used",
+        entity_type="route",
+        entity_id="/knowledge/sync",
+        payload={"replacement": "/knowledge/import-vault"},
+        level="warn",
+    )
+    return await import_vault(persona)
+
+
+@router.get("/import-vault/preview")
+async def preview_import_vault():
     result = await asyncio.to_thread(scan_vault)
     return result
 
 
-@router.get("/sync/runs")
-def list_sync_runs(limit: int = 20):
+@router.get("/sync/preview", deprecated=True)
+async def preview_sync():
+    emit("deprecated_route_used", entity_type="route", entity_id="/knowledge/sync/preview", payload={"replacement": "/knowledge/import-vault/preview"}, level="warn")
+    return await preview_import_vault()
+
+
+@router.get("/import-vault/runs")
+def list_import_vault_runs(limit: int = 20):
     return supabase_client.get_sync_runs(limit)
 
 
-@router.get("/sync/runs/{run_id}/logs")
-def get_sync_logs(run_id: str, limit: int = 200):
+@router.get("/sync/runs", deprecated=True)
+def list_sync_runs(limit: int = 20):
+    emit("deprecated_route_used", entity_type="route", entity_id="/knowledge/sync/runs", payload={"replacement": "/knowledge/import-vault/runs"}, level="warn")
+    return list_import_vault_runs(limit)
+
+
+@router.get("/import-vault/runs/{run_id}/logs")
+def get_import_vault_logs(run_id: str, limit: int = 200):
     return supabase_client.get_sync_logs(run_id, limit)
+
+
+@router.get("/sync/runs/{run_id}/logs", deprecated=True)
+def get_sync_logs(run_id: str, limit: int = 200):
+    emit("deprecated_route_used", entity_type="route", entity_id="/knowledge/sync/runs/{run_id}/logs", payload={"replacement": "/knowledge/import-vault/runs/{run_id}/logs"}, level="warn")
+    return get_import_vault_logs(run_id, limit)
 
 
 # ── File serve (for asset preview) ───────────────────────────
@@ -457,7 +489,9 @@ def update_queue_item(item_id: str, body: ItemUpdate, request: Request):
 
 class ApproveBody(BaseModel):
     promote_to_kb: bool = False
-    agent_visibility: list = ["SDR", "Closer", "Classifier"]
+    # Deprecated compatibility input. Golden Dataset visibility is determined
+    # exclusively by persona authorization.
+    agent_visibility: Optional[list] = None
 
 
 def _ensure_promotion_evidence(evidence: dict, *, require_embed: bool) -> None:
@@ -480,12 +514,10 @@ def approve_item(item_id: str, request: Request, body: ApproveBody = ApproveBody
         if not item.get("persona_id"):
             raise HTTPException(400, "Assign a persona before approving")
         auth_service.assert_persona_access(request, persona_id=item.get("persona_id"))
-        if body.promote_to_kb:
-            raise HTTPException(409, "Approval and Golden Dataset publication are now separate. Approve first, then connect the approved FAQ node to Embedded in the graph.")
         result = knowledge_lifecycle.promote_knowledge_item(
             item_id,
-            promote_to_kb=body.promote_to_kb,
-            agent_visibility=body.agent_visibility,
+            promote_to_kb=False,
+            agent_visibility=None,
             approval_mode="manual_validation",
         )
     except HTTPException:
@@ -501,12 +533,88 @@ def approve_item(item_id: str, request: Request, body: ApproveBody = ApproveBody
     publication_evidence = {}
     try:
         user = auth_service.current_user(request)
-        publication_evidence = approved_knowledge_snapshots.publish_approved_node(
-            evidence.get("knowledge_node_id"),
-            approved_by=user.get("id"),
-            require_rag_for_faq=True,
-        )
+        if str(updated_item.get("content_type") or "").lower() == "faq":
+            persona = supabase_client.get_persona_by_id(updated_item.get("persona_id")) or {}
+            persona_slug = persona.get("slug")
+            current_doc = graph_json_v2_store.load_current(persona_slug) if persona_slug else None
+            if current_doc is None:
+                raise RuntimeError("FAQ approval requires a published canonical Graph JSON")
+            current_version, graph = current_doc
+            next_graph = GraphJson.model_validate(graph.model_dump())
+            semantic_node = supabase_client.get_knowledge_node(evidence.get("knowledge_node_id")) or {}
+            faq_doc = next(
+                (
+                    node
+                    for node in next_graph.nodes
+                    if node.node_type == "faq"
+                    and (
+                        str((node.data or {}).get("knowledge_item_id") or "") == item_id
+                        or str((node.data or {}).get("knowledge_node_id") or "") == str(evidence.get("knowledge_node_id") or "")
+                        or (
+                            semantic_node.get("slug")
+                            and node.slug == semantic_node.get("slug")
+                        )
+                    )
+                ),
+                None,
+            )
+            embedded_doc = next((node for node in next_graph.nodes if node.node_type == "embedded"), None)
+            if not faq_doc or not embedded_doc:
+                raise RuntimeError("Canonical FAQ or Embedded node was not found")
+            faq_doc.data = {**(faq_doc.data or {}), "status": "approved", "validation_status": "approved"}
+            next_graph.edges = [
+                edge
+                for edge in next_graph.edges
+                if not (edge.source == faq_doc.id and edge.target == embedded_doc.id)
+            ]
+            next_graph.edges.append(
+                Edge(
+                    id=f"edge:faq-embedded:{faq_doc.slug}",
+                    source=faq_doc.id,
+                    target=embedded_doc.id,
+                    relation="visible_to_agent",
+                    primary_tree=False,
+                    metadata={"created_from": "atomic_faq_approval", "active": True},
+                )
+            )
+            canonical_publication = graph_document_publisher.publish(
+                graph=next_graph,
+                persona_slug=persona_slug,
+                brand_slug=next_graph.brand_slug,
+                source="knowledge.queue.approve",
+                published_by=user.get("id"),
+                expected_version=current_version,
+                idempotency_key=f"faq-approval:{item_id}:{current_version}",
+            )
+            faq_publications = (canonical_publication.get("projections") or {}).get("faq_publications") or []
+            publication_evidence = {
+                **(faq_publications[0] if faq_publications else {}),
+                "graph_version": canonical_publication.get("version"),
+                "graph_checksum": canonical_publication.get("checksum"),
+            }
+        else:
+            publication_evidence = approved_knowledge_snapshots.publish_approved_node(
+                evidence.get("knowledge_node_id"),
+                approved_by=user.get("id"),
+                require_rag_for_faq=False,
+            )
     except Exception as exc:
+        # Approval is atomic from the operator's perspective: incomplete
+        # snapshot/RAG/Embedded publication returns the FAQ to validation.
+        try:
+            supabase_client.update_knowledge_item(
+                item_id,
+                {"status": "pending", "curation_status": "draft"},
+            )
+            if evidence.get("knowledge_node_id"):
+                supabase_client.update_knowledge_node(
+                    evidence["knowledge_node_id"],
+                    {"status": "pending"},
+                    mark_related_faqs=False,
+                )
+            supabase_client.withdraw_faq_from_embedded(item_id)
+        except Exception:
+            pass
         partial_ids = {
             "knowledge_item_id": evidence.get("knowledge_item_id"),
             "source_node_id": evidence.get("knowledge_node_id"),
@@ -516,15 +624,15 @@ def approve_item(item_id: str, request: Request, body: ApproveBody = ApproveBody
         emit("item_approved_snapshot_failed", entity_type="knowledge_item", entity_id=item_id,
              persona_id=updated_item.get("persona_id"),
              payload={"title": updated_item.get("title"), "error": str(exc), "partial_ids": partial_ids})
-        return {
-            "ok": False,
-            "success": False,
-            "stage": "approved_snapshot_publication",
-            "error": str(exc),
-            "item": updated_item,
-            "evidence": evidence,
-            "partial_ids": partial_ids,
-        }
+        raise HTTPException(
+            502,
+            {
+                "code": "FAQ_APPROVAL_ATOMIC_PUBLICATION_FAILED",
+                "stage": "approved_snapshot_publication",
+                "error": str(exc),
+                "partial_ids": partial_ids,
+            },
+        ) from exc
     emit("item_approved", entity_type="knowledge_item", entity_id=item_id,
          persona_id=updated_item.get("persona_id"),
          payload={"title": updated_item.get("title"), "content_type": updated_item.get("content_type"),
@@ -1222,38 +1330,39 @@ def chat_context(
     )
 
 
-# ── KB Context (for external consumers like wa-wscrap-bot) ───
+# ── Published Graph JSON v2 context ───
 
 @router.get("/context/{persona_slug}")
 def get_kb_context(persona_slug: str, request: Request):
-    """Return formatted KB text for a persona slug. Used by ai_fallback in wa-wscrap-bot."""
+    """Return approved context from the published Graph JSON v2."""
     persona = supabase_client.get_persona(persona_slug)
     if not persona:
         raise HTTPException(404, f"Persona not found: {persona_slug}")
     auth_service.assert_persona_access(request, persona_id=persona.get("id"), persona_slug=persona_slug)
-
-    persona_id = persona["id"]
-    entries = supabase_client.get_kb_entries(persona_id=persona_id, status="ATIVO")
-    if not entries:
-        return {"persona_slug": persona_slug, "context": ""}
-
-    sections: dict[str, list[str]] = {}
-    for e in entries:
-        tipo = e.get("tipo", "geral")
-        text = f"[{e.get('titulo', '')}] {e.get('conteudo', '')}"
-        sections.setdefault(tipo, []).append(text)
-
+    current = graph_json_v2_store.load_current(persona_slug)
+    if not current:
+        return {"persona_slug": persona_slug, "context": "", "graph_version": None}
+    version, graph = current
+    event = graph_json_v2_store.latest_event(persona_slug) or {}
     lines: list[str] = []
-    priority = ["brand", "tom", "produto", "regra", "briefing", "faq"]
-    order = priority + [k for k in sections if k not in priority]
-    for tipo in order:
-        if tipo not in sections:
+    for node in graph.nodes:
+        data = node.data or {}
+        if data.get("active", True) is False:
             continue
-        lines.append(f'\n### {tipo.upper()}')
-        for item in sections[tipo][:6]:
-            lines.append(f"- {item[:400]}")
-
-    return {"persona_slug": persona_slug, "context": "\n".join(lines)}
+        if str(data.get("status") or "").lower() not in {
+            "approved", "validated", "active", "ativo"
+        }:
+            continue
+        lines.append(
+            f"\n### {node.node_type.upper()} · {node.id}\n"
+            f"{str(data.get('markdown') or node.label)[:800]}"
+        )
+    return {
+        "persona_slug": persona_slug,
+        "graph_version": version,
+        "graph_checksum": (event.get("payload") or {}).get("checksum"),
+        "context": "\n".join(lines),
+    }
 
 
 # ── Brand Profiles ────────────────────────────────────────────

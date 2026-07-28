@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,9 @@ RELATION_BY_PAIR: dict[tuple[str, str], str] = {
     ("briefing", "campaign"): "part_of_campaign",
     ("campaign", "audience"): "targets_audience",
     ("briefing", "audience"): "targets_audience",
+    ("brand", "tone"): "contains",
+    ("campaign", "tone"): "contains",
+    ("briefing", "tone"): "contains",
     ("audience", "product_group"): "audience_has_product_group",
     ("product_group", "product"): "product_group_has_product",
     ("product_group", "offer"): "contains",
@@ -35,7 +40,11 @@ RELATION_BY_PAIR: dict[tuple[str, str], str] = {
     ("product", "faq"): "answers_question",
     ("product_group", "faq"): "answers_question",
     ("faq", "embedded"): "visible_to_agent",
-    ("gallery", "asset"): "gallery_asset",
+    ("brand", "asset"): "uses_asset",
+    ("campaign", "asset"): "uses_asset",
+    ("product_group", "asset"): "uses_asset",
+    ("product", "asset"): "uses_asset",
+    ("asset", "gallery"): "gallery_asset",
 }
 
 
@@ -67,31 +76,131 @@ def _node_markdown(node: Node) -> str:
     return f"# {title}\n\n{summary}".strip()
 
 
+_FOLDER_BY_TYPE: dict[str, str] = {
+    "persona": "00_PERSONA",
+    "brand": "01_BRAND",
+    "briefing": "02_BRIEFING",
+    "campaign": "03_CAMPAIGNS",
+    "audience": "04_AUDIENCES",
+    "product_group": "05_PRODUCT_GROUPS",
+    "product": "06_PRODUCTS",
+    "offer": "07_OFFERS",
+    "copy": "08_COPY",
+    "faq": "09_FAQ",
+    "rule": "10_RULES",
+    "tone": "10_TONE",
+    "asset": "11_ASSETS",
+    "embedded": "12_EMBEDDED",
+    "gallery": "13_GALLERY",
+}
+
+
+def _persona_folder(persona_slug: str) -> str:
+    return (persona_slug or "UNKNOWN").strip().upper().replace("-", "_")
+
+
 def _file_path(graph: GraphJson, node: Node) -> str:
-    data = node.data or {}
-    if data.get("file_path"):
-        return str(data["file_path"])
-    folder = {
-        "brand": "01_BRAND",
-        "campaign": "02_CAMPAIGN",
-        "briefing": "03_BRIEFING",
-        "audience": "04_AUDIENCE",
-        "product_group": "05_PRODUCT_GROUP",
-        "product": "06_PRODUCT",
-        "offer": "07_OFFER",
-        "copy": "08_COPY",
-        "rule": "09_RULE",
-        "faq": "10_FAQ",
-        "asset": "11_ASSET",
-    }.get(node.node_type, "99_OTHER")
-    return f"{graph.persona_slug}/{folder}/{node.slug}.md"
+    supplied = str((node.data or {}).get("file_path") or "").replace("\\", "/")
+    if supplied:
+        candidate = Path(supplied)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise ValueError(f"unsafe file_path on node {node.id}")
+    folder = _FOLDER_BY_TYPE.get(node.node_type, "99_OTHER")
+    return (
+        f"AI-BRAIN/05_ENTITIES/CLIENTS/{_persona_folder(graph.persona_slug)}"
+        f"/{folder}/{node.slug}.md"
+    )
 
 
 def _write_vault_file(relative_path: str, content: str) -> Path:
-    path = VAULT_PATH / relative_path
+    root = VAULT_PATH.resolve()
+    path = (root / relative_path).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("file_path escapes the configured vault root") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def _branch_path(graph: GraphJson, node: Node) -> list[str]:
+    by_id = {item.id: item for item in graph.nodes}
+    chain: list[str] = []
+    current: Node | None = node
+    visited: set[str] = set()
+    while current and current.id not in visited:
+        visited.add(current.id)
+        chain.insert(0, f"{current.node_type}:{current.slug}")
+        current = by_id.get(current.parent_id or "")
+    return chain
+
+
+def _relation_manifest(graph: GraphJson, node_id: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": edge.id,
+            "source": edge.source,
+            "target": edge.target,
+            "relation": edge.relation,
+            "primary_tree": edge.primary_tree,
+        }
+        for edge in graph.edges
+        if edge.source == node_id or edge.target == node_id
+    ]
+
+
+def _projected_body(graph: GraphJson, node: Node) -> str:
+    if node.node_type == "embedded":
+        faq_ids = {
+            edge.source
+            for edge in graph.edges
+            if edge.target == node.id and edge.relation in {"visible_to_agent", "contains"}
+        }
+        faqs = [item for item in graph.nodes if item.id in faq_ids and item.node_type == "faq"]
+        lines = [f"# {node.label}", "", "## FAQs publicadas"]
+        lines.extend(f"- [{faq.label}](../09_FAQ/{faq.slug}.md)" for faq in faqs)
+        return "\n".join(lines).strip()
+    if node.node_type == "gallery":
+        asset_ids = {
+            edge.source
+            for edge in graph.edges
+            if edge.target == node.id and edge.relation == "gallery_asset"
+        }
+        assets = [item for item in graph.nodes if item.id in asset_ids and item.node_type == "asset"]
+        lines = [f"# {node.label}", "", "## Assets aprovados"]
+        lines.extend(f"- [{asset.label}](../11_ASSETS/{asset.slug}.md)" for asset in assets)
+        return "\n".join(lines).strip()
+    return _node_markdown(node)
+
+
+def _markdown_document(
+    graph: GraphJson,
+    node: Node,
+    *,
+    version: int | None,
+    graph_checksum: str | None,
+) -> str:
+    body = _projected_body(graph, node)
+    relative_path = _file_path(graph, node)
+    content_checksum = _content_hash(body)
+    frontmatter = {
+        "graph_id": graph.graph_id,
+        "graph_version": version,
+        "graph_checksum": graph_checksum,
+        "node_id": node.id,
+        "node_type": node.node_type,
+        "slug": node.slug,
+        "status": (node.data or {}).get("status") or "pending_validation",
+        "source": (node.data or {}).get("source") or "pending_source",
+        "parent_id": node.parent_id,
+        "branch_path": _branch_path(graph, node),
+        "file_path": relative_path,
+        "checksum": content_checksum,
+        "relations": _relation_manifest(graph, node.id),
+    }
+    # JSON is valid YAML and avoids unsafe interpolation in frontmatter.
+    return f"---\n{json.dumps(frontmatter, ensure_ascii=False, indent=2)}\n---\n\n{body}\n"
 
 
 def _node_status(node: Node) -> str:
@@ -101,6 +210,11 @@ def _node_status(node: Node) -> str:
     # the public projection uses to discover them.
     if node.node_type in {"gallery", "embedded"} and status in {"validated", "approved", "active", "ativo"}:
         return "active"
+    # Markdown uses `validated` as the canonical approval state. The legacy
+    # FAQ -> Embedded database trigger still requires the historical
+    # `approved` label, so translate only this operational projection.
+    if node.node_type == "faq" and status in {"validated", "approved", "active", "ativo"}:
+        return "approved"
     if status in {"validated", "approved", "active", "ativo"}:
         return "validated"
     return "pending"
@@ -117,7 +231,16 @@ def _item_status(node: Node) -> str:
     return "pending"
 
 
-def _node_metadata(graph: GraphJson, node: Node, relative_path: str, content: str, session_id: str | None) -> dict[str, Any]:
+def _node_metadata(
+    graph: GraphJson,
+    node: Node,
+    relative_path: str,
+    content: str,
+    session_id: str | None,
+    *,
+    version: int | None = None,
+    graph_checksum: str | None = None,
+) -> dict[str, Any]:
     data = dict(node.data or {})
     data.update(
         {
@@ -128,6 +251,9 @@ def _node_metadata(graph: GraphJson, node: Node, relative_path: str, content: st
             "slug": node.slug,
             "file_path": relative_path,
             "content_hash": _content_hash(content),
+            "graph_version": version,
+            "graph_checksum": graph_checksum,
+            "active": True,
         }
     )
     if session_id:
@@ -141,6 +267,92 @@ def _default_relation(parent_type: str, child_type: str) -> str:
     return RELATION_BY_PAIR.get((parent_type, child_type), "contains")
 
 
+def _rag_status(node: Node) -> bool:
+    return str(
+        (node.data or {}).get("validation_status")
+        or (node.data or {}).get("status")
+        or ""
+    ).lower() in {"validated", "approved", "active", "ativo"}
+
+
+def _project_rag_document(
+    *,
+    graph: GraphJson,
+    node: Node,
+    graph_node: dict[str, Any],
+    persona_id: str,
+    version: int | None,
+    graph_checksum: str | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Idempotently project one approved Markdown node to one RAG chunk."""
+    body = _projected_body(graph, node)
+    hierarchy_path = _branch_path(graph, node)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    metadata = {
+        **(node.data or {}),
+        "source": "graph_json_markdown",
+        "source_node_id": graph_node.get("id"),
+        "graph_json_node_id": node.id,
+        "graph_id": graph.graph_id,
+        "graph_version": version,
+        "graph_checksum": graph_checksum,
+        "hierarchy_path": hierarchy_path,
+        "rag_index": "default",
+        "active": True,
+    }
+    entry = supabase_client.upsert_knowledge_rag_entry(
+        {
+            "persona_id": persona_id,
+            "content_type": node.node_type,
+            "semantic_level": 50,
+            "title": node.label,
+            "content": body,
+            "summary": str((node.data or {}).get("summary") or body)[:500],
+            "canonical_key": f"{graph.persona_slug}:{node.node_type}:{node.slug}",
+            "slug": node.slug,
+            "language": str((node.data or {}).get("language") or "pt-BR"),
+            "status": "active",
+            "tags": (node.data or {}).get("tags") or [node.node_type],
+            "entities": [],
+            "products": [node.slug] if node.node_type == "product" else [],
+            "campaigns": [node.slug] if node.node_type == "campaign" else [],
+            "metadata": metadata,
+            "embedding_model": node.node_type,
+            "confidence": 1.0,
+            "importance": 0.75,
+            "validated_at": now_iso,
+            "source_node_id": graph_node.get("id"),
+        }
+    )
+    if not entry or not entry.get("id"):
+        raise RuntimeError(f"RAG entry import returned no id for {node.id}")
+    chunks = supabase_client.replace_knowledge_rag_chunks(
+        entry["id"],
+        persona_id,
+        [
+            {
+                "chunk_index": 0,
+                "chunk_text": body,
+                "chunk_summary": str((node.data or {}).get("summary") or node.label)[:280],
+                "embedding_model": node.node_type,
+                "metadata": {
+                    "source": "graph_json_markdown",
+                    "source_node_id": graph_node.get("id"),
+                    "graph_json_node_id": node.id,
+                    "graph_version": version,
+                    "graph_checksum": graph_checksum,
+                    "hierarchy_path": hierarchy_path,
+                    "chunk_status": "pending_embedding",
+                    "active": True,
+                },
+            }
+        ],
+    )
+    if not chunks:
+        raise RuntimeError(f"RAG chunk import returned no rows for {node.id}")
+    return entry, chunks
+
+
 # content_type (Sofia Criar plan) -> canonical graph node_type. Non-canonical
 # types (tone/entity/competitor/prompt/maker_material/other) are NOT part of the
 # graph law chain and are dropped from the canonical tree.
@@ -150,7 +362,7 @@ _PLAN_TYPE_ALIASES: dict[str, str] = {
     "rules": "rule",
 }
 _CANONICAL_NODE_TYPES: set[str] = {
-    "persona", "brand", "briefing", "campaign", "audience",
+    "persona", "brand", "briefing", "campaign", "audience", "tone",
     "product_group", "product", "offer", "copy", "rule", "faq",
     "embedded", "asset", "gallery",
 }
@@ -332,7 +544,14 @@ def normalized_plan_to_graph_json(
     )
 
 
-def import_graph_json(*, graph_json: GraphJson, source: str = "graph_json.import", session_id: str | None = None) -> dict[str, Any]:
+def import_graph_json(
+    *,
+    graph_json: GraphJson,
+    source: str = "graph_json.import",
+    session_id: str | None = None,
+    version: int | None = None,
+    graph_checksum: str | None = None,
+) -> dict[str, Any]:
     is_valid, errors = graph_json_v2_validator.validate_graph_json(graph_json)
     if not is_valid:
         return {"ok": False, "error_code": "GRAPH_JSON_INVALID", "errors": errors}
@@ -349,44 +568,43 @@ def import_graph_json(*, graph_json: GraphJson, source: str = "graph_json.import
 
     for node in graph_json.nodes:
         metadata = dict(node.data or {})
-        if node.node_type == "persona":
-            graph_node = supabase_client.upsert_knowledge_node(
-                {
-                    "persona_id": persona_id,
-                    "node_type": "persona",
-                    "slug": node.slug,
-                    "title": node.label,
-                    "summary": metadata.get("summary"),
-                    "tags": metadata.get("tags") or ["persona"],
-                    "metadata": _node_metadata(graph_json, node, "", "", session_id),
-                    "status": "validated",
-                }
-            )
-            if graph_node:
-                graph_nodes_by_doc_id[node.id] = graph_node
-            continue
-
-        if node.node_type in {"embedded", "gallery"}:
-            graph_node = supabase_client.upsert_knowledge_node(
-                {
-                    "persona_id": persona_id,
-                    "node_type": node.node_type,
-                    "slug": node.slug,
-                    "title": node.label,
-                    "summary": metadata.get("summary"),
-                    "tags": metadata.get("tags") or [node.node_type],
-                    "metadata": _node_metadata(graph_json, node, "", "", session_id),
-                    "status": _node_status(node),
-                }
-            )
-            if graph_node:
-                graph_nodes_by_doc_id[node.id] = graph_node
-            continue
-
-        content = _node_markdown(node)
+        content = _markdown_document(
+            graph_json,
+            node,
+            version=version,
+            graph_checksum=graph_checksum,
+        )
         relative_path = _file_path(graph_json, node)
         _write_vault_file(relative_path, content)
         written_files.append(relative_path)
+        node_meta = _node_metadata(
+            graph_json,
+            node,
+            relative_path,
+            content,
+            session_id,
+            version=version,
+            graph_checksum=graph_checksum,
+        )
+        if node.node_type in {"persona", "embedded", "gallery"}:
+            database_node_type = "embed" if node.node_type == "embedded" else node.node_type
+            graph_node = supabase_client.upsert_knowledge_node(
+                {
+                    "persona_id": persona_id,
+                    "node_type": database_node_type,
+                    "slug": node.slug,
+                    "title": node.label,
+                    "summary": metadata.get("summary") or _projected_body(graph_json, node)[:400],
+                    "tags": metadata.get("tags") or [node.node_type],
+                    "metadata": node_meta,
+                    "status": "validated" if node.node_type == "persona" else _node_status(node),
+                }
+            )
+            if not graph_node or not graph_node.get("id"):
+                raise RuntimeError(f"knowledge_node import returned no id for {node.id}")
+            graph_nodes_by_doc_id[node.id] = graph_node
+            continue
+
         item_payload = {
             "persona_id": persona_id,
             "source_id": source_row.get("id"),
@@ -394,11 +612,12 @@ def import_graph_json(*, graph_json: GraphJson, source: str = "graph_json.import
             "content_type": node.node_type,
             "title": node.label,
             "content": content[:8000],
-            "metadata": _node_metadata(graph_json, node, relative_path, content, session_id),
+            "metadata": node_meta,
             "file_path": supabase_client.normalize_file_path(relative_path),
             "file_type": "md",
             "tags": metadata.get("tags") or [node.node_type],
-            "agent_visibility": metadata.get("agent_visibility") or ["SDR", "Closer", "Classifier"],
+            # Golden Dataset visibility is persona-scoped, never role-selected.
+            "agent_visibility": [],
             "content_hash": _content_hash(content),
             "canonical_key": f"{graph_json.persona_slug}:{node.node_type}:{node.slug}",
             "canonical_hash": _content_hash(f"{graph_json.persona_slug}:{node.node_type}:{node.slug}:{content}"),
@@ -456,6 +675,131 @@ def import_graph_json(*, graph_json: GraphJson, source: str = "graph_json.import
             raise RuntimeError(f"knowledge_edge import returned no id for {edge.id}")
         edge_ids.append(imported["id"])
 
+    rag_entries_by_doc_id: dict[str, dict[str, Any]] = {}
+    rag_chunk_ids: list[str] = []
+    for node in graph_json.nodes:
+        if node.node_type in {"persona", "embedded", "gallery", "faq"}:
+            continue
+        if not _rag_status(node):
+            continue
+        entry, chunks = _project_rag_document(
+            graph=graph_json,
+            node=node,
+            graph_node=graph_nodes_by_doc_id[node.id],
+            persona_id=persona_id,
+            version=version,
+            graph_checksum=graph_checksum,
+        )
+        rag_entries_by_doc_id[node.id] = entry
+        rag_chunk_ids.extend(
+            str(chunk["id"]) for chunk in chunks if chunk.get("id")
+        )
+        imported_node = graph_nodes_by_doc_id[node.id]
+        supabase_client.update_knowledge_node(
+            imported_node["id"],
+            {
+                "metadata": {
+                    **(imported_node.get("metadata") or {}),
+                    "knowledge_rag_entry_id": entry["id"],
+                    "knowledge_rag_chunk_ids": [
+                        chunk.get("id") for chunk in chunks if chunk.get("id")
+                    ],
+                }
+            },
+            mark_related_faqs=False,
+        )
+
+    active_doc_node_ids = set(graph_nodes_by_doc_id)
+    active_doc_edge_ids = {edge.id for edge in graph_json.edges}
+    nodes_deactivated = 0
+    edges_deactivated = 0
+    stale_nodes = supabase_client.list_graph_json_projection_nodes(persona_id)
+    for stale in stale_nodes:
+        stale_meta = stale.get("metadata") or {}
+        doc_node_id = stale_meta.get("graph_json_node_id")
+        if not doc_node_id or doc_node_id in active_doc_node_ids:
+            continue
+        next_meta = {
+            **stale_meta,
+            "active": False,
+            "projection_removed_in_version": version,
+            "projection_removed_from": source,
+        }
+        supabase_client.update_knowledge_node(
+            stale["id"],
+            {"metadata": next_meta},
+            mark_related_faqs=False,
+        )
+        if stale.get("node_type") == "faq" and stale.get("source_id"):
+            supabase_client.withdraw_faq_from_embedded(str(stale["source_id"]))
+        nodes_deactivated += 1
+
+    stale_edges = supabase_client.list_graph_json_projection_edges(persona_id)
+    for stale in stale_edges:
+        stale_meta = stale.get("metadata") or {}
+        doc_edge_id = stale_meta.get("graph_json_edge_id")
+        if not doc_edge_id or doc_edge_id in active_doc_edge_ids:
+            continue
+        if supabase_client.delete_knowledge_edge(stale.get("id")):
+            edges_deactivated += 1
+
+    faq_publications: list[dict[str, Any]] = []
+    approved_statuses = {"approved", "validated", "embedded", "active", "ativo"}
+    for edge in graph_json.edges:
+        source_doc = next((item for item in graph_json.nodes if item.id == edge.source), None)
+        target_doc = next((item for item in graph_json.nodes if item.id == edge.target), None)
+        if not source_doc or not target_doc:
+            continue
+        if source_doc.node_type != "faq" or target_doc.node_type != "embedded":
+            continue
+        status = str(
+            (source_doc.data or {}).get("validation_status")
+            or (source_doc.data or {}).get("status")
+            or ""
+        ).lower()
+        if status not in approved_statuses:
+            raise RuntimeError(f"pending FAQ cannot be materialized into Embedded: {source_doc.id}")
+        from services import approved_knowledge_snapshots
+
+        publication = approved_knowledge_snapshots.publish_approved_node(
+            graph_nodes_by_doc_id[source_doc.id]["id"],
+            require_rag_for_faq=True,
+        )
+        faq_publications.append(publication)
+        entry_ids = publication.get("rag_entry_ids") or []
+        if entry_ids:
+            rag_entries_by_doc_id[source_doc.id] = {"id": entry_ids[0]}
+        rag_chunk_ids.extend(
+            str(chunk_id) for chunk_id in (publication.get("rag_chunk_ids") or [])
+        )
+
+    rag_link_ids: list[str] = []
+    for edge in graph_json.edges:
+        source_entry = rag_entries_by_doc_id.get(edge.source)
+        target_entry = rag_entries_by_doc_id.get(edge.target)
+        if not source_entry or not target_entry:
+            continue
+        link = supabase_client.upsert_knowledge_rag_link(
+            {
+                "persona_id": persona_id,
+                "source_entry_id": source_entry["id"],
+                "target_entry_id": target_entry["id"],
+                "relation_type": edge.relation,
+                "weight": 1.0,
+                "confidence": 1.0,
+                "created_by": source,
+                "metadata": {
+                    "graph_json_edge_id": edge.id,
+                    "graph_version": version,
+                    "graph_checksum": graph_checksum,
+                    "primary_tree": edge.primary_tree,
+                    "active": True,
+                },
+            }
+        )
+        if link.get("id"):
+            rag_link_ids.append(str(link["id"]))
+
     supabase_client.insert_event(
         {
             "event_type": "graph_json_imported",
@@ -471,6 +815,21 @@ def import_graph_json(*, graph_json: GraphJson, source: str = "graph_json.import
                 "edge_count": len(graph_json.edges),
                 "knowledge_item_ids": item_ids,
                 "knowledge_edge_ids": edge_ids,
+                "nodes_deactivated": nodes_deactivated,
+                "edges_deactivated": edges_deactivated,
+                "faq_publications": len(faq_publications),
+                "rag_entries": len(rag_entries_by_doc_id),
+                "rag_chunks": len(rag_chunk_ids),
+                "rag_links": len(rag_link_ids),
+                "graph_version": version,
+                "graph_checksum": graph_checksum,
+                "source_files": sorted(
+                    {
+                        str((node.data or {}).get("source_file"))
+                        for node in graph_json.nodes
+                        if (node.data or {}).get("source_file")
+                    }
+                ),
             },
         },
         source=source,
@@ -486,4 +845,18 @@ def import_graph_json(*, graph_json: GraphJson, source: str = "graph_json.import
         "knowledge_node_ids": [node["id"] for node in graph_nodes_by_doc_id.values() if node.get("id")],
         "knowledge_edge_ids": edge_ids,
         "written_files": written_files,
+        "nodes_deactivated": nodes_deactivated,
+        "edges_deactivated": edges_deactivated,
+        "faq_publications": faq_publications,
+        "rag_entries_imported": len(rag_entries_by_doc_id),
+        "rag_chunks_imported": len(rag_chunk_ids),
+        "rag_links_imported": len(rag_link_ids),
+        "rag_chunk_ids": rag_chunk_ids,
+        "source_files": sorted(
+            {
+                str((node.data or {}).get("source_file"))
+                for node in graph_json.nodes
+                if (node.data or {}).get("source_file")
+            }
+        ),
     }

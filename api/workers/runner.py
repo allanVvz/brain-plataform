@@ -7,6 +7,7 @@ from workers.flow_validator_worker import FlowValidatorWorker
 from workers.health_check_worker import HealthCheckWorker
 from workers.kb_sync_worker import KbSyncWorker
 from workers.n8n_mirror_worker import N8nMirrorWorker
+from workers.whatsapp_dispatch_worker import WhatsAppDispatchWorker
 
 
 WORKERS = {
@@ -14,6 +15,7 @@ WORKERS = {
     "n8n_mirror": N8nMirrorWorker,
     "health_check": HealthCheckWorker,
     "kb_sync": KbSyncWorker,
+    "whatsapp_dispatch": WhatsAppDispatchWorker,
 }
 
 

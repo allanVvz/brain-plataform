@@ -17,6 +17,7 @@ logger = logging.getLogger("personas")
 
 class RoutingUpdate(BaseModel):
     process_mode: str | None = None
+    conversation_mode: str | None = None
     outbound_webhook_url: str | None = None
     outbound_webhook_secret: str | None = None
     inbound_webhook_token: str | None = None
@@ -37,10 +38,17 @@ def _mask_routing(routing: dict) -> dict:
     """Hide secret/token values from GET responses; return only presence flag."""
     if not routing:
         return routing
+    process_mode = routing.get("process_mode") or "internal"
     return {
         "slug": routing.get("slug"),
         "id": routing.get("id"),
-        "process_mode": routing.get("process_mode") or "internal",
+        "process_mode": process_mode,
+        "conversation_mode": (
+            "n8n_agents" if process_mode == "n8n" else "deterministic"
+        ),
+        "pipeline_contract": "conversation_v1",
+        "classifier": "deterministic_v1",
+        "model_required": False,
         "outbound_webhook_url": routing.get("outbound_webhook_url"),
         "has_outbound_webhook_secret": bool(routing.get("outbound_webhook_secret")),
         "has_inbound_webhook_token": bool(routing.get("inbound_webhook_token")),
@@ -169,6 +177,20 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
         )
     payload: dict = {}
     rotated_token: str | None = None
+    aliases = {
+        "deterministic": "internal",
+        "n8n_agents": "n8n",
+    }
+    if body.conversation_mode is not None:
+        if body.conversation_mode not in aliases:
+            raise HTTPException(
+                400,
+                "conversation_mode must be 'deterministic' or 'n8n_agents'",
+            )
+        normalized = aliases[body.conversation_mode]
+        if body.process_mode is not None and body.process_mode != normalized:
+            raise HTTPException(400, "routing mode fields conflict")
+        payload["process_mode"] = normalized
     if body.process_mode is not None:
         if body.process_mode not in {"internal", "n8n"}:
             raise HTTPException(400, "process_mode must be 'internal' or 'n8n'")
@@ -185,6 +207,40 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
     if not payload:
         return _mask_routing(current)
     updated = supabase_client.update_persona_routing(slug, payload)
+    if "process_mode" in payload:
+        conversation_mode = (
+            "n8n_agents"
+            if payload["process_mode"] == "n8n"
+            else "deterministic"
+        )
+        for binding in supabase_client.get_workflow_bindings(current.get("id")):
+            if not binding.get("id") or not binding.get("active"):
+                continue
+            metadata = {
+                **(binding.get("metadata") or {}),
+                "conversation_mode": conversation_mode,
+                "decision_owner": conversation_mode,
+                "pipeline_contract": "conversation_v1",
+            }
+            supabase_client.update_workflow_binding_metadata(
+                str(binding["id"]),
+                metadata,
+            )
+        supabase_client.insert_event(
+            {
+                "event_type": "conversation.mode_updated",
+                "entity_type": "persona",
+                "entity_id": str(current.get("id") or slug),
+                "persona_id": current.get("id"),
+                "payload": {
+                    "persona_slug": slug,
+                    "conversation_mode": conversation_mode,
+                    "pipeline_contract": "conversation_v1",
+                    "classifier": "deterministic_v1",
+                },
+            },
+            source="routes.personas",
+        )
     response = _mask_routing(updated or current)
     if rotated_token:
         response["inbound_webhook_token"] = rotated_token

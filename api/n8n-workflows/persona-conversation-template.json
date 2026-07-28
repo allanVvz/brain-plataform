@@ -1,0 +1,85 @@
+{
+  "name": "__PERSONA_NAME__ — __AGENT_NAME__",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "__PERSONA_SLUG__/conversation", "responseMode": "responseNode"},
+      "id": "inbound", "name": "Canonical inbound", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json.body || $json; const binding = { persona_slug: '__PERSONA_SLUG__', agent_slug: '__AGENT_SLUG__', decision_owner: 'n8n_agents', pipeline_contract: 'conversation_v1', classifier: 'deterministic_v1' }; if (input.persona_slug !== binding.persona_slug) throw new Error('persona binding mismatch'); if (input.pipeline_contract && input.pipeline_contract !== binding.pipeline_contract) throw new Error('pipeline contract mismatch'); if (!input.lead_ref || !input.buffer_id || !input.correlation_id) throw new Error('invalid canonical event'); return [{ json: { ...input, ...binding } }];"
+      },
+      "id": "binding", "name": "Validate persona binding", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/context'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({persona_slug: $('Validate persona binding').item.json.persona_slug, lead_ref: $('Validate persona binding').item.json.lead_ref, message: $('Validate persona binding').item.json.message, message_id: $('Validate persona binding').item.json.external_message_id})}}",
+        "options": {}
+      },
+      "id": "context", "name": "Load published graph context", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [700, 300], "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/decide'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({context: $json})}}",
+        "options": {}
+      },
+      "id": "decision", "name": "Classify SDR Closer Human", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [960, 300], "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/commit'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({lead_ref: $('Validate persona binding').item.json.lead_ref, context: $('Load published graph context').item.json, decision: $json.decision, response: $json.response, correlation_id: $('Validate persona binding').item.json.correlation_id, phone_number_id: $('Validate persona binding').item.json.phone_number_id, inbound_buffer_id: $('Validate persona binding').item.json.buffer_id})}}",
+        "options": {}
+      },
+      "id": "commit", "name": "Persist decision cart and handoff", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1220, 300], "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/fail-safe-handoff'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({lead_ref: $('Validate persona binding').item.json.lead_ref, reason: 'workflow_step_failed', correlation_id: $('Validate persona binding').item.json.correlation_id})}}",
+        "options": {}
+      },
+      "id": "failsafe", "name": "Fail safe human handoff", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1220, 520]
+    },
+    {
+      "parameters": {"respondWith": "json", "responseBody": "={{$json}}"},
+      "id": "respond", "name": "Return canonical result", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.4, "position": [1480, 300]
+    }
+  ],
+  "connections": {
+    "Canonical inbound": {"main": [[{"node": "Validate persona binding", "type": "main", "index": 0}]]},
+    "Validate persona binding": {"main": [[{"node": "Load published graph context", "type": "main", "index": 0}]]},
+    "Load published graph context": {"main": [[{"node": "Classify SDR Closer Human", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Classify SDR Closer Human": {"main": [[{"node": "Persist decision cart and handoff", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Persist decision cart and handoff": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Fail safe human handoff": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all"}
+}

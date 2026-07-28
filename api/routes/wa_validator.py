@@ -5,9 +5,7 @@ import logging
 import traceback
 
 from fastapi import APIRouter, HTTPException
-from services.model_router import ModelRouterError
 from pydantic import BaseModel
-from typing import Optional
 from services import wa_validator_service
 
 logger = logging.getLogger("wa_validator")
@@ -19,7 +17,7 @@ class GenerateScriptRequest(BaseModel):
     persona_slug: str
     flow_id: str
     target_contact: str
-    model: str = "gpt-4o-mini"
+    model: str = "none"
 
 
 class RunRequest(BaseModel):
@@ -28,7 +26,7 @@ class RunRequest(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     session_id: str
-    model: str = "gpt-4o-mini"
+    model: str = "none"
 
 
 @router.get("/bots")
@@ -70,16 +68,13 @@ def generate_script(body: GenerateScriptRequest):
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
-    except ModelRouterError as e:
-        logger.error("ModelRouter exhausted all providers (model=%r): %s", body.model, e)
-        raise HTTPException(503, detail={"error": "ModelRouterError", "message": str(e), "model_requested": body.model})
     except Exception as e:
         tb = traceback.format_exc()
         logger.error("generate_script failed (model=%r)\n%s", body.model, tb)
         raise HTTPException(500, detail={
             "error": type(e).__name__,
             "message": str(e),
-            "model_sent": body.model,
+            "classifier_sent": body.model,
             "traceback": tb,
         })
 
@@ -102,7 +97,7 @@ def run_session(body: RunRequest):
 
 @router.post("/run-direct")
 async def run_session_direct(body: RunRequest):
-    """Drive validation through the platform's own /process pipeline — no WhatsApp needed."""
+    """Drive validation through the selected conversation_v1 mode."""
     try:
         return await wa_validator_service.run_session_direct(body.session_id)
     except ValueError as e:
@@ -123,15 +118,12 @@ def analyze_gaps(body: AnalyzeRequest):
         return wa_validator_service.analyze_gaps(body.session_id, model=body.model)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    except ModelRouterError as e:
-        logger.error("ModelRouter exhausted all providers (model=%r): %s", body.model, e)
-        raise HTTPException(503, detail={"error": "ModelRouterError", "message": str(e), "model_requested": body.model})
     except Exception as e:
         tb = traceback.format_exc()
         logger.error("analyze_gaps failed (model=%r)\n%s", body.model, tb)
         raise HTTPException(500, detail={
             "error": type(e).__name__,
             "message": str(e),
-            "model_sent": body.model,
+            "classifier_sent": body.model,
             "traceback": tb,
         })

@@ -1945,6 +1945,8 @@ def get_chat_context(
             "nodes": [],
             "edges": [],
             "kb_entries": [],
+            "golden_dataset": [],
+            "legacy_fallback_used": False,
             "assets": [],
             "similar": [],
             "validated": {"nodes": [], "kb_entries": [], "assets": []},
@@ -1964,6 +1966,15 @@ def get_chat_context(
 
     query_text = " ".join(x for x in [user_text, lead_interest] if x)
     terms = _detect_terms(query_text or None, messages, persona_id)
+    try:
+        golden_chunks = supabase_client.search_active_rag_chunks(
+            persona_id=persona_id,
+            query=query_text,
+            limit=limit,
+        )
+    except Exception as exc:
+        logger.warning("search_active_rag_chunks failed: %s", exc)
+        golden_chunks = []
 
     # 2. Match nodes by each term.
     seed_nodes: dict[str, dict] = {}
@@ -2035,39 +2046,62 @@ def get_chat_context(
         or n.get("node_type") in {"kb_entry", "faq", "copy"}
     ]
     # Batch fetch — avoids N+1 round-trip per kb_entry node.
-    kb_source_ids = [str(n["source_id"]) for n in kb_entry_nodes if n.get("source_id")]
+    kb_source_ids = [
+        str(n["source_id"])
+        for n in kb_entry_nodes
+        if n.get("source_id") and not golden_chunks
+    ]
     try:
         kb_rows_by_id = supabase_client.get_kb_entries_by_ids(kb_source_ids) if kb_source_ids else {}
     except Exception as exc:
         logger.warning("get_kb_entries_by_ids failed: %s", exc)
         kb_rows_by_id = {}
 
-    kb_entries: list[dict] = []
-    for n in kb_entry_nodes:
-        sid = n.get("source_id")
-        row = kb_rows_by_id.get(str(sid)) if sid else None
-        if row:
-            row_node_type = _tipo_to_node_type(row.get("tipo") or row.get("categoria") or "") or n.get("node_type")
+    kb_entries: list[dict] = [
+        {
+            "id": chunk.get("id"),
+            "rag_entry_id": chunk.get("rag_entry_id"),
+            "titulo": (chunk.get("entry") or {}).get("title"),
+            "conteudo": chunk.get("chunk_text") or chunk.get("chunk_summary") or "",
+            "tipo": (chunk.get("entry") or {}).get("content_type") or "faq",
+            "node_type": (chunk.get("entry") or {}).get("content_type") or "faq",
+            "validation_status": "validated",
+            "validated": True,
+            "source": "golden_dataset",
+            "metadata": {
+                **((chunk.get("entry") or {}).get("metadata") or {}),
+                **(chunk.get("metadata") or {}),
+            },
+        }
+        for chunk in golden_chunks
+    ]
+    if not kb_entries:
+        for n in kb_entry_nodes:
+            sid = n.get("source_id")
+            row = kb_rows_by_id.get(str(sid)) if sid else None
+            if row:
+                row_node_type = _tipo_to_node_type(row.get("tipo") or row.get("categoria") or "") or n.get("node_type")
+                kb_entries.append({
+                    **row,
+                    "node_type": row_node_type,
+                    "validation_status": "validated" if _is_validated_source("kb_entries", row.get("status"), row_node_type) else "pending",
+                    "validated": _is_validated_source("kb_entries", row.get("status"), row_node_type),
+                    "link_target": n.get("link_target") or _link_target(n),
+                    "source": "kb_entries_fallback",
+                })
+                continue
             kb_entries.append({
-                **row,
-                "node_type": row_node_type,
-                "validation_status": "validated" if _is_validated_source("kb_entries", row.get("status"), row_node_type) else "pending",
-                "validated": _is_validated_source("kb_entries", row.get("status"), row_node_type),
-                "link_target": n.get("link_target") or _link_target(n),
+                "id": n.get("id"),
+                "titulo": n.get("title"),
+                "conteudo": n.get("summary") or "",
+                "tipo": n.get("node_type"),
+                "tags": _normalize_tags(n.get("tags")),
+                "node_type": n.get("node_type"),
+                "validation_status": n.get("validation_status") or "pending",
+                "validated": bool(n.get("validated")),
+                "link_target": n.get("link_target"),
+                "source": "graph_node_fallback",
             })
-            continue
-        # Fallback: project the node itself (when no kb row backs it).
-        kb_entries.append({
-            "id": n.get("id"),
-            "titulo": n.get("title"),
-            "conteudo": n.get("summary") or "",
-            "tipo": n.get("node_type"),
-            "tags": _normalize_tags(n.get("tags")),
-            "node_type": n.get("node_type"),
-            "validation_status": n.get("validation_status") or "pending",
-            "validated": bool(n.get("validated")),
-            "link_target": n.get("link_target"),
-        })
 
     assets: list[dict] = []
     for n in by_type.get("asset", []):
@@ -2158,6 +2192,8 @@ def get_chat_context(
         "nodes": nodes,
         "edges": edges,
         "kb_entries": kb_entries,
+        "golden_dataset": kb_entries if golden_chunks else [],
+        "legacy_fallback_used": not bool(golden_chunks),
         "assets": assets,
         "similar": similar,
         "validated": {

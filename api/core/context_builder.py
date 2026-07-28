@@ -35,6 +35,7 @@ def build(event: LeadEvent) -> Context:
         cidade=event.cidade or lead_data.get("cidade"),
         cep=event.cep or lead_data.get("cep"),
         ai_enabled=lead_data.get("ai_enabled", True),
+        metadata=lead_data.get("metadata") or {},
     )
 
     historico = supabase_client.get_messages(str(lead.ref or event.lead_id), limit=20)
@@ -76,4 +77,5 @@ def build(event: LeadEvent) -> Context:
         historico=historico,
         kb_chunks=kb_chunks,
         persona_slug=event.persona_slug,
+        metadata=lead_data.get("metadata") or {},
     )

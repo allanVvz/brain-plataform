@@ -11,6 +11,10 @@ interface RoutingConfig {
   slug: string;
   id: string;
   process_mode: "internal" | "n8n";
+  conversation_mode: "deterministic" | "n8n_agents";
+  pipeline_contract?: string;
+  classifier?: string;
+  model_required?: boolean;
   outbound_webhook_url: string | null;
   has_outbound_webhook_secret: boolean;
   has_inbound_webhook_token: boolean;
@@ -218,7 +222,7 @@ export default function PersonaPage() {
     setGalleryAssetCount(Array.isArray(galleryData) ? galleryData.length : 0);
   }
 
-  async function setProcessMode(mode: "internal" | "n8n") {
+  async function setConversationMode(mode: "deterministic" | "n8n_agents") {
     if (!selected || routingBusy) return;
     if (routing && !routing.migration_applied) {
       setRoutingMessage("A migration 011 ainda não foi aplicada. O modo exibido vem do fluxo n8n legado e está somente leitura.");
@@ -227,9 +231,9 @@ export default function PersonaPage() {
     setRoutingBusy(true);
     try {
       const updated = await api.updatePersonaRouting(selected.slug, {
-        process_mode: mode,
+        conversation_mode: mode,
         // When switching to n8n the operator needs a token; auto-generate if missing.
-        ...(mode === "n8n" && routing && !routing.has_inbound_webhook_token
+        ...(mode === "n8n_agents" && routing && !routing.has_inbound_webhook_token
           ? { rotate_inbound_token: true }
           : {}),
       });
@@ -471,34 +475,34 @@ export default function PersonaPage() {
                 <label className="flex items-start gap-2.5 cursor-pointer p-2 rounded-md hover:bg-white/3 border border-transparent hover:border-brain-border transition">
                   <input
                     type="radio"
-                    name="process_mode"
-                    value="internal"
-                    checked={routing?.process_mode === "internal"}
-                    onChange={() => setProcessMode("internal")}
+                    name="conversation_mode"
+                    value="deterministic"
+                    checked={routing?.conversation_mode === "deterministic"}
+                    onChange={() => setConversationMode("deterministic")}
                     disabled={routingBusy || !routing}
                     className="mt-0.5 accent-brain-accent"
                   />
                   <div>
-                    <p className="text-sm">Processar internamente <span className="text-xs text-brain-muted">(Brain AI)</span></p>
+                    <p className="text-sm">Fluxo determinístico <span className="text-xs text-brain-muted">(Brain AI)</span></p>
                     <p className="text-xs text-brain-muted">
-                      Classifica, decide rota, gera resposta e envia via outbound webhook.
+                      Executa context → classify → commit sem modelo ou chave de API.
                     </p>
                   </div>
                 </label>
                 <label className="flex items-start gap-2.5 cursor-pointer p-2 rounded-md hover:bg-white/3 border border-transparent hover:border-brain-border transition">
                   <input
                     type="radio"
-                    name="process_mode"
-                    value="n8n"
-                    checked={routing?.process_mode === "n8n"}
-                    onChange={() => setProcessMode("n8n")}
+                    name="conversation_mode"
+                    value="n8n_agents"
+                    checked={routing?.conversation_mode === "n8n_agents"}
+                    onChange={() => setConversationMode("n8n_agents")}
                     disabled={routingBusy || !routing}
                     className="mt-0.5 accent-brain-accent"
                   />
                   <div>
-                    <p className="text-sm">Processar via n8n</p>
+                    <p className="text-sm">n8n SDR + Closer</p>
                     <p className="text-xs text-brain-muted">
-                      Brain AI só persiste a inbound. n8n é responsável pela resposta. Operador continua usando outbound webhook.
+                      n8n orquestra o mesmo contrato e classificador determinístico.
                     </p>
                   </div>
                 </label>
@@ -508,7 +512,7 @@ export default function PersonaPage() {
                   Outbound webhook não configurado — abra a engrenagem para definir.
                 </p>
               )}
-              {routing?.process_mode === "n8n" && !routing.has_inbound_webhook_token && (
+              {routing?.conversation_mode === "n8n_agents" && !routing.has_inbound_webhook_token && (
                 <p className="text-xs text-amber-300/80 border border-amber-400/30 bg-amber-500/10 rounded px-2 py-1.5">
                   Sem inbound token — n8n pode chamar /process sem autenticação. Rotacione o token na engrenagem.
                 </p>

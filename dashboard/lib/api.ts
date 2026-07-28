@@ -289,10 +289,10 @@ export const api = {
     req<any>(`/knowledge/taxonomy${canonicalOnly ? "?canonical_only=true" : ""}`),
 
   // Knowledge — Vault Sync
-  knowledgePreview: () => req<any>("/knowledge/sync/preview"),
-  triggerSync: (persona?: string) => req<any>(`/knowledge/sync${persona ? `?persona=${persona}` : ""}`, { method: "POST" }),
-  syncRuns: (limit = 20) => req<any[]>(`/knowledge/sync/runs?limit=${limit}`),
-  syncRunLogs: (runId: string) => req<any[]>(`/knowledge/sync/runs/${runId}/logs`),
+  knowledgePreview: () => req<any>("/knowledge/import-vault/preview"),
+  triggerSync: (persona?: string) => req<any>(`/knowledge/import-vault${persona ? `?persona=${persona}` : ""}`, { method: "POST" }),
+  syncRuns: (limit = 20) => req<any[]>(`/knowledge/import-vault/runs?limit=${limit}`),
+  syncRunLogs: (runId: string) => req<any[]>(`/knowledge/import-vault/runs/${runId}/logs`),
 
   // Knowledge — Single item fetch
   queueItem: (id: string) => req<any>(`/knowledge/queue/${id}`),
@@ -626,10 +626,12 @@ export const api = {
   },
   // Canonical write path: publish the edited graph_json. The backend validates
   // the whole document and materializes the derived knowledge_nodes/edges (reindex).
-  publishGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json: any; source?: string; note?: string }) =>
+  publishGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json: any; source?: string; note?: string; expected_version?: number; idempotency_key?: string }) =>
     req<any>("/graph-documents/publish", { method: "POST", body: JSON.stringify({ source: "graph_ui", ...body }) }),
-  applyGraphPatch: (body: { persona_slug: string; graph_json: any; source?: string; note?: string }) =>
+  applyGraphPatch: (body: { persona_slug: string; graph_json: any; source?: string; note?: string; expected_version?: number; idempotency_key?: string }) =>
     req<any>("/graph-documents/apply-patch", { method: "POST", body: JSON.stringify({ source: "graph_ui_patch", ...body }) }),
+  syncGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; idempotency_key?: string }) =>
+    req<any>("/graph-documents/sync", { method: "POST", body: JSON.stringify(body) }),
   createGraphEdge: (body: { source_node_id: string; target_node_id: string; relation_type?: string; persona_id?: string; weight?: number; metadata?: any }) =>
     req<any>("/knowledge/graph-edges", { method: "POST", body: JSON.stringify(body) }),
   deleteGraphEdge: (edgeId: string) =>

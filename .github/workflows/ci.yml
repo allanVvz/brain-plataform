@@ -28,6 +28,39 @@ jobs:
         working-directory: api
         run: python -m compileall -q .
 
+      - name: Bloquear fatos de persona em codigo e workflow
+        run: python scripts/check_persona_hardcodes.py
+
+      - name: Testar backend canônico com timeout
+        env:
+          SUPABASE_URL: http://127.0.0.1:54321
+          SUPABASE_SERVICE_KEY: ci-local-placeholder
+          SUPABASE_RETRY_ATTEMPTS: "0"
+          SUPABASE_HTTP_TIMEOUT_SECONDS: "2"
+        run: |
+          timeout --signal=TERM --kill-after=15s 240s python -m pytest tests \
+            --ignore=tests/e2e \
+            --ignore=tests/test_bra91_allanvvz_safe_crawler_snapshot.py \
+            --ignore=tests/test_qa_contract_routes.py \
+            --ignore=tests/test_sofia_primary_tree_publication.py \
+            --ignore=tests/test_sofia_session_context.py \
+            --ignore=tests/test_sofia_v2_patch_loop.py \
+            -q
+
+      - name: Testar contratos canônicos críticos
+        env:
+          SUPABASE_URL: http://127.0.0.1:54321
+          SUPABASE_SERVICE_KEY: ci-local-placeholder
+          SUPABASE_RETRY_ATTEMPTS: "0"
+          SUPABASE_HTTP_TIMEOUT_SECONDS: "2"
+        run: |
+          timeout --signal=TERM --kill-after=15s 120s python -m pytest \
+            tests/test_graph_document_publisher.py \
+            tests/test_graph_json_projection_markdown.py \
+            tests/test_sofia_canonical_graph_patch.py \
+            tests/test_approved_faq_publication_contract.py \
+            -q
+
       - name: Configurar Node
         uses: actions/setup-node@v4
         with:
@@ -45,3 +78,7 @@ jobs:
           API_INTERNAL_BASE_URL: http://127.0.0.1:8080
           NEXT_PUBLIC_API_BASE_URL: /api-brain
         run: npm run build
+
+      - name: Testar frontend
+        working-directory: dashboard
+        run: npm test

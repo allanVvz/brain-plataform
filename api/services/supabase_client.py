@@ -35,7 +35,8 @@ def _supabase_ssl_verify() -> bool:
 def get_client() -> Client:
     global _client
     if _client is None:
-        http_client = httpx.Client(verify=_supabase_ssl_verify(), timeout=120)
+        timeout_seconds = float(os.environ.get("SUPABASE_HTTP_TIMEOUT_SECONDS") or "120")
+        http_client = httpx.Client(verify=_supabase_ssl_verify(), timeout=timeout_seconds)
         _client = create_client(
             os.environ["SUPABASE_URL"],
             os.environ["SUPABASE_SERVICE_KEY"],
@@ -61,6 +62,7 @@ def _execute_with_retry(query, retries: int = 4):
     ("Server disconnected", "RemoteProtocolError"). Retries with a fresh client
     have proven to recover most of these without operator-visible failure.
     """
+    retries = int(os.environ.get("SUPABASE_RETRY_ATTEMPTS") or retries)
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
         try:
@@ -913,6 +915,9 @@ def insert_message(data: dict) -> None:
         "channel": data.get("channel") or data.get("canal"),
         "sender_id": data.get("sender_id") or data.get("message_id"),
         "whatsapp_phone_number_id": data.get("whatsapp_phone_number_id"),
+        "external_message_id": data.get("external_message_id"),
+        "correlation_id": data.get("correlation_id"),
+        "metadata": data.get("metadata"),
         "created_at": data.get("created_at"),
     }
     mapped = {k: v for k, v in mapped.items() if v is not None}
@@ -1105,6 +1110,52 @@ def update_knowledge_node(node_id: str, data: dict, *, mark_related_faqs: bool =
         raise
 
 
+def list_graph_json_projection_nodes(persona_id: str, limit: int = 10000) -> list[dict]:
+    """List only nodes owned by the regenerable Graph JSON projection."""
+    if _KG_TABLES_MISSING or not persona_id:
+        return []
+    try:
+        rows = _q(
+            get_client()
+            .table("knowledge_nodes")
+            .select("id,node_type,source_id,status,metadata")
+            .eq("persona_id", persona_id)
+            .limit(limit)
+        )
+        return [
+            row
+            for row in rows
+            if (row.get("metadata") or {}).get("graph_json_import") is True
+        ]
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            return []
+        raise
+
+
+def list_graph_json_projection_edges(persona_id: str, limit: int = 10000) -> list[dict]:
+    """List only edges owned by the regenerable Graph JSON projection."""
+    if _KG_TABLES_MISSING or not persona_id:
+        return []
+    try:
+        rows = _q(
+            get_client()
+            .table("knowledge_edges")
+            .select("id,source_node_id,target_node_id,relation_type,metadata")
+            .eq("persona_id", persona_id)
+            .limit(limit)
+        )
+        return [
+            row
+            for row in rows
+            if (row.get("metadata") or {}).get("graph_json_edge_id")
+        ]
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            return []
+        raise
+
+
 def ensure_persona_knowledge_node(persona_id: str) -> Optional[dict]:
     """Ensure the graph has a protected semantic root for a persona."""
     if not persona_id:
@@ -1204,7 +1255,7 @@ def ensure_embedded_node(persona_id: str) -> Optional[dict]:
         return None
     return upsert_knowledge_node({
         "persona_id": persona_id,
-        "node_type": "embedded",
+        "node_type": "embed",
         "slug": "embedded-default",
         "title": "Embedded",
         "summary": "Destino protegido para FAQs publicados no Golden Dataset e enviados ao RAG.",
@@ -3595,6 +3646,74 @@ def count_knowledge_rag_chunks_by_entry_ids(entry_ids: list[str]) -> dict[str, i
     return counts
 
 
+def search_active_rag_chunks(
+    *,
+    persona_id: str,
+    query: str = "",
+    limit: int = 12,
+) -> list[dict]:
+    """Return persona-scoped Golden Dataset chunks before any legacy fallback.
+
+    Text scoring stays deterministic and local for now; embeddings can replace
+    the ranking without changing the caller contract.
+    """
+    if not persona_id:
+        return []
+    client = get_client()
+    entries = _q(
+        client.table("knowledge_rag_entries")
+        .select("id,title,content_type,slug,status,metadata,canonical_key")
+        .eq("persona_id", persona_id)
+        .in_("status", ["active", "approved", "validated", "embedded"])
+        .limit(2000)
+    )
+    entry_by_id = {str(row.get("id")): row for row in entries if row.get("id")}
+    if not entry_by_id:
+        return []
+    chunks = _q(
+        client.table("knowledge_rag_chunks")
+        .select("id,rag_entry_id,persona_id,chunk_index,chunk_text,chunk_summary,metadata")
+        .eq("persona_id", persona_id)
+        .in_("rag_entry_id", list(entry_by_id))
+        .limit(5000)
+    )
+    # WhatsApp questions commonly contain accents, punctuation and hyphenated
+    # names (for example "Coca-Cola" / "preço").  Normalize both sides so a
+    # lexical RAG fallback remains useful before embeddings are available.
+    def _rag_terms(value: str) -> set[str]:
+        normalized = unicodedata.normalize("NFKD", value or "")
+        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
+        return {part for part in re.findall(r"[a-z0-9]+", normalized) if len(part) > 1}
+
+    terms = _rag_terms(query)
+    ranked: list[tuple[int, int, dict]] = []
+    for chunk in chunks:
+        entry = entry_by_id.get(str(chunk.get("rag_entry_id")))
+        if not entry:
+            continue
+        haystack = " ".join(
+            [
+                str(entry.get("title") or ""),
+                str(entry.get("slug") or ""),
+                str(chunk.get("chunk_text") or ""),
+                str(chunk.get("chunk_summary") or ""),
+            ]
+        )
+        normalized_haystack = " ".join(_rag_terms(haystack))
+        score = sum(1 for term in terms if term in normalized_haystack)
+        if terms and score == 0:
+            continue
+        ranked.append(
+            (
+                score,
+                -int(chunk.get("chunk_index") or 0),
+                {**chunk, "entry": entry, "source": "golden_dataset"},
+            )
+        )
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in ranked[:limit]]
+
+
 def find_knowledge_rag_entry_by_slug(
     *,
     persona_id: str,
@@ -3691,10 +3810,140 @@ def get_default_whatsapp_phone_number_id(persona_id: Optional[str] = None) -> Op
     return None
 
 
+def get_active_workflow_binding_by_phone_number_id(phone_number_id: str) -> Optional[dict]:
+    """Resolve routing exclusively by the business number, never by lead phone."""
+    if not phone_number_id:
+        return None
+    return _one(
+        get_client().table("workflow_bindings").select("*")
+        .eq("whatsapp_phone_number_id", phone_number_id).eq("active", True).maybe_single()
+    )
+
+
+def debounce_available_at(seconds: int = 3) -> str:
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) + timedelta(seconds=max(0, seconds))).isoformat()
+
+
+def enqueue_whatsapp_message(data: dict) -> Optional[dict]:
+    """Idempotent durable inbox/outbox insert. None means a duplicate."""
+    try:
+        result = get_client().table("lead_buffer").insert(data).execute()
+        return (result.data or [None])[0]
+    except Exception as exc:
+        # Postgres unique violation is expected when Meta retries a webhook.
+        text = str(exc).lower()
+        if "duplicate" in text or "unique" in text or "23505" in text:
+            return None
+        raise
+
+
+def claim_whatsapp_buffer(worker_id: str, limit: int = 20, lease_seconds: int = 60) -> list[dict]:
+    result = get_client().rpc("claim_whatsapp_buffer", {
+        "p_worker": worker_id, "p_limit": limit, "p_lease_seconds": lease_seconds,
+    }).execute()
+    return result.data or []
+
+
+def complete_whatsapp_buffer(buffer_id: str, status: str, error: str | None = None) -> None:
+    from datetime import datetime, timezone
+    _execute_with_retry(get_client().table("lead_buffer").update({
+        "status": status, "last_error": error, "locked_at": None, "locked_by": None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", buffer_id))
+
+
+def release_whatsapp_buffer(buffer_id: str, status: str, *, delay_seconds: int, error: str | None, decrement_attempt: bool = False) -> None:
+    from datetime import datetime, timedelta, timezone
+    payload = {
+        "status": status, "last_error": error, "locked_at": None, "locked_by": None,
+        "available_at": (datetime.now(timezone.utc) + timedelta(seconds=max(0, delay_seconds))).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _execute_with_retry(get_client().table("lead_buffer").update(payload).eq("id", buffer_id))
+
+
+def update_whatsapp_delivery(wamid: str, status: str, errors: list | None = None) -> None:
+    error = None
+    if errors:
+        first = errors[0] if isinstance(errors[0], dict) else {"message": str(errors[0])}
+        # Store code/description only; never preserve recipient or token data.
+        error = str({k: first.get(k) for k in ("code", "title", "message") if first.get(k)})[:1000]
+    from datetime import datetime, timezone
+    _execute_with_retry(get_client().table("lead_buffer").update({"status": status, "last_error": error, "updated_at": datetime.now(timezone.utc).isoformat()}).eq("external_message_id", wamid))
+    # Different historical schemas use sender_id/message_id; external id is
+    # preferred after migration 050.
+    try:
+        _execute_with_retry(get_client().table("messages").update({"status": status}).eq("external_message_id", wamid))
+    except Exception:
+        _execute_with_retry(get_client().table("messages").update({"status": status}).eq("sender_id", wamid))
+
+
+def complete_whatsapp_outbound(buffer_id: str | None, wamid: str | None, status: str, error: str | None, execution_id: str | None) -> None:
+    if not buffer_id:
+        return
+    from datetime import datetime, timezone
+    payload = {"status": status, "last_error": (error or None), "updated_at": datetime.now(timezone.utc).isoformat()}
+    if wamid:
+        payload["external_message_id"] = wamid
+    result = _execute_with_retry(get_client().table("lead_buffer").update(payload).eq("id", buffer_id))
+    rows = getattr(result, "data", None) or []
+    if rows and wamid:
+        try:
+            _execute_with_retry(get_client().table("messages").update({"status": status, "external_message_id": wamid}).eq("lead_ref", rows[0].get("lead_ref")))
+        except Exception:
+            pass
+
+
+def set_lead_buffer_waiting_human(lead_ref: int) -> None:
+    _execute_with_retry(
+        get_client().table("lead_buffer").update({"status": "waiting_human"})
+        .eq("lead_ref", lead_ref).in_("status", ["received", "buffered", "processing", "pending_send", "retry"])
+    )
+
+
+def handoff_whatsapp_lead(lead_ref: int) -> None:
+    """Atomically pause AI and quarantine queued work for a human operator."""
+    _execute_with_retry(get_client().rpc("handoff_whatsapp_lead", {"p_lead_ref": lead_ref}))
+
+
+def handoff_whatsapp_lead_state(
+    lead_ref: int,
+    *,
+    metadata: dict,
+    stage: str,
+) -> None:
+    """Atomically persist the cart/stage and quarantine queued AI work."""
+    _execute_with_retry(
+        get_client().rpc(
+            "handoff_whatsapp_lead_state",
+            {
+                "p_lead_ref": lead_ref,
+                "p_metadata": metadata,
+                "p_stage": stage,
+            },
+        )
+    )
+
+
 def upsert_workflow_binding(data: dict) -> dict:
     result = get_client().table("workflow_bindings").upsert(
         data, on_conflict="workflow_name,persona_id"
     ).execute()
+    return result.data[0] if result.data else {}
+
+
+def update_workflow_binding_metadata(
+    binding_id: str,
+    metadata: dict,
+) -> dict:
+    result = (
+        get_client()
+        .table("workflow_bindings")
+        .update({"metadata": metadata})
+        .eq("id", binding_id)
+        .execute()
+    )
     return result.data[0] if result.data else {}
 
 

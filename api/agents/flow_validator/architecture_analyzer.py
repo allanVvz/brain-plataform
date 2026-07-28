@@ -16,7 +16,7 @@ _ANTI_PATTERNS = [
             "Durante o rebuild (30-60s/hora), queries retornam vazio."
         ),
         "recommendation": "Migrar KB para Supabase pgvector (já suportado no Brain AI).",
-        "affected_component": "KB Update Tock / Simple Vector Store",
+        "affected_component": "legacy knowledge workflow",
         "score_impact": -15,
     },
     {

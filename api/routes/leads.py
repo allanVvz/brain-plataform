@@ -744,6 +744,27 @@ def pause_ai(lead_ref: int, request: Request):
     return {"ok": True, "lead_ref": lead_ref, "ai_paused": True}
 
 
+class HandoffBody(BaseModel):
+    reason: str
+    role: str = "human"
+
+
+@router.post("/{lead_ref}/handoff")
+def handoff(lead_ref: int, body: HandoffBody, request: Request):
+    """Pause automation before a human is notified; it is never best-effort."""
+    lead = supabase_client.get_lead_by_ref(lead_ref)
+    if not lead:
+        raise HTTPException(404, "Lead nao encontrado")
+    if lead.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=lead["persona_id"])
+    try:
+        supabase_client.handoff_whatsapp_lead(lead_ref)
+    except Exception as exc:
+        raise HTTPException(500, "Falha ao registrar handoff") from exc
+    event_emitter.emit("lead.handoff", entity_type="lead", entity_id=str(lead_ref), persona_id=lead.get("persona_id"), payload={"reason": body.reason, "role": body.role, "ai_paused": True}, source="leads.handoff")
+    return {"ok": True, "lead_ref": lead_ref, "ai_paused": True, "reason": body.reason}
+
+
 @router.post("/{lead_ref}/resume-ai")
 def resume_ai(lead_ref: int, request: Request):
     """Retoma a IA para esse lead."""

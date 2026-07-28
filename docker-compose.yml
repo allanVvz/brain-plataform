@@ -17,6 +17,10 @@ x-backend-environment: &backend-environment
   ALLOWED_ORIGIN_REGEX: ${ALLOWED_ORIGIN_REGEX:-}
   AI_BRAIN_AUTH_SECRET: ${AI_BRAIN_AUTH_SECRET:?set AI_BRAIN_AUTH_SECRET}
   AI_BRAIN_WEBHOOK_TOKEN: ${AI_BRAIN_WEBHOOK_TOKEN:?set AI_BRAIN_WEBHOOK_TOKEN}
+  META_WHATSAPP_APP_SECRET: ${META_WHATSAPP_APP_SECRET:-}
+  META_WHATSAPP_VERIFY_TOKEN: ${META_WHATSAPP_VERIFY_TOKEN:-}
+  META_WHATSAPP_ALLOW_UNSIGNED_LOCAL: ${META_WHATSAPP_ALLOW_UNSIGNED_LOCAL:-false}
+  API_INTERNAL_BASE_URL: ${API_INTERNAL_BASE_URL:-http://api:8080}
   AI_BRAIN_COOKIE_SECURE: ${AI_BRAIN_COOKIE_SECURE:-true}
   LOCAL_STORAGE_DIR: /data/local-storage
   VAULT_PATH: /data/vault
@@ -25,6 +29,7 @@ x-backend-environment: &backend-environment
   SOFIA_TOOLS_ENABLED: ${SOFIA_TOOLS_ENABLED:-true}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  WA_VALIDATOR_RUNNER_URL: ${WA_VALIDATOR_RUNNER_URL:-http://wa-validator:3010}
 
 services:
   db:
@@ -92,6 +97,8 @@ services:
     build:
       context: .
       dockerfile: infra/migrate.Dockerfile
+      args:
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     environment:
       PGHOST: db
       PGPORT: "5432"
@@ -162,6 +169,13 @@ services:
 
   kong:
     image: kong:3.8
+    # Docker Desktop can restart this container without recreating its
+    # writable layer. Remove only Kong's stale worker-events socket before
+    # delegating to the official entrypoint.
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - rm -f /usr/local/kong/sockets/we && exec /docker-entrypoint.sh kong docker-start
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yml
@@ -169,6 +183,9 @@ services:
       KONG_PLUGINS: bundled
       KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
       KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      # Local QA does not need one worker per CPU; reserve memory for graph/RAG
+      # compilation and the Playwright validator.
+      KONG_NGINX_WORKER_PROCESSES: "2"
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
@@ -182,8 +199,11 @@ services:
         condition: service_started
       storage:
         condition: service_healthy
+    # Do not invoke `kong health` here: Docker runs the image entrypoint for
+    # CMD checks and it attempts to start a second nginx instance. The master
+    # process creates this socket only after it is ready to serve requests.
     healthcheck:
-      test: ["CMD", "kong", "health"]
+      test: ["CMD-SHELL", "test -S /usr/local/kong/sockets/we"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -196,11 +216,15 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+      args:
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     environment:
       <<: *backend-environment
     volumes:
       - local-storage:/data/local-storage
       - vault-data:/data/vault
+      # Persona knowledge remains in versioned Markdown and is read-only at runtime.
+      - ./docs:/docs:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -223,12 +247,15 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+      args:
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     command: ["python", "-m", "workers.runner", "--all"]
     environment:
       <<: *backend-environment
     volumes:
       - local-storage:/data/local-storage
       - vault-data:/data/vault
+      - ./docs:/docs:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -245,6 +272,8 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+      args:
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     command: ["python", "scripts/ensure_seed_admin.py"]
     environment:
       <<: *backend-environment
@@ -259,20 +288,75 @@ services:
     networks: [backend]
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:1.115.0
     environment:
       N8N_HOST: ${N8N_DOMAIN:?set N8N_DOMAIN}
-      N8N_PROTOCOL: https
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
       N8N_PORT: "5678"
-      N8N_EDITOR_BASE_URL: https://${N8N_DOMAIN:?set N8N_DOMAIN}
-      WEBHOOK_URL: https://${N8N_DOMAIN:?set N8N_DOMAIN}/
-      N8N_SECURE_COOKIE: "true"
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-http://localhost:5678}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
       N8N_RUNNERS_ENABLED: "true"
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY}
+      API_INTERNAL_BASE_URL: http://api:8080
+      AI_BRAIN_WEBHOOK_TOKEN: ${AI_BRAIN_WEBHOOK_TOKEN:?set AI_BRAIN_WEBHOOK_TOKEN}
+      META_WHATSAPP_ACCESS_TOKEN: ${META_WHATSAPP_ACCESS_TOKEN:-}
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v23.0}
       GENERIC_TIMEZONE: America/Sao_Paulo
     volumes:
       - n8n-data:/home/node/.n8n
+      - ./api/n8n-workflows:/workflows:ro
+    ports:
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5678/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     restart: unless-stopped
+    logging: *default-logging
+    networks: [backend]
+
+  n8n-import:
+    image: n8nio/n8n:1.115.0
+    command:
+      - sh
+      - -ec
+      - |
+        for workflow in /workflows/whatsapp-*.json /workflows/baita-vitoria.json; do
+          n8n import:workflow --input="$${workflow}"
+        done
+    environment:
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY}
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./api/n8n-workflows:/workflows:ro
+    restart: "no"
+    profiles: ["workflow-bootstrap"]
+    logging: *default-logging
+    networks: [backend]
+
+  wa-validator:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile.wa-validator
+    environment:
+      WA_VALIDATOR_RUNNER_TOKEN: ${AI_BRAIN_WEBHOOK_TOKEN:?set AI_BRAIN_WEBHOOK_TOKEN}
+      WA_VALIDATOR_HEADLESS: ${WA_VALIDATOR_HEADLESS:-true}
+    volumes:
+      - wa-validator-runtime:/runtime
+      - wa-validator-profile:/profile
+      - wa-validator-artifacts:/artifacts
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    profiles: ["wa-validator"]
     logging: *default-logging
     networks: [backend]
 
@@ -299,6 +383,7 @@ services:
       n8n:
         condition: service_started
     restart: unless-stopped
+    profiles: ["edge"]
     logging: *default-logging
     networks: [backend]
 
@@ -310,6 +395,9 @@ volumes:
   caddy-data:
   caddy-config:
   n8n-data:
+  wa-validator-runtime:
+  wa-validator-profile:
+  wa-validator-artifacts:
 
 networks:
   backend:

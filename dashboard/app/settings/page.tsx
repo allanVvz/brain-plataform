@@ -36,6 +36,7 @@ const PERSONA_SLUG_STORAGE = "ai-brain-persona-slug";
 const PERSONA_ID_STORAGE = "ai-brain-persona-id";
 
 type Theme = "clean" | "dark";
+type ConversationMode = "deterministic" | "n8n_agents";
 type PublicSiteDraft = {
   site_slug: string;
   site_name: string;
@@ -128,6 +129,9 @@ export default function SettingsPage() {
   const [apiKeyBusy, setApiKeyBusy] = useState(false);
   const [apiKeyError, setApiKeyError] = useState("");
   const [apiKeySuccess, setApiKeySuccess] = useState("");
+  const [conversationRouting, setConversationRouting] = useState<any>(null);
+  const [conversationModeBusy, setConversationModeBusy] = useState(false);
+  const [conversationModeMessage, setConversationModeMessage] = useState("");
 
   useEffect(() => {
     setPanKey(window.localStorage.getItem(PAN_KEY_STORAGE) || "Control");
@@ -221,7 +225,7 @@ export default function SettingsPage() {
     setLoadingIntegrations(true);
     setMenuError("");
     try {
-      const [session, healthData, integrationsData, formatsData, publicSiteData, collectionsData, categoriesData, productsData, menuData] =
+      const [session, healthData, integrationsData, formatsData, publicSiteData, collectionsData, categoriesData, productsData, menuData, routingData] =
         await Promise.all([
           api.me().catch(() => null),
           api.health().catch(() => null),
@@ -235,6 +239,7 @@ export default function SettingsPage() {
             setMenuError(error?.message || "Menu API indisponivel");
             return null;
           }) : Promise.resolve(null),
+          personaSlug ? api.personaRouting(personaSlug).catch(() => null) : Promise.resolve(null),
         ]);
       const list = session?.personas || [];
       setPersonas(list);
@@ -257,6 +262,7 @@ export default function SettingsPage() {
       setCategories(categoriesData || []);
       setProducts(productsData || []);
       setMenuPayload(menuData);
+      setConversationRouting(routingData);
       const personaId = list.find((persona: any) => persona.slug === personaSlug)?.id || activePersonaId;
       const assets = personaId ? await api.galleryAssets(personaId).catch(() => []) : [];
       setGalleryAssets(assets || []);
@@ -360,6 +366,30 @@ export default function SettingsPage() {
       setApiKeyError(error?.message || "Falha ao remover a chave.");
     } finally {
       setApiKeyBusy(false);
+    }
+  }
+
+  async function updateConversationMode(mode: ConversationMode) {
+    if (!personaSlug || conversationModeBusy) return;
+    setConversationModeBusy(true);
+    setConversationModeMessage("");
+    try {
+      const updated = await api.updatePersonaRouting(personaSlug, {
+        conversation_mode: mode,
+        ...(mode === "n8n_agents" && !conversationRouting?.has_inbound_webhook_token
+          ? { rotate_inbound_token: true }
+          : {}),
+      });
+      setConversationRouting(updated);
+      setConversationModeMessage(
+        mode === "deterministic"
+          ? "Fluxo determinístico ativado. Nenhuma chave de modelo será usada."
+          : "Fluxo n8n agents ativado com o mesmo contrato e classificador determinístico.",
+      );
+    } catch (error: any) {
+      setConversationModeMessage(error?.message || "Falha ao atualizar o fluxo.");
+    } finally {
+      setConversationModeBusy(false);
     }
   }
 
@@ -583,6 +613,54 @@ export default function SettingsPage() {
         status={`${apiKeyStatus(byService.openai).label} / ${apiKeyStatus(byService.anthropic).label}`}
         defaultOpen
       >
+        <div className="mb-4 rounded-xl border border-obs-violet/25 bg-obs-violet/10 p-3">
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold text-obs-text">Fluxo de atendimento</p>
+            <p className="text-xs leading-5 text-obs-subtle">
+              Os dois modos usam <code>conversation_v1</code>, o classificador
+              <code className="ml-1">deterministic_v1</code> e o mesmo Graph/RAG publicado.
+            </p>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {([
+              {
+                value: "deterministic",
+                title: "Determinístico",
+                description: "Executa context → classify → commit no Brain, sem modelo ou chave de API.",
+              },
+              {
+                value: "n8n_agents",
+                title: "n8n SDR + Closer",
+                description: "O n8n orquestra as mesmas etapas. Nesta versão, o classificador continua determinístico.",
+              },
+            ] as const).map((option) => (
+              <label
+                key={option.value}
+                className="flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-obs-base/60 p-3"
+              >
+                <input
+                  type="radio"
+                  name="conversation_mode"
+                  value={option.value}
+                  checked={conversationRouting?.conversation_mode === option.value}
+                  onChange={() => updateConversationMode(option.value)}
+                  disabled={!personaSlug || conversationModeBusy || !conversationRouting?.migration_applied}
+                  className="mt-0.5 accent-obs-violet"
+                />
+                <span>
+                  <span className="block text-xs font-medium text-obs-text">{option.title}</span>
+                  <span className="mt-1 block text-xs leading-5 text-obs-subtle">{option.description}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          {!personaSlug && (
+            <p className="mt-2 text-xs text-amber-200">Selecione uma persona para definir o fluxo.</p>
+          )}
+          {conversationModeMessage && (
+            <p className="mt-2 text-xs text-obs-subtle">{conversationModeMessage}</p>
+          )}
+        </div>
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="text-xs leading-5 text-obs-subtle">
             Vault por usuario para OpenAI e Anthropic. O frontend exibe apenas status.

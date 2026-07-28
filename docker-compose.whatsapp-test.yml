@@ -1,0 +1,11 @@
+# Explicit opt-in overlay for the temporary Meta pilot. Credentials stay only
+# in the VPS .env.compose and are never stored in this repository.
+services:
+  n8n:
+    environment:
+      META_WHATSAPP_ACCESS_TOKEN: ${META_WHATSAPP_ACCESS_TOKEN:?set META_WHATSAPP_ACCESS_TOKEN only on the VPS}
+      META_WHATSAPP_PHONE_NUMBER_ID: ${META_WHATSAPP_PHONE_NUMBER_ID:?set META_WHATSAPP_PHONE_NUMBER_ID only on the VPS}
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v23.0}
+      AI_BRAIN_WEBHOOK_TOKEN: ${AI_BRAIN_WEBHOOK_TOKEN:?set AI_BRAIN_WEBHOOK_TOKEN}
+      BRAIN_INTERNAL_BASE_URL: http://api:8080
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"

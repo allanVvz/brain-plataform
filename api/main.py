@@ -17,7 +17,7 @@ load_dotenv()
 configure_trust_store()
 
 from middleware.auth import auth_middleware
-from routes import auth, health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, graph_documents, marketing, audiences, assets, menu, qa_contract, public_site_formats
+from routes import auth, health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, graph_documents, marketing, audiences, assets, menu, qa_contract, public_site_formats, whatsapp, conversations
 from workers.flow_validator_worker import FlowValidatorWorker
 from workers.n8n_mirror_worker import N8nMirrorWorker
 from workers.health_check_worker import HealthCheckWorker
@@ -73,6 +73,9 @@ app.middleware("http")(auth_middleware)
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(process.router)
+app.include_router(whatsapp.router)
+app.include_router(whatsapp.internal_router)
+app.include_router(conversations.router)
 app.include_router(insights.router)
 app.include_router(leads.router)
 app.include_router(messages.router)

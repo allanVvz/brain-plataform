@@ -29,6 +29,7 @@ CANONICAL_PARENT: dict[str, tuple[str, ...]] = {
     "offer": ("product", "product_group"),
     "copy": ("product", "product_group", "offer"),
     "rule": ("campaign", "briefing", "brand", "persona"),
+    "tone": ("campaign", "briefing", "brand", "persona"),
     "faq": ("copy", "product", "product_group", "audience", "briefing", "campaign", "brand", "persona", "rule"),
     "embedded": ("faq",),
     # Gallery is an output sink, never the hierarchical parent of an asset.
@@ -195,6 +196,8 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
         target = nodes_by_id.get(edge.target)
         if source and target and getattr(target, "node_type", None) == "embedded" and getattr(source, "node_type", None) != "faq":
             errors.append(f"embedded edge {edge.id} source must be FAQ, got {getattr(source, 'node_type', None)}")
+        if source and target and getattr(target, "node_type", None) == "embedded" and _is_primary(edge):
+            errors.append(f"embedded edge {edge.id} must be secondary (primary_tree=false)")
         if source and target and getattr(target, "node_type", None) == "gallery":
             # Gallery itself hangs from Persona as a protected node.  Every
             # other incoming connection is the terminal asset -> Gallery edge.
@@ -239,5 +242,25 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
     for node in graph.nodes:
         if node.node_type == "asset" and node.id not in gallery_links:
             errors.append(f"asset node {node.id} must have a secondary asset -> gallery edge")
+
+    embedded_edges_by_faq: dict[str, list[object]] = {}
+    for edge in graph.edges:
+        source = nodes_by_id.get(edge.source)
+        target = nodes_by_id.get(edge.target)
+        if (
+            source
+            and target
+            and getattr(source, "node_type", None) == "faq"
+            and getattr(target, "node_type", None) == "embedded"
+        ):
+            embedded_edges_by_faq.setdefault(edge.source, []).append(edge)
+    for node in graph.nodes:
+        if node.node_type != "faq":
+            continue
+        links = embedded_edges_by_faq.get(node.id, [])
+        if _status_of(node) in FAQ_APPROVED_STATUSES and len(links) != 1:
+            errors.append(f"approved FAQ {node.id} must have exactly one FAQ -> Embedded edge")
+        if _status_of(node) not in FAQ_APPROVED_STATUSES and links:
+            errors.append(f"pending FAQ cannot connect to embedded: {node.id}")
 
     return (not errors, errors)
