@@ -733,6 +733,37 @@ def commit(
     if not persona or persona.get("id") != lead.get("persona_id"):
         raise PermissionError("conversation context does not match lead persona")
 
+    if expected_decision_owner and not inbound_buffer_id:
+        raise RuntimeError("inbound buffer id is required for a decision commit")
+    commit_claim = None
+    if inbound_buffer_id:
+        commit_claim = supabase_client.claim_conversation_commit(
+            inbound_buffer_id=inbound_buffer_id,
+            binding_id=channel_binding_id,
+            lead_ref=lead_ref,
+            correlation_id=correlation_id,
+        )
+        claim_state = commit_claim.get("state")
+        if claim_state == "completed":
+            stored_result = commit_claim.get("result") or {}
+            if not isinstance(stored_result, dict):
+                raise RuntimeError("stored conversation commit result is invalid")
+            return {
+                **stored_result,
+                "ok": True,
+                "deduplicated": True,
+            }
+        if claim_state == "processing":
+            supabase_client.record_whatsapp_safety_violation(
+                binding_id=channel_binding_id,
+                lead_ref=lead_ref,
+                violation_key=f"conversation_commit_reentry:{inbound_buffer_id}",
+                reason="compromised conversation commit re-execution",
+            )
+            raise RuntimeError("conversation commit is already processing")
+        if claim_state != "claimed":
+            raise RuntimeError("conversation commit claim returned an invalid state")
+
     message_id = f"ai:{correlation_id}"
     existing_outbound = (
         supabase_client.get_whatsapp_buffer_by_idempotency(message_id)
@@ -740,7 +771,7 @@ def commit(
         else None
     )
     if existing_outbound:
-        return {
+        result = {
             "ok": True,
             "message_id": message_id,
             "outbound_buffer_id": existing_outbound.get("id"),
@@ -758,6 +789,15 @@ def commit(
             "qualification": (lead.get("metadata") or {}).get("qualification") or {},
             "stage": lead.get("stage") or decision.lead_stage,
         }
+        if inbound_buffer_id:
+            supabase_client.complete_conversation_commit(
+                inbound_buffer_id=inbound_buffer_id,
+                binding_id=channel_binding_id,
+                lead_ref=lead_ref,
+                correlation_id=correlation_id,
+                result_payload=result,
+            )
+        return result
     previous_metadata = dict(lead.get("metadata") or {})
     qualification, qualified_stage = lead_qualification.calculate(
         previous=previous_metadata.get("qualification"),
@@ -873,7 +913,7 @@ def commit(
         },
         source="conversation_runtime",
     )
-    return {
+    result = {
         "ok": True,
         "message_id": message_id if response.reply_text else None,
         "outbound_buffer_id": (buffer or {}).get("id"),
@@ -891,6 +931,15 @@ def commit(
         "qualification": qualification,
         "stage": qualified_stage,
     }
+    if inbound_buffer_id:
+        supabase_client.complete_conversation_commit(
+            inbound_buffer_id=inbound_buffer_id,
+            binding_id=channel_binding_id,
+            lead_ref=lead_ref,
+            correlation_id=correlation_id,
+            result_payload=result,
+        )
+    return result
 
 
 def execute_pipeline(

@@ -4038,6 +4038,52 @@ def record_whatsapp_safety_violation(
     return payload if isinstance(payload, dict) else {}
 
 
+def claim_conversation_commit(
+    *,
+    inbound_buffer_id: str,
+    binding_id: str,
+    lead_ref: int,
+    correlation_id: str,
+) -> dict:
+    result = get_client().rpc(
+        "claim_conversation_commit",
+        {
+            "p_inbound_buffer_id": inbound_buffer_id,
+            "p_binding_id": binding_id,
+            "p_lead_ref": lead_ref,
+            "p_correlation_id": correlation_id,
+        },
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def complete_conversation_commit(
+    *,
+    inbound_buffer_id: str,
+    binding_id: str,
+    lead_ref: int,
+    correlation_id: str,
+    result_payload: dict,
+) -> dict:
+    result = get_client().rpc(
+        "complete_conversation_commit",
+        {
+            "p_inbound_buffer_id": inbound_buffer_id,
+            "p_binding_id": binding_id,
+            "p_lead_ref": lead_ref,
+            "p_correlation_id": correlation_id,
+            "p_result": result_payload,
+        },
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def complete_whatsapp_buffer(buffer_id: str, status: str, error: str | None = None) -> None:
     from datetime import datetime, timezone
     _execute_with_retry(get_client().table("lead_buffer").update({

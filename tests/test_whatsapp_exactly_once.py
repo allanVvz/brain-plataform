@@ -189,6 +189,7 @@ def test_internal_commit_declares_n8n_as_expected_owner(monkeypatch):
 
 
 def test_repeated_n8n_commit_returns_existing_outbox_without_new_decision(monkeypatch):
+    completed = []
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
         "get_lead_by_ref",
@@ -220,6 +221,16 @@ def test_repeated_n8n_commit_returns_existing_outbox_without_new_decision(monkey
     )
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
+        "claim_conversation_commit",
+        lambda **_kwargs: {"state": "claimed"},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "complete_conversation_commit",
+        lambda **kwargs: completed.append(kwargs) or kwargs["result_payload"],
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
         "get_whatsapp_buffer_by_idempotency",
         lambda _key: {"id": "outbox-1", "status": "pending_send"},
     )
@@ -248,6 +259,168 @@ def test_repeated_n8n_commit_returns_existing_outbox_without_new_decision(monkey
     assert result["deduplicated"] is True
     assert result["message_id"] == "ai:corr-1"
     assert result["outbound_buffer_id"] == "outbox-1"
+    assert completed[0]["result_payload"] == result
+
+
+def test_repeated_n8n_handoff_commit_is_persisted_once(monkeypatch):
+    state = {}
+    calls = {"lead": 0, "log": 0, "event": 0}
+    lead = {
+        "id": 7,
+        "persona_id": "persona-1",
+        "channel_binding_id": "binding-1",
+        "stage": "novo",
+        "metadata": {},
+    }
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_lead_by_ref",
+        lambda _ref: lead,
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_workflow_binding_by_id",
+        lambda _id: {
+            "id": "binding-1",
+            "persona_id": "persona-1",
+            "active": True,
+            "metadata": {"decision_owner": "n8n_agents"},
+        },
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_persona",
+        lambda _slug: {"id": "persona-1"},
+    )
+
+    def claim(**_kwargs):
+        if "result" in state:
+            return {"state": "completed", "result": state["result"]}
+        if state.get("processing"):
+            return {"state": "processing"}
+        state["processing"] = True
+        return {"state": "claimed"}
+
+    def complete(**kwargs):
+        state["result"] = kwargs["result_payload"]
+        return state["result"]
+
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "claim_conversation_commit",
+        claim,
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "complete_conversation_commit",
+        complete,
+    )
+    monkeypatch.setattr(
+        conversation_runtime.lead_qualification,
+        "calculate",
+        lambda **_kwargs: ({"score": 0}, "contatado"),
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "update_lead",
+        lambda *_args, **_kwargs: calls.__setitem__("lead", calls["lead"] + 1),
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "insert_agent_log",
+        lambda *_args, **_kwargs: calls.__setitem__("log", calls["log"] + 1),
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "insert_event",
+        lambda *_args, **_kwargs: calls.__setitem__("event", calls["event"] + 1),
+    )
+    monkeypatch.setattr(
+        conversation_runtime.whatsapp_outbox,
+        "enqueue_outbound",
+        lambda **_kwargs: pytest.fail("no-reply commit created an outbox"),
+    )
+    response = AgentResponse(
+        reply_text=None,
+        role=ConversationRoute.SDR,
+        cart_state={},
+        handoff_required=False,
+    )
+    kwargs = {
+        "lead_ref": 7,
+        "context": _context(),
+        "decision": _decision(),
+        "response": response,
+        "correlation_id": "corr-no-reply",
+        "phone_number_id": None,
+        "channel_binding_id": "binding-1",
+        "inbound_buffer_id": "buffer-in",
+        "expected_decision_owner": "n8n_agents",
+    }
+
+    first = conversation_runtime.commit(**kwargs)
+    duplicate = conversation_runtime.commit(**kwargs)
+
+    assert first["deduplicated"] is False
+    assert duplicate["deduplicated"] is True
+    assert duplicate["message_id"] is None
+    assert calls == {"lead": 1, "log": 1, "event": 1}
+
+
+def test_concurrent_commit_reentry_pauses_the_lead(monkeypatch):
+    violations = []
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_lead_by_ref",
+        lambda _ref: {
+            "id": 7,
+            "persona_id": "persona-1",
+            "channel_binding_id": "binding-1",
+        },
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_workflow_binding_by_id",
+        lambda _id: {
+            "id": "binding-1",
+            "persona_id": "persona-1",
+            "active": True,
+            "metadata": {"decision_owner": "n8n_agents"},
+        },
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_persona",
+        lambda _slug: {"id": "persona-1"},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "claim_conversation_commit",
+        lambda **_kwargs: {"state": "processing"},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "record_whatsapp_safety_violation",
+        lambda **kwargs: violations.append(kwargs) or {},
+    )
+
+    with pytest.raises(RuntimeError, match="already processing"):
+        conversation_runtime.commit(
+            lead_ref=7,
+            context=_context(),
+            decision=_decision(),
+            response=_response(),
+            correlation_id="corr-reentry",
+            phone_number_id=None,
+            channel_binding_id="binding-1",
+            inbound_buffer_id="buffer-in",
+            expected_decision_owner="n8n_agents",
+        )
+
+    assert violations[0]["lead_ref"] == 7
+    assert violations[0]["violation_key"] == (
+        "conversation_commit_reentry:buffer-in"
+    )
 
 
 def test_thousand_repeated_inbound_events_yield_one_decision_outbox_and_provider_call(

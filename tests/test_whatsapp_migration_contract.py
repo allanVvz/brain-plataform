@@ -5,6 +5,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = (
     ROOT / "supabase" / "migrations" / "065_whatsapp_monotonic_delivery.sql"
 ).read_text(encoding="utf-8").lower()
+COMMIT_MIGRATION = (
+    ROOT / "supabase" / "migrations" / "066_conversation_commit_idempotency.sql"
+).read_text(encoding="utf-8").lower()
 
 
 def test_hotfix_reuses_existing_tables_and_has_atomic_envelope():
@@ -43,3 +46,15 @@ def test_three_distinct_recent_violations_pause_the_binding():
     assert "if v_count >= 3" in MIGRATION
     assert "'safety_paused', true" in MIGRATION
     assert "connection_status = 'safety_paused'" in MIGRATION
+
+
+def test_conversation_callback_claim_reuses_the_inbound_lock():
+    assert "create table" not in COMMIT_MIGRATION
+    assert "claim_conversation_commit" in COMMIT_MIGRATION
+    assert "complete_conversation_commit" in COMMIT_MIGRATION
+    assert "from public.lead_buffer" in COMMIT_MIGRATION
+    assert "for update" in COMMIT_MIGRATION
+    assert "channel_binding_id = p_binding_id" in COMMIT_MIGRATION
+    assert "v_buffer.lead_ref is distinct from p_lead_ref" in COMMIT_MIGRATION
+    assert "'{conversation_commit}'" in COMMIT_MIGRATION
+    assert "'status', 'completed'" in COMMIT_MIGRATION
