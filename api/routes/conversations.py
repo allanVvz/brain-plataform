@@ -92,7 +92,14 @@ def commit(
     _authorize(x_webhook_token)
     try:
         return conversation_runtime.commit(
-            **body.model_dump(),
+            lead_ref=body.lead_ref,
+            context=body.context,
+            decision=body.decision,
+            response=body.response,
+            correlation_id=body.correlation_id,
+            phone_number_id=body.phone_number_id,
+            channel_binding_id=body.channel_binding_id,
+            inbound_buffer_id=body.inbound_buffer_id,
             expected_decision_owner="n8n_agents",
         )
     except PermissionError as exc:

@@ -186,6 +186,9 @@ def test_internal_commit_declares_n8n_as_expected_owner(monkeypatch):
 
     assert conversations.commit(body, "internal-token") == {"ok": True}
     assert captured["expected_decision_owner"] == "n8n_agents"
+    assert isinstance(captured["context"], ConversationContext)
+    assert isinstance(captured["decision"], ConversationDecision)
+    assert isinstance(captured["response"], AgentResponse)
 
 
 def test_repeated_n8n_commit_returns_existing_outbox_without_new_decision(monkeypatch):
