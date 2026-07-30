@@ -521,13 +521,15 @@ function KnowledgeSection({
   title,
   count,
   children,
+  showEmpty = false,
 }: {
   icon: React.ReactNode;
   title: string;
   count: number;
   children: React.ReactNode;
+  showEmpty?: boolean;
 }) {
-  if (count === 0) return null;
+  if (count === 0 && !showEmpty) return null;
   return (
     <section className="space-y-1.5">
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-obs-faint">
@@ -951,7 +953,7 @@ function KnowledgeDetail({
   );
 }
 
-function KnowledgeSidebar({
+export function KnowledgeSidebar({
   ctx,
   loading,
   leadSelected,
@@ -1005,31 +1007,48 @@ function KnowledgeSidebar({
           icon={<Boxes size={11} />}
           title="Usado nesta resposta"
           count={operator.primary.length}
+          showEmpty
         >
-          {operator.primary.map(renderEvidence)}
+          {operator.primary.length > 0 ? operator.primary.map(renderEvidence) : (
+            <p className="text-[11px] text-obs-faint">
+              Nenhuma evidência registrada na última decisão.
+            </p>
+          )}
         </KnowledgeSection>
         <KnowledgeSection
           icon={<FileQuestion size={11} />}
           title="FAQ e regras relacionadas"
           count={operator.faq_rules.length}
+          showEmpty
         >
-          {operator.faq_rules.map(renderEvidence)}
+          {operator.faq_rules.length > 0 ? operator.faq_rules.map(renderEvidence) : (
+            <p className="text-[11px] text-obs-faint">
+              Nenhuma FAQ ou regra relacionada neste contexto.
+            </p>
+          )}
         </KnowledgeSection>
         <KnowledgeSection
           icon={<Radio size={11} />}
           title="Caminho no grafo"
           count={operator.graph_path.length}
+          showEmpty
         >
-          <ol className="space-y-1">
-            {operator.graph_path.map((step, index) => (
-              <li key={`${step.node_id || step.slug}-${index}`} className="flex items-center gap-2 text-[11px] text-obs-subtle">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-obs-violet/10 text-[9px] text-obs-violet">
-                  {index + 1}
-                </span>
-                <span>{step.title || step.slug}</span>
-              </li>
-            ))}
-          </ol>
+          {operator.graph_path.length > 0 ? (
+            <ol className="space-y-1">
+              {operator.graph_path.map((step, index) => (
+                <li key={`${step.node_id || step.slug}-${index}`} className="flex items-center gap-2 text-[11px] text-obs-subtle">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-obs-violet/10 text-[9px] text-obs-violet">
+                    {index + 1}
+                  </span>
+                  <span>{step.title || step.slug}</span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-[11px] text-obs-faint">
+              Caminho indisponível para esta evidência.
+            </p>
+          )}
         </KnowledgeSection>
       </div>
     );
