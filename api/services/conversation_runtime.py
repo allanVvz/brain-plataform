@@ -697,6 +697,7 @@ def commit(
     phone_number_id: str | None,
     channel_binding_id: str,
     inbound_buffer_id: str | None = None,
+    expected_decision_owner: str | None = None,
 ) -> dict[str, Any]:
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     if not lead:
@@ -714,6 +715,13 @@ def commit(
     if not binding.get("active"):
         raise RuntimeError("channel binding is inactive")
     binding_metadata = binding.get("metadata") or {}
+    if (
+        expected_decision_owner
+        and binding_metadata.get("decision_owner") != expected_decision_owner
+    ):
+        raise RuntimeError(
+            "binding decision owner does not authorize this commit path"
+        )
     if (
         binding_metadata.get("safety_paused")
         or binding.get("connection_status") == "safety_paused"
@@ -913,6 +921,7 @@ def execute_pipeline(
         phone_number_id=phone_number_id,
         channel_binding_id=channel_binding_id,
         inbound_buffer_id=inbound_buffer_id,
+        expected_decision_owner="deterministic",
     )
     return {
         **result,

@@ -91,7 +91,10 @@ def commit(
 ) -> dict:
     _authorize(x_webhook_token)
     try:
-        return conversation_runtime.commit(**body.model_dump())
+        return conversation_runtime.commit(
+            **body.model_dump(),
+            expected_decision_owner="n8n_agents",
+        )
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except LookupError as exc:

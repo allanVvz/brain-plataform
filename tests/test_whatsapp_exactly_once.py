@@ -128,6 +128,66 @@ def test_internal_commit_requires_channel_binding_id():
         )
 
 
+def test_n8n_commit_rejects_deterministic_binding(monkeypatch):
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_lead_by_ref",
+        lambda _ref: {
+            "id": 7,
+            "persona_id": "persona-1",
+            "channel_binding_id": "binding-1",
+        },
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_workflow_binding_by_id",
+        lambda _id: {
+            "id": "binding-1",
+            "persona_id": "persona-1",
+            "active": True,
+            "metadata": {"decision_owner": "deterministic"},
+        },
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="decision owner does not authorize",
+    ):
+        conversation_runtime.commit(
+            lead_ref=7,
+            context=_context(),
+            decision=_decision(),
+            response=_response(),
+            correlation_id="corr-owner-guard",
+            phone_number_id=None,
+            channel_binding_id="binding-1",
+            inbound_buffer_id="buffer-in",
+            expected_decision_owner="n8n_agents",
+        )
+
+
+def test_internal_commit_declares_n8n_as_expected_owner(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("AI_BRAIN_WEBHOOK_TOKEN", "internal-token")
+    monkeypatch.setattr(
+        conversation_runtime,
+        "commit",
+        lambda **kwargs: captured.update(kwargs) or {"ok": True},
+    )
+    body = conversations.CommitRequest(
+        lead_ref=7,
+        context=_context(),
+        decision=_decision(),
+        response=_response(),
+        correlation_id="corr-route-owner",
+        channel_binding_id="binding-1",
+        inbound_buffer_id="buffer-in",
+    )
+
+    assert conversations.commit(body, "internal-token") == {"ok": True}
+    assert captured["expected_decision_owner"] == "n8n_agents"
+
+
 def test_repeated_n8n_commit_returns_existing_outbox_without_new_decision(monkeypatch):
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
