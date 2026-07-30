@@ -31,7 +31,7 @@ def main() -> None:
     parser.add_argument("--n8n-workflow-id")
     parser.add_argument("--phone-number-id", required=True)
     parser.add_argument("--conversation-webhook-url")
-    parser.add_argument("--outbound-webhook-url", required=True)
+    parser.add_argument("--outbound-webhook-url")
     parser.add_argument("--allow", action="append", type=phone, default=[])
     parser.add_argument(
         "--mode",
@@ -43,6 +43,11 @@ def main() -> None:
         choices=("deterministic", "n8n_agents"),
         default="deterministic",
     )
+    parser.add_argument(
+        "--transport-mode",
+        choices=("provider_direct", "n8n_adapter"),
+        default="provider_direct",
+    )
     parser.add_argument("--activate", action="store_true")
     args = parser.parse_args()
 
@@ -53,6 +58,8 @@ def main() -> None:
         raise SystemExit("test_allowlist requires at least one --allow")
     if args.conversation_mode == "n8n_agents" and not args.conversation_webhook_url:
         raise SystemExit("n8n_agents requires --conversation-webhook-url")
+    if args.transport_mode == "n8n_adapter" and not args.outbound_webhook_url:
+        raise SystemExit("n8n_adapter requires --outbound-webhook-url")
     binding = supabase_client.upsert_workflow_binding(
         {
             "persona_id": persona["id"],
@@ -63,11 +70,12 @@ def main() -> None:
             "metadata": {
                 "decision_owner": args.conversation_mode,
                 "conversation_mode": args.conversation_mode,
+                "transport_mode": args.transport_mode,
                 "pipeline_contract": "conversation_v1",
                 "mode": args.mode,
                 "allowlist": args.allow,
                 "conversation_webhook_url": args.conversation_webhook_url,
-                "outbound_webhook_url": args.outbound_webhook_url,
+                "n8n_outbound_webhook_url": args.outbound_webhook_url,
             },
         }
     )
@@ -91,6 +99,7 @@ def main() -> None:
                 "workflow_name": args.workflow_name,
                 "active": args.activate,
                 "decision_owner": args.conversation_mode,
+                "transport_mode": args.transport_mode,
                 "pipeline_contract": "conversation_v1",
                 "mode": args.mode,
                 "allowlist_count": len(args.allow),
@@ -106,6 +115,7 @@ def main() -> None:
                 "binding_id": binding.get("id"),
                 "active": args.activate,
                 "conversation_mode": args.conversation_mode,
+                "transport_mode": args.transport_mode,
                 "mode": args.mode,
                 "allowlist_count": len(args.allow),
             }

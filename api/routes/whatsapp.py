@@ -78,13 +78,13 @@ def _text(message: dict[str, Any]) -> str:
 
 
 class OutboundResult(BaseModel):
-    lead_ref: int | None = None
-    buffer_id: str | None = None
+    buffer_id: str
+    channel_binding_id: str
+    correlation_id: str
     wamid: str | None = None
     success: bool
     execution_id: str | None = None
     error: str | None = None
-    correlation_id: str | None = None
 
 
 async def _process_inbound(payload: dict[str, Any]) -> dict:
@@ -97,7 +97,7 @@ async def _process_inbound(payload: dict[str, Any]) -> dict:
             if not phone_number_id:
                 continue
             binding = _binding(phone_number_id)
-            if not binding:
+            if not binding or binding.get("provider") != "meta_cloud":
                 ignored += len(value.get("messages") or [])
                 continue
             contacts = {c.get("wa_id"): c.get("profile", {}).get("name") for c in value.get("contacts") or []}
@@ -107,22 +107,68 @@ async def _process_inbound(payload: dict[str, Any]) -> dict:
                 if not external_id:
                     ignored += 1
                     continue
+                if not sender:
+                    ignored += 1
+                    continue
                 if not _allowed(binding, sender):
                     ignored += 1
                     supabase_client.insert_event({"event_type": "whatsapp.inbound_ignored", "entity_type": "whatsapp", "entity_id": external_id or "unknown", "persona_id": binding["persona_id"], "payload": {"sender": _mask(sender), "phone_number_id": phone_number_id}}, source="whatsapp.inbound")
                     continue
-                lead = supabase_client.ensure_lead_for_persona(lead_id=sender or "", persona_slug_or_id=binding["persona_id"], nome=contacts.get(sender), canal="whatsapp", mensagem=_text(message), whatsapp_phone_number_id=phone_number_id) or {}
-                correlation_id = f"wa:{external_id or int(time.time() * 1000)}"
-                inserted = supabase_client.enqueue_whatsapp_message({
-                    "persona_id": binding["persona_id"], "lead_ref": lead.get("id"), "whatsapp_phone_number_id": phone_number_id,
-                    "external_message_id": external_id, "direction": "inbound", "payload": {"type": message.get("type"), "text": _text(message), "sender": sender, "raw": message},
-                    "status": "buffered", "batch_key": f"{binding['persona_id']}:{sender}", "available_at": supabase_client.debounce_available_at(3),
-                    "idempotency_key": f"meta:{binding['persona_id']}:{phone_number_id}:{external_id}", "correlation_id": correlation_id,
-                })
-                if not inserted:
+                lead = supabase_client.ensure_channel_lead(
+                    persona_id=binding["persona_id"],
+                    channel_binding_id=binding["id"],
+                    external_contact_id=sender,
+                    display_name=contacts.get(sender),
+                    metadata={
+                        "identities": {"meta_wa_id": sender},
+                        "portal": {"reply_state": "ready"},
+                    },
+                )
+                if not lead.get("id"):
+                    raise RuntimeError("failed to resolve lead for Meta inbound")
+                correlation_id = f"meta:{binding['id']}:{external_id}"
+                result = supabase_client.enqueue_whatsapp_envelope(
+                    buffer={
+                        "persona_id": binding["persona_id"],
+                        "lead_ref": lead["id"],
+                        "channel_binding_id": binding["id"],
+                        "whatsapp_phone_number_id": phone_number_id,
+                        "external_message_id": external_id,
+                        "direction": "inbound",
+                        "payload": {
+                            "type": message.get("type"),
+                            "text": _text(message),
+                            "sender": sender,
+                            "raw": message,
+                        },
+                        "status": "buffered",
+                        "batch_key": f"{binding['persona_id']}:{lead['id']}",
+                        "available_at": supabase_client.debounce_available_at(3),
+                        "idempotency_key": f"inbound:meta_cloud:{binding['id']}:{external_id}",
+                        "correlation_id": correlation_id,
+                    },
+                    message={
+                        "lead_id": lead["id"],
+                        "role": "user",
+                        "content": _text(message),
+                        "direction": "inbound",
+                        "status": "buffered",
+                        "channel": "whatsapp",
+                        "sender_id": external_id,
+                        "whatsapp_phone_number_id": phone_number_id,
+                        "external_message_id": external_id,
+                        "channel_binding_id": binding["id"],
+                        "correlation_id": correlation_id,
+                        "metadata": {
+                            "type": message.get("type"),
+                            "provider": "meta_cloud",
+                        },
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+                if result.get("deduplicated"):
                     duplicate += 1
                     continue
-                supabase_client.insert_message({"lead_ref": lead.get("id"), "message_id": external_id, "external_message_id": external_id, "sender_type": "lead", "role": "user", "canal": "whatsapp", "texto": _text(message), "direction": "inbound", "status": "buffered", "whatsapp_phone_number_id": phone_number_id, "correlation_id": correlation_id, "metadata": {"type": message.get("type")}})
                 accepted += 1
                 event_emitter.emit("whatsapp.inbound_buffered", entity_type="lead", entity_id=str(lead.get("id") or ""), persona_id=binding["persona_id"], payload={"correlation_id": correlation_id, "sender": _mask(sender)}, source="whatsapp.inbound")
     return {"accepted": accepted, "duplicate": duplicate, "ignored": ignored}
@@ -132,10 +178,17 @@ def _process_status(payload: dict[str, Any]) -> dict:
     updated = 0
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
-            for item in ((change.get("value") or {}).get("statuses") or []):
+            value = change.get("value") or {}
+            phone_number_id = (value.get("metadata") or {}).get("phone_number_id")
+            binding = _binding(phone_number_id) if phone_number_id else None
+            for item in (value.get("statuses") or []):
                 wamid, state = item.get("id"), item.get("status")
-                if wamid and state in {"sent", "delivered", "read", "failed"}:
-                    supabase_client.update_whatsapp_delivery(wamid, state, item.get("errors") or [])
+                if wamid and state and binding:
+                    supabase_client.update_whatsapp_delivery_by_binding(
+                        binding["id"],
+                        wamid,
+                        state,
+                    )
                     updated += 1
     return {"updated": updated}
 
@@ -196,6 +249,19 @@ def outbound_result(body: OutboundResult, x_webhook_token: str | None = Header(N
         raise HTTPException(503, "internal webhook token is not configured")
     if not hmac.compare_digest((x_webhook_token or "").encode(), expected.encode()):
         raise HTTPException(401, "invalid webhook token")
-    state = "sent" if body.success else "retry"
-    supabase_client.complete_whatsapp_outbound(body.buffer_id, body.wamid, state, body.error, body.execution_id)
-    return {"ok": True, "status": state}
+    result = supabase_client.complete_whatsapp_outbound(
+        body.buffer_id,
+        binding_id=body.channel_binding_id,
+        correlation_id=body.correlation_id,
+        wamid=body.wamid,
+        success=body.success,
+        error=body.error,
+        execution_id=body.execution_id,
+    )
+    return {
+        "ok": bool(result.get("ok", True)),
+        "message_id": result.get("message_id"),
+        "buffer_id": result.get("buffer_id") or body.buffer_id,
+        "status": result.get("status"),
+        "deduplicated": bool(result.get("deduplicated")),
+    }

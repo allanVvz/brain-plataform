@@ -57,12 +57,28 @@ def test_allowlist_normalizes_phone_format_and_rejects_other_senders():
 def test_inbound_is_routed_only_by_business_phone_and_is_idempotent(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("META_WHATSAPP_ALLOW_UNSIGNED_LOCAL", "true")
-    binding = {"persona_id": "baita-id", "metadata": {"mode": "test_allowlist", "allowlist": ["5551982608510"]}}
+    binding = {
+        "id": "binding-baita",
+        "persona_id": "baita-id",
+        "provider": "meta_cloud",
+        "metadata": {
+            "mode": "test_allowlist",
+            "allowlist": ["5551982608510"],
+        },
+    }
     calls: list[dict] = []
     monkeypatch.setattr(whatsapp, "_binding", lambda phone: binding if phone == "business-baita" else None)
-    monkeypatch.setattr(whatsapp.supabase_client, "ensure_lead_for_persona", lambda **kwargs: {"id": 44, "persona_id": kwargs["persona_slug_or_id"]})
-    monkeypatch.setattr(whatsapp.supabase_client, "enqueue_whatsapp_message", lambda item: calls.append(item) or {"id": "buffer-1"})
-    monkeypatch.setattr(whatsapp.supabase_client, "insert_message", lambda item: None)
+    monkeypatch.setattr(
+        whatsapp.supabase_client,
+        "ensure_channel_lead",
+        lambda **kwargs: {"id": 44, "persona_id": kwargs["persona_id"]},
+    )
+    monkeypatch.setattr(
+        whatsapp.supabase_client,
+        "enqueue_whatsapp_envelope",
+        lambda **item: calls.append(item)
+        or {"buffer_id": "buffer-1", "deduplicated": False},
+    )
     monkeypatch.setattr(whatsapp.supabase_client, "insert_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(whatsapp.event_emitter, "emit", lambda *args, **kwargs: None)
     payload = {"entry": [{"changes": [{"value": {
@@ -72,33 +88,61 @@ def test_inbound_is_routed_only_by_business_phone_and_is_idempotent(monkeypatch)
     }}]}]}
     result = asyncio.run(whatsapp.inbound(RequestStub(payload)))
     assert result == {"accepted": 1, "duplicate": 0, "ignored": 0}
-    assert calls[0]["persona_id"] == "baita-id"
-    assert calls[0]["whatsapp_phone_number_id"] == "business-baita"
-    assert calls[0]["idempotency_key"].endswith(":wamid-1")
+    assert calls[0]["buffer"]["persona_id"] == "baita-id"
+    assert calls[0]["buffer"]["channel_binding_id"] == "binding-baita"
+    assert calls[0]["buffer"]["idempotency_key"] == (
+        "inbound:meta_cloud:binding-baita:wamid-1"
+    )
 
 
 def test_inbound_duplicate_does_not_create_a_second_message(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("META_WHATSAPP_ALLOW_UNSIGNED_LOCAL", "true")
-    binding = {"persona_id": "baita-id", "metadata": {"mode": "active"}}
+    binding = {
+        "id": "binding-baita",
+        "persona_id": "baita-id",
+        "provider": "meta_cloud",
+        "metadata": {"mode": "active"},
+    }
     monkeypatch.setattr(whatsapp, "_binding", lambda _phone: binding)
-    monkeypatch.setattr(whatsapp.supabase_client, "ensure_lead_for_persona", lambda **_kwargs: {"id": 44})
-    monkeypatch.setattr(whatsapp.supabase_client, "enqueue_whatsapp_message", lambda _item: None)
-    monkeypatch.setattr(whatsapp.supabase_client, "insert_message", lambda _item: pytest.fail("duplicate must not insert message"))
+    monkeypatch.setattr(
+        whatsapp.supabase_client,
+        "ensure_channel_lead",
+        lambda **_kwargs: {"id": 44},
+    )
+    monkeypatch.setattr(
+        whatsapp.supabase_client,
+        "enqueue_whatsapp_envelope",
+        lambda **_item: {"buffer_id": "buffer-1", "deduplicated": True},
+    )
     payload = {"entry": [{"changes": [{"value": {"metadata": {"phone_number_id": "business-baita"}, "messages": [{"id": "wamid-1", "from": "5551982608510", "type": "text", "text": {"body": "Oi"}}]}}]}]}
     assert asyncio.run(whatsapp.inbound(RequestStub(payload))) == {"accepted": 0, "duplicate": 1, "ignored": 0}
 
 
-def test_delivery_callback_reconciles_only_supported_states(monkeypatch):
+def test_delivery_callback_routes_every_observation_through_binding(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("META_WHATSAPP_ALLOW_UNSIGNED_LOCAL", "true")
     updates: list[tuple] = []
-    monkeypatch.setattr(whatsapp.supabase_client, "update_whatsapp_delivery", lambda *args: updates.append(args))
-    payload = {"entry": [{"changes": [{"value": {"statuses": [
+    monkeypatch.setattr(
+        whatsapp,
+        "_binding",
+        lambda phone: {"id": "binding-1"} if phone == "business-baita" else None,
+    )
+    monkeypatch.setattr(
+        whatsapp.supabase_client,
+        "update_whatsapp_delivery_by_binding",
+        lambda *args: updates.append(args),
+    )
+    payload = {"entry": [{"changes": [{"value": {
+        "metadata": {"phone_number_id": "business-baita"},
+        "statuses": [
         {"id": "wamid-1", "status": "delivered"}, {"id": "wamid-2", "status": "unknown"},
     ]}}]}]}
-    assert asyncio.run(whatsapp.status(RequestStub(payload))) == {"updated": 1}
-    assert updates == [("wamid-1", "delivered", [])]
+    assert asyncio.run(whatsapp.status(RequestStub(payload))) == {"updated": 2}
+    assert updates == [
+        ("binding-1", "wamid-1", "delivered"),
+        ("binding-1", "wamid-2", "unknown"),
+    ]
 
 
 def test_retry_backoff_and_dead_letter_are_bounded(monkeypatch):

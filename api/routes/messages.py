@@ -1,6 +1,5 @@
 import logging
-import time
-from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -10,8 +9,8 @@ from services import (
     auth_service,
     event_emitter,
     lead_qualification,
-    n8n_client,
     supabase_client,
+    whatsapp_outbox,
 )
 
 router = APIRouter(prefix="/messages", tags=["messages"])
@@ -20,167 +19,83 @@ logger = logging.getLogger("messages")
 
 class SendMessageBody(BaseModel):
     lead_ref: int
-    agent_id: str | None = None  # Resolved from lead.persona if omitted
+    client_message_id: UUID
+    agent_id: str | None = None
     texto: str
-    sender_id: str | None = None  # operator email/handle
-    nome: str | None = None       # display name (operator name)
+    sender_id: str | None = None
+    nome: str | None = None
 
 
 @router.post("/send")
 def send_message(body: SendMessageBody, request: Request) -> dict:
-    """Operator sends a message into a lead's conversation.
-
-    1. INSERT a row in `messages` with sender_type='human'.
-    2. Resolve the agent for this lead and POST to its n8n webhook (so the
-       n8n SDR/Closer flow sees the human reply and can keep state in sync).
-    3. Emit SSE event `message.new` for the dashboard.
-    """
-    if not (body.texto or "").strip():
+    """Atomically enqueue one operator message for one explicit binding."""
+    text = (body.texto or "").strip()
+    if not text:
         raise HTTPException(status_code=400, detail="texto vazio")
 
-    # Find the agent. Prefer the explicit agent_id; otherwise resolve via
-    # the lead's persona+stage so the message is correctly tagged with
-    # whoever is on the role for this conversation.
     lead = supabase_client.get_lead_by_ref(body.lead_ref) or {}
+    if not lead:
+        raise HTTPException(404, detail="Lead nao encontrado")
     persona_id = lead.get("persona_id")
-    if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
-    whatsapp_phone_number_id = lead.get("whatsapp_phone_number_id") or supabase_client.get_default_whatsapp_phone_number_id(persona_id)
-    persona_routing: dict | None = None
-    if persona_id:
-        # Resolve persona slug to load the per-persona outbound webhook
-        # config (used in BOTH internal and n8n routing modes — the operator
-        # reply always goes out through this hook).
-        try:
-            personas = supabase_client.get_personas() or []
-            persona_row = next((p for p in personas if p.get("id") == persona_id), None)
-            if persona_row and persona_row.get("slug"):
-                persona_routing = supabase_client.get_persona_routing(persona_row["slug"])
-        except Exception as exc:
-            logger.warning("persona routing lookup failed in send: %s", exc)
+    if not persona_id:
+        raise HTTPException(409, detail="Lead sem persona.")
+    auth_service.assert_persona_access(request, persona_id=persona_id)
 
     agent: dict | None = None
     if body.agent_id:
         agent = agents_service.get_agent(body.agent_id)
+        if not agent or agent.get("persona_id") != persona_id:
+            raise HTTPException(403, detail="Agente nao pertence a persona do lead.")
     else:
         stage = lead.get("stage") or lead.get("funnel_stage") or "novo"
-        if persona_id:
-            try:
-                agent, _role = agents_service.resolve_for_stage(persona_id, stage)
-            except Exception as exc:
-                logger.warning("resolve_for_stage failed in send: %s", exc)
+        try:
+            agent, _role = agents_service.resolve_for_stage(persona_id, stage)
+        except Exception as exc:
+            logger.warning("resolve_for_stage failed in send: %s", exc)
 
-    msg_payload = {
-        "lead_ref": body.lead_ref,
-        "message_id": f"hum_{int(time.time() * 1000)}_{body.lead_ref}",
-        "sender_type": "human",
-        "role": "human",
-        "sender_id": body.sender_id,
-        "canal": "whatsapp",
-        "texto": body.texto,
-        "direction": "outbound",
-        "nome": body.nome or body.sender_id or "Operador",
-        "status": "pending",
-        "whatsapp_phone_number_id": whatsapp_phone_number_id,
-        "metadata": {"agent_id": agent.get("id") if agent else None,
-                     "bot_name": agent.get("bot_name") if agent else None},
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-
+    client_message_id = str(body.client_message_id)
+    message_id = f"manual:{client_message_id}"
     try:
-        supabase_client.insert_message(msg_payload)
+        result = whatsapp_outbox.enqueue_outbound(
+            lead=lead,
+            text=text,
+            sender_type="human",
+            message_id=message_id,
+            correlation_id=message_id,
+            idempotency_key=message_id,
+            metadata={
+                "agent_id": agent.get("id") if agent else None,
+                "bot_name": agent.get("bot_name") if agent else None,
+                "sender_id": body.sender_id,
+                "nome": body.nome or body.sender_id or "Operador",
+                "client_message_id": client_message_id,
+            },
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.error("insert_message failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"insert_message failed: {exc}")
+        logger.error("outbox enqueue failed: %s", exc)
+        raise HTTPException(500, detail="Falha ao enfileirar mensagem") from exc
 
-    # Human messages use the same durable outbox as automated replies. n8n is
-    # notified by the dispatcher/worker after this commit, never inline from
-    # the dashboard request.
-    if persona_id and whatsapp_phone_number_id:
-        correlation_id = f"human:{msg_payload['message_id']}"
-        try:
-            item = supabase_client.enqueue_whatsapp_message({
-                "persona_id": persona_id,
+    if not result.get("deduplicated"):
+        event_emitter.emit(
+            "message.new",
+            entity_type="message",
+            entity_id=message_id,
+            persona_id=persona_id,
+            payload={
                 "lead_ref": body.lead_ref,
-                "whatsapp_phone_number_id": whatsapp_phone_number_id,
-                "external_message_id": None,
-                "direction": "outbound",
-                "payload": {"text": body.texto, "sender_type": "human", "sender_id": body.sender_id},
-                "status": "pending_send",
-                "batch_key": f"{persona_id}:{body.lead_ref}",
-                "idempotency_key": f"human:{msg_payload['message_id']}",
-                "correlation_id": correlation_id,
-            })
-        except Exception as exc:
-            logger.error("outbox enqueue failed: %s", exc)
-            raise HTTPException(500, detail="Falha ao enfileirar mensagem") from exc
-        event_emitter.emit("message.new", entity_type="message", entity_id=msg_payload["message_id"], persona_id=persona_id, payload={"lead_ref": body.lead_ref, "sender_type": "human", "buffer_id": (item or {}).get("id")}, source="messages.send")
-        return {"ok": True, "message_id": msg_payload["message_id"], "status": "pending_send", "buffer_id": (item or {}).get("id")}
-
-    # Outbound webhook precedence:
-    #   1) persona.outbound_webhook_url (preferred — works for both
-    #      process_modes; configured per-persona in the dashboard).
-    #   2) agent.n8n_webhook_url (legacy fallback for personas that haven't
-    #      been migrated to per-persona webhook config yet).
-    outbound_url: str | None = None
-    outbound_secret: str | None = None
-    if persona_routing and persona_routing.get("outbound_webhook_url"):
-        outbound_url = persona_routing["outbound_webhook_url"]
-        outbound_secret = persona_routing.get("outbound_webhook_secret")
-    elif agent and agent.get("n8n_webhook_url"):
-        outbound_url = agent["n8n_webhook_url"]
-        outbound_secret = agent.get("n8n_webhook_secret")
-
-    webhook_status: int | None = None
-    webhook_error: str | None = None
-    if outbound_url:
-        webhook_payload = {
-            "lead_ref": body.lead_ref,
-            "agent_id": agent.get("id") if agent else None,
-            "bot_name": agent.get("bot_name") if agent else None,
-            "persona_id": persona_id,
-            "lead_id": lead.get("lead_id"),
-            "telefone": lead.get("telefone"),
-            "whatsapp_phone_number_id": whatsapp_phone_number_id,
-            "from": "human",
-            "sender_id": body.sender_id,
-            "texto": body.texto,
-            "message_id": msg_payload["message_id"],
-        }
-        try:
-            webhook_status, _ = n8n_client.send_to_webhook(
-                outbound_url,
-                webhook_payload,
-                secret=outbound_secret,
-            )
-            msg_payload["status"] = "sent" if 200 <= webhook_status < 300 else "failed"
-        except Exception as exc:
-            webhook_error = str(exc)
-            msg_payload["status"] = "failed"
-            logger.warning("webhook delivery failed: %s", exc)
-    else:
-        # No webhook configured — message is in DB but won't be sent out.
-        msg_payload["status"] = "draft"
-
-    event_emitter.emit(
-        "message.new",
-        entity_type="message",
-        entity_id=msg_payload["message_id"],
-        payload={
-            "lead_ref": body.lead_ref,
-            "sender_type": "human",
-            "agent_id": agent.get("id") if agent else None,
-            "webhook_status": webhook_status,
-        },
-        source="messages.send",
-    )
-
+                "sender_type": "human",
+                "buffer_id": result["buffer_id"],
+            },
+            source="messages.send",
+        )
     return {
-        "ok": webhook_error is None,
-        "message_id": msg_payload["message_id"],
-        "status": msg_payload["status"],
-        "webhook_status": webhook_status,
-        "webhook_error": webhook_error,
+        "ok": True,
+        "message_id": result.get("message_id") or message_id,
+        "status": result.get("status") or "pending_send",
+        "buffer_id": result["buffer_id"],
+        "deduplicated": bool(result.get("deduplicated")),
     }
 
 
@@ -197,7 +112,11 @@ def _resolve_scope_lead_refs(
         persona = supabase_client.get_persona(persona_slug)
         resolved_persona_id = persona.get("id") if persona else None
     if resolved_persona_id:
-        auth_service.assert_persona_access(request, persona_id=resolved_persona_id, persona_slug=persona_slug)
+        auth_service.assert_persona_access(
+            request,
+            persona_id=resolved_persona_id,
+            persona_slug=persona_slug,
+        )
         if audience_id or audience_slug:
             lead_refs = supabase_client.get_lead_refs_for_audience_scope(
                 persona_id=resolved_persona_id,
@@ -237,10 +156,7 @@ def get_conversations(
     audience_id: str | None = Query(None),
     audience_slug: str | None = Query(None),
 ):
-    """
-    Returns one entry per conversation (grouped by lead_ref first),
-    sorted by most-recent message. Used by the Mensagens sidebar.
-    """
+    """Return one row per conversation, ordered by the latest message."""
     try:
         resolved_persona_id, lead_refs = _resolve_scope_lead_refs(
             request,
@@ -260,7 +176,10 @@ def get_conversations(
         if persona_id:
             auth_service.assert_persona_access(request, persona_id=persona_id)
             return _decorate_conversations(
-                supabase_client.get_conversations(hours=hours, persona_id=persona_id)
+                supabase_client.get_conversations(
+                    hours=hours,
+                    persona_id=persona_id,
+                )
             )
         if auth_service.is_admin(auth_service.current_user(request)):
             return _decorate_conversations(
@@ -268,8 +187,13 @@ def get_conversations(
             )
         rows: list[dict] = []
         for pid in auth_service.allowed_persona_ids(request):
-            rows.extend(supabase_client.get_conversations(hours=hours, persona_id=pid))
-        rows.sort(key=lambda item: item.get("last_at") or item.get("created_at") or "", reverse=True)
+            rows.extend(
+                supabase_client.get_conversations(hours=hours, persona_id=pid)
+            )
+        rows.sort(
+            key=lambda item: item.get("last_at") or item.get("created_at") or "",
+            reverse=True,
+        )
         return _decorate_conversations(rows)
     except HTTPException:
         raise
@@ -293,7 +217,7 @@ def get_messages_by_ref(
     audience_id: str | None = Query(None),
     audience_slug: str | None = Query(None),
 ):
-    """Fetch messages by integer lead_ref — the canonical way."""
+    """Fetch messages by the canonical integer lead reference."""
     lead = supabase_client.get_lead_by_ref(lead_ref)
     resolved_persona_id, lead_refs = _resolve_scope_lead_refs(
         request,
@@ -304,19 +228,36 @@ def get_messages_by_ref(
     )
     if lead_refs is not None and lead_ref not in lead_refs:
         raise HTTPException(status_code=403, detail="Lead fora da audiencia atual.")
-    if resolved_persona_id and supabase_client.lead_has_membership(lead_ref, resolved_persona_id, audience_id):
+    if (
+        resolved_persona_id
+        and supabase_client.lead_has_membership(
+            lead_ref,
+            resolved_persona_id,
+            audience_id,
+        )
+    ):
         return supabase_client.get_messages(str(lead_ref), limit=limit)
     if lead and lead.get("persona_id"):
-        auth_service.assert_persona_access(request, persona_id=lead.get("persona_id"))
+        auth_service.assert_persona_access(
+            request,
+            persona_id=lead.get("persona_id"),
+        )
     return supabase_client.get_messages(str(lead_ref), limit=limit)
 
 
 @router.get("/{lead_id}")
-def get_messages(lead_id: str, request: Request, limit: int = Query(200, le=500)):
+def get_messages(
+    lead_id: str,
+    request: Request,
+    limit: int = Query(200, le=500),
+):
     if lead_id.isdigit():
         lead = supabase_client.get_lead_by_ref(int(lead_id))
         if lead and lead.get("persona_id"):
-            auth_service.assert_persona_access(request, persona_id=lead.get("persona_id"))
+            auth_service.assert_persona_access(
+                request,
+                persona_id=lead.get("persona_id"),
+            )
     return supabase_client.get_messages(lead_id, limit=limit)
 
 
@@ -329,7 +270,7 @@ def recent_messages(
     audience_id: str | None = Query(None),
     audience_slug: str | None = Query(None),
 ):
-    """Returns all recent messages without status filtering."""
+    """Return recent messages without status filtering."""
     resolved_persona_id, lead_refs = _resolve_scope_lead_refs(
         request,
         persona_id=persona_id,
@@ -338,14 +279,33 @@ def recent_messages(
         audience_slug=audience_slug,
     )
     if resolved_persona_id and lead_refs is not None:
-        return supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=resolved_persona_id, lead_refs=lead_refs)
+        return supabase_client.get_recent_messages(
+            hours=hours,
+            limit=500,
+            persona_id=resolved_persona_id,
+            lead_refs=lead_refs,
+        )
     if persona_id:
         auth_service.assert_persona_access(request, persona_id=persona_id)
-        return supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=persona_id)
+        return supabase_client.get_recent_messages(
+            hours=hours,
+            limit=500,
+            persona_id=persona_id,
+        )
     if auth_service.is_admin(auth_service.current_user(request)):
-        return supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=None)
+        return supabase_client.get_recent_messages(
+            hours=hours,
+            limit=500,
+            persona_id=None,
+        )
     rows: list[dict] = []
     for pid in auth_service.allowed_persona_ids(request):
-        rows.extend(supabase_client.get_recent_messages(hours=hours, limit=500, persona_id=pid))
+        rows.extend(
+            supabase_client.get_recent_messages(
+                hours=hours,
+                limit=500,
+                persona_id=pid,
+            )
+        )
     rows.sort(key=lambda item: item.get("created_at") or "", reverse=True)
     return rows[:500]

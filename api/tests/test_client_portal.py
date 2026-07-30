@@ -375,8 +375,14 @@ def test_deterministic_inbound_propagates_evolution_binding(monkeypatch):
         "get_workflow_binding_by_id",
         lambda _id: {
             "id": "evo-1", "persona_id": "p1", "provider": "evolution_baileys",
+            "active": True,
             "metadata": {"decision_owner": "deterministic"},
         },
+    )
+    monkeypatch.setattr(
+        whatsapp_dispatch_worker.supabase_client,
+        "mark_whatsapp_attempt",
+        lambda *_args, **_kwargs: True,
     )
     monkeypatch.setattr(
         whatsapp_dispatch_worker.conversation_runtime,
@@ -571,33 +577,19 @@ def test_portal_pipeline_uses_persona_labels_and_summary(monkeypatch):
     assert result["business_model"] == "appointment"
 
 
-def test_evolution_pending_ack_uses_allowed_buffer_status(monkeypatch):
-    updates = []
-
-    class Query:
-        def __init__(self, table):
-            self.table = table
-
-        def update(self, payload):
-            updates.append((self.table, payload))
-            return self
-
-        def eq(self, *_args):
-            return self
-
-        def execute(self):
-            return SimpleNamespace(data=[])
-
-    class Client:
-        def table(self, name):
-            return Query(name)
-
-    monkeypatch.setattr(portal.supabase_client, "get_client", lambda: Client())
+def test_evolution_pending_ack_is_audit_only(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        portal.supabase_client,
+        "insert_event",
+        lambda data, **kwargs: events.append((data, kwargs)),
+    )
     portal.supabase_client.update_whatsapp_delivery_by_binding(
         "binding-1", "message-1", "PENDING"
     )
 
-    assert updates == [
-        ("lead_buffer", {"status": "pending_send"}),
-        ("messages", {"status": "pending_send"}),
-    ]
+    assert events[0][0]["event_type"] == "whatsapp.delivery_ack_ignored"
+    assert events[0][0]["payload"] == {
+        "external_message_id": "message-1",
+        "status": "PENDING",
+    }

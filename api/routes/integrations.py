@@ -71,6 +71,9 @@ def _public_binding(binding: dict[str, Any] | None) -> dict[str, Any] | None:
     return {
         "id": binding.get("id"), "persona_id": binding.get("persona_id"),
         "workflow_name": binding.get("workflow_name"), "n8n_workflow_id": binding.get("n8n_workflow_id"),
+        "channel": binding.get("channel"),
+        "provider": binding.get("provider"),
+        "connection_status": binding.get("connection_status"),
         "whatsapp_number": binding.get("whatsapp_number"),
         "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
         "active": bool(binding.get("active")),
@@ -85,6 +88,7 @@ def _public_binding(binding: dict[str, Any] | None) -> dict[str, Any] | None:
                 "agent_id",
                 "conversation_mode",
                 "decision_owner",
+                "transport_mode",
                 "pipeline_contract",
             )
             if metadata.get(key) is not None
@@ -183,20 +187,47 @@ def put_whatsapp_binding(slug: str, body: WhatsAppBindingBody, request: Request)
     )
     if conversation_mode not in {"deterministic", "n8n_agents"}:
         raise HTTPException(400, "conversation_mode invalido")
+    if conversation_mode == "n8n_agents" and not (body.webhook_url or "").strip():
+        raise HTTPException(400, "n8n_agents exige conversation_webhook_url")
+    connection = (
+        supabase_client.get_user_integration_connection(
+            _current_user_id(request),
+            "meta",
+        )
+        or {}
+    )
+    provider_secret_ciphertext = connection.get("secret_ciphertext")
+    if body.mode != "disabled" and not provider_secret_ciphertext:
+        raise HTTPException(409, "Token Meta nao configurado para este binding.")
     metadata = {
         "business_id": body.business_id,
         "waba_id": body.waba_id,
         "verified_name": body.verified_name,
-        "webhook_url": body.webhook_url,
+        "conversation_webhook_url": body.webhook_url,
         "mode": body.mode,
         "allowlist": allowlist,
         "agent_id": body.agent_id,
         "conversation_mode": conversation_mode,
         "decision_owner": conversation_mode,
+        "transport_mode": "provider_direct",
         "pipeline_contract": "conversation_v1",
     }
     try:
-        binding = supabase_client.upsert_workflow_binding({"persona_id": persona["id"], "workflow_name": body.workflow_name, "n8n_workflow_id": body.n8n_workflow_id, "whatsapp_number": body.whatsapp_number, "whatsapp_phone_number_id": body.phone_number_id, "active": body.mode != "disabled", "metadata": metadata})
+        binding = supabase_client.upsert_workflow_binding({
+            "persona_id": persona["id"],
+            "workflow_name": body.workflow_name,
+            "n8n_workflow_id": body.n8n_workflow_id,
+            "whatsapp_number": body.whatsapp_number,
+            "whatsapp_phone_number_id": body.phone_number_id,
+            "channel": "whatsapp",
+            "provider": "meta_cloud",
+            "provider_secret_ciphertext": provider_secret_ciphertext,
+            "connection_status": (
+                "connected" if body.mode != "disabled" else "disabled"
+            ),
+            "active": body.mode != "disabled",
+            "metadata": metadata,
+        })
     except Exception as exc:
         raise HTTPException(409, "phone_number_id ja possui binding ativo") from exc
     supabase_client.insert_event({"event_type": "whatsapp.binding_updated", "entity_type": "workflow_binding", "entity_id": binding.get("id") or body.phone_number_id, "persona_id": persona["id"], "payload": {"mode": body.mode, "phone_number_id": body.phone_number_id}}, source="integrations.whatsapp")
@@ -209,7 +240,7 @@ def validate_whatsapp_binding(slug: str, request: Request):
     binding = next((b for b in supabase_client.get_workflow_bindings(persona["id"]) if b.get("active")), None)
     if not binding:
         raise HTTPException(400, "Binding WhatsApp nao configurado")
-    if not (supabase_client.get_user_integration_connection(_current_user_id(request), "meta") or {}).get("secret_ciphertext"):
+    if not binding.get("provider_secret_ciphertext"):
         raise HTTPException(400, "Token Meta nao configurado")
     return {"ok": True, "phone_number_id": binding.get("whatsapp_phone_number_id"), "token_masked": True}
 

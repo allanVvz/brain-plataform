@@ -47,8 +47,8 @@ class CommitRequest(StrictModel):
     response: AgentResponse
     correlation_id: str
     phone_number_id: str | None = None
-    channel_binding_id: str | None = None
-    inbound_buffer_id: str | None = None
+    channel_binding_id: str
+    inbound_buffer_id: str
 
 
 class FailSafeHandoffRequest(StrictModel):
@@ -90,7 +90,14 @@ def commit(
     x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
 ) -> dict:
     _authorize(x_webhook_token)
-    return conversation_runtime.commit(**body.model_dump())
+    try:
+        return conversation_runtime.commit(**body.model_dump())
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/fail-safe-handoff")

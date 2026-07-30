@@ -41,6 +41,77 @@ verify_local_images() {
   done < <("${COMPOSE[@]}" config --images | sort -u)
 }
 
+env_value() {
+  local key="$1"
+  awk -v wanted="$key" '
+    {
+      line=$0
+      sub(/\r$/, "", line)
+    }
+    line ~ "^[[:space:]]*" wanted "[[:space:]]*=" {
+      sub("^[[:space:]]*" wanted "[[:space:]]*=[[:space:]]*", "", line)
+      if (line ~ /^".*"$/ || line ~ /^\047.*\047$/) {
+        line=substr(line, 2, length(line) - 2)
+      }
+      value=line
+    }
+    END { print value }
+  ' "$ENV_FILE"
+}
+
+wait_for_api() {
+  local api_bind deadline
+  api_bind="$("${COMPOSE[@]}" port api 8080)"
+  deadline=$((SECONDS + 180))
+  until curl --fail --silent --show-error "http://$api_bind/health/ready" >/dev/null; do
+    if (( SECONDS >= deadline )); then
+      "${COMPOSE[@]}" ps
+      "${COMPOSE[@]}" logs --tail=100 api migrate
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+configure_whatsapp_bindings() {
+  local allow_missing_hook="$1"
+  local meta_persona evolution_persona meta_token
+  meta_persona="$(env_value WHATSAPP_META_PERSONA_SLUG)"
+  evolution_persona="$(env_value WHATSAPP_EVOLUTION_PERSONA_SLUG)"
+
+  if [[ -z "$meta_persona" && -z "$evolution_persona" ]]; then
+    echo "WhatsApp binding rollout hook is not configured; skipping."
+    return 0
+  fi
+  if [[ -z "$meta_persona" || -z "$evolution_persona" ]]; then
+    echo "Both WHATSAPP_META_PERSONA_SLUG and WHATSAPP_EVOLUTION_PERSONA_SLUG are required." >&2
+    return 1
+  fi
+
+  if ! "${COMPOSE[@]}" exec -T api \
+    test -f /app/scripts/configure_whatsapp_hotfix_bindings.py; then
+    if [[ "$allow_missing_hook" == "true" ]]; then
+      echo "Binding hook is unavailable in the rollback image; preserving binding state." >&2
+      return 0
+    fi
+    echo "Binding hook is unavailable in the target API image." >&2
+    return 1
+  fi
+
+  meta_token="$(env_value META_WHATSAPP_ACCESS_TOKEN)"
+  if [[ -z "$meta_token" ]]; then
+    echo "META_WHATSAPP_ACCESS_TOKEN is required for the configured Meta binding." >&2
+    return 1
+  fi
+  "${COMPOSE[@]}" exec -T \
+    -e META_WHATSAPP_ACCESS_TOKEN="$meta_token" \
+    api python scripts/configure_whatsapp_hotfix_bindings.py \
+    --meta-persona "$meta_persona" \
+    --evolution-persona "$evolution_persona" \
+    --apply
+  unset meta_token
+}
+
 deploy_tag() {
   local tag="$1"
   local allow_local_images="${2:-false}"
@@ -56,23 +127,18 @@ deploy_tag() {
       verify_local_images
     fi
   fi
+  # No sender may race the migration or the binding authority update.
+  "${COMPOSE[@]}" stop workers
   "${COMPOSE[@]}" up -d db
   "${COMPOSE[@]}" up --no-deps --force-recreate migrate
-  "${COMPOSE[@]}" up -d --remove-orphans rest storage kong api workers seed-admin caddy
+  "${COMPOSE[@]}" up -d --remove-orphans rest storage kong api caddy
+  wait_for_api
+  configure_whatsapp_bindings "$allow_local_images"
+  "${COMPOSE[@]}" up -d workers seed-admin
   if [[ "$evolution_enabled" =~ ^(1|true|yes)$ ]]; then
     "${COMPOSE[@]}" up -d evolution-redis evolution-api
   fi
-  local api_bind
-  api_bind="$("${COMPOSE[@]}" port api 8080)"
-  local deadline=$((SECONDS + 180))
-  until curl --fail --silent --show-error "http://$api_bind/health/ready" >/dev/null; do
-    if (( SECONDS >= deadline )); then
-      "${COMPOSE[@]}" ps
-      "${COMPOSE[@]}" logs --tail=100 api workers migrate
-      return 1
-    fi
-    sleep 5
-  done
+  wait_for_api
   if [[ "$evolution_enabled" =~ ^(1|true|yes)$ ]]; then
     local evolution_deadline=$((SECONDS + 360))
     local service cid status

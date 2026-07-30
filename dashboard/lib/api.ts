@@ -234,8 +234,8 @@ export const api = {
     if (opts.audienceSlug) params.set("audience_slug", opts.audienceSlug);
     return req<any[]>(`/messages/conversations?${params.toString()}`);
   },
-  sendMessage: (body: { lead_ref: number; texto: string; agent_id?: string; sender_id?: string; nome?: string }) =>
-    req<{ ok: boolean; message_id: string; status: string; webhook_status?: number; webhook_error?: string }>(
+  sendMessage: (body: { lead_ref: number; client_message_id: string; texto: string; agent_id?: string; sender_id?: string; nome?: string }) =>
+    req<{ ok: boolean; message_id: string; buffer_id: string; status: string; deduplicated: boolean }>(
       "/messages/send",
       { method: "POST", body: JSON.stringify(body) },
     ),
@@ -270,8 +270,8 @@ export const api = {
       `/portal/leads/${leadRef}/ai/resume?${personaQuery(slug)}`,
       { method: "POST" },
     ),
-  portalSendMessage: (slug: string, body: { lead_id: number; text: string }) =>
-    req<{ ok: boolean; message_id: string; status: string }>(
+  portalSendMessage: (slug: string, body: { lead_id: number; client_message_id: string; text: string }) =>
+    req<{ ok: boolean; message_id: string; buffer_id: string; status: string; deduplicated: boolean }>(
       `/portal/messages?${personaQuery(slug)}`,
       { method: "POST", body: JSON.stringify(body) },
     ),

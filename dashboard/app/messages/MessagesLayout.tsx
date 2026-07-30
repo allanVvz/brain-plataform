@@ -1252,6 +1252,11 @@ export function MessagesLayout({
   const previousLastMessageIdRef = useRef<string | null>(null);
   const selectedIdRef = useRef<number | null>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
+  const pendingSendRef = useRef<{
+    leadId: number;
+    text: string;
+    clientMessageId: string;
+  } | null>(null);
   const loadLeadsRequestRef = useRef(0);
   const loadMessagesRequestRef = useRef(0);
   const loadKnowledgeRequestRef = useRef(0);
@@ -1526,21 +1531,38 @@ export function MessagesLayout({
 
   const onSend = useCallback(async () => {
     if (!selectedId || !draft.trim() || sending) return;
+    const text = draft.trim();
+    const pending = pendingSendRef.current;
+    const clientMessageId = (
+      pending
+      && pending.leadId === selectedId
+      && pending.text === text
+    )
+      ? pending.clientMessageId
+      : crypto.randomUUID();
+    pendingSendRef.current = {
+      leadId: selectedId,
+      text,
+      clientMessageId,
+    };
     setSending(true);
     setSendError(null);
     try {
       if (isPortal) {
         await api.portalSendMessage(portalSlug!, {
           lead_id: selectedId,
-          text: draft.trim(),
+          client_message_id: clientMessageId,
+          text,
         });
       } else {
         await api.sendMessage({
           lead_ref: selectedId,
-          texto: draft.trim(),
+          client_message_id: clientMessageId,
+          texto: text,
           nome: "Operador",
         });
       }
+      pendingSendRef.current = null;
       setDraft("");
       // Refresh messages + conversations imediato (não esperar próximo poll)
       const [msgRows, convRows] = await Promise.all([

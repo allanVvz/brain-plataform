@@ -3952,7 +3952,11 @@ def debounce_available_at(seconds: int = 3) -> str:
 
 
 def enqueue_whatsapp_message(data: dict) -> Optional[dict]:
-    """Idempotent durable inbox/outbox insert. None means a duplicate."""
+    """Legacy buffer-only insert.
+
+    New inbound and outbound traffic must use enqueue_whatsapp_envelope so the
+    message projection and the idempotency lock commit in one transaction.
+    """
     try:
         result = get_client().table("lead_buffer").insert(data).execute()
         return (result.data or [None])[0]
@@ -3964,11 +3968,74 @@ def enqueue_whatsapp_message(data: dict) -> Optional[dict]:
         raise
 
 
+def enqueue_whatsapp_envelope(
+    *,
+    buffer: dict,
+    message: dict,
+) -> dict:
+    """Atomically create or resolve a WhatsApp message + durable buffer."""
+    result = get_client().rpc(
+        "enqueue_whatsapp_envelope",
+        {"p_buffer": buffer, "p_message": message},
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else None
+    if not isinstance(payload, dict) or not payload.get("buffer_id"):
+        raise RuntimeError("enqueue_whatsapp_envelope returned an invalid result")
+    return payload
+
+
+def get_whatsapp_buffer_by_idempotency(idempotency_key: str) -> Optional[dict]:
+    if not idempotency_key:
+        return None
+    return _one(
+        get_client()
+        .table("lead_buffer")
+        .select("*")
+        .eq("idempotency_key", idempotency_key)
+        .maybe_single()
+    )
+
+
 def claim_whatsapp_buffer(worker_id: str, limit: int = 20, lease_seconds: int = 60) -> list[dict]:
     result = get_client().rpc("claim_whatsapp_buffer", {
         "p_worker": worker_id, "p_limit": limit, "p_lease_seconds": lease_seconds,
     }).execute()
     return result.data or []
+
+
+def mark_whatsapp_attempt(buffer_id: str, worker_id: str, kind: str) -> bool:
+    result = get_client().rpc(
+        "mark_whatsapp_attempt",
+        {"p_buffer_id": buffer_id, "p_worker": worker_id, "p_kind": kind},
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else False
+    return payload is True
+
+
+def record_whatsapp_safety_violation(
+    *,
+    binding_id: str,
+    lead_ref: int | None,
+    violation_key: str,
+    reason: str,
+) -> dict:
+    result = get_client().rpc(
+        "record_whatsapp_safety_violation",
+        {
+            "p_binding_id": binding_id,
+            "p_lead_ref": lead_ref,
+            "p_violation_key": violation_key,
+            "p_reason": reason[:500],
+        },
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def complete_whatsapp_buffer(buffer_id: str, status: str, error: str | None = None) -> None:
@@ -3989,22 +4056,6 @@ def release_whatsapp_buffer(buffer_id: str, status: str, *, delay_seconds: int, 
     _execute_with_retry(get_client().table("lead_buffer").update(payload).eq("id", buffer_id))
 
 
-def update_whatsapp_delivery(wamid: str, status: str, errors: list | None = None) -> None:
-    error = None
-    if errors:
-        first = errors[0] if isinstance(errors[0], dict) else {"message": str(errors[0])}
-        # Store code/description only; never preserve recipient or token data.
-        error = str({k: first.get(k) for k in ("code", "title", "message") if first.get(k)})[:1000]
-    from datetime import datetime, timezone
-    _execute_with_retry(get_client().table("lead_buffer").update({"status": status, "last_error": error, "updated_at": datetime.now(timezone.utc).isoformat()}).eq("external_message_id", wamid))
-    # Different historical schemas use sender_id/message_id; external id is
-    # preferred after migration 050.
-    try:
-        _execute_with_retry(get_client().table("messages").update({"status": status}).eq("external_message_id", wamid))
-    except Exception:
-        _execute_with_retry(get_client().table("messages").update({"status": status}).eq("sender_id", wamid))
-
-
 def update_whatsapp_delivery_by_binding(
     binding_id: str,
     external_message_id: str,
@@ -4012,38 +4063,73 @@ def update_whatsapp_delivery_by_binding(
 ) -> None:
     if not binding_id or not external_message_id:
         return
-    normalized = {
-        "PENDING": "pending_send", "SERVER_ACK": "sent", "DELIVERY_ACK": "delivered",
-        "READ": "read", "PLAYED": "read", "ERROR": "failed",
-        "pending": "pending_send", "pending_send": "pending_send",
-        "sent": "sent", "delivered": "delivered", "read": "read", "failed": "failed",
-    }.get(str(status), "sent")
-    _execute_with_retry(
-        get_client().table("lead_buffer").update({"status": normalized})
-        .eq("channel_binding_id", binding_id)
-        .eq("external_message_id", external_message_id)
-    )
-    _execute_with_retry(
-        get_client().table("messages").update({"status": normalized})
-        .eq("channel_binding_id", binding_id)
-        .eq("external_message_id", external_message_id)
-    )
-
-
-def complete_whatsapp_outbound(buffer_id: str | None, wamid: str | None, status: str, error: str | None, execution_id: str | None) -> None:
-    if not buffer_id:
+    raw_status = str(status).upper()
+    # Provider PENDING is not an outbox instruction.  It is audit-only: an
+    # external callback must never make a committed row dispatchable again.
+    if raw_status in {"PENDING", "PENDING_SEND", "UNKNOWN", ""}:
+        insert_event({"event_type": "whatsapp.delivery_ack_ignored", "entity_type": "workflow_binding",
+                      "entity_id": binding_id, "payload": {"external_message_id": external_message_id,
+                      "status": raw_status}}, source="whatsapp.delivery")
         return
-    from datetime import datetime, timezone
-    payload = {"status": status, "last_error": (error or None), "updated_at": datetime.now(timezone.utc).isoformat()}
-    if wamid:
-        payload["external_message_id"] = wamid
-    result = _execute_with_retry(get_client().table("lead_buffer").update(payload).eq("id", buffer_id))
-    rows = getattr(result, "data", None) or []
-    if rows and wamid:
-        try:
-            _execute_with_retry(get_client().table("messages").update({"status": status, "external_message_id": wamid}).eq("lead_ref", rows[0].get("lead_ref")))
-        except Exception:
-            pass
+    normalized = {
+        "SERVER_ACK": "sent",
+        "SENT": "sent",
+        "DELIVERY_ACK": "delivered",
+        "DELIVERED": "delivered",
+        "READ": "read",
+        "PLAYED": "read",
+        "ERROR": "failed",
+        "FAILED": "failed",
+    }.get(raw_status)
+    if not normalized:
+        insert_event(
+            {
+                "event_type": "whatsapp.delivery_ack_ignored",
+                "entity_type": "workflow_binding",
+                "entity_id": binding_id,
+                "payload": {
+                    "external_message_id": external_message_id,
+                    "status": raw_status,
+                },
+            },
+            source="whatsapp.delivery",
+        )
+        return
+    get_client().rpc(
+        "reconcile_whatsapp_delivery",
+        {
+            "p_binding_id": binding_id, "p_external_message_id": external_message_id,
+            "p_status": normalized,
+        },
+    ).execute()
+
+
+def complete_whatsapp_outbound(
+    buffer_id: str,
+    *,
+    binding_id: str,
+    correlation_id: str,
+    wamid: str | None,
+    success: bool,
+    error: str | None = None,
+    execution_id: str | None = None,
+) -> dict:
+    result = get_client().rpc(
+        "complete_whatsapp_outbound_result",
+        {
+            "p_buffer_id": buffer_id,
+            "p_binding_id": binding_id,
+            "p_correlation_id": correlation_id,
+            "p_external_message_id": wamid,
+            "p_success": success,
+            "p_error": error,
+            "p_execution_id": execution_id,
+        },
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def set_lead_buffer_waiting_human(lead_ref: int) -> None:

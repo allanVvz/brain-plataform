@@ -43,6 +43,7 @@ def test_deterministic_worker_uses_canonical_pipeline_without_n8n(monkeypatch):
         "direction": "inbound",
         "persona_id": "persona-1",
         "lead_ref": 44,
+        "channel_binding_id": "binding-1",
         "whatsapp_phone_number_id": "business-1",
         "external_message_id": "wamid-1",
         "correlation_id": "corr-1",
@@ -65,11 +66,17 @@ def test_deterministic_worker_uses_canonical_pipeline_without_n8n(monkeypatch):
         lambda _lead_ref, limit=20: [],
     )
     monkeypatch.setattr(
-        "workers.whatsapp_dispatch_worker.supabase_client.get_active_workflow_binding_by_phone_number_id",
-        lambda _phone: {
+        "workers.whatsapp_dispatch_worker.supabase_client.get_workflow_binding_by_id",
+        lambda _binding_id: {
+            "id": "binding-1",
             "persona_id": "persona-1",
+            "active": True,
             "metadata": {"decision_owner": "deterministic", "mode": "active"},
         },
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.mark_whatsapp_attempt",
+        lambda *_args, **_kwargs: True,
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.conversation_runtime.execute_pipeline",

@@ -10,10 +10,7 @@ import json
 import os
 import re
 import socket
-from datetime import datetime, timedelta, timezone
 from typing import Any
-
-import httpx
 
 from services import (
     conversation_runtime,
@@ -49,6 +46,29 @@ class WhatsAppDispatchWorker(BaseWorker):
                     self._dispatch_outbound(row)
             except Exception as exc:  # one poison message must not block the queue
                 self._retry_or_dead_letter(row, exc)
+
+    def _begin_attempt(self, row: dict[str, Any], kind: str) -> bool:
+        if supabase_client.mark_whatsapp_attempt(
+            row["id"],
+            self.worker_id,
+            kind,
+        ):
+            row["_attempt_started"] = kind
+            return True
+        reason = f"compromised {kind} re-execution"
+        if row.get("channel_binding_id"):
+            supabase_client.record_whatsapp_safety_violation(
+                binding_id=row["channel_binding_id"],
+                lead_ref=row.get("lead_ref"),
+                violation_key=f"reexecution:{kind}:{row['id']}",
+                reason=reason,
+            )
+        supabase_client.complete_whatsapp_buffer(
+            row["id"],
+            "waiting_human",
+            error=reason,
+        )
+        return False
 
     def _dispatch_inbound(self, row: dict[str, Any]) -> None:
         payload = row.get("payload") or {}
@@ -102,21 +122,42 @@ class WhatsAppDispatchWorker(BaseWorker):
                 source="workers.whatsapp",
             )
             return
-        binding = (
-            supabase_client.get_workflow_binding_by_id(row.get("channel_binding_id"))
-            or supabase_client.get_active_workflow_binding_by_phone_number_id(
-                row.get("whatsapp_phone_number_id")
-            )
-        )
+        binding = supabase_client.get_workflow_binding_by_id(row.get("channel_binding_id"))
         binding_metadata = (binding or {}).get("metadata") or {}
-        canonical_binding = (
-            binding
-            and binding.get("persona_id") == row.get("persona_id")
-            and binding_metadata.get("decision_owner")
-            in {"n8n_hybrid", "n8n_agents", "deterministic"}
-        )
-        process_mode = str(persona.get("process_mode") or "internal")
-        if canonical_binding and process_mode == "internal":
+        if (
+            not binding
+            or not binding.get("active")
+            or binding.get("persona_id") != row.get("persona_id")
+        ):
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error="inbound binding is missing, inactive or cross-persona",
+            )
+            return
+        if (
+            binding_metadata.get("safety_paused")
+            or binding.get("connection_status") == "safety_paused"
+        ):
+            if row.get("lead_ref"):
+                supabase_client.handoff_whatsapp_lead(int(row["lead_ref"]))
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error="binding safety paused",
+            )
+            return
+        decision_owner = binding_metadata.get("decision_owner")
+        if decision_owner not in {"deterministic", "n8n_agents"}:
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error="unsupported binding decision owner",
+            )
+            return
+        if not self._begin_attempt(row, "decision"):
+            return
+        if decision_owner == "deterministic":
             result = conversation_runtime.execute_pipeline(
                 persona_slug=persona["slug"],
                 lead_ref=int(row["lead_ref"]),
@@ -145,11 +186,9 @@ class WhatsAppDispatchWorker(BaseWorker):
                 source="workers.whatsapp",
             )
             return
-        if canonical_binding and process_mode == "n8n":
+        if decision_owner == "n8n_agents":
             webhook_url = str(
-                binding_metadata.get("conversation_webhook_url")
-                or binding_metadata.get("webhook_url")
-                or ""
+                binding_metadata.get("conversation_webhook_url") or ""
             ).strip()
             if not webhook_url:
                 raise RuntimeError("n8n_agents conversation webhook is not configured")
@@ -162,6 +201,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                     "persona_id": row["persona_id"],
                     "persona_slug": persona["slug"],
                     "phone_number_id": row["whatsapp_phone_number_id"],
+                    "channel_binding_id": row.get("channel_binding_id"),
                     "external_message_id": row.get("external_message_id"),
                     "correlation_id": row.get("correlation_id"),
                     "message": payload.get("text") or "",
@@ -193,71 +233,90 @@ class WhatsAppDispatchWorker(BaseWorker):
                 source="workers.whatsapp",
             )
             return
-        event = {
-            "lead_id": str((lead or {}).get("lead_id") or payload.get("sender") or row.get("lead_ref") or ""),
-            "lead_ref": row.get("lead_ref"),
-            "nome": (lead or {}).get("nome"),
-            "stage": (lead or {}).get("stage") or "novo",
-            "canal": "whatsapp",
-            "mensagem": payload.get("text") or "",
-            "whatsapp_phone_number_id": row["whatsapp_phone_number_id"],
-            "persona_slug": persona["slug"],
-        }
-        token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
-        base = (os.environ.get("API_INTERNAL_BASE_URL") or "http://api:8080").rstrip("/")
-        response = httpx.post(
-            f"{base}/process", json=event,
-            headers={"X-Webhook-Token": token}, timeout=30.0,
-        )
-        response.raise_for_status()
-        result = response.json()
-        reply = (result.get("reply") or "").strip()
-        if reply:
-            outbound = supabase_client.enqueue_whatsapp_message({
-                "persona_id": row["persona_id"], "lead_ref": row.get("lead_ref"),
-                "channel_binding_id": row.get("channel_binding_id"),
-                "whatsapp_phone_number_id": row["whatsapp_phone_number_id"],
-                "direction": "outbound", "payload": {"text": reply, "sender_type": "ai"},
-                "status": "pending_send", "batch_key": row["batch_key"],
-                "idempotency_key": f"ai:{row['id']}",
-                "correlation_id": row.get("correlation_id"),
-            })
-            if outbound is None:
-                # A retry after a successful decision already has its outbox.
-                pass
-        supabase_client.complete_whatsapp_buffer(row["id"], "sent" if reply else "waiting_human")
-        event_emitter.emit("whatsapp.inbound_dispatched", entity_type="lead", entity_id=str(row.get("lead_ref") or ""), persona_id=row["persona_id"], payload={"correlation_id": row.get("correlation_id"), "reply_queued": bool(reply)}, source="workers.whatsapp")
 
     def _dispatch_outbound(self, row: dict[str, Any]) -> None:
-        binding = (
-            supabase_client.get_workflow_binding_by_id(row.get("channel_binding_id"))
-            or supabase_client.get_active_workflow_binding_by_phone_number_id(
-                row.get("whatsapp_phone_number_id")
+        binding = supabase_client.get_workflow_binding_by_id(row.get("channel_binding_id"))
+        if (
+            not binding
+            or not binding.get("active")
+            or binding.get("persona_id") != row.get("persona_id")
+        ):
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error="active binding does not match outbound persona",
             )
+            return
+        metadata = binding.get("metadata") or {}
+        if (
+            metadata.get("safety_paused")
+            or binding.get("connection_status") == "safety_paused"
+        ):
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error="binding safety paused",
+            )
+            return
+        transport_mode = metadata.get("transport_mode")
+        if transport_mode not in {"provider_direct", "n8n_adapter"}:
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error="unsupported binding transport mode",
+            )
+            return
+
+        correlation_id = str(row.get("correlation_id") or "")
+        if not correlation_id:
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error="outbound correlation id is missing",
+            )
+            return
+        lead = (
+            supabase_client.get_lead_by_ref(row.get("lead_ref"))
+            if row.get("lead_ref")
+            else {}
         )
-        if not binding or binding.get("persona_id") != row.get("persona_id"):
-            raise RuntimeError("active binding does not match outbound persona")
-        if binding.get("provider") == "evolution_baileys":
-            lead = supabase_client.get_lead_by_ref(row.get("lead_ref")) if row.get("lead_ref") else {}
-            identities = ((lead or {}).get("metadata") or {}).get("identities") or {}
-            recipient = identities.get("remote_jid_alt") or (lead or {}).get("external_contact_id") or ""
-            if recipient.endswith("@s.whatsapp.net"):
-                recipient = recipient.split("@", 1)[0]
-            if not recipient or "@lid" in recipient:
-                supabase_client.complete_whatsapp_buffer(
-                    row["id"], "waiting_human", error="recipient identification unavailable"
-                )
-                return
+        identities = ((lead or {}).get("metadata") or {}).get("identities") or {}
+        recipient = str(
+            identities.get("remote_jid_alt")
+            or (lead or {}).get("external_contact_id")
+            or ""
+        )
+        if recipient.endswith("@s.whatsapp.net"):
+            recipient = recipient.split("@", 1)[0]
+        if not recipient or "@lid" in recipient:
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error="recipient identification unavailable",
+            )
+            return
+        recipient = re.sub(r"\D", "", recipient)
+        if not recipient:
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error="recipient identification unavailable",
+            )
+            return
+
+        if transport_mode == "provider_direct":
             outbound_payload = row.get("payload") or {}
-            provider = get_provider("evolution_baileys")
-            if outbound_payload.get("media"):
+            provider = get_provider(binding.get("provider"))
+            if outbound_payload.get("media") and binding.get("provider") == "evolution_baileys":
                 media = outbound_payload["media"]
                 signed_url = supabase_client._storage_signed_url(
                     media.get("bucket"), media.get("path"), 3600
                 )
                 if not signed_url:
                     raise RuntimeError("could not create signed media URL")
-                result = provider.send_media(binding, re.sub(r"\D", "", recipient), {
+                if not self._begin_attempt(row, "provider"):
+                    return
+                result = provider.send_media(binding, recipient, {
                     "mediatype": (
                         "image" if str(media.get("mime") or "").startswith("image/")
                         else "audio" if str(media.get("mime") or "").startswith("audio/")
@@ -269,49 +328,80 @@ class WhatsAppDispatchWorker(BaseWorker):
                     "caption": str(outbound_payload.get("text") or ""),
                 })
             else:
+                if outbound_payload.get("media"):
+                    supabase_client.complete_whatsapp_buffer(
+                        row["id"],
+                        "waiting_human",
+                        error="binding provider does not support canonical media send",
+                    )
+                    return
+                if not self._begin_attempt(row, "provider"):
+                    return
                 result = provider.send_text(
                     binding,
-                    re.sub(r"\D", "", recipient),
+                    recipient,
                     str(outbound_payload.get("text") or ""),
                 )
             external_id = (
                 (result.get("key") or {}).get("id")
+                or ((result.get("messages") or [{}])[0] or {}).get("id")
                 or result.get("messageId")
                 or result.get("id")
             )
+            if not external_id:
+                raise RuntimeError("provider returned no external message id")
             supabase_client.complete_whatsapp_outbound(
-                row["id"], external_id, "sent", None, None
+                row["id"],
+                binding_id=binding["id"],
+                correlation_id=correlation_id,
+                wamid=str(external_id),
+                success=True,
             )
             return
-        metadata = binding.get("metadata") or {}
-        webhook_url = (
-            metadata.get("outbound_webhook_url")
-            or metadata.get("webhook_url")
-            or os.environ.get("N8N_OUTBOUND_WEBHOOK_URL")
-            or ""
-        ).strip()
+
+        webhook_url = str(metadata.get("n8n_outbound_webhook_url") or "").strip()
         if not webhook_url:
-            raise RuntimeError("outbound n8n webhook is not configured")
-        lead = supabase_client.get_lead_by_ref(row.get("lead_ref")) if row.get("lead_ref") else {}
-        recipient = re.sub(r"\D", "", str((lead or {}).get("telefone") or (lead or {}).get("lead_id") or ""))
-        if not recipient:
-            raise RuntimeError("outbound lead has no WhatsApp recipient")
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error="outbound n8n webhook is not configured",
+            )
+            return
+        if not self._begin_attempt(row, "provider"):
+            return
         status, _ = n8n_client.send_to_webhook(webhook_url, {
             "buffer_id": row["id"], "lead_ref": row.get("lead_ref"), "persona_id": row["persona_id"],
-            "phone_number_id": row["whatsapp_phone_number_id"], "to": recipient,
+            "phone_number_id": binding.get("whatsapp_phone_number_id"), "channel_binding_id": binding["id"], "to": recipient,
             "text": (row.get("payload") or {}).get("text", ""),
-            "correlation_id": row.get("correlation_id"),
+            "correlation_id": correlation_id,
         }, secret=(os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or None))
         if not 200 <= status < 300:
             raise RuntimeError(f"n8n outbound returned HTTP {status}")
-        # n8n must post /internal/whatsapp/outbound-result with the Meta wamid.
-        # Once transport accepts the hand-off this row is no longer eligible for
-        # a second send; delivery callbacks reconcile sent/delivered/read.
-        supabase_client.complete_whatsapp_buffer(row["id"], "sent")
+        # The controlled adapter commits the external id through
+        # /internal/whatsapp/outbound-result before responding.  If it did not,
+        # this processing row expires to waiting_human and is never resent.
 
     def _retry_or_dead_letter(self, row: dict[str, Any], exc: Exception) -> None:
         attempts, maximum = int(row.get("attempt_count") or 1), int(row.get("max_attempts") or 5)
         error = f"{type(exc).__name__}: {str(exc)[:800]}"
+        attempt_kind = row.get("_attempt_started")
+        if attempt_kind:
+            if row.get("channel_binding_id"):
+                supabase_client.record_whatsapp_safety_violation(
+                    binding_id=row["channel_binding_id"],
+                    lead_ref=row.get("lead_ref"),
+                    violation_key=f"attempt-failed:{attempt_kind}:{row['id']}",
+                    reason=error,
+                )
+            supabase_client.complete_whatsapp_buffer(row["id"], "waiting_human", error=error)
+            return
+        if row.get("direction") == "outbound":
+            supabase_client.complete_whatsapp_buffer(
+                row["id"],
+                "waiting_human",
+                error=error,
+            )
+            return
         if attempts >= maximum:
             supabase_client.complete_whatsapp_buffer(row["id"], "dead_letter", error=error)
             sre_logger.error(self.name, f"dead-letter buffer={row['id']}: {error}")

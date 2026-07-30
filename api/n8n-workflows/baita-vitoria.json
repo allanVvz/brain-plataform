@@ -8,7 +8,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $json.body || $json; const binding = { persona_slug: 'baita-conveniencia', agent_slug: 'vitoria', decision_owner: 'n8n_agents', pipeline_contract: 'conversation_v1', classifier: 'deterministic_v1' }; if (input.persona_slug !== binding.persona_slug) throw new Error('persona binding mismatch'); if (input.pipeline_contract && input.pipeline_contract !== binding.pipeline_contract) throw new Error('pipeline contract mismatch'); if (!input.lead_ref || !input.buffer_id || !input.correlation_id) throw new Error('invalid canonical event'); return [{ json: { ...input, ...binding } }];"
+        "jsCode": "const input = $json.body || $json; const binding = { persona_slug: 'baita-conveniencia', agent_slug: 'vitoria', decision_owner: 'n8n_agents', pipeline_contract: 'conversation_v1', classifier: 'deterministic_v1' }; if (input.persona_slug !== binding.persona_slug) throw new Error('persona binding mismatch'); if (input.pipeline_contract && input.pipeline_contract !== binding.pipeline_contract) throw new Error('pipeline contract mismatch'); if (!input.lead_ref || !input.buffer_id || !input.correlation_id || !input.channel_binding_id) throw new Error('invalid canonical event'); return [{ json: { ...input, ...binding } }];"
       },
       "id": "binding", "name": "Validate Baita binding", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [440, 300]
     },
@@ -49,7 +49,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({lead_ref: $('Validate Baita binding').item.json.lead_ref, context: $('Load graph RAG cart history').item.json, decision: $json.decision, response: $json.response, correlation_id: $('Validate Baita binding').item.json.correlation_id, phone_number_id: $('Validate Baita binding').item.json.phone_number_id, inbound_buffer_id: $('Validate Baita binding').item.json.buffer_id})}}",
+        "body": "={{JSON.stringify({lead_ref: $('Validate Baita binding').item.json.lead_ref, context: $('Load graph RAG cart history').item.json, decision: $json.decision, response: $json.response, correlation_id: $('Validate Baita binding').item.json.correlation_id, phone_number_id: $('Validate Baita binding').item.json.phone_number_id, channel_binding_id: $('Validate Baita binding').item.json.channel_binding_id, inbound_buffer_id: $('Validate Baita binding').item.json.buffer_id})}}",
         "options": {}
       },
       "id": "commit", "name": "Persist once and enqueue send", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1220, 300], "onError": "continueErrorOutput"

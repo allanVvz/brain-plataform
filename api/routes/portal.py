@@ -23,6 +23,7 @@ from services import (
     lead_qualification,
     secret_store,
     supabase_client,
+    whatsapp_outbox,
 )
 from services.whatsapp_providers import get_provider
 
@@ -202,10 +203,12 @@ def knowledge_chat_context(
 async def send_message(request: Request, persona_slug: str = Query(...)):
     content_type = request.headers.get("content-type") or ""
     media: dict[str, Any] | None = None
+    raw_client_message_id = ""
     if content_type.startswith("multipart/form-data"):
         form = await request.form()
         lead_id = int(str(form.get("lead_id") or "0"))
         text = str(form.get("text") or "").strip()
+        raw_client_message_id = str(form.get("client_message_id") or "").strip()
         upload = form.get("file")
         if upload and hasattr(upload, "read"):
             data = await upload.read()
@@ -236,18 +239,44 @@ async def send_message(request: Request, persona_slug: str = Query(...)):
         body = await request.json()
         lead_id = int(body.get("lead_id") or 0)
         text = str(body.get("text") or "").strip()
+        raw_client_message_id = str(body.get("client_message_id") or "").strip()
 
     persona = _persona(persona_slug, request, "edit")
     lead = _lead(lead_id, persona["id"])
     if not text and not media:
         raise HTTPException(400, "Mensagem vazia.")
+    try:
+        client_message_id = str(uuid.UUID(raw_client_message_id))
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(422, "client_message_id UUID e obrigatorio.") from exc
+
     binding_id = lead.get("channel_binding_id")
-    binding = supabase_client.get_workflow_binding_by_id(binding_id) if binding_id else _binding_for_persona(persona["id"])
+    if not binding_id:
+        raise HTTPException(409, "Lead sem canal WhatsApp explicito.")
+    binding = supabase_client.get_workflow_binding_by_id(binding_id)
     if not binding:
         raise HTTPException(409, "Canal WhatsApp nao configurado.")
+    if binding.get("persona_id") != persona["id"]:
+        raise HTTPException(403, "Canal WhatsApp pertence a outra persona.")
     if binding.get("connection_status") not in {None, "connected", "open"} and binding.get("provider") == "evolution_baileys":
         raise HTTPException(409, "Canal WhatsApp desconectado.")
-    message_id = f"portal_{int(time.time() * 1000)}_{lead['id']}"
+
+    message_id = f"manual:{client_message_id}"
+    existing = supabase_client.get_whatsapp_buffer_by_idempotency(message_id)
+    if existing:
+        if (
+            existing.get("lead_ref") != lead["id"]
+            or existing.get("channel_binding_id") != binding["id"]
+        ):
+            raise HTTPException(409, "client_message_id ja pertence a outra mensagem.")
+        return {
+            "ok": True,
+            "message_id": message_id,
+            "status": existing.get("status") or "pending_send",
+            "buffer_id": existing["id"],
+            "deduplicated": True,
+        }
+
     media_metadata = None
     outbox_media = None
     if media:
@@ -261,33 +290,28 @@ async def send_message(request: Request, persona_slug: str = Query(...)):
             "filename": media["filename"],
         }
         outbox_media = dict(media_metadata)
-    supabase_client.insert_message({
-        "lead_ref": lead["id"],
-        "message_id": message_id,
-        "sender_type": "human",
-        "role": "human",
-        "canal": "whatsapp",
-        "texto": text,
-        "direction": "outbound",
-        "status": "pending",
-        "channel_binding_id": binding["id"],
-        "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
-        "metadata": {"source": "portal", "media": media_metadata},
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    item = supabase_client.enqueue_whatsapp_message({
-        "persona_id": persona["id"],
-        "lead_ref": lead["id"],
-        "channel_binding_id": binding["id"],
-        "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
-        "direction": "outbound",
-        "payload": {"text": text, "sender_type": "human", "media": outbox_media},
-        "status": "pending_send",
-        "batch_key": f"{persona['id']}:{lead['id']}",
-        "idempotency_key": f"portal:{message_id}",
-        "correlation_id": f"portal:{message_id}",
-    })
-    return {"ok": True, "message_id": message_id, "status": "pending_send", "buffer_id": (item or {}).get("id")}
+
+    result = whatsapp_outbox.enqueue_outbound(
+        lead=lead,
+        text=text,
+        sender_type="human",
+        message_id=message_id,
+        correlation_id=message_id,
+        idempotency_key=message_id,
+        metadata={
+            "source": "portal",
+            "media": media_metadata,
+            "client_message_id": client_message_id,
+        },
+        media=outbox_media,
+    )
+    return {
+        "ok": True,
+        "message_id": result.get("message_id") or message_id,
+        "status": result.get("status") or "pending_send",
+        "buffer_id": result["buffer_id"],
+        "deduplicated": bool(result.get("deduplicated")),
+    }
 
 
 @router.get("/leads")
@@ -449,14 +473,39 @@ def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Req
     current = next((item for item in bindings if item.get("active")), None)
     target = next((item for item in bindings if item.get("provider") == body.provider), None)
     if current and current.get("provider") == body.provider:
+        metadata = {
+            **(current.get("metadata") or {}),
+            "decision_owner": "deterministic",
+            "conversation_mode": "deterministic",
+            "transport_mode": "provider_direct",
+            "pipeline_contract": "conversation_v1",
+        }
+        supabase_client.update_workflow_binding_metadata(current["id"], metadata)
         return {"ok": True, "provider": body.provider, "status": current.get("connection_status") or "connected"}
     if body.provider == "meta_cloud":
-        if not target or not target.get("whatsapp_phone_number_id"):
+        if (
+            not target
+            or not target.get("whatsapp_phone_number_id")
+            or not target.get("provider_secret_ciphertext")
+        ):
             raise HTTPException(409, "Nao existe um binding Meta configurado para reativar.")
         try:
             if current:
                 supabase_client.update_workflow_binding(current["id"], {"active": False, "connection_status": "disabled"})
-            supabase_client.update_workflow_binding(target["id"], {"active": True, "connection_status": "connected"})
+            supabase_client.update_workflow_binding_metadata(
+                target["id"],
+                {
+                    **(target.get("metadata") or {}),
+                    "decision_owner": "deterministic",
+                    "conversation_mode": "deterministic",
+                    "transport_mode": "provider_direct",
+                    "pipeline_contract": "conversation_v1",
+                },
+            )
+            supabase_client.update_workflow_binding(
+                target["id"],
+                {"active": True, "connection_status": "connected"},
+            )
         except Exception:
             if current:
                 supabase_client.update_workflow_binding(current["id"], {"active": True})
@@ -477,7 +526,13 @@ def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Req
             "provider_instance_key": instance_key,
             "provider_secret_ciphertext": secret_store.encrypt_secret(instance_token),
             "connection_status": "provisioning", "active": False,
-            "metadata": {"provider_version": os.environ.get("EVOLUTION_API_VERSION", "2.3.7"), "decision_owner": "deterministic"},
+            "metadata": {
+                "provider_version": os.environ.get("EVOLUTION_API_VERSION", "2.3.7"),
+                "decision_owner": "deterministic",
+                "conversation_mode": "deterministic",
+                "transport_mode": "provider_direct",
+                "pipeline_contract": "conversation_v1",
+            },
         })
         webhook_url, callback = _evolution_webhook_target(
             target["id"],
@@ -497,6 +552,16 @@ def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Req
     try:
         if current:
             supabase_client.update_workflow_binding(current["id"], {"active": False, "connection_status": "disabled"})
+        supabase_client.update_workflow_binding_metadata(
+            target["id"],
+            {
+                **(target.get("metadata") or {}),
+                "decision_owner": "deterministic",
+                "conversation_mode": "deterministic",
+                "transport_mode": "provider_direct",
+                "pipeline_contract": "conversation_v1",
+            },
+        )
         supabase_client.update_workflow_binding(target["id"], {"active": True, "connection_status": "connecting"})
     except Exception:
         if current:
@@ -533,6 +598,9 @@ def provision_evolution(slug: str, request: Request):
         "metadata": {
             "provider_version": os.environ.get("EVOLUTION_API_VERSION", "2.3.7"),
             "decision_owner": "deterministic",
+            "conversation_mode": "deterministic",
+            "transport_mode": "provider_direct",
+            "pipeline_contract": "conversation_v1",
         },
     })
     webhook_url, callback = _evolution_webhook_target(

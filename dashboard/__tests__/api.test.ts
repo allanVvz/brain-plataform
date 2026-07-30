@@ -57,3 +57,41 @@ describe("api public site endpoints", () => {
     expect(String(opts?.body)).toContain("landing_page");
   });
 });
+
+describe("WhatsApp manual-send idempotency contract", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("forwards the caller-owned UUID to admin and portal endpoints", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        message_id: "manual:11111111-1111-4111-8111-111111111111",
+        buffer_id: "buffer-1",
+        status: "pending_send",
+        deduplicated: false,
+      }),
+    } as Response);
+    const clientMessageId = "11111111-1111-4111-8111-111111111111";
+
+    await api.sendMessage({
+      lead_ref: 7,
+      texto: "Oi",
+      client_message_id: clientMessageId,
+    });
+    await api.portalSendMessage("aurora", {
+      lead_id: 7,
+      text: "Oi",
+      client_message_id: clientMessageId,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, options] of fetchMock.mock.calls) {
+      expect(JSON.parse(String(options?.body))).toMatchObject({
+        client_message_id: clientMessageId,
+      });
+    }
+  });
+});

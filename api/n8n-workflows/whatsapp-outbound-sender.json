@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $json.body || $json; const required = ['buffer_id','phone_number_id','to','text','correlation_id']; for (const key of required) { if (!input[key]) throw new Error(`missing ${key}`); } return [{json: input}];"
+        "jsCode": "const input = $json.body || $json; const required = ['buffer_id','channel_binding_id','phone_number_id','to','text','correlation_id']; for (const key of required) { if (!input[key]) throw new Error(`missing ${key}`); } return [{json: input}];"
       },
       "id": "normalize",
       "name": "Normalize outbound",
@@ -67,7 +67,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({buffer_id: $('Normalize outbound').item.json.buffer_id, lead_ref: $('Normalize outbound').item.json.lead_ref, wamid: $json.messages?.[0]?.id, success: true, execution_id: $execution.id, correlation_id: $('Normalize outbound').item.json.correlation_id})}}",
+        "body": "={{JSON.stringify({buffer_id: $('Normalize outbound').item.json.buffer_id, channel_binding_id: $('Normalize outbound').item.json.channel_binding_id, wamid: $json.messages?.[0]?.id, success: true, execution_id: $execution.id, correlation_id: $('Normalize outbound').item.json.correlation_id})}}",
         "options": {}
       },
       "id": "success-callback",
@@ -92,7 +92,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({buffer_id: $('Normalize outbound').item.json.buffer_id, lead_ref: $('Normalize outbound').item.json.lead_ref, success: false, error: $json.message || $json.error?.message || 'Meta transport failed', execution_id: $execution.id, correlation_id: $('Normalize outbound').item.json.correlation_id})}}",
+        "body": "={{JSON.stringify({buffer_id: $('Normalize outbound').item.json.buffer_id, channel_binding_id: $('Normalize outbound').item.json.channel_binding_id, success: false, error: $json.message || $json.error?.message || 'Meta transport failed', execution_id: $execution.id, correlation_id: $('Normalize outbound').item.json.correlation_id})}}",
         "options": {}
       },
       "id": "failure-callback",

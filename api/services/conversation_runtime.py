@@ -15,7 +15,12 @@ from schemas.conversation import (
     ConversationDecision,
     ConversationRoute,
 )
-from services import graph_json_v2_store, lead_qualification, supabase_client
+from services import (
+    graph_json_v2_store,
+    lead_qualification,
+    supabase_client,
+    whatsapp_outbox,
+)
 from services.model_router import get_router
 from services.deterministic_sdr import (
     DeterministicSDR,
@@ -690,10 +695,61 @@ def commit(
     response: AgentResponse,
     correlation_id: str,
     phone_number_id: str | None,
-    channel_binding_id: str | None = None,
+    channel_binding_id: str,
     inbound_buffer_id: str | None = None,
 ) -> dict[str, Any]:
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
+    if not lead:
+        raise LookupError("lead not found")
+    # A commit cannot choose transport.  The persisted lead binding is the
+    # authority and also protects n8n from committing to another persona.
+    persisted_binding_id = lead.get("channel_binding_id")
+    if not persisted_binding_id:
+        raise RuntimeError("lead has no explicit channel binding")
+    if channel_binding_id != persisted_binding_id:
+        raise PermissionError("channel binding does not match lead")
+    binding = supabase_client.get_workflow_binding_by_id(persisted_binding_id) or {}
+    if not binding or binding.get("persona_id") != lead.get("persona_id"):
+        raise PermissionError("channel binding does not match lead persona")
+    if not binding.get("active"):
+        raise RuntimeError("channel binding is inactive")
+    binding_metadata = binding.get("metadata") or {}
+    if (
+        binding_metadata.get("safety_paused")
+        or binding.get("connection_status") == "safety_paused"
+    ):
+        raise RuntimeError("channel binding is safety paused")
+    channel_binding_id = persisted_binding_id
+    phone_number_id = binding.get("whatsapp_phone_number_id")
+    persona = supabase_client.get_persona(context.persona_slug) or {}
+    if not persona or persona.get("id") != lead.get("persona_id"):
+        raise PermissionError("conversation context does not match lead persona")
+
+    message_id = f"ai:{correlation_id}"
+    existing_outbound = (
+        supabase_client.get_whatsapp_buffer_by_idempotency(message_id)
+        if response.reply_text
+        else None
+    )
+    if existing_outbound:
+        return {
+            "ok": True,
+            "message_id": message_id,
+            "outbound_buffer_id": existing_outbound.get("id"),
+            "deduplicated": True,
+            "handoff": response.handoff_required,
+            "ai_paused": response.handoff_required,
+            "route": decision.route.value,
+            "role": response.role.value,
+            "intent": decision.intent,
+            "reply_text": response.reply_text,
+            "classifier": decision.classifier,
+            "evidence_node_ids": decision.evidence_node_ids,
+            "graph_version": context.graph_version,
+            "graph_checksum": context.graph_checksum,
+            "qualification": (lead.get("metadata") or {}).get("qualification") or {},
+            "stage": lead.get("stage") or decision.lead_stage,
+        }
     previous_metadata = dict(lead.get("metadata") or {})
     qualification, qualified_stage = lead_qualification.calculate(
         previous=previous_metadata.get("qualification"),
@@ -739,7 +795,6 @@ def commit(
             {"metadata": metadata, "stage": qualified_stage},
         )
 
-    persona = supabase_client.get_persona(context.persona_slug) or {}
     supabase_client.insert_agent_log(
         {
             "lead_id": str(lead_ref),
@@ -767,60 +822,28 @@ def commit(
         }
     )
 
-    message_id = f"ai:{correlation_id}"
     buffer = None
     if response.reply_text:
-        try:
-            supabase_client.insert_message(
-                {
-                "lead_ref": lead_ref,
-                "message_id": message_id,
-                "sender_type": "agent",
-                "role": "assistant",
-                "canal": "whatsapp",
-                "texto": response.reply_text,
-                "direction": "outbound",
-                "status": "pending",
-                "whatsapp_phone_number_id": phone_number_id,
-                "channel_binding_id": channel_binding_id,
-                "correlation_id": correlation_id,
-                "metadata": {
-                    "agent_slug": context.agent_slug,
-                    "role": response.role.value,
-                    "intent": decision.intent,
-                    "graph_version": context.graph_version,
-                    "graph_checksum": context.graph_checksum,
-                    "evidence_node_ids": decision.evidence_node_ids,
-                },
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
-            )
-        except Exception as exc:
-            duplicate = any(
-                marker in str(exc).lower()
-                for marker in ("duplicate", "unique", "already exists")
-            )
-            if not duplicate:
-                raise
-        if persona.get("id") and (phone_number_id or channel_binding_id):
-            buffer = supabase_client.enqueue_whatsapp_message(
-                {
-                    "persona_id": persona["id"],
-                    "lead_ref": lead_ref,
-                    "channel_binding_id": channel_binding_id,
-                    "whatsapp_phone_number_id": phone_number_id,
-                    "direction": "outbound",
-                    "payload": {
-                        "text": response.reply_text,
-                        "sender_type": "ai",
-                        "role": response.role.value,
-                    },
-                    "status": "pending_send",
-                    "batch_key": f"{persona['id']}:{lead_ref}",
-                    "idempotency_key": message_id,
-                    "correlation_id": correlation_id,
-                }
-            )
+        envelope = whatsapp_outbox.enqueue_outbound(
+            lead=lead,
+            text=response.reply_text,
+            sender_type="agent",
+            message_id=message_id,
+            correlation_id=correlation_id,
+            idempotency_key=message_id,
+            metadata={
+                "agent_slug": context.agent_slug,
+                "role": response.role.value,
+                "intent": decision.intent,
+                "graph_version": context.graph_version,
+                "graph_checksum": context.graph_checksum,
+                "evidence_node_ids": decision.evidence_node_ids,
+            },
+        )
+        buffer = {
+            "id": envelope.get("buffer_id"),
+            "status": envelope.get("status"),
+        }
 
     supabase_client.insert_event(
         {
@@ -846,6 +869,7 @@ def commit(
         "ok": True,
         "message_id": message_id if response.reply_text else None,
         "outbound_buffer_id": (buffer or {}).get("id"),
+        "deduplicated": False,
         "handoff": response.handoff_required,
         "ai_paused": response.handoff_required,
         "route": decision.route.value,

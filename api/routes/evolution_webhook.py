@@ -65,6 +65,7 @@ async def evolution_webhook(binding_id: str, request: Request):
     provider = get_provider("evolution_baileys")
     events = provider.normalize_webhook(payload)
     accepted = 0
+    duplicate = 0
     ignored = 0
     for event in events:
         instance = str(event.get("instance") or "")
@@ -79,10 +80,16 @@ async def evolution_webhook(binding_id: str, request: Request):
                 "close": "disconnected", "disconnected": "disconnected",
                 "connecting": "connecting",
             }.get(raw_state.lower(), "qr_ready" if event_type == "QRCODE_UPDATED" else "connecting")
-            supabase_client.update_workflow_binding(binding_id, {
-                "connection_status": normalized,
-                "last_connection_at": datetime.now(timezone.utc).isoformat() if normalized == "connected" else binding.get("last_connection_at"),
-            })
+            update = {
+                "last_connection_at": (
+                    datetime.now(timezone.utc).isoformat()
+                    if normalized == "connected"
+                    else binding.get("last_connection_at")
+                ),
+            }
+            if not (binding.get("metadata") or {}).get("safety_paused"):
+                update["connection_status"] = normalized
+            supabase_client.update_workflow_binding(binding_id, update)
             if event_type == "CONNECTION_UPDATE":
                 status_code = event_raw.get("statusCode") or event_raw.get("status_code")
                 reason = event_raw.get("reason") or event_raw.get("disconnectReason") or event_raw.get("disconnect_reason")
@@ -130,32 +137,50 @@ async def evolution_webhook(binding_id: str, request: Request):
             },
         )
         correlation_id = f"evolution:{binding_id}:{external_id}"
-        supabase_client.insert_message({
-            "lead_ref": lead["id"],
-            "message_id": external_id,
-            "external_message_id": external_id,
-            "sender_type": "lead",
-            "role": "user",
-            "canal": "whatsapp",
-            "texto": event.get("text") or "",
-            "direction": "inbound",
-            "status": "buffered",
-            "channel_binding_id": binding_id,
-            "correlation_id": correlation_id,
-            "metadata": {"provider": "evolution_baileys"},
-        })
-        supabase_client.enqueue_whatsapp_message({
-            "persona_id": binding["persona_id"],
-            "lead_ref": lead["id"],
-            "channel_binding_id": binding_id,
-            "whatsapp_phone_number_id": None,
-            "external_message_id": external_id,
-            "direction": "inbound",
-            "payload": {"text": event.get("text") or "", "sender": contact},
-            "status": "buffered",
-            "batch_key": f"{binding['persona_id']}:{lead['id']}",
-            "idempotency_key": correlation_id,
-            "correlation_id": correlation_id,
-        })
+        result = supabase_client.enqueue_whatsapp_envelope(
+            buffer={
+                "persona_id": binding["persona_id"],
+                "lead_ref": lead["id"],
+                "channel_binding_id": binding_id,
+                "whatsapp_phone_number_id": None,
+                "external_message_id": external_id,
+                "direction": "inbound",
+                "payload": {
+                    "text": event.get("text") or "",
+                    "sender": contact,
+                },
+                "status": "buffered",
+                "batch_key": f"{binding['persona_id']}:{lead['id']}",
+                "idempotency_key": (
+                    f"inbound:evolution_baileys:{binding_id}:{external_id}"
+                ),
+                "correlation_id": correlation_id,
+            },
+            message={
+                "lead_id": lead["id"],
+                "role": "user",
+                "content": event.get("text") or "",
+                "direction": "inbound",
+                "status": "buffered",
+                "channel": "whatsapp",
+                "sender_id": external_id,
+                "external_message_id": external_id,
+                "channel_binding_id": binding_id,
+                "correlation_id": correlation_id,
+                "metadata": {"provider": "evolution_baileys"},
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        if result.get("deduplicated"):
+            duplicate += 1
+            continue
         accepted += 1
-    return JSONResponse({"ok": True, "accepted": accepted, "ignored": ignored}, status_code=202)
+    return JSONResponse(
+        {
+            "ok": True,
+            "accepted": accepted,
+            "duplicate": duplicate,
+            "ignored": ignored,
+        },
+        status_code=202,
+    )
