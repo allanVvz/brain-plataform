@@ -19,12 +19,14 @@ describe("explicit client portal API context", () => {
     await api.portalLeads("aurora");
     await api.portalConversations("aurora");
     await api.portalConversationMessages("aurora", 42);
+    await api.portalKnowledgeChatContext("aurora", 42, "lavagem");
     await api.portalPipeline("aurora");
 
     expect(calls).toEqual([
       "/api-brain/portal/leads?persona_slug=aurora&limit=500",
       "/api-brain/portal/conversations?persona_slug=aurora",
       "/api-brain/portal/conversations/42/messages?persona_slug=aurora",
+      "/api-brain/portal/knowledge/chat-context?persona_slug=aurora&lead_ref=42&limit=12&q=lavagem",
       "/api-brain/portal/pipeline?persona_slug=aurora",
     ]);
   });

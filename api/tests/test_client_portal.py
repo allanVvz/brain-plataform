@@ -23,6 +23,62 @@ def request_for(user: dict, access: list[dict]):
     return SimpleNamespace(state=SimpleNamespace(user=user, persona_access=access))
 
 
+def test_portal_chat_context_reuses_operator_projection_and_persona_scope(monkeypatch):
+    request = request_for(
+        {"id": "u1", "role": "user", "account_type": "client"},
+        [{
+            "persona_id": "p1", "persona_slug": "aurora",
+            "can_view": True, "can_edit": True, "can_manage": False,
+        }],
+    )
+    monkeypatch.setattr(
+        portal.supabase_client,
+        "get_persona",
+        lambda _slug: {"id": "p1", "slug": "aurora"},
+    )
+    monkeypatch.setattr(
+        portal.supabase_client,
+        "get_lead_by_ref",
+        lambda _lead_id: {"id": 42, "persona_id": "p1"},
+    )
+    captured = {}
+    monkeypatch.setattr(
+        portal.knowledge_graph,
+        "get_chat_context",
+        lambda **kwargs: captured.update(kwargs) or {"nodes": [], "edges": []},
+    )
+    monkeypatch.setattr(
+        portal.knowledge_graph,
+        "with_operator_context",
+        lambda context, *, limit: {
+            **context,
+            "operator_context": {
+                "primary": [], "faq_rules": [], "graph_path": [],
+            },
+            "limit": limit,
+        },
+    )
+
+    result = portal.knowledge_chat_context(
+        request,
+        persona_slug="aurora",
+        lead_ref=42,
+        q="lavagem",
+        limit=7,
+    )
+
+    assert captured == {
+        "lead_ref": 42,
+        "persona_id": "p1",
+        "user_text": "lavagem",
+        "limit": 7,
+    }
+    assert result["operator_context"] == {
+        "primary": [], "faq_rules": [], "graph_path": [],
+    }
+    assert result["limit"] == 7
+
+
 def test_password_hash_roundtrip_and_rejects_wrong_password():
     encoded = auth_service.hash_password("a-strong-temporary-password")
     assert "a-strong-temporary-password" not in encoded

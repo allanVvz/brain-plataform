@@ -1453,12 +1453,6 @@ export function MessagesLayout({
   }, [isPortal, portalSlug, selectedId]);
 
   useEffect(() => {
-    if (isPortal) {
-      setKnowledge(null);
-      setKnowledgeLoading(false);
-      setKnowledgeError(null);
-      return;
-    }
     if (!selectedId || !selectedLead) {
       setKnowledge((current) => (current !== null ? null : current));
       setKnowledgeLoading(false);
@@ -1471,7 +1465,19 @@ export function MessagesLayout({
 
     setKnowledgeLoading(true);
     setKnowledgeError(null);
-    api.knowledgeChatContext(selectedId, lastClientText || selectedLeadInterest, selectedLeadPersonaId)
+    (
+      isPortal
+        ? api.portalKnowledgeChatContext(
+            portalSlug!,
+            selectedId,
+            lastClientText || selectedLeadInterest,
+          )
+        : api.knowledgeChatContext(
+            selectedId,
+            lastClientText || selectedLeadInterest,
+            selectedLeadPersonaId,
+          )
+    )
       .then((ctx) => {
         if (cancelled || loadKnowledgeRequestRef.current !== requestId || selectedIdRef.current !== selectedId) return;
         setKnowledge(ctx);
@@ -1486,7 +1492,7 @@ export function MessagesLayout({
         setKnowledgeLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isPortal, selectedId, selectedLead?.id, lastClientText, selectedLeadInterest, selectedLeadPersonaId]);
+  }, [isPortal, portalSlug, selectedId, selectedLead?.id, lastClientText, selectedLeadInterest, selectedLeadPersonaId]);
 
   const refreshSelectedLead = useCallback(async (id: number) => {
     try {
@@ -1930,7 +1936,7 @@ export function MessagesLayout({
       </div>
 
       {/* ── Right: Knowledge sidebar ────────────────────────────────────── */}
-      {!isPortal && <aside
+      <aside
         className="knowledge-panel w-80 shrink-0 flex flex-col overflow-hidden rounded-r-xl"
         style={{
           border: "1px solid rgba(20,20,40,0.08)",
@@ -1958,7 +1964,7 @@ export function MessagesLayout({
         <div className="flex-1 overflow-hidden">
           <KnowledgeSidebar ctx={knowledge} loading={knowledgeLoading} leadSelected={!!selectedLead} />
         </div>
-      </aside>}
+      </aside>
     </div>
   );
 }

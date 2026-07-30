@@ -19,6 +19,7 @@ from services import (
     agents_service,
     auth_service,
     event_emitter,
+    knowledge_graph,
     lead_qualification,
     secret_store,
     supabase_client,
@@ -175,6 +176,26 @@ def conversation_messages(lead_id: int, request: Request, persona_slug: str = Qu
     persona = _persona(persona_slug, request)
     _lead(lead_id, persona["id"])
     return supabase_client.get_messages(str(lead_id), limit=500)
+
+
+@router.get("/knowledge/chat-context")
+def knowledge_chat_context(
+    request: Request,
+    persona_slug: str = Query(...),
+    lead_ref: int = Query(...),
+    q: str | None = Query(None),
+    limit: int = Query(12, ge=1, le=50),
+):
+    """Expose the operator evidence inside the authorized client portal."""
+    persona = _persona(persona_slug, request)
+    _lead(lead_ref, persona["id"])
+    context = knowledge_graph.get_chat_context(
+        lead_ref=lead_ref,
+        persona_id=persona["id"],
+        user_text=q,
+        limit=limit,
+    )
+    return knowledge_graph.with_operator_context(context, limit=limit)
 
 
 @router.post("/messages", status_code=202)

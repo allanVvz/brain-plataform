@@ -243,6 +243,14 @@ export const api = {
     req<any[]>(`/portal/conversations?${personaQuery(slug)}`),
   portalConversationMessages: (slug: string, leadRef: number) =>
     req<any[]>(`/portal/conversations/${leadRef}/messages?${personaQuery(slug)}`),
+  portalKnowledgeChatContext: (slug: string, leadRef: number, q?: string, limit = 12) => {
+    const params = new URLSearchParams();
+    params.set("persona_slug", slug);
+    params.set("lead_ref", String(leadRef));
+    params.set("limit", String(limit));
+    if (q) params.set("q", q);
+    return req<any>(`/portal/knowledge/chat-context?${params.toString()}`);
+  },
   portalLeads: (slug: string, limit = 500) =>
     req<any[]>(`/portal/leads?${personaQuery(slug)}&limit=${limit}`),
   portalLead: (slug: string, leadRef: number | string) =>
