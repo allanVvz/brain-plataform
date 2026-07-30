@@ -4,6 +4,11 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Lock, Mail, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
+import {
+  mandatoryPasswordDestination,
+  resolveSessionDestination,
+  safeLocalTarget,
+} from "@/lib/session-routing";
 
 function normalizeError(message: string) {
   if (message.includes("Usuario inativo")) return "Usuario inativo. Fale com um administrador.";
@@ -14,6 +19,7 @@ function normalizeError(message: string) {
 
 export default function LoginPage() {
   const router = useRouter();
+  const [safeTarget, setSafeTarget] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -22,8 +28,17 @@ export default function LoginPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    const requestedTarget = new URLSearchParams(window.location.search).get("next") || "";
+    const target = safeLocalTarget(requestedTarget);
+    setSafeTarget(target);
     api.me()
-      .then(() => router.replace("/"))
+      .then((session) => {
+        const postLogin = resolveSessionDestination(session, target);
+        const destination = session?.user?.must_change_password
+          ? mandatoryPasswordDestination(session, postLogin)
+          : postLogin;
+        router.replace(destination);
+      })
       .catch(() => {});
   }, [router]);
 
@@ -42,8 +57,10 @@ export default function LoginPage() {
         window.localStorage.removeItem("ai-brain-persona-slug");
         window.localStorage.removeItem("ai-brain-persona-id");
       }
-      router.replace("/");
-      router.refresh();
+      const postLogin = resolveSessionDestination(session, safeTarget);
+      router.replace(session?.user?.must_change_password
+        ? mandatoryPasswordDestination(session, postLogin)
+        : postLogin);
     } catch (err) {
       setError(normalizeError(err instanceof Error ? err.message : String(err)));
     } finally {

@@ -20,6 +20,13 @@ x-backend-environment: &backend-environment
   META_WHATSAPP_APP_SECRET: ${META_WHATSAPP_APP_SECRET:-}
   META_WHATSAPP_VERIFY_TOKEN: ${META_WHATSAPP_VERIFY_TOKEN:-}
   META_WHATSAPP_ALLOW_UNSIGNED_LOCAL: ${META_WHATSAPP_ALLOW_UNSIGNED_LOCAL:-false}
+  EVOLUTION_ENABLED: ${EVOLUTION_ENABLED:-false}
+  EVOLUTION_API_URL: ${EVOLUTION_API_URL:-http://evolution-api:8080}
+  EVOLUTION_API_VERSION: ${EVOLUTION_API_VERSION:-2.3.7}
+  EVOLUTION_AUTHENTICATION_API_KEY: ${EVOLUTION_AUTHENTICATION_API_KEY:-}
+  EVOLUTION_WEBHOOK_HMAC_SECRET: ${EVOLUTION_WEBHOOK_HMAC_SECRET:-}
+  AI_BRAIN_SECRETS_KEY: ${AI_BRAIN_SECRETS_KEY:-}
+  AI_BRAIN_PUBLIC_API_URL: ${AI_BRAIN_PUBLIC_API_URL:-}
   API_INTERNAL_BASE_URL: ${API_INTERNAL_BASE_URL:-http://api:8080}
   AI_BRAIN_COOKIE_SECURE: ${AI_BRAIN_COOKIE_SECURE:-true}
   LOCAL_STORAGE_DIR: /data/local-storage
@@ -57,6 +64,7 @@ services:
       PGUSER: ${POSTGRES_USER:-postgres}
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB:-brain}
+      EVOLUTION_DB_PASSWORD: ${EVOLUTION_DB_PASSWORD:-}
     command:
       - sh
       - -ec
@@ -85,6 +93,20 @@ services:
         GRANT USAGE ON SCHEMA public, storage TO anon, authenticated, service_role;
         GRANT ALL ON SCHEMA public, storage TO service_role;
         SQL
+        if [ -n "$${EVOLUTION_DB_PASSWORD}" ]; then
+          psql -v ON_ERROR_STOP=1 -v evolution_password="$${EVOLUTION_DB_PASSWORD}" <<'SQL'
+        DO $$$$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'evolution') THEN
+            CREATE ROLE evolution LOGIN;
+          END IF;
+        END
+        $$$$;
+        ALTER ROLE evolution WITH LOGIN PASSWORD :'evolution_password';
+        SELECT 'CREATE DATABASE evolution OWNER evolution'
+        WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'evolution')\gexec
+        SQL
+        fi
     depends_on:
       db:
         condition: service_healthy
@@ -337,6 +359,67 @@ services:
     logging: *default-logging
     networks: [backend]
 
+  evolution-redis:
+    image: redis:7.4-alpine
+    command: ["sh", "-ec", "exec redis-server --appendonly yes --requirepass \"$${EVOLUTION_REDIS_PASSWORD}\""]
+    environment:
+      EVOLUTION_REDIS_PASSWORD: ${EVOLUTION_REDIS_PASSWORD:-evolution-disabled}
+    volumes:
+      - evolution-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${EVOLUTION_REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    profiles: ["evolution"]
+    logging: *default-logging
+    networks: [backend]
+
+  evolution-api:
+    image: ${EVOLUTION_API_IMAGE:-evoapicloud/evolution-api@sha256:1bd8afc4a6cf48822e6cf02469aeae7bd35a12a6b616eacd1291926307f4d339}
+    environment:
+      SERVER_URL: http://evolution-api:8080
+      AUTHENTICATION_API_KEY: ${EVOLUTION_AUTHENTICATION_API_KEY:-evolution-disabled}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:-evolution-disabled}@db:5432/evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://:${EVOLUTION_REDIS_PASSWORD:-evolution-disabled}@evolution-redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: brain-evolution
+      CACHE_LOCAL_ENABLED: "false"
+      QRCODE_LIMIT: "30"
+      QRCODE_COLOR: "#198754"
+      CONFIG_SESSION_PHONE_CLIENT: Chrome
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      NODE_EXTRA_CA_CERTS: /usr/local/share/ca-certificates/brain-local.pem
+      DEL_INSTANCE: "false"
+      LOG_LEVEL: WARN
+    volumes:
+      - evolution-instances:/evolution/instances
+      - ${EVOLUTION_CA_BUNDLE_HOST:-./.runtime/evolution/ca.pem}:/usr/local/share/ca-certificates/brain-local.pem:ro
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+      evolution-redis:
+        condition: service_healthy
+    healthcheck:
+      # Evolution 2.3.7 does not expose the health routes added in newer
+      # releases. Probe the authenticated, read-only instance listing instead.
+      test: ["CMD-SHELL", "wget -q --header=\"apikey: $${AUTHENTICATION_API_KEY}\" -O /dev/null http://127.0.0.1:8080/instance/fetchInstances || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 300s
+    restart: unless-stopped
+    profiles: ["evolution"]
+    logging: *default-logging
+    networks: [backend]
+
   wa-validator:
     build:
       context: ./dashboard
@@ -398,6 +481,8 @@ volumes:
   wa-validator-runtime:
   wa-validator-profile:
   wa-validator-artifacts:
+  evolution-redis-data:
+  evolution-instances:
 
 networks:
   backend:

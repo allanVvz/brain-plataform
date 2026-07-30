@@ -223,6 +223,11 @@ def main() -> int:
             print(f"warning: SEED_FILE {seed_path} not found, skipping seed")
 
     finalize_platform_grants(conn)
+    # PostgREST can remain running across an idempotent Compose migration run.
+    # Ensure newly added portal/channel columns become visible immediately.
+    with conn.cursor() as cur:
+        cur.execute("NOTIFY pgrst, 'reload schema'")
+    conn.commit()
 
     with conn.cursor() as cur:
         cur.execute(

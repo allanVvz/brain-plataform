@@ -243,6 +243,21 @@
   --rf-minimap-bg: #0e1118;
 }
 
+/* Client portal is deliberately light, independent from the admin preference. */
+.portal-theme {
+  color-scheme: light;
+  --obs-deep: 244 246 250;
+  --obs-base: 244 246 250;
+  --obs-surface: 255 255 255;
+  --obs-raised: 255 255 255;
+  --obs-text: 15 23 42;
+  --obs-subtle: 71 85 105;
+  --obs-faint: 100 116 139;
+  --scrim-fg: 255 255 255;
+  --border-glass: rgba(15, 23, 42, 0.10);
+  --border-glass-soft: rgba(15, 23, 42, 0.06);
+}
+
 /* Legacy alias for any consumer that still reads --brain-* */
 :root {
   --brain-bg:      var(--body-bg);

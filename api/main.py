@@ -17,7 +17,7 @@ load_dotenv()
 configure_trust_store()
 
 from middleware.auth import auth_middleware
-from routes import auth, health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, graph_documents, marketing, audiences, assets, menu, qa_contract, public_site_formats, whatsapp, conversations
+from routes import auth, health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, graph_documents, marketing, audiences, assets, menu, qa_contract, public_site_formats, whatsapp, conversations, access, portal, evolution_webhook
 from workers.flow_validator_worker import FlowValidatorWorker
 from workers.n8n_mirror_worker import N8nMirrorWorker
 from workers.health_check_worker import HealthCheckWorker
@@ -36,6 +36,9 @@ async def lifespan(app: FastAPI):
         logger.error(msg)
         raise RuntimeError(msg)
     logger.info("Backend env validation OK.")
+    from services import supabase_client
+    supabase_client.assert_client_portal_schema()
+    logger.info("Client portal schema validation OK (migrations 061/062).")
     env = get_backend_env()
     tasks: list[asyncio.Task] = []
     if env["run_embedded_workers"]:
@@ -71,6 +74,9 @@ app.add_middleware(
 app.middleware("http")(auth_middleware)
 
 app.include_router(auth.router)
+app.include_router(access.router)
+app.include_router(portal.router)
+app.include_router(evolution_webhook.router)
 app.include_router(health.router)
 app.include_router(process.router)
 app.include_router(whatsapp.router)

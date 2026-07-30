@@ -47,12 +47,23 @@ jobs:
       - name: Run backend tests
         env:
           ASSET_OCR_BACKEND: mock
+          SUPABASE_URL: http://127.0.0.1:54321
+          SUPABASE_SERVICE_KEY: ci-local-placeholder
+          SUPABASE_RETRY_ATTEMPTS: "0"
+          SUPABASE_HTTP_TIMEOUT_SECONDS: "2"
+          SUPABASE_OFFLINE: "true"
+          KNOWLEDGE_TAXONOMY_OFFLINE: "true"
         run: >-
           python -m pytest -q
           tests/test_production_env.py
           tests/test_public_route_allowlist.py
           tests/test_graph_json_validator.py
           tests/test_approved_faq_publication_contract.py
+          tests/test_aurora_appointment_runtime.py
+          tests/test_seed_aurora_credentials.py
+          tests/test_conversation_runtime.py
+          tests/test_deterministic_sdr.py
+          api/tests/test_client_portal.py
 
       - uses: actions/setup-node@v4
         with:
@@ -71,7 +82,18 @@ jobs:
         shell: bash
         run: |
           cp .env.compose.example .env.ci
-          sed -i 's/api\.example\.invalid/api.example.com/g; s/storage\.example\.invalid/storage.example.com/g; s/ops@example\.invalid/ops@example.com/g; s/dashboard\.example\.invalid/dashboard.example.com/g' .env.ci
+          sed -i 's|^ENVIRONMENT=.*|ENVIRONMENT=production|' .env.ci
+          sed -i 's|^API_DOMAIN=.*|API_DOMAIN=api.example.com|' .env.ci
+          sed -i 's|^STORAGE_DOMAIN=.*|STORAGE_DOMAIN=storage.example.com|' .env.ci
+          sed -i 's|^N8N_DOMAIN=.*|N8N_DOMAIN=n8n.example.com|' .env.ci
+          sed -i 's|^ACME_EMAIL=.*|ACME_EMAIL=ops@example.com|' .env.ci
+          sed -i 's|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://storage.example.com|' .env.ci
+          sed -i 's|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=https://dashboard.example.com|' .env.ci
+          sed -i 's|^AI_BRAIN_COOKIE_SECURE=.*|AI_BRAIN_COOKIE_SECURE=true|' .env.ci
+          sed -i 's|^N8N_PROTOCOL=.*|N8N_PROTOCOL=https|' .env.ci
+          sed -i 's|^N8N_EDITOR_BASE_URL=.*|N8N_EDITOR_BASE_URL=https://n8n.example.com|' .env.ci
+          sed -i 's|^N8N_WEBHOOK_URL=.*|N8N_WEBHOOK_URL=https://n8n.example.com/|' .env.ci
+          sed -i 's|^N8N_SECURE_COOKIE=.*|N8N_SECURE_COOKIE=true|' .env.ci
           sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(python -c 'import secrets; print(secrets.token_urlsafe(48))')|" .env.ci
           sed -i "s|^AI_BRAIN_AUTH_SECRET=.*|AI_BRAIN_AUTH_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(48))')|" .env.ci
           sed -i "s|^AI_BRAIN_WEBHOOK_TOKEN=.*|AI_BRAIN_WEBHOOK_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(48))')|" .env.ci
@@ -82,6 +104,14 @@ jobs:
             echo 'Development value found in rendered production Compose' >&2
             exit 1
           fi
+          for key in EVOLUTION_AUTHENTICATION_API_KEY EVOLUTION_DB_PASSWORD EVOLUTION_REDIS_PASSWORD EVOLUTION_WEBHOOK_HMAC_SECRET AI_BRAIN_SECRETS_KEY; do
+            value="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+            sed -i "s|^${key}=.*|${key}=${value}|" .env.ci
+          done
+          sed -i 's|^EVOLUTION_ENABLED=.*|EVOLUTION_ENABLED=true|' .env.ci
+          sed -i 's|^AI_BRAIN_PUBLIC_API_URL=.*|AI_BRAIN_PUBLIC_API_URL=https://api.example.com|' .env.ci
+          python ops/vps/validate_env.py .env.ci
+          IMAGE_TAG=${GITHUB_SHA} docker compose --env-file .env.ci --profile evolution config --quiet
 
   publish:
     if: github.event_name == 'push' || inputs.action != 'rollback'

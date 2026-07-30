@@ -650,6 +650,24 @@ def import_graph_json(
         graph_nodes_by_doc_id[node.id] = graph_node
         supabase_client.update_knowledge_item(item["id"], {"metadata": {**item_payload["metadata"], "knowledge_node_id": graph_node["id"]}})
 
+    # Updating a later product/copy intentionally marks existing FAQs as
+    # pending_regeneration. During a canonical all-at-once publication those
+    # later nodes belong to the same validated document, so restore the
+    # document's approved FAQ status only after every node has been projected
+    # and immediately before FAQ -> Embedded edges are enforced.
+    for node in graph_json.nodes:
+        if node.node_type != "faq" or _node_status(node) != "approved":
+            continue
+        projected = graph_nodes_by_doc_id.get(node.id)
+        if projected and projected.get("id"):
+            refreshed = supabase_client.update_knowledge_node(
+                projected["id"],
+                {"status": "approved"},
+                mark_related_faqs=False,
+            )
+            if refreshed:
+                graph_nodes_by_doc_id[node.id] = {**projected, **refreshed}
+
     edge_ids: list[str] = []
     for edge in graph_json.edges:
         source_node = graph_nodes_by_doc_id.get(edge.source)

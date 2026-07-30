@@ -61,6 +61,10 @@ def test_deterministic_worker_uses_canonical_pipeline_without_n8n(monkeypatch):
         lambda _ref: {"id": 44, "ai_paused": False},
     )
     monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_messages",
+        lambda _lead_ref, limit=20: [],
+    )
+    monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.supabase_client.get_active_workflow_binding_by_phone_number_id",
         lambda _phone: {
             "persona_id": "persona-1",

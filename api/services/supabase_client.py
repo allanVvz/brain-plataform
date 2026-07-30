@@ -35,6 +35,15 @@ def _supabase_ssl_verify() -> bool:
 def get_client() -> Client:
     global _client
     if _client is None:
+        if (os.environ.get("SUPABASE_OFFLINE") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            raise RuntimeError(
+                "Supabase access is disabled for this deterministic test run"
+            )
         timeout_seconds = float(os.environ.get("SUPABASE_HTTP_TIMEOUT_SECONDS") or "120")
         http_client = httpx.Client(verify=_supabase_ssl_verify(), timeout=timeout_seconds)
         _client = create_client(
@@ -916,6 +925,7 @@ def insert_message(data: dict) -> None:
         "sender_id": data.get("sender_id") or data.get("message_id"),
         "whatsapp_phone_number_id": data.get("whatsapp_phone_number_id"),
         "external_message_id": data.get("external_message_id"),
+        "channel_binding_id": data.get("channel_binding_id"),
         "correlation_id": data.get("correlation_id"),
         "metadata": data.get("metadata"),
         "created_at": data.get("created_at"),
@@ -926,6 +936,10 @@ def insert_message(data: dict) -> None:
         return
     except Exception as exc:
         text = str(exc)
+        if data.get("external_message_id") and any(
+            marker in text.lower() for marker in ("duplicate", "unique", "23505")
+        ):
+            return
         current_column_mismatch = any(
             marker in text
             for marker in (
@@ -1253,6 +1267,35 @@ def ensure_embedded_node(persona_id: str) -> Optional[dict]:
     """Ensure a protected Embedded/Golden Dataset destination node exists for a persona."""
     if not persona_id:
         return None
+    try:
+        existing = (
+            get_client()
+            .table("knowledge_nodes")
+            .select("*")
+            .eq("persona_id", persona_id)
+            .in_("node_type", ["embed", "embedded"])
+            .limit(100)
+            .execute()
+            .data
+            or []
+        )
+        active = [
+            row
+            for row in existing
+            if (row.get("metadata") or {}).get("active", True) is not False
+        ]
+        if active:
+            active.sort(
+                key=lambda row: (
+                    (row.get("metadata") or {}).get("graph_json_import") is True,
+                    row.get("slug") in {"embedded", "embedded-default"},
+                ),
+                reverse=True,
+            )
+            return active[0]
+    except Exception as exc:
+        if not _kg_unavailable(exc):
+            raise
     return upsert_knowledge_node({
         "persona_id": persona_id,
         "node_type": "embed",
@@ -1263,6 +1306,10 @@ def ensure_embedded_node(persona_id: str) -> Optional[dict]:
         "metadata": {
             "protected": True,
             "system_node": True,
+            # The protected output sink has no primary Persona edge. This also
+            # keeps the legacy primary-edge trigger from manufacturing an
+            # invalid Persona -> Embed connection on older installations.
+            "graph_json_id": "protected-output-sink",
             "rag_index": "default",
             "open_url": "/kb",
         },
@@ -3800,6 +3847,24 @@ def get_workflow_bindings(persona_id: Optional[str] = None) -> list:
     return _q(q)
 
 
+def assert_client_portal_schema() -> None:
+    """Fail API startup when the Compose migration contract is incomplete."""
+    checks = (
+        ("app_users", "id,account_type,must_change_password"),
+        ("workflow_bindings", "id,channel,provider,provider_instance_key,provider_secret_ciphertext,connection_status"),
+        ("leads", "id,channel_binding_id,external_contact_id"),
+        ("messages", "id,channel_binding_id"),
+        ("lead_buffer", "id,channel_binding_id"),
+    )
+    for table, fields in checks:
+        try:
+            get_client().table(table).select(fields).limit(1).execute()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Client portal schema is incomplete at {table}; apply migrations 061/062 with Docker Compose."
+            ) from exc
+
+
 def get_default_whatsapp_phone_number_id(persona_id: Optional[str] = None) -> Optional[str]:
     if not persona_id:
         return None
@@ -3818,6 +3883,67 @@ def get_active_workflow_binding_by_phone_number_id(phone_number_id: str) -> Opti
         get_client().table("workflow_bindings").select("*")
         .eq("whatsapp_phone_number_id", phone_number_id).eq("active", True).maybe_single()
     )
+
+
+def get_workflow_binding_by_id(binding_id: Optional[str]) -> Optional[dict]:
+    if not binding_id:
+        return None
+    return _one(
+        get_client().table("workflow_bindings").select("*")
+        .eq("id", binding_id).maybe_single()
+    )
+
+
+def update_workflow_binding(binding_id: str, payload: dict) -> dict:
+    from datetime import datetime, timezone
+    update = {**payload, "updated_at": datetime.now(timezone.utc).isoformat()}
+    rows = (
+        get_client().table("workflow_bindings").update(update)
+        .eq("id", binding_id).execute().data or []
+    )
+    return rows[0] if rows else {}
+
+
+def ensure_channel_lead(
+    *,
+    persona_id: str,
+    channel_binding_id: str,
+    external_contact_id: str,
+    display_name: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> dict:
+    existing = _one(
+        get_client().table("leads").select("*")
+        .eq("persona_id", persona_id)
+        .eq("channel_binding_id", channel_binding_id)
+        .eq("external_contact_id", external_contact_id)
+        .maybe_single()
+    )
+    if existing:
+        return existing
+    payload = {
+        "lead_id": f"channel:{channel_binding_id}:{external_contact_id}",
+        "persona_id": persona_id,
+        "channel_binding_id": channel_binding_id,
+        "external_contact_id": external_contact_id,
+        "nome": display_name,
+        "stage": "novo",
+        "origem": "whatsapp",
+        "metadata": metadata or {},
+    }
+    try:
+        rows = get_client().table("leads").insert(payload).execute().data or []
+        return rows[0] if rows else payload
+    except Exception as exc:
+        if not any(token in str(exc).lower() for token in ("duplicate", "unique", "23505")):
+            raise
+        return _one(
+            get_client().table("leads").select("*")
+            .eq("persona_id", persona_id)
+            .eq("channel_binding_id", channel_binding_id)
+            .eq("external_contact_id", external_contact_id)
+            .maybe_single()
+        ) or {}
 
 
 def debounce_available_at(seconds: int = 3) -> str:
@@ -3877,6 +4003,31 @@ def update_whatsapp_delivery(wamid: str, status: str, errors: list | None = None
         _execute_with_retry(get_client().table("messages").update({"status": status}).eq("external_message_id", wamid))
     except Exception:
         _execute_with_retry(get_client().table("messages").update({"status": status}).eq("sender_id", wamid))
+
+
+def update_whatsapp_delivery_by_binding(
+    binding_id: str,
+    external_message_id: str,
+    status: str,
+) -> None:
+    if not binding_id or not external_message_id:
+        return
+    normalized = {
+        "PENDING": "pending_send", "SERVER_ACK": "sent", "DELIVERY_ACK": "delivered",
+        "READ": "read", "PLAYED": "read", "ERROR": "failed",
+        "pending": "pending_send", "pending_send": "pending_send",
+        "sent": "sent", "delivered": "delivered", "read": "read", "failed": "failed",
+    }.get(str(status), "sent")
+    _execute_with_retry(
+        get_client().table("lead_buffer").update({"status": normalized})
+        .eq("channel_binding_id", binding_id)
+        .eq("external_message_id", external_message_id)
+    )
+    _execute_with_retry(
+        get_client().table("messages").update({"status": normalized})
+        .eq("channel_binding_id", binding_id)
+        .eq("external_message_id", external_message_id)
+    )
 
 
 def complete_whatsapp_outbound(buffer_id: str | None, wamid: str | None, status: str, error: str | None, execution_id: str | None) -> None:

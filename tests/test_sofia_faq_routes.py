@@ -99,32 +99,55 @@ def test_handle_generation_needs_node_when_unresolved(monkeypatch):
 
 def test_faq_accept_persists_as_pending_and_connects_parent(monkeypatch):
     from routes import qa_contract
+    from schemas.graph_json_v2 import GraphJson
 
     monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
     monkeypatch.setattr(
         qa_contract, "_resolve_sofia_persona", lambda request, ref: {"id": "per1", "slug": "allanvvz"}
     )
+    graph = GraphJson.model_validate({
+        "graph_id": "allanvvz-test",
+        "tenant": "qa",
+        "persona_slug": "allanvvz",
+        "status": "published",
+        "nodes": [
+            {
+                "id": "persona",
+                "node_type": "persona",
+                "slug": "allanvvz",
+                "label": "AllanVvz",
+                "data": {"status": "validated", "source": "test"},
+            },
+            {
+                "id": "p1",
+                "node_type": "product",
+                "slug": "produto",
+                "label": "Produto",
+                "parent_id": "persona",
+                "data": {"status": "validated", "source": "test"},
+            },
+        ],
+        "edges": [
+            {
+                "id": "persona-product",
+                "source": "persona",
+                "target": "p1",
+                "relation": "contains",
+                "primary_tree": True,
+            }
+        ],
+    })
     monkeypatch.setattr(
-        qa_contract.supabase_client,
-        "get_knowledge_node",
-        lambda nid: {"id": "p1", "node_type": "product", "metadata": {}},
+        qa_contract.graph_json_v2_store,
+        "load_current",
+        lambda slug: (7, graph),
     )
-
-    persisted: list[dict] = []
-
-    def fake_persist(**kwargs):
-        persisted.append(kwargs)
-        return {"id": f"ki-{len(persisted)}", "status": "pending", "metadata": {"knowledge_node_id": f"gn{len(persisted)}"}}
-
-    edges: list[tuple] = []
-
-    monkeypatch.setattr(qa_contract.knowledge_lifecycle, "persist_pending_knowledge_item", fake_persist)
+    captured = {}
     monkeypatch.setattr(
-        qa_contract.supabase_client,
-        "upsert_knowledge_edge",
-        lambda s, t, rt, **k: edges.append((s, t, rt)) or {"id": f"ge-{len(edges)}"},
+        qa_contract.graph_document_publisher,
+        "publish",
+        lambda **kwargs: captured.update(kwargs) or {"ok": True, "version": 8},
     )
-    monkeypatch.setattr(qa_contract.supabase_client, "update_knowledge_node", lambda *a, **k: None)
 
     body = qa_contract.SofiaFaqAcceptBody(
         persona_slug="allanvvz",
@@ -140,8 +163,14 @@ def test_faq_accept_persists_as_pending_and_connects_parent(monkeypatch):
 
     assert result["ok"] is True
     assert len(result["created"]) == 1
-    assert result["created"][0]["status"] == "pending"
-    assert persisted[0]["content_type"] == "faq"
-    assert persisted[0]["metadata"]["source_tool"] == "adaptar_faqs_universais_ao_grafo"
-    assert persisted[0]["metadata"]["faq_generation_count"] == 4
-    assert edges == [("p1", "gn1", "product_has_faq")]
+    assert result["created"][0]["status"] == "pending_validation"
+    next_graph = captured["graph"]
+    faq = next(node for node in next_graph.nodes if node.node_type == "faq")
+    assert faq.data["source"] == "adaptar_faqs_universais_ao_grafo"
+    assert faq.data["question_count"] == 1
+    assert faq.data["source_node_id"] == "p1"
+    assert any(
+        edge.source == "p1" and edge.target == faq.id and edge.primary_tree
+        for edge in next_graph.edges
+    )
+    assert captured["expected_version"] == 7

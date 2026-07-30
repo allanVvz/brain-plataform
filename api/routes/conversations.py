@@ -47,6 +47,7 @@ class CommitRequest(StrictModel):
     response: AgentResponse
     correlation_id: str
     phone_number_id: str | None = None
+    channel_binding_id: str | None = None
     inbound_buffer_id: str | None = None
 
 

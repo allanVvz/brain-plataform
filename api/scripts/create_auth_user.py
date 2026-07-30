@@ -21,6 +21,8 @@ def upsert_user(args: argparse.Namespace) -> dict:
         "password_hash": auth_service.hash_password(args.password),
         "name": args.name,
         "role": args.role,
+        "account_type": args.account_type,
+        "must_change_password": args.must_change_password,
         "is_active": not args.inactive,
     }
     result = client.table("app_users").upsert(payload, on_conflict="email").execute()
@@ -63,6 +65,8 @@ def main() -> None:
     parser.add_argument("--password", default=os.environ.get("AI_BRAIN_SEED_ADMIN_PASSWORD"))
     parser.add_argument("--name", default=os.environ.get("AI_BRAIN_SEED_ADMIN_NAME") or "Brain AI Admin")
     parser.add_argument("--role", choices=["admin", "user", "viewer", "operator"], default=os.environ.get("AI_BRAIN_SEED_ADMIN_ROLE") or "admin")
+    parser.add_argument("--account-type", choices=["internal", "agency", "client"], default="internal")
+    parser.add_argument("--must-change-password", action="store_true")
     parser.add_argument("--persona", action="append", default=[], help="Persona slug to grant. Repeat for multiple personas.")
     parser.add_argument("--can-edit", action="store_true")
     parser.add_argument("--can-manage", action="store_true")

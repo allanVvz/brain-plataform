@@ -36,6 +36,12 @@ class Product:
     price: float | None = None
     currency: str = "BRL"
     status: str = "active"
+    duration_minutes: int | None = None
+    capacity: int = 1
+    price_qualifier: str = "fixed"
+    required_fields: tuple[str, ...] = ()
+    confirmation_required: bool = False
+    booking_provider: str | None = None
 
     @property
     def terms(self) -> tuple[str, ...]:
@@ -293,6 +299,33 @@ def catalog_from_graph(graph: Any) -> Catalog:
             price=unit_price,
             currency=currency,
             status="active",
+            duration_minutes=(
+                int((data.get("booking") or {}).get("duration_minutes"))
+                if (data.get("booking") or {}).get("duration_minutes") is not None
+                else None
+            ),
+            capacity=int((data.get("booking") or {}).get("capacity") or 1),
+            price_qualifier=str(
+                data.get("price_qualifier")
+                or metadata.get("price_qualifier")
+                or "fixed"
+            ),
+            required_fields=tuple(
+                str(value)
+                for value in (
+                    (data.get("booking") or {}).get("required_fields")
+                    or metadata.get("required_fields")
+                    or []
+                )
+            ),
+            confirmation_required=bool(
+                (data.get("booking") or {}).get("confirmation_required", False)
+            ),
+            booking_provider=(
+                str((data.get("booking") or {}).get("provider"))
+                if (data.get("booking") or {}).get("provider")
+                else None
+            ),
         )
         catalog.products.append(product)
         catalog.categories.setdefault(category, []).append(product.slug)
@@ -363,6 +396,22 @@ class DeterministicSDR:
         category = self.catalog.find_category(text)
         if category and _is_generic_category_query(text, category):
             product = None
+        # Addresses frequently contain catalog tokens or numbers (for example
+        # "Rua QA, 100"). While collecting an address, a syntactically clear
+        # address wins over a fuzzy product match. Explicit category/product
+        # interruptions without address syntax still work.
+        address_candidate = _address(text)
+        address_prefix = re.match(
+            r"^(rua|avenida|av|travessa|rodovia|estrada)\b",
+            normalized,
+        )
+        if (
+            state.get("conversation_state") == "awaiting_address"
+            and address_candidate
+            and (address_candidate.get("number") or address_prefix)
+        ):
+            product = None
+            category = None
         # Only concise references may inherit a product from cart/history.
         address_number = (
             state.get("conversation_state") == "awaiting_address"

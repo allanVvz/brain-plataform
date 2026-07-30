@@ -7,5 +7,5 @@ if [[ -z "$TAG" && -f "$STATE_DIR/previous-tag" ]]; then
   TAG="$(tr -d '\r\n' < "$STATE_DIR/previous-tag")"
 fi
 [[ -n "$TAG" ]] || { echo "No rollback tag supplied or recorded." >&2; exit 1; }
+export ALLOW_LOCAL_IMAGES=true
 exec "$ROOT_DIR/ops/vps/deploy.sh" "$TAG"
-

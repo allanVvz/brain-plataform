@@ -908,11 +908,12 @@ def publish_approved_node(
             },
         ) or snapshot
         embedded_node = supabase_client.ensure_embedded_node(persona_id)
-        if embedded_node and embedded_node.get("id"):
+        embedded_edge = _active_faq_embedded_edge(source_node["id"], persona_id)
+        if not embedded_edge and embedded_node and embedded_node.get("id"):
             embedded_edge = supabase_client.upsert_knowledge_edge(
                 source_node_id=source_node["id"],
                 target_node_id=embedded_node["id"],
-                relation_type="manual",
+                relation_type="visible_to_agent",
                 persona_id=persona_id,
                 weight=1.0,
                 metadata={
@@ -943,7 +944,13 @@ def publish_approved_node(
         "snapshot_status": snapshot.get("status"),
         "n8n_ready": bool(chunks) if content_type == "faq" else False,
     }
-    supabase_client.update_knowledge_node(source_node["id"], {"metadata": node_meta, "status": "validated"})
+    supabase_client.update_knowledge_node(
+        source_node["id"],
+        {
+            "metadata": node_meta,
+            "status": "approved" if content_type == "faq" else "validated",
+        },
+    )
     if source_item and source_item.get("id"):
         supabase_client.update_knowledge_item(source_item["id"], {
             "metadata": {

@@ -28,6 +28,8 @@ ADMIN_TOKEN_ENV_NAMES = ("QA", "qa", "preview", "PREVIEW", "test", "TEST")
 
 
 def is_public_path(path: str) -> bool:
+    if path.startswith("/webhooks/evolution/"):
+        return True
     if path in PUBLIC_EXACT_PATHS:
         return True
     # Only the public site contract is anonymous. Nested admin endpoints under
@@ -93,15 +95,6 @@ async def auth_middleware(request: Request, call_next):
     if not payload:
         return JSONResponse({"detail": "Sessao obrigatoria."}, status_code=401)
 
-    fallback_user = {
-        "id": payload.get("sub") or "",
-        "email": payload.get("email"),
-        "username": payload.get("email"),
-        "name": payload.get("email") or payload.get("sub") or "Sessao ativa",
-        "role": payload.get("role") or "user",
-        "is_active": True,
-    }
-
     try:
         user = auth_service.get_user_by_id(payload.get("sub") or "")
     except Exception as exc:
@@ -109,12 +102,12 @@ async def auth_middleware(request: Request, call_next):
             from services import sre_logger
             sre_logger.warn(
                 "auth_middleware",
-                f"falling back to signed session payload: {exc}",
+                f"session revalidation unavailable: {exc}",
                 exc,
             )
         except Exception:
             pass
-        user = fallback_user if fallback_user["id"] else None
+        return JSONResponse({"detail": "Auth backend unavailable."}, status_code=503)
 
     if not user or not user.get("is_active", True):
         return JSONResponse({"detail": "Sessao invalida."}, status_code=401)
@@ -136,4 +129,21 @@ async def auth_middleware(request: Request, call_next):
             except Exception:
                 pass
             request.state.persona_access = []
+
+    account_type = user.get("account_type") or "internal"
+    path = request.url.path
+    if account_type == "client":
+        allowed = (
+            path in {"/auth/me", "/auth/logout", "/auth/change-password"}
+            or path.startswith("/portal/")
+        )
+        if not allowed:
+            return JSONResponse({"detail": "Acesso negado."}, status_code=403)
+        if user.get("must_change_password") and path not in {
+            "/auth/me", "/auth/logout", "/auth/change-password",
+        }:
+            return JSONResponse(
+                {"detail": "Troca de senha obrigatoria."},
+                status_code=403,
+            )
     return await call_next(request)

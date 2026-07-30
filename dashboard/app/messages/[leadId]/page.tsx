@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { MessagesLayout } from "../page";
+import { MessagesLayout } from "../MessagesLayout";
 
 export default function FocusedMessagesPage({ params }: { params: Promise<{ leadId: string }> }) {
   const { leadId } = use(params);

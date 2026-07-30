@@ -35,7 +35,7 @@ def _plan() -> dict:
             {"content_type": "faq", "title": "FAQ Radar", "slug": "faq-radar",
              "content": "## Como comprar?\nFale com a marca.",
              "metadata": {"parent_slug": "copy-radar", "generate_via": "branch", "question_count": 3}},
-            # Non-canonical type must be dropped from the canonical tree.
+            # Tone is a first-class canonical category and remains in the tree.
             {"content_type": "tone", "title": "Tom de voz", "slug": "tom",
              "content": "Tom amigável.", "metadata": {"parent_slug": "vz-lupas"}},
         ],
@@ -47,10 +47,10 @@ def test_converter_produces_valid_canonical_graph():
     graph = normalized_plan_to_graph_json(_plan(), {"persona_name": "AllanVvz"})
     assert graph.schema_version == "2.0"
     assert graph.persona_slug == "allanvvz"
-    # 1 persona + 7 canonical entries (tone dropped).
-    assert len(graph.nodes) == 8
+    # 1 persona + 8 canonical entries.
+    assert len(graph.nodes) == 9
     types = {n.node_type for n in graph.nodes}
-    assert "tone" not in types
+    assert "tone" in types
     # Every non-persona node has a parent and a primary edge.
     non_persona = [n for n in graph.nodes if n.node_type != "persona"]
     assert all(n.parent_id for n in non_persona)

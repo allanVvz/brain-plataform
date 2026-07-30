@@ -1,0 +1,597 @@
+from __future__ import annotations
+
+import json
+import hashlib
+import hmac
+import os
+import time
+import re
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Iterator
+
+import httpx
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
+
+from services import agents_service, auth_service, event_emitter, secret_store, supabase_client
+from services.whatsapp_providers import get_provider
+
+router = APIRouter(prefix="/portal", tags=["portal"])
+
+PIPELINE_STAGES = [
+    ("novo", "Novo"),
+    ("nao_qualificado", "Nao qualificado"),
+    ("contatado", "Contatado"),
+    ("engajado", "Engajado"),
+    ("qualificado", "Qualificado"),
+    ("oportunidade", "Oportunidade"),
+    ("fechado", "Fechado"),
+    ("perdido", "Perdido"),
+]
+
+
+class LeadPatchBody(BaseModel):
+    stage: str | None = None
+    nome: str | None = None
+    email: str | None = None
+    cidade: str | None = None
+    cep: str | None = None
+    notes: str | None = None
+    tags: list[str] | None = None
+
+
+class AutomationBody(BaseModel):
+    mode: str
+
+
+class WhatsAppProviderBody(BaseModel):
+    provider: str
+    confirmed: bool = False
+
+
+def _persona(slug: str, request: Request, capability: str = "view") -> dict[str, Any]:
+    persona = supabase_client.get_persona(slug)
+    if not persona:
+        raise HTTPException(404, "Persona nao encontrada.")
+    auth_service.assert_persona_capability(
+        request, capability, persona_id=persona["id"], persona_slug=slug
+    )
+    return persona
+
+
+def _lead(lead_id: int, persona_id: str) -> dict[str, Any]:
+    row = supabase_client.get_lead_by_ref(lead_id) or {}
+    if not row or row.get("persona_id") != persona_id:
+        raise HTTPException(404, "Lead nao encontrado.")
+    return row
+
+
+def _binding_for_persona(persona_id: str) -> dict[str, Any] | None:
+    return next(
+        (
+            row for row in supabase_client.get_workflow_bindings(persona_id)
+            if row.get("active") and row.get("channel") == "whatsapp"
+        ),
+        None,
+    )
+
+
+def _whatsapp_bindings(persona_id: str) -> list[dict[str, Any]]:
+    return [row for row in supabase_client.get_workflow_bindings(persona_id) if row.get("channel") == "whatsapp"]
+
+
+def _evolution_webhook_target(
+    binding_id: str,
+    public_base: str,
+) -> tuple[str, str]:
+    secret = (
+        os.environ.get("EVOLUTION_WEBHOOK_HMAC_SECRET")
+        or os.environ.get("AI_BRAIN_AUTH_SECRET")
+        or ""
+    )
+    if not secret:
+        raise HTTPException(503, "Segredo do webhook Evolution nao configurado.")
+    callback_token = auth_service._b64encode(
+        hmac.new(secret.encode(), binding_id.encode(), hashlib.sha256).digest()
+    )
+    return (
+        f"{public_base.rstrip('/')}/webhooks/evolution/{binding_id}",
+        callback_token,
+    )
+
+
+@router.get("/conversations")
+def conversations(request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request)
+    return supabase_client.get_conversations(hours=720, persona_id=persona["id"])
+
+
+@router.get("/client-pages")
+def client_pages(request: Request):
+    """Return every authorized persona, including channel-onboarding states."""
+    user = auth_service.current_user(request)
+    access_rows = auth_service.allowed_access(request)
+    pages = []
+    for persona in auth_service.filter_personas_for_user(
+        user, auth_service.get_auth_personas(), access_rows
+    ):
+        binding = _binding_for_persona(persona["id"])
+        capability = (
+            {
+                "capabilities": {
+                    "view": True,
+                    "edit": True,
+                    "manage": True,
+                    "manage_members": True,
+                }
+            }
+            if auth_service.is_admin(user)
+            else auth_service.assert_persona_capability(
+                request,
+                "view",
+                persona_id=persona["id"],
+                persona_slug=persona["slug"],
+            )
+        )
+        pages.append({
+            "slug": persona["slug"], "name": persona["name"],
+            "url": f"/clientes/{persona['slug']}/mensagens",
+            "capabilities": capability.get("capabilities") or {},
+            "channel": {
+                "configured": bool(binding),
+                "provider": (binding or {}).get("provider"),
+                "status": (
+                    (binding or {}).get("connection_status")
+                    or ("connected" if binding and binding.get("active") else "disabled")
+                ),
+            },
+        })
+    return pages
+
+
+@router.get("/conversations/{lead_id}/messages")
+def conversation_messages(lead_id: int, request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request)
+    _lead(lead_id, persona["id"])
+    return supabase_client.get_messages(str(lead_id), limit=500)
+
+
+@router.post("/messages", status_code=202)
+async def send_message(request: Request, persona_slug: str = Query(...)):
+    content_type = request.headers.get("content-type") or ""
+    media: dict[str, Any] | None = None
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        lead_id = int(str(form.get("lead_id") or "0"))
+        text = str(form.get("text") or "").strip()
+        upload = form.get("file")
+        if upload and hasattr(upload, "read"):
+            data = await upload.read()
+            mime = str(getattr(upload, "content_type", "") or "application/octet-stream").lower()
+            filename = re.sub(r"[^A-Za-z0-9._-]+", "-", str(getattr(upload, "filename", "") or "arquivo"))[:120]
+            allowed = (
+                mime.startswith("image/")
+                or mime.startswith("audio/")
+                or mime in {
+                    "application/pdf",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "text/plain",
+                }
+            )
+            if not allowed:
+                raise HTTPException(415, "Tipo de arquivo nao permitido.")
+            if len(data) > 25 * 1024 * 1024:
+                raise HTTPException(413, "Arquivo excede 25 MiB.")
+            if mime == "application/pdf" and not data.startswith(b"%PDF"):
+                raise HTTPException(415, "Arquivo PDF invalido.")
+            if mime.startswith("image/") and not data.startswith(
+                (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF8", b"RIFF")
+            ):
+                raise HTTPException(415, "Imagem invalida.")
+            media = {"data": data, "mime": mime, "filename": filename}
+    else:
+        body = await request.json()
+        lead_id = int(body.get("lead_id") or 0)
+        text = str(body.get("text") or "").strip()
+
+    persona = _persona(persona_slug, request, "edit")
+    lead = _lead(lead_id, persona["id"])
+    if not text and not media:
+        raise HTTPException(400, "Mensagem vazia.")
+    binding_id = lead.get("channel_binding_id")
+    binding = supabase_client.get_workflow_binding_by_id(binding_id) if binding_id else _binding_for_persona(persona["id"])
+    if not binding:
+        raise HTTPException(409, "Canal WhatsApp nao configurado.")
+    if binding.get("connection_status") not in {None, "connected", "open"} and binding.get("provider") == "evolution_baileys":
+        raise HTTPException(409, "Canal WhatsApp desconectado.")
+    message_id = f"portal_{int(time.time() * 1000)}_{lead['id']}"
+    media_metadata = None
+    outbox_media = None
+    if media:
+        bucket = "message-media"
+        if not supabase_client.ensure_bucket(bucket, public=False):
+            raise HTTPException(503, "Storage de mensagens indisponivel.")
+        path = f"{persona['id']}/{lead['id']}/{uuid.uuid4().hex}-{media['filename']}"
+        supabase_client.upload_to_storage(bucket, path, media["data"], media["mime"])
+        media_metadata = {
+            "bucket": bucket, "path": path, "mime": media["mime"],
+            "filename": media["filename"],
+        }
+        outbox_media = dict(media_metadata)
+    supabase_client.insert_message({
+        "lead_ref": lead["id"],
+        "message_id": message_id,
+        "sender_type": "human",
+        "role": "human",
+        "canal": "whatsapp",
+        "texto": text,
+        "direction": "outbound",
+        "status": "pending",
+        "channel_binding_id": binding["id"],
+        "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
+        "metadata": {"source": "portal", "media": media_metadata},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    item = supabase_client.enqueue_whatsapp_message({
+        "persona_id": persona["id"],
+        "lead_ref": lead["id"],
+        "channel_binding_id": binding["id"],
+        "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
+        "direction": "outbound",
+        "payload": {"text": text, "sender_type": "human", "media": outbox_media},
+        "status": "pending_send",
+        "batch_key": f"{persona['id']}:{lead['id']}",
+        "idempotency_key": f"portal:{message_id}",
+        "correlation_id": f"portal:{message_id}",
+    })
+    return {"ok": True, "message_id": message_id, "status": "pending_send", "buffer_id": (item or {}).get("id")}
+
+
+@router.get("/leads")
+def leads(request: Request, persona_slug: str = Query(...), limit: int = Query(500, le=2000)):
+    persona = _persona(persona_slug, request)
+    return supabase_client.get_leads_for_persona_ids([persona["id"]], limit=limit, offset=0)
+
+
+@router.get("/leads/{lead_id}")
+def lead_detail(lead_id: int, request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request)
+    return _lead(lead_id, persona["id"])
+
+
+@router.patch("/leads/{lead_id}")
+def update_lead(lead_id: int, body: LeadPatchBody, request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request, "edit")
+    lead = _lead(lead_id, persona["id"])
+    payload = {key: value for key, value in body.model_dump().items() if value is not None and key not in {"notes", "tags"}}
+    if body.stage and body.stage not in {item[0] for item in PIPELINE_STAGES}:
+        raise HTTPException(400, "Etapa invalida.")
+    if body.notes is not None or body.tags is not None:
+        metadata = dict(lead.get("metadata") or {})
+        portal = dict(metadata.get("portal") or {})
+        if body.notes is not None:
+            portal["notes"] = body.notes
+        if body.tags is not None:
+            portal["tags"] = body.tags
+        metadata["portal"] = portal
+        payload["metadata"] = metadata
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    rows = supabase_client.get_client().table("leads").update(payload).eq("id", lead_id).eq("persona_id", persona["id"]).execute().data or []
+    return rows[0] if rows else {}
+
+
+def _set_ai(lead_id: int, request: Request, persona_slug: str, paused: bool):
+    persona = _persona(persona_slug, request, "edit")
+    lead = _lead(lead_id, persona["id"])
+    ok = agents_service.pause_lead(lead_id) if paused else agents_service.resume_lead(lead_id)
+    if not ok:
+        raise HTTPException(500, "Falha ao atualizar IA.")
+    if not paused:
+        metadata = dict(lead.get("metadata") or {})
+        state = dict(metadata.get("vitoria_state") or {})
+        state.pop("conversation_state", None)
+        state.pop("confirmation_status", None)
+        state["clarification_attempts"] = 0
+        metadata["vitoria_state"] = state
+        supabase_client.update_lead(lead_id, {"metadata": metadata})
+    return {"ok": True, "lead_id": lead_id, "ai_paused": paused}
+
+
+@router.post("/leads/{lead_id}/ai/pause")
+def pause_ai(lead_id: int, request: Request, persona_slug: str = Query(...)):
+    return _set_ai(lead_id, request, persona_slug, True)
+
+
+@router.post("/leads/{lead_id}/ai/resume")
+def resume_ai(lead_id: int, request: Request, persona_slug: str = Query(...)):
+    return _set_ai(lead_id, request, persona_slug, False)
+
+
+@router.post("/leads/{lead_id}/handoff")
+def handoff(lead_id: int, request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request, "edit")
+    _lead(lead_id, persona["id"])
+    supabase_client.handoff_whatsapp_lead(lead_id)
+    return {"ok": True, "lead_id": lead_id, "ai_paused": True, "handoff": True}
+
+
+@router.get("/pipeline")
+def pipeline(request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request)
+    rows = supabase_client.get_leads_for_persona_ids([persona["id"]], limit=2000, offset=0)
+    portal_config = dict((persona.get("config") or {}).get("portal") or {})
+    configured_labels = dict(portal_config.get("stage_labels") or {})
+    conversion_stage = str(portal_config.get("conversion_stage") or "fechado")
+    stages = [
+        {
+            "id": slug,
+            "label": configured_labels.get(slug) or label,
+            "leads": [row for row in rows if (row.get("stage") or "novo") == slug],
+        }
+        for slug, label in PIPELINE_STAGES
+    ]
+    return {
+        "stages": stages,
+        "summary": {
+            "total": len(rows),
+            "conversion_stage": conversion_stage,
+            "converted": sum(
+                1 for row in rows if (row.get("stage") or "novo") == conversion_stage
+            ),
+            "open": sum(
+                1
+                for row in rows
+                if (row.get("stage") or "novo") not in {conversion_stage, "perdido"}
+            ),
+        },
+        "business_model": portal_config.get("business_model") or "sales",
+    }
+
+
+@router.patch("/personas/{slug}/automation")
+def automation(slug: str, body: AutomationBody, request: Request):
+    persona = _persona(slug, request, "manage")
+    if body.mode not in {"ai_with_handoff", "human_only"}:
+        raise HTTPException(400, "Modo invalido.")
+    config = dict(persona.get("config") or {})
+    portal = dict(config.get("portal") or {})
+    portal["automation_mode"] = body.mode
+    config["portal"] = portal
+    rows = supabase_client.get_client().table("personas").update({"config": config}).eq("id", persona["id"]).execute().data or []
+    return {"ok": True, "mode": body.mode, "persona": rows[0] if rows else None}
+
+
+@router.get("/personas/{slug}/channels/whatsapp")
+def whatsapp_channel(slug: str, request: Request):
+    persona = _persona(slug, request)
+    capability = auth_service.assert_persona_capability(
+        request, "view", persona_id=persona["id"], persona_slug=persona["slug"]
+    )
+    can_manage = capability.get("capabilities", {}).get("manage", False)
+    binding = _binding_for_persona(persona["id"])
+    if not binding:
+        return {
+            "configured": False,
+            "status": "disabled",
+            "can_manage": can_manage,
+            "available_providers": ["meta_cloud", "evolution_baileys"] if can_manage else [],
+        }
+    return {
+        "configured": True,
+        "provider": binding.get("provider") or "meta_cloud",
+        "status": binding.get("connection_status") or ("connected" if binding.get("active") else "disabled"),
+        "last_connection_at": binding.get("last_connection_at"),
+        "can_manage": can_manage,
+        "available_providers": ["meta_cloud", "evolution_baileys"] if can_manage else [],
+    }
+
+
+@router.post("/personas/{slug}/channels/whatsapp/provider")
+def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Request):
+    """Switch transport only after an explicit confirmation.
+
+    Secrets stay in the binding ciphertext.  The previous binding is retained,
+    inactive, so a failed provider call can be rolled back safely.
+    """
+    persona = _persona(slug, request, "manage")
+    if body.provider not in {"meta_cloud", "evolution_baileys"}:
+        raise HTTPException(400, "Provider invalido.")
+    if not body.confirmed:
+        raise HTTPException(400, "Confirme a troca do canal WhatsApp.")
+    bindings = _whatsapp_bindings(persona["id"])
+    current = next((item for item in bindings if item.get("active")), None)
+    target = next((item for item in bindings if item.get("provider") == body.provider), None)
+    if current and current.get("provider") == body.provider:
+        return {"ok": True, "provider": body.provider, "status": current.get("connection_status") or "connected"}
+    if body.provider == "meta_cloud":
+        if not target or not target.get("whatsapp_phone_number_id"):
+            raise HTTPException(409, "Nao existe um binding Meta configurado para reativar.")
+        try:
+            if current:
+                supabase_client.update_workflow_binding(current["id"], {"active": False, "connection_status": "disabled"})
+            supabase_client.update_workflow_binding(target["id"], {"active": True, "connection_status": "connected"})
+        except Exception:
+            if current:
+                supabase_client.update_workflow_binding(current["id"], {"active": True})
+            raise
+        return {"ok": True, "provider": "meta_cloud", "status": "connected"}
+
+    if (os.environ.get("EVOLUTION_ENABLED") or "").lower() not in {"1", "true", "yes"}:
+        raise HTTPException(503, "Evolution API desabilitada.")
+    if not target:
+        instance_key = f"brain-{persona['slug'][:30]}-{persona['id'][:8]}"
+        instance_token = os.urandom(32).hex()
+        public_base = (os.environ.get("AI_BRAIN_PUBLIC_API_URL") or "").rstrip("/")
+        if not public_base:
+            raise HTTPException(503, "AI_BRAIN_PUBLIC_API_URL nao configurada.")
+        target = supabase_client.upsert_workflow_binding({
+            "persona_id": persona["id"], "workflow_name": f"Evolution {persona['slug']}",
+            "channel": "whatsapp", "provider": "evolution_baileys",
+            "provider_instance_key": instance_key,
+            "provider_secret_ciphertext": secret_store.encrypt_secret(instance_token),
+            "connection_status": "provisioning", "active": False,
+            "metadata": {"provider_version": os.environ.get("EVOLUTION_API_VERSION", "2.3.7"), "decision_owner": "deterministic"},
+        })
+        webhook_url, callback = _evolution_webhook_target(
+            target["id"],
+            public_base,
+        )
+        try:
+            get_provider("evolution_baileys").provision_instance(
+                instance_key,
+                instance_token,
+                webhook_url,
+                webhook_token=callback,
+            )
+        except Exception:
+            # A draft without a provisioned remote instance must not become active.
+            supabase_client.update_workflow_binding(target["id"], {"active": False, "connection_status": "failed"})
+            raise HTTPException(502, "Falha ao provisionar Evolution; o canal anterior foi preservado.")
+    try:
+        if current:
+            supabase_client.update_workflow_binding(current["id"], {"active": False, "connection_status": "disabled"})
+        supabase_client.update_workflow_binding(target["id"], {"active": True, "connection_status": "connecting"})
+    except Exception:
+        if current:
+            supabase_client.update_workflow_binding(current["id"], {"active": True})
+        raise
+    return {"ok": True, "provider": "evolution_baileys", "status": "connecting"}
+
+
+@router.post("/personas/{slug}/channels/whatsapp/evolution/provision")
+def provision_evolution(slug: str, request: Request):
+    persona = _persona(slug, request, "manage")
+    if (os.environ.get("EVOLUTION_ENABLED") or "").lower() not in {"1", "true", "yes"}:
+        raise HTTPException(503, "Evolution API desabilitada.")
+    current = _binding_for_persona(persona["id"])
+    if current:
+        if (current.get("provider") or "meta_cloud") == "meta_cloud":
+            raise HTTPException(409, "A persona ja possui Meta Cloud ativo.")
+        return {"configured": True, "status": current.get("connection_status"), "provider": "evolution_baileys"}
+    provider = get_provider("evolution_baileys")
+    instance_key = f"brain-{persona['slug'][:30]}-{persona['id'][:8]}"
+    instance_token = os.urandom(32).hex()
+    public_base = (os.environ.get("AI_BRAIN_PUBLIC_API_URL") or "").rstrip("/")
+    if not public_base:
+        raise HTTPException(503, "AI_BRAIN_PUBLIC_API_URL nao configurada.")
+    draft = supabase_client.upsert_workflow_binding({
+        "persona_id": persona["id"],
+        "workflow_name": f"Evolution {persona['slug']}",
+        "channel": "whatsapp",
+        "provider": "evolution_baileys",
+        "provider_instance_key": instance_key,
+        "provider_secret_ciphertext": secret_store.encrypt_secret(instance_token),
+        "connection_status": "provisioning",
+        "active": True,
+        "metadata": {
+            "provider_version": os.environ.get("EVOLUTION_API_VERSION", "2.3.7"),
+            "decision_owner": "deterministic",
+        },
+    })
+    webhook_url, callback = _evolution_webhook_target(
+        draft["id"],
+        public_base,
+    )
+    provider.provision_instance(
+        instance_key,
+        instance_token,
+        webhook_url,
+        webhook_token=callback,
+    )
+    supabase_client.update_workflow_binding(draft["id"], {"connection_status": "connecting"})
+    return {"configured": True, "provider": "evolution_baileys", "status": "connecting"}
+
+
+def _evolution_action(slug: str, request: Request, action: str):
+    persona = _persona(slug, request, "manage")
+    binding = _binding_for_persona(persona["id"])
+    if not binding or binding.get("provider") != "evolution_baileys":
+        raise HTTPException(404, "Canal Evolution nao configurado.")
+    provider = get_provider("evolution_baileys")
+    try:
+        result = getattr(provider, action)(binding)
+    except httpx.HTTPStatusError as exc:
+        if action != "get_qr_code" or exc.response.status_code != 404 or not binding.get("active"):
+            raise
+        instance_key = str(binding.get("provider_instance_key") or "")
+        instance_token = secret_store.decrypt_secret(binding.get("provider_secret_ciphertext"))
+        public_base = (os.environ.get("AI_BRAIN_PUBLIC_API_URL") or "").rstrip("/")
+        if not instance_key or not instance_token or not public_base:
+            raise HTTPException(503, "Binding Evolution incompleto para reprovisionamento.") from exc
+        webhook_url, callback = _evolution_webhook_target(
+            binding["id"],
+            public_base,
+        )
+        provider.provision_instance(
+            instance_key,
+            instance_token,
+            webhook_url,
+            webhook_token=callback,
+        )
+        supabase_client.update_workflow_binding(binding["id"], {"connection_status": "connecting"})
+        result = provider.get_qr_code(binding)
+    if action == "logout_instance":
+        supabase_client.update_workflow_binding(binding["id"], {"connection_status": "disconnected"})
+    elif action == "get_qr_code" and result.get("status") == "qr_ready":
+        supabase_client.update_workflow_binding(binding["id"], {"connection_status": "qr_ready"})
+    return result
+
+
+@router.post("/personas/{slug}/channels/whatsapp/evolution/connect")
+def connect_evolution(slug: str, request: Request):
+    response = _evolution_action(slug, request, "get_qr_code")
+    return JSONResponse(response, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/personas/{slug}/channels/whatsapp/evolution/restart")
+def restart_evolution(slug: str, request: Request):
+    return _evolution_action(slug, request, "restart_instance")
+
+
+@router.post("/personas/{slug}/channels/whatsapp/evolution/logout")
+def logout_evolution(slug: str, request: Request):
+    return _evolution_action(slug, request, "logout_instance")
+
+
+@router.get("/events/stream")
+def events_stream(request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request)
+    allowed = {
+        "message.new", "lead.ai_paused", "lead.ai_resumed",
+        "whatsapp.connection_changed", "lead.updated",
+    }
+
+    def generate() -> Iterator[str]:
+        cursor = request.headers.get("last-event-id")
+        while True:
+            if await_disconnected(request):
+                break
+            rows = supabase_client.get_events(limit=50, persona_id=persona["id"])
+            rows = list(reversed(rows))
+            for row in rows:
+                event_id = str(row.get("id") or "")
+                if cursor and event_id == cursor:
+                    cursor = None
+                    continue
+                if cursor:
+                    continue
+                if row.get("event_type") not in allowed:
+                    continue
+                safe = {
+                    "type": row.get("event_type"),
+                    "entity_id": row.get("entity_id"),
+                    "created_at": row.get("created_at"),
+                }
+                yield f"id: {event_id}\nevent: update\ndata: {json.dumps(safe)}\n\n"
+            yield ": heartbeat\n\n"
+            time.sleep(10)
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
+
+
+def await_disconnected(_request: Request) -> bool:
+    # Sync generator cannot await Request.is_disconnected; failed writes close it.
+    return False

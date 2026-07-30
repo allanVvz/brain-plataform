@@ -37,6 +37,8 @@ jobs:
           SUPABASE_SERVICE_KEY: ci-local-placeholder
           SUPABASE_RETRY_ATTEMPTS: "0"
           SUPABASE_HTTP_TIMEOUT_SECONDS: "2"
+          SUPABASE_OFFLINE: "true"
+          KNOWLEDGE_TAXONOMY_OFFLINE: "true"
         run: |
           timeout --signal=TERM --kill-after=15s 240s python -m pytest tests \
             --ignore=tests/e2e \
@@ -53,12 +55,19 @@ jobs:
           SUPABASE_SERVICE_KEY: ci-local-placeholder
           SUPABASE_RETRY_ATTEMPTS: "0"
           SUPABASE_HTTP_TIMEOUT_SECONDS: "2"
+          SUPABASE_OFFLINE: "true"
+          KNOWLEDGE_TAXONOMY_OFFLINE: "true"
         run: |
-          timeout --signal=TERM --kill-after=15s 120s python -m pytest \
+          timeout --signal=TERM --kill-after=15s 300s python -m pytest \
             tests/test_graph_document_publisher.py \
             tests/test_graph_json_projection_markdown.py \
             tests/test_sofia_canonical_graph_patch.py \
             tests/test_approved_faq_publication_contract.py \
+            tests/test_aurora_appointment_runtime.py \
+            tests/test_seed_aurora_credentials.py \
+            tests/test_conversation_runtime.py \
+            tests/test_deterministic_sdr.py \
+            api/tests/test_client_portal.py \
             -q
 
       - name: Configurar Node
@@ -82,3 +91,16 @@ jobs:
       - name: Testar frontend
         working-directory: dashboard
         run: npm test
+
+      - name: Validar Compose com perfil Evolution
+        shell: bash
+        run: |
+          cp .env.compose.example .env.evolution-ci
+          python infra/generate_keys.py --write .env.evolution-ci
+          for key in EVOLUTION_AUTHENTICATION_API_KEY EVOLUTION_DB_PASSWORD EVOLUTION_REDIS_PASSWORD EVOLUTION_WEBHOOK_HMAC_SECRET AI_BRAIN_SECRETS_KEY; do
+            value="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+            sed -i "s|^${key}=.*|${key}=${value}|" .env.evolution-ci
+          done
+          sed -i 's|^EVOLUTION_ENABLED=.*|EVOLUTION_ENABLED=true|' .env.evolution-ci
+          sed -i 's|^AI_BRAIN_PUBLIC_API_URL=.*|AI_BRAIN_PUBLIC_API_URL=https://api.example.com|' .env.evolution-ci
+          docker compose --env-file .env.evolution-ci --profile evolution config --quiet

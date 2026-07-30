@@ -22,6 +22,7 @@ from services import (
     supabase_client,
     sre_logger,
 )
+from services.whatsapp_providers import get_provider
 from workers.base_worker import BaseWorker
 
 
@@ -55,7 +56,38 @@ class WhatsAppDispatchWorker(BaseWorker):
         if not persona:
             raise RuntimeError("persona for inbound buffer no longer exists")
         lead = supabase_client.get_lead_by_ref(row.get("lead_ref")) if row.get("lead_ref") else {}
-        if (lead or {}).get("ai_paused"):
+        inbound_text = str(payload.get("text") or "").strip()
+        if inbound_text and row.get("lead_ref"):
+            recent_messages = supabase_client.get_messages(str(row["lead_ref"]), limit=20) or []
+            recent_outbound_echo = next(
+                (
+                    message
+                    for message in reversed(recent_messages)
+                    if message.get("direction") == "outbound"
+                    and str(message.get("content") or message.get("texto") or "").strip() == inbound_text
+                ),
+                None,
+            )
+            if recent_outbound_echo:
+                supabase_client.handoff_whatsapp_lead(int(row["lead_ref"]))
+                supabase_client.complete_whatsapp_buffer(row["id"], "waiting_human", error="recent outbound echo")
+                event_emitter.emit(
+                    "whatsapp.bot_loop_suppressed",
+                    entity_type="lead",
+                    entity_id=str(row["lead_ref"]),
+                    persona_id=row["persona_id"],
+                    payload={
+                        "correlation_id": row.get("correlation_id"),
+                        "matched_outbound_id": recent_outbound_echo.get("id"),
+                    },
+                    source="workers.whatsapp",
+                )
+                return
+        automation_mode = (
+            (((persona.get("config") or {}).get("portal") or {}).get("automation_mode"))
+            or "ai_with_handoff"
+        )
+        if (lead or {}).get("ai_paused") or automation_mode == "human_only":
             supabase_client.complete_whatsapp_buffer(row["id"], "waiting_human")
             event_emitter.emit(
                 "whatsapp.inbound_waiting_human",
@@ -64,13 +96,17 @@ class WhatsAppDispatchWorker(BaseWorker):
                 persona_id=row["persona_id"],
                 payload={
                     "correlation_id": row.get("correlation_id"),
-                    "ai_paused": True,
+                    "ai_paused": bool((lead or {}).get("ai_paused")),
+                    "automation_mode": automation_mode,
                 },
                 source="workers.whatsapp",
             )
             return
-        binding = supabase_client.get_active_workflow_binding_by_phone_number_id(
-            row["whatsapp_phone_number_id"]
+        binding = (
+            supabase_client.get_workflow_binding_by_id(row.get("channel_binding_id"))
+            or supabase_client.get_active_workflow_binding_by_phone_number_id(
+                row.get("whatsapp_phone_number_id")
+            )
         )
         binding_metadata = (binding or {}).get("metadata") or {}
         canonical_binding = (
@@ -88,6 +124,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                 message_id=row.get("external_message_id"),
                 correlation_id=str(row.get("correlation_id") or row["id"]),
                 phone_number_id=row.get("whatsapp_phone_number_id"),
+                channel_binding_id=row.get("channel_binding_id"),
                 inbound_buffer_id=row["id"],
             )
             if not result.get("handoff"):
@@ -178,6 +215,7 @@ class WhatsAppDispatchWorker(BaseWorker):
         if reply:
             outbound = supabase_client.enqueue_whatsapp_message({
                 "persona_id": row["persona_id"], "lead_ref": row.get("lead_ref"),
+                "channel_binding_id": row.get("channel_binding_id"),
                 "whatsapp_phone_number_id": row["whatsapp_phone_number_id"],
                 "direction": "outbound", "payload": {"text": reply, "sender_type": "ai"},
                 "status": "pending_send", "batch_key": row["batch_key"],
@@ -191,9 +229,60 @@ class WhatsAppDispatchWorker(BaseWorker):
         event_emitter.emit("whatsapp.inbound_dispatched", entity_type="lead", entity_id=str(row.get("lead_ref") or ""), persona_id=row["persona_id"], payload={"correlation_id": row.get("correlation_id"), "reply_queued": bool(reply)}, source="workers.whatsapp")
 
     def _dispatch_outbound(self, row: dict[str, Any]) -> None:
-        binding = supabase_client.get_active_workflow_binding_by_phone_number_id(row["whatsapp_phone_number_id"])
+        binding = (
+            supabase_client.get_workflow_binding_by_id(row.get("channel_binding_id"))
+            or supabase_client.get_active_workflow_binding_by_phone_number_id(
+                row.get("whatsapp_phone_number_id")
+            )
+        )
         if not binding or binding.get("persona_id") != row.get("persona_id"):
             raise RuntimeError("active binding does not match outbound persona")
+        if binding.get("provider") == "evolution_baileys":
+            lead = supabase_client.get_lead_by_ref(row.get("lead_ref")) if row.get("lead_ref") else {}
+            identities = ((lead or {}).get("metadata") or {}).get("identities") or {}
+            recipient = identities.get("remote_jid_alt") or (lead or {}).get("external_contact_id") or ""
+            if recipient.endswith("@s.whatsapp.net"):
+                recipient = recipient.split("@", 1)[0]
+            if not recipient or "@lid" in recipient:
+                supabase_client.complete_whatsapp_buffer(
+                    row["id"], "waiting_human", error="recipient identification unavailable"
+                )
+                return
+            outbound_payload = row.get("payload") or {}
+            provider = get_provider("evolution_baileys")
+            if outbound_payload.get("media"):
+                media = outbound_payload["media"]
+                signed_url = supabase_client._storage_signed_url(
+                    media.get("bucket"), media.get("path"), 3600
+                )
+                if not signed_url:
+                    raise RuntimeError("could not create signed media URL")
+                result = provider.send_media(binding, re.sub(r"\D", "", recipient), {
+                    "mediatype": (
+                        "image" if str(media.get("mime") or "").startswith("image/")
+                        else "audio" if str(media.get("mime") or "").startswith("audio/")
+                        else "document"
+                    ),
+                    "mimetype": media.get("mime"),
+                    "media": signed_url,
+                    "fileName": media.get("filename"),
+                    "caption": str(outbound_payload.get("text") or ""),
+                })
+            else:
+                result = provider.send_text(
+                    binding,
+                    re.sub(r"\D", "", recipient),
+                    str(outbound_payload.get("text") or ""),
+                )
+            external_id = (
+                (result.get("key") or {}).get("id")
+                or result.get("messageId")
+                or result.get("id")
+            )
+            supabase_client.complete_whatsapp_outbound(
+                row["id"], external_id, "sent", None, None
+            )
+            return
         metadata = binding.get("metadata") or {}
         webhook_url = (
             metadata.get("outbound_webhook_url")

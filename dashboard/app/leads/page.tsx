@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, MessageSquare, Plus, Search, Share2, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { AudiencePill } from "@/components/leads/AudiencePill";
@@ -75,6 +75,10 @@ function primaryAudienceLabel(lead: Lead, fallback: string): string {
 
 function LeadsPageInner() {
   const router = useRouter();
+  const pathname = usePathname();
+  const portalMatch = pathname.match(/^\/clientes\/([^/]+)/);
+  const leadsBase = portalMatch ? `/clientes/${portalMatch[1]}/leads` : "/leads";
+  const messagesBase = portalMatch ? `/clientes/${portalMatch[1]}/mensagens` : "/messages";
   const searchParams = useSearchParams();
   const audienceParam = searchParams.get("audience") || ALL_KEY;
 
@@ -183,7 +187,7 @@ function LeadsPageInner() {
     const params = new URLSearchParams(searchParams.toString());
     if (slug === ALL_KEY) params.delete("audience");
     else params.set("audience", slug);
-    router.replace(`/leads${params.toString() ? `?${params}` : ""}`);
+    router.replace(`${leadsBase}${params.toString() ? `?${params}` : ""}`);
   };
 
   const renameAudience = async (audience: Audience, nextName: string) => {
@@ -328,7 +332,7 @@ function LeadsPageInner() {
                       <td>
                         <div className="flex flex-col">
                           <Link
-                            href={`/messages/${lead.id}`}
+                            href={`${messagesBase}/${lead.id}`}
                             className="font-medium text-obs-text hover:text-obs-violet"
                           >
                             {lead.nome || phone || "—"}
@@ -373,7 +377,7 @@ function LeadsPageInner() {
                           </button>
                           {canStart ? (
                             <Link
-                              href={`/messages/${lead.id}`}
+                              href={`${messagesBase}/${lead.id}`}
                               className="lg-btn lg-btn-primary"
                               title="Iniciar conversa"
                             >

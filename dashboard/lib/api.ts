@@ -5,8 +5,37 @@
 // the proxy under a different path.
 export const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "/api-brain";
 export const API_URL = BASE;
-const API_OFFLINE_ERROR =
+export const API_OFFLINE_ERROR =
   "Backend indisponivel agora. Confirme o backend (API_INTERNAL_BASE_URL), o endpoint /health e tente novamente.";
+
+export type ApiErrorKind =
+  | "network"
+  | "unauthenticated"
+  | "forbidden"
+  | "unavailable"
+  | "client"
+  | "server";
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly path: string;
+  readonly detail: string;
+  readonly kind: ApiErrorKind;
+
+  constructor(args: { status: number; path: string; detail?: string; kind: ApiErrorKind }) {
+    const offline = args.kind === "network" || args.kind === "unavailable";
+    super(
+      offline
+        ? API_OFFLINE_ERROR
+        : `${args.status} ${args.path}${args.detail ? ` - ${args.detail}` : ""}`,
+    );
+    this.name = "ApiError";
+    this.status = args.status;
+    this.path = args.path;
+    this.detail = args.detail || "";
+    this.kind = args.kind;
+  }
+}
 
 function assertApiConfigured() {
   // With the same-origin proxy the browser only needs a relative prefix, which
@@ -14,6 +43,37 @@ function assertApiConfigured() {
   if (!BASE) {
     throw new Error("Proxy base ausente. Defina NEXT_PUBLIC_API_BASE_URL (padrao /api-brain).");
   }
+}
+
+function errorKind(status: number): ApiErrorKind {
+  if (status === 401) return "unauthenticated";
+  if (status === 403) return "forbidden";
+  if ([502, 503, 504].includes(status)) return "unavailable";
+  if (status >= 500) return "server";
+  return "client";
+}
+
+async function responseDetail(res: Response): Promise<string> {
+  const raw = await res.text().catch(() => "");
+  if (!raw) return "";
+  try {
+    const body = JSON.parse(raw);
+    return typeof body?.detail === "string"
+      ? body.detail
+      : JSON.stringify(body?.detail ?? body);
+  } catch {
+    return raw;
+  }
+}
+
+async function assertResponse(path: string, res: Response): Promise<void> {
+  if (res.ok) return;
+  throw new ApiError({
+    status: res.status,
+    path,
+    detail: await responseDetail(res),
+    kind: errorKind(res.status),
+  });
 }
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -26,22 +86,10 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
       ...opts,
     });
   } catch {
-    throw new Error(API_OFFLINE_ERROR);
+    throw new ApiError({ status: 0, path, kind: "network" });
   }
 
-  if (!res.ok) {
-    if (res.status === 503) {
-      throw new Error(API_OFFLINE_ERROR);
-    }
-    let detail = "";
-    try {
-      const body = await res.json();
-      detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail || body);
-    } catch {
-      detail = await res.text().catch(() => "");
-    }
-    throw new Error(`${res.status} ${path}${detail ? ` - ${detail}` : ""}`);
-  }
+  await assertResponse(path, res);
   return res.json();
 }
 
@@ -51,20 +99,15 @@ async function reqForm<T>(path: string, form: FormData): Promise<T> {
   try {
     res = await fetch(`${BASE}${path}`, { method: "POST", body: form, credentials: "include" });
   } catch {
-    throw new Error(API_OFFLINE_ERROR);
+    throw new ApiError({ status: 0, path, kind: "network" });
   }
-  if (res.status === 503) throw new Error(API_OFFLINE_ERROR);
-  if (!res.ok) {
-    let detail = "";
-    try {
-      const body = await res.json();
-      detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail || body);
-    } catch {
-      detail = await res.text().catch(() => "");
-    }
-    throw new Error(`${res.status} ${path}${detail ? ` - ${detail}` : ""}`);
-  }
+  await assertResponse(path, res);
   return res.json();
+}
+
+function personaQuery(slug: string) {
+  if (!slug) throw new Error("Persona do portal não informada.");
+  return `persona_slug=${encodeURIComponent(slug)}`;
 }
 
 export const api = {
@@ -73,6 +116,15 @@ export const api = {
     req<any>("/auth/login", { method: "POST", body: JSON.stringify(body) }),
   me: () => req<any>("/auth/me"),
   logout: () => req<any>("/auth/logout", { method: "POST", body: "{}" }),
+  changePassword: (body: { current_password: string; new_password: string }) =>
+    req<any>("/auth/change-password", { method: "POST", body: JSON.stringify(body) }),
+  clientPages: () => req<Array<{
+    slug: string;
+    name: string;
+    url: string;
+    capabilities: { view: boolean; edit: boolean; manage: boolean; manage_members: boolean };
+    channel: { configured: boolean; status: string; provider?: string | null };
+  }>>("/portal/client-pages"),
 
   // Health & Insights
   health: () => req<any>("/health/score"),
@@ -131,7 +183,8 @@ export const api = {
   pauseAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/pause-ai`, { method: "POST" }),
   resumeAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/resume-ai`, { method: "POST" }),
   messages: (leadId: string) => req<any[]>(`/messages/${leadId}`),
-  messagesByRef: (leadRef: number, limit = 200) => req<any[]>(`/messages/by-ref/${leadRef}?limit=${limit}`),
+  messagesByRef: (leadRef: number, limit = 200) =>
+    req<any[]>(`/messages/by-ref/${leadRef}?limit=${limit}`),
   messagesByRefScoped: (leadRef: number, opts: {
     limit?: number;
     personaId?: string;
@@ -186,6 +239,46 @@ export const api = {
       "/messages/send",
       { method: "POST", body: JSON.stringify(body) },
     ),
+  portalConversations: (slug: string) =>
+    req<any[]>(`/portal/conversations?${personaQuery(slug)}`),
+  portalConversationMessages: (slug: string, leadRef: number) =>
+    req<any[]>(`/portal/conversations/${leadRef}/messages?${personaQuery(slug)}`),
+  portalLeads: (slug: string, limit = 500) =>
+    req<any[]>(`/portal/leads?${personaQuery(slug)}&limit=${limit}`),
+  portalLead: (slug: string, leadRef: number | string) =>
+    req<any>(`/portal/leads/${leadRef}?${personaQuery(slug)}`),
+  updatePortalLead: (slug: string, leadRef: number | string, body: Record<string, unknown>) =>
+    req<any>(`/portal/leads/${leadRef}?${personaQuery(slug)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  portalPauseAi: (slug: string, leadRef: number) =>
+    req<{ ok: boolean; ai_paused: boolean }>(
+      `/portal/leads/${leadRef}/ai/pause?${personaQuery(slug)}`,
+      { method: "POST" },
+    ),
+  portalResumeAi: (slug: string, leadRef: number) =>
+    req<{ ok: boolean; ai_paused: boolean }>(
+      `/portal/leads/${leadRef}/ai/resume?${personaQuery(slug)}`,
+      { method: "POST" },
+    ),
+  portalSendMessage: (slug: string, body: { lead_id: number; text: string }) =>
+    req<{ ok: boolean; message_id: string; status: string }>(
+      `/portal/messages?${personaQuery(slug)}`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  portalPipeline: (slug: string) => req<any>(`/portal/pipeline?${personaQuery(slug)}`),
+  whatsappChannel: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp`),
+  provisionEvolution: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/evolution/provision`, { method: "POST", body: "{}" }),
+  selectWhatsAppProvider: (slug: string, provider: "meta_cloud" | "evolution_baileys", confirmed: boolean) =>
+    req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/provider`, { method: "POST", body: JSON.stringify({ provider, confirmed }) }),
+  connectEvolution: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/evolution/connect`, { method: "POST", body: "{}" }),
+  restartEvolution: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/evolution/restart`, { method: "POST", body: "{}" }),
+  logoutEvolution: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/evolution/logout`, { method: "POST", body: "{}" }),
+  accessMembers: (slug: string) => req<any[]>(`/access/personas/${encodeURIComponent(slug)}/members`),
+  createAccessMember: (slug: string, body: any) => req<any>(`/access/personas/${encodeURIComponent(slug)}/members`, { method: "POST", body: JSON.stringify(body) }),
+  updateAccessMember: (slug: string, userId: string, body: any) => req<any>(`/access/personas/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`, { method: "PATCH", body: JSON.stringify(body) }),
+  revokeAccessMember: (slug: string, userId: string) => req<any>(`/access/personas/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" }),
 
   // KB
   kb: (personaId?: string, status = "ATIVO") => req<any[]>(`/kb?status=${status}${personaId ? `&persona_id=${personaId}` : ""}`),

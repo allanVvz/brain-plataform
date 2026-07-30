@@ -255,6 +255,18 @@ def test_publish_approved_faq_rebuilds_embedded_markdown(monkeypatch):
     assert result["embedded_edge_id"] == "e-embedded-new"
     assert result["rag_chunk_ids"] == ["chunk-1"]
     assert store.markdown_rebuilt == ["persona-1"]
+    assert store.edges[-1]["relation_type"] == "visible_to_agent"
+
+
+def test_publish_approved_faq_reuses_existing_embedded_edge(monkeypatch):
+    store = _Store(existing_edge=True, existing_chunks=0)
+    service = _patch(monkeypatch, store)
+    before = len(store.edges)
+
+    result = service.publish_approved_node("n-faq", require_rag_for_faq=True)
+
+    assert result["embedded_edge_id"] == "e-embedded"
+    assert len(store.edges) == before
 
 
 def test_publish_approved_faq_populates_rag_branch_columns(monkeypatch):

@@ -14,6 +14,11 @@ class LoginBody(BaseModel):
     remember: bool = False
 
 
+class ChangePasswordBody(BaseModel):
+    current_password: str
+    new_password: str
+
+
 @router.post("/login")
 def login(body: LoginBody, response: Response):
     try:
@@ -47,3 +52,10 @@ def me(request: Request):
 def logout(response: Response):
     auth_service.clear_session_cookie(response)
     return {"ok": True}
+
+
+@router.post("/change-password")
+def change_password(body: ChangePasswordBody, request: Request):
+    user = auth_service.current_user(request)
+    auth_service.change_password(user["id"], body.current_password, body.new_password)
+    return {"ok": True, "must_change_password": False}

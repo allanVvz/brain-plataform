@@ -5,7 +5,18 @@ ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/brain-ai}"
 cd "$ROOT_DIR"
 failed=0
-for service in db rest storage kong api workers caddy; do
+services=(db rest storage kong api workers caddy)
+evolution_enabled="$(
+  awk -F= '
+    /^[[:space:]]*EVOLUTION_ENABLED[[:space:]]*=/ {
+      value=tolower($2); gsub(/[[:space:]"\047]/, "", value); print value
+    }
+  ' "$ENV_FILE" | tail -n 1
+)"
+if [[ "$evolution_enabled" =~ ^(1|true|yes)$ ]]; then
+  services+=(evolution-redis evolution-api)
+fi
+for service in "${services[@]}"; do
   cid="$(docker compose --env-file "$ENV_FILE" ps -q "$service")"
   if [[ -z "$cid" || "$(docker inspect -f '{{.State.Status}}' "$cid")" != "running" ]]; then
     echo "CRITICAL: $service is not running"; failed=1

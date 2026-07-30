@@ -14,7 +14,7 @@ for path in (API_DIR, ROOT):
 def test_qa_contract_routes_mounted_with_and_without_api_prefix() -> None:
     from main import app
 
-    paths = {route.path for route in app.routes}
+    paths = set(app.openapi()["paths"])
     expected = [
         "/qa/reset-destructive",
         "/catalog/ingest",

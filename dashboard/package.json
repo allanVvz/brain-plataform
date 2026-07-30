@@ -11,6 +11,9 @@
     "env:check": "node scripts/check-env.mjs",
     "start": "next start",
     "test": "vitest run",
+    "test:e2e:evolution": "node scripts/run-e2e-evolution.mjs",
+    "demo:baita-deterministic": "node scripts/demo-baita-deterministic.mjs",
+    "demo:baita-cleanup": "node scripts/demo-baita-deterministic.mjs --cleanup",
     "test:api-health": "node scripts/test-api-health.mjs",
     "test:frontend-proxy": "node scripts/test-frontend-proxy.mjs"
   },

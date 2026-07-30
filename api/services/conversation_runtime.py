@@ -22,6 +22,7 @@ from services.deterministic_sdr import (
     _quantity,
     catalog_from_graph,
 )
+from services.deterministic_appointment import DeterministicAppointment
 
 
 STAGES = ("novo", "contatado", "engajado", "qualificado", "oportunidade")
@@ -155,6 +156,29 @@ def _current_graph(persona_slug: str) -> tuple[int, str, Any]:
     return version, checksum, graph
 
 
+def _business_model(graph: Any) -> str:
+    persona = next(
+        (node for node in graph.nodes if node.node_type == "persona"),
+        None,
+    )
+    data = (persona.data or {}) if persona else {}
+    metadata = data.get("metadata") or {}
+    return str(
+        data.get("business_model")
+        or metadata.get("business_model")
+        or "sales"
+    ).strip().lower()
+
+
+def _appointment_policy(graph: Any) -> dict[str, Any]:
+    persona = next(
+        (node for node in graph.nodes if node.node_type == "persona"),
+        None,
+    )
+    data = (persona.data or {}) if persona else {}
+    return dict(data.get("appointment_policy") or {})
+
+
 def _relevant_nodes(graph: Any, query: str, *, limit: int = 30) -> list[Any]:
     terms = {term for term in _norm(query).split() if len(term) > 1}
     mandatory = {"persona", "brand", "tone", "rule", "briefing"}
@@ -227,7 +251,11 @@ def build_context(
         )
     messages = messages[-20:]
     lead_metadata = lead.get("metadata") or {}
-    cart = dict(lead_metadata.get("vitoria_state") or {})
+    cart = dict(
+        lead_metadata.get("conversation_state")
+        or lead_metadata.get("vitoria_state")
+        or {}
+    )
     prior_runtime = lead_metadata.get("conversation_runtime") or {}
     prior_version = prior_runtime.get("graph_version")
     prior_checksum = prior_runtime.get("graph_checksum")
@@ -325,6 +353,143 @@ def _stage(current: str, intent: str, route: ConversationRoute) -> str:
     return STAGES[max(index, target)]
 
 
+def _appointment_stage(current: str, intent: str) -> str:
+    try:
+        index = STAGES.index(current)
+    except ValueError:
+        index = 0
+    if intent in {"greeting", "list_services"}:
+        target = 1
+    elif intent in {"consult_service", "consult_price"}:
+        target = 2
+    elif intent in {
+        "request_quote",
+        "request_booking",
+        "provide_vehicle",
+        "provide_condition",
+        "provide_date",
+        "provide_time_window",
+    }:
+        target = 3
+    elif intent == "complete_booking_request":
+        target = 4
+    else:
+        target = index
+    return STAGES[max(index, target)]
+
+
+def _appointment_evidence(
+    graph: Any,
+    *,
+    product_slug: str | None,
+    include_all_products: bool = False,
+) -> list[str]:
+    by_id = {node.id: node for node in graph.nodes}
+    evidence: list[str] = []
+    product_node = next(
+        (
+            node
+            for node in graph.nodes
+            if node.node_type == "product" and node.slug == product_slug
+        ),
+        None,
+    )
+    product_nodes = (
+        [product_node]
+        if product_node
+        else [node for node in graph.nodes if node.node_type == "product"]
+        if include_all_products
+        else []
+    )
+    for selected_product in product_nodes:
+        evidence.extend(_node_path(graph, selected_product.id))
+        evidence.append(selected_product.id)
+        for node in graph.nodes:
+            data = node.data or {}
+            if (
+                node.node_type == "faq"
+                and data.get("source_node_id") == selected_product.id
+            ):
+                evidence.append(node.id)
+    for node in graph.nodes:
+        if node.node_type in {"persona", "brand", "briefing", "rule", "tone"}:
+            status = str((node.data or {}).get("status") or "").lower()
+            if status in {"approved", "validated", "active", "ativo"}:
+                evidence.extend(_node_path(graph, node.id))
+                evidence.append(node.id)
+    return [node_id for node_id in dict.fromkeys(evidence) if node_id in by_id]
+
+
+def _decide_appointment(
+    context: ConversationContext,
+    graph: Any,
+    *,
+    graph_changed: bool,
+    current_stage: str,
+    state: dict[str, Any],
+    message: str,
+) -> tuple[ConversationDecision, AgentResponse]:
+    if graph_changed:
+        state["conversation_state"] = "handoff"
+        decision = ConversationDecision(
+            classifier="deterministic_appointment_v1",
+            intent="stale_graph",
+            route=ConversationRoute.HUMAN,
+            confidence=0,
+            lead_stage=current_stage,
+            handoff_reason="graph_version_changed",
+            evidence_node_ids=[],
+        )
+        return decision, AgentResponse(
+            reply_text=(
+                "Vou encaminhar para a equipe revisar sua solicitação com as "
+                "informações atuais."
+            ),
+            role=ConversationRoute.HUMAN,
+            evidence_node_ids=[],
+            cart_state=state,
+            handoff_required=True,
+        )
+
+    catalog = catalog_from_graph(graph)
+    result = DeterministicAppointment(
+        catalog,
+        policy=_appointment_policy(graph),
+    ).handle(message, state=state)
+    evidence = _appointment_evidence(
+        graph,
+        product_slug=result.product.slug if result.product else None,
+        include_all_products=result.intent == "list_services",
+    )
+    route = ConversationRoute.HUMAN if result.handoff else ConversationRoute.SDR
+    confidence = 1.0 if result.intent != "ununderstood" else (0.0 if result.handoff else 0.7)
+    if not evidence:
+        route = ConversationRoute.HUMAN
+        confidence = 0.0
+        result.handoff = True
+        result.handoff_reason = "missing_approved_evidence"
+        result.reply = None
+        result.state["conversation_state"] = "handoff"
+    decision = ConversationDecision(
+        classifier="deterministic_appointment_v1",
+        intent=result.intent,
+        route=route,
+        confidence=confidence,
+        product_slug=result.product.slug if result.product else None,
+        lead_stage=_appointment_stage(current_stage, result.intent),
+        handoff_reason=result.handoff_reason,
+        evidence_node_ids=evidence,
+    )
+    response = AgentResponse(
+        reply_text=result.reply,
+        role=route,
+        evidence_node_ids=evidence,
+        cart_state=result.state,
+        handoff_required=result.handoff,
+    )
+    return decision, response
+
+
 def decide(
     context: ConversationContext,
 ) -> tuple[ConversationDecision, AgentResponse]:
@@ -352,6 +517,15 @@ def decide(
     state = dict(context.cart)
     current_stage = str(state.pop("_lead_stage", "novo"))
     graph_changed = bool(state.pop("_graph_changed", False))
+    if _business_model(graph) == "appointment":
+        return _decide_appointment(
+            context,
+            graph,
+            graph_changed=graph_changed,
+            current_stage=current_stage,
+            state=state,
+            message=message,
+        )
     catalog = catalog_from_graph(graph)
     engine = DeterministicSDR(catalog)
     product = catalog.find_product(message)
@@ -516,12 +690,13 @@ def commit(
     response: AgentResponse,
     correlation_id: str,
     phone_number_id: str | None,
+    channel_binding_id: str | None = None,
     inbound_buffer_id: str | None = None,
 ) -> dict[str, Any]:
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     metadata = {
         **(lead.get("metadata") or {}),
-        "vitoria_state": response.cart_state,
+        "conversation_state": response.cart_state,
         "conversation_runtime": {
             "agent_slug": context.agent_slug,
             "graph_version": context.graph_version,
@@ -532,6 +707,10 @@ def commit(
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },
     }
+    if response.cart_state.get("business_model") != "appointment":
+        # Backward-compatible mirror for Baita conversations already consumed
+        # by the legacy deterministic/n8n flow.
+        metadata["vitoria_state"] = response.cart_state
     if response.handoff_required:
         supabase_client.handoff_whatsapp_lead_state(
             lead_ref,
@@ -586,6 +765,7 @@ def commit(
                 "direction": "outbound",
                 "status": "pending",
                 "whatsapp_phone_number_id": phone_number_id,
+                "channel_binding_id": channel_binding_id,
                 "correlation_id": correlation_id,
                 "metadata": {
                     "agent_slug": context.agent_slug,
@@ -605,11 +785,12 @@ def commit(
             )
             if not duplicate:
                 raise
-        if persona.get("id") and phone_number_id:
+        if persona.get("id") and (phone_number_id or channel_binding_id):
             buffer = supabase_client.enqueue_whatsapp_message(
                 {
                     "persona_id": persona["id"],
                     "lead_ref": lead_ref,
+                    "channel_binding_id": channel_binding_id,
                     "whatsapp_phone_number_id": phone_number_id,
                     "direction": "outbound",
                     "payload": {
@@ -668,6 +849,7 @@ def execute_pipeline(
     message_id: str | None,
     correlation_id: str,
     phone_number_id: str | None,
+    channel_binding_id: str | None = None,
     inbound_buffer_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the same context -> classify -> commit contract used by n8n."""
@@ -685,6 +867,7 @@ def execute_pipeline(
         response=response,
         correlation_id=correlation_id,
         phone_number_id=phone_number_id,
+        channel_binding_id=channel_binding_id,
         inbound_buffer_id=inbound_buffer_id,
     )
     return {

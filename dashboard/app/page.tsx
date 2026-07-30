@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BrainCircuit, Gauge } from "lucide-react";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { SystemDashboardTab } from "@/components/dashboard/SystemDashboardTab";
 import { LeadsDashboardTab } from "@/components/dashboard/LeadsDashboardTab";
 import { KnowledgeDashboardTab } from "@/components/dashboard/KnowledgeDashboardTab";
@@ -15,6 +15,16 @@ const tabs: Array<{ id: DashboardTab; label: string; icon: any }> = [
   { id: "system", label: "Dashboard do Sistema", icon: Activity },
 ];
 
+function dashboardError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.kind === "forbidden") return "Sua conta nao tem permissao para este painel.";
+    if (error.kind === "network" || error.kind === "unavailable") {
+      return "Backend indisponivel. Confirme API_INTERNAL_BASE_URL e o endpoint /health.";
+    }
+  }
+  return "Nao foi possivel carregar todos os dados do dashboard.";
+}
+
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>("knowledge");
   const [health, setHealth] = useState<any>(null);
@@ -25,6 +35,7 @@ export default function DashboardPage() {
   const [pipelineMetrics, setPipelineMetrics] = useState<any>(null);
   const [running, setRunning] = useState(false);
   const [personaFilterId, setPersonaFilterId] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     setPersonaFilterId(window.localStorage.getItem("ai-brain-persona-id") || "");
@@ -37,16 +48,49 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    api.health().then(setHealth).catch(console.error);
-    api.insights("open").then((d) => setInsights(d.slice(0, 6))).catch(console.error);
+    let active = true;
+    setLoadError("");
+    Promise.all([api.health(), api.insights("open")])
+      .then(([nextHealth, nextInsights]) => {
+        if (!active) return;
+        setHealth(nextHealth);
+        setInsights(nextInsights.slice(0, 6));
+      })
+      .catch((error) => {
+        if (active) setLoadError(dashboardError(error));
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
+    let active = true;
     const scopedPersonaId = personaFilterId || undefined;
-    api.leads(1000, 0, scopedPersonaId).then(setLeads).catch(console.error);
-    api.conversations(720, scopedPersonaId).then(setConversations).catch(() => setConversations([]));
-    api.knowledgeCounts(scopedPersonaId).then(setKnowledgeCounts).catch(() => setKnowledgeCounts(null));
-    api.pipelineMetrics(scopedPersonaId).then(setPipelineMetrics).catch(() => setPipelineMetrics(null));
+    Promise.all([
+      api.leads(1000, 0, scopedPersonaId),
+      api.conversations(720, scopedPersonaId),
+      api.knowledgeCounts(scopedPersonaId),
+      api.pipelineMetrics(scopedPersonaId),
+    ])
+      .then(([nextLeads, nextConversations, nextKnowledgeCounts, nextPipelineMetrics]) => {
+        if (!active) return;
+        setLeads(nextLeads);
+        setConversations(nextConversations);
+        setKnowledgeCounts(nextKnowledgeCounts);
+        setPipelineMetrics(nextPipelineMetrics);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setLeads([]);
+        setConversations([]);
+        setKnowledgeCounts(null);
+        setPipelineMetrics(null);
+        setLoadError(dashboardError(error));
+      });
+    return () => {
+      active = false;
+    };
   }, [personaFilterId]);
 
   async function triggerValidator() {
@@ -57,7 +101,7 @@ export default function DashboardPage() {
       const fresh = await api.insights("open");
       setInsights(fresh.slice(0, 6));
     } catch (e) {
-      console.error(e);
+      setLoadError(dashboardError(e));
     } finally {
       setRunning(false);
     }
@@ -101,6 +145,15 @@ export default function DashboardPage() {
           })}
         </div>
       </header>
+
+      {loadError && (
+        <div
+          role="alert"
+          className="rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+        >
+          {loadError}
+        </div>
+      )}
 
       {activeTab === "leads" && (
         <LeadsDashboardTab

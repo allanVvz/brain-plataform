@@ -76,6 +76,48 @@ def main() -> int:
     origins = env.get("ALLOWED_ORIGINS", "")
     if "*" in origins or "localhost" in origins or "127.0.0.1" in origins:
         errors.append("ALLOWED_ORIGINS cannot contain wildcards or local development origins")
+    evolution_enabled = env.get("EVOLUTION_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if evolution_enabled:
+        evolution_required = (
+            "EVOLUTION_AUTHENTICATION_API_KEY",
+            "EVOLUTION_DB_PASSWORD",
+            "EVOLUTION_REDIS_PASSWORD",
+            "EVOLUTION_WEBHOOK_HMAC_SECRET",
+            "AI_BRAIN_SECRETS_KEY",
+            "AI_BRAIN_PUBLIC_API_URL",
+        )
+        for key in evolution_required:
+            value = env.get(key, "")
+            if not value:
+                errors.append(f"{key} is required when EVOLUTION_ENABLED=true")
+            elif key != "AI_BRAIN_PUBLIC_API_URL" and (
+                len(value) < 32 or not re.fullmatch(r"[A-Za-z0-9_-]+", value)
+            ):
+                errors.append(
+                    f"{key} must be a URL-safe random value with at least 32 characters"
+                )
+        evolution_secrets = {
+            env.get(key, "")
+            for key in evolution_required
+            if key != "AI_BRAIN_PUBLIC_API_URL"
+        }
+        if len(evolution_secrets) != len(evolution_required) - 1:
+            errors.append("Evolution and binding encryption secrets must be distinct")
+        public_api_url = env.get("AI_BRAIN_PUBLIC_API_URL", "")
+        if not re.fullmatch(r"https://[^/]+", public_api_url):
+            errors.append(
+                "AI_BRAIN_PUBLIC_API_URL must be an HTTPS origin without a path"
+            )
+        expected_digest = (
+            "evoapicloud/evolution-api@sha256:"
+            "1bd8afc4a6cf48822e6cf02469aeae7bd35a12a6b616eacd1291926307f4d339"
+        )
+        if env.get("EVOLUTION_API_IMAGE") != expected_digest:
+            errors.append("EVOLUTION_API_IMAGE must use the validated 2.3.7 digest")
     try:
         if jwt_payload(env.get("ANON_KEY", ""), env.get("JWT_SECRET", "")).get("role") != "anon":
             errors.append("ANON_KEY must carry role=anon")

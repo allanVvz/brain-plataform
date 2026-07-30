@@ -61,6 +61,8 @@ def _safe_user(row: dict[str, Any]) -> dict[str, Any]:
         "username": row.get("username"),
         "name": row.get("name"),
         "role": row.get("role") or "user",
+        "account_type": row.get("account_type") or "internal",
+        "must_change_password": bool(row.get("must_change_password", False)),
         "is_active": bool(row.get("is_active", True)),
     }
 
@@ -82,7 +84,7 @@ def get_user_by_identifier(identifier: str) -> Optional[dict[str, Any]]:
     if not ident:
         return None
     client = supabase_client.get_client()
-    fields = "id,email,username,password_hash,name,role,is_active"
+    fields = "id,email,username,password_hash,name,role,account_type,must_change_password,is_active"
     result = _execute_auth_query(
         client.table("app_users").select(fields).eq("email", ident).limit(1),
         operation="lookup app_users by email",
@@ -102,7 +104,7 @@ def get_user_by_id(user_id: str) -> Optional[dict[str, Any]]:
     result = _execute_auth_query(
         supabase_client.get_client()
         .table("app_users")
-        .select("id,email,username,name,role,is_active")
+        .select("id,email,username,name,role,account_type,must_change_password,is_active")
         .eq("id", user_id)
         .maybe_single(),
         operation="lookup app_users by id",
@@ -124,7 +126,15 @@ def get_user_access(user_id: str) -> list[dict[str, Any]]:
 
 def get_auth_personas() -> list[dict[str, Any]]:
     try:
-        return supabase_client.get_personas() or []
+        return [
+            {
+                "id": row.get("id"),
+                "slug": row.get("slug"),
+                "name": row.get("name"),
+                "active": bool(row.get("active", True)),
+            }
+            for row in (supabase_client.get_personas() or [])
+        ]
     except Exception as exc:
         try:
             from services import sre_logger
@@ -192,7 +202,11 @@ def authenticate(identifier: str, password: str) -> dict[str, Any]:
 
 
 def is_admin(user: Optional[dict[str, Any]]) -> bool:
-    return bool(user and user.get("role") == "admin")
+    return bool(
+        user
+        and user.get("role") == "admin"
+        and (user.get("account_type") or "internal") == "internal"
+    )
 
 
 def current_user(request: Request) -> dict[str, Any]:
@@ -213,16 +227,68 @@ def allowed_persona_ids(request: Request) -> list[str]:
 
 
 def assert_persona_access(request: Request, persona_id: Optional[str] = None, persona_slug: Optional[str] = None) -> None:
+    assert_persona_capability(
+        request,
+        "view",
+        persona_id=persona_id,
+        persona_slug=persona_slug,
+    )
+
+
+_CAPABILITY_RANK = {"view": 1, "edit": 2, "manage": 3}
+_ROLE_CEILING = {"viewer": 1, "operator": 2, "user": 3, "admin": 3}
+
+
+def _effective_capabilities(user: dict[str, Any], access: dict[str, Any]) -> dict[str, bool]:
+    ceiling = _ROLE_CEILING.get(str(user.get("role") or "viewer"), 1)
+    view = bool(access.get("can_view")) and ceiling >= 1
+    edit = view and bool(access.get("can_edit")) and ceiling >= 2
+    manage = edit and bool(access.get("can_manage")) and ceiling >= 3
+    return {
+        "view": view,
+        "edit": edit,
+        "manage": manage,
+        "manage_members": bool(
+            is_admin(user)
+            or (
+                (user.get("account_type") or "internal") == "agency"
+                and manage
+            )
+        ),
+    }
+
+
+def assert_persona_capability(
+    request: Request,
+    capability: str,
+    *,
+    persona_id: Optional[str] = None,
+    persona_slug: Optional[str] = None,
+) -> dict[str, Any]:
+    if capability not in _CAPABILITY_RANK:
+        raise ValueError(f"Unknown persona capability: {capability}")
     user = current_user(request)
     if is_admin(user):
-        return
+        return {
+            "persona_id": persona_id,
+            "persona_slug": persona_slug,
+            "capabilities": {
+                "view": True, "edit": True, "manage": True, "manage_members": True,
+            },
+        }
+    if not persona_id and not persona_slug:
+        raise HTTPException(status_code=400, detail="Selecione uma persona.")
     access = allowed_access(request)
     if not access:
         raise HTTPException(status_code=403, detail="Nenhuma persona foi atribuida a este usuario.")
-    if persona_id and any(row.get("persona_id") == persona_id for row in access):
-        return
-    if persona_slug and any(row.get("persona_slug") == persona_slug for row in access):
-        return
+    for row in access:
+        matches_id = bool(persona_id and row.get("persona_id") == persona_id)
+        matches_slug = bool(persona_slug and row.get("persona_slug") == persona_slug)
+        if not (matches_id or matches_slug):
+            continue
+        capabilities = _effective_capabilities(user, row)
+        if capabilities.get(capability):
+            return {**row, "capabilities": capabilities}
     raise HTTPException(status_code=403, detail="Acesso negado para esta persona.")
 
 
@@ -240,11 +306,98 @@ def build_session_response(user: dict[str, Any]) -> dict[str, Any]:
     visible_personas = filter_personas_for_user(user, personas, access)
     if not is_admin(user) and not visible_personas:
         raise HTTPException(status_code=403, detail="Nenhuma persona foi atribuida a este usuario.")
+    projected_personas = []
+    strongest = 3 if is_admin(user) else 0
+    for persona in visible_personas:
+        row = next(
+            (
+                item for item in access
+                if item.get("persona_id") == persona.get("id")
+                or item.get("persona_slug") == persona.get("slug")
+            ),
+            {},
+        )
+        capabilities = (
+            {"view": True, "edit": True, "manage": True, "manage_members": True}
+            if is_admin(user)
+            else _effective_capabilities(user, row)
+        )
+        if capabilities["manage"]:
+            strongest = max(strongest, 3)
+        elif capabilities["edit"]:
+            strongest = max(strongest, 2)
+        elif capabilities["view"]:
+            strongest = max(strongest, 1)
+        projected_personas.append({**persona, "capabilities": capabilities})
+
+    account_type = user.get("account_type") or "internal"
+    if is_admin(user):
+        access_profile = "brain_admin"
+    else:
+        suffix = "manager" if strongest >= 3 else "operator" if strongest >= 2 else "viewer"
+        prefix = "agency" if account_type == "agency" else "client" if account_type == "client" else "brain"
+        access_profile = f"{prefix}_{suffix}"
+
+    first_persona_slug = next(
+        (str(persona.get("slug")) for persona in projected_personas if persona.get("slug")),
+        "",
+    )
+    if account_type == "client":
+        surface = "client_portal"
+        home_url = (
+            f"/clientes/{first_persona_slug}/mensagens"
+            if first_persona_slug
+            else "/login"
+        )
+    elif account_type == "agency":
+        surface = "agency"
+        home_url = "/"
+    elif is_admin(user):
+        surface = "brain_admin"
+        home_url = "/"
+    else:
+        surface = "internal"
+        home_url = "/"
+
     return {
         "user": user,
-        "personas": visible_personas,
+        "account_type": account_type,
+        "access_profile": access_profile,
+        "navigation": {
+            "surface": surface,
+            "home_url": home_url,
+        },
+        "personas": projected_personas,
         "permissions": {
             "role": user.get("role"),
             "persona_access": access,
         },
     }
+
+
+def change_password(user_id: str, current_password: str, new_password: str) -> None:
+    if len(new_password or "") < 12:
+        raise HTTPException(status_code=400, detail="A nova senha deve ter pelo menos 12 caracteres.")
+    result = _execute_auth_query(
+        supabase_client.get_client()
+        .table("app_users")
+        .select("id,password_hash")
+        .eq("id", user_id)
+        .maybe_single(),
+        operation="lookup app_users for password change",
+    )
+    row = result.data or {}
+    if not row or not verify_password(current_password, row.get("password_hash") or ""):
+        raise HTTPException(status_code=400, detail="Senha atual invalida.")
+    if verify_password(new_password, row.get("password_hash") or ""):
+        raise HTTPException(status_code=400, detail="A nova senha deve ser diferente da atual.")
+    _execute_auth_query(
+        supabase_client.get_client()
+        .table("app_users")
+        .update({
+            "password_hash": hash_password(new_password),
+            "must_change_password": False,
+        })
+        .eq("id", user_id),
+        operation="update app_users password",
+    )

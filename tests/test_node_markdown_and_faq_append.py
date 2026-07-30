@@ -88,18 +88,49 @@ def test_update_graph_node_blocks_protected(monkeypatch):
 
 def test_faq_append_updates_same_node_no_new_node(monkeypatch):
     from routes import qa_contract
+    from schemas.graph_json_v2 import GraphJson
 
     monkeypatch.setattr(qa_contract, "_require_non_production", lambda: None)
     monkeypatch.setattr(qa_contract, "_resolve_sofia_persona", lambda request, ref: {"id": "per1", "slug": "allanvvz"})
-    monkeypatch.setattr(qa_contract.supabase_client, "get_knowledge_node", lambda nid: {
-        "id": "f1", "node_type": "faq", "source_table": "knowledge_items", "source_id": "ki1",
-        "metadata": {"markdown": "# FAQ\n\n### Pergunta antiga\n\nResposta: A"},
+    graph = GraphJson.model_validate({
+        "graph_id": "allanvvz-test",
+        "tenant": "qa",
+        "persona_slug": "allanvvz",
+        "status": "published",
+        "nodes": [
+            {
+                "id": "persona",
+                "node_type": "persona",
+                "slug": "allanvvz",
+                "label": "AllanVvz",
+                "data": {"status": "validated", "source": "test"},
+            },
+            {
+                "id": "f1",
+                "node_type": "faq",
+                "slug": "faq",
+                "label": "FAQ",
+                "parent_id": "persona",
+                "data": {
+                    "status": "approved",
+                    "source": "test",
+                    "markdown": "# FAQ\n\n### Pergunta antiga\n\nResposta: A",
+                },
+            },
+        ],
+        "edges": [],
     })
-    monkeypatch.setattr(qa_contract.supabase_client, "get_knowledge_item", lambda iid: {"id": "ki1", "status": "pending"})
-    node_updates = {}
-    monkeypatch.setattr(qa_contract.supabase_client, "update_knowledge_node", lambda nid, data, **k: node_updates.update({"id": nid, **data}))
-    item_updates = {}
-    monkeypatch.setattr(qa_contract.supabase_client, "update_knowledge_item", lambda iid, data: item_updates.update(data))
+    monkeypatch.setattr(
+        qa_contract.graph_json_v2_store,
+        "load_current",
+        lambda slug: (4, graph),
+    )
+    captured = {}
+    monkeypatch.setattr(
+        qa_contract.graph_document_publisher,
+        "publish",
+        lambda **kwargs: captured.update(kwargs) or {"ok": True, "version": 5},
+    )
 
     body = qa_contract.SofiaFaqAppendBody(
         persona_slug="allanvvz",
@@ -113,10 +144,12 @@ def test_faq_append_updates_same_node_no_new_node(monkeypatch):
 
     assert out["created_node"] is False
     assert out["appended_count"] == 1
-    assert out["status"] == "pending"
+    assert out["status"] == "pending_validation"
     assert "### Pergunta antiga" in out["markdown"]  # preserved
     assert "### Nova pergunta?" in out["markdown"]   # appended
     assert "Resposta: Nova resposta." in out["markdown"]
-    assert node_updates["status"] == "pending_validation"
-    assert item_updates["status"] == "pending"
-    assert item_updates["curation_status"] == "draft"
+    next_graph = captured["graph"]
+    assert len(next_graph.nodes) == len(graph.nodes)
+    updated = next(node for node in next_graph.nodes if node.id == "f1")
+    assert updated.data["status"] == "pending_validation"
+    assert captured["expected_version"] == 4

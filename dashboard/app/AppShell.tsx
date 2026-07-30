@@ -3,8 +3,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { getStoredLanguage, UI_LANGUAGE_EVENT, type UiLanguage } from "@/lib/language";
+import {
+  mandatoryPasswordDestination,
+  resolveSessionDestination,
+} from "@/lib/session-routing";
 import {
   Activity,
   BookOpen,
@@ -93,30 +97,59 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [personas, setPersonas] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
   const [language, setLanguage] = useState<UiLanguage>("pt-BR");
+  const [sessionPhase, setSessionPhase] = useState<"resolving" | "internal" | "redirecting" | "error">("resolving");
+  const [sessionRetry, setSessionRetry] = useState(0);
 
   useEffect(() => {
-    if (pathname === "/login") return;
+    if (
+      pathname === "/login"
+      || pathname.startsWith("/clientes/")
+      || pathname === "/account/change-password"
+    ) return;
+    if (user && (user.account_type || "internal") !== "client") {
+      setSessionPhase("internal");
+      return;
+    }
+    let active = true;
+    setSessionPhase("resolving");
     setLanguage(getStoredLanguage());
     const saved = window.localStorage.getItem("ai-brain-persona-slug");
     api.me()
       .then((session) => {
+        if (!active) return;
         const list = session?.personas || [];
-        setUser(session?.user || null);
+        const sessionUser = session?.user || null;
+        setUser(sessionUser);
         setPersonas(list);
         const savedExists = saved && list.some((p: any) => p.slug === saved);
-        setPersona(savedExists ? saved : "");
+        const mustSelect = (session?.account_type || sessionUser?.account_type) === "client";
+        setPersona(savedExists ? saved : mustSelect ? list[0]?.slug || "" : "");
+        if (sessionUser?.must_change_password && pathname !== "/account/change-password") {
+          setSessionPhase("redirecting");
+          router.replace(mandatoryPasswordDestination(session, pathname));
+        } else if (mustSelect) {
+          setSessionPhase("redirecting");
+          router.replace(resolveSessionDestination(session, pathname));
+        } else {
+          setSessionPhase("internal");
+        }
       })
       .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error || "");
-        if (message.includes("401")) {
-          router.replace("/login");
+        if (!active) return;
+        if (error instanceof ApiError && error.status === 401) {
+          const next = pathname === "/" ? "/" : pathname;
+          router.replace(`/login?next=${encodeURIComponent(next)}`);
           return;
         }
+        setSessionPhase("error");
         setUser(null);
         setPersonas([]);
         setPersona(saved || "");
       });
-  }, [pathname, router]);
+    return () => {
+      active = false;
+    };
+  }, [pathname, router, sessionRetry]);
 
   useEffect(() => {
     function handleLanguageChange(event: Event) {
@@ -164,13 +197,53 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       window.localStorage.removeItem("ai-brain-persona-slug");
       window.localStorage.removeItem("ai-brain-persona-id");
       router.replace("/login");
-      router.refresh();
     }
   }
 
-  if (pathname === "/login") {
+  if (
+    pathname === "/login"
+    || pathname.startsWith("/clientes/")
+    || pathname === "/account/change-password"
+  ) {
     return <>{children}</>;
   }
+
+  if (sessionPhase === "resolving" || sessionPhase === "redirecting") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-obs-bg text-obs-subtle">
+        <div className="rounded-xl border border-black/10 bg-white/70 px-5 py-4 text-sm shadow-sm">
+          Validando acesso...
+        </div>
+      </main>
+    );
+  }
+
+  if (sessionPhase === "error") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-obs-bg px-6 text-obs-text">
+        <section className="max-w-md rounded-2xl border border-black/10 bg-white/75 p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold">Nao foi possivel validar sua sessao</h1>
+          <p className="mt-2 text-sm text-obs-subtle">
+            Confirme o backend e tente novamente. Nenhuma tela administrativa foi carregada.
+          </p>
+          <button
+            type="button"
+            className="mt-5 rounded-lg bg-obs-violet px-4 py-2 text-sm font-medium text-white"
+            onClick={() => setSessionRetry((value) => value + 1)}
+          >
+            Tentar novamente
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  const isAgency = user?.account_type === "agency";
+  const visibleNav = isAgency
+    ? [...nav, { section: "Configuracoes", href: "/access", label: "Acessos", icon: Users }]
+    : user?.role === "admin"
+      ? [...nav, { section: "Configuracoes", href: "/access", label: "Acessos", icon: Users }]
+      : nav;
 
   return (
     <div className="flex min-h-screen text-obs-text">
@@ -185,9 +258,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
-          {nav.map(({ href, label, icon: Icon, section }, idx) => {
+          {visibleNav.map(({ href, label, icon: Icon, section }, idx) => {
             const active = pathname === href || (href !== "/" && pathname.startsWith(href));
-            const prevSection = idx > 0 ? nav[idx - 1].section : null;
+            const prevSection = idx > 0 ? visibleNav[idx - 1].section : null;
             const showHeader = section && section !== prevSection;
             return (
               <div key={href}>

@@ -8,12 +8,16 @@ from cryptography.fernet import Fernet, InvalidToken
 
 
 def _secret_material() -> str:
-    return (
+    value = (
         (os.environ.get("AI_BRAIN_SECRETS_KEY") or "").strip()
         or (os.environ.get("AI_BRAIN_AUTH_SECRET") or "").strip()
         or (os.environ.get("NEXTAUTH_SECRET") or "").strip()
-        or "dev-only-ai-brain-secrets-key-change-me"
     )
+    if value:
+        return value
+    if (os.environ.get("ENVIRONMENT") or "").lower() == "production":
+        raise RuntimeError("AI_BRAIN_SECRETS_KEY is required in production")
+    return "dev-only-ai-brain-secrets-key-change-me"
 
 
 def _fernet() -> Fernet:

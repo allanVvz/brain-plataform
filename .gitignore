@@ -47,6 +47,7 @@ node_modules/
 out/
 dashboard/node_modules/
 dashboard/.next/
+dashboard/.next-e2e-evolution/
 dashboard/out/
 *.tsbuildinfo
 
@@ -104,6 +105,8 @@ dashboard/modes.json
 tmp/
 memory.backup-*.md
 .pytest_cache/
+dashboard/test-results/
+dashboard/playwright-report/
 
 # Local legacy QA/prod scripts kept out of the Docker-first operational branch.
 scripts/apply_seed_delivery_01.py
@@ -151,3 +154,4 @@ tests/e2e_vz_lupas_full_catalog.py
 tests/integration_knowledge_curation_architecture.py
 
 .vercel
+.demo-baita-state.json

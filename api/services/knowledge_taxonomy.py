@@ -21,6 +21,7 @@ Asset is a lateral layer that may connect to any node or to another asset via
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Optional
 
@@ -125,6 +126,16 @@ def _refresh_cache() -> None:
 
 
 def _ensure_cache() -> None:
+    if (os.environ.get("KNOWLEDGE_TAXONOMY_OFFLINE") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        # Unit/CI graph validation is deterministic from the static canonical
+        # registry and must not wait on an absent PostgREST endpoint.
+        _cache["fetched_at"] = time.monotonic()
+        return
     fetched = float(_cache.get("fetched_at") or 0.0)
     if (time.monotonic() - fetched) > _CACHE_TTL_SECONDS:
         try:
