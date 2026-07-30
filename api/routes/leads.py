@@ -6,7 +6,14 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
-from services import agents_service, auth_service, event_emitter, knowledge_graph, supabase_client
+from services import (
+    agents_service,
+    auth_service,
+    event_emitter,
+    knowledge_graph,
+    lead_qualification,
+    supabase_client,
+)
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -131,20 +138,31 @@ def list_leads(
         if resolved_persona_id and (audience_id or audience_slug):
             auth_service.assert_persona_access(request, persona_id=resolved_persona_id, persona_slug=persona_slug)
             try:
-                return supabase_client.get_leads_for_audience_scope(
+                rows = supabase_client.get_leads_for_audience_scope(
                     persona_id=resolved_persona_id,
                     audience_id=audience_id,
                     audience_slug=audience_slug,
                     limit=limit,
                     offset=offset,
                 ) or []
+                return [lead_qualification.decorate_lead(row) for row in rows]
             except Exception:
                 return []
         if persona_id or persona_slug:
             auth_service.assert_persona_access(request, persona_id=persona_id, persona_slug=persona_slug)
         elif not auth_service.is_admin(auth_service.current_user(request)):
-            return supabase_client.get_leads_for_persona_ids(auth_service.allowed_persona_ids(request), limit=limit, offset=offset) or []
-        return supabase_client.get_leads(persona_slug=persona_id or persona_slug, limit=limit, offset=offset) or []
+            rows = supabase_client.get_leads_for_persona_ids(
+                auth_service.allowed_persona_ids(request),
+                limit=limit,
+                offset=offset,
+            ) or []
+            return [lead_qualification.decorate_lead(row) for row in rows]
+        rows = supabase_client.get_leads(
+            persona_slug=persona_id or persona_slug,
+            limit=limit,
+            offset=offset,
+        ) or []
+        return [lead_qualification.decorate_lead(row) for row in rows]
     except HTTPException:
         raise
     except Exception as exc:
@@ -551,7 +569,7 @@ def get_lead(lead_id: str, request: Request):
         # Compatibilidade: leads antigos sem membership ainda podem usar
         # leads.persona_id como fallback de visibilidade.
         auth_service.assert_persona_access(request, persona_id=lead.get("persona_id"))
-    return lead
+    return lead_qualification.decorate_lead(lead)
 
 
 def _resolve_target_audience(body: LeadAudienceChangeBody, request: Request) -> dict:

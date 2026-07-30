@@ -12,7 +12,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from schemas.graph_json_v2 import Edge, GraphJson, Node
-from services import graph_json_importer, graph_json_v2_store, graph_json_v2_validator, supabase_client
+from services import (
+    graph_json_importer,
+    graph_json_v2_store,
+    graph_json_v2_validator,
+    graph_markdown,
+    supabase_client,
+)
 
 
 class VersionConflict(RuntimeError):
@@ -134,6 +140,10 @@ def publish(
     session_id: str | None = None,
     current_version_override: int | None = None,
 ) -> dict[str, Any]:
+    try:
+        graph = graph_markdown.canonicalize_graph(graph)
+    except graph_markdown.GraphMarkdownError as exc:
+        raise GraphValidationError(exc.errors) from exc
     scope = _scope_key(persona_slug, brand_slug)
     with _lock_for(scope):
         replay = _idempotent_result(persona_slug, brand_slug, idempotency_key)

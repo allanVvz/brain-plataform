@@ -15,7 +15,7 @@ from schemas.conversation import (
     ConversationDecision,
     ConversationRoute,
 )
-from services import graph_json_v2_store, supabase_client
+from services import graph_json_v2_store, lead_qualification, supabase_client
 from services.model_router import get_router
 from services.deterministic_sdr import (
     DeterministicSDR,
@@ -694,9 +694,25 @@ def commit(
     inbound_buffer_id: str | None = None,
 ) -> dict[str, Any]:
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
+    previous_metadata = dict(lead.get("metadata") or {})
+    qualification, qualified_stage = lead_qualification.calculate(
+        previous=previous_metadata.get("qualification"),
+        business_model=str(
+            response.cart_state.get("business_model") or "sales"
+        ).lower(),
+        intent=decision.intent,
+        state={
+            **response.cart_state,
+            "_decision_product_slug": decision.product_slug,
+        },
+        current_stage=lead.get("stage") or decision.lead_stage,
+        evidence_node_ids=decision.evidence_node_ids,
+        update_stage=True,
+    )
     metadata = {
-        **(lead.get("metadata") or {}),
+        **previous_metadata,
         "conversation_state": response.cart_state,
+        "qualification": qualification,
         "conversation_runtime": {
             "agent_slug": context.agent_slug,
             "graph_version": context.graph_version,
@@ -715,12 +731,12 @@ def commit(
         supabase_client.handoff_whatsapp_lead_state(
             lead_ref,
             metadata=metadata,
-            stage=decision.lead_stage,
+            stage=qualified_stage,
         )
     else:
         supabase_client.update_lead(
             lead_ref,
-            {"metadata": metadata, "stage": decision.lead_stage},
+            {"metadata": metadata, "stage": qualified_stage},
         )
 
     persona = supabase_client.get_persona(context.persona_slug) or {}
@@ -746,6 +762,7 @@ def commit(
             "output": {
                 "decision": decision.model_dump(mode="json"),
                 "response": response.model_dump(mode="json"),
+                "qualification": qualification,
             },
         }
     )
@@ -820,6 +837,7 @@ def commit(
                 "graph_version": context.graph_version,
                 "graph_checksum": context.graph_checksum,
                 "outbound_buffer_id": (buffer or {}).get("id"),
+                "qualification": qualification,
             },
         },
         source="conversation_runtime",
@@ -838,6 +856,8 @@ def commit(
         "evidence_node_ids": decision.evidence_node_ids,
         "graph_version": context.graph_version,
         "graph_checksum": context.graph_checksum,
+        "qualification": qualification,
+        "stage": qualified_stage,
     }
 
 

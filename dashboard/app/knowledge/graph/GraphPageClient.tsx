@@ -150,6 +150,7 @@ export default function GraphPageClient() {
   const [addPanelOpen, setAddPanelOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [headerPersonaSlug, setHeaderPersonaSlug] = useState("");
+  const [personaSummaries, setPersonaSummaries] = useState<any[]>([]);
   const [graphNotice, setGraphNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [sofiaOpen, setSofiaOpen] = useState(true);
   const [sofiaLoading, setSofiaLoading] = useState(false);
@@ -223,13 +224,15 @@ export default function GraphPageClient() {
     setLoading(true);
     try {
       if (!headerPersonaSlug) {
+        const catalog = await api.knowledgeCatalog().catch(() => ({ catalogs: [] }));
+        setPersonaSummaries(catalog?.catalogs || []);
         const emptyPayload = { nodes: [], edges: [], meta: {} } as GraphPayload;
         setDocGraph(null);
         setDocVersion(0);
         setData(emptyPayload);
-        setGraphNotice({ tone: "error", text: "Selecione uma persona para carregar o Graph JSON v2." });
         return emptyPayload;
       }
+      setPersonaSummaries([]);
       const currentDoc = await api.getGraphDocument(headerPersonaSlug);
       const parsed = parseGraphJsonV2Payload(currentDoc);
       if (parsed) {
@@ -616,6 +619,49 @@ export default function GraphPageClient() {
       blockingCount: blocking,
     };
   }, [effectivePersonaSlug, sharedPlanJson]);
+
+  if (!headerPersonaSlug) {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-xl font-semibold text-obs-text">Grafos de conhecimento</h1>
+          <p className="mt-1 text-sm text-obs-subtle">
+            Visão agregada das personas autorizadas. Selecione uma persona no topo para abrir e editar seu grafo.
+          </p>
+        </div>
+        {loading && <div className="rounded-xl border border-white/06 p-8 text-center text-sm text-obs-subtle">Carregando grafos…</div>}
+        {!loading && personaSummaries.length === 0 && (
+          <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-obs-subtle">
+            Nenhum Graph JSON v2 publicado no escopo autorizado.
+          </div>
+        )}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {personaSummaries.map((catalog) => (
+            <button
+              key={catalog.persona.slug}
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent("ai-brain-persona-change", { detail: { id: catalog.persona.id, slug: catalog.persona.slug } }))}
+              className="rounded-xl border border-white/06 bg-white/[0.025] p-4 text-left transition hover:border-obs-violet/35 hover:bg-obs-violet/[0.04]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-obs-text">{catalog.persona.name}</p>
+                  <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-obs-faint">{catalog.persona.slug}</p>
+                </div>
+                <span className="rounded-full bg-emerald-400/10 px-2 py-1 text-[10px] text-emerald-300">{catalog.graph.status}</span>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg bg-white/[0.03] p-2"><p className="text-lg font-semibold text-obs-text">{catalog.graph.node_count}</p><p className="text-[9px] text-obs-faint">nodes</p></div>
+                <div className="rounded-lg bg-white/[0.03] p-2"><p className="text-lg font-semibold text-obs-text">{catalog.graph.edge_count}</p><p className="text-[9px] text-obs-faint">edges</p></div>
+                <div className="rounded-lg bg-white/[0.03] p-2"><p className="text-lg font-semibold text-obs-text">{catalog.embedded.faq_count}</p><p className="text-[9px] text-obs-faint">FAQs</p></div>
+              </div>
+              <p className="mt-3 truncate font-mono text-[10px] text-obs-faint">v{catalog.graph.version} · {catalog.graph.checksum}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-96px)] -mx-6 -mt-6 overflow-hidden">

@@ -87,6 +87,7 @@ function LeadsPageInner() {
   const [audiences, setAudiences] = useState<Audience[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState("");
+  const [listMode, setListMode] = useState<"clients" | "validations">("clients");
   const [loading, setLoading] = useState(true);
   const [creatingAudience, setCreatingAudience] = useState(false);
   const [moveShare, setMoveShare] = useState<{ lead: Lead; mode: MoveShareMode } | null>(null);
@@ -153,25 +154,22 @@ function LeadsPageInner() {
   }, [personaId, personaSlug, activeAudience?.slug]);
 
   useEffect(() => {
-    if (!personaId && !personaSlug) {
-      setLeads([]);
-      setLoading(false);
-      return;
-    }
     loadLeads();
   }, [loadLeads, personaId, personaSlug]);
 
   const filteredLeads = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return leads;
     return leads.filter((lead) => {
+      const isValidation = Boolean(lead.validation?.is_validation);
+      if (listMode === "validations" ? !isValidation : isValidation) return false;
+      if (!q) return true;
       const hay = [lead.nome, lead.lead_id, lead.email, lead.telefone, lead.interesse_produto]
         .filter(Boolean)
         .map((v: string) => String(v).toLowerCase())
         .join(" ");
       return hay.includes(q);
     });
-  }, [leads, search]);
+  }, [leads, listMode, search]);
 
   const audienceCounts = useMemo(() => {
     const counts: Record<string, number> = { [ALL_KEY]: leads.length };
@@ -216,8 +214,6 @@ function LeadsPageInner() {
     setAudienceParam(audience.slug);
   };
 
-  const personaSelected = Boolean(personaId || personaSlug);
-
   return (
     <div className="lg-page-narrow flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -241,16 +237,17 @@ function LeadsPageInner() {
         </div>
       </header>
 
-      {!personaSelected && (
-        <div className="lg-card text-sm text-obs-text">
-          Selecione uma persona no topo da plataforma para listar os leads.
-        </div>
-      )}
-
-      {personaSelected && (
-        <>
+      <>
           <div className="flex flex-wrap items-center gap-2">
-            {buildLeadsFilters(audiences).map((f) => {
+            <div className="flex rounded-lg border border-white/06 bg-obs-base p-1">
+              <button type="button" onClick={() => setListMode("clients")} className={`rounded-md px-3 py-1.5 text-xs ${listMode === "clients" ? "bg-white/10 text-obs-text" : "text-obs-faint"}`}>
+                Clientes reais
+              </button>
+              <button type="button" onClick={() => setListMode("validations")} className={`rounded-md px-3 py-1.5 text-xs ${listMode === "validations" ? "bg-white/10 text-obs-text" : "text-obs-faint"}`}>
+                Validações
+              </button>
+            </div>
+            {personaId && buildLeadsFilters(audiences).map((f) => {
               const backing = f.isAll ? null : audiences.find((a) => a.slug === f.slug);
               const canRename = Boolean(backing && !(backing as any).from_graph_node);
               return (
@@ -269,14 +266,14 @@ function LeadsPageInner() {
                 />
               );
             })}
-            <button
+            {personaId && <button
               type="button"
               onClick={() => setCreatingAudience(true)}
               className="lg-btn lg-btn-secondary"
               title="Criar audiencia"
             >
               <Plus size={12} /> Nova
-            </button>
+            </button>}
 
             <div className="relative ml-auto w-full max-w-xs">
               <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-obs-faint" />
@@ -295,6 +292,7 @@ function LeadsPageInner() {
                 <tr>
                   <th>Lead</th>
                   <th>Stage</th>
+                  <th>Score</th>
                   <th>Produto</th>
                   <th>Origem</th>
                   <th>Ultima mensagem</th>
@@ -304,17 +302,19 @@ function LeadsPageInner() {
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={6} className="text-center text-obs-faint">Carregando leads...</td>
+                    <td colSpan={7} className="text-center text-obs-faint">Carregando leads...</td>
                   </tr>
                 )}
                 {!loading && !filteredLeads.length && (
                   <tr>
-                    <td colSpan={6} className="text-center text-obs-faint">
+                    <td colSpan={7} className="text-center text-obs-faint">
                       {search
                         ? "Nenhum lead corresponde a busca."
                         : activeAudience
                         ? `Nenhum lead na audiencia "${activeAudience.name}".`
-                        : "Nenhum lead encontrado para esta persona."}
+                        : listMode === "validations"
+                        ? "Nenhuma validação neste escopo."
+                        : "Nenhum cliente real encontrado no escopo autorizado."}
                     </td>
                   </tr>
                 )}
@@ -344,6 +344,19 @@ function LeadsPageInner() {
                       </td>
                       <td className={STAGE_COLOR[lead.stage] || "text-obs-text"}>
                         {STAGE_LABEL[lead.stage] || lead.stage || "Novo"}
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-obs-text">{lead.qualification_score || 0}</span>
+                          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-white/5">
+                            <div className="h-full bg-obs-violet" style={{ width: `${Math.min(100, Number(lead.qualification_score || 0))}%` }} />
+                          </div>
+                        </div>
+                        {lead.qualification_signals?.length > 0 && (
+                          <p className="mt-1 max-w-40 truncate text-[9px] text-obs-faint">
+                            {lead.qualification_signals.map((signal: any) => signal.label || signal.key).join(", ")}
+                          </p>
+                        )}
                       </td>
                       <td className="text-obs-subtle lg-cell-truncate">{lead.interesse_produto || "—"}</td>
                       <td>
@@ -401,7 +414,6 @@ function LeadsPageInner() {
             </table>
           </div>
         </>
-      )}
 
       {creatingAudience && personaId && (
         <CreateAudiencePrompt

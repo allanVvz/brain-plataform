@@ -822,6 +822,13 @@ export const api = {
     if (personaId) params.set("persona_id", personaId);
     return req<any>(`/knowledge/chat-context?${params.toString()}`);
   },
+  knowledgeCatalog: (opts: { personaId?: string; personaSlug?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.personaId) params.set("persona_id", opts.personaId);
+    if (opts.personaSlug) params.set("persona_slug", opts.personaSlug);
+    const query = params.toString();
+    return req<any>(`/knowledge/catalog${query ? `?${query}` : ""}`);
+  },
 
   // Marketing
   marketingModes: () => req<any>("/marketing/modes"),

@@ -107,6 +107,10 @@ def _publish_or_http(**kwargs):
                 "current_version": exc.current,
             },
         ) from exc
+    except graph_document_publisher.GraphValidationError as exc:
+        raise HTTPException(
+            422, {"code": "GRAPH_VALIDATION_FAILED", "errors": exc.errors}
+        ) from exc
     except Exception as exc:
         raise HTTPException(502, str(exc)) from exc
 

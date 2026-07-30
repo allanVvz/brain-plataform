@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowRight, BarChart3, Boxes, Clock, GitBranch, Maximize2, MessageSquare, RefreshCw, SlidersHorizontal, Tags, Users } from "lucide-react";
+import { Activity, ArrowRight, BarChart3, Boxes, CheckCircle2, Clock, GitBranch, Maximize2, MessageSquare, RefreshCw, SlidersHorizontal, Tags, Users } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -243,7 +243,33 @@ export default function PipelinePage() {
     { label: "Mensagens usuario", value: messages.filter(isUserMessage).length, icon: Activity },
     { label: "Mensagens assistente", value: messages.filter(isAssistantMessage).length, icon: Activity },
     { label: "Latencia media", value: formatLatency(averageResponseLatency(messages)), icon: Clock },
+    {
+      label: "Score medio",
+      value: filteredLeads.length
+        ? Math.round(filteredLeads.reduce((total, lead) => total + Number(lead.qualification_score || 0), 0) / filteredLeads.length)
+        : 0,
+      icon: Activity,
+    },
+    {
+      label: "Validacoes",
+      value: filteredLeads.filter((lead) => lead.validation?.is_validation).length,
+      icon: CheckCircle2,
+    },
   ];
+  const qualificationData = useMemo(
+    () => filteredLeads
+      .map((lead) => ({
+        name: lead.nome || lead.lead_id || `Lead #${lead.id}`,
+        stage: lead.stage || "novo",
+        score: Number(lead.qualification_score || 0),
+        signals: (lead.qualification_signals || [])
+          .map((signal: any) => `${signal.label || signal.key} (+${signal.points || 0})`)
+          .join(", "),
+        validation: lead.validation?.is_validation ? "Validacao" : "Cliente real",
+      }))
+      .sort((a, b) => b.score - a.score),
+    [filteredLeads],
+  );
 
   return (
     <div className="flex h-[calc(100vh-6rem)] min-h-[760px] gap-4 overflow-hidden">
@@ -296,6 +322,7 @@ export default function PipelinePage() {
             setDistributionMode={setDistributionMode}
             distributionData={distributionData}
             interactionsData={interactionsData}
+            qualificationData={qualificationData}
             setExpanded={setExpanded}
           />
         ) : activeTab === "knowledge" ? (
@@ -369,6 +396,7 @@ function LeadsPipeline({
   setDistributionMode,
   distributionData,
   interactionsData,
+  qualificationData,
   setExpanded,
 }: {
   headerMetrics: Array<{ label: string; value: string | number; icon: any }>;
@@ -380,6 +408,7 @@ function LeadsPipeline({
   setDistributionMode: (mode: DistributionMode) => void;
   distributionData: any[];
   interactionsData: any[];
+  qualificationData: any[];
   setExpanded: (value: ExpandedTable) => void;
 }) {
   return (
@@ -484,6 +513,31 @@ function LeadsPipeline({
             </LineChart>
           </ResponsiveContainer>
         </ChartShell>
+      </div>
+
+      <div className="rounded-xl border border-white/06 bg-white/[0.025] p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-obs-text">Qualificacao deterministica</h2>
+            <p className="mt-0.5 text-xs text-obs-subtle">Score, estagio e sinais persistidos por lead.</p>
+          </div>
+          <button type="button" onClick={() => setExpanded({ title: "Qualificacao deterministica", rows: qualificationData })} className="flex items-center gap-1.5 rounded-md border border-white/08 px-2.5 py-1.5 text-xs text-obs-subtle hover:text-obs-text">
+            <Maximize2 size={12} /> Tabela
+          </button>
+        </div>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {qualificationData.slice(0, 6).map((lead) => (
+            <div key={`${lead.name}:${lead.validation}`} className="rounded-lg border border-white/06 bg-white/[0.03] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-xs font-medium text-obs-text">{lead.name}</p>
+                <span className="text-sm font-semibold text-obs-violet">{lead.score}/100</span>
+              </div>
+              <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-obs-faint">{lead.stage} · {lead.validation}</p>
+              <p className="mt-2 line-clamp-2 text-[10px] leading-relaxed text-obs-subtle">{lead.signals || "Sem sinais comerciais."}</p>
+            </div>
+          ))}
+          {qualificationData.length === 0 && <p className="text-sm text-obs-subtle">Nenhum lead no periodo selecionado.</p>}
+        </div>
       </div>
     </section>
   );

@@ -5,7 +5,14 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from services import agents_service, auth_service, event_emitter, n8n_client, supabase_client
+from services import (
+    agents_service,
+    auth_service,
+    event_emitter,
+    lead_qualification,
+    n8n_client,
+    supabase_client,
+)
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 logger = logging.getLogger("messages")
@@ -201,6 +208,26 @@ def _resolve_scope_lead_refs(
     return resolved_persona_id, None
 
 
+def _decorate_conversations(rows: list[dict]) -> list[dict]:
+    decorated: list[dict] = []
+    for row in rows:
+        lead_ref = row.get("lead_ref")
+        lead = (
+            supabase_client.get_lead_by_ref(int(lead_ref))
+            if lead_ref is not None
+            else {}
+        ) or {}
+        extra = lead_qualification.decorate_lead(lead)
+        decorated.append({
+            **row,
+            "qualification": extra.get("qualification") or {},
+            "qualification_score": extra.get("qualification_score") or 0,
+            "qualification_signals": extra.get("qualification_signals") or [],
+            "validation": extra.get("validation") or {},
+        })
+    return decorated
+
+
 @router.get("/conversations")
 def get_conversations(
     request: Request,
@@ -223,17 +250,27 @@ def get_conversations(
             audience_slug=audience_slug,
         )
         if resolved_persona_id and lead_refs is not None:
-            return supabase_client.get_conversations(hours=hours, persona_id=resolved_persona_id, lead_refs=lead_refs)
+            return _decorate_conversations(
+                supabase_client.get_conversations(
+                    hours=hours,
+                    persona_id=resolved_persona_id,
+                    lead_refs=lead_refs,
+                )
+            )
         if persona_id:
             auth_service.assert_persona_access(request, persona_id=persona_id)
-            return supabase_client.get_conversations(hours=hours, persona_id=persona_id)
+            return _decorate_conversations(
+                supabase_client.get_conversations(hours=hours, persona_id=persona_id)
+            )
         if auth_service.is_admin(auth_service.current_user(request)):
-            return supabase_client.get_conversations(hours=hours, persona_id=None)
+            return _decorate_conversations(
+                supabase_client.get_conversations(hours=hours, persona_id=None)
+            )
         rows: list[dict] = []
         for pid in auth_service.allowed_persona_ids(request):
             rows.extend(supabase_client.get_conversations(hours=hours, persona_id=pid))
         rows.sort(key=lambda item: item.get("last_at") or item.get("created_at") or "", reverse=True)
-        return rows
+        return _decorate_conversations(rows)
     except HTTPException:
         raise
     except Exception as exc:

@@ -302,15 +302,13 @@ export default function NodeDrawer({ node, selectedNodes = [], personaSlug, sess
     ["Status", currentStatus || "active"],
     ["Tipo", d.content_type || d.node_type || "node"],
     ["Origem", d.source || "graph"],
-    ["Pergunta", fullItem?.question || d.question],
-    ["Resposta", fullItem?.answer || d.answer],
     ["Preço", fullItem?.metadata?.price?.display || d.metadata?.price?.display],
     ["Última modificação", lastModifiedDisplay],
   ];
   const summaryItems = rawSummaryItems.filter(([, value]) => Boolean(value));
 
   return (
-    <div className="absolute top-0 right-0 h-full w-[340px] glass-raised border-l border-white/06 flex flex-col z-50 animate-slide-in-r shadow-2xl">
+    <div className="absolute right-0 top-0 z-50 flex h-full w-[min(720px,94vw)] flex-col border-l border-white/06 glass-raised shadow-2xl animate-slide-in-r">
 
       {/* ── Header ── */}
       <div className="flex items-start justify-between px-5 pt-5 pb-4 sep">

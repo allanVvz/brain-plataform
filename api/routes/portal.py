@@ -15,7 +15,14 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from services import agents_service, auth_service, event_emitter, secret_store, supabase_client
+from services import (
+    agents_service,
+    auth_service,
+    event_emitter,
+    lead_qualification,
+    secret_store,
+    supabase_client,
+)
 from services.whatsapp_providers import get_provider
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -105,7 +112,19 @@ def _evolution_webhook_target(
 @router.get("/conversations")
 def conversations(request: Request, persona_slug: str = Query(...)):
     persona = _persona(persona_slug, request)
-    return supabase_client.get_conversations(hours=720, persona_id=persona["id"])
+    rows = supabase_client.get_conversations(hours=720, persona_id=persona["id"])
+    decorated = []
+    for row in rows:
+        lead = supabase_client.get_lead_by_ref(int(row.get("lead_ref") or 0)) or {}
+        extra = lead_qualification.decorate_lead(lead)
+        decorated.append({
+            **row,
+            "qualification": extra.get("qualification") or {},
+            "qualification_score": extra.get("qualification_score") or 0,
+            "qualification_signals": extra.get("qualification_signals") or [],
+            "validation": extra.get("validation") or {},
+        })
+    return decorated
 
 
 @router.get("/client-pages")
@@ -253,13 +272,14 @@ async def send_message(request: Request, persona_slug: str = Query(...)):
 @router.get("/leads")
 def leads(request: Request, persona_slug: str = Query(...), limit: int = Query(500, le=2000)):
     persona = _persona(persona_slug, request)
-    return supabase_client.get_leads_for_persona_ids([persona["id"]], limit=limit, offset=0)
+    rows = supabase_client.get_leads_for_persona_ids([persona["id"]], limit=limit, offset=0)
+    return [lead_qualification.decorate_lead(row) for row in rows]
 
 
 @router.get("/leads/{lead_id}")
 def lead_detail(lead_id: int, request: Request, persona_slug: str = Query(...)):
     persona = _persona(persona_slug, request)
-    return _lead(lead_id, persona["id"])
+    return lead_qualification.decorate_lead(_lead(lead_id, persona["id"]))
 
 
 @router.patch("/leads/{lead_id}")
@@ -321,7 +341,10 @@ def handoff(lead_id: int, request: Request, persona_slug: str = Query(...)):
 @router.get("/pipeline")
 def pipeline(request: Request, persona_slug: str = Query(...)):
     persona = _persona(persona_slug, request)
-    rows = supabase_client.get_leads_for_persona_ids([persona["id"]], limit=2000, offset=0)
+    rows = [
+        lead_qualification.decorate_lead(row)
+        for row in supabase_client.get_leads_for_persona_ids([persona["id"]], limit=2000, offset=0)
+    ]
     portal_config = dict((persona.get("config") or {}).get("portal") or {})
     configured_labels = dict(portal_config.get("stage_labels") or {})
     conversion_stage = str(portal_config.get("conversion_stage") or "fechado")

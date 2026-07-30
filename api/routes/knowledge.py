@@ -1306,6 +1306,55 @@ def rebuild_graph(request: Request, persona_slug: Optional[str] = Query(None)):
 
 # ── Chat Context (semantic graph + KB fallback) ──────────────
 
+@router.get("/catalog")
+def knowledge_catalog(
+    request: Request,
+    persona_id: Optional[str] = Query(None),
+    persona_slug: Optional[str] = Query(None),
+):
+    from services import knowledge_catalog as catalog_service
+
+    personas = supabase_client.get_personas() or []
+    if persona_id or persona_slug:
+        persona = next(
+            (
+                row for row in personas
+                if (persona_id and row.get("id") == persona_id)
+                or (persona_slug and row.get("slug") == persona_slug)
+            ),
+            None,
+        )
+        if not persona:
+            raise HTTPException(404, "Persona not found")
+        auth_service.assert_persona_access(
+            request,
+            persona_id=persona.get("id"),
+            persona_slug=persona.get("slug"),
+        )
+        personas = [persona]
+    elif not auth_service.is_admin(auth_service.current_user(request)):
+        allowed = set(auth_service.allowed_persona_ids(request))
+        personas = [row for row in personas if row.get("id") in allowed]
+
+    catalogs = []
+    for persona in personas:
+        catalog = catalog_service.load_catalog(
+            persona_slug=persona.get("slug"),
+            persona_id=persona.get("id"),
+            persona_name=persona.get("name"),
+        )
+        if catalog:
+            catalogs.append(catalog)
+    return {
+        "catalogs": catalogs,
+        "persona_count": len(catalogs),
+        "document_count": sum(
+            int((item.get("graph") or {}).get("document_count") or 0)
+            for item in catalogs
+        ),
+    }
+
+
 @router.get("/chat-context")
 def chat_context(
     request: Request,
@@ -1322,12 +1371,13 @@ def chat_context(
     conversation (or to an explicit `q`). Falls back gracefully when the
     semantic graph has no data — always returns the same response shape.
     """
-    return knowledge_graph.get_chat_context(
+    context = knowledge_graph.get_chat_context(
         lead_ref=lead_ref,
         persona_id=persona_id,
         user_text=q,
         limit=limit,
     )
+    return knowledge_graph.with_operator_context(context, limit=limit)
 
 
 # ── Published Graph JSON v2 context ───

@@ -113,13 +113,8 @@ function themeTextColor(theme: AppTheme, translucent: boolean): string {
 // ── Layout helpers ─────────────────────────────────────────────
 
 function nodeSize(data: GraphNodeData): { w: number; h: number } {
-  const importance = data.importance ?? 0.5;
-  // Persona always wide
-  if (data.node_type === "persona") return { w: 180, h: 56 };
-  if (importance >= 0.85) return { w: 170, h: 52 };
-  if (importance >= 0.65) return { w: 140, h: 44 };
-  if (importance >= 0.50) return { w: 120, h: 38 };
-  return { w: 104, h: 32 };
+  if (data.node_type === "persona") return { w: 220, h: 76 };
+  return { w: 210, h: 92 };
 }
 
 function nodeToRank(data: GraphNodeData): number {
@@ -146,8 +141,8 @@ function nodeToRank(data: GraphNodeData): number {
     gallery: 9,
     asset: 9,
     embedded: 10,
-    rule: 10,
-    tone: 10,
+    rule: 7,
+    tone: 7,
     entity: 11,
   };
   if (topDownRank[nodeType] !== undefined) return topDownRank[nodeType];
@@ -255,10 +250,10 @@ function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Nod
       if (ax !== bx) return ax - bx;
       return a.id.localeCompare(b.id);
     });
-    const rankWidth = (sorted.length - 1) * (118 + spacing.nodeSep);
-    const y = (compactRank.get(rank) ?? 0) * (74 + spacing.rankSep * 0.72);
+    const rankWidth = (sorted.length - 1) * (210 + spacing.nodeSep);
+    const y = (compactRank.get(rank) ?? 0) * (96 + spacing.rankSep * 0.72);
     sorted.forEach((node, index) => {
-      const x = index * (118 + spacing.nodeSep) - rankWidth / 2;
+      const x = index * (210 + spacing.nodeSep) - rankWidth / 2;
       mirroredPositions.set(node.id, { x, y });
     });
   });
@@ -275,20 +270,20 @@ function applyLayoutTree(nodes: Node[], edges: Edge[], branchDistance = 48): Nod
   const galleryNodes = mirrored.filter((node) => (node.data as GraphNodeData)?.node_type === "gallery");
   const embeddedNodes = mirrored.filter((node) => (node.data as GraphNodeData)?.node_type === "embedded");
   if (!embeddedNodes.length && !galleryNodes.length) return mirrored;
-  const galleryOffsetStart = -((galleryNodes.length - 1) * 160) / 2;
-  const embeddedOffsetStart = -((embeddedNodes.length - 1) * 160) / 2;
+  const galleryOffsetStart = -((galleryNodes.length - 1) * 240) / 2;
+  const embeddedOffsetStart = -((embeddedNodes.length - 1) * 240) / 2;
   const terminalShift = galleryNodes.length && embeddedNodes.length ? 90 : 0;
   let galleryIndex = 0;
   let embeddedIndex = 0;
   return mirrored.map((node) => {
     const nodeType = (node.data as GraphNodeData)?.node_type;
     if (nodeType === "gallery") {
-      const x = galleryOffsetStart + galleryIndex * 160 - terminalShift;
+      const x = galleryOffsetStart + galleryIndex * 240 - terminalShift;
       galleryIndex += 1;
       return { ...node, position: { x, y: baseMaxY + 180 } };
     }
     if (nodeType === "embedded") {
-      const x = embeddedOffsetStart + embeddedIndex * 160 + terminalShift;
+      const x = embeddedOffsetStart + embeddedIndex * 240 + terminalShift;
       embeddedIndex += 1;
       return { ...node, position: { x, y: baseMaxY + 180 } };
     }
@@ -408,11 +403,14 @@ function PersonaNode({ data, selected }: NodeProps) {
   const inPath = !!d.in_focus_path;
   const branchComplete = Boolean((d as any).branch_complete_validated);
   const personaColor = branchComplete ? "#22c55e" : (d.color || "#7c6fff");
+  const snippet = String(
+    (d as any).markdown || (d as any).summary || d.content_preview || "",
+  ).replace(/^#+\s+/gm, "").replace(/\s+/g, " ").trim();
   return (
     <div
       className={`rounded-xl border-2 px-4 py-2.5 text-sm font-semibold tracking-wide cursor-pointer transition-all ${selected || focused ? "scale-105" : ""}`}
       style={{
-        minWidth: 160, textAlign: "center",
+        width: 220, minHeight: 76, textAlign: "center",
         borderColor: focused ? "#a78bfa" : personaColor,
         background: `${personaColor}1A`,
         color: personaColor,
@@ -422,7 +420,11 @@ function PersonaNode({ data, selected }: NodeProps) {
     >
       <Handle id="bottom-source" type="source" position={Position.Bottom} style={HANDLE_STYLE} />
       <div className="text-[10px] uppercase tracking-widest opacity-60 mb-0.5">{d.node_type || "persona"}</div>
-      {d.label}
+      <div className="line-clamp-2">{d.label}</div>
+      <div className="mt-1 text-[8px] uppercase tracking-wider opacity-60">
+        {String(d.status || "validated")}
+      </div>
+      {snippet && <p className="mt-1 line-clamp-2 text-[9px] font-normal leading-snug opacity-70">{snippet}</p>}
     </div>
   );
 }
@@ -451,6 +453,17 @@ function KnowledgeNode({ data, selected }: NodeProps) {
   const isGraphMode = d._viewMode === "graph";
   const theme = (d._theme === "dark" ? "dark" : "clean") as AppTheme;
   const translucent = Boolean(d._graphNodeOpacity);
+  const factualSnippet = String(
+    (d as any).markdown
+    || (d as any).summary
+    || d.content_preview
+    || (d as any).metadata?.markdown
+    || "",
+  )
+    .replace(/^---[\s\S]*?---/m, "")
+    .replace(/^#+\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
   const labelColor = themeTextColor(theme, translucent);
   const nodeFill = translucent
     ? `radial-gradient(circle at 35% 25%, ${color}73, ${color}40 58%, ${color}24)`
@@ -514,9 +527,9 @@ function KnowledgeNode({ data, selected }: NodeProps) {
     <div
       className={`relative rounded-2xl border cursor-pointer transition-all ${translucent ? "glass" : ""} ${focused ? "ring-2 ring-obs-violet" : ""} ${selected ? "ring-1 ring-obs-violet" : ""}`}
       style={{
-        minWidth: importance >= 0.85 ? 150 : importance >= 0.65 ? 130 : importance >= 0.5 ? 110 : 96,
-        maxWidth: importance >= 0.85 ? 180 : 150,
-        padding: importance >= 0.85 ? "8px 12px" : importance >= 0.5 ? "6px 10px" : "4px 8px",
+        width: 210,
+        minHeight: 82,
+        padding: "9px 12px",
         borderColor: isEmbedded ? "rgba(255,255,255,0.72)" : isGallery ? "rgba(217,70,239,0.72)" : focused ? "#a78bfa" : `${color}AA`,
         background: isEmbedded
           ? (translucent ? "linear-gradient(145deg, rgba(255,255,255,0.34), rgba(148,163,184,0.28))" : "#64748b")
@@ -549,7 +562,7 @@ function KnowledgeNode({ data, selected }: NodeProps) {
         )}
       </div>
       <div
-        className="font-medium truncate"
+        className="font-medium line-clamp-2"
         style={{
           color: labelColor,
           fontSize: importance >= 0.85 ? 13 : importance >= 0.5 ? 12 : 11,
@@ -557,6 +570,14 @@ function KnowledgeNode({ data, selected }: NodeProps) {
       >
         {d.label}
       </div>
+      <div className="mt-1 flex items-center justify-between gap-2 text-[8px] uppercase tracking-wider" style={{ color: labelColor, opacity: 0.7 }}>
+        <span>{String(d.status || (d.validated === false ? "pending" : "validated"))}</span>
+      </div>
+      {factualSnippet && !isEmbedded && !isGallery && (
+        <p className="mt-1 line-clamp-2 text-[9px] leading-snug" style={{ color: labelColor, opacity: 0.78 }}>
+          {factualSnippet}
+        </p>
+      )}
     </div>
   );
 }

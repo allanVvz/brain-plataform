@@ -2209,6 +2209,99 @@ def get_chat_context(
         "summary": summary,
         "persona_id": persona_id,
         "persona_inferred": persona_was_inferred,
+        "conversation_runtime": (
+            (lead_data.get("metadata") or {}).get("conversation_runtime") or {}
+        ),
+        "evidence_node_ids": (
+            ((lead_data.get("metadata") or {}).get("conversation_runtime") or {}).get(
+                "evidence_node_ids"
+            )
+            or []
+        ),
+    }
+
+
+def with_operator_context(context: dict, *, limit: int = 12) -> dict:
+    """Add a stable operator projection while preserving all legacy arrays."""
+    nodes = list(context.get("nodes") or [])
+    evidence_ids = {
+        str(value)
+        for value in (
+            context.get("evidence_node_ids")
+            or ((context.get("conversation_runtime") or {}).get("evidence_node_ids"))
+            or []
+        )
+    }
+    type_priority = {
+        "faq": 0, "rule": 1, "tone": 2, "product": 3,
+        "product_group": 4, "copy": 5, "campaign": 6,
+        "brand": 7, "persona": 8,
+    }
+
+    def rank(node: dict) -> tuple:
+        distance = node.get("graph_distance")
+        return (
+            0 if str(node.get("id") or "") in evidence_ids else 1,
+            type_priority.get(str(node.get("node_type") or ""), 20),
+            distance if isinstance(distance, int) else 999,
+            0 if node.get("validated") else 1,
+            str(node.get("id") or ""),
+        )
+
+    ranked_nodes = sorted(nodes, key=rank)
+    primary_nodes = (
+        [node for node in ranked_nodes if str(node.get("id") or "") in evidence_ids]
+        if evidence_ids
+        else ranked_nodes[:limit]
+    )
+    primary = []
+    for node in primary_nodes[:limit]:
+        primary.append({
+            "id": node.get("id"),
+            "node_type": node.get("node_type"),
+            "title": node.get("title"),
+            "markdown": (
+                (node.get("metadata") or {}).get("markdown")
+                or node.get("summary")
+                or ""
+            ),
+            "graph_distance": node.get("graph_distance"),
+            "validated": bool(node.get("validated")),
+            "path": node.get("path") or [],
+            "used_in_last_decision": str(node.get("id") or "") in evidence_ids,
+        })
+    faq_rules = []
+    for node in ranked_nodes:
+        if node.get("node_type") not in {"faq", "rule", "tone"}:
+            continue
+        faq_rules.append({
+            "id": node.get("id"),
+            "node_type": node.get("node_type"),
+            "title": node.get("title"),
+            "markdown": (
+                (node.get("metadata") or {}).get("markdown")
+                or node.get("summary")
+                or ""
+            ),
+            "graph_distance": node.get("graph_distance"),
+            "validated": bool(node.get("validated")),
+            "path": node.get("path") or [],
+            "used_in_last_decision": str(node.get("id") or "") in evidence_ids,
+        })
+        if len(faq_rules) >= limit:
+            break
+    best_path = next(
+        (item.get("path") or [] for item in primary if item.get("path")),
+        [],
+    )
+    return {
+        **context,
+        "operator_context": {
+            "primary": primary,
+            "faq_rules": faq_rules,
+            "graph_path": best_path,
+            "ranking": "last_decision,exact_match,faq,distance,validation,id",
+        },
     }
 
 

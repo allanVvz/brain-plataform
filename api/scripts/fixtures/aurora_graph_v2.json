@@ -1,6 +1,6 @@
 {
   "schema_version": "2.0",
-  "graph_id": "aurora-premium-automotive-v2",
+  "graph_id": "aurora-premium-automotive-markdown",
   "tenant": "brain-ai",
   "persona_slug": "aurora",
   "brand_slug": "aurora-estetica-automotiva",
@@ -11,6 +11,7 @@
       "node_type": "persona",
       "slug": "aurora",
       "label": "Aurora Estética Automotiva",
+      "parent_id": null,
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
@@ -23,8 +24,20 @@
           "capacity": 1,
           "operational_interval_minutes": 30,
           "confirmation_required": true,
-          "final_price_depends_on": ["modelo", "porte", "estado do veículo"],
-          "required_fields": ["customer_name", "service_slug", "vehicle_model", "vehicle_size", "condition", "desired_date", "time_window"],
+          "final_price_depends_on": [
+            "modelo",
+            "porte",
+            "estado do veículo"
+          ],
+          "required_fields": [
+            "customer_name",
+            "service_slug",
+            "vehicle_model",
+            "vehicle_size",
+            "condition",
+            "desired_date",
+            "time_window"
+          ],
           "field_questions": {
             "customer_name": "Qual é o seu nome?",
             "service_slug": "Qual serviço você deseja?",
@@ -42,7 +55,8 @@
             "unknown_clarification": "Não entendi completamente. Você quer conhecer os serviços, pedir orçamento ou solicitar agendamento?",
             "unknown_handoff": "Não encontrei informação aprovada para responder. Vou encaminhar à Equipe Aurora."
           }
-        }
+        },
+        "markdown": "# Aurora Estética Automotiva\n\nAtendimento premium de estética automotiva para dúvidas, orçamento, agendamento e coleta para atendimento humano.\n\n## Business model\n\nappointment\n\n## Greeting\n\nOlá. Sou o atendimento virtual da Aurora Estética Automotiva. Posso apresentar os serviços, informar valores demonstrativos ou registrar uma solicitação de agendamento.\n\n## Appointment policy\n\n- **Responsible team:** Equipe Aurora\n- **Provider:** manual\n- **Capacity:** 1\n- **Operational interval minutes:** 30\n- **Confirmation required:** True\n### Final price depends on\n\n- modelo\n- porte\n- estado do veículo\n\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_size\n- condition\n- desired_date\n- time_window\n\n### Field questions\n\n- **Customer name:** Qual é o seu nome?\n- **Service slug:** Qual serviço você deseja?\n- **Vehicle model:** Qual é o modelo do veículo?\n- **Vehicle size:** Qual é o porte do veículo, por exemplo hatch, sedan, SUV ou picape?\n- **Condition:** Como está o veículo hoje e quais pontos precisam de atenção?\n- **Desired date:** Qual data você prefere?\n- **Time window:** Qual período você prefere: manhã, tarde ou noite?\n\n### Texts\n\n- **Services header:** Serviços disponíveis:\n- **Exceptional handoff:** Vou encaminhar sua solicitação para a Equipe Aurora.\n- **Human handoff:** Vou encaminhar sua conversa para a Equipe Aurora.\n- **Confirmation suffix:** Registrei sua preferência; a equipe confirmará o valor final e o horário.\n- **Unknown clarification:** Não entendi completamente. Você quer conhecer os serviços, pedir orçamento ou solicitar agendamento?\n- **Unknown handoff:** Não encontrei informação aprovada para responder. Vou encaminhar à Equipe Aurora."
       }
     },
     {
@@ -54,7 +68,8 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Cuidado automotivo detalhista, premium e consultivo."
+        "summary": "Cuidado automotivo detalhista, premium e consultivo.",
+        "markdown": "# Aurora Estética Automotiva\n\nCuidado automotivo detalhista, premium e consultivo."
       }
     },
     {
@@ -66,7 +81,8 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Operação manual de um veículo por vez, com confirmação humana obrigatória de valor final, data e horário."
+        "summary": "Operação manual de um veículo por vez, com confirmação humana obrigatória de valor final, data e horário.",
+        "markdown": "# Briefing da operação demonstrativa\n\nOperação manual de um veículo por vez, com confirmação humana obrigatória de valor final, data e horário."
       }
     },
     {
@@ -78,7 +94,8 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Campanha demonstrativa de dúvidas, orçamento e solicitação de agendamento."
+        "summary": "Campanha demonstrativa de dúvidas, orçamento e solicitação de agendamento.",
+        "markdown": "# Agenda Premium\n\nCampanha demonstrativa de dúvidas, orçamento e solicitação de agendamento."
       }
     },
     {
@@ -90,7 +107,8 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Pessoas que buscam conservação, acabamento e atendimento consultivo."
+        "summary": "Pessoas que buscam conservação, acabamento e atendimento consultivo.",
+        "markdown": "# Proprietários que valorizam cuidado\n\nPessoas que buscam conservação, acabamento e atendimento consultivo."
       }
     },
     {
@@ -102,7 +120,8 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Serviços com preços demonstrativos; o valor final depende do modelo, porte e estado do veículo."
+        "summary": "Serviços com preços demonstrativos; o valor final depende do modelo, porte e estado do veículo.",
+        "markdown": "# Serviços agendáveis\n\nServiços com preços demonstrativos; o valor final depende do modelo, porte e estado do veículo."
       }
     },
     {
@@ -114,12 +133,28 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "hours": {"monday_friday": "08:00-18:00", "saturday": "08:00-13:00"},
-        "payment": ["Pix", "débito", "crédito", "dinheiro"],
+        "hours": {
+          "monday_friday": "08:00-18:00",
+          "saturday": "08:00-13:00"
+        },
+        "payment": [
+          "Pix",
+          "débito",
+          "crédito",
+          "dinheiro"
+        ],
         "payment_timing": "após o serviço",
         "reschedule_notice_hours": 24,
-        "human_only_topics": ["descontos", "garantia", "reclamações", "dúvidas técnicas", "serviço não cadastrado", "exceções de cancelamento ou reagendamento"],
-        "confirmation_policy": "Toda data, horário e valor final dependem de confirmação humana."
+        "human_only_topics": [
+          "descontos",
+          "garantia",
+          "reclamações",
+          "dúvidas técnicas",
+          "serviço não cadastrado",
+          "exceções de cancelamento ou reagendamento"
+        ],
+        "confirmation_policy": "Toda data, horário e valor final dependem de confirmação humana.",
+        "markdown": "# Regras operacionais e comerciais\n\n## Hours\n\n- **Monday friday:** 08:00-18:00\n- **Saturday:** 08:00-13:00\n\n## Payment\n\n- Pix\n- débito\n- crédito\n- dinheiro\n\n## Payment timing\n\napós o serviço\n\n## Reschedule notice hours\n\n24\n\n## Human only topics\n\n- descontos\n- garantia\n- reclamações\n- dúvidas técnicas\n- serviço não cadastrado\n- exceções de cancelamento ou reagendamento\n\n## Confirmation policy\n\nToda data, horário e valor final dependem de confirmação humana."
       }
     },
     {
@@ -131,7 +166,8 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Mensagens curtas, objetivas e sem emojis por padrão."
+        "summary": "Mensagens curtas, objetivas e sem emojis por padrão.",
+        "markdown": "# Tom premium, cordial e consultivo\n\nMensagens curtas, objetivas e sem emojis por padrão."
       }
     },
     {
@@ -143,17 +179,33 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "aliases": ["avaliação", "avaliar veículo", "avaliação do carro"],
+        "aliases": [
+          "avaliação",
+          "avaliar veículo",
+          "avaliação do carro"
+        ],
         "summary": "Avaliação inicial do veículo.",
-        "price": {"amount": 80.0, "currency": "BRL"},
+        "price": {
+          "amount": 80.0,
+          "currency": "BRL"
+        },
         "price_qualifier": "fixed",
         "booking": {
           "duration_minutes": 30,
           "capacity": 1,
           "confirmation_required": true,
           "provider": "manual",
-          "required_fields": ["customer_name", "service_slug", "vehicle_model", "vehicle_size", "condition", "desired_date", "time_window"]
-        }
+          "required_fields": [
+            "customer_name",
+            "service_slug",
+            "vehicle_model",
+            "vehicle_size",
+            "condition",
+            "desired_date",
+            "time_window"
+          ]
+        },
+        "markdown": "# Avaliação inicial\n\nAvaliação inicial do veículo.\n\n## Aliases\n\n- avaliação\n- avaliar veículo\n- avaliação do carro\n\n## Price\n\n- **Amount:** 80.0\n- **Currency:** BRL\n\n## Price qualifier\n\nfixed\n\n## Booking\n\n- **Duration minutes:** 30\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_size\n- condition\n- desired_date\n- time_window"
       }
     },
     {
@@ -166,7 +218,8 @@
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Comece com uma avaliação cuidadosa do seu veículo. A equipe confirma o horário."
+        "content": "Comece com uma avaliação cuidadosa do seu veículo. A equipe confirma o horário.",
+        "markdown": "# Copy — Avaliação inicial\n\nComece com uma avaliação cuidadosa do seu veículo. A equipe confirma o horário.\n\n## Channel\n\nwhatsapp"
       }
     },
     {
@@ -180,9 +233,21 @@
         "status": "validated",
         "question": "Quanto custa e quanto dura a avaliação inicial?",
         "answer": "A avaliação inicial leva cerca de 30 minutos e custa R$ 80,00. O horário depende de confirmação humana.",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-campaign", "aurora-audience", "aurora-services", "aurora-product-evaluation", "aurora-copy-evaluation"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-evaluation",
+          "aurora-copy-evaluation"
+        ],
         "source_node_id": "aurora-product-evaluation",
-        "source_node_type": "product"
+        "source_node_type": "product",
+        "markdown": "# Quanto custa e quanto dura a avaliação inicial?\n\n## Pergunta\n\nQuanto custa e quanto dura a avaliação inicial?\n\n## Resposta\n\nA avaliação inicial leva cerca de 30 minutos e custa R$ 80,00. O horário depende de confirmação humana.",
+        "markdown_document": true,
+        "question_count": 1
       }
     },
     {
@@ -194,17 +259,33 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "aliases": ["lavagem", "lavagem completa", "lavar carro"],
+        "aliases": [
+          "lavagem",
+          "lavagem completa",
+          "lavar carro"
+        ],
         "summary": "Lavagem detalhada com preço inicial demonstrativo.",
-        "price": {"amount": 180.0, "currency": "BRL"},
+        "price": {
+          "amount": 180.0,
+          "currency": "BRL"
+        },
         "price_qualifier": "starting_at",
         "booking": {
           "duration_minutes": 120,
           "capacity": 1,
           "confirmation_required": true,
           "provider": "manual",
-          "required_fields": ["customer_name", "service_slug", "vehicle_model", "vehicle_size", "condition", "desired_date", "time_window"]
-        }
+          "required_fields": [
+            "customer_name",
+            "service_slug",
+            "vehicle_model",
+            "vehicle_size",
+            "condition",
+            "desired_date",
+            "time_window"
+          ]
+        },
+        "markdown": "# Lavagem detalhada\n\nLavagem detalhada com preço inicial demonstrativo.\n\n## Aliases\n\n- lavagem\n- lavagem completa\n- lavar carro\n\n## Price\n\n- **Amount:** 180.0\n- **Currency:** BRL\n\n## Price qualifier\n\nstarting_at\n\n## Booking\n\n- **Duration minutes:** 120\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_size\n- condition\n- desired_date\n- time_window"
       }
     },
     {
@@ -217,7 +298,8 @@
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Lavagem detalhada para renovar o cuidado com o veículo, mediante confirmação de agenda."
+        "content": "Lavagem detalhada para renovar o cuidado com o veículo, mediante confirmação de agenda.",
+        "markdown": "# Copy — Lavagem detalhada\n\nLavagem detalhada para renovar o cuidado com o veículo, mediante confirmação de agenda.\n\n## Channel\n\nwhatsapp"
       }
     },
     {
@@ -231,9 +313,21 @@
         "status": "validated",
         "question": "Quanto custa e quanto dura a lavagem detalhada?",
         "answer": "A lavagem detalhada leva cerca de 2 horas e parte de R$ 180,00. O valor final e o horário dependem de confirmação humana.",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-campaign", "aurora-audience", "aurora-services", "aurora-product-wash", "aurora-copy-wash"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-wash",
+          "aurora-copy-wash"
+        ],
         "source_node_id": "aurora-product-wash",
-        "source_node_type": "product"
+        "source_node_type": "product",
+        "markdown": "# Quanto custa e quanto dura a lavagem detalhada?\n\n## Pergunta\n\nQuanto custa e quanto dura a lavagem detalhada?\n\n## Resposta\n\nA lavagem detalhada leva cerca de 2 horas e parte de R$ 180,00. O valor final e o horário dependem de confirmação humana.",
+        "markdown_document": true,
+        "question_count": 1
       }
     },
     {
@@ -245,17 +339,33 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "aliases": ["higienização", "limpeza interna", "higienizar bancos"],
+        "aliases": [
+          "higienização",
+          "limpeza interna",
+          "higienizar bancos"
+        ],
         "summary": "Higienização interna com preço inicial demonstrativo.",
-        "price": {"amount": 350.0, "currency": "BRL"},
+        "price": {
+          "amount": 350.0,
+          "currency": "BRL"
+        },
         "price_qualifier": "starting_at",
         "booking": {
           "duration_minutes": 180,
           "capacity": 1,
           "confirmation_required": true,
           "provider": "manual",
-          "required_fields": ["customer_name", "service_slug", "vehicle_model", "vehicle_size", "condition", "desired_date", "time_window"]
-        }
+          "required_fields": [
+            "customer_name",
+            "service_slug",
+            "vehicle_model",
+            "vehicle_size",
+            "condition",
+            "desired_date",
+            "time_window"
+          ]
+        },
+        "markdown": "# Higienização interna\n\nHigienização interna com preço inicial demonstrativo.\n\n## Aliases\n\n- higienização\n- limpeza interna\n- higienizar bancos\n\n## Price\n\n- **Amount:** 350.0\n- **Currency:** BRL\n\n## Price qualifier\n\nstarting_at\n\n## Booking\n\n- **Duration minutes:** 180\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_size\n- condition\n- desired_date\n- time_window"
       }
     },
     {
@@ -268,7 +378,8 @@
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Renove o interior do veículo com uma higienização cuidadosa e atendimento confirmado."
+        "content": "Renove o interior do veículo com uma higienização cuidadosa e atendimento confirmado.",
+        "markdown": "# Copy — Higienização interna\n\nRenove o interior do veículo com uma higienização cuidadosa e atendimento confirmado.\n\n## Channel\n\nwhatsapp"
       }
     },
     {
@@ -282,9 +393,21 @@
         "status": "validated",
         "question": "Quanto custa e quanto dura a higienização interna?",
         "answer": "A higienização interna leva cerca de 3 horas e parte de R$ 350,00. O valor final e o horário dependem de confirmação humana.",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-campaign", "aurora-audience", "aurora-services", "aurora-product-interior", "aurora-copy-interior"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-interior",
+          "aurora-copy-interior"
+        ],
         "source_node_id": "aurora-product-interior",
-        "source_node_type": "product"
+        "source_node_type": "product",
+        "markdown": "# Quanto custa e quanto dura a higienização interna?\n\n## Pergunta\n\nQuanto custa e quanto dura a higienização interna?\n\n## Resposta\n\nA higienização interna leva cerca de 3 horas e parte de R$ 350,00. O valor final e o horário dependem de confirmação humana.",
+        "markdown_document": true,
+        "question_count": 1
       }
     },
     {
@@ -296,17 +419,33 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "aliases": ["polimento", "polir carro", "correção de pintura"],
+        "aliases": [
+          "polimento",
+          "polir carro",
+          "correção de pintura"
+        ],
         "summary": "Polimento técnico com preço inicial demonstrativo.",
-        "price": {"amount": 650.0, "currency": "BRL"},
+        "price": {
+          "amount": 650.0,
+          "currency": "BRL"
+        },
         "price_qualifier": "starting_at",
         "booking": {
           "duration_minutes": 240,
           "capacity": 1,
           "confirmation_required": true,
           "provider": "manual",
-          "required_fields": ["customer_name", "service_slug", "vehicle_model", "vehicle_size", "condition", "desired_date", "time_window"]
-        }
+          "required_fields": [
+            "customer_name",
+            "service_slug",
+            "vehicle_model",
+            "vehicle_size",
+            "condition",
+            "desired_date",
+            "time_window"
+          ]
+        },
+        "markdown": "# Polimento técnico\n\nPolimento técnico com preço inicial demonstrativo.\n\n## Aliases\n\n- polimento\n- polir carro\n- correção de pintura\n\n## Price\n\n- **Amount:** 650.0\n- **Currency:** BRL\n\n## Price qualifier\n\nstarting_at\n\n## Booking\n\n- **Duration minutes:** 240\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_size\n- condition\n- desired_date\n- time_window"
       }
     },
     {
@@ -319,7 +458,8 @@
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Valorize o acabamento do veículo com polimento técnico e agenda confirmada."
+        "content": "Valorize o acabamento do veículo com polimento técnico e agenda confirmada.",
+        "markdown": "# Copy — Polimento técnico\n\nValorize o acabamento do veículo com polimento técnico e agenda confirmada.\n\n## Channel\n\nwhatsapp"
       }
     },
     {
@@ -333,9 +473,21 @@
         "status": "validated",
         "question": "Quanto custa e quanto dura o polimento técnico?",
         "answer": "O polimento técnico leva cerca de 4 horas e parte de R$ 650,00. O valor final e o horário dependem de confirmação humana.",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-campaign", "aurora-audience", "aurora-services", "aurora-product-polish", "aurora-copy-polish"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish",
+          "aurora-copy-polish"
+        ],
         "source_node_id": "aurora-product-polish",
-        "source_node_type": "product"
+        "source_node_type": "product",
+        "markdown": "# Quanto custa e quanto dura o polimento técnico?\n\n## Pergunta\n\nQuanto custa e quanto dura o polimento técnico?\n\n## Resposta\n\nO polimento técnico leva cerca de 4 horas e parte de R$ 650,00. O valor final e o horário dependem de confirmação humana.",
+        "markdown_document": true,
+        "question_count": 1
       }
     },
     {
@@ -349,9 +501,17 @@
         "status": "validated",
         "question": "Qual é o horário de atendimento?",
         "answer": "O atendimento ocorre de segunda a sexta, das 08h às 18h, e sábado, das 08h às 13h.",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-operation"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
         "source_node_id": "aurora-rule-operation",
-        "source_node_type": "rule"
+        "source_node_type": "rule",
+        "markdown": "# Qual é o horário de atendimento?\n\n## Pergunta\n\nQual é o horário de atendimento?\n\n## Resposta\n\nO atendimento ocorre de segunda a sexta, das 08h às 18h, e sábado, das 08h às 13h.",
+        "markdown_document": true,
+        "question_count": 1
       }
     },
     {
@@ -365,9 +525,17 @@
         "status": "validated",
         "question": "Quais são as formas de pagamento?",
         "answer": "O pagamento é feito após o serviço por Pix, débito, crédito ou dinheiro.",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-operation"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
         "source_node_id": "aurora-rule-operation",
-        "source_node_type": "rule"
+        "source_node_type": "rule",
+        "markdown": "# Quais são as formas de pagamento?\n\n## Pergunta\n\nQuais são as formas de pagamento?\n\n## Resposta\n\nO pagamento é feito após o serviço por Pix, débito, crédito ou dinheiro.",
+        "markdown_document": true,
+        "question_count": 1
       }
     },
     {
@@ -381,9 +549,17 @@
         "status": "validated",
         "question": "Como cancelar ou reagendar?",
         "answer": "Solicite cancelamento ou reagendamento com 24 horas de antecedência. Exceções são avaliadas pela equipe.",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-operation"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
         "source_node_id": "aurora-rule-operation",
-        "source_node_type": "rule"
+        "source_node_type": "rule",
+        "markdown": "# Como cancelar ou reagendar?\n\n## Pergunta\n\nComo cancelar ou reagendar?\n\n## Resposta\n\nSolicite cancelamento ou reagendamento com 24 horas de antecedência. Exceções são avaliadas pela equipe.",
+        "markdown_document": true,
+        "question_count": 1
       }
     },
     {
@@ -397,9 +573,17 @@
         "status": "validated",
         "question": "O agendamento é confirmado automaticamente?",
         "answer": "Não. Toda data e horário dependem de confirmação humana da Equipe Aurora.",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-operation"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
         "source_node_id": "aurora-rule-operation",
-        "source_node_type": "rule"
+        "source_node_type": "rule",
+        "markdown": "# O agendamento é confirmado automaticamente?\n\n## Pergunta\n\nO agendamento é confirmado automaticamente?\n\n## Resposta\n\nNão. Toda data e horário dependem de confirmação humana da Equipe Aurora.",
+        "markdown_document": true,
+        "question_count": 1
       }
     },
     {
@@ -430,39 +614,269 @@
     }
   ],
   "edges": [
-    {"id": "aurora-e-persona-brand", "source": "aurora-persona", "target": "aurora-brand", "relation": "contains"},
-    {"id": "aurora-e-brand-briefing", "source": "aurora-brand", "target": "aurora-briefing", "relation": "contains"},
-    {"id": "aurora-e-briefing-campaign", "source": "aurora-briefing", "target": "aurora-campaign", "relation": "briefed_by"},
-    {"id": "aurora-e-campaign-audience", "source": "aurora-campaign", "target": "aurora-audience", "relation": "contains"},
-    {"id": "aurora-e-audience-services", "source": "aurora-audience", "target": "aurora-services", "relation": "contains"},
-    {"id": "aurora-e-briefing-rule", "source": "aurora-briefing", "target": "aurora-rule-operation", "relation": "contains"},
-    {"id": "aurora-e-briefing-tone", "source": "aurora-briefing", "target": "aurora-tone", "relation": "contains"},
-    {"id": "aurora-e-services-evaluation", "source": "aurora-services", "target": "aurora-product-evaluation", "relation": "contains"},
-    {"id": "aurora-e-evaluation-copy", "source": "aurora-product-evaluation", "target": "aurora-copy-evaluation", "relation": "supports_copy"},
-    {"id": "aurora-e-copy-evaluation-faq", "source": "aurora-copy-evaluation", "target": "aurora-faq-evaluation", "relation": "answers_question"},
-    {"id": "aurora-e-services-wash", "source": "aurora-services", "target": "aurora-product-wash", "relation": "contains"},
-    {"id": "aurora-e-wash-copy", "source": "aurora-product-wash", "target": "aurora-copy-wash", "relation": "supports_copy"},
-    {"id": "aurora-e-copy-wash-faq", "source": "aurora-copy-wash", "target": "aurora-faq-wash", "relation": "answers_question"},
-    {"id": "aurora-e-services-interior", "source": "aurora-services", "target": "aurora-product-interior", "relation": "contains"},
-    {"id": "aurora-e-interior-copy", "source": "aurora-product-interior", "target": "aurora-copy-interior", "relation": "supports_copy"},
-    {"id": "aurora-e-copy-interior-faq", "source": "aurora-copy-interior", "target": "aurora-faq-interior", "relation": "answers_question"},
-    {"id": "aurora-e-services-polish", "source": "aurora-services", "target": "aurora-product-polish", "relation": "contains"},
-    {"id": "aurora-e-polish-copy", "source": "aurora-product-polish", "target": "aurora-copy-polish", "relation": "supports_copy"},
-    {"id": "aurora-e-copy-polish-faq", "source": "aurora-copy-polish", "target": "aurora-faq-polish", "relation": "answers_question"},
-    {"id": "aurora-e-rule-hours", "source": "aurora-rule-operation", "target": "aurora-faq-hours", "relation": "answers_question"},
-    {"id": "aurora-e-rule-payment", "source": "aurora-rule-operation", "target": "aurora-faq-payment", "relation": "answers_question"},
-    {"id": "aurora-e-rule-reschedule", "source": "aurora-rule-operation", "target": "aurora-faq-reschedule", "relation": "answers_question"},
-    {"id": "aurora-e-rule-confirmation", "source": "aurora-rule-operation", "target": "aurora-faq-confirmation", "relation": "answers_question"},
-    {"id": "aurora-e-persona-gallery", "source": "aurora-persona", "target": "aurora-gallery", "relation": "contains"},
-    {"id": "aurora-e-evaluation-embedded", "source": "aurora-faq-evaluation", "target": "aurora-embedded", "relation": "visible_to_agent", "primary_tree": false},
-    {"id": "aurora-e-wash-embedded", "source": "aurora-faq-wash", "target": "aurora-embedded", "relation": "visible_to_agent", "primary_tree": false},
-    {"id": "aurora-e-interior-embedded", "source": "aurora-faq-interior", "target": "aurora-embedded", "relation": "visible_to_agent", "primary_tree": false},
-    {"id": "aurora-e-polish-embedded", "source": "aurora-faq-polish", "target": "aurora-embedded", "relation": "visible_to_agent", "primary_tree": false},
-    {"id": "aurora-e-hours-embedded", "source": "aurora-faq-hours", "target": "aurora-embedded", "relation": "visible_to_agent", "primary_tree": false},
-    {"id": "aurora-e-payment-embedded", "source": "aurora-faq-payment", "target": "aurora-embedded", "relation": "visible_to_agent", "primary_tree": false},
-    {"id": "aurora-e-reschedule-embedded", "source": "aurora-faq-reschedule", "target": "aurora-embedded", "relation": "visible_to_agent", "primary_tree": false},
-    {"id": "aurora-e-confirmation-embedded", "source": "aurora-faq-confirmation", "target": "aurora-embedded", "relation": "visible_to_agent", "primary_tree": false}
+    {
+      "id": "aurora-e-persona-brand",
+      "source": "aurora-persona",
+      "target": "aurora-brand",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-brand-briefing",
+      "source": "aurora-brand",
+      "target": "aurora-briefing",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-campaign",
+      "source": "aurora-briefing",
+      "target": "aurora-campaign",
+      "relation": "briefed_by",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-campaign-audience",
+      "source": "aurora-campaign",
+      "target": "aurora-audience",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-audience-services",
+      "source": "aurora-audience",
+      "target": "aurora-services",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-rule",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-operation",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-tone",
+      "source": "aurora-briefing",
+      "target": "aurora-tone",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-evaluation",
+      "source": "aurora-services",
+      "target": "aurora-product-evaluation",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-evaluation-copy",
+      "source": "aurora-product-evaluation",
+      "target": "aurora-copy-evaluation",
+      "relation": "supports_copy",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-evaluation-faq",
+      "source": "aurora-copy-evaluation",
+      "target": "aurora-faq-evaluation",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-wash",
+      "source": "aurora-services",
+      "target": "aurora-product-wash",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-wash-copy",
+      "source": "aurora-product-wash",
+      "target": "aurora-copy-wash",
+      "relation": "supports_copy",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-wash-faq",
+      "source": "aurora-copy-wash",
+      "target": "aurora-faq-wash",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-interior",
+      "source": "aurora-services",
+      "target": "aurora-product-interior",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-interior-copy",
+      "source": "aurora-product-interior",
+      "target": "aurora-copy-interior",
+      "relation": "supports_copy",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-interior-faq",
+      "source": "aurora-copy-interior",
+      "target": "aurora-faq-interior",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-polish",
+      "source": "aurora-services",
+      "target": "aurora-product-polish",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-polish-copy",
+      "source": "aurora-product-polish",
+      "target": "aurora-copy-polish",
+      "relation": "supports_copy",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-polish-faq",
+      "source": "aurora-copy-polish",
+      "target": "aurora-faq-polish",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-rule-hours",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-hours",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-rule-payment",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-payment",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-rule-reschedule",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-reschedule",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-rule-confirmation",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-confirmation",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-persona-gallery",
+      "source": "aurora-persona",
+      "target": "aurora-gallery",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-evaluation-embedded",
+      "source": "aurora-faq-evaluation",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-wash-embedded",
+      "source": "aurora-faq-wash",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-interior-embedded",
+      "source": "aurora-faq-interior",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-polish-embedded",
+      "source": "aurora-faq-polish",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-hours-embedded",
+      "source": "aurora-faq-hours",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-payment-embedded",
+      "source": "aurora-faq-payment",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-reschedule-embedded",
+      "source": "aurora-faq-reschedule",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-confirmation-embedded",
+      "source": "aurora-faq-confirmation",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    }
   ],
-  "layout": {"engine": "top-down-canonical", "positions": {}},
-  "validation": {"is_valid": true, "errors": []}
+  "layout": {
+    "engine": "top-down-canonical",
+    "positions": {}
+  },
+  "validation": {
+    "is_valid": true,
+    "errors": []
+  }
 }

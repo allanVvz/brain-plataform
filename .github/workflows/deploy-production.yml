@@ -63,6 +63,8 @@ jobs:
           tests/test_seed_aurora_credentials.py
           tests/test_conversation_runtime.py
           tests/test_deterministic_sdr.py
+          api/tests/test_graph_markdown_catalog.py
+          api/tests/test_lead_qualification.py
           api/tests/test_client_portal.py
 
       - uses: actions/setup-node@v4
@@ -198,6 +200,13 @@ jobs:
             if [ "$DEPLOY_ACTION" = "rollback" ]; then
               bash ops/vps/rollback.sh "$REQUESTED_TAG"
             else
+              bash ops/vps/backup-release.sh "pre-knowledge-crm-${REQUESTED_TAG:0:12}"
               bash ops/vps/deploy.sh "$REQUESTED_TAG"
+              docker compose --env-file .env.compose exec -T api \
+                python scripts/publish_aurora_graph.py
+              docker compose --env-file .env.compose exec -T api \
+                python scripts/backfill_lead_qualification.py --apply
+              docker compose --env-file .env.compose exec -T api \
+                python scripts/validate_knowledge_crm_release.py
             fi
             bash ops/vps/audit.sh

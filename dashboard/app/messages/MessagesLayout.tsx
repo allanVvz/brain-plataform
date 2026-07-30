@@ -22,6 +22,9 @@ interface Lead {
   updated_at: string | null;
   persona_id: string | null;
   interesse_produto: string | null;
+  qualification_score?: number;
+  qualification_signals?: Array<{ key?: string; label?: string; points?: number }>;
+  validation?: { is_validation?: boolean; scenario?: string | null; session_id?: string | null };
 }
 
 interface ConversationSummary {
@@ -36,6 +39,9 @@ interface ConversationSummary {
   last_direction: string;
   last_sender_type: string;
   last_at: string;
+  qualification_score?: number;
+  qualification_signals?: Array<{ key?: string; label?: string; points?: number }>;
+  validation?: { is_validation?: boolean; scenario?: string | null; session_id?: string | null };
 }
 
 type AttentionState = "ok" | "human_replying" | "awaiting_bot";
@@ -120,6 +126,27 @@ interface ChatContext {
   validated?: { nodes?: KnowledgeNode[]; kb_entries?: KnowledgeKbEntry[]; assets?: KnowledgeAsset[] };
   unvalidated?: { nodes?: KnowledgeNode[]; kb_entries?: KnowledgeKbEntry[]; assets?: KnowledgeAsset[] };
   summary: string;
+  operator_context?: {
+    primary: Array<{
+      id: string;
+      node_type: string;
+      title: string;
+      markdown: string;
+      validated: boolean;
+      used_in_last_decision: boolean;
+      path: NonNullable<KnowledgeNode["path"]>;
+    }>;
+    faq_rules: Array<{
+      id: string;
+      node_type: string;
+      title: string;
+      markdown: string;
+      validated?: boolean;
+      used_in_last_decision?: boolean;
+      path?: KnowledgeNode["path"];
+    }>;
+    graph_path: NonNullable<KnowledgeNode["path"]>;
+  };
 }
 
 interface Message {
@@ -950,6 +977,63 @@ function KnowledgeSidebar({
     return <div className="p-4 text-xs text-obs-faint">Carregando conhecimento…</div>;
   }
   if (!ctx) return null;
+  if (ctx.operator_context) {
+    const operator = ctx.operator_context;
+    const renderEvidence = (item: typeof operator.primary[number] | typeof operator.faq_rules[number]) => (
+      <article key={item.id} className="rounded-lg border border-white/06 bg-white/[0.03] p-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-obs-violet">
+            {item.node_type}
+          </span>
+          {item.used_in_last_decision && (
+            <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[9px] text-emerald-300">
+              usado
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-xs font-medium text-obs-text">{item.title}</p>
+        {item.markdown && (
+          <p className="mt-1 line-clamp-4 whitespace-pre-line text-[11px] leading-relaxed text-obs-subtle">
+            {item.markdown.replace(/^#+\s+/gm, "")}
+          </p>
+        )}
+      </article>
+    );
+    return (
+      <div className="h-full space-y-4 overflow-y-auto p-3">
+        <KnowledgeSection
+          icon={<Boxes size={11} />}
+          title="Usado nesta resposta"
+          count={operator.primary.length}
+        >
+          {operator.primary.map(renderEvidence)}
+        </KnowledgeSection>
+        <KnowledgeSection
+          icon={<FileQuestion size={11} />}
+          title="FAQ e regras relacionadas"
+          count={operator.faq_rules.length}
+        >
+          {operator.faq_rules.map(renderEvidence)}
+        </KnowledgeSection>
+        <KnowledgeSection
+          icon={<Radio size={11} />}
+          title="Caminho no grafo"
+          count={operator.graph_path.length}
+        >
+          <ol className="space-y-1">
+            {operator.graph_path.map((step, index) => (
+              <li key={`${step.node_id || step.slug}-${index}`} className="flex items-center gap-2 text-[11px] text-obs-subtle">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-obs-violet/10 text-[9px] text-obs-violet">
+                  {index + 1}
+                </span>
+                <span>{step.title || step.slug}</span>
+              </li>
+            ))}
+          </ol>
+        </KnowledgeSection>
+      </div>
+    );
+  }
 
   const graphNodes = uniqueBy(ctx.nodes || [], nodeIdentity);
   const dedupedCtx = { ...ctx, nodes: graphNodes };
@@ -1125,6 +1209,7 @@ export function MessagesLayout({
   const [leads, setLeads] = useState<Lead[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [search, setSearch] = useState("");
+  const [conversationMode, setConversationMode] = useState<"clients" | "validations">("clients");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isConversationSidebarOpen, setIsConversationSidebarOpen] = useState(!focused);
   const [personaFilterId, setPersonaFilterId] = useState<string>("");
@@ -1473,16 +1558,21 @@ export function MessagesLayout({
   }, [selectedId, pausing, leads, refreshSelectedLead, isPortal, portalSlug]);
 
   const filtered = useMemo(() => {
-    if (!search) return leads;
     const q = search.toLowerCase();
     return leads.filter((l) => (
-      (l.nome || "").toLowerCase().includes(q) ||
-      (l.telefone || "").includes(q) ||
-      (l.lead_id || "").includes(q) ||
-      (l.stage || "").toLowerCase().includes(q) ||
-      (l.interesse_produto || "").toLowerCase().includes(q)
+      (conversationMode === "validations"
+        ? Boolean(l.validation?.is_validation)
+        : !l.validation?.is_validation)
+      && (
+        !q
+        || (l.nome || "").toLowerCase().includes(q)
+        || (l.telefone || "").includes(q)
+        || (l.lead_id || "").includes(q)
+        || (l.stage || "").toLowerCase().includes(q)
+        || (l.interesse_produto || "").toLowerCase().includes(q)
+      )
     ));
-  }, [leads, search]);
+  }, [conversationMode, leads, search]);
 
   const chatName = displayName(selectedLead);
 
@@ -1540,6 +1630,14 @@ export function MessagesLayout({
               className="flex-1 bg-transparent text-xs text-obs-text placeholder-obs-faint focus:outline-none"
             />
           </div>
+          <div className="mt-2 grid grid-cols-2 rounded-lg bg-white/50 p-1">
+            <button type="button" onClick={() => setConversationMode("clients")} className={`rounded-md px-2 py-1 text-[10px] ${conversationMode === "clients" ? "bg-white text-obs-text shadow-sm" : "text-obs-faint"}`}>
+              Clientes reais
+            </button>
+            <button type="button" onClick={() => setConversationMode("validations")} className={`rounded-md px-2 py-1 text-[10px] ${conversationMode === "validations" ? "bg-white text-obs-text shadow-sm" : "text-obs-faint"}`}>
+              Validações
+            </button>
+          </div>
         </div>
 
         {/* Lead list */}
@@ -1591,6 +1689,14 @@ export function MessagesLayout({
                     <span className="text-xs font-medium text-obs-text truncate">{name}</span>
                   </div>
                   <StageBadge stage={lead.stage} />
+                </div>
+                <div className="flex items-center gap-2 pl-6 text-[10px] text-obs-faint">
+                  <span>Score {lead.qualification_score || 0}/100</span>
+                  {(lead.qualification_signals?.length || 0) > 0 && (
+                    <span className="truncate">
+                      {lead.qualification_signals?.slice(0, 2).map((signal) => signal.label || signal.key).join(" · ")}
+                    </span>
+                  )}
                 </div>
 
                 {/* Attention badge: humano respondendo OU bot inativo */}
