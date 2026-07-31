@@ -202,6 +202,39 @@ def test_price_is_starting_at_and_exceptional_support_goes_directly_to_human(mon
     assert response.reply_text == "Vou encaminhar sua solicitação para a Equipe Aurora."
 
 
+def test_confirmation_faq_interrupts_collection_without_losing_booking_state(monkeypatch):
+    install_graph(monkeypatch)
+    cart = {
+        "business_model": "appointment",
+        "conversation_state": "collecting",
+        "appointment_request": {
+            "service_slug": "polimento-tecnico",
+            "vehicle_size": "SUV",
+            "desired_date": "próxima sexta",
+            "time_window": "manhã",
+        },
+        "missing_fields": ["customer_name", "vehicle_model", "condition"],
+        "_lead_stage": "qualificado",
+    }
+
+    decision, response = conversation_runtime.decide(
+        context_for(
+            "O agendamento é confirmado automaticamente?",
+            cart=cart,
+        )
+    )
+
+    assert decision.intent == "answer_faq"
+    assert decision.route == ConversationRoute.SDR
+    assert response.reply_text == (
+        "Não. Toda data e horário dependem de confirmação humana da Equipe Aurora."
+    )
+    assert response.cart_state["conversation_state"] == "collecting"
+    assert response.cart_state["appointment_request"] == cart["appointment_request"]
+    assert response.cart_state["missing_fields"] == cart["missing_fields"]
+    assert "aurora-faq-confirmation" in decision.evidence_node_ids
+
+
 def test_unknown_message_clarifies_once_then_hands_off(monkeypatch):
     install_graph(monkeypatch)
     decision, response = conversation_runtime.decide(context_for("xyzzy"))

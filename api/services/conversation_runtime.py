@@ -184,6 +184,36 @@ def _appointment_policy(graph: Any) -> dict[str, Any]:
     return dict(data.get("appointment_policy") or {})
 
 
+def _approved_faq_match(graph: Any, message: str) -> Any | None:
+    """Match only an exact, validated FAQ question.
+
+    Exact normalization keeps graph answers authoritative without introducing
+    fuzzy guesses. FAQ interruptions must not discard an in-progress
+    appointment request; the caller preserves the cart state unchanged.
+    """
+    query = _norm(message)
+    if not query:
+        return None
+    for node in graph.nodes:
+        if node.node_type != "faq":
+            continue
+        data = node.data or {}
+        if str(data.get("status") or "").lower() not in {
+            "approved",
+            "validated",
+            "active",
+            "ativo",
+        }:
+            continue
+        questions = (
+            str(data.get("question") or ""),
+            str(node.label or ""),
+        )
+        if any(query == _norm(question) for question in questions if question):
+            return node
+    return None
+
+
 def _relevant_nodes(graph: Any, query: str, *, limit: int = 30) -> list[Any]:
     terms = {term for term in _norm(query).split() if len(term) > 1}
     mandatory = {"persona", "brand", "tone", "rule", "briefing"}
@@ -455,6 +485,28 @@ def _decide_appointment(
             cart_state=state,
             handoff_required=True,
         )
+
+    faq = _approved_faq_match(graph, message)
+    if faq:
+        answer = str((faq.data or {}).get("answer") or "").strip()
+        if answer:
+            evidence = list(dict.fromkeys([*_node_path(graph, faq.id), faq.id]))
+            state["clarification_attempts"] = 0
+            decision = ConversationDecision(
+                classifier="deterministic_appointment_v1",
+                intent="answer_faq",
+                route=ConversationRoute.SDR,
+                confidence=1.0,
+                lead_stage=current_stage,
+                evidence_node_ids=evidence,
+            )
+            return decision, AgentResponse(
+                reply_text=answer,
+                role=ConversationRoute.SDR,
+                evidence_node_ids=evidence,
+                cart_state=state,
+                handoff_required=False,
+            )
 
     catalog = catalog_from_graph(graph)
     result = DeterministicAppointment(
