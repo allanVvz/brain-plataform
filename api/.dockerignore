@@ -5,7 +5,6 @@ __pycache__
 *.pyc
 .pytest_cache
 tmp
-n8n-workflows
 *.log
 logs-dev.txt
 logs-dev-restart.err.txt
