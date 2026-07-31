@@ -179,7 +179,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           source: docker-compose.yml,infra/Caddyfile,infra/kong.yml,ops/vps
-          target: ${{ secrets.VPS_APP_DIR }}
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
 
       - name: Deploy immutable images over SSH
@@ -187,7 +187,7 @@ jobs:
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
           REQUESTED_TAG: ${{ inputs.image_tag || needs.publish.outputs.image_tag }}
         with:
