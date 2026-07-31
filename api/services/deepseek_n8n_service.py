@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +34,12 @@ def _workflow_for_persona(
     workflow = json.loads(serialized)
     workflow["name"] = f"Brain — {persona.get('name') or slug} — Conversação"
     workflow["active"] = False
+    # Webhook ids are global in n8n. Keep each persona clone isolated while
+    # remaining stable across reprovisioning.
+    webhook_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"brain-ai:{slug}:conversation"))
     for node in workflow.get("nodes") or []:
+        if node.get("id") == "inbound":
+            node["webhookId"] = webhook_id
         if node.get("id") == "binding":
             code = str((node.get("parameters") or {}).get("jsCode") or "")
             node["parameters"]["jsCode"] = code.replace(

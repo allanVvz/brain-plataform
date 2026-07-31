@@ -20,9 +20,15 @@ def _recipient_for_lead(lead: dict[str, Any]) -> str:
     import re
 
     identities = (lead.get("metadata") or {}).get("identities") or {}
+    # Inbound webhooks always populate a canonical remote JID/external id.
+    # Manually imported/operator-created leads may only have `telefone`, so
+    # use that as a safe fallback after normalising it below.  The old code
+    # rejected those leads even when the phone was valid and the binding was
+    # healthy, producing a misleading "recipient unavailable" 409.
     recipient = str(
         identities.get("remote_jid_alt")
         or lead.get("external_contact_id")
+        or lead.get("telefone")
         or ""
     )
     if recipient.endswith("@s.whatsapp.net"):
