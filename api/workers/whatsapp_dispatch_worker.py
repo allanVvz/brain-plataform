@@ -18,6 +18,7 @@ from services import (
     n8n_client,
     supabase_client,
     sre_logger,
+    whatsapp_outbox,
 )
 from services.whatsapp_providers import get_provider
 from workers.base_worker import BaseWorker
@@ -258,14 +259,17 @@ class WhatsAppDispatchWorker(BaseWorker):
                 error="binding safety paused",
             )
             return
-        transport_mode = metadata.get("transport_mode")
-        if transport_mode not in {"provider_direct", "n8n_adapter"}:
+        try:
+            whatsapp_outbox.validate_direct_binding(binding)
+        except Exception as exc:
+            detail = getattr(exc, "detail", None) or str(exc)
             supabase_client.complete_whatsapp_buffer(
                 row["id"],
                 "waiting_human",
-                error="unsupported binding transport mode",
+                error=str(detail),
             )
             return
+        transport_mode = "provider_direct"
 
         correlation_id = str(row.get("correlation_id") or "")
         if not correlation_id:
@@ -296,7 +300,7 @@ class WhatsAppDispatchWorker(BaseWorker):
             )
             return
         recipient = re.sub(r"\D", "", recipient)
-        if not recipient:
+        if not recipient or not 8 <= len(recipient) <= 15:
             supabase_client.complete_whatsapp_buffer(
                 row["id"],
                 "waiting_human",
@@ -356,6 +360,13 @@ class WhatsAppDispatchWorker(BaseWorker):
                 correlation_id=correlation_id,
                 wamid=str(external_id),
                 success=True,
+            )
+            event_emitter.emit(
+                "whatsapp.outbound_accepted", entity_type="lead",
+                entity_id=str(row.get("lead_ref") or ""), persona_id=row["persona_id"],
+                payload={"buffer_id": row["id"], "correlation_id": correlation_id,
+                         "provider": binding.get("provider"), "external_message_id": str(external_id)},
+                source="workers.whatsapp",
             )
             return
 

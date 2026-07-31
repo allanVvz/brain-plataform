@@ -71,11 +71,3 @@ export function resolveSessionDestination(
   }
   return target && target !== "/login" ? target : fallback;
 }
-
-export function mandatoryPasswordDestination(
-  session: SessionLike,
-  requestedTarget?: string | null,
-): string {
-  const destination = resolveSessionDestination(session, requestedTarget);
-  return `/account/change-password?next=${encodeURIComponent(destination)}`;
-}

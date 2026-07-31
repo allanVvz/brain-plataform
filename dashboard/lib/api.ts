@@ -277,6 +277,23 @@ export const api = {
     ),
   portalPipeline: (slug: string) => req<any>(`/portal/pipeline?${personaQuery(slug)}`),
   whatsappChannel: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp`),
+  whatsappMetaBinding: (slug: string) =>
+    req<any>(`/integrations/meta/whatsapp/personas/${encodeURIComponent(slug)}`),
+  updateWhatsAppMetaBinding: (slug: string, body: {
+    phone_number_id: string;
+    whatsapp_number?: string;
+    workflow_name?: string;
+    business_id?: string;
+    waba_id?: string;
+    verified_name?: string;
+    mode?: "disabled" | "test_allowlist" | "active";
+    allowlist?: string[];
+    agent_id?: string;
+    conversation_mode?: "deterministic";
+  }) => req<any>(`/integrations/meta/whatsapp/personas/${encodeURIComponent(slug)}/binding`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  }),
   provisionEvolution: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/evolution/provision`, { method: "POST", body: "{}" }),
   selectWhatsAppProvider: (slug: string, provider: "meta_cloud" | "evolution_baileys", confirmed: boolean) =>
     req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/provider`, { method: "POST", body: JSON.stringify({ provider, confirmed }) }),

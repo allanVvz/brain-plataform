@@ -5,15 +5,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import { getStoredLanguage, UI_LANGUAGE_EVENT, type UiLanguage } from "@/lib/language";
-import {
-  mandatoryPasswordDestination,
-  resolveSessionDestination,
-} from "@/lib/session-routing";
+import { resolveSessionDestination } from "@/lib/session-routing";
 import {
   Activity,
   BookOpen,
   CheckSquare,
-  GitBranch,
   Image,
   LayoutDashboard,
   LogOut,
@@ -22,12 +18,10 @@ import {
   Package,
   Plus,
   RefreshCw,
-  ScrollText,
   Settings,
   Sparkles,
   UserCircle,
   Users,
-  Wrench,
 } from "lucide-react";
 
 const nav = [
@@ -45,10 +39,6 @@ const nav = [
   { section: "Knowledge", href: "/knowledge/import-vault", label: "Importar vault", icon: Plus },
   { section: "Knowledge", href: "/knowledge/quality", label: "Quality", icon: CheckSquare },
   { section: "Knowledge", href: "/kb", label: "Golden Dataset", icon: BookOpen },
-  { section: "Configuracoes", href: "/wa-validator", label: "ChatBot", icon: GitBranch },
-  { section: "Configuracoes", href: "/tools", label: "Tools", icon: Wrench },
-  { section: "Configuracoes", href: "/settings", label: "Settings", icon: Settings },
-  { section: "Configuracoes", href: "/logs", label: "Logs", icon: ScrollText },
 ];
 
 const NAV_TRANSLATIONS: Record<UiLanguage, Record<string, string>> = {
@@ -99,6 +89,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [language, setLanguage] = useState<UiLanguage>("pt-BR");
   const [sessionPhase, setSessionPhase] = useState<"resolving" | "internal" | "redirecting" | "error">("resolving");
   const [sessionRetry, setSessionRetry] = useState(0);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
     if (
@@ -124,10 +115,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const savedExists = saved && list.some((p: any) => p.slug === saved);
         const mustSelect = (session?.account_type || sessionUser?.account_type) === "client";
         setPersona(savedExists ? saved : mustSelect ? list[0]?.slug || "" : "");
-        if (sessionUser?.must_change_password && pathname !== "/account/change-password") {
-          setSessionPhase("redirecting");
-          router.replace(mandatoryPasswordDestination(session, pathname));
-        } else if (mustSelect) {
+        if (mustSelect) {
           setSessionPhase("redirecting");
           router.replace(resolveSessionDestination(session, pathname));
         } else {
@@ -238,12 +226,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const isAgency = user?.account_type === "agency";
-  const visibleNav = isAgency
-    ? [...nav, { section: "Configuracoes", href: "/access", label: "Acessos", icon: Users }]
-    : user?.role === "admin"
-      ? [...nav, { section: "Configuracoes", href: "/access", label: "Acessos", icon: Users }]
-      : nav;
+  const visibleNav = nav;
 
   return (
     <div className="flex min-h-screen text-obs-text">
@@ -312,18 +295,40 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               )}
             </select>
           </div>
-          <div className="ml-auto hidden text-[10px] tracking-wide text-obs-faint sm:block">
-            {user?.name || user?.email || "Brain AI Platform"}
+          <div className="relative ml-auto">
+            <button
+              type="button"
+              onClick={() => setUserMenuOpen((open) => !open)}
+              className="flex items-center gap-2 rounded-full border border-black/10 bg-white/55 py-1 pl-1 pr-3 text-obs-subtle shadow-sm transition hover:bg-white hover:text-obs-text"
+              aria-label="Abrir menu do usuario"
+              aria-expanded={userMenuOpen}
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-obs-violet/15 text-obs-violet">
+                <UserCircle size={15} />
+              </span>
+              <span className="hidden max-w-48 truncate text-[11px] font-medium sm:block">
+                {user?.name || user?.email || "Brain AI Platform"}
+              </span>
+            </button>
+            {userMenuOpen && (
+              <div className="absolute right-0 top-10 z-50 w-52 rounded-xl border border-white/10 bg-obs-raised p-1.5 shadow-2xl">
+                <Link
+                  href="/settings"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-obs-subtle transition hover:bg-white/[0.06] hover:text-obs-text"
+                >
+                  <Settings size={14} /> Configurações
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-obs-subtle transition hover:bg-white/[0.06] hover:text-obs-text"
+                >
+                  <LogOut size={14} /> {navText(language, "Sair")}
+                </button>
+              </div>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white/55 text-obs-subtle shadow-sm transition hover:bg-white hover:text-obs-text"
-            aria-label={navText(language, "Sair")}
-            title={navText(language, "Sair")}
-          >
-            <LogOut size={14} />
-          </button>
         </header>
 
         <main className="flex-1 overflow-y-auto p-6">{children}</main>

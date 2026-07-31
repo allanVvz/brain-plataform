@@ -55,10 +55,10 @@ def test_insert_agent_log_falls_back_to_legacy_when_modern_insert_fails(monkeypa
         "metadata": {"level": "INFO", "component": "HealthCheckWorker"},
     })
 
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[0]["agent_type"] == "HealthCheckWorker"
-    assert calls[1]["agent_name"] == "HealthCheckWorker"
-    assert calls[1]["status"] == "success"
+    assert calls[2]["agent_name"] == "HealthCheckWorker"
+    assert calls[2]["status"] == "success"
 
 
 def test_insert_agent_log_raises_when_both_shapes_fail(monkeypatch):

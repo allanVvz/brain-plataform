@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import dynamic from "next/dynamic";
 import {
   BookOpenCheck,
   ChevronDown,
@@ -25,6 +26,30 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { applyLanguage, getStoredLanguage, LANGUAGE_OPTIONS, type UiLanguage } from "@/lib/language";
+import { MessagingSettingsPanel } from "@/components/settings/MessagingSettingsPanel";
+import { SecuritySettingsPanel } from "@/components/settings/SecuritySettingsPanel";
+
+const panelLoading = () => (
+  <p className="rounded-xl border border-white/10 bg-obs-surface p-4 text-sm text-obs-subtle">
+    Carregando painel…
+  </p>
+);
+const WaValidatorSettingsPanel = dynamic(
+  () => import("@/app/wa-validator/page"),
+  { loading: panelLoading },
+);
+const ToolsSettingsPanel = dynamic(
+  () => import("@/app/tools/page"),
+  { loading: panelLoading },
+);
+const LogsSettingsPanel = dynamic(
+  () => import("@/app/logs/page"),
+  { loading: panelLoading },
+);
+const AccessSettingsPanel = dynamic(
+  () => import("@/app/access/page"),
+  { loading: panelLoading },
+);
 
 const PAN_KEY_STORAGE = "ai-brain-graph-pan-key";
 const THEME_STORAGE = "ai-brain-theme";
@@ -89,7 +114,7 @@ function slugifyPersona(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-export default function SettingsPage() {
+function GeneralSettingsPanel() {
   const [panKey, setPanKey] = useState("Control");
   const [theme, setTheme] = useState<Theme>("clean");
   const [language, setLanguage] = useState<UiLanguage>("pt-BR");
@@ -812,6 +837,104 @@ export default function SettingsPage() {
           onSave={saveApiKey}
         />
       )}
+    </div>
+  );
+}
+
+type SettingsTab =
+  | "general"
+  | "messaging"
+  | "chatbot"
+  | "tools"
+  | "logs"
+  | "access"
+  | "security";
+
+const SETTINGS_TABS: Array<{
+  key: SettingsTab;
+  label: string;
+  icon: typeof Settings;
+}> = [
+  { key: "general", label: "Geral", icon: Settings },
+  { key: "messaging", label: "Mensageria", icon: MessageCircle },
+  { key: "chatbot", label: "ChatBot", icon: BookOpenCheck },
+  { key: "tools", label: "Ferramentas", icon: SlidersHorizontal },
+  { key: "logs", label: "Logs", icon: RefreshCw },
+  { key: "access", label: "Acessos", icon: UserPlus },
+  { key: "security", label: "Segurança", icon: ShieldCheck },
+];
+
+function tabFromLocation(): SettingsTab {
+  if (typeof window === "undefined") return "general";
+  const candidate = new URLSearchParams(window.location.search).get("tab") || "";
+  return SETTINGS_TABS.some((tab) => tab.key === candidate)
+    ? candidate as SettingsTab
+    : "general";
+}
+
+export default function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+
+  useEffect(() => {
+    const sync = () => setActiveTab(tabFromLocation());
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+
+  function selectTab(tab: SettingsTab) {
+    setActiveTab(tab);
+    const url = new URL(window.location.href);
+    if (tab === "general") {
+      url.searchParams.delete("tab");
+    } else {
+      url.searchParams.set("tab", tab);
+    }
+    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-[1500px] space-y-5">
+      <header>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-obs-faint">
+          Central administrativa
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold text-obs-text">Configurações</h1>
+        <p className="mt-1 text-sm text-obs-subtle">
+          Operação, mensageria, ferramentas, auditoria e segurança em um único lugar.
+        </p>
+      </header>
+
+      <nav
+        aria-label="Abas de configurações"
+        className="flex gap-1 overflow-x-auto rounded-2xl border border-white/10 bg-obs-surface p-1.5"
+      >
+        {SETTINGS_TABS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => selectTab(key)}
+            aria-selected={activeTab === key}
+            className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium transition ${
+              activeTab === key
+                ? "bg-obs-violet/15 text-obs-violet ring-1 ring-obs-violet/25"
+                : "text-obs-subtle hover:bg-white/[0.05] hover:text-obs-text"
+            }`}
+          >
+            <Icon size={14} /> {label}
+          </button>
+        ))}
+      </nav>
+
+      <section data-settings-tab={activeTab}>
+        {activeTab === "general" && <GeneralSettingsPanel />}
+        {activeTab === "messaging" && <MessagingSettingsPanel />}
+        {activeTab === "chatbot" && <WaValidatorSettingsPanel />}
+        {activeTab === "tools" && <ToolsSettingsPanel />}
+        {activeTab === "logs" && <LogsSettingsPanel />}
+        {activeTab === "access" && <AccessSettingsPanel />}
+        {activeTab === "security" && <SecuritySettingsPanel />}
+      </section>
     </div>
   );
 }

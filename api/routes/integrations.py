@@ -63,6 +63,13 @@ def _persona_or_404(slug: str, request: Request) -> dict[str, Any]:
     return persona
 
 
+def _require_internal_admin(request: Request) -> dict[str, Any]:
+    user = auth_service.current_user(request)
+    if not auth_service.is_admin(user):
+        raise HTTPException(403, "Configuracao de mensageria disponivel apenas para administradores.")
+    return user
+
+
 def _public_binding(binding: dict[str, Any] | None) -> dict[str, Any] | None:
     """Expose routing state without ever serializing integration secrets."""
     if not binding:
@@ -165,30 +172,31 @@ def delete_user_integration_credentials(service: str, request: Request):
 
 @router.get("/meta/whatsapp/personas/{slug}")
 def get_whatsapp_binding(slug: str, request: Request):
+    _require_internal_admin(request)
     persona = _persona_or_404(slug, request)
-    binding = next((b for b in supabase_client.get_workflow_bindings(persona["id"]) if b.get("active") and b.get("whatsapp_phone_number_id")), None)
+    binding = next((
+        b for b in supabase_client.get_workflow_bindings(persona["id"])
+        if b.get("provider") == "meta_cloud"
+    ), None)
     connection = supabase_client.get_user_integration_connection(_current_user_id(request), "meta") or {}
     return {"persona": {"id": persona["id"], "slug": persona["slug"]}, "binding": _public_binding(binding), "meta_configured": bool(connection.get("secret_ciphertext"))}
 
 
 @router.put("/meta/whatsapp/personas/{slug}/binding")
 def put_whatsapp_binding(slug: str, body: WhatsAppBindingBody, request: Request):
+    _require_internal_admin(request)
     persona = _persona_or_404(slug, request)
     if body.mode not in {"disabled", "test_allowlist", "active"}:
         raise HTTPException(400, "mode invalido")
     allowlist = [item.strip() for item in body.allowlist if item and item.strip()]
     if body.mode == "test_allowlist" and not allowlist:
         raise HTTPException(400, "test_allowlist exige allowlist")
-    routing = supabase_client.get_persona_routing(slug) or {}
-    conversation_mode = body.conversation_mode or (
-        "n8n_agents"
-        if routing.get("process_mode") == "n8n"
-        else "deterministic"
-    )
-    if conversation_mode not in {"deterministic", "n8n_agents"}:
-        raise HTTPException(400, "conversation_mode invalido")
-    if conversation_mode == "n8n_agents" and not (body.webhook_url or "").strip():
-        raise HTTPException(400, "n8n_agents exige conversation_webhook_url")
+    if (
+        body.conversation_mode not in {None, "deterministic"}
+        or (body.webhook_url or "").strip()
+        or (body.n8n_workflow_id or "").strip()
+    ):
+        raise HTTPException(400, "Mensageria direta nao aceita n8n_adapter ou webhooks n8n.")
     connection = (
         supabase_client.get_user_integration_connection(
             _current_user_id(request),
@@ -203,20 +211,23 @@ def put_whatsapp_binding(slug: str, body: WhatsAppBindingBody, request: Request)
         "business_id": body.business_id,
         "waba_id": body.waba_id,
         "verified_name": body.verified_name,
-        "conversation_webhook_url": body.webhook_url,
         "mode": body.mode,
         "allowlist": allowlist,
         "agent_id": body.agent_id,
-        "conversation_mode": conversation_mode,
-        "decision_owner": conversation_mode,
+        "conversation_mode": "deterministic",
+        "decision_owner": "deterministic",
         "transport_mode": "provider_direct",
         "pipeline_contract": "conversation_v1",
     }
+    existing = next((
+        row for row in supabase_client.get_workflow_bindings(persona["id"])
+        if row.get("provider") == "meta_cloud"
+    ), None)
     try:
         binding = supabase_client.upsert_workflow_binding({
             "persona_id": persona["id"],
             "workflow_name": body.workflow_name,
-            "n8n_workflow_id": body.n8n_workflow_id,
+            "n8n_workflow_id": None,
             "whatsapp_number": body.whatsapp_number,
             "whatsapp_phone_number_id": body.phone_number_id,
             "channel": "whatsapp",
@@ -225,17 +236,42 @@ def put_whatsapp_binding(slug: str, body: WhatsAppBindingBody, request: Request)
             "connection_status": (
                 "connected" if body.mode != "disabled" else "disabled"
             ),
-            "active": body.mode != "disabled",
+            "active": bool(existing and existing.get("active") and body.mode != "disabled"),
             "metadata": metadata,
         })
     except Exception as exc:
         raise HTTPException(409, "phone_number_id ja possui binding ativo") from exc
-    supabase_client.insert_event({"event_type": "whatsapp.binding_updated", "entity_type": "workflow_binding", "entity_id": binding.get("id") or body.phone_number_id, "persona_id": persona["id"], "payload": {"mode": body.mode, "phone_number_id": body.phone_number_id}}, source="integrations.whatsapp")
-    return _public_binding(binding)
+    result = {}
+    if body.mode != "disabled":
+        result = supabase_client.activate_whatsapp_binding(
+            persona_id=persona["id"],
+            binding_id=binding["id"],
+            provider="meta_cloud",
+            source="admin.settings.meta",
+        )
+        binding = {
+            **binding,
+            "active": True,
+            "connection_status": "connected",
+        }
+    supabase_client.insert_event({
+        "event_type": "whatsapp.binding_updated",
+        "entity_type": "workflow_binding",
+        "entity_id": binding.get("id") or body.phone_number_id,
+        "persona_id": persona["id"],
+        "payload": {
+            "mode": body.mode,
+            "provider": "meta_cloud",
+            "binding_id": binding.get("id"),
+            "rebound_leads": result.get("rebound_leads", 0),
+        },
+    }, source="integrations.whatsapp")
+    return {**(_public_binding(binding) or {}), "rebound_leads": result.get("rebound_leads", 0)}
 
 
 @router.post("/meta/whatsapp/personas/{slug}/validate")
 def validate_whatsapp_binding(slug: str, request: Request):
+    _require_internal_admin(request)
     persona = _persona_or_404(slug, request)
     binding = next((b for b in supabase_client.get_workflow_bindings(persona["id"]) if b.get("active")), None)
     if not binding:
@@ -247,6 +283,7 @@ def validate_whatsapp_binding(slug: str, request: Request):
 
 @router.post("/meta/whatsapp/personas/{slug}/test")
 def test_whatsapp_webhook(slug: str, request: Request):
+    _require_internal_admin(request)
     persona = _persona_or_404(slug, request)
     binding = next((b for b in supabase_client.get_workflow_bindings(persona["id"]) if b.get("active")), None)
     if not binding:

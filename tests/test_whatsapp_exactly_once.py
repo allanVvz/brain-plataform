@@ -435,6 +435,8 @@ def test_thousand_repeated_inbound_events_yield_one_decision_outbox_and_provider
         "provider": "meta_cloud",
         "active": True,
         "connection_status": "connected",
+        "whatsapp_phone_number_id": "business-1",
+        "provider_secret_ciphertext": "encrypted-token",
         "metadata": {
             "mode": "active",
             "decision_owner": "deterministic",
@@ -593,7 +595,13 @@ def test_provider_timeout_is_never_retried_automatically(monkeypatch):
         "persona_id": "persona-1",
         "provider": "evolution_baileys",
         "active": True,
-        "metadata": {"transport_mode": "provider_direct"},
+        "connection_status": "connected",
+        "provider_instance_key": "brain-persona-1",
+        "provider_secret_ciphertext": "encrypted-token",
+        "metadata": {
+            "decision_owner": "deterministic",
+            "transport_mode": "provider_direct",
+        },
     }
 
     class Provider:

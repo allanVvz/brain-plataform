@@ -3,7 +3,7 @@
 O dashboard usa exclusivamente o proxy same-origin `/api-brain`. No projeto Vercel, com root directory `dashboard`, configure:
 
 ```text
-API_INTERNAL_BASE_URL=https://api.<dominio-do-backend>
+API_INTERNAL_BASE_URL=https://api.vzforeal.com
 NEXT_PUBLIC_API_BASE_URL=/api-brain
 ```
 

@@ -298,6 +298,18 @@ function MessageBubble({ msg, lead }: { msg: Message; lead: Lead | null }) {
   const senderName = out
     ? (msg.sender_type === "assistant" ? "Assistente IA" : msg.sender_type || "IA")
     : displayName(lead, msg);
+  const deliveryLabel = (() => {
+    const status = String(msg.status || "").toLowerCase();
+    if (status === "pending" || status === "pending_send" || status === "processing" || status === "retry") return "enfileirada";
+    if (status === "sent") return "enviada";
+    if (status === "delivered") return "entregue";
+    if (status === "read") return "lida";
+    if (status === "failed" || status === "waiting_human" || status === "dead_letter") return "falha no envio";
+    return null;
+  })();
+  const deliveryError = out && deliveryLabel === "falha no envio"
+    ? String(msg.metadata?.outbox_error || "")
+    : "";
 
   return (
     <div className={`flex flex-col gap-0.5 ${out ? "items-end" : "items-start"}`}>
@@ -324,7 +336,9 @@ function MessageBubble({ msg, lead }: { msg: Message; lead: Lead | null }) {
         )}
       </div>
 
-      <span className="text-[10px] px-1 text-obs-faint">{formatTs(msg.created_at)}</span>
+      <span className={`text-[10px] px-1 ${deliveryLabel === "falha no envio" ? "text-red-400" : "text-obs-faint"}`}>
+        {formatTs(msg.created_at)}{out && deliveryLabel ? ` · ${deliveryLabel}` : ""}{deliveryError ? `: ${deliveryError}` : ""}
+      </span>
     </div>
   );
 }

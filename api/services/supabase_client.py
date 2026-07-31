@@ -3059,9 +3059,25 @@ def insert_agent_log(data: dict) -> None:
         "status": "error" if level == "error" else ("timeout" if level == "timeout" else "success"),
         "error_msg": payload.get("decision") if level == "error" else payload.get("error_msg"),
     }
+    # Compose bootstraps the legacy table first and later expands it with the
+    # modern columns. Insert the compatible superset first so NOT NULL legacy
+    # fields are satisfied without intentionally generating a database error
+    # for every log line.
+    hybrid_payload = {
+        **legacy_payload,
+        **payload,
+        "agent_name": legacy_payload["agent_name"],
+        "status": legacy_payload["status"],
+        "input": legacy_payload["input"],
+        "output": legacy_payload["output"],
+    }
 
     mode = _detect_agent_logs_schema_mode()
-    attempts = [payload, legacy_payload] if mode == "modern" else [legacy_payload, payload]
+    attempts = (
+        [hybrid_payload, payload, legacy_payload]
+        if mode == "modern"
+        else [legacy_payload, hybrid_payload, payload]
+    )
     last_exc: Exception | None = None
     for candidate in attempts:
         try:
@@ -3847,6 +3863,43 @@ def get_workflow_bindings(persona_id: Optional[str] = None) -> list:
     return _q(q)
 
 
+def get_active_whatsapp_binding(persona_id: Optional[str]) -> Optional[dict]:
+    if not persona_id:
+        return None
+    return _one(
+        get_client().table("workflow_bindings").select("*")
+        .eq("persona_id", persona_id)
+        .eq("channel", "whatsapp")
+        .eq("active", True)
+        .maybe_single()
+    )
+
+
+def activate_whatsapp_binding(
+    *,
+    persona_id: str,
+    binding_id: str,
+    provider: str,
+    source: str = "admin.settings",
+) -> dict:
+    """Atomically activate a persona transport and rebind its current leads."""
+    result = _execute_with_retry(
+        get_client().rpc(
+            "activate_persona_whatsapp_binding",
+            {
+                "p_persona_id": persona_id,
+                "p_binding_id": binding_id,
+                "p_provider": provider,
+                "p_source": source,
+            },
+        )
+    )
+    payload = result.data
+    if isinstance(payload, list):
+        return payload[0] if payload else {}
+    return payload or {}
+
+
 def assert_client_portal_schema() -> None:
     """Fail API startup when the Compose migration contract is incomplete."""
     checks = (
@@ -4086,10 +4139,45 @@ def complete_conversation_commit(
 
 def complete_whatsapp_buffer(buffer_id: str, status: str, error: str | None = None) -> None:
     from datetime import datetime, timezone
+    # Keep the chat projection in step with terminal outbound outbox states.
+    # Without this, an operator sees a forever "pending" bubble even though
+    # lead_buffer contains the actionable failure reason.
+    buffer = _one(
+        get_client().table("lead_buffer")
+        .select("direction,channel_binding_id,correlation_id")
+        .eq("id", buffer_id)
+        .maybe_single()
+    ) or {}
     _execute_with_retry(get_client().table("lead_buffer").update({
         "status": status, "last_error": error, "locked_at": None, "locked_by": None,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", buffer_id))
+    if buffer.get("direction") == "outbound" and buffer.get("channel_binding_id") and buffer.get("correlation_id"):
+        messages_query = (
+            get_client().table("messages")
+            .select("id,metadata")
+            .eq("channel_binding_id", buffer["channel_binding_id"])
+            .eq("correlation_id", buffer["correlation_id"])
+            .not_.in_("status", ["sent", "delivered", "read"])
+        )
+        message_rows = _q(messages_query)
+        _execute_with_retry(
+            get_client().table("messages").update({"status": status})
+            .eq("channel_binding_id", buffer["channel_binding_id"])
+            .eq("correlation_id", buffer["correlation_id"])
+            .not_.in_("status", ["sent", "delivered", "read"])
+        )
+        if error:
+            for message in message_rows:
+                merged_metadata = {
+                    **(message.get("metadata") or {}),
+                    "outbox_error": str(error)[:800],
+                    "outbox_buffer_id": buffer_id,
+                }
+                _execute_with_retry(
+                    get_client().table("messages").update({"metadata": merged_metadata})
+                    .eq("id", message["id"])
+                )
 
 
 def release_whatsapp_buffer(buffer_id: str, status: str, *, delay_seconds: int, error: str | None, decrement_attempt: bool = False) -> None:

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AppShell from "@/app/AppShell";
@@ -97,4 +97,27 @@ describe("AppShell session barrier", () => {
     await waitFor(() => expect(onMount).toHaveBeenCalledTimes(1));
     expect(mocks.replace).not.toHaveBeenCalled();
   });
+
+  it("opens settings and logout from the user menu without legacy settings links", async () => {
+    mocks.me.mockResolvedValue({
+      account_type: "internal",
+      user: {
+        account_type: "internal",
+        role: "admin",
+        name: "Admin Brain",
+      },
+      personas: [],
+      navigation: { home_url: "/" },
+    });
+    render(<AppShell><div>conteudo</div></AppShell>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir menu do usuario" }));
+
+    expect(screen.getByRole("link", { name: /Configurações/i })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("button", { name: /Sair/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "ChatBot" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Tools" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Logs" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Acessos" })).not.toBeInTheDocument();
+  }, 15_000);
 });

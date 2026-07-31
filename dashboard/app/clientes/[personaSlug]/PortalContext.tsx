@@ -71,12 +71,6 @@ export default function PortalProvider({
         );
         const page = pages.find((item) => item.slug === personaSlug);
         if (!persona || !page) throw new Error("403");
-        if (session?.user?.must_change_password) {
-          router.replace(
-            `/account/change-password?next=${encodeURIComponent(pathname)}`,
-          );
-          return;
-        }
         const capabilities = persona.capabilities || page.capabilities || {};
         if (active) {
           setState({

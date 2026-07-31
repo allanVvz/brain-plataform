@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Lock, Mail, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 import {
-  mandatoryPasswordDestination,
   resolveSessionDestination,
   safeLocalTarget,
 } from "@/lib/session-routing";
@@ -33,11 +32,7 @@ export default function LoginPage() {
     setSafeTarget(target);
     api.me()
       .then((session) => {
-        const postLogin = resolveSessionDestination(session, target);
-        const destination = session?.user?.must_change_password
-          ? mandatoryPasswordDestination(session, postLogin)
-          : postLogin;
-        router.replace(destination);
+        router.replace(resolveSessionDestination(session, target));
       })
       .catch(() => {});
   }, [router]);
@@ -57,10 +52,7 @@ export default function LoginPage() {
         window.localStorage.removeItem("ai-brain-persona-slug");
         window.localStorage.removeItem("ai-brain-persona-id");
       }
-      const postLogin = resolveSessionDestination(session, safeTarget);
-      router.replace(session?.user?.must_change_password
-        ? mandatoryPasswordDestination(session, postLogin)
-        : postLogin);
+      router.replace(resolveSessionDestination(session, safeTarget));
     } catch (err) {
       setError(normalizeError(err instanceof Error ? err.message : String(err)));
     } finally {

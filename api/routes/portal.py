@@ -60,6 +60,26 @@ class WhatsAppProviderBody(BaseModel):
     confirmed: bool = False
 
 
+def _require_internal_admin(request: Request) -> dict[str, Any]:
+    user = auth_service.current_user(request)
+    if not auth_service.is_admin(user):
+        raise HTTPException(403, "Troca de provider disponivel apenas na administracao.")
+    return user
+
+
+def _direct_binding_metadata(binding: dict[str, Any] | None = None) -> dict[str, Any]:
+    metadata = {
+        **((binding or {}).get("metadata") or {}),
+        "decision_owner": "deterministic",
+        "conversation_mode": "deterministic",
+        "transport_mode": "provider_direct",
+        "pipeline_contract": "conversation_v1",
+    }
+    metadata.pop("n8n_outbound_webhook_url", None)
+    metadata.pop("conversation_webhook_url", None)
+    return metadata
+
+
 def _persona(slug: str, request: Request, capability: str = "view") -> dict[str, Any]:
     persona = supabase_client.get_persona(slug)
     if not persona:
@@ -250,16 +270,7 @@ async def send_message(request: Request, persona_slug: str = Query(...)):
     except (ValueError, AttributeError) as exc:
         raise HTTPException(422, "client_message_id UUID e obrigatorio.") from exc
 
-    binding_id = lead.get("channel_binding_id")
-    if not binding_id:
-        raise HTTPException(409, "Lead sem canal WhatsApp explicito.")
-    binding = supabase_client.get_workflow_binding_by_id(binding_id)
-    if not binding:
-        raise HTTPException(409, "Canal WhatsApp nao configurado.")
-    if binding.get("persona_id") != persona["id"]:
-        raise HTTPException(403, "Canal WhatsApp pertence a outra persona.")
-    if binding.get("connection_status") not in {None, "connected", "open"} and binding.get("provider") == "evolution_baileys":
-        raise HTTPException(409, "Canal WhatsApp desconectado.")
+    binding = whatsapp_outbox.resolve_lead_binding(lead)
 
     message_id = f"manual:{client_message_id}"
     existing = supabase_client.get_whatsapp_buffer_by_idempotency(message_id)
@@ -435,25 +446,28 @@ def automation(slug: str, body: AutomationBody, request: Request):
 @router.get("/personas/{slug}/channels/whatsapp")
 def whatsapp_channel(slug: str, request: Request):
     persona = _persona(slug, request)
-    capability = auth_service.assert_persona_capability(
-        request, "view", persona_id=persona["id"], persona_slug=persona["slug"]
-    )
-    can_manage = capability.get("capabilities", {}).get("manage", False)
+    can_manage_provider = auth_service.is_admin(auth_service.current_user(request))
     binding = _binding_for_persona(persona["id"])
     if not binding:
         return {
             "configured": False,
             "status": "disabled",
-            "can_manage": can_manage,
-            "available_providers": ["meta_cloud", "evolution_baileys"] if can_manage else [],
+            "can_manage_provider": can_manage_provider,
+            "available_providers": (
+                ["meta_cloud", "evolution_baileys"]
+                if can_manage_provider else []
+            ),
         }
     return {
         "configured": True,
         "provider": binding.get("provider") or "meta_cloud",
         "status": binding.get("connection_status") or ("connected" if binding.get("active") else "disabled"),
         "last_connection_at": binding.get("last_connection_at"),
-        "can_manage": can_manage,
-        "available_providers": ["meta_cloud", "evolution_baileys"] if can_manage else [],
+        "can_manage_provider": can_manage_provider,
+        "available_providers": (
+            ["meta_cloud", "evolution_baileys"]
+            if can_manage_provider else []
+        ),
     }
 
 
@@ -464,6 +478,7 @@ def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Req
     Secrets stay in the binding ciphertext.  The previous binding is retained,
     inactive, so a failed provider call can be rolled back safely.
     """
+    _require_internal_admin(request)
     persona = _persona(slug, request, "manage")
     if body.provider not in {"meta_cloud", "evolution_baileys"}:
         raise HTTPException(400, "Provider invalido.")
@@ -472,16 +487,7 @@ def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Req
     bindings = _whatsapp_bindings(persona["id"])
     current = next((item for item in bindings if item.get("active")), None)
     target = next((item for item in bindings if item.get("provider") == body.provider), None)
-    if current and current.get("provider") == body.provider:
-        metadata = {
-            **(current.get("metadata") or {}),
-            "decision_owner": "deterministic",
-            "conversation_mode": "deterministic",
-            "transport_mode": "provider_direct",
-            "pipeline_contract": "conversation_v1",
-        }
-        supabase_client.update_workflow_binding_metadata(current["id"], metadata)
-        return {"ok": True, "provider": body.provider, "status": current.get("connection_status") or "connected"}
+
     if body.provider == "meta_cloud":
         if (
             not target
@@ -489,51 +495,69 @@ def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Req
             or not target.get("provider_secret_ciphertext")
         ):
             raise HTTPException(409, "Nao existe um binding Meta configurado para reativar.")
-        try:
-            if current:
-                supabase_client.update_workflow_binding(current["id"], {"active": False, "connection_status": "disabled"})
-            supabase_client.update_workflow_binding_metadata(
-                target["id"],
-                {
-                    **(target.get("metadata") or {}),
-                    "decision_owner": "deterministic",
-                    "conversation_mode": "deterministic",
-                    "transport_mode": "provider_direct",
-                    "pipeline_contract": "conversation_v1",
-                },
-            )
-            supabase_client.update_workflow_binding(
-                target["id"],
-                {"active": True, "connection_status": "connected"},
-            )
-        except Exception:
-            if current:
-                supabase_client.update_workflow_binding(current["id"], {"active": True})
-            raise
-        return {"ok": True, "provider": "meta_cloud", "status": "connected"}
+        supabase_client.update_workflow_binding_metadata(
+            target["id"],
+            _direct_binding_metadata(target),
+        )
+        if target.get("connection_status") not in {"connected", "open"}:
+            raise HTTPException(409, "Binding Meta configurado, mas nao conectado.")
+        result = supabase_client.activate_whatsapp_binding(
+            persona_id=persona["id"],
+            binding_id=target["id"],
+            provider="meta_cloud",
+            source="admin.settings",
+        )
+        return {**result, "status": target.get("connection_status")}
 
     if (os.environ.get("EVOLUTION_ENABLED") or "").lower() not in {"1", "true", "yes"}:
         raise HTTPException(503, "Evolution API desabilitada.")
-    if not target:
+    needs_provision = not target or target.get("connection_status") in {
+        None, "disabled", "disconnected", "failed",
+    }
+    if needs_provision:
         instance_key = f"brain-{persona['slug'][:30]}-{persona['id'][:8]}"
         instance_token = os.urandom(32).hex()
         public_base = (os.environ.get("AI_BRAIN_PUBLIC_API_URL") or "").rstrip("/")
         if not public_base:
             raise HTTPException(503, "AI_BRAIN_PUBLIC_API_URL nao configurada.")
-        target = supabase_client.upsert_workflow_binding({
-            "persona_id": persona["id"], "workflow_name": f"Evolution {persona['slug']}",
-            "channel": "whatsapp", "provider": "evolution_baileys",
-            "provider_instance_key": instance_key,
-            "provider_secret_ciphertext": secret_store.encrypt_secret(instance_token),
-            "connection_status": "provisioning", "active": False,
-            "metadata": {
-                "provider_version": os.environ.get("EVOLUTION_API_VERSION", "2.3.7"),
-                "decision_owner": "deterministic",
-                "conversation_mode": "deterministic",
-                "transport_mode": "provider_direct",
-                "pipeline_contract": "conversation_v1",
-            },
-        })
+        if target:
+            instance_key = str(target.get("provider_instance_key") or instance_key)
+            instance_token = (
+                secret_store.decrypt_secret(target.get("provider_secret_ciphertext"))
+                or instance_token
+            )
+            supabase_client.update_workflow_binding(
+                target["id"],
+                {
+                    "provider_instance_key": instance_key,
+                    "provider_secret_ciphertext": secret_store.encrypt_secret(instance_token),
+                    "connection_status": "provisioning",
+                    "active": False,
+                },
+            )
+            supabase_client.update_workflow_binding_metadata(
+                target["id"],
+                _direct_binding_metadata(target),
+            )
+            target = {
+                **target,
+                "provider_instance_key": instance_key,
+                "provider_secret_ciphertext": secret_store.encrypt_secret(instance_token),
+                "connection_status": "provisioning",
+                "active": False,
+            }
+        else:
+            target = supabase_client.upsert_workflow_binding({
+                "persona_id": persona["id"], "workflow_name": f"Evolution {persona['slug']}",
+                "channel": "whatsapp", "provider": "evolution_baileys",
+                "provider_instance_key": instance_key,
+                "provider_secret_ciphertext": secret_store.encrypt_secret(instance_token),
+                "connection_status": "provisioning", "active": False,
+                "metadata": {
+                    "provider_version": os.environ.get("EVOLUTION_API_VERSION", "2.3.7"),
+                    **_direct_binding_metadata(),
+                },
+            })
         webhook_url, callback = _evolution_webhook_target(
             target["id"],
             public_base,
@@ -549,72 +573,37 @@ def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Req
             # A draft without a provisioned remote instance must not become active.
             supabase_client.update_workflow_binding(target["id"], {"active": False, "connection_status": "failed"})
             raise HTTPException(502, "Falha ao provisionar Evolution; o canal anterior foi preservado.")
-    try:
-        if current:
-            supabase_client.update_workflow_binding(current["id"], {"active": False, "connection_status": "disabled"})
-        supabase_client.update_workflow_binding_metadata(
+        supabase_client.update_workflow_binding(
             target["id"],
-            {
-                **(target.get("metadata") or {}),
-                "decision_owner": "deterministic",
-                "conversation_mode": "deterministic",
-                "transport_mode": "provider_direct",
-                "pipeline_contract": "conversation_v1",
-            },
+            {"active": False, "connection_status": "connecting"},
         )
-        supabase_client.update_workflow_binding(target["id"], {"active": True, "connection_status": "connecting"})
-    except Exception:
-        if current:
-            supabase_client.update_workflow_binding(current["id"], {"active": True})
-        raise
-    return {"ok": True, "provider": "evolution_baileys", "status": "connecting"}
+        target = {**target, "connection_status": "connecting", "active": False}
+
+    supabase_client.update_workflow_binding_metadata(
+        target["id"],
+        _direct_binding_metadata(target),
+    )
+    result = supabase_client.activate_whatsapp_binding(
+        persona_id=persona["id"],
+        binding_id=target["id"],
+        provider="evolution_baileys",
+        source="admin.settings",
+    )
+    return {
+        **result,
+        "provider": "evolution_baileys",
+        "status": target.get("connection_status") or "connecting",
+    }
 
 
 @router.post("/personas/{slug}/channels/whatsapp/evolution/provision")
 def provision_evolution(slug: str, request: Request):
-    persona = _persona(slug, request, "manage")
-    if (os.environ.get("EVOLUTION_ENABLED") or "").lower() not in {"1", "true", "yes"}:
-        raise HTTPException(503, "Evolution API desabilitada.")
-    current = _binding_for_persona(persona["id"])
-    if current:
-        if (current.get("provider") or "meta_cloud") == "meta_cloud":
-            raise HTTPException(409, "A persona ja possui Meta Cloud ativo.")
-        return {"configured": True, "status": current.get("connection_status"), "provider": "evolution_baileys"}
-    provider = get_provider("evolution_baileys")
-    instance_key = f"brain-{persona['slug'][:30]}-{persona['id'][:8]}"
-    instance_token = os.urandom(32).hex()
-    public_base = (os.environ.get("AI_BRAIN_PUBLIC_API_URL") or "").rstrip("/")
-    if not public_base:
-        raise HTTPException(503, "AI_BRAIN_PUBLIC_API_URL nao configurada.")
-    draft = supabase_client.upsert_workflow_binding({
-        "persona_id": persona["id"],
-        "workflow_name": f"Evolution {persona['slug']}",
-        "channel": "whatsapp",
-        "provider": "evolution_baileys",
-        "provider_instance_key": instance_key,
-        "provider_secret_ciphertext": secret_store.encrypt_secret(instance_token),
-        "connection_status": "provisioning",
-        "active": True,
-        "metadata": {
-            "provider_version": os.environ.get("EVOLUTION_API_VERSION", "2.3.7"),
-            "decision_owner": "deterministic",
-            "conversation_mode": "deterministic",
-            "transport_mode": "provider_direct",
-            "pipeline_contract": "conversation_v1",
-        },
-    })
-    webhook_url, callback = _evolution_webhook_target(
-        draft["id"],
-        public_base,
+    _require_internal_admin(request)
+    return select_whatsapp_provider(
+        slug,
+        WhatsAppProviderBody(provider="evolution_baileys", confirmed=True),
+        request,
     )
-    provider.provision_instance(
-        instance_key,
-        instance_token,
-        webhook_url,
-        webhook_token=callback,
-    )
-    supabase_client.update_workflow_binding(draft["id"], {"connection_status": "connecting"})
-    return {"configured": True, "provider": "evolution_baileys", "status": "connecting"}
 
 
 def _evolution_action(slug: str, request: Request, action: str):

@@ -139,11 +139,4 @@ async def auth_middleware(request: Request, call_next):
         )
         if not allowed:
             return JSONResponse({"detail": "Acesso negado."}, status_code=403)
-        if user.get("must_change_password") and path not in {
-            "/auth/me", "/auth/logout", "/auth/change-password",
-        }:
-            return JSONResponse(
-                {"detail": "Troca de senha obrigatoria."},
-                status_code=403,
-            )
     return await call_next(request)

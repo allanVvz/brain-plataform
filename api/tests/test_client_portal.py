@@ -258,7 +258,7 @@ def test_evolution_webhook_target_keeps_signature_out_of_url(monkeypatch):
     assert callback_token == evolution_webhook._callback_token("binding-1")
 
 
-def test_unconfigured_whatsapp_channel_exposes_manager_capability(monkeypatch):
+def test_unconfigured_whatsapp_channel_hides_provider_controls_from_client(monkeypatch):
     request = request_for(
         {"id": "u1", "role": "user", "account_type": "client"},
         [{
@@ -276,18 +276,15 @@ def test_unconfigured_whatsapp_channel_exposes_manager_capability(monkeypatch):
     assert portal.whatsapp_channel("baita-conveniencia", request) == {
         "configured": False,
         "status": "disabled",
-        "can_manage": True,
-        "available_providers": ["meta_cloud", "evolution_baileys"],
+        "can_manage_provider": False,
+        "available_providers": [],
     }
 
 
 def test_provider_switch_requires_explicit_confirmation(monkeypatch):
     request = request_for(
-        {"id": "u1", "role": "user", "account_type": "client"},
-        [{
-            "persona_id": "p1", "persona_slug": "baita-conveniencia",
-            "can_view": True, "can_edit": True, "can_manage": True,
-        }],
+        {"id": "admin-1", "role": "admin", "account_type": "internal"},
+        [],
     )
     monkeypatch.setattr(
         portal.supabase_client,
@@ -303,13 +300,27 @@ def test_provider_switch_requires_explicit_confirmation(monkeypatch):
     assert error.value.status_code == 400
 
 
-def test_provider_switch_rolls_back_to_meta_when_evolution_provision_fails(monkeypatch):
+def test_client_manager_cannot_switch_provider(monkeypatch):
     request = request_for(
         {"id": "u1", "role": "user", "account_type": "client"},
         [{
             "persona_id": "p1", "persona_slug": "baita-conveniencia",
             "can_view": True, "can_edit": True, "can_manage": True,
         }],
+    )
+    with pytest.raises(HTTPException) as error:
+        portal.select_whatsapp_provider(
+            "baita-conveniencia",
+            portal.WhatsAppProviderBody(provider="evolution_baileys", confirmed=True),
+            request,
+        )
+    assert error.value.status_code == 403
+
+
+def test_provider_switch_rolls_back_to_meta_when_evolution_provision_fails(monkeypatch):
+    request = request_for(
+        {"id": "admin-1", "role": "admin", "account_type": "internal"},
+        [],
     )
     meta = {
         "id": "meta-1", "persona_id": "p1", "channel": "whatsapp",
@@ -483,7 +494,7 @@ def test_client_session_response_declares_safe_portal_home(monkeypatch):
     assert session["access_profile"] == "client_manager"
 
 
-def test_must_change_password_blocks_portal(monkeypatch):
+def test_must_change_password_is_warning_and_does_not_block_portal(monkeypatch):
     monkeypatch.setattr(auth_service, "get_session_payload", lambda _token: {"sub": "u1"})
     monkeypatch.setattr(auth_service, "get_user_by_id", lambda _id: {
         "id": "u1", "email": "client@example.com", "role": "user",
@@ -499,7 +510,7 @@ def test_must_change_password_blocks_portal(monkeypatch):
 
     client = TestClient(app)
     client.cookies.set(auth_service.SESSION_COOKIE, "signed")
-    assert client.get("/portal/ping").status_code == 403
+    assert client.get("/portal/ping").status_code == 200
 
 
 def test_client_pages_include_authorized_persona_without_channel(monkeypatch):

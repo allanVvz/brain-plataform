@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultSessionHome,
-  mandatoryPasswordDestination,
   resolveSessionDestination,
   safeLocalTarget,
 } from "@/lib/session-routing";
@@ -47,12 +46,6 @@ describe("session routing", () => {
     expect(defaultSessionHome(internal)).toBe("/");
     expect(resolveSessionDestination(internal, "/leads?stage=novo")).toBe(
       "/leads?stage=novo",
-    );
-  });
-
-  it("encodes the already validated post-password destination", () => {
-    expect(mandatoryPasswordDestination(clientSession, "/pipeline")).toBe(
-      "/account/change-password?next=%2Fclientes%2Faurora%2Fmensagens",
     );
   });
 });
