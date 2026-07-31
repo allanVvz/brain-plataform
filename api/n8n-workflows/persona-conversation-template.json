@@ -4,7 +4,7 @@
   "nodes": [
     {
       "parameters": {"httpMethod": "POST", "path": "__PERSONA_SLUG__/conversation", "responseMode": "responseNode"},
-      "id": "inbound", "name": "Canonical inbound", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [200, 300]
+      "id": "inbound", "webhookId": "b4f0d00e-8ed0-4ca4-bf9c-2fb6e5b7f002", "name": "Canonical inbound", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [200, 300]
     },
     {
       "parameters": {
