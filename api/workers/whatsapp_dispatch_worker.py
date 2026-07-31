@@ -288,6 +288,7 @@ class WhatsAppDispatchWorker(BaseWorker):
         recipient = str(
             identities.get("remote_jid_alt")
             or (lead or {}).get("external_contact_id")
+            or (lead or {}).get("telefone")
             or ""
         )
         if recipient.endswith("@s.whatsapp.net"):
