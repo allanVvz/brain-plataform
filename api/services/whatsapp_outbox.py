@@ -49,12 +49,18 @@ def validate_direct_binding(binding: dict[str, Any]) -> None:
         metadata.get("outbound_webhook_url")
         or metadata.get("n8n_outbound_webhook_url")
     ):
-        raise HTTPException(409, "Adapter n8n de saida nao e permitido no transporte direto.")
+        raise HTTPException(
+            409,
+            "Webhooks n8n de saida nao sao permitidos no transporte direto.",
+        )
     conversation_url = str(metadata.get("conversation_webhook_url") or "").strip()
     if decision_owner == "deterministic" and (
         binding.get("n8n_workflow_id") or conversation_url
     ):
-        raise HTTPException(409, "Binding deterministico nao aceita workflow n8n.")
+        raise HTTPException(
+            409,
+            "Webhooks n8n nao sao permitidos no binding deterministico.",
+        )
     if decision_owner == "n8n_agents":
         expected_base = str(os.environ.get("N8N_BASE_URL") or "").rstrip("/")
         parsed = urlparse(conversation_url)

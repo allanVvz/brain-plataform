@@ -305,12 +305,12 @@ def test_normalize_credentials_meta_splits_secret_and_config() -> None:
     assert config == {"business_id": "biz", "catalog_id": "cat"}
 
 
-def test_llm_integrations_are_user_managed_and_validate_format() -> None:
+def test_llm_integrations_are_persona_managed_and_validate_format() -> None:
     openai = integration_service.get_catalog_item("openai")
     anthropic = integration_service.get_catalog_item("anthropic")
-    assert openai["scope"] == "user"
+    assert openai["scope"] == "persona"
     assert openai["user_managed"] is True
-    assert anthropic["scope"] == "user"
+    assert anthropic["scope"] == "persona"
     assert anthropic["user_managed"] is True
 
     secret, config = integration_service.normalize_credentials("openai", {"api_key": "sk-test-123"})
