@@ -66,6 +66,22 @@ def test_baita_accepts_meta_or_evolution_but_rejects_n8n(monkeypatch):
     with pytest.raises(HTTPException, match="transporte direto"):
         whatsapp_outbox.resolve_lead_binding(_lead())
 
+    for legacy_binding in (
+        _binding(metadata={
+            "decision_owner": "deterministic",
+            "transport_mode": "provider_direct",
+            "outbound_webhook_url": "http://n8n:5678/webhook/legacy",
+        }),
+        _binding(n8n_workflow_id="legacy-workflow"),
+    ):
+        monkeypatch.setattr(
+            whatsapp_outbox.supabase_client,
+            "get_workflow_binding_by_id",
+            lambda _id, value=legacy_binding: value,
+        )
+        with pytest.raises(HTTPException, match="Webhooks n8n"):
+            whatsapp_outbox.resolve_lead_binding(_lead())
+
 
 def test_provider_direct_rejects_missing_credential_and_invalid_recipient(monkeypatch):
     monkeypatch.setattr(

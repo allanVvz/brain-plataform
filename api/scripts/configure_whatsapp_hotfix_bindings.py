@@ -38,13 +38,17 @@ def _binding(persona_slug: str, provider: str) -> tuple[dict, dict]:
 
 
 def _canonical_metadata(binding: dict) -> dict:
-    return {
+    metadata = {
         **(binding.get("metadata") or {}),
         "decision_owner": "deterministic",
         "conversation_mode": "deterministic",
         "transport_mode": "provider_direct",
         "pipeline_contract": "conversation_v1",
     }
+    metadata.pop("outbound_webhook_url", None)
+    metadata.pop("n8n_outbound_webhook_url", None)
+    metadata.pop("conversation_webhook_url", None)
+    return metadata
 
 
 def main() -> None:
@@ -85,6 +89,7 @@ def main() -> None:
             {
                 "channel": "whatsapp",
                 "provider": "meta_cloud",
+                "n8n_workflow_id": None,
                 "provider_secret_ciphertext": meta_ciphertext,
                 "metadata": _canonical_metadata(meta_binding),
             },
@@ -94,6 +99,7 @@ def main() -> None:
             {
                 "channel": "whatsapp",
                 "provider": "evolution_baileys",
+                "n8n_workflow_id": None,
                 "metadata": _canonical_metadata(evolution_binding),
             },
         )

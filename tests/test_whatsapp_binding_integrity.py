@@ -28,6 +28,23 @@ def test_binding_integrity_migration_covers_switch_backfill_and_trigger():
     assert "'transport_mode', 'provider_direct'" in sql
 
 
+def test_provider_direct_guard_removes_and_rejects_every_legacy_n8n_route():
+    sql = (
+        ROOT
+        / "supabase"
+        / "migrations"
+        / "069_block_legacy_n8n_direct_transport.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "- 'outbound_webhook_url'" in sql
+    assert "- 'n8n_outbound_webhook_url'" in sql
+    assert "- 'conversation_webhook_url'" in sql
+    assert "n8n_workflow_id = NULL" in sql
+    assert "CREATE TRIGGER trg_enforce_whatsapp_provider_direct_contract" in sql
+    assert "Provider-direct WhatsApp binding cannot reference n8n" in sql
+    assert "whatsapp.binding_n8n_route_removed" in sql
+
+
 def test_activate_binding_uses_single_transactional_rpc(monkeypatch):
     captured = {}
 

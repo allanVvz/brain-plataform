@@ -75,6 +75,7 @@ def _direct_binding_metadata(binding: dict[str, Any] | None = None) -> dict[str,
         "transport_mode": "provider_direct",
         "pipeline_contract": "conversation_v1",
     }
+    metadata.pop("outbound_webhook_url", None)
     metadata.pop("n8n_outbound_webhook_url", None)
     metadata.pop("conversation_webhook_url", None)
     return metadata

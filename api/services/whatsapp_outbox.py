@@ -42,7 +42,12 @@ def validate_direct_binding(binding: dict[str, Any]) -> None:
         raise HTTPException(409, "A mensageria deve usar decisao deterministica.")
     if metadata.get("transport_mode") != "provider_direct":
         raise HTTPException(409, "A mensageria deve usar transporte direto pelo provider.")
-    if metadata.get("n8n_outbound_webhook_url") or metadata.get("conversation_webhook_url"):
+    if (
+        binding.get("n8n_workflow_id")
+        or metadata.get("outbound_webhook_url")
+        or metadata.get("n8n_outbound_webhook_url")
+        or metadata.get("conversation_webhook_url")
+    ):
         raise HTTPException(409, "Webhooks n8n nao sao permitidos no transporte direto.")
 
     provider = binding.get("provider")
