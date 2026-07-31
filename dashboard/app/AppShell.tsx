@@ -36,7 +36,6 @@ const nav = [
   { section: "Marketing", href: "/marketing/produtos", label: "Produtos", icon: Package },
   { section: "Marketing", href: "/marketing/assets", label: "Assets", icon: Image },
   { section: "Knowledge", href: "/knowledge/sync", label: "Sync", icon: RefreshCw },
-  { section: "Knowledge", href: "/knowledge/import-vault", label: "Importar vault", icon: Plus },
   { section: "Knowledge", href: "/knowledge/quality", label: "Quality", icon: CheckSquare },
   { section: "Knowledge", href: "/kb", label: "Golden Dataset", icon: BookOpen },
 ];

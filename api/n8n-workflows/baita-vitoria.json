@@ -8,7 +8,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $json.body || $json; const binding = { persona_slug: 'baita-conveniencia', agent_slug: 'vitoria', decision_owner: 'n8n_agents', pipeline_contract: 'conversation_v1', classifier: 'deterministic_v1' }; if (input.persona_slug !== binding.persona_slug) throw new Error('persona binding mismatch'); if (input.pipeline_contract && input.pipeline_contract !== binding.pipeline_contract) throw new Error('pipeline contract mismatch'); if (!input.lead_ref || !input.buffer_id || !input.correlation_id || !input.channel_binding_id) throw new Error('invalid canonical event'); return [{ json: { ...input, ...binding } }];"
+        "jsCode": "const headers = $json.headers || {}; const supplied = headers['x-webhook-token'] || headers['X-Webhook-Token']; if (!supplied || supplied !== $env.AI_BRAIN_WEBHOOK_TOKEN) throw new Error('invalid webhook token'); const input = $json.body || $json; const binding = { persona_slug: 'baita-conveniencia', agent_slug: 'vitoria', decision_owner: 'n8n_agents', pipeline_contract: 'conversation_v1', classifier: 'deterministic_v1', field_extractor: 'deepseek-v4-flash' }; if (input.persona_slug !== binding.persona_slug) throw new Error('persona binding mismatch'); if (input.pipeline_contract && input.pipeline_contract !== binding.pipeline_contract) throw new Error('pipeline contract mismatch'); if (!input.lead_ref || !input.buffer_id || !input.correlation_id || !input.channel_binding_id) throw new Error('invalid canonical event'); return [{ json: { ...input, ...binding } }];"
       },
       "id": "binding", "name": "Validate Baita binding", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [440, 300]
     },
@@ -29,16 +29,32 @@
     {
       "parameters": {
         "method": "POST",
+        "url": "https://api.deepseek.com/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "Content-Type", "value": "application/json"}]},
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+          "body": "={{JSON.stringify({model: 'deepseek-v4-flash', thinking: {type: 'disabled'}, temperature: 0, max_tokens: 500, response_format: {type: 'json_object'}, messages: [{role: 'system', content: 'Extraia somente fatos escritos pelo cliente. Responda JSON no formato {\"intent\":\"\",\"fields\":{\"customer_name\":null,\"product_or_service\":null,\"delivery_address\":{\"street\":null,\"number\":null,\"complement\":null,\"neighborhood\":null,\"city\":null,\"state\":null,\"zip\":null},\"vehicle_model\":null,\"vehicle_size\":null,\"condition\":null,\"desired_date\":null,\"time_window\":null}}. Nunca invente campos. Campos ausentes devem ser null.'}, {role: 'user', content: $('Validate Baita binding').item.json.message}]})}}",
+        "options": {}
+      },
+      "id": "deepseek", "name": "DeepSeek field extraction", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [940, 300], "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
         "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/decide'}}",
         "sendHeaders": true,
         "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({context: $json})}}",
+        "body": "={{JSON.stringify({context: $('Load graph RAG cart history').item.json, model_observation: JSON.parse($json.choices?.[0]?.message?.content || '{}')})}}",
         "options": {}
       },
-      "id": "decision", "name": "Route Vitoria SDR Closer Human", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [960, 300], "onError": "continueErrorOutput"
+      "id": "decision", "name": "Route Vitoria SDR Closer Human", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1180, 300], "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -52,7 +68,7 @@
         "body": "={{JSON.stringify({lead_ref: $('Validate Baita binding').item.json.lead_ref, context: $('Load graph RAG cart history').item.json, decision: $json.decision, response: $json.response, correlation_id: $('Validate Baita binding').item.json.correlation_id, phone_number_id: $('Validate Baita binding').item.json.phone_number_id, channel_binding_id: $('Validate Baita binding').item.json.channel_binding_id, inbound_buffer_id: $('Validate Baita binding').item.json.buffer_id})}}",
         "options": {}
       },
-      "id": "commit", "name": "Persist once and enqueue send", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1220, 300], "onError": "continueErrorOutput"
+      "id": "commit", "name": "Persist once and enqueue send", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1420, 300], "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -66,21 +82,22 @@
         "body": "={{JSON.stringify({lead_ref: $('Validate Baita binding').item.json.lead_ref, reason: 'workflow_step_failed', correlation_id: $('Validate Baita binding').item.json.correlation_id})}}",
         "options": {}
       },
-      "id": "failsafe", "name": "Fail safe human handoff", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1220, 520]
+      "id": "failsafe", "name": "Fail safe human handoff", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1420, 520]
     },
     {
       "parameters": {"respondWith": "json", "responseBody": "={{$json}}"},
-      "id": "respond", "name": "Return canonical result", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.4, "position": [1480, 300]
+      "id": "respond", "name": "Return canonical result", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.4, "position": [1680, 300]
     }
   ],
   "connections": {
     "Canonical inbound": {"main": [[{"node": "Validate Baita binding", "type": "main", "index": 0}]]},
     "Validate Baita binding": {"main": [[{"node": "Load graph RAG cart history", "type": "main", "index": 0}]]},
-    "Load graph RAG cart history": {"main": [[{"node": "Route Vitoria SDR Closer Human", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Load graph RAG cart history": {"main": [[{"node": "DeepSeek field extraction", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "DeepSeek field extraction": {"main": [[{"node": "Route Vitoria SDR Closer Human", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
     "Route Vitoria SDR Closer Human": {"main": [[{"node": "Persist once and enqueue send", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
     "Persist once and enqueue send": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
     "Fail safe human handoff": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}]]}
   },
-  "settings": {"executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all"},
-  "meta": {"binding": {"persona_slug": "baita-conveniencia", "agent_slug": "vitoria", "decision_owner": "n8n_agents", "pipeline_contract": "conversation_v1", "classifier": "deterministic_v1", "model_required": false}}
+  "settings": {"executionOrder": "v1", "saveDataErrorExecution": "none", "saveDataSuccessExecution": "none"},
+  "meta": {"binding": {"persona_slug": "baita-conveniencia", "agent_slug": "vitoria", "decision_owner": "n8n_agents", "pipeline_contract": "conversation_v1", "classifier": "deterministic_v1", "field_extractor": "deepseek-v4-flash", "model_required": true, "model": "deepseek-v4-flash"}}
 }

@@ -48,8 +48,8 @@ describe("explicit client portal API context", () => {
     await api.pipelineStatus();
 
     expect(calls).toEqual([
-      "/api-brain/leads?limit=100&offset=0",
-      "/api-brain/messages/conversations?hours=168",
+      "/api-brain/leads?limit=100&offset=0&validation_scope=exclude",
+      "/api-brain/messages/conversations?hours=168&validation_scope=exclude",
       "/api-brain/pipeline/status",
     ]);
   });

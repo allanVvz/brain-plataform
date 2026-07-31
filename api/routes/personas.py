@@ -1,4 +1,5 @@
 import logging
+import os
 import secrets
 import time
 from typing import Optional
@@ -48,7 +49,10 @@ def _mask_routing(routing: dict) -> dict:
         ),
         "pipeline_contract": "conversation_v1",
         "classifier": "deterministic_v1",
-        "model_required": False,
+        "field_extractor": (
+            "deepseek-v4-flash" if process_mode == "n8n" else None
+        ),
+        "model_required": process_mode == "n8n",
         "outbound_webhook_url": routing.get("outbound_webhook_url"),
         "has_outbound_webhook_secret": bool(routing.get("outbound_webhook_secret")),
         "has_inbound_webhook_token": bool(routing.get("inbound_webhook_token")),
@@ -77,7 +81,14 @@ def get_persona(slug: str, request: Request):
 def create_persona(body: PersonaCreate, request: Request):
     if not auth_service.is_admin(auth_service.current_user(request)):
         raise HTTPException(403, "Apenas admin pode criar personas")
-    supabase_client.upsert_persona(body.model_dump())
+    payload = body.model_dump()
+    config = dict(payload.get("config") or {})
+    config.setdefault(
+        "public_site",
+        public_site.default_public_site_config(payload),
+    )
+    payload["config"] = config
+    supabase_client.upsert_persona(payload)
     vault_sync.ensure_persona_vault_structure(body.slug)
     return supabase_client.get_persona(body.slug)
 
@@ -196,9 +207,19 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
             raise HTTPException(400, "process_mode must be 'internal' or 'n8n'")
         payload["process_mode"] = body.process_mode
     if body.outbound_webhook_url is not None:
-        payload["outbound_webhook_url"] = body.outbound_webhook_url.strip() or None
+        if body.outbound_webhook_url.strip():
+            raise HTTPException(
+                400,
+                "provider_direct nao aceita webhook de saida n8n",
+            )
+        payload["outbound_webhook_url"] = None
     if body.outbound_webhook_secret is not None:
-        payload["outbound_webhook_secret"] = body.outbound_webhook_secret or None
+        if body.outbound_webhook_secret:
+            raise HTTPException(
+                400,
+                "provider_direct nao aceita secret de webhook de saida n8n",
+            )
+        payload["outbound_webhook_secret"] = None
     if body.inbound_webhook_token is not None:
         payload["inbound_webhook_token"] = body.inbound_webhook_token or None
     if body.rotate_inbound_token:
@@ -206,13 +227,28 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
         payload["inbound_webhook_token"] = rotated_token
     if not payload:
         return _mask_routing(current)
-    updated = supabase_client.update_persona_routing(slug, payload)
+    updated = None
     if "process_mode" in payload:
         conversation_mode = (
             "n8n_agents"
             if payload["process_mode"] == "n8n"
             else "deterministic"
         )
+        deepseek_config: dict = {}
+        if conversation_mode == "n8n_agents":
+            integration = (
+                supabase_client.get_persona_integration_connection(
+                    current.get("id"),
+                    "deepseek",
+                )
+                or {}
+            )
+            deepseek_config = dict(integration.get("config_json") or {})
+            if not integration.get("enabled") or not deepseek_config.get("n8n_workflow_id"):
+                raise HTTPException(
+                    409,
+                    "Configure a chave DeepSeek da persona em Ferramentas antes de ativar o n8n.",
+                )
         for binding in supabase_client.get_workflow_bindings(current.get("id")):
             if not binding.get("id") or not binding.get("active"):
                 continue
@@ -221,11 +257,28 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                 "conversation_mode": conversation_mode,
                 "decision_owner": conversation_mode,
                 "pipeline_contract": "conversation_v1",
+                "transport_mode": "provider_direct",
             }
-            supabase_client.update_workflow_binding_metadata(
+            binding_update: dict = {"metadata": metadata}
+            if conversation_mode == "n8n_agents":
+                n8n_base = str(os.environ.get("N8N_BASE_URL") or "").rstrip("/")
+                webhook_path = str(
+                    deepseek_config.get("conversation_webhook_path") or ""
+                ).strip("/")
+                if not n8n_base or not webhook_path:
+                    raise HTTPException(409, "Endpoint interno do n8n nao configurado.")
+                metadata["conversation_webhook_url"] = (
+                    f"{n8n_base}/webhook/{webhook_path}"
+                )
+                binding_update["n8n_workflow_id"] = deepseek_config["n8n_workflow_id"]
+            else:
+                metadata.pop("conversation_webhook_url", None)
+                binding_update["n8n_workflow_id"] = None
+            supabase_client.update_workflow_binding(
                 str(binding["id"]),
-                metadata,
+                binding_update,
             )
+        updated = supabase_client.update_persona_routing(slug, payload)
         supabase_client.insert_event(
             {
                 "event_type": "conversation.mode_updated",
@@ -237,10 +290,17 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                     "conversation_mode": conversation_mode,
                     "pipeline_contract": "conversation_v1",
                     "classifier": "deterministic_v1",
+                    "field_extractor": (
+                        "deepseek-v4-flash"
+                        if conversation_mode == "n8n_agents"
+                        else None
+                    ),
                 },
             },
             source="routes.personas",
         )
+    else:
+        updated = supabase_client.update_persona_routing(slug, payload)
     response = _mask_routing(updated or current)
     if rotated_token:
         response["inbound_webhook_token"] = rotated_token

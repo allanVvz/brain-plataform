@@ -117,6 +117,7 @@ def list_leads(
     persona_slug: str | None = Query(None),
     audience_id: str | None = Query(None),
     audience_slug: str | None = Query(None),
+    validation_scope: str = Query("exclude", pattern="^(exclude|only|all)$"),
 ):
     """Lista leads visiveis na persona ativa.
 
@@ -125,6 +126,9 @@ def list_leads(
     audience, garantimos via helper idempotente para nao 404 a UI.
     """
     try:
+        user = auth_service.current_user(request)
+        if (user.get("account_type") or "internal") == "client":
+            validation_scope = "exclude"
         resolved_persona_id = persona_id
         if not resolved_persona_id and persona_slug:
             persona = supabase_client.get_persona(persona_slug)
@@ -145,7 +149,7 @@ def list_leads(
                     limit=limit,
                     offset=offset,
                 ) or []
-                return [lead_qualification.decorate_lead(row) for row in rows]
+                return lead_qualification.filter_validation_scope(rows, validation_scope)
             except Exception:
                 return []
         if persona_id or persona_slug:
@@ -156,13 +160,13 @@ def list_leads(
                 limit=limit,
                 offset=offset,
             ) or []
-            return [lead_qualification.decorate_lead(row) for row in rows]
+            return lead_qualification.filter_validation_scope(rows, validation_scope)
         rows = supabase_client.get_leads(
             persona_slug=persona_id or persona_slug,
             limit=limit,
             offset=offset,
         ) or []
-        return [lead_qualification.decorate_lead(row) for row in rows]
+        return lead_qualification.filter_validation_scope(rows, validation_scope)
     except HTTPException:
         raise
     except Exception as exc:

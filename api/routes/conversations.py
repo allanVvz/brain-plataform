@@ -38,6 +38,7 @@ class ContextRequest(StrictModel):
 
 class DecisionRequest(StrictModel):
     context: ConversationContext
+    model_observation: dict | None = None
 
 
 class CommitRequest(StrictModel):
@@ -77,7 +78,10 @@ def decide(
     x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
 ) -> dict:
     _authorize(x_webhook_token)
-    decision, response = conversation_runtime.decide(body.context)
+    decision, response = conversation_runtime.decide(
+        body.context,
+        model_observation=body.model_observation,
+    )
     return {
         "decision": decision.model_dump(mode="json"),
         "response": response.model_dump(mode="json"),

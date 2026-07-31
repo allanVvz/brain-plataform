@@ -496,6 +496,23 @@ class DeterministicSDR:
                 return {"reply": f"Sim. {product.public_name}{(' ' + product.unit) if product.unit else ''} — {_brl(product.price)}. Quantas unidades você deseja?", "intent": "consult_product", "state": state, "handoff": False}
             total = sum((i.get("unit_price") or 0) * int(i.get("quantity") or 0) for i in state["items"])
             summary = ", ".join(f"{i['quantity']} {next((p.public_name for p in self.catalog.products if p.slug == i['product_slug']), i['product_slug'])}" for i in state["items"])
+            address = dict(state.get("address") or {})
+            if (
+                state.get("customer_name")
+                and address.get("street")
+                and address.get("number")
+            ):
+                state["conversation_state"] = "awaiting_confirmation"
+                destination = f"{address['street']}, {address['number']}"
+                return {
+                    "reply": (
+                        f"Pedido: {summary}, total de {_brl(total)}, para "
+                        f"{destination}. Posso confirmar este pedido?"
+                    ),
+                    "intent": intent,
+                    "state": state,
+                    "handoff": False,
+                }
             state["conversation_state"] = "awaiting_address" if state.get("customer_name") else "awaiting_name"
             next_question = f"Obrigada, {state['customer_name']}. Qual endereço devo usar?" if state.get("customer_name") else "Qual é o seu nome?"
             return {"reply": f"Certo: {summary}, total de {_brl(total)}. {next_question}", "intent": intent, "state": state, "handoff": False}

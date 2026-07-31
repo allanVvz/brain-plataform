@@ -33,6 +33,8 @@ def test_routing_exposes_public_conversation_modes_without_new_storage():
     assert deterministic["pipeline_contract"] == n8n["pipeline_contract"] == "conversation_v1"
     assert deterministic["classifier"] == n8n["classifier"] == "deterministic_v1"
     assert deterministic["model_required"] is False
+    assert n8n["model_required"] is True
+    assert n8n["field_extractor"] == "deepseek-v4-flash"
 
 
 def test_deterministic_worker_uses_canonical_pipeline_without_n8n(monkeypatch):
@@ -125,7 +127,8 @@ def test_n8n_and_local_modes_use_the_same_three_stage_contract():
     source = inspect.getsource(conversation_runtime.execute_pipeline)
     assert source.index("build_context(") < source.index("decide(") < source.index("commit(")
     assert workflow["meta"]["binding"]["classifier"] == "deterministic_v1"
-    assert workflow["meta"]["binding"]["model_required"] is False
+    assert workflow["meta"]["binding"]["model_required"] is True
+    assert workflow["meta"]["binding"]["field_extractor"] == "deepseek-v4-flash"
 
 
 def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatch):

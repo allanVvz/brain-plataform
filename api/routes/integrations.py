@@ -170,6 +170,76 @@ def delete_user_integration_credentials(service: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Unknown integration: {service}") from exc
 
 
+@router.get("/personas/{slug}")
+def list_persona_integrations(slug: str, request: Request):
+    _require_internal_admin(request)
+    persona = _persona_or_404(slug, request)
+    return integration_service.list_persona_integrations(persona["id"])
+
+
+@router.put("/personas/{slug}/{service}")
+def upsert_persona_integration(
+    slug: str,
+    service: str,
+    body: IntegrationCredentialsBody,
+    request: Request,
+):
+    user = _require_internal_admin(request)
+    persona = _persona_or_404(slug, request)
+    try:
+        return integration_service.save_persona_integration(
+            persona_id=persona["id"],
+            actor_user_id=user.get("id") or "",
+            service=service,
+            enabled=bool(body.enabled),
+            credentials=_to_payload(body),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown integration: {service}") from exc
+    except integration_service.IntegrationValidationError as exc:
+        _handle_validation_error(exc)
+
+
+@router.post("/personas/{slug}/{service}/validate")
+def validate_persona_integration(
+    slug: str,
+    service: str,
+    request: Request,
+    body: Optional[IntegrationValidateBody] = None,
+):
+    user = _require_internal_admin(request)
+    persona = _persona_or_404(slug, request)
+    try:
+        return integration_service.validate_persona_integration(
+            persona_id=persona["id"],
+            actor_user_id=user.get("id") or "",
+            service=service,
+            credentials=_to_payload(body or IntegrationValidateBody()) or None,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown integration: {service}") from exc
+    except integration_service.IntegrationValidationError as exc:
+        _handle_validation_error(exc)
+
+
+@router.delete("/personas/{slug}/{service}/credentials")
+def delete_persona_integration_credentials(
+    slug: str,
+    service: str,
+    request: Request,
+):
+    user = _require_internal_admin(request)
+    persona = _persona_or_404(slug, request)
+    try:
+        return integration_service.delete_persona_credentials(
+            persona_id=persona["id"],
+            actor_user_id=user.get("id") or "",
+            service=service,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown integration: {service}") from exc
+
+
 @router.get("/meta/whatsapp/personas/{slug}")
 def get_whatsapp_binding(slug: str, request: Request):
     _require_internal_admin(request)
@@ -178,7 +248,7 @@ def get_whatsapp_binding(slug: str, request: Request):
         b for b in supabase_client.get_workflow_bindings(persona["id"])
         if b.get("provider") == "meta_cloud"
     ), None)
-    connection = supabase_client.get_user_integration_connection(_current_user_id(request), "meta") or {}
+    connection = supabase_client.get_persona_integration_connection(persona["id"], "meta") or {}
     return {"persona": {"id": persona["id"], "slug": persona["slug"]}, "binding": _public_binding(binding), "meta_configured": bool(connection.get("secret_ciphertext"))}
 
 
@@ -198,10 +268,7 @@ def put_whatsapp_binding(slug: str, body: WhatsAppBindingBody, request: Request)
     ):
         raise HTTPException(400, "Mensageria direta nao aceita n8n_adapter ou webhooks n8n.")
     connection = (
-        supabase_client.get_user_integration_connection(
-            _current_user_id(request),
-            "meta",
-        )
+        supabase_client.get_persona_integration_connection(persona["id"], "meta")
         or {}
     )
     provider_secret_ciphertext = connection.get("secret_ciphertext")
@@ -248,6 +315,14 @@ def put_whatsapp_binding(slug: str, body: WhatsAppBindingBody, request: Request)
             binding_id=binding["id"],
             provider="meta_cloud",
             source="admin.settings.meta",
+        )
+        supabase_client.update_persona_routing(
+            slug,
+            {
+                "process_mode": "internal",
+                "outbound_webhook_url": None,
+                "outbound_webhook_secret": None,
+            },
         )
         binding = {
             **binding,

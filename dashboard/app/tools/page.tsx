@@ -1,338 +1,252 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Cpu, ExternalLink, Plug, Settings, Wrench } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Bot,
+  CheckCircle2,
+  ExternalLink,
+  Globe2,
+  KeyRound,
+  MessageCircle,
+  Network,
+  RefreshCw,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
 import { api } from "@/lib/api";
-import LegacyToolsOverview from "../validacao/tools/page";
-import { IntegrationConfigModal } from "@/components/tools/IntegrationConfigModal";
+import { useGlobalPersona } from "@/lib/useGlobalPersona";
 
-type ToolsTab = "overview" | "integrations";
+const KEY_SERVICES = [
+  { service: "meta", label: "Meta", description: "Catálogo e APIs da Meta", field: "access_token" },
+  { service: "openai", label: "ChatGPT / OpenAI", description: "Chat, modelos e embeddings", field: "api_key" },
+  { service: "anthropic", label: "Claude", description: "Modelos Claude da persona", field: "api_key" },
+  { service: "deepseek", label: "DeepSeek", description: "Modelo usado nas automações n8n", field: "api_key" },
+] as const;
 
-const STATUS_STYLE: Record<string, string> = {
-  healthy: "text-green-400",
-  degraded: "text-yellow-400",
-  down: "text-red-400",
-  error: "text-red-400",
-  unknown: "text-obs-faint",
-};
-
-const STATUS_DOT: Record<string, string> = {
-  healthy: "bg-green-400",
-  degraded: "bg-yellow-400",
-  down: "bg-red-400",
-  error: "bg-red-400",
-  unknown: "bg-obs-faint",
-};
-
-// Ordem desejada: Meta, Supabase, n8n, OpenAI, Anthropic, Airtable (entradas)
-// e Assets/Gallery, FAQ Routing, Catalogo API, Figma MCP (saidas).
-const INPUTS = [
-  { key: "meta", label: "Meta", desc: "Catalogo WhatsApp Business", configurable: true },
-  { key: "supabase", label: "Supabase", desc: "Banco de dados e autenticação" },
-  { key: "n8n", label: "n8n", desc: "Automação de fluxos e execuções" },
-  { key: "openai", label: "OpenAI", desc: "Embeddings e modelos auxiliares" },
-  { key: "anthropic", label: "Anthropic", desc: "Claude API e classificadores" },
-  { key: "airtable", label: "Airtable", desc: "CRM e dados estruturados" },
-];
-
-const OUTPUTS = [
-  { key: "assets", label: "Assets / Gallery", desc: "Assets aprovados disponiveis para MCP e API" },
-  { key: "faq", label: "FAQ Routing", desc: "FAQ como contexto de roteamento de mensagens" },
-  { key: "catalogo_api", label: "Catalogo API", desc: "Branch de produto para o catalogo/landing page multi-persona" },
-  { key: "figma_mcp", label: "Figma MCP", desc: "Diagramas e designs" },
-];
-
-const MCP_TOOLS = [
-  {
-    name: "get_design_context",
-    description: "Busca contexto de design a partir de um node Figma",
-    example: '{ "fileKey": "abc123", "nodeId": "1:23" }',
-  },
-  {
-    name: "get_screenshot",
-    description: "Captura screenshot de um node ou frame do Figma",
-    example: '{ "fileKey": "abc123", "nodeId": "1:23" }',
-  },
-  {
-    name: "get_metadata",
-    description: "Retorna metadados de um arquivo Figma",
-    example: '{ "fileKey": "abc123" }',
-  },
-  {
-    name: "generate_diagram",
-    description: "Cria um diagrama em FigJam",
-    example: '{ "title": "Arquitetura", "nodes": [] }',
-  },
-];
-
-function statusOf(data: any) {
-  return data?.status || "unknown";
-}
-
-function ServiceCard({
-  service,
-  data,
-  compact = false,
-  onConfigure,
-}: {
-  service: { key: string; label: string; desc: string };
-  data: any;
-  compact?: boolean;
-  onConfigure?: () => void;
-}) {
-  const status = statusOf(data);
-  return (
-    <div className={`flex items-center gap-3 rounded-xl border border-white/06 bg-white/[0.03] ${compact ? "min-w-44 px-3 py-2" : "p-4"}`}>
-      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_DOT[status] ?? STATUS_DOT.unknown}`} />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-white">{service.label}</p>
-        {!compact && <p className="mt-0.5 text-xs text-obs-subtle">{service.desc}</p>}
-        {data?.error_message && !compact && (
-          <p className="mt-0.5 text-xs text-red-400">{data.error_message}</p>
-        )}
-      </div>
-      <div className="text-right">
-        <p className={`text-xs font-medium ${STATUS_STYLE[status] ?? STATUS_STYLE.unknown}`}>{status}</p>
-        {data?.response_ms > 0 && !compact && (
-          <p className="text-xs text-obs-faint">{data.response_ms}ms</p>
-        )}
-      </div>
-      {!compact && onConfigure && (
-        <button
-          type="button"
-          onClick={onConfigure}
-          aria-label={`Configurar ${service.label}`}
-          title={`Configurar ${service.label}`}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/08 text-obs-subtle transition hover:border-white/20 hover:text-obs-text"
-        >
-          <Settings size={14} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-function IntegrationsSummary({ byService }: { byService: Record<string, any> }) {
-  const services = [...INPUTS, ...OUTPUTS];
-  const counts = services.reduce(
-    (acc, service) => {
-      const status = statusOf(byService[service.key]);
-      if (status === "healthy") acc.healthy += 1;
-      else if (status === "down") acc.down += 1;
-      else acc.other += 1;
-      return acc;
-    },
-    { healthy: 0, down: 0, other: 0 },
-  );
-
-  return (
-    <section className="rounded-xl border border-white/06 bg-white/[0.025] p-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Plug size={15} className="text-obs-violet" />
-          <h2 className="text-sm font-semibold text-obs-text">Resumo de integrações</h2>
-        </div>
-        <div className="flex gap-2 text-[11px]">
-          <span className="rounded-full bg-green-400/10 px-2 py-1 text-green-300">{counts.healthy} saudáveis</span>
-          <span className="rounded-full bg-red-400/10 px-2 py-1 text-red-300">{counts.down} down</span>
-          <span className="rounded-full bg-white/5 px-2 py-1 text-obs-subtle">{counts.other} outros</span>
-        </div>
-      </div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {services.map((service) => (
-          <ServiceCard key={service.key} service={service} data={byService[service.key]} compact />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function FullIntegrations({
-  byService,
-  onConfigure,
-}: {
-  byService: Record<string, any>;
-  onConfigure: (service: { key: string; label: string; desc: string }) => void;
-}) {
-  return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.75fr)]">
-      <div className="space-y-5">
-        <section>
-          <p className="mb-3 text-[10px] uppercase tracking-widest text-obs-faint">Entradas - fontes de dados</p>
-          <div className="grid gap-3">
-            {INPUTS.map((service) => (
-              <ServiceCard key={service.key} service={service} data={byService[service.key]} onConfigure={() => onConfigure(service)} />
-            ))}
-          </div>
-        </section>
-
-        <section>
-          <p className="mb-3 text-[10px] uppercase tracking-widest text-obs-faint">Saídas - destinos e canais</p>
-          <div className="grid gap-3">
-            {OUTPUTS.map((service) => (
-              <ServiceCard key={service.key} service={service} data={byService[service.key]} onConfigure={() => onConfigure(service)} />
-            ))}
-          </div>
-        </section>
-      </div>
-
-      <McpPanel />
-    </div>
-  );
-}
-
-function McpPanel() {
-  const [selected, setSelected] = useState(MCP_TOOLS[0].name);
-  const [input, setInput] = useState(MCP_TOOLS[0].example);
-  const [result, setResult] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const tool = MCP_TOOLS.find((item) => item.name === selected) || MCP_TOOLS[0];
-
-  function selectTool(name: string) {
-    const next = MCP_TOOLS.find((item) => item.name === name);
-    if (!next) return;
-    setSelected(next.name);
-    setInput(next.example);
-    setResult(null);
-  }
-
-  async function runTool() {
-    setRunning(true);
-    setResult(null);
-    try {
-      const parsed = JSON.parse(input);
-      setResult(JSON.stringify(parsed, null, 2) + "\n\n// Ferramenta MCP simulada via integração Figma");
-    } catch {
-      setResult("Erro: JSON inválido");
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  return (
-    <section className="rounded-xl border border-white/06 bg-white/[0.025] p-4">
-      <div className="mb-4 flex items-center gap-2">
-        <Cpu size={15} className="text-obs-violet" />
-        <div>
-          <h2 className="text-sm font-semibold text-obs-text">MCP</h2>
-          <p className="text-xs text-obs-subtle">Ferramentas Figma disponíveis dentro de Integrações.</p>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        {MCP_TOOLS.map((item) => (
-          <button
-            key={item.name}
-            type="button"
-            onClick={() => selectTool(item.name)}
-            className={`w-full rounded-lg border p-3 text-left transition ${
-              selected === item.name
-                ? "border-obs-violet/40 bg-obs-violet/10"
-                : "border-white/06 bg-white/[0.02] hover:border-white/12"
-            }`}
-          >
-            <p className="font-mono text-xs font-medium text-obs-violet">{item.name}</p>
-            <p className="mt-1 text-xs text-obs-subtle">{item.description}</p>
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-4">
-        <p className="mb-1 text-xs text-obs-faint">Parâmetros JSON</p>
-        <textarea
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          rows={6}
-          className="w-full resize-none rounded-lg border border-white/08 bg-obs-base p-3 font-mono text-xs text-white outline-none transition focus:border-obs-violet/50"
-        />
-      </div>
-      <button
-        type="button"
-        onClick={runTool}
-        disabled={running}
-        className="mt-3 inline-flex items-center gap-2 rounded-md border border-obs-violet/35 bg-obs-violet/15 px-3 py-2 text-xs font-medium text-obs-text transition hover:bg-obs-violet/25 disabled:opacity-50"
-      >
-        <ExternalLink size={13} />
-        {running ? "Executando..." : `Executar ${tool.name}`}
-      </button>
-      {result && (
-        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg border border-white/08 bg-obs-base p-3 font-mono text-xs text-green-300">
-          {result}
-        </pre>
-      )}
-    </section>
-  );
+function statusLabel(item: any) {
+  if (!item?.configured) return "não configurada";
+  if (!item?.enabled) return "desativada";
+  if (["connected", "healthy"].includes(String(item?.status))) return "ativa";
+  return String(item?.status || "pendente");
 }
 
 export default function ToolsPage() {
-  const [activeTab, setActiveTab] = useState<ToolsTab>("overview");
+  const persona = useGlobalPersona();
   const [integrations, setIntegrations] = useState<any[]>([]);
-  const [configService, setConfigService] = useState<{ key: string; label: string; desc: string } | null>(null);
-
-  function refreshIntegrations() {
-    api.integrations().then(setIntegrations).catch(console.error);
-  }
-
-  useEffect(() => {
-    refreshIntegrations();
-  }, []);
+  const [site, setSite] = useState<any>(null);
+  const [channel, setChannel] = useState<any>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
   const byService = useMemo(
     () => Object.fromEntries(integrations.map((item) => [item.service, item])),
     [integrations],
   );
 
-  return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-obs-violet/25 bg-obs-violet/10 text-obs-violet">
-            <Wrench size={16} />
-          </span>
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-obs-faint">Configurações</p>
-            <h1 className="mt-1 text-xl font-semibold text-white">Tools</h1>
-          </div>
-        </div>
+  const load = useCallback(async () => {
+    if (!persona.slug) {
+      setIntegrations([]);
+      setSite(null);
+      setChannel(null);
+      return;
+    }
+    setError("");
+    try {
+      const [rows, siteState, channelState] = await Promise.all([
+        api.personaIntegrations(persona.slug),
+        api.personaPublicSite(persona.slug),
+        api.whatsappChannel(persona.slug),
+      ]);
+      setIntegrations(rows || []);
+      setSite(siteState);
+      setChannel(channelState);
+    } catch (reason: any) {
+      setError(reason?.message || "Não foi possível carregar as integrações.");
+    }
+  }, [persona.slug]);
 
-        <div className="flex w-full gap-1 rounded-lg border border-white/06 bg-white/[0.03] p-1 lg:w-auto">
-          {[
-            { id: "overview", label: "Overview" },
-            { id: "integrations", label: "Integrações" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id as ToolsTab)}
-              className={`min-h-9 flex-1 rounded-md px-4 text-xs font-medium transition lg:flex-none ${
-                activeTab === tab.id
-                  ? "bg-white/10 text-obs-text shadow-obs-node"
-                  : "text-obs-subtle hover:bg-white/[0.04] hover:text-obs-text"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+  useEffect(() => {
+    setDrafts({});
+    setMessage("");
+    load();
+  }, [load]);
+
+  async function save(service: string, field: string) {
+    const value = String(drafts[service] || "").trim();
+    if (!value) {
+      setError("Informe a chave antes de salvar.");
+      return;
+    }
+    setBusy(service);
+    setError("");
+    setMessage("");
+    try {
+      await api.updatePersonaIntegration(persona.slug, service, {
+        enabled: true,
+        [field]: value,
+        ...(service === "meta" ? { catalog_id: drafts.meta_catalog_id || "" } : {}),
+      });
+      setDrafts((current) => ({ ...current, [service]: "" }));
+      setMessage(`Credencial ${service} salva no vault da persona.`);
+      await load();
+    } catch (reason: any) {
+      setError(reason?.message || `Não foi possível salvar ${service}.`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function revoke(service: string) {
+    if (!window.confirm(`Revogar a credencial ${service} desta persona?`)) return;
+    setBusy(service);
+    setError("");
+    setMessage("");
+    try {
+      await api.deletePersonaIntegrationCredentials(persona.slug, service);
+      setMessage(`Credencial ${service} revogada.`);
+      await load();
+    } catch (reason: any) {
+      setError(reason?.message || `Não foi possível revogar ${service}.`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  if (!persona.slug) {
+    return (
+      <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5 text-sm text-amber-200">
+        Selecione uma persona no filtro do cabeçalho. Chaves, site e catálogo sempre pertencem a uma única persona.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-obs-faint">
+            Persona selecionada · {persona.slug}
+          </p>
+          <h1 className="mt-1 text-xl font-semibold text-obs-text">Ferramentas e integrações</h1>
+          <p className="mt-1 text-sm text-obs-subtle">
+            Apenas integrações operacionais, com configuração isolada por persona.
+          </p>
         </div>
+        <button type="button" onClick={load} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-obs-subtle">
+          <RefreshCw size={14} /> Atualizar
+        </button>
       </header>
 
-      {activeTab === "overview" ? (
-        <>
-          <IntegrationsSummary byService={byService} />
-          <LegacyToolsOverview />
-        </>
-      ) : (
-        <FullIntegrations byService={byService} onConfigure={setConfigService} />
-      )}
+      {error && <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</div>}
+      {message && <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">{message}</div>}
 
-      {configService && (
-        <IntegrationConfigModal
-          service={configService}
-          data={byService[configService.key]}
-          onClose={() => setConfigService(null)}
-          onSaved={refreshIntegrations}
+      <section>
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-obs-text">
+          <KeyRound size={16} /> Chaves de API
+        </h2>
+        <div className="mt-3 grid gap-4 lg:grid-cols-2">
+          {KEY_SERVICES.map((definition) => {
+            const state = byService[definition.service];
+            return (
+              <article key={definition.service} className="rounded-2xl border border-white/10 bg-obs-surface p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-obs-text">{definition.label}</h3>
+                    <p className="mt-1 text-xs text-obs-subtle">{definition.description}</p>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-[10px] ${
+                    state?.configured && state?.enabled
+                      ? "bg-emerald-500/10 text-emerald-300"
+                      : "bg-white/5 text-obs-faint"
+                  }`}>{statusLabel(state)}</span>
+                </div>
+                {definition.service === "meta" && (
+                  <input
+                    value={drafts.meta_catalog_id || ""}
+                    onChange={(event) => setDrafts((current) => ({ ...current, meta_catalog_id: event.target.value }))}
+                    placeholder="Catalog ID"
+                    className="mt-4 w-full rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text"
+                  />
+                )}
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={drafts[definition.service] || ""}
+                  onChange={(event) => setDrafts((current) => ({ ...current, [definition.service]: event.target.value }))}
+                  placeholder={state?.configured ? "Nova chave para rotacionar" : "Chave de API"}
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text"
+                />
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    disabled={busy === definition.service}
+                    onClick={() => save(definition.service, definition.field)}
+                    className="rounded-lg bg-obs-violet px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
+                  >
+                    {state?.configured ? "Rotacionar chave" : "Salvar chave"}
+                  </button>
+                  {state?.configured && (
+                    <button
+                      type="button"
+                      disabled={busy === definition.service}
+                      onClick={() => revoke(definition.service)}
+                      className="flex items-center gap-1 rounded-lg border border-rose-500/25 px-3 py-2 text-xs text-rose-300 disabled:opacity-40"
+                    >
+                      <Trash2 size={13} /> Revogar
+                    </button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <OperationalCard icon={<MessageCircle size={17} />} title="WhatsApp" status={`${channel?.provider || "sem provider"} · ${channel?.status || "não configurado"}`} />
+        <OperationalCard icon={<Network size={17} />} title="n8n" status={statusLabel(byService.n8n)} />
+        <OperationalCard icon={<Bot size={17} />} title="Chat" status={statusLabel(byService.openai)} />
+        <OperationalCard
+          icon={<Globe2 size={17} />}
+          title="Site e Catálogo API"
+          status={site?.config?.site_slug
+            ? `${site.config.site_name || site.config.site_slug} · ${site.config.format_key}`
+            : "configuração pendente"}
+          href={site?.config?.site_slug ? `/api/menu/${persona.slug}` : undefined}
         />
-      )}
+      </section>
+
+      <div className="flex items-start gap-2 rounded-xl border border-sky-500/20 bg-sky-500/10 p-4 text-xs leading-5 text-sky-100">
+        <ShieldAlert size={16} className="mt-0.5 shrink-0" />
+        Segredos não são exibidos após o salvamento. Site, Catálogo API, Meta, Claude, ChatGPT e DeepSeek acompanham exclusivamente a persona selecionada no cabeçalho.
+      </div>
     </div>
+  );
+}
+
+function OperationalCard({
+  icon,
+  title,
+  status,
+  href,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  status: string;
+  href?: string;
+}) {
+  return (
+    <article className="rounded-2xl border border-white/10 bg-obs-surface p-4">
+      <div className="flex items-center gap-2 text-obs-text">{icon}<h3 className="text-sm font-semibold">{title}</h3></div>
+      <p className="mt-3 text-xs text-obs-subtle">{status}</p>
+      {href && (
+        <a href={href} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-obs-violet">
+          Abrir endpoint <ExternalLink size={12} />
+        </a>
+      )}
+      {!href && status.includes("ativa") && <CheckCircle2 size={15} className="mt-3 text-emerald-300" />}
+    </article>
   );
 }

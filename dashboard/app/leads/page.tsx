@@ -87,7 +87,6 @@ function LeadsPageInner() {
   const [audiences, setAudiences] = useState<Audience[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState("");
-  const [listMode, setListMode] = useState<"clients" | "validations">("clients");
   const [loading, setLoading] = useState(true);
   const [creatingAudience, setCreatingAudience] = useState(false);
   const [moveShare, setMoveShare] = useState<{ lead: Lead; mode: MoveShareMode } | null>(null);
@@ -160,8 +159,6 @@ function LeadsPageInner() {
   const filteredLeads = useMemo(() => {
     const q = search.trim().toLowerCase();
     return leads.filter((lead) => {
-      const isValidation = Boolean(lead.validation?.is_validation);
-      if (listMode === "validations" ? !isValidation : isValidation) return false;
       if (!q) return true;
       const hay = [lead.nome, lead.lead_id, lead.email, lead.telefone, lead.interesse_produto]
         .filter(Boolean)
@@ -169,7 +166,7 @@ function LeadsPageInner() {
         .join(" ");
       return hay.includes(q);
     });
-  }, [leads, listMode, search]);
+  }, [leads, search]);
 
   const audienceCounts = useMemo(() => {
     const counts: Record<string, number> = { [ALL_KEY]: leads.length };
@@ -239,14 +236,6 @@ function LeadsPageInner() {
 
       <>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-lg border border-white/06 bg-obs-base p-1">
-              <button type="button" onClick={() => setListMode("clients")} className={`rounded-md px-3 py-1.5 text-xs ${listMode === "clients" ? "bg-white/10 text-obs-text" : "text-obs-faint"}`}>
-                Clientes reais
-              </button>
-              <button type="button" onClick={() => setListMode("validations")} className={`rounded-md px-3 py-1.5 text-xs ${listMode === "validations" ? "bg-white/10 text-obs-text" : "text-obs-faint"}`}>
-                Validações
-              </button>
-            </div>
             {personaId && buildLeadsFilters(audiences).map((f) => {
               const backing = f.isAll ? null : audiences.find((a) => a.slug === f.slug);
               const canRename = Boolean(backing && !(backing as any).from_graph_node);
@@ -312,8 +301,6 @@ function LeadsPageInner() {
                         ? "Nenhum lead corresponde a busca."
                         : activeAudience
                         ? `Nenhum lead na audiencia "${activeAudience.name}".`
-                        : listMode === "validations"
-                        ? "Nenhuma validação neste escopo."
                         : "Nenhum cliente real encontrado no escopo autorizado."}
                     </td>
                   </tr>

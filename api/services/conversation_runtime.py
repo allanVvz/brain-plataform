@@ -371,6 +371,63 @@ def _message(context: ConversationContext) -> str:
     return ""
 
 
+def _observation_value(value: Any, *, limit: int = 160) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split()).strip(" .,")
+    return normalized[:limit] if len(normalized) >= 2 else None
+
+
+def _apply_model_fields(
+    state: dict[str, Any],
+    observation: dict[str, Any] | None,
+    *,
+    business_model: str,
+) -> dict[str, Any]:
+    """Append model-extracted facts without granting it business authority."""
+    fields = (observation or {}).get("fields")
+    if not isinstance(fields, dict):
+        return state
+    merged = dict(state)
+    if business_model == "appointment":
+        request = dict(merged.get("appointment_request") or {})
+        for field in (
+            "customer_name",
+            "vehicle_model",
+            "vehicle_size",
+            "condition",
+            "desired_date",
+            "time_window",
+        ):
+            value = _observation_value(fields.get(field))
+            if value and not request.get(field):
+                request[field] = value
+        merged["appointment_request"] = request
+        return merged
+
+    name = _observation_value(fields.get("customer_name"))
+    if name and not merged.get("customer_name"):
+        merged["customer_name"] = name
+    address = fields.get("delivery_address")
+    if isinstance(address, dict):
+        current_address = dict(merged.get("address") or {})
+        for field in (
+            "street",
+            "number",
+            "complement",
+            "neighborhood",
+            "city",
+            "state",
+            "zip",
+        ):
+            value = _observation_value(address.get(field), limit=100)
+            if value and not current_address.get(field):
+                current_address[field] = value
+        if current_address:
+            merged["address"] = current_address
+    return merged
+
+
 def _stage(current: str, intent: str, route: ConversationRoute) -> str:
     try:
         index = STAGES.index(current)
@@ -549,6 +606,8 @@ def _decide_appointment(
 
 def decide(
     context: ConversationContext,
+    *,
+    model_observation: dict[str, Any] | None = None,
 ) -> tuple[ConversationDecision, AgentResponse]:
     version, checksum, graph = _current_graph(context.persona_slug)
     if version != context.graph_version or checksum != context.graph_checksum:
@@ -571,10 +630,15 @@ def decide(
 
     message = _message(context)
     normalized = _norm(message)
-    state = dict(context.cart)
+    business_model = _business_model(graph)
+    state = _apply_model_fields(
+        dict(context.cart),
+        model_observation,
+        business_model=business_model,
+    )
     current_stage = str(state.pop("_lead_stage", "novo"))
     graph_changed = bool(state.pop("_graph_changed", False))
-    if _business_model(graph) == "appointment":
+    if business_model == "appointment":
         return _decide_appointment(
             context,
             graph,
@@ -883,17 +947,40 @@ def commit(
         # Backward-compatible mirror for Baita conversations already consumed
         # by the legacy deterministic/n8n flow.
         metadata["vitoria_state"] = response.cart_state
+    appointment_request = dict(
+        response.cart_state.get("appointment_request") or {}
+    )
+    commercial_note = dict(metadata.get("commercial_note") or {})
+    if response.cart_state.get("business_model") == "appointment":
+        if appointment_request.get("vehicle_model"):
+            commercial_note["vehicle_model"] = appointment_request["vehicle_model"]
+        for field in ("vehicle_size", "condition", "desired_date", "time_window"):
+            if appointment_request.get(field):
+                commercial_note[field] = appointment_request[field]
+        if commercial_note:
+            commercial_note["updated_at"] = datetime.now(timezone.utc).isoformat()
+            metadata["commercial_note"] = commercial_note
+    lead_update = {"metadata": metadata, "stage": qualified_stage}
+    customer_name = (
+        appointment_request.get("customer_name")
+        if response.cart_state.get("business_model") == "appointment"
+        else response.cart_state.get("customer_name")
+    )
+    service_interest = appointment_request.get("service_slug") or decision.product_slug
+    if customer_name:
+        lead_update["nome"] = str(customer_name).strip()
+    if service_interest:
+        lead_update["interesse_produto"] = str(service_interest).strip()
     if response.handoff_required:
         supabase_client.handoff_whatsapp_lead_state(
             lead_ref,
             metadata=metadata,
             stage=qualified_stage,
         )
+        if customer_name or service_interest:
+            supabase_client.update_lead(lead_ref, lead_update)
     else:
-        supabase_client.update_lead(
-            lead_ref,
-            {"metadata": metadata, "stage": qualified_stage},
-        )
+        supabase_client.update_lead(lead_ref, lead_update)
 
     supabase_client.insert_agent_log(
         {

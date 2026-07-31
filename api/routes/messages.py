@@ -127,7 +127,10 @@ def _resolve_scope_lead_refs(
     return resolved_persona_id, None
 
 
-def _decorate_conversations(rows: list[dict]) -> list[dict]:
+def _decorate_conversations(
+    rows: list[dict],
+    validation_scope: str = "exclude",
+) -> list[dict]:
     decorated: list[dict] = []
     for row in rows:
         lead_ref = row.get("lead_ref")
@@ -137,6 +140,11 @@ def _decorate_conversations(rows: list[dict]) -> list[dict]:
             else {}
         ) or {}
         extra = lead_qualification.decorate_lead(lead)
+        is_validation = bool(extra.get("validation", {}).get("is_validation"))
+        if validation_scope == "only" and not is_validation:
+            continue
+        if validation_scope == "exclude" and is_validation:
+            continue
         decorated.append({
             **row,
             "qualification": extra.get("qualification") or {},
@@ -155,9 +163,13 @@ def get_conversations(
     persona_slug: str | None = Query(None),
     audience_id: str | None = Query(None),
     audience_slug: str | None = Query(None),
+    validation_scope: str = Query("exclude", pattern="^(exclude|only|all)$"),
 ):
     """Return one row per conversation, ordered by the latest message."""
     try:
+        user = auth_service.current_user(request)
+        if (user.get("account_type") or "internal") == "client":
+            validation_scope = "exclude"
         resolved_persona_id, lead_refs = _resolve_scope_lead_refs(
             request,
             persona_id=persona_id,
@@ -171,7 +183,8 @@ def get_conversations(
                     hours=hours,
                     persona_id=resolved_persona_id,
                     lead_refs=lead_refs,
-                )
+                ),
+                validation_scope,
             )
         if persona_id:
             auth_service.assert_persona_access(request, persona_id=persona_id)
@@ -179,11 +192,13 @@ def get_conversations(
                 supabase_client.get_conversations(
                     hours=hours,
                     persona_id=persona_id,
-                )
+                ),
+                validation_scope,
             )
         if auth_service.is_admin(auth_service.current_user(request)):
             return _decorate_conversations(
-                supabase_client.get_conversations(hours=hours, persona_id=None)
+                supabase_client.get_conversations(hours=hours, persona_id=None),
+                validation_scope,
             )
         rows: list[dict] = []
         for pid in auth_service.allowed_persona_ids(request):
@@ -194,7 +209,7 @@ def get_conversations(
             key=lambda item: item.get("last_at") or item.get("created_at") or "",
             reverse=True,
         )
-        return _decorate_conversations(rows)
+        return _decorate_conversations(rows, validation_scope)
     except HTTPException:
         raise
     except Exception as exc:
@@ -216,9 +231,20 @@ def get_messages_by_ref(
     persona_slug: str | None = Query(None),
     audience_id: str | None = Query(None),
     audience_slug: str | None = Query(None),
+    validation_scope: str = Query("exclude", pattern="^(exclude|only|all)$"),
 ):
     """Fetch messages by the canonical integer lead reference."""
     lead = supabase_client.get_lead_by_ref(lead_ref)
+    user = auth_service.current_user(request)
+    if (user.get("account_type") or "internal") == "client":
+        validation_scope = "exclude"
+    if lead:
+        is_validation = lead_qualification.is_validation_lead(lead)
+        if (
+            (validation_scope == "only" and not is_validation)
+            or (validation_scope == "exclude" and is_validation)
+        ):
+            raise HTTPException(status_code=404, detail="Conversa nao encontrada.")
     resolved_persona_id, lead_refs = _resolve_scope_lead_refs(
         request,
         persona_id=persona_id,

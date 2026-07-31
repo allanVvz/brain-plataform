@@ -2689,6 +2689,68 @@ def upsert_user_integration_connection(data: dict[str, Any]) -> Optional[dict[st
     return get_user_integration_connection(payload.get("user_id"), payload.get("service"))
 
 
+def list_persona_integration_connections(persona_id: str) -> list[dict[str, Any]]:
+    if not persona_id:
+        return []
+    return _q(
+        get_client()
+        .table("user_integration_connections")
+        .select("*")
+        .eq("persona_id", persona_id)
+        .order("service")
+    )
+
+
+def get_persona_integration_connection(
+    persona_id: str,
+    service: str,
+) -> Optional[dict[str, Any]]:
+    if not persona_id or not service:
+        return None
+    rows = _q(
+        get_client()
+        .table("user_integration_connections")
+        .select("*")
+        .eq("persona_id", persona_id)
+        .eq("service", service)
+        .limit(1)
+    )
+    return rows[0] if rows else None
+
+
+def save_persona_integration_connection(
+    data: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    payload = dict(data or {})
+    persona_id = str(payload.get("persona_id") or "")
+    service = str(payload.get("service") or "")
+    if not persona_id or not service:
+        raise ValueError("persona_id and service are required")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    payload.setdefault("config_json", {})
+    payload["updated_at"] = now_iso
+    existing = get_persona_integration_connection(persona_id, service)
+    if existing:
+        rows = (
+            _execute_with_retry(
+                get_client()
+                .table("user_integration_connections")
+                .update(payload)
+                .eq("id", existing["id"])
+            ).data
+            or []
+        )
+        return rows[0] if rows else get_persona_integration_connection(persona_id, service)
+    payload.setdefault("created_at", now_iso)
+    rows = (
+        _execute_with_retry(
+            get_client().table("user_integration_connections").insert(payload)
+        ).data
+        or []
+    )
+    return rows[0] if rows else get_persona_integration_connection(persona_id, service)
+
+
 # â”€â”€ Personas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def get_personas() -> list:
@@ -3089,16 +3151,36 @@ def insert_agent_log(data: dict) -> None:
         raise last_exc
 
 
-def get_agent_logs(lead_id: Optional[str] = None, limit: int = 50) -> list:
-    q = get_client().table("agent_logs").select("*").order("created_at", desc=True).limit(limit)
+def get_agent_logs(
+    lead_id: Optional[str] = None,
+    limit: int = 50,
+    persona_id: Optional[str] = None,
+) -> list:
+    fetch_limit = min(max(limit * 4, limit), 1000) if persona_id else limit
+    q = get_client().table("agent_logs").select("*").order("created_at", desc=True).limit(fetch_limit)
     if lead_id:
         q = q.eq("lead_id", lead_id)
     rows = _q(q)
-    return [_normalize_agent_log_row(row) for row in rows]
+    normalized = [_normalize_agent_log_row(row) for row in rows]
+    if persona_id:
+        normalized = [
+            row for row in normalized
+            if str(
+                row.get("persona_id")
+                or (row.get("payload") or {}).get("persona_id")
+                or (row.get("metadata") or {}).get("persona_id")
+                or ""
+            ) == str(persona_id)
+        ]
+    return normalized[:limit]
 
 
-def get_error_logs(component: Optional[str] = None, limit: int = 100) -> list:
-    rows = get_agent_logs(limit=limit)
+def get_error_logs(
+    component: Optional[str] = None,
+    limit: int = 100,
+    persona_id: Optional[str] = None,
+) -> list:
+    rows = get_agent_logs(limit=limit, persona_id=persona_id)
     filtered = []
     for row in rows:
         level = str(row.get("level") or "").upper()

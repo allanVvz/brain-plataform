@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+import os
+from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
@@ -38,17 +40,32 @@ def _recipient_for_lead(lead: dict[str, Any]) -> str:
 def validate_direct_binding(binding: dict[str, Any]) -> None:
     """Validate the provider-direct contract shared by every persona."""
     metadata = binding.get("metadata") or {}
-    if metadata.get("decision_owner") != "deterministic":
-        raise HTTPException(409, "A mensageria deve usar decisao deterministica.")
+    decision_owner = metadata.get("decision_owner")
+    if decision_owner not in {"deterministic", "n8n_agents"}:
+        raise HTTPException(409, "Dono da decisao de mensageria invalido.")
     if metadata.get("transport_mode") != "provider_direct":
         raise HTTPException(409, "A mensageria deve usar transporte direto pelo provider.")
     if (
-        binding.get("n8n_workflow_id")
-        or metadata.get("outbound_webhook_url")
+        metadata.get("outbound_webhook_url")
         or metadata.get("n8n_outbound_webhook_url")
-        or metadata.get("conversation_webhook_url")
     ):
-        raise HTTPException(409, "Webhooks n8n nao sao permitidos no transporte direto.")
+        raise HTTPException(409, "Adapter n8n de saida nao e permitido no transporte direto.")
+    conversation_url = str(metadata.get("conversation_webhook_url") or "").strip()
+    if decision_owner == "deterministic" and (
+        binding.get("n8n_workflow_id") or conversation_url
+    ):
+        raise HTTPException(409, "Binding deterministico nao aceita workflow n8n.")
+    if decision_owner == "n8n_agents":
+        expected_base = str(os.environ.get("N8N_BASE_URL") or "").rstrip("/")
+        parsed = urlparse(conversation_url)
+        if (
+            not binding.get("n8n_workflow_id")
+            or not conversation_url
+            or not expected_base
+            or not conversation_url.startswith(f"{expected_base}/webhook/")
+            or parsed.scheme not in {"http", "https"}
+        ):
+            raise HTTPException(409, "Workflow conversacional n8n invalido.")
 
     provider = binding.get("provider")
     status = str(binding.get("connection_status") or "").lower()

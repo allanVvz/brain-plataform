@@ -22,9 +22,25 @@ interface Lead {
   updated_at: string | null;
   persona_id: string | null;
   interesse_produto: string | null;
+  metadata?: {
+    commercial_note?: {
+      vehicle_model?: string;
+      vehicle_size?: string;
+      condition?: string;
+      desired_date?: string;
+      time_window?: string;
+    };
+    [key: string]: any;
+  } | null;
   qualification_score?: number;
   qualification_signals?: Array<{ key?: string; label?: string; points?: number }>;
-  validation?: { is_validation?: boolean; scenario?: string | null; session_id?: string | null };
+  validation?: {
+    is_validation?: boolean;
+    source?: string | null;
+    run_id?: string | null;
+    scenario?: string | null;
+    session_id?: string | null;
+  };
 }
 
 interface ConversationSummary {
@@ -652,8 +668,44 @@ function KbCard({
   onSelect: (id: string) => void;
 }) {
   const title = entry.titulo || "(sem título)";
-  const body = (entry.conteudo || "").slice(0, 220);
+  const rawBody = entry.conteudo || "";
+  const isFaq = String(entry.node_type || entry.tipo || "").toLowerCase() === "faq";
+  let body = rawBody;
+  if (isFaq) {
+    try {
+      const parsed = JSON.parse(rawBody);
+      body = parsed.resposta || parsed.answer || parsed.content || rawBody;
+    } catch {
+      const lines = rawBody.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      if (lines.length > 1 && normalizeKnowledgeText(lines[0]) === normalizeKnowledgeText(title)) {
+        lines.shift();
+      }
+      body = lines.join(" ").replace(/^resposta\s*:\s*/i, "");
+    }
+  }
+  body = body.slice(0, 320);
   const id = kbEntryIdentity(entry);
+  if (isFaq) {
+    return (
+      <button
+        type="button"
+        onClick={() => onSelect(id)}
+        className="block w-full rounded-lg border border-violet-300/40 bg-violet-50/80 px-3 py-2.5 text-left text-xs transition hover:border-violet-400/60"
+      >
+        <div className="flex items-start gap-2">
+          <span className="mt-0.5 rounded bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">FAQ</span>
+          <p className="line-clamp-2 flex-1 font-semibold leading-snug text-obs-text">{title}</p>
+          {pendingLabel(entry)}
+          <ChevronRight size={11} className="mt-0.5 shrink-0 text-violet-500" />
+        </div>
+        {body && (
+          <p className="mt-2 line-clamp-4 border-t border-violet-200/70 pt-2 text-[11px] leading-relaxed text-obs-subtle">
+            {body}
+          </p>
+        )}
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -1230,11 +1282,13 @@ export function MessagesLayout({
   focused = false,
   portalSlug,
   canEdit = true,
+  validationMode = false,
 }: {
   initialLeadId?: number | null;
   focused?: boolean;
   portalSlug?: string;
   canEdit?: boolean;
+  validationMode?: boolean;
 }) {
   const pathname = usePathname();
   const portalMatch = portalSlug ? [pathname, portalSlug] : pathname.match(/^\/clientes\/([^/]+)/);
@@ -1242,7 +1296,7 @@ export function MessagesLayout({
   const [leads, setLeads] = useState<Lead[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [search, setSearch] = useState("");
-  const [conversationMode, setConversationMode] = useState<"clients" | "validations">("clients");
+  const validationScope = validationMode ? "only" as const : "exclude" as const;
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isConversationSidebarOpen, setIsConversationSidebarOpen] = useState(!focused);
   const [personaFilterId, setPersonaFilterId] = useState<string>("");
@@ -1299,8 +1353,8 @@ export function MessagesLayout({
     setLoadError(null);
     try {
       const [leadRows, convRows] = await Promise.all([
-        isPortal ? api.portalLeads(portalSlug!, 200) : api.leads(200, 0, personaFilterId || undefined),
-        isPortal ? api.portalConversations(portalSlug!) : api.conversations(168, personaFilterId || undefined),
+        isPortal ? api.portalLeads(portalSlug!, 200) : api.leads(200, 0, personaFilterId || undefined, validationScope),
+        isPortal ? api.portalConversations(portalSlug!) : api.conversations(168, personaFilterId || undefined, validationScope),
       ]);
       if (loadLeadsRequestRef.current !== requestId) return;
       setLeads(leadRows as Lead[]);
@@ -1315,7 +1369,7 @@ export function MessagesLayout({
         setLoadingLeads(false);
       }
     }
-  }, [isPortal, personaFilterId, portalSlug]);
+  }, [isPortal, personaFilterId, portalSlug, validationScope]);
 
   useEffect(() => { loadLeads(); }, [loadLeads]);
 
@@ -1368,8 +1422,8 @@ export function MessagesLayout({
       if (!id) return;
       try {
         const [msgRows, convRows] = await Promise.all([
-          isPortal ? api.portalConversationMessages(portalSlug!, id) : api.messagesByRef(id),
-          isPortal ? api.portalConversations(portalSlug!) : api.conversations(168, personaFilterId || undefined),
+          isPortal ? api.portalConversationMessages(portalSlug!, id) : api.messagesByRef(id, 200, validationScope),
+          isPortal ? api.portalConversations(portalSlug!) : api.conversations(168, personaFilterId || undefined, validationScope),
         ]);
         if (selectedIdRef.current !== id) return;
         setMessages(sortMessages(msgRows as Message[]));
@@ -1384,7 +1438,7 @@ export function MessagesLayout({
       setLiveSync(false);
       window.clearInterval(interval);
     };
-  }, [isPortal, selectedId, personaFilterId, portalSlug]);
+  }, [isPortal, selectedId, personaFilterId, portalSlug, validationScope]);
 
   const openLead = useCallback((lead: Lead) => {
     let changed = false;
@@ -1470,7 +1524,7 @@ export function MessagesLayout({
 
     (isPortal
       ? api.portalConversationMessages(portalSlug!, selectedId)
-      : api.messagesByRef(selectedId))
+      : api.messagesByRef(selectedId, 200, validationScope))
       .then((rows) => {
         if (cancelled || loadMessagesRequestRef.current !== requestId || selectedIdRef.current !== selectedId) return;
         setMessages(sortMessages(rows as Message[]));
@@ -1488,7 +1542,7 @@ export function MessagesLayout({
     return () => {
       cancelled = true;
     };
-  }, [isPortal, portalSlug, selectedId]);
+  }, [isPortal, portalSlug, selectedId, validationScope]);
 
   useEffect(() => {
     if (!selectedId || !selectedLead) {
@@ -1580,8 +1634,8 @@ export function MessagesLayout({
       setDraft("");
       // Refresh messages + conversations imediato (não esperar próximo poll)
       const [msgRows, convRows] = await Promise.all([
-        isPortal ? api.portalConversationMessages(portalSlug!, selectedId) : api.messagesByRef(selectedId),
-        isPortal ? api.portalConversations(portalSlug!) : api.conversations(168, personaFilterId || undefined),
+        isPortal ? api.portalConversationMessages(portalSlug!, selectedId) : api.messagesByRef(selectedId, 200, validationScope),
+        isPortal ? api.portalConversations(portalSlug!) : api.conversations(168, personaFilterId || undefined, validationScope),
       ]);
       setMessages(sortMessages(msgRows as Message[]));
       setConversations(convRows as ConversationSummary[]);
@@ -1591,7 +1645,7 @@ export function MessagesLayout({
       setSending(false);
       setTimeout(() => draftRef.current?.focus(), 50);
     }
-  }, [selectedId, draft, sending, personaFilterId, isPortal, portalSlug]);
+  }, [selectedId, draft, sending, personaFilterId, isPortal, portalSlug, validationScope]);
 
   const onDraftKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -1621,10 +1675,7 @@ export function MessagesLayout({
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return leads.filter((l) => (
-      (conversationMode === "validations"
-        ? Boolean(l.validation?.is_validation)
-        : !l.validation?.is_validation)
-      && (
+      (
         !q
         || (l.nome || "").toLowerCase().includes(q)
         || (l.telefone || "").includes(q)
@@ -1633,7 +1684,7 @@ export function MessagesLayout({
         || (l.interesse_produto || "").toLowerCase().includes(q)
       )
     ));
-  }, [conversationMode, leads, search]);
+  }, [leads, search]);
 
   const chatName = displayName(selectedLead);
 
@@ -1690,14 +1741,6 @@ export function MessagesLayout({
               placeholder="Buscar lead..."
               className="flex-1 bg-transparent text-xs text-obs-text placeholder-obs-faint focus:outline-none"
             />
-          </div>
-          <div className="mt-2 grid grid-cols-2 rounded-lg bg-white/50 p-1">
-            <button type="button" onClick={() => setConversationMode("clients")} className={`rounded-md px-2 py-1 text-[10px] ${conversationMode === "clients" ? "bg-white text-obs-text shadow-sm" : "text-obs-faint"}`}>
-              Clientes reais
-            </button>
-            <button type="button" onClick={() => setConversationMode("validations")} className={`rounded-md px-2 py-1 text-[10px] ${conversationMode === "validations" ? "bg-white text-obs-text shadow-sm" : "text-obs-faint"}`}>
-              Validações
-            </button>
           </div>
         </div>
 
@@ -1843,6 +1886,14 @@ export function MessagesLayout({
                   {selectedLead.interesse_produto && (
                     <span className="text-[10px] text-obs-subtle truncate">
                       {selectedLead.interesse_produto}
+                    </span>
+                  )}
+                  {selectedLead.metadata?.commercial_note?.vehicle_model && (
+                    <span
+                      title="Nota comercial vinculada ao lead"
+                      className="rounded border border-violet-300/50 bg-violet-100/70 px-1.5 py-0.5 text-[10px] text-violet-700"
+                    >
+                      Nota comercial · veículo: {selectedLead.metadata.commercial_note.vehicle_model}
                     </span>
                   )}
                   <span className="text-[10px] text-obs-faint ml-auto">

@@ -134,8 +134,13 @@ export const api = {
   healthHistory: (limit = 30) => req<any[]>(`/logs/health-history?limit=${limit}`),
 
   // Leads & Messages
-  leads: (limit = 100, offset = 0, personaId?: string) =>
-    req<any[]>(`/leads?limit=${limit}&offset=${offset}${personaId ? `&persona_id=${personaId}` : ""}`),
+  leads: (
+    limit = 100,
+    offset = 0,
+    personaId?: string,
+    validationScope: "exclude" | "only" | "all" = "exclude",
+  ) =>
+    req<any[]>(`/leads?limit=${limit}&offset=${offset}&validation_scope=${validationScope}${personaId ? `&persona_id=${personaId}` : ""}`),
   leadsScoped: (opts: {
     limit?: number;
     offset?: number;
@@ -143,6 +148,7 @@ export const api = {
     personaSlug?: string;
     audienceId?: string;
     audienceSlug?: string;
+    validationScope?: "exclude" | "only" | "all";
   }) => {
     const params = new URLSearchParams();
     params.set("limit", String(opts.limit ?? 100));
@@ -151,6 +157,7 @@ export const api = {
     if (opts.personaSlug) params.set("persona_slug", opts.personaSlug);
     if (opts.audienceId) params.set("audience_id", opts.audienceId);
     if (opts.audienceSlug) params.set("audience_slug", opts.audienceSlug);
+    params.set("validation_scope", opts.validationScope ?? "exclude");
     return req<any[]>(`/leads?${params.toString()}`);
   },
   lead: (id: string) => req<any>(`/leads/${id}`),
@@ -183,14 +190,19 @@ export const api = {
   pauseAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/pause-ai`, { method: "POST" }),
   resumeAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/resume-ai`, { method: "POST" }),
   messages: (leadId: string) => req<any[]>(`/messages/${leadId}`),
-  messagesByRef: (leadRef: number, limit = 200) =>
-    req<any[]>(`/messages/by-ref/${leadRef}?limit=${limit}`),
+  messagesByRef: (
+    leadRef: number,
+    limit = 200,
+    validationScope: "exclude" | "only" | "all" = "exclude",
+  ) =>
+    req<any[]>(`/messages/by-ref/${leadRef}?limit=${limit}&validation_scope=${validationScope}`),
   messagesByRefScoped: (leadRef: number, opts: {
     limit?: number;
     personaId?: string;
     personaSlug?: string;
     audienceId?: string;
     audienceSlug?: string;
+    validationScope?: "exclude" | "only" | "all";
   }) => {
     const params = new URLSearchParams();
     params.set("limit", String(opts.limit ?? 200));
@@ -198,6 +210,7 @@ export const api = {
     if (opts.personaSlug) params.set("persona_slug", opts.personaSlug);
     if (opts.audienceId) params.set("audience_id", opts.audienceId);
     if (opts.audienceSlug) params.set("audience_slug", opts.audienceSlug);
+    params.set("validation_scope", opts.validationScope ?? "exclude");
     return req<any[]>(`/messages/by-ref/${leadRef}?${params.toString()}`);
   },
   recentMessages: (hours = 24, personaId?: string) =>
@@ -217,14 +230,19 @@ export const api = {
     if (opts.audienceSlug) params.set("audience_slug", opts.audienceSlug);
     return req<any[]>(`/messages?${params.toString()}`);
   },
-  conversations: (hours = 168, personaId?: string) =>
-    req<any[]>(`/messages/conversations?hours=${hours}${personaId ? `&persona_id=${personaId}` : ""}`),
+  conversations: (
+    hours = 168,
+    personaId?: string,
+    validationScope: "exclude" | "only" | "all" = "exclude",
+  ) =>
+    req<any[]>(`/messages/conversations?hours=${hours}&validation_scope=${validationScope}${personaId ? `&persona_id=${personaId}` : ""}`),
   conversationsScoped: (opts: {
     hours?: number;
     personaId?: string;
     personaSlug?: string;
     audienceId?: string;
     audienceSlug?: string;
+    validationScope?: "exclude" | "only" | "all";
   }) => {
     const params = new URLSearchParams();
     params.set("hours", String(opts.hours ?? 168));
@@ -232,6 +250,7 @@ export const api = {
     if (opts.personaSlug) params.set("persona_slug", opts.personaSlug);
     if (opts.audienceId) params.set("audience_id", opts.audienceId);
     if (opts.audienceSlug) params.set("audience_slug", opts.audienceSlug);
+    params.set("validation_scope", opts.validationScope ?? "exclude");
     return req<any[]>(`/messages/conversations?${params.toString()}`);
   },
   sendMessage: (body: { lead_ref: number; client_message_id: string; texto: string; agent_id?: string; sender_id?: string; nome?: string }) =>
@@ -300,6 +319,7 @@ export const api = {
   connectEvolution: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/evolution/connect`, { method: "POST", body: "{}" }),
   restartEvolution: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/evolution/restart`, { method: "POST", body: "{}" }),
   logoutEvolution: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/evolution/logout`, { method: "POST", body: "{}" }),
+  revokeAndReconnectEvolution: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp/evolution/revoke-and-reconnect`, { method: "POST", body: "{}" }),
   accessMembers: (slug: string) => req<any[]>(`/access/personas/${encodeURIComponent(slug)}/members`),
   createAccessMember: (slug: string, body: any) => req<any>(`/access/personas/${encodeURIComponent(slug)}/members`, { method: "POST", body: JSON.stringify(body) }),
   updateAccessMember: (slug: string, userId: string, body: any) => req<any>(`/access/personas/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`, { method: "PATCH", body: JSON.stringify(body) }),
@@ -380,8 +400,38 @@ export const api = {
   ) => req<any>(`/integrations/user/${encodeURIComponent(service)}/validate`, { method: "POST", body: JSON.stringify(body || {}) }),
   deleteUserIntegrationCredentials: (service: string) =>
     req<any>(`/integrations/user/${encodeURIComponent(service)}/credentials`, { method: "DELETE" }),
+  personaIntegrations: (slug: string) =>
+    req<any[]>(`/integrations/personas/${encodeURIComponent(slug)}`),
+  updatePersonaIntegration: (
+    slug: string,
+    service: string,
+    body: {
+      enabled: boolean;
+      api_key?: string;
+      access_token?: string;
+      business_id?: string;
+      catalog_id?: string;
+      service_account_json?: string | Record<string, any>;
+      spreadsheet_id?: string;
+      base_id?: string;
+    },
+  ) => req<any>(
+    `/integrations/personas/${encodeURIComponent(slug)}/${encodeURIComponent(service)}`,
+    { method: "PUT", body: JSON.stringify(body) },
+  ),
+  validatePersonaIntegration: (slug: string, service: string) =>
+    req<any>(
+      `/integrations/personas/${encodeURIComponent(slug)}/${encodeURIComponent(service)}/validate`,
+      { method: "POST", body: "{}" },
+    ),
+  deletePersonaIntegrationCredentials: (slug: string, service: string) =>
+    req<any>(
+      `/integrations/personas/${encodeURIComponent(slug)}/${encodeURIComponent(service)}/credentials`,
+      { method: "DELETE" },
+    ),
   n8nLogs: (limit = 100, status?: string) => req<any[]>(`/logs/n8n?limit=${limit}${status ? `&status=${status}` : ""}`),
-  agentLogs: (leadId?: string, limit = 50) => req<any[]>(`/logs/agents?limit=${limit}${leadId ? `&lead_id=${leadId}` : ""}`),
+  agentLogs: (leadId?: string, limit = 50, personaId?: string) =>
+    req<any[]>(`/logs/agents?limit=${limit}${leadId ? `&lead_id=${leadId}` : ""}${personaId ? `&persona_id=${personaId}` : ""}`),
   auditLogs: (params: {
     entity_type?: string;
     event_type?: string;

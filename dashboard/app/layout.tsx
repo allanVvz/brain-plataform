@@ -1,5 +1,14 @@
 import "./globals.css";
 import AppShell from "./AppShell";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: {
+    default: "Brain AI",
+    template: "%s · Brain AI",
+  },
+  description: "CRM, Knowledge Graph e automação comercial por persona.",
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

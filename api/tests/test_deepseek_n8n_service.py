@@ -1,0 +1,78 @@
+from services import deepseek_n8n_service
+
+
+def test_provision_keeps_key_only_in_n8n_credential(monkeypatch):
+    calls = {}
+
+    def create_credential(**payload):
+        calls["credential"] = payload
+        return {"id": "credential-new"}
+
+    def update_workflow(workflow_id, workflow):
+        calls["workflow"] = workflow
+        return {"id": workflow_id}
+
+    deleted = []
+    monkeypatch.setattr(deepseek_n8n_service.n8n_client, "create_credential", create_credential)
+    monkeypatch.setattr(deepseek_n8n_service.n8n_client, "update_workflow", update_workflow)
+    monkeypatch.setattr(deepseek_n8n_service.n8n_client, "activate_workflow", lambda workflow_id: {"id": workflow_id})
+    monkeypatch.setattr(deepseek_n8n_service.n8n_client, "delete_credential", deleted.append)
+
+    key = "sk-test-deepseek-secret"
+    result = deepseek_n8n_service.provision(
+        persona={
+            "id": "persona-id",
+            "slug": "baita-conveniencia",
+            "name": "Baita",
+            "config": {"agent_slug": "vitoria"},
+        },
+        api_key=key,
+        previous_config={
+            "n8n_workflow_id": "workflow-existing",
+            "n8n_credential_id": "credential-old",
+        },
+    )
+
+    assert calls["credential"]["data"]["value"] == f"Bearer {key}"
+    assert key not in str(calls["workflow"])
+    deepseek_node = next(node for node in calls["workflow"]["nodes"] if node["id"] == "deepseek")
+    assert deepseek_node["credentials"]["httpHeaderAuth"]["id"] == "credential-new"
+    assert calls["workflow"]["settings"]["saveDataSuccessExecution"] == "none"
+    assert result["n8n_workflow_id"] == "workflow-existing"
+    assert result["n8n_credential_id"] == "credential-new"
+    assert key not in str(result)
+    assert deleted == ["credential-old"]
+
+
+def test_provision_rolls_back_only_new_credential_when_workflow_fails(monkeypatch):
+    deleted = []
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client,
+        "create_credential",
+        lambda **_payload: {"id": "credential-new"},
+    )
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client,
+        "update_workflow",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("n8n failed")),
+    )
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client,
+        "delete_credential",
+        deleted.append,
+    )
+
+    try:
+        deepseek_n8n_service.provision(
+            persona={"slug": "baita-conveniencia", "name": "Baita"},
+            api_key="sk-test-deepseek-secret",
+            previous_config={
+                "n8n_workflow_id": "workflow-existing",
+                "n8n_credential_id": "credential-old",
+            },
+        )
+        raise AssertionError("provision should fail")
+    except RuntimeError as exc:
+        assert str(exc) == "n8n failed"
+
+    assert deleted == ["credential-new"]

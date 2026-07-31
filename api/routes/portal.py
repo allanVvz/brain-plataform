@@ -140,6 +140,8 @@ def conversations(request: Request, persona_slug: str = Query(...)):
     for row in rows:
         lead = supabase_client.get_lead_by_ref(int(row.get("lead_ref") or 0)) or {}
         extra = lead_qualification.decorate_lead(lead)
+        if extra.get("validation", {}).get("is_validation"):
+            continue
         decorated.append({
             **row,
             "qualification": extra.get("qualification") or {},
@@ -196,7 +198,9 @@ def client_pages(request: Request):
 @router.get("/conversations/{lead_id}/messages")
 def conversation_messages(lead_id: int, request: Request, persona_slug: str = Query(...)):
     persona = _persona(persona_slug, request)
-    _lead(lead_id, persona["id"])
+    lead = _lead(lead_id, persona["id"])
+    if lead_qualification.is_validation_lead(lead):
+        raise HTTPException(404, "Conversa nao encontrada.")
     return supabase_client.get_messages(str(lead_id), limit=500)
 
 
@@ -330,13 +334,16 @@ async def send_message(request: Request, persona_slug: str = Query(...)):
 def leads(request: Request, persona_slug: str = Query(...), limit: int = Query(500, le=2000)):
     persona = _persona(persona_slug, request)
     rows = supabase_client.get_leads_for_persona_ids([persona["id"]], limit=limit, offset=0)
-    return [lead_qualification.decorate_lead(row) for row in rows]
+    return lead_qualification.filter_validation_scope(rows, "exclude")
 
 
 @router.get("/leads/{lead_id}")
 def lead_detail(lead_id: int, request: Request, persona_slug: str = Query(...)):
     persona = _persona(persona_slug, request)
-    return lead_qualification.decorate_lead(_lead(lead_id, persona["id"]))
+    lead = _lead(lead_id, persona["id"])
+    if lead_qualification.is_validation_lead(lead):
+        raise HTTPException(404, "Lead nao encontrada.")
+    return lead_qualification.decorate_lead(lead)
 
 
 @router.patch("/leads/{lead_id}")
@@ -508,6 +515,14 @@ def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Req
             provider="meta_cloud",
             source="admin.settings",
         )
+        supabase_client.update_persona_routing(
+            slug,
+            {
+                "process_mode": "internal",
+                "outbound_webhook_url": None,
+                "outbound_webhook_secret": None,
+            },
+        )
         return {**result, "status": target.get("connection_status")}
 
     if (os.environ.get("EVOLUTION_ENABLED") or "").lower() not in {"1", "true", "yes"}:
@@ -590,6 +605,14 @@ def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Req
         provider="evolution_baileys",
         source="admin.settings",
     )
+    supabase_client.update_persona_routing(
+        slug,
+        {
+            "process_mode": "internal",
+            "outbound_webhook_url": None,
+            "outbound_webhook_secret": None,
+        },
+    )
     return {
         **result,
         "provider": "evolution_baileys",
@@ -650,12 +673,23 @@ def connect_evolution(slug: str, request: Request):
 
 @router.post("/personas/{slug}/channels/whatsapp/evolution/restart")
 def restart_evolution(slug: str, request: Request):
+    _require_internal_admin(request)
     return _evolution_action(slug, request, "restart_instance")
 
 
 @router.post("/personas/{slug}/channels/whatsapp/evolution/logout")
 def logout_evolution(slug: str, request: Request):
+    _require_internal_admin(request)
     return _evolution_action(slug, request, "logout_instance")
+
+
+@router.post("/personas/{slug}/channels/whatsapp/evolution/revoke-and-reconnect")
+def revoke_and_reconnect_evolution(slug: str, request: Request):
+    """Revoke the device session and issue a fresh QR code (admin only)."""
+    _require_internal_admin(request)
+    _evolution_action(slug, request, "logout_instance")
+    response = _evolution_action(slug, request, "get_qr_code")
+    return JSONResponse(response, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/events/stream")

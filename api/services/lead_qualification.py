@@ -36,9 +36,9 @@ def stage_for_score(score: int) -> str:
         return "contatado"
     if score <= 34:
         return "engajado"
-    if score <= 69:
-        return "qualificado"
-    return "oportunidade"
+    # Qualification is the highest automatic stage. Opportunity is a later
+    # explicit commercial decision, not a side effect of accumulating points.
+    return "qualificado"
 
 
 def _has_complete_address(state: dict[str, Any]) -> bool:
@@ -159,10 +159,28 @@ def decorate_lead(lead: dict[str, Any]) -> dict[str, Any]:
     metadata = dict(lead.get("metadata") or {})
     qualification = dict(metadata.get("qualification") or {})
     lead_id = str(lead.get("lead_id") or "")
-    validation = lead_id.startswith("validator_") or bool(
+    canonical_validation = (
+        dict(metadata.get("validation") or {})
+        if isinstance(metadata.get("validation"), dict)
+        else {}
+    )
+    validation = bool(canonical_validation.get("is_validation")) or lead_id.startswith("validator_") or bool(
         metadata.get("validation_scenario")
         or metadata.get("validator_scenario")
         or metadata.get("validation_session_id")
+        or metadata.get("validator_session_id")
+        or metadata.get("e2e_run")
+    )
+    source = canonical_validation.get("source")
+    if not source and metadata.get("e2e_run"):
+        source = "release_e2e"
+    if not source and validation:
+        source = "webscraping" if lead_id.startswith("validator_") else "legacy"
+    run_id = (
+        canonical_validation.get("run_id")
+        or metadata.get("e2e_run")
+        or metadata.get("validation_session_id")
+        or metadata.get("validator_session_id")
     )
     return {
         **lead,
@@ -171,7 +189,40 @@ def decorate_lead(lead: dict[str, Any]) -> dict[str, Any]:
         "qualification_signals": qualification.get("signals") or [],
         "validation": {
             "is_validation": validation,
-            "scenario": metadata.get("validation_scenario") or metadata.get("validator_scenario"),
-            "session_id": metadata.get("validation_session_id") or metadata.get("validator_session_id"),
+            "source": source,
+            "run_id": run_id,
+            "counterpart_persona_slug": canonical_validation.get("counterpart_persona_slug"),
+            "scenario": (
+                canonical_validation.get("scenario")
+                or metadata.get("validation_scenario")
+                or metadata.get("validator_scenario")
+            ),
+            "session_id": (
+                canonical_validation.get("session_id")
+                or metadata.get("validation_session_id")
+                or metadata.get("validator_session_id")
+            ),
         },
     }
+
+
+def is_validation_lead(lead: dict[str, Any]) -> bool:
+    return bool(decorate_lead(lead).get("validation", {}).get("is_validation"))
+
+
+def filter_validation_scope(
+    rows: list[dict[str, Any]],
+    scope: str = "exclude",
+) -> list[dict[str, Any]]:
+    normalized = str(scope or "exclude").strip().lower()
+    if normalized not in {"exclude", "only", "all"}:
+        normalized = "exclude"
+    decorated = [decorate_lead(row) for row in rows]
+    if normalized == "all":
+        return decorated
+    expected = normalized == "only"
+    return [
+        row
+        for row in decorated
+        if bool(row.get("validation", {}).get("is_validation")) is expected
+    ]

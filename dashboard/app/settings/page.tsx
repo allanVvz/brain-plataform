@@ -7,8 +7,6 @@ import {
   BookOpenCheck,
   ChevronDown,
   Globe2,
-  Image,
-  KeyRound,
   Keyboard,
   Link2,
   MessageCircle,
@@ -20,23 +18,18 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sun,
-  Trash2,
   UserPlus,
-  X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { applyLanguage, getStoredLanguage, LANGUAGE_OPTIONS, type UiLanguage } from "@/lib/language";
 import { MessagingSettingsPanel } from "@/components/settings/MessagingSettingsPanel";
 import { SecuritySettingsPanel } from "@/components/settings/SecuritySettingsPanel";
+import { ChatBotSettingsPanel } from "@/components/settings/ChatBotSettingsPanel";
 
 const panelLoading = () => (
   <p className="rounded-xl border border-white/10 bg-obs-surface p-4 text-sm text-obs-subtle">
     Carregando painel…
   </p>
-);
-const WaValidatorSettingsPanel = dynamic(
-  () => import("@/app/wa-validator/page"),
-  { loading: panelLoading },
 );
 const ToolsSettingsPanel = dynamic(
   () => import("@/app/tools/page"),
@@ -61,7 +54,6 @@ const PERSONA_SLUG_STORAGE = "ai-brain-persona-slug";
 const PERSONA_ID_STORAGE = "ai-brain-persona-id";
 
 type Theme = "clean" | "dark";
-type ConversationMode = "deterministic" | "n8n_agents";
 type PublicSiteDraft = {
   site_slug: string;
   site_name: string;
@@ -128,7 +120,6 @@ function GeneralSettingsPanel() {
   const [loadingIntegrations, setLoadingIntegrations] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [apiOnline, setApiOnline] = useState(false);
-  const [integrations, setIntegrations] = useState<any[]>([]);
   const [personas, setPersonas] = useState<any[]>([]);
   const [personaSlug, setPersonaSlug] = useState("");
   const [storedPersonaId, setStoredPersonaId] = useState("");
@@ -149,14 +140,6 @@ function GeneralSettingsPanel() {
   const [creatingPersona, setCreatingPersona] = useState(false);
   const [createPersonaError, setCreatePersonaError] = useState("");
   const [createPersonaSuccess, setCreatePersonaSuccess] = useState("");
-  const [apiKeyModal, setApiKeyModal] = useState<null | "selector" | "openai" | "anthropic">(null);
-  const [apiKeyValue, setApiKeyValue] = useState("");
-  const [apiKeyBusy, setApiKeyBusy] = useState(false);
-  const [apiKeyError, setApiKeyError] = useState("");
-  const [apiKeySuccess, setApiKeySuccess] = useState("");
-  const [conversationRouting, setConversationRouting] = useState<any>(null);
-  const [conversationModeBusy, setConversationModeBusy] = useState(false);
-  const [conversationModeMessage, setConversationModeMessage] = useState("");
 
   useEffect(() => {
     setPanKey(window.localStorage.getItem(PAN_KEY_STORAGE) || "Control");
@@ -164,8 +147,14 @@ function GeneralSettingsPanel() {
     setTheme(savedTheme === "dark" ? "dark" : "clean");
     setLanguage(getStoredLanguage());
     setGraphNodeOpacity(window.localStorage.getItem(GRAPH_NODE_OPACITY_STORAGE) === "true");
-    setPersonaSlug(window.localStorage.getItem(PERSONA_SLUG_STORAGE) || "");
-    setStoredPersonaId(window.localStorage.getItem(PERSONA_ID_STORAGE) || "");
+    const syncPersona = (event?: Event) => {
+      const detail = (event as CustomEvent<{ id?: string; slug?: string }> | undefined)?.detail;
+      setPersonaSlug(detail?.slug ?? window.localStorage.getItem(PERSONA_SLUG_STORAGE) ?? "");
+      setStoredPersonaId(detail?.id ?? window.localStorage.getItem(PERSONA_ID_STORAGE) ?? "");
+    };
+    syncPersona();
+    window.addEventListener("ai-brain-persona-change", syncPersona as EventListener);
+    return () => window.removeEventListener("ai-brain-persona-change", syncPersona as EventListener);
   }, []);
 
   useEffect(() => {
@@ -173,11 +162,6 @@ function GeneralSettingsPanel() {
   }, [personaSlug]);
 
   const activePersonaId = personas.find((persona) => persona.slug === personaSlug)?.id || storedPersonaId;
-  const byService = useMemo(
-    () => Object.fromEntries(integrations.map((item) => [item.service, item])),
-    [integrations],
-  );
-  const tockFatalConnected = personaSlug === "tock-fatal";
   const galleryConnected = countItems(galleryAssets) > 0;
   const menuConnected = !menuError && Boolean(menuPayload?.ok);
   const siteConnected = Boolean(publicSite?.site?.slug || menuPayload?.site?.slug);
@@ -250,11 +234,10 @@ function GeneralSettingsPanel() {
     setLoadingIntegrations(true);
     setMenuError("");
     try {
-      const [session, healthData, integrationsData, formatsData, publicSiteData, collectionsData, categoriesData, productsData, menuData, routingData] =
+      const [session, healthData, formatsData, publicSiteData, collectionsData, categoriesData, productsData, menuData] =
         await Promise.all([
           api.me().catch(() => null),
           api.health().catch(() => null),
-          api.integrations().catch(() => []),
           api.publicSiteFormats().catch(() => []),
           personaSlug ? api.personaPublicSite(personaSlug).catch(() => null) : Promise.resolve(null),
           api.productCollections({ persona_slug: personaSlug }).catch(() => []),
@@ -264,12 +247,10 @@ function GeneralSettingsPanel() {
             setMenuError(error?.message || "Menu API indisponivel");
             return null;
           }) : Promise.resolve(null),
-          personaSlug ? api.personaRouting(personaSlug).catch(() => null) : Promise.resolve(null),
         ]);
       const list = session?.personas || [];
       setPersonas(list);
       setApiOnline(Boolean(healthData));
-      setIntegrations(integrationsData || []);
       setSiteFormats(formatsData || []);
       setPublicSite(publicSiteData);
       if (publicSiteData?.config) {
@@ -287,7 +268,6 @@ function GeneralSettingsPanel() {
       setCategories(categoriesData || []);
       setProducts(productsData || []);
       setMenuPayload(menuData);
-      setConversationRouting(routingData);
       const personaId = list.find((persona: any) => persona.slug === personaSlug)?.id || activePersonaId;
       const assets = personaId ? await api.galleryAssets(personaId).catch(() => []) : [];
       setGalleryAssets(assets || []);
@@ -347,74 +327,6 @@ function GeneralSettingsPanel() {
       setSiteError(error?.message || "Falha ao salvar o site.");
     } finally {
       setSavingSite(false);
-    }
-  }
-
-  function openApiKeyForm(service: "openai" | "anthropic") {
-    setApiKeyValue("");
-    setApiKeyError("");
-    setApiKeySuccess("");
-    setApiKeyModal(service);
-  }
-
-  async function saveApiKey(service: "openai" | "anthropic") {
-    const key = apiKeyValue.trim();
-    setApiKeyError("");
-    setApiKeySuccess("");
-    if (!key) {
-      setApiKeyError("Informe a chave de API.");
-      return;
-    }
-    setApiKeyBusy(true);
-    try {
-      await api.updateUserIntegration(service, { enabled: true, api_key: key });
-      setApiKeySuccess(`${service === "openai" ? "OpenAI" : "Anthropic"} configurado para este usuario.`);
-      setApiKeyValue("");
-      setApiKeyModal(null);
-      await refreshIntegrationState();
-    } catch (error: any) {
-      setApiKeyError(error?.message || "Falha ao salvar a chave.");
-    } finally {
-      setApiKeyBusy(false);
-    }
-  }
-
-  async function removeApiKey(service: "openai" | "anthropic") {
-    setApiKeyError("");
-    setApiKeySuccess("");
-    setApiKeyBusy(true);
-    try {
-      await api.deleteUserIntegrationCredentials(service);
-      setApiKeySuccess(`${service === "openai" ? "OpenAI" : "Anthropic"} removido deste usuario.`);
-      await refreshIntegrationState();
-    } catch (error: any) {
-      setApiKeyError(error?.message || "Falha ao remover a chave.");
-    } finally {
-      setApiKeyBusy(false);
-    }
-  }
-
-  async function updateConversationMode(mode: ConversationMode) {
-    if (!personaSlug || conversationModeBusy) return;
-    setConversationModeBusy(true);
-    setConversationModeMessage("");
-    try {
-      const updated = await api.updatePersonaRouting(personaSlug, {
-        conversation_mode: mode,
-        ...(mode === "n8n_agents" && !conversationRouting?.has_inbound_webhook_token
-          ? { rotate_inbound_token: true }
-          : {}),
-      });
-      setConversationRouting(updated);
-      setConversationModeMessage(
-        mode === "deterministic"
-          ? "Fluxo determinístico ativado. Nenhuma chave de modelo será usada."
-          : "Fluxo n8n agents ativado com o mesmo contrato e classificador determinístico.",
-      );
-    } catch (error: any) {
-      setConversationModeMessage(error?.message || "Falha ao atualizar o fluxo.");
-    } finally {
-      setConversationModeBusy(false);
     }
   }
 
@@ -633,107 +545,6 @@ function GeneralSettingsPanel() {
       </SettingsDropdown>
 
       <SettingsDropdown
-        icon={<KeyRound size={15} />}
-        title="Chaves de API"
-        status={`${apiKeyStatus(byService.openai).label} / ${apiKeyStatus(byService.anthropic).label}`}
-        defaultOpen
-      >
-        <div className="mb-4 rounded-xl border border-obs-violet/25 bg-obs-violet/10 p-3">
-          <div className="flex flex-col gap-1">
-            <p className="text-xs font-semibold text-obs-text">Fluxo de atendimento</p>
-            <p className="text-xs leading-5 text-obs-subtle">
-              Os dois modos usam <code>conversation_v1</code>, o classificador
-              <code className="ml-1">deterministic_v1</code> e o mesmo Graph/RAG publicado.
-            </p>
-          </div>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {([
-              {
-                value: "deterministic",
-                title: "Determinístico",
-                description: "Executa context → classify → commit no Brain, sem modelo ou chave de API.",
-              },
-              {
-                value: "n8n_agents",
-                title: "n8n SDR + Closer",
-                description: "O n8n orquestra as mesmas etapas. Nesta versão, o classificador continua determinístico.",
-              },
-            ] as const).map((option) => (
-              <label
-                key={option.value}
-                className="flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-obs-base/60 p-3"
-              >
-                <input
-                  type="radio"
-                  name="conversation_mode"
-                  value={option.value}
-                  checked={conversationRouting?.conversation_mode === option.value}
-                  onChange={() => updateConversationMode(option.value)}
-                  disabled={!personaSlug || conversationModeBusy || !conversationRouting?.migration_applied}
-                  className="mt-0.5 accent-obs-violet"
-                />
-                <span>
-                  <span className="block text-xs font-medium text-obs-text">{option.title}</span>
-                  <span className="mt-1 block text-xs leading-5 text-obs-subtle">{option.description}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          {!personaSlug && (
-            <p className="mt-2 text-xs text-amber-200">Selecione uma persona para definir o fluxo.</p>
-          )}
-          {conversationModeMessage && (
-            <p className="mt-2 text-xs text-obs-subtle">{conversationModeMessage}</p>
-          )}
-        </div>
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="text-xs leading-5 text-obs-subtle">
-            Vault por usuario para OpenAI e Anthropic. O frontend exibe apenas status.
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setApiKeyError("");
-              setApiKeySuccess("");
-              setApiKeyModal("selector");
-            }}
-            className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-obs-violet/30 bg-obs-violet/15 px-3 text-xs font-medium text-obs-violet transition hover:bg-obs-violet/20"
-          >
-            <KeyRound size={13} />
-            Abrir seletor
-          </button>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <ApiKeyStatusCard
-            label="OpenAI"
-            description="Sofia, marketing, assets e embeddings."
-            item={byService.openai}
-            busy={apiKeyBusy}
-            onConfigure={() => openApiKeyForm("openai")}
-            onRemove={() => removeApiKey("openai")}
-          />
-          <ApiKeyStatusCard
-            label="Anthropic"
-            description="Claude e fallback de modelo."
-            item={byService.anthropic}
-            busy={apiKeyBusy}
-            onConfigure={() => openApiKeyForm("anthropic")}
-            onRemove={() => removeApiKey("anthropic")}
-          />
-        </div>
-        {apiKeyError && (
-          <p className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
-            {apiKeyError}
-          </p>
-        )}
-        {apiKeySuccess && (
-          <p className="mt-3 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs text-green-200">
-            {apiKeySuccess}
-          </p>
-        )}
-      </SettingsDropdown>
-
-      <SettingsDropdown
         icon={<Keyboard size={15} />}
         title="Configuracao do grafo"
         status={`Pan ${panKey}`}
@@ -791,52 +602,6 @@ function GeneralSettingsPanel() {
         </div>
       </SettingsDropdown>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <OutputBox
-          icon={<Image size={15} className="text-obs-amber" />}
-          title="Saida - Assets"
-          status={galleryConnected ? "conectada" : "sem assets"}
-          ok={galleryConnected}
-          lines={[
-            `${countItems(galleryAssets)} assets em Gallery`,
-            "Assets aprovados alimentam MCP e API.",
-            "Capas seguem a conexao vigente no grafo.",
-          ]}
-        />
-        <OutputBox
-          icon={<BookOpenCheck size={15} className="text-green-300" />}
-          title="Saida - FAQ"
-          status={tockFatalConnected ? "conectada" : "pendente"}
-          ok={tockFatalConnected}
-          lines={[
-            tockFatalConnected ? "Tock Fatal validado para FAQ." : "FAQ depende de contexto aprovado.",
-            "Publicacao segue o Golden Dataset.",
-            "Aba Persona controla o roteamento detalhado.",
-          ]}
-        />
-      </section>
-
-      {apiKeyModal && (
-        <ApiKeyModal
-          mode={apiKeyModal}
-          value={apiKeyValue}
-          busy={apiKeyBusy}
-          error={apiKeyError}
-          onChange={setApiKeyValue}
-          onClose={() => {
-            setApiKeyModal(null);
-            setApiKeyValue("");
-            setApiKeyError("");
-          }}
-          onBack={() => {
-            setApiKeyModal("selector");
-            setApiKeyValue("");
-            setApiKeyError("");
-          }}
-          onSelect={openApiKeyForm}
-          onSave={saveApiKey}
-        />
-      )}
     </div>
   );
 }
@@ -929,7 +694,7 @@ export default function SettingsPage() {
       <section data-settings-tab={activeTab}>
         {activeTab === "general" && <GeneralSettingsPanel />}
         {activeTab === "messaging" && <MessagingSettingsPanel />}
-        {activeTab === "chatbot" && <WaValidatorSettingsPanel />}
+        {activeTab === "chatbot" && <ChatBotSettingsPanel />}
         {activeTab === "tools" && <ToolsSettingsPanel />}
         {activeTab === "logs" && <LogsSettingsPanel />}
         {activeTab === "access" && <AccessSettingsPanel />}
@@ -988,216 +753,6 @@ function SettingsDropdown({
       </summary>
       <div className="border-t border-white/10 px-5 py-4">{children}</div>
     </details>
-  );
-}
-
-function apiKeyStatus(item: any) {
-  if (!item) return { label: "carregando", ok: false };
-  if (item.configured && item.enabled && ["connected", "healthy"].includes(String(item.status))) return { label: "ativa", ok: true };
-  if (item.configured) return { label: item.enabled ? String(item.status || "configurada") : "desativada", ok: false };
-  return { label: "nao configurada", ok: false };
-}
-
-function ApiKeyStatusCard({
-  label,
-  description,
-  item,
-  busy,
-  onConfigure,
-  onRemove,
-}: {
-  label: string;
-  description: string;
-  item: any;
-  busy: boolean;
-  onConfigure: () => void;
-  onRemove: () => void;
-}) {
-  const status = apiKeyStatus(item);
-  return (
-    <article className="rounded-xl border border-white/10 bg-obs-base/60 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className={`h-2.5 w-2.5 rounded-full ${statusDot(status.ok)}`} />
-            <h3 className="text-sm font-semibold text-obs-text">{label}</h3>
-          </div>
-          <p className="mt-2 text-xs leading-5 text-obs-subtle">{description}</p>
-        </div>
-        <span className="rounded-full border border-white/10 bg-obs-raised px-2 py-1 text-[11px] text-obs-subtle">
-          {status.label}
-        </span>
-      </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onConfigure}
-          disabled={busy}
-          className="inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-white/10 bg-obs-raised px-3 text-xs font-medium text-obs-text transition hover:bg-white/[0.06] disabled:opacity-50"
-        >
-          <KeyRound size={12} />
-          {item?.configured ? "Substituir" : "Adicionar"}
-        </button>
-        {item?.configured && (
-          <button
-            type="button"
-            onClick={onRemove}
-            disabled={busy}
-            className="inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 text-xs font-medium text-rose-200 transition hover:bg-rose-500/15 disabled:opacity-50"
-          >
-            <Trash2 size={12} />
-            Remover
-          </button>
-        )}
-      </div>
-      <p className="mt-3 flex items-center gap-2 text-[11px] text-obs-faint">
-        <ShieldCheck size={12} />
-        Valor mascarado por contrato: esta tela mostra apenas status, nunca a chave.
-      </p>
-    </article>
-  );
-}
-
-function ApiKeyModal({
-  mode,
-  value,
-  busy,
-  error,
-  onChange,
-  onClose,
-  onBack,
-  onSelect,
-  onSave,
-}: {
-  mode: "selector" | "openai" | "anthropic";
-  value: string;
-  busy: boolean;
-  error: string;
-  onChange: (value: string) => void;
-  onClose: () => void;
-  onBack: () => void;
-  onSelect: (service: "openai" | "anthropic") => void;
-  onSave: (service: "openai" | "anthropic") => void;
-}) {
-  const serviceLabel = mode === "openai" ? "OpenAI" : "Anthropic";
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-2xl">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-obs-faint">Vault de API</p>
-            <h3 className="mt-1 text-lg font-semibold text-obs-text">
-              {mode === "selector" ? "Escolha a chave para configurar" : `Configurar ${serviceLabel}`}
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-white/10 bg-obs-raised p-2 text-obs-subtle transition hover:text-obs-text"
-            aria-label="Fechar"
-          >
-            <X size={14} />
-          </button>
-        </div>
-
-        {mode === "selector" ? (
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => onSelect("openai")}
-              className="rounded-xl border border-white/10 bg-obs-base/60 p-4 text-left transition hover:border-obs-violet/40 hover:bg-obs-violet/10"
-            >
-              <KeyRound size={16} className="text-obs-violet" />
-              <p className="mt-3 text-sm font-semibold text-obs-text">OpenAI</p>
-              <p className="mt-1 text-xs leading-5 text-obs-subtle">GPT, embeddings, assets e Sofia.</p>
-            </button>
-            <button
-              type="button"
-              onClick={() => onSelect("anthropic")}
-              className="rounded-xl border border-white/10 bg-obs-base/60 p-4 text-left transition hover:border-obs-violet/40 hover:bg-obs-violet/10"
-            >
-              <KeyRound size={16} className="text-obs-violet" />
-              <p className="mt-3 text-sm font-semibold text-obs-text">Anthropic</p>
-              <p className="mt-1 text-xs leading-5 text-obs-subtle">Claude e fallback de modelo.</p>
-            </button>
-          </div>
-        ) : (
-          <div className="mt-5 space-y-4">
-            <label className="block space-y-2">
-              <span className="text-sm text-obs-text">Chave de API {serviceLabel}</span>
-              <input
-                type="password"
-                value={value}
-                onChange={(event) => onChange(event.target.value)}
-                placeholder={mode === "openai" ? "sk-..." : "sk-ant-..."}
-                autoComplete="off"
-                className="w-full rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text outline-none focus:border-obs-violet focus:ring-4 focus:ring-obs-violet/15"
-              />
-            </label>
-            <div className="rounded-xl border border-white/10 bg-obs-base/60 px-3 py-2 text-xs leading-5 text-obs-subtle">
-              A chave sera enviada somente para o backend autenticado, criptografada no banco e usada apenas nas chamadas do usuario atual.
-            </div>
-            {error && (
-              <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
-                {error}
-              </p>
-            )}
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={onBack}
-                className="rounded-lg border border-white/10 bg-obs-raised px-3 py-2 text-xs text-obs-subtle transition hover:text-obs-text"
-              >
-                Voltar
-              </button>
-              <button
-                type="button"
-                onClick={() => onSave(mode)}
-                disabled={busy}
-                className="rounded-lg border border-obs-violet/30 bg-obs-violet/15 px-3 py-2 text-xs font-medium text-obs-violet transition hover:bg-obs-violet/20 disabled:opacity-50"
-              >
-                {busy ? "Salvando..." : "Salvar chave"}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function OutputBox({
-  icon,
-  title,
-  status,
-  ok,
-  lines,
-}: {
-  icon: ReactNode;
-  title: string;
-  status: string;
-  ok: boolean;
-  lines: string[];
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-obs-surface p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          {icon}
-          <h2 className="text-sm font-semibold text-obs-text">{title}</h2>
-        </div>
-        <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${ok ? "bg-green-400/10 text-green-300" : "bg-yellow-400/10 text-yellow-300"}`}>
-          {status}
-        </span>
-      </div>
-      <div className="space-y-2">
-        {lines.map((line) => (
-          <p key={line} className="rounded-lg border border-white/10 bg-obs-base/60 px-3 py-2 text-xs text-obs-subtle">
-            {line}
-          </p>
-        ))}
-      </div>
-    </div>
   );
 }
 

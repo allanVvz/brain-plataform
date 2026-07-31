@@ -10,7 +10,7 @@ import gspread
 import httpx
 from google.oauth2.service_account import Credentials
 
-from services import secret_store, supabase_client
+from services import deepseek_n8n_service, n8n_client, secret_store, supabase_client
 from utils.tls import get_ca_bundle_path
 
 CATALOG: list[dict[str, Any]] = [
@@ -31,14 +31,6 @@ CATALOG: list[dict[str, Any]] = [
         "user_managed": True,
     },
     {
-        "service": "supabase",
-        "label": "Supabase",
-        "description": "Banco de dados, auth e persistencia operacional.",
-        "scope": "system",
-        "requires_credentials": False,
-        "user_managed": False,
-    },
-    {
         "service": "n8n",
         "label": "n8n",
         "description": "Automacoes e espelhamento de execucoes.",
@@ -48,17 +40,25 @@ CATALOG: list[dict[str, Any]] = [
     },
     {
         "service": "openai",
-        "label": "OpenAI",
-        "description": "Modelos GPT, embeddings e Sofia por usuario.",
-        "scope": "user",
+        "label": "ChatGPT / OpenAI",
+        "description": "Modelos GPT, embeddings e chat da persona.",
+        "scope": "persona",
         "requires_credentials": True,
         "user_managed": True,
     },
     {
         "service": "anthropic",
-        "label": "Anthropic",
-        "description": "Modelos Claude e fallback de Sofia por usuario.",
-        "scope": "user",
+        "label": "Claude / Anthropic",
+        "description": "Modelos Claude e fallback de IA da persona.",
+        "scope": "persona",
+        "requires_credentials": True,
+        "user_managed": True,
+    },
+    {
+        "service": "deepseek",
+        "label": "DeepSeek",
+        "description": "Modelo do workflow conversacional n8n da persona.",
+        "scope": "persona",
         "requires_credentials": True,
         "user_managed": True,
     },
@@ -82,7 +82,7 @@ CATALOG: list[dict[str, Any]] = [
         "service": "meta",
         "label": "Meta",
         "description": "Catalogo WhatsApp Business (Graph API).",
-        "scope": "user",
+        "scope": "persona",
         "requires_credentials": True,
         "user_managed": True,
     },
@@ -168,6 +168,8 @@ def _normalize_llm_api_key_payload(service: str, payload: dict[str, Any]) -> tup
         raise IntegrationValidationError("OpenAI api_key has an invalid format.")
     if service == "anthropic" and not api_key.startswith("sk-ant-"):
         raise IntegrationValidationError("Anthropic api_key has an invalid format.")
+    if service == "deepseek" and not api_key.startswith("sk-"):
+        raise IntegrationValidationError("DeepSeek api_key has an invalid format.")
     return api_key, {}
 
 
@@ -177,7 +179,7 @@ def normalize_credentials(service: str, payload: Optional[dict[str, Any]]) -> tu
         return _normalize_google_payload(body)
     if service == "airtable":
         return _normalize_airtable_payload(body)
-    if service in {"openai", "anthropic"}:
+    if service in {"openai", "anthropic", "deepseek"}:
         return _normalize_llm_api_key_payload(service, body)
     if service == "meta":
         return _normalize_meta_payload(body)
@@ -261,6 +263,38 @@ def validate_meta(
         raise IntegrationValidationError(f"Meta validation failed: {exc}") from exc
 
 
+def validate_deepseek(api_key: str) -> tuple[str, Optional[str], Optional[int]]:
+    started = time.monotonic()
+    try:
+        with _http_client(timeout=8.0) as client:
+            response = client.get(
+                "https://api.deepseek.com/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        latency_ms = int((time.monotonic() - started) * 1000)
+        if response.status_code in {401, 403}:
+            raise IntegrationValidationError("DeepSeek rejeitou a chave informada.")
+        if response.status_code != 200:
+            raise IntegrationValidationError(
+                f"DeepSeek indisponivel (HTTP {response.status_code})."
+            )
+        models = {
+            str(item.get("id") or "")
+            for item in (response.json().get("data") or [])
+        }
+        if "deepseek-v4-flash" not in models:
+            raise IntegrationValidationError(
+                "DeepSeek nao disponibilizou o modelo deepseek-v4-flash para esta chave."
+            )
+        return "connected", None, latency_ms
+    except IntegrationValidationError:
+        raise
+    except Exception as exc:
+        raise IntegrationValidationError(
+            f"Falha ao validar a chave DeepSeek: {exc}"
+        ) from exc
+
+
 def get_meta_credentials(user_id: str) -> dict[str, Any]:
     """Return decrypted Meta credentials for the import service. Never logged."""
     row = supabase_client.get_user_integration_connection(user_id, "meta") or {}
@@ -284,6 +318,9 @@ def validate_credentials(service: str, *, secret_value: str, config_json: Option
     elif service in {"openai", "anthropic"}:
         _normalize_llm_api_key_payload(service, {"api_key": secret_value})
         status, error, latency = "connected", None, None
+    elif service == "deepseek":
+        _normalize_llm_api_key_payload(service, {"api_key": secret_value})
+        status, error, latency = validate_deepseek(secret_value)
     elif service == "meta":
         status, error, latency = validate_meta(secret_value, str(config.get("catalog_id") or ""))
     else:
@@ -299,7 +336,11 @@ def validate_credentials(service: str, *, secret_value: str, config_json: Option
 def _merge_user_integration(service: str, row: Optional[dict[str, Any]]) -> dict[str, Any]:
     catalog = get_catalog_item(service)
     connection = row or {}
-    configured = bool(connection.get("secret_ciphertext"))
+    connection_config = connection.get("config_json") or {}
+    configured = bool(
+        connection.get("secret_ciphertext")
+        or connection_config.get("n8n_credential_id")
+    )
     enabled = bool(connection.get("enabled")) if configured else False
     status = str(connection.get("status") or ("disabled" if not enabled else "never_validated"))
     if not configured:
@@ -319,7 +360,7 @@ def _merge_user_integration(service: str, row: Optional[dict[str, Any]]) -> dict
         "status": status,
         "requires_credentials": True,
         "configured": configured,
-        "config_json": connection.get("config_json") or {},
+        "config_json": connection_config,
         "last_validated_at": connection.get("last_validated_at"),
         "last_error": connection.get("last_error"),
     }
@@ -362,6 +403,34 @@ def get_user_integration_state(user_id: str, service: str) -> dict[str, Any]:
     if not is_user_managed(service):
         raise KeyError(service)
     return _merge_user_integration(service, supabase_client.get_user_integration_connection(user_id, service))
+
+
+def list_persona_integrations(persona_id: str) -> list[dict[str, Any]]:
+    persona_rows = {
+        row["service"]: row
+        for row in supabase_client.list_persona_integration_connections(persona_id)
+    }
+    system_rows = {
+        row["service"]: row
+        for row in supabase_client.get_integration_statuses(persona_id=persona_id)
+    }
+    merged: list[dict[str, Any]] = []
+    for item in CATALOG:
+        service = item["service"]
+        if item["user_managed"]:
+            merged.append(_merge_user_integration(service, persona_rows.get(service)))
+        else:
+            merged.append(_merge_system_integration(service, system_rows.get(service)))
+    return merged
+
+
+def get_persona_integration_state(persona_id: str, service: str) -> dict[str, Any]:
+    if not is_user_managed(service):
+        raise KeyError(service)
+    return _merge_user_integration(
+        service,
+        supabase_client.get_persona_integration_connection(persona_id, service),
+    )
 
 
 def _build_update_payload(
@@ -477,6 +546,193 @@ def delete_user_credentials(user_id: str, service: str) -> dict[str, Any]:
         }
     )
     return get_user_integration_state(user_id, service)
+
+
+def save_persona_integration(
+    *,
+    persona_id: str,
+    actor_user_id: str,
+    service: str,
+    enabled: bool,
+    credentials: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    if not is_user_managed(service):
+        raise KeyError(service)
+    existing = (
+        supabase_client.get_persona_integration_connection(persona_id, service)
+        or {}
+    )
+    if service == "deepseek":
+        if not enabled:
+            return delete_persona_credentials(
+                persona_id=persona_id,
+                actor_user_id=actor_user_id,
+                service=service,
+            )
+        secret_value, _ = normalize_credentials(service, credentials)
+        if not secret_value:
+            raise IntegrationValidationError("DeepSeek api_key is required.")
+        validate_deepseek(secret_value)
+        persona = supabase_client.get_persona_by_id(persona_id) or {}
+        try:
+            config_json = deepseek_n8n_service.provision(
+                persona=persona,
+                api_key=secret_value,
+                previous_config=existing.get("config_json") or {},
+            )
+        except Exception as exc:
+            raise IntegrationValidationError(
+                f"DeepSeek/n8n provisioning failed: {exc}"
+            ) from exc
+        supabase_client.save_persona_integration_connection(
+            {
+                "persona_id": persona_id,
+                "user_id": actor_user_id,
+                "service": service,
+                "enabled": True,
+                "status": "connected",
+                "config_json": config_json,
+                "secret_ciphertext": None,
+                "last_validated_at": _utcnow(),
+                "last_error": None,
+            }
+        )
+        return get_persona_integration_state(persona_id, service)
+    secret_value, config_json = (
+        normalize_credentials(service, credentials)
+        if credentials
+        else (None, None)
+    )
+    if enabled:
+        if secret_value is None:
+            secret_value = secret_store.decrypt_secret(existing.get("secret_ciphertext"))
+        if not secret_value:
+            raise IntegrationValidationError(
+                "Credentials are required before enabling this integration."
+            )
+        if config_json is None:
+            config_json = existing.get("config_json") or {}
+        validation = validate_credentials(
+            service,
+            secret_value=secret_value,
+            config_json=config_json,
+        )
+    else:
+        validation = {
+            "status": "disabled",
+            "last_error": None,
+            "last_validated_at": existing.get("last_validated_at"),
+        }
+    payload = _build_update_payload(
+        user_id=actor_user_id,
+        service=service,
+        existing=existing,
+        enabled=enabled,
+        secret_value=secret_value,
+        config_json=config_json,
+        validation=validation,
+    )
+    payload["persona_id"] = persona_id
+    supabase_client.save_persona_integration_connection(payload)
+    return get_persona_integration_state(persona_id, service)
+
+
+def validate_persona_integration(
+    *,
+    persona_id: str,
+    actor_user_id: str,
+    service: str,
+    credentials: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    if not is_user_managed(service):
+        raise KeyError(service)
+    existing = (
+        supabase_client.get_persona_integration_connection(persona_id, service)
+        or {}
+    )
+    if service == "deepseek":
+        ok, latency = n8n_client.ping()
+        if not existing.get("enabled") or not (
+            existing.get("config_json") or {}
+        ).get("n8n_credential_id"):
+            raise IntegrationValidationError("DeepSeek is not provisioned in n8n.")
+        if not ok:
+            raise IntegrationValidationError("n8n is unavailable.")
+        existing["last_validated_at"] = _utcnow()
+        existing["status"] = "connected"
+        existing["last_error"] = None
+        supabase_client.save_persona_integration_connection(existing)
+        state = get_persona_integration_state(persona_id, service)
+        state["response_ms"] = latency
+        return state
+    secret_value, config_json = (
+        normalize_credentials(service, credentials)
+        if credentials
+        else (None, None)
+    )
+    if secret_value is None:
+        secret_value = secret_store.decrypt_secret(existing.get("secret_ciphertext"))
+    if config_json is None:
+        config_json = existing.get("config_json") or {}
+    if not secret_value:
+        raise IntegrationValidationError("Credentials are required before validation.")
+    validation = validate_credentials(
+        service,
+        secret_value=secret_value,
+        config_json=config_json,
+    )
+    payload = _build_update_payload(
+        user_id=actor_user_id,
+        service=service,
+        existing=existing,
+        enabled=bool(existing.get("enabled")),
+        secret_value=secret_value if credentials else None,
+        config_json=config_json,
+        validation=validation,
+    )
+    payload["persona_id"] = persona_id
+    supabase_client.save_persona_integration_connection(payload)
+    return get_persona_integration_state(persona_id, service)
+
+
+def delete_persona_credentials(
+    *,
+    persona_id: str,
+    actor_user_id: str,
+    service: str,
+) -> dict[str, Any]:
+    if not is_user_managed(service):
+        raise KeyError(service)
+    if service == "deepseek":
+        existing = (
+            supabase_client.get_persona_integration_connection(persona_id, service)
+            or {}
+        )
+        deepseek_n8n_service.revoke(existing.get("config_json") or {})
+    supabase_client.save_persona_integration_connection(
+        {
+            "persona_id": persona_id,
+            "user_id": actor_user_id,
+            "service": service,
+            "enabled": False,
+            "status": "never_validated",
+            "config_json": {},
+            "secret_ciphertext": None,
+            "last_validated_at": None,
+            "last_error": None,
+        }
+    )
+    return get_persona_integration_state(persona_id, service)
+
+
+def get_enabled_persona_secret(persona_id: str, service: str) -> Optional[str]:
+    row = (
+        supabase_client.get_persona_integration_connection(persona_id, service)
+        or {}
+    )
+    if not row.get("enabled"):
+        return None
+    return secret_store.decrypt_secret(row.get("secret_ciphertext"))
 
 
 def system_service_has_runtime_credentials(service: str) -> bool:

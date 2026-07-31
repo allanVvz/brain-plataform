@@ -1,10 +1,11 @@
 import hashlib
+import hashlib
 import hmac
 import json
 import os
 import time
 import httpx
-from typing import Optional
+from typing import Any, Optional
 from utils.tls import get_ca_bundle_path
 
 
@@ -32,6 +33,7 @@ def send_to_webhook(
         sig = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
         headers["X-Hub-Signature-256"] = f"sha256={sig}"
         headers["X-Timestamp"] = str(int(time.time()))
+        headers["X-Webhook-Token"] = secret
     with httpx.Client(timeout=timeout, verify=get_ca_bundle_path()) as client:
         resp = client.post(url, content=body, headers=headers)
         return resp.status_code, (resp.text or "")[:300]
@@ -66,6 +68,76 @@ def get_workflows() -> list:
         response = client.get(f"{_base()}/api/v1/workflows", headers=_headers())
         response.raise_for_status()
         return response.json().get("data", [])
+
+
+def create_credential(
+    *,
+    name: str,
+    credential_type: str,
+    data: dict[str, Any],
+) -> dict[str, Any]:
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+        response = client.post(
+            f"{_base()}/api/v1/credentials",
+            headers=_headers(),
+            json={"name": name, "type": credential_type, "data": data},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def delete_credential(credential_id: str) -> None:
+    if not credential_id:
+        return
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+        response = client.delete(
+            f"{_base()}/api/v1/credentials/{credential_id}",
+            headers=_headers(),
+        )
+        if response.status_code != 404:
+            response.raise_for_status()
+
+
+def create_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        key: workflow[key]
+        for key in ("name", "nodes", "connections", "settings")
+        if key in workflow
+    }
+    with httpx.Client(timeout=20, verify=get_ca_bundle_path()) as client:
+        response = client.post(
+            f"{_base()}/api/v1/workflows",
+            headers=_headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def update_workflow(workflow_id: str, workflow: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        key: workflow[key]
+        for key in ("name", "nodes", "connections", "settings")
+        if key in workflow
+    }
+    with httpx.Client(timeout=20, verify=get_ca_bundle_path()) as client:
+        response = client.put(
+            f"{_base()}/api/v1/workflows/{workflow_id}",
+            headers=_headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def activate_workflow(workflow_id: str) -> dict[str, Any]:
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+        response = client.post(
+            f"{_base()}/api/v1/workflows/{workflow_id}/activate",
+            headers=_headers(),
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 def ping() -> tuple[bool, int]:

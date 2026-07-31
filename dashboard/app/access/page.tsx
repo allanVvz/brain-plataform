@@ -17,6 +17,12 @@ const ACCESS_PROFILES: Record<AccessProfile, {
   viewer: { role: "viewer", can_view: true, can_edit: false, can_manage: false },
 };
 
+function profileFor(row: any): AccessProfile {
+  if (row?.can_manage) return "manager";
+  if (row?.can_edit) return "operator";
+  return "viewer";
+}
+
 export default function AccessPage() {
   const [slug, setSlug] = useState("");
   const [members, setMembers] = useState<any[]>([]);
@@ -83,7 +89,42 @@ export default function AccessPage() {
       <div className="space-y-2">
         {members.map((row) => {
           const user = row.app_users || {};
-          return <div key={row.id} className="flex items-center justify-between rounded-xl border border-black/10 bg-white/60 p-4"><div><p className="font-medium">{user.name || user.email}</p><p className="text-xs text-obs-faint">{user.email} · {row.can_manage ? "gestor" : row.can_edit ? "operador" : "visualizador"}</p></div><button onClick={async () => { await api.revokeAccessMember(slug, row.user_id); await load(slug); }} className="text-xs text-red-500">Revogar</button></div>;
+          return (
+            <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white/60 p-4">
+              <div><p className="font-medium">{user.name || user.email}</p><p className="text-xs text-obs-faint">{user.email}</p></div>
+              <div className="flex items-center gap-2">
+                <select
+                  aria-label={`Permissão de ${user.email}`}
+                  value={profileFor(row)}
+                  onChange={async (event) => {
+                    const next = event.target.value as AccessProfile;
+                    setError("");
+                    try {
+                      await api.updateAccessMember(slug, row.user_id, ACCESS_PROFILES[next]);
+                      await load(slug);
+                    } catch (reason: any) {
+                      setError(reason?.message || "Falha ao atualizar o acesso.");
+                    }
+                  }}
+                  className="rounded-lg border border-black/10 bg-white px-2 py-1.5 text-xs text-obs-text"
+                >
+                  <option value="manager">Gestor</option>
+                  <option value="operator">Operador</option>
+                  <option value="viewer">Visualizador</option>
+                </select>
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`Revogar o acesso de ${user.email}?`)) return;
+                    await api.revokeAccessMember(slug, row.user_id);
+                    await load(slug);
+                  }}
+                  className="text-xs text-red-500"
+                >
+                  Revogar
+                </button>
+              </div>
+            </div>
+          );
         })}
       </div>
     </div>

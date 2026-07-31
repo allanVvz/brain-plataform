@@ -4,10 +4,11 @@ const nextConfig = {
   allowedDevOrigins: ["192.168.0.182", "localhost", "127.0.0.1"],
   async redirects() {
     return [
-      { source: "/wa-validator", destination: "/settings?tab=chatbot", permanent: false },
+      { source: "/wa-validator", destination: "/settings?tab=chatbot&view=validations", permanent: false },
       { source: "/tools", destination: "/settings?tab=tools", permanent: false },
       { source: "/logs", destination: "/settings?tab=logs", permanent: false },
       { source: "/access", destination: "/settings?tab=access", permanent: false },
+      { source: "/knowledge/import-vault", destination: "/knowledge/sync", permanent: false },
     ];
   },
   async rewrites() {

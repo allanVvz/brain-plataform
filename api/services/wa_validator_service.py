@@ -644,6 +644,20 @@ async def run_session_direct(session_id: str) -> dict:
     lead_ref = lead.get("id")
     if not lead_ref:
         raise ValueError("Não foi possível criar o lead de validação")
+    supabase_client.update_lead(
+        lead_ref,
+        {
+            "metadata": {
+                **dict(lead.get("metadata") or {}),
+                "validation": {
+                    "is_validation": True,
+                    "source": "webscraping",
+                    "run_id": session_id,
+                    "session_id": session_id,
+                },
+            }
+        },
+    )
     steps = script.get("steps", [])
 
     with _sessions_lock:
