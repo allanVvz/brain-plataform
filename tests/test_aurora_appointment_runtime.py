@@ -103,16 +103,20 @@ def test_catalog_reads_duration_price_qualifier_and_manual_confirmation():
 
 
 def test_appointment_collects_partial_request_and_always_hands_confirmation_to_human():
-    engine = DeterministicAppointment(catalog_from_graph(aurora_graph()))
+    graph = aurora_graph()
+    engine = DeterministicAppointment(
+        catalog_from_graph(graph),
+        policy=conversation_runtime._appointment_policy(graph),
+    )
     result = engine.handle("Quero agendar higienização interna")
     assert result.intent == "request_booking"
     assert result.handoff is False
     assert result.state["missing_fields"][0] == "customer_name"
 
-    for answer in ("Allan", "Onix", "hatch", "bancos manchados", "10/08"):
+    for answer in ("Allan", "Onix", "2020", "Quero vender em breve", "Consigo levar até a Aurora"):
         result = engine.handle(answer, state=result.state)
         assert result.handoff is False
-    result = engine.handle("manhã", state=result.state)
+    result = engine.handle("Bancos meio manchados", state=result.state)
 
     assert result.intent == "complete_booking_request"
     assert result.handoff is True
@@ -122,14 +126,15 @@ def test_appointment_collects_partial_request_and_always_hands_confirmation_to_h
         "service_slug": "higienizacao-interna",
         "customer_name": "Allan",
         "vehicle_model": "Onix",
-        "vehicle_size": "hatch",
-        "condition": "bancos manchados",
-        "desired_date": "10/08",
-        "time_window": "manhã",
+        "vehicle_year": "2020",
+        "objective": "Quero vender em breve",
+        "can_visit_in_person": "Consigo levar até a Aurora",
+        "condition": "Bancos meio manchados",
     }
     assert result.reply == (
         "A higienização interna leva cerca de 3 horas e parte de R$ 350,00. "
-        "Registrei sua preferência; a equipe confirmará o valor final e o horário."
+        "Anotei tudo por aqui; a Equipe Aurora vai te chamar para confirmar "
+        "o valor final e o melhor horário."
     )
 
 
@@ -137,7 +142,7 @@ def test_runtime_selects_appointment_classifier_stage_and_graph_evidence(monkeyp
     graph = install_graph(monkeypatch)
     decision, response = conversation_runtime.decide(
         context_for(
-            "manhã",
+            "Consigo levar até a Aurora",
             cart={
                 "business_model": "appointment",
                 "conversation_state": "collecting",
@@ -145,11 +150,11 @@ def test_runtime_selects_appointment_classifier_stage_and_graph_evidence(monkeyp
                     "service_slug": "higienizacao-interna",
                     "customer_name": "Allan",
                     "vehicle_model": "Onix",
-                    "vehicle_size": "hatch",
+                    "vehicle_year": "2020",
+                    "objective": "Quero vender em breve",
                     "condition": "bancos manchados",
-                    "desired_date": "10/08",
                 },
-                "missing_fields": ["time_window"],
+                "missing_fields": ["can_visit_in_person"],
                 "_lead_stage": "qualificado",
             },
         )
@@ -180,7 +185,7 @@ def test_list_services_records_every_product_and_faq_as_graph_evidence(monkeypat
     assert sum(
         node.node_type == "product" and node.id in decision.evidence_node_ids
         for node in graph.nodes
-    ) == 4
+    ) == 9
     assert "Serviços disponíveis:" in (response.reply_text or "")
 
 
@@ -209,11 +214,11 @@ def test_confirmation_faq_interrupts_collection_without_losing_booking_state(mon
         "conversation_state": "collecting",
         "appointment_request": {
             "service_slug": "polimento-tecnico",
-            "vehicle_size": "SUV",
-            "desired_date": "próxima sexta",
-            "time_window": "manhã",
+            "vehicle_year": "2019",
+            "objective": "Quero manter e cuidar do carro",
+            "can_visit_in_person": "Consigo ir presencialmente",
         },
-        "missing_fields": ["customer_name", "vehicle_model", "condition"],
+        "missing_fields": ["customer_name", "vehicle_model", "vehicle_color", "condition"],
         "_lead_stage": "qualificado",
     }
 

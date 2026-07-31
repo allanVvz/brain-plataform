@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Settings,
   Sparkles,
+  UserCircle,
   Users,
 } from "lucide-react";
 import {
@@ -61,6 +62,7 @@ export default function PortalProvider({
   const router = useRouter();
   const [state, setState] = useState<PortalContextValue | null>(null);
   const [error, setError] = useState("");
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -168,18 +170,43 @@ export default function PortalProvider({
               );
             })}
           </nav>
-          <div className="border-t border-slate-100 p-4">
-            <p className="truncate px-2 text-xs font-medium text-slate-700">
-              {value.user?.name || value.user?.email}
-            </p>
-            <p className="mt-0.5 px-2 text-[11px] text-slate-500">
-              {value.accessProfile.replaceAll("_", " ")}
-            </p>
+          <div className="relative border-t border-slate-100 p-3">
+            {accountMenuOpen && (
+              <div className="absolute bottom-full left-3 right-3 mb-2 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+                <Link
+                  href={`${base}/configuracoes`}
+                  onClick={() => setAccountMenuOpen(false)}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+                >
+                  <Settings size={15} /> Configurações
+                </Link>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+                >
+                  <LogOut size={15} /> Sair da conta
+                </button>
+              </div>
+            )}
             <button
-              onClick={logout}
-              className="mt-3 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+              type="button"
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-slate-100"
+              aria-label="Abrir menu da conta"
+              aria-expanded={accountMenuOpen}
             >
-              <LogOut size={16} /> Sair
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950/5 text-slate-600">
+                <UserCircle size={17} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium text-slate-700">
+                  {value.user?.name || value.user?.email}
+                </p>
+                <p className="truncate text-[11px] text-slate-500">
+                  {value.accessProfile.replaceAll("_", " ")}
+                </p>
+              </span>
             </button>
           </div>
         </aside>

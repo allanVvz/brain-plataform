@@ -114,6 +114,20 @@ def test_explicit_human_request_never_generates_ai_route(monkeypatch):
     assert response.handoff_required is True
 
 
+def test_reply_confirms_price_or_schedule_blocks_only_genuine_confirmations():
+    unsafe = conversation_runtime._reply_confirms_price_or_schedule
+    assert unsafe("Perfeito, confirmo o agendamento para amanhã às 14h.")
+    assert unsafe("Valor fechado em R$ 350,00, pode deixar reservado.")
+    assert not unsafe(
+        "A higienização interna leva cerca de 3 horas e parte de R$ 350,00."
+    )
+    assert not unsafe(
+        "Não. Toda data e horário dependem de confirmação humana da Equipe Aurora."
+    )
+    assert not unsafe(None)
+    assert not unsafe("")
+
+
 def test_model_schema_gets_exactly_one_correction_attempt():
     context = context_for("Oi")
     evidence_id = context.rag_nodes[0]["id"]

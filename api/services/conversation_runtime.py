@@ -803,6 +803,32 @@ def decide(
     return decision, response
 
 
+_UNSAFE_CONFIRMATION_VERB = re.compile(
+    r"confirmad[oa]|confirmo\b|fechad[oa]|reservad[oa]|"
+    r"agendad[oa]\s+para|marcad[oa]\s+para",
+    re.IGNORECASE,
+)
+_UNSAFE_MONEY_TOKEN = re.compile(r"r\$\s?\d", re.IGNORECASE)
+_UNSAFE_SCHEDULE_TOKEN = re.compile(
+    r"\b\d{1,2}[:h]\d{0,2}\b|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b"
+)
+
+
+def _reply_confirms_price_or_schedule(text: str | None) -> bool:
+    """A reply must never both use confirmation language and state a price
+    or a date/time in the same breath — only a human may finalize those.
+
+    Informational replies (FAQ prices, durations) are unaffected because they
+    never pair a confirmation verb with the figure; this only catches a
+    reply that actually claims something is booked or settled.
+    """
+    if not text:
+        return False
+    if not _UNSAFE_CONFIRMATION_VERB.search(text):
+        return False
+    return bool(_UNSAFE_MONEY_TOKEN.search(text) or _UNSAFE_SCHEDULE_TOKEN.search(text))
+
+
 def commit(
     *,
     lead_ref: int,
@@ -815,6 +841,25 @@ def commit(
     inbound_buffer_id: str | None = None,
     expected_decision_owner: str | None = None,
 ) -> dict[str, Any]:
+    if _reply_confirms_price_or_schedule(response.reply_text):
+        decision = decision.model_copy(
+            update={
+                "route": ConversationRoute.HUMAN,
+                "handoff_reason": decision.handoff_reason
+                or "unsafe_reply_blocked_price_or_schedule_confirmation",
+            }
+        )
+        response = response.model_copy(
+            update={
+                "reply_text": (
+                    "Vou encaminhar sua conversa para a equipe confirmar "
+                    "os detalhes."
+                ),
+                "role": ConversationRoute.HUMAN,
+                "handoff_required": True,
+            }
+        )
+
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     if not lead:
         raise LookupError("lead not found")

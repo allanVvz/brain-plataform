@@ -1,9 +1,9 @@
 "use client";
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
 import { api } from "@/lib/api";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { MessageSquare, User, Clock, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, Maximize2, ArrowLeft, ChevronLeft, ChevronRight, Tag } from "lucide-react";
+import { MessageSquare, User, Clock, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, PanelRightClose, PanelRightOpen, ArrowLeft, ChevronLeft, ChevronRight, Tag } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -546,6 +546,61 @@ function pendingLabel(item: { validated?: boolean; validation_status?: string })
   );
 }
 
+// Evidence markdown is authored as "# title\n\n## Pergunta\n\n{question}\n\n## Resposta\n\n{answer}".
+// The card already shows the title separately, so strip the repeated
+// heading/question/label lines and keep only the actual answer content.
+function extractEvidenceSummary(title: string, markdown: string): string {
+  if (!markdown) return "";
+  const normalizedTitle = normalizeKnowledgeText(title);
+  const lines = markdown
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#+\s*/, "").trim())
+    .filter(Boolean)
+    .filter((line) => {
+      const norm = normalizeKnowledgeText(line);
+      if (!norm || norm === normalizedTitle) return false;
+      if (norm === "pergunta" || norm === "resposta") return false;
+      return true;
+    });
+  return lines.join(" ").trim();
+}
+
+const EvidenceCard = memo(function EvidenceCard({
+  item,
+}: {
+  item: { id: string; node_type: string; title: string; markdown: string; used_in_last_decision?: boolean };
+}) {
+  const summary = extractEvidenceSummary(item.title, item.markdown);
+  return (
+    <article className="rounded-lg border border-white/06 bg-white/[0.03] p-2.5">
+      <div className="flex items-start gap-1.5">
+        <span className="mt-0.5 shrink-0 rounded border border-obs-violet/30 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-obs-violet">
+          {item.node_type}
+        </span>
+        <p className="min-w-0 flex-1 text-xs font-medium leading-snug text-obs-text">{item.title}</p>
+        {item.used_in_last_decision && (
+          <span
+            title="Usado na última decisão"
+            className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400"
+          />
+        )}
+      </div>
+      {summary && summary !== item.title && (
+        <p className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-obs-subtle">{summary}</p>
+      )}
+    </article>
+  );
+});
+
+function sortEvidenceByRelevance<T extends { used_in_last_decision?: boolean }>(
+  items: T[],
+  limit: number,
+): T[] {
+  return [...items]
+    .sort((a, b) => Number(!!b.used_in_last_decision) - Number(!!a.used_in_last_decision))
+    .slice(0, limit);
+}
+
 function KnowledgeSection({
   icon,
   title,
@@ -1047,26 +1102,10 @@ export function KnowledgeSidebar({
   if (!ctx) return null;
   if (ctx.operator_context) {
     const operator = ctx.operator_context;
-    const renderEvidence = (item: typeof operator.primary[number] | typeof operator.faq_rules[number]) => (
-      <article key={item.id} className="rounded-lg border border-white/06 bg-white/[0.03] p-3">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-obs-violet">
-            {item.node_type}
-          </span>
-          {item.used_in_last_decision && (
-            <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[9px] text-emerald-300">
-              usado
-            </span>
-          )}
-        </div>
-        <p className="mt-1 text-xs font-medium text-obs-text">{item.title}</p>
-        {item.markdown && (
-          <p className="mt-1 line-clamp-4 whitespace-pre-line text-[11px] leading-relaxed text-obs-subtle">
-            {item.markdown.replace(/^#+\s+/gm, "")}
-          </p>
-        )}
-      </article>
-    );
+    // Cap and rank by "used in the last decision" so the cards most useful
+    // for the current decision surface first, without overwhelming the panel.
+    const primaryRanked = sortEvidenceByRelevance(operator.primary, 4);
+    const faqRulesRanked = sortEvidenceByRelevance(operator.faq_rules, 4);
     return (
       <div className="h-full space-y-4 overflow-y-auto p-3">
         <KnowledgeSection
@@ -1075,7 +1114,9 @@ export function KnowledgeSidebar({
           count={operator.primary.length}
           showEmpty
         >
-          {operator.primary.length > 0 ? operator.primary.map(renderEvidence) : (
+          {primaryRanked.length > 0 ? primaryRanked.map((item) => (
+            <EvidenceCard key={item.id} item={item} />
+          )) : (
             <p className="text-[11px] text-obs-faint">
               Nenhuma evidência registrada na última decisão.
             </p>
@@ -1087,7 +1128,9 @@ export function KnowledgeSidebar({
           count={operator.faq_rules.length}
           showEmpty
         >
-          {operator.faq_rules.length > 0 ? operator.faq_rules.map(renderEvidence) : (
+          {faqRulesRanked.length > 0 ? faqRulesRanked.map((item) => (
+            <EvidenceCard key={item.id} item={item} />
+          )) : (
             <p className="text-[11px] text-obs-faint">
               Nenhuma FAQ ou regra relacionada neste contexto.
             </p>
@@ -1299,6 +1342,7 @@ export function MessagesLayout({
   const validationScope = validationMode ? "only" as const : "exclude" as const;
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isConversationSidebarOpen, setIsConversationSidebarOpen] = useState(!focused);
+  const [isKnowledgeSidebarOpen, setIsKnowledgeSidebarOpen] = useState(true);
   const [personaFilterId, setPersonaFilterId] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
@@ -1910,15 +1954,6 @@ export function MessagesLayout({
                 </div>
               )}
 
-              {/* Focused conversation route. */}
-              <Link
-                href={portalMatch ? `/clientes/${portalMatch[1]}/mensagens/${selectedLead.id}` : `/messages/${selectedLead.id}`}
-                title="Abrir conversa focada"
-                className="p-1.5 rounded-md text-obs-subtle hover:text-obs-violet transition shrink-0 hover:[background:rgba(255,255,255,0.6)]"
-              >
-                <Maximize2 size={13} />
-              </Link>
-
               <button
                 type="button"
                 onClick={togglePause}
@@ -1932,6 +1967,16 @@ export function MessagesLayout({
               >
                 <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle ${selectedLead.ai_paused ? "bg-amber-400" : "bg-emerald-400"}`} />
                 {selectedLead.ai_paused ? "IA pausada · humano" : "IA ativa"}
+              </button>
+
+              {/* Toggle the right-hand knowledge sidebar. */}
+              <button
+                type="button"
+                onClick={() => setIsKnowledgeSidebarOpen((v) => !v)}
+                title={isKnowledgeSidebarOpen ? "Esconder conhecimento" : "Mostrar conhecimento"}
+                className="p-1.5 rounded-md text-obs-subtle hover:text-obs-violet transition shrink-0 hover:[background:rgba(255,255,255,0.6)]"
+              >
+                {isKnowledgeSidebarOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
               </button>
             </>
           ) : (
@@ -2042,6 +2087,7 @@ export function MessagesLayout({
       </div>
 
       {/* ── Right: Knowledge sidebar ────────────────────────────────────── */}
+      {isKnowledgeSidebarOpen && (
       <aside
         className="knowledge-panel w-80 shrink-0 flex flex-col overflow-hidden rounded-r-xl"
         style={{
@@ -2071,6 +2117,7 @@ export function MessagesLayout({
           <KnowledgeSidebar ctx={knowledge} loading={knowledgeLoading} leadSelected={!!selectedLead} />
         </div>
       </aside>
+      )}
     </div>
   );
 }

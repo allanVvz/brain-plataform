@@ -12,6 +12,7 @@
     "start": "next start",
     "test": "vitest run",
     "test:e2e:evolution": "node scripts/run-e2e-evolution.mjs",
+    "test:e2e:wa-validator": "playwright test --config=playwright.wa-validator.config.ts",
     "demo:baita-deterministic": "node scripts/demo-baita-deterministic.mjs",
     "demo:baita-cleanup": "node scripts/demo-baita-deterministic.mjs --cleanup",
     "test:api-health": "node scripts/test-api-health.mjs",

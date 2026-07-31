@@ -112,8 +112,12 @@ DEFAULT_FIELD_QUESTIONS = {
     "customer_name": "Qual é o seu nome?",
     "service_slug": "Qual serviço você deseja?",
     "vehicle_model": "Qual é o modelo do veículo?",
+    "vehicle_year": "Qual é o ano do veículo?",
+    "vehicle_color": "Qual é a cor do veículo?",
     "vehicle_size": "Qual é o porte do veículo, por exemplo hatch, sedan, SUV ou picape?",
     "condition": "Como está o veículo hoje e quais pontos precisam de atenção?",
+    "objective": "Você pretende vender o veículo em breve ou vai continuar com ele?",
+    "can_visit_in_person": "Você consegue vir até nós ou prefere seguir tudo à distância?",
     "desired_date": "Qual data você prefere?",
     "time_window": "Qual período você prefere: manhã, tarde ou noite?",
 }
@@ -183,21 +187,25 @@ class DeterministicAppointment:
             request["vehicle_size"] = size
 
         plain = _plain_value(message)
-        if not plain or not expected:
+        if not plain or not expected or request.get(expected):
             return
-        if expected == "customer_name" and not request.get(expected):
+        if expected == "customer_name":
             if re.fullmatch(r"[A-Za-zÀ-ÿ]{2,}(?:\s+[A-Za-zÀ-ÿ]{2,}){0,3}", plain):
                 request[expected] = plain
-        elif expected == "vehicle_model" and not request.get(expected):
+        elif expected == "vehicle_size":
+            if size:
+                request[expected] = size
+        elif expected == "desired_date":
+            if date:
+                request[expected] = date
+        elif expected == "time_window":
+            if window:
+                request[expected] = window
+        else:
+            # Any other field (vehicle_model, condition, vehicle_year,
+            # vehicle_color, objective, can_visit_in_person, and future
+            # per-product fields) accepts free text as-is.
             request[expected] = plain
-        elif expected == "vehicle_size" and not request.get(expected) and size:
-            request[expected] = size
-        elif expected == "condition" and not request.get(expected):
-            request[expected] = plain
-        elif expected == "desired_date" and not request.get(expected) and date:
-            request[expected] = date
-        elif expected == "time_window" and not request.get(expected) and window:
-            request[expected] = window
 
     def _list_services(self) -> str:
         lines = []

@@ -11,6 +11,17 @@ from services import n8n_client
 
 
 _TEMPLATE = Path(__file__).resolve().parents[1] / "n8n-workflows" / "baita-vitoria.json"
+_AGENTIC_TEMPLATE = Path(__file__).resolve().parents[1] / "n8n-workflows" / "aurora-conversation.json"
+_AGENTIC_BUSINESS_MODELS = {"appointment"}
+
+
+def _uses_agentic_reply_template(persona: dict[str, Any]) -> bool:
+    """Appointment-style businesses get a model-authored reply (SDR script),
+    still gated by the deterministic engine for route/handoff/missing fields.
+    Everything else keeps the original field-extraction-only template."""
+    config = persona.get("config") or {}
+    business_model = str((config.get("portal") or {}).get("business_model") or "")
+    return business_model in _AGENTIC_BUSINESS_MODELS
 
 
 def _workflow_for_persona(
@@ -19,7 +30,6 @@ def _workflow_for_persona(
     credential_id: str,
     credential_name: str,
 ) -> dict[str, Any]:
-    template = json.loads(_TEMPLATE.read_text(encoding="utf-8"))
     slug = str(persona.get("slug") or "").strip()
     if not slug:
         raise ValueError("persona slug is required")
@@ -29,8 +39,13 @@ def _workflow_for_persona(
         or (config.get("automation") or {}).get("agent_slug")
         or "assistant"
     )
+    agentic = _uses_agentic_reply_template(persona)
+    template_path = _AGENTIC_TEMPLATE if agentic else _TEMPLATE
+    template = json.loads(template_path.read_text(encoding="utf-8"))
+    template_slug = str(template["meta"]["binding"]["persona_slug"])
+    template_agent_slug = str(template["meta"]["binding"]["agent_slug"])
     serialized = json.dumps(template, ensure_ascii=False)
-    serialized = serialized.replace("baita-conveniencia", slug)
+    serialized = serialized.replace(template_slug, slug)
     workflow = json.loads(serialized)
     workflow["name"] = f"Brain — {persona.get('name') or slug} — Conversação"
     workflow["active"] = False
@@ -42,11 +57,13 @@ def _workflow_for_persona(
             node["webhookId"] = webhook_id
         if node.get("id") == "binding":
             code = str((node.get("parameters") or {}).get("jsCode") or "")
-            node["parameters"]["jsCode"] = code.replace(
-                "agent_slug: 'vitoria'",
+            code = code.replace(
+                f"agent_slug: '{template_agent_slug}'",
                 f"agent_slug: {json.dumps(agent_slug)}",
             )
-        if node.get("id") == "deepseek":
+            node["parameters"]["jsCode"] = code
+        url = str((node.get("parameters") or {}).get("url") or "")
+        if node.get("type") == "n8n-nodes-base.httpRequest" and "api.deepseek.com" in url:
             node["credentials"] = {
                 "httpHeaderAuth": {
                     "id": credential_id,
@@ -54,19 +71,14 @@ def _workflow_for_persona(
                 }
             }
     workflow.setdefault("settings", {})
-    workflow["settings"].update({
-        "saveDataErrorExecution": "none",
-        "saveDataSuccessExecution": "none",
-    })
     workflow.setdefault("meta", {})
     workflow["meta"]["binding"] = {
+        **(workflow["meta"].get("binding") or {}),
         "persona_slug": slug,
         "agent_slug": agent_slug,
         "decision_owner": "n8n_agents",
         "pipeline_contract": "conversation_v1",
         "classifier": "deterministic_v1",
-        "field_extractor": "deepseek-v4-flash",
-        "model_required": True,
         "model": "deepseek-v4-flash",
     }
     return workflow

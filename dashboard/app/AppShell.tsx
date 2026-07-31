@@ -298,7 +298,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={() => setUserMenuOpen((open) => !open)}
-              className="flex items-center gap-2 rounded-full border border-black/10 bg-white/55 py-1 pl-1 pr-3 text-obs-subtle shadow-sm transition hover:bg-white hover:text-obs-text"
+              className="flex items-center gap-2 rounded-full py-1 pl-1 pr-3 shadow-sm backdrop-blur-glass transition"
+              style={{
+                border: "1px solid var(--border-glass-strong)",
+                background: "rgb(var(--glass-bg) / var(--glass-bg-alpha))",
+                color: "rgb(17 24 39)",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgb(var(--glass-bg) / var(--glass-bg-hover))"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "rgb(var(--glass-bg) / var(--glass-bg-alpha))"; }}
               aria-label="Abrir menu do usuario"
               aria-expanded={userMenuOpen}
             >

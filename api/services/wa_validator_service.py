@@ -112,6 +112,11 @@ _FLOWS = {
     "classifier_failure": "Falha do classificador determinístico gera handoff.",
     "invalid_decision_schema": "Saída fora do contrato gera handoff.",
     "delivery_callback": "Callbacks sent/delivered/read/failed são reconciliados.",
+    "sdr_qualificacao_carro": (
+        "SDR agêntico de agendamento (Aurora): qualifica nome, veículo, ano, "
+        "objetivo e trilha presencial/remoto, nunca confirma preço ou "
+        "horário, e encerra com handoff para a equipe humana."
+    ),
 }
 
 
@@ -213,6 +218,15 @@ def _deterministic_script(
         "classifier_failure": ["[QA_CLASSIFIER_FAILURE]"],
         "invalid_decision_schema": ["[QA_INVALID_DECISION_SCHEMA]"],
         "delivery_callback": [f"Quero 1 de {product_name}"],
+        "sdr_qualificacao_carro": [
+            "Quero saber sobre a higienização interna do meu carro",
+            "Allan",
+            "Onix",
+            "2020",
+            "Quero manter o carro e cuidar bem dele",
+            "Consigo levar até vocês",
+            "Os bancos estão meio manchados",
+        ],
     }
     messages = scenarios.get(flow_id)
     if not messages:
@@ -658,6 +672,14 @@ async def run_session_direct(session_id: str) -> dict:
             }
         },
     )
+    channel_binding_id = (supabase_client.get_lead_by_ref(lead_ref) or {}).get(
+        "channel_binding_id"
+    )
+    if not channel_binding_id:
+        raise ValueError(
+            f"Lead de validação para {persona_slug} não recebeu channel_binding_id "
+            "automático; configure um workflow_binding ativo para a persona."
+        )
     steps = script.get("steps", [])
 
     with _sessions_lock:
@@ -686,19 +708,42 @@ async def run_session_direct(session_id: str) -> dict:
                         "ts": ts_now,
                         "message_id": message_id,
                     })
-                    supabase_client.insert_message({
-                        "lead_ref": lead_ref,
-                        "message_id": message_id,
-                        "external_message_id": message_id,
-                        "sender_type": "lead",
-                        "role": "user",
-                        "canal": "whatsapp",
-                        "texto": text,
-                        "direction": "inbound",
-                        "status": "received",
-                        "correlation_id": correlation_id,
-                        "created_at": ts_now,
-                    })
+                    # commit() claims the inbound message through the same
+                    # durable lead_buffer row the real inbound webhooks create
+                    # (claim_conversation_commit requires it to already exist),
+                    # so the validator must go through the same atomic
+                    # enqueue used in production rather than a bare message
+                    # insert.
+                    envelope = supabase_client.enqueue_whatsapp_envelope(
+                        buffer={
+                            "persona_id": persona.get("id"),
+                            "lead_ref": lead_ref,
+                            "channel_binding_id": channel_binding_id,
+                            "whatsapp_phone_number_id": None,
+                            "external_message_id": message_id,
+                            "direction": "inbound",
+                            "payload": {"text": text, "sender": "wa-validator"},
+                            "status": "buffered",
+                            "batch_key": f"{persona.get('id')}:{lead_ref}",
+                            "idempotency_key": f"inbound:wa-validator:{message_id}",
+                            "correlation_id": correlation_id,
+                        },
+                        message={
+                            "lead_id": lead_ref,
+                            "role": "user",
+                            "content": text,
+                            "direction": "inbound",
+                            "status": "buffered",
+                            "channel": "whatsapp",
+                            "sender_id": "wa-validator",
+                            "external_message_id": message_id,
+                            "channel_binding_id": channel_binding_id,
+                            "correlation_id": correlation_id,
+                            "metadata": {"provider": "wa-validator"},
+                            "created_at": ts_now,
+                        },
+                    )
+                    buffer_uuid = str(envelope.get("buffer_id") or "")
                     with _sessions_lock:
                         _sessions[session_id]["output"] = {
                             "conversation": list(conversation), "status": "running"
@@ -707,10 +752,11 @@ async def run_session_direct(session_id: str) -> dict:
                         event = {
                                 "persona_slug": persona_slug,
                                 "lead_ref": lead_ref,
-                                "buffer_id": f"validator:{session_id}:{i}",
+                                "buffer_id": buffer_uuid,
                                 "external_message_id": message_id,
                                 "correlation_id": correlation_id,
                                 "phone_number_id": None,
+                                "channel_binding_id": channel_binding_id,
                                 "message": text,
                                 "pipeline_contract": "conversation_v1",
                                 "decision_owner": conversation_mode,
@@ -731,6 +777,7 @@ async def run_session_direct(session_id: str) -> dict:
                                 message_id=message_id,
                                 correlation_id=correlation_id,
                                 phone_number_id=None,
+                                channel_binding_id=channel_binding_id,
                                 inbound_buffer_id=event["buffer_id"],
                             )
                         reply: str = data.get("reply_text") or ""
