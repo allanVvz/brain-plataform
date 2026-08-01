@@ -365,8 +365,9 @@ class DeterministicAppointment:
             return AppointmentResult(
                 self._text(
                     "unknown_handoff",
-                    "Não encontrei informação aprovada para responder. "
-                    "Vou encaminhar ao atendimento humano.",
+                    "Já chamei a equipe para continuar com você. Se puder, me "
+                    "diga seu nome, o serviço que procura e o modelo do carro "
+                    "enquanto aguarda.",
                 ),
                 "ununderstood",
                 state,
@@ -376,8 +377,9 @@ class DeterministicAppointment:
         return AppointmentResult(
             self._text(
                 "unknown_clarification",
-                "Não entendi completamente. Você quer conhecer os serviços, "
-                "pedir orçamento ou solicitar agendamento?",
+                "Vou chamar a equipe para te ajudar direitinho nisso. "
+                "Enquanto isso, me conta seu nome, o serviço que você procura "
+                "e o modelo do carro?",
             ),
             "ununderstood",
             state,
