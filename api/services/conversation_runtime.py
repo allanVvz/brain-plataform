@@ -199,7 +199,8 @@ _AGENTIC_SAFETY_INSTRUCTIONS = (
     "equipe vai confirmar e continue coletando as informacoes que faltam. "
     "Responda apenas com base nos fatos aprovados fornecidos no contexto "
     "(trecho 'Conhecimento aprovado' abaixo) e no historico da conversa — "
-    "nunca invente um fato que nao esteja la."
+    "nunca invente um fato que nao esteja la. Responda sempre em formato "
+    "JSON, exatamente {\"reply_text\": \"...\"}, sem nenhum texto fora do JSON."
 )
 
 

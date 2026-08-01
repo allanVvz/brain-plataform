@@ -397,6 +397,19 @@ def test_build_system_prompt_is_persona_agnostic_and_reads_tone_and_rules():
     assert "Nunca confirme preco final" in prompt
 
 
+def test_build_system_prompt_mentions_json_for_deepseek_response_format(monkeypatch):
+    """Regression test for a real production 400 confirmed live 2026-08-01:
+    DeepSeek (like OpenAI) rejects any request using
+    response_format={type: 'json_object'} unless the word 'json' appears
+    somewhere in the prompt ("Prompt must contain the word 'json' in some
+    form..."). The old hardcoded prompt happened to satisfy this by
+    accident ("Responda somente JSON..."); build_system_prompt() must
+    keep doing so explicitly, or every agentic reply silently falls back
+    to the raw deterministic text with no error surfaced to the user."""
+    prompt = conversation_runtime.build_system_prompt(aurora_graph())
+    assert "json" in prompt.lower()
+
+
 def test_build_system_prompt_never_hardcodes_business_specific_vocabulary():
     """A source-level guard against regressing to the old hardcoded
     prompt: the function body must not contain Aurora-specific business
