@@ -184,6 +184,24 @@ def _appointment_policy(graph: Any) -> dict[str, Any]:
     return dict(data.get("appointment_policy") or {})
 
 
+def _commercial_note_fields(context: ConversationContext) -> list[str]:
+    """Field names this persona wants mirrored into leads.metadata.commercial_note.
+
+    Declared per persona in its graph's persona-node data
+    (`commercial_note_fields: [...]`), not hardcoded here — any business
+    model, any engine. commit() only has `context.rag_nodes` (flattened
+    node dicts), not the full GraphJson, so this reads from there instead
+    of `_appointment_policy`.
+    """
+    persona_node = next(
+        (item for item in context.rag_nodes if item.get("node_type") == "persona"),
+        None,
+    )
+    data = (persona_node or {}).get("data") or {}
+    fields = data.get("commercial_note_fields") or []
+    return [str(field) for field in fields if field]
+
+
 def _approved_faq_match(graph: Any, message: str) -> Any | None:
     """Match only an exact, validated FAQ question.
 
@@ -996,15 +1014,21 @@ def commit(
         response.cart_state.get("appointment_request") or {}
     )
     commercial_note = dict(metadata.get("commercial_note") or {})
-    if response.cart_state.get("business_model") == "appointment":
-        if appointment_request.get("vehicle_model"):
-            commercial_note["vehicle_model"] = appointment_request["vehicle_model"]
-        for field in ("vehicle_size", "condition", "desired_date", "time_window"):
-            if appointment_request.get(field):
-                commercial_note[field] = appointment_request[field]
-        if commercial_note:
-            commercial_note["updated_at"] = datetime.now(timezone.utc).isoformat()
-            metadata["commercial_note"] = commercial_note
+    # No hardcoded field names or business_model gate: each persona declares
+    # its own commercial_note_fields in its graph's persona node data (any
+    # business model — appointment or otherwise). Values are resolved from
+    # whatever shape that persona's engine produces (appointment_request
+    # first, since that's where DeterministicAppointment nests its
+    # per-field state; cart_state itself as a fallback for other engines
+    # like Baita's cart/order-based DeterministicSDR).
+    note_fields = _commercial_note_fields(context)
+    note_pool = {**response.cart_state, **appointment_request}
+    for field in note_fields:
+        if note_pool.get(field):
+            commercial_note[field] = note_pool[field]
+    if commercial_note:
+        commercial_note["updated_at"] = datetime.now(timezone.utc).isoformat()
+        metadata["commercial_note"] = commercial_note
     lead_update = {"metadata": metadata, "stage": qualified_stage}
     customer_name = (
         appointment_request.get("customer_name")

@@ -166,6 +166,30 @@ def test_already_handed_off_lead_keeps_handoff_flag_on_new_messages():
     assert result.handoff is True
 
 
+def test_commercial_note_fields_are_declared_per_persona_not_hardcoded():
+    """Regression test for the 2026-08-01 finding.
+
+    conversation_runtime used to hardcode the commercial_note field names
+    (vehicle_size, condition, desired_date, time_window) and gate the whole
+    mechanism to business_model == "appointment" — meaning no other persona
+    (e.g. Baita, a sales/cart persona) could ever populate a commercial
+    note no matter what its own graph declared. commercial_note_fields is
+    now read from each persona's own graph data, any business model.
+    """
+    context = context_for("Oi", cart={"business_model": "appointment"})
+    assert conversation_runtime._commercial_note_fields(context) == [
+        "vehicle_model", "vehicle_size", "condition", "desired_date", "time_window",
+    ]
+
+
+def test_commercial_note_fields_defaults_to_empty_without_graph_declaration():
+    context = context_for("Oi")
+    for node in context.rag_nodes:
+        if node.get("node_type") == "persona":
+            node["data"] = {k: v for k, v in node["data"].items() if k != "commercial_note_fields"}
+    assert conversation_runtime._commercial_note_fields(context) == []
+
+
 def test_runtime_selects_appointment_classifier_stage_and_graph_evidence(monkeypatch):
     graph = install_graph(monkeypatch)
     decision, response = conversation_runtime.decide(
