@@ -51,6 +51,20 @@ def _canonical_metadata(binding: dict) -> dict:
     return metadata
 
 
+def _is_complete_n8n_agents_binding(binding: dict) -> bool:
+    """True only for a binding already fully, validly configured for the
+    agentic engine — never for a half-configured one (e.g. decision_owner
+    flipped to n8n_agents without a workflow id or webhook), which stays
+    exactly as dangerous as before and must still be reset to the safe
+    deterministic baseline."""
+    metadata = binding.get("metadata") or {}
+    return (
+        metadata.get("decision_owner") == "n8n_agents"
+        and bool(binding.get("n8n_workflow_id"))
+        and bool(str(metadata.get("conversation_webhook_url") or "").strip())
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--meta-persona", required=True)
@@ -83,7 +97,12 @@ def main() -> None:
     ):
         raise RuntimeError("Evolution binding credential is unavailable")
 
+    evolution_preserved = _is_complete_n8n_agents_binding(evolution_binding)
+
     if args.apply:
+        # Meta/Baita always gets forced to the safe deterministic baseline
+        # on every deploy — it never uses the agentic engine, so there is
+        # no valid reason for it to be anything else.
         supabase_client.update_workflow_binding(
             meta_binding["id"],
             {
@@ -94,18 +113,25 @@ def main() -> None:
                 "metadata": _canonical_metadata(meta_binding),
             },
         )
-        supabase_client.update_workflow_binding(
-            evolution_binding["id"],
-            {
-                "channel": "whatsapp",
-                "provider": "evolution_baileys",
-                "n8n_workflow_id": None,
-                "metadata": _canonical_metadata(evolution_binding),
-            },
-        )
-        for persona, binding in (
-            (meta_persona, meta_binding),
-            (evolution_persona, evolution_binding),
+        # Evolution/Aurora only gets reset if it is NOT already a complete,
+        # valid n8n_agents configuration — a half-configured one (missing
+        # workflow id or webhook) is exactly as dangerous as before and
+        # still gets reset. Confirmed live 2026-08-01: this reset used to
+        # unconditionally revert Aurora's decision_owner on every deploy,
+        # silently undoing an intentional activation of the agentic flow.
+        if not evolution_preserved:
+            supabase_client.update_workflow_binding(
+                evolution_binding["id"],
+                {
+                    "channel": "whatsapp",
+                    "provider": "evolution_baileys",
+                    "n8n_workflow_id": None,
+                    "metadata": _canonical_metadata(evolution_binding),
+                },
+            )
+        for persona, binding, preserved in (
+            (meta_persona, meta_binding, False),
+            (evolution_persona, evolution_binding, evolution_preserved),
         ):
             supabase_client.insert_event(
                 {
@@ -116,9 +142,12 @@ def main() -> None:
                     "payload": {
                         "persona_slug": persona["slug"],
                         "provider": binding["provider"],
-                        "decision_owner": "deterministic",
+                        "decision_owner": (
+                            "n8n_agents" if preserved else "deterministic"
+                        ),
                         "transport_mode": "provider_direct",
                         "credential_preserved": True,
+                        "preserved_existing_n8n_agents_config": preserved,
                     },
                 },
                 source="scripts.configure_whatsapp_hotfix_bindings",
@@ -139,6 +168,7 @@ def main() -> None:
                 "binding_id": evolution_binding["id"],
                 "provider": "evolution_baileys",
                 "encrypted_secret_present": True,
+                "preserved_existing_n8n_agents_config": evolution_preserved,
             },
         ],
     })
