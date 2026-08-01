@@ -22,6 +22,7 @@ class RequestStub:
     def __init__(self, payload: dict):
         self.payload = payload
         self.raw = __import__("json").dumps(payload).encode()
+        self.headers: dict[str, str] = {}
 
     async def body(self):
         return self.raw

@@ -23,6 +23,10 @@ from services import event_emitter, supabase_client
 router = APIRouter(prefix="/webhooks/whatsapp", tags=["whatsapp"])
 internal_router = APIRouter(prefix="/internal/whatsapp", tags=["whatsapp"])
 logger = logging.getLogger("whatsapp")
+# Evolution's webhook has always had this guard (EVOLUTION_WEBHOOK_MAX_BYTES);
+# Meta's had none at all. Same env var name/default so both providers share
+# one documented limit.
+MAX_WEBHOOK_BYTES = int(os.environ.get("EVOLUTION_WEBHOOK_MAX_BYTES", str(2 * 1024 * 1024)))
 
 
 def _mask(phone: str | None) -> str | None:
@@ -194,7 +198,12 @@ def _process_status(payload: dict[str, Any]) -> dict:
 
 
 async def _signed_payload(request: Request, signature: str | None) -> dict[str, Any]:
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_WEBHOOK_BYTES:
+        raise HTTPException(413, "Payload too large.")
     raw = await request.body()
+    if len(raw) > MAX_WEBHOOK_BYTES:
+        raise HTTPException(413, "Payload too large.")
     try:
         _verify_signature(raw, signature)
     except HTTPException:
