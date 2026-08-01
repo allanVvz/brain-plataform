@@ -204,11 +204,17 @@ _AGENTIC_SAFETY_INSTRUCTIONS = (
     "modelo do carro juntos), identifique cada uma separadamente — nao "
     "deixe nenhuma se perder so porque vieram juntas. Responda sempre em "
     "formato JSON, exatamente {\"reply_text\": \"...\", \"extracted_fields\": "
-    "{...}}, sem nenhum texto fora do JSON. extracted_fields deve conter "
-    "somente os campos da lista 'Informacoes pendentes' que o cliente "
-    "realmente respondeu nesta mensagem, com a chave exata fornecida — "
-    "nunca invente uma chave nova nem preencha um campo que o cliente nao "
-    "respondeu."
+    "{...}, \"identified_service_slug\": \"...\"}, sem nenhum texto fora do "
+    "JSON. extracted_fields deve conter somente os campos da lista "
+    "'Informacoes pendentes' que o cliente realmente respondeu nesta "
+    "mensagem, com a chave exata fornecida — nunca invente uma chave nova "
+    "nem preencha um campo que o cliente nao respondeu. Se, pelo que o "
+    "cliente descreveu (mesmo sem citar o nome do servico), voce "
+    "identificar qual item da lista 'Servicos disponiveis' resolve o caso "
+    "dele, preencha identified_service_slug com o slug EXATO dessa lista — "
+    "nunca invente um slug que nao esteja nela. Se nenhum servico "
+    "especifico ficou claro ainda, omita identified_service_slug ou "
+    "deixe null."
 )
 
 
@@ -318,6 +324,31 @@ def _merge_extracted_fields(cart_state: dict[str, Any], extracted_fields: dict[s
         else:
             still_missing.append(field)
     return {**cart_state, "appointment_request": request, "missing_fields": still_missing}
+
+
+def _resolve_identified_service(
+    extracted_fields: dict[str, str],
+    identified_service_slug: str | None,
+    available_services: list[dict[str, str]],
+) -> dict[str, str]:
+    """Fold an AI-inferred service into extracted_fields, safely.
+
+    Confirmed live 2026-08-01: a customer describing a symptom ("risco
+    fundo na porta") got a reply that correctly recommended "chapeação",
+    but "servico" stayed in missing_fields forever — the customer never
+    said the word themselves, so the extraction contract (which only
+    covers fields the customer explicitly answered) never captured it.
+    identified_service_slug lets the model report what it inferred, but
+    it's only trusted when it matches a real slug from this persona's own
+    catalog — never an invented one — and never overrides a value the
+    customer (or a prior turn) already provided.
+    """
+    if not identified_service_slug or "servico" in extracted_fields:
+        return extracted_fields
+    valid_slugs = {svc.get("slug") for svc in available_services}
+    if identified_service_slug not in valid_slugs:
+        return extracted_fields
+    return {**extracted_fields, "servico": identified_service_slug}
 
 
 def _approved_faq_match(graph: Any, message: str) -> Any | None:
@@ -467,6 +498,11 @@ def build_context(
     except Exception as exc:  # noqa: BLE001 — the deterministic path never needs this
         logger.warning("build_system_prompt failed: %s", exc)
         system_prompt = ""
+    available_services = [
+        {"slug": node.slug, "label": node.label}
+        for node in graph.nodes
+        if node.node_type in ("product", "service") and node.slug
+    ]
     agent_slug = next(
         (
             str((node.data or {}).get("metadata", {}).get("agent_slug"))
@@ -509,6 +545,7 @@ def build_context(
         rag_paths=[_node_path(graph, node.id) for node in nodes],
         rag_chunks=rag_chunks,
         system_prompt=system_prompt,
+        available_services=available_services,
     )
 
 
@@ -548,12 +585,12 @@ def _apply_model_fields(
     if business_model == "appointment":
         request = dict(merged.get("appointment_request") or {})
         for field in (
-            "customer_name",
-            "vehicle_model",
+            "nome_cliente",
+            "modelo_veiculo",
             "vehicle_size",
-            "condition",
-            "desired_date",
-            "time_window",
+            "condicao",
+            "data_desejada",
+            "janela_horario",
         ):
             value = _observation_value(fields.get(field))
             if value and not request.get(field):
@@ -1016,11 +1053,16 @@ def commit(
             }
         )
 
-    if response.extracted_fields:
+    extracted_fields = _resolve_identified_service(
+        dict(response.extracted_fields),
+        response.identified_service_slug,
+        context.available_services,
+    )
+    if extracted_fields:
         response = response.model_copy(
             update={
                 "cart_state": _merge_extracted_fields(
-                    response.cart_state, response.extracted_fields
+                    response.cart_state, extracted_fields
                 )
             }
         )
@@ -1178,11 +1220,11 @@ def commit(
         metadata["commercial_note"] = commercial_note
     lead_update = {"metadata": metadata, "stage": qualified_stage}
     customer_name = (
-        appointment_request.get("customer_name")
+        appointment_request.get("nome_cliente")
         if response.cart_state.get("business_model") == "appointment"
         else response.cart_state.get("customer_name")
     )
-    service_interest = appointment_request.get("service_slug") or decision.product_slug
+    service_interest = appointment_request.get("servico") or decision.product_slug
     if customer_name:
         lead_update["nome"] = str(customer_name).strip()
     if service_interest:

@@ -30,7 +30,7 @@ prompt do DeepSeek em `api/n8n-workflows/aurora-conversation.json`.
 2. **Objetivo do cliente** — perguntar cedo se o cliente pretende vender o
    veículo em breve ou vai continuar com ele e investir em cuidado e
    proteção (`objective`).
-3. **Identificação do veículo** — modelo e ano (`vehicle_model`,
+3. **Identificação do veículo** — modelo e ano (`modelo_veiculo`,
    `vehicle_year`); cor (`vehicle_color`) somente para os serviços que
    envolvem pintura (polimento, vitrificação, chapeação, pintura).
 4. **Explicação breve do serviço** antes de falar de preço.

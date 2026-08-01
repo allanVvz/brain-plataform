@@ -9,13 +9,13 @@ from services.deterministic_sdr import Catalog, Product, _brl, _norm
 
 
 DEFAULT_REQUIRED_FIELDS = (
-    "customer_name",
-    "service_slug",
-    "vehicle_model",
+    "nome_cliente",
+    "servico",
+    "modelo_veiculo",
     "vehicle_size",
-    "condition",
-    "desired_date",
-    "time_window",
+    "condicao",
+    "data_desejada",
+    "janela_horario",
 )
 
 
@@ -109,17 +109,17 @@ def _plain_value(text: str) -> str | None:
 
 
 DEFAULT_FIELD_QUESTIONS = {
-    "customer_name": "Qual é o seu nome?",
-    "service_slug": "Qual serviço você deseja?",
-    "vehicle_model": "Qual é o modelo do veículo?",
+    "nome_cliente": "Qual é o seu nome?",
+    "servico": "Qual serviço você deseja?",
+    "modelo_veiculo": "Qual é o modelo do veículo?",
     "vehicle_year": "Qual é o ano do veículo?",
     "vehicle_color": "Qual é a cor do veículo?",
     "vehicle_size": "Qual é o porte do veículo, por exemplo hatch, sedan, SUV ou picape?",
-    "condition": "Como está o veículo hoje e quais pontos precisam de atenção?",
+    "condicao": "Como está o veículo hoje e quais pontos precisam de atenção?",
     "objective": "Você pretende vender o veículo em breve ou vai continuar com ele?",
     "can_visit_in_person": "Você consegue vir até nós ou prefere seguir tudo à distância?",
-    "desired_date": "Qual data você prefere?",
-    "time_window": "Qual período você prefere: manhã, tarde ou noite?",
+    "data_desejada": "Qual data você prefere?",
+    "janela_horario": "Qual período você prefere: manhã, tarde ou noite?",
 }
 
 
@@ -164,9 +164,9 @@ class DeterministicAppointment:
     def _product(self, request: dict[str, Any], message: str) -> Product | None:
         product = self.catalog.find_product(message)
         if product:
-            request["service_slug"] = product.slug
+            request["servico"] = product.slug
             return product
-        slug = request.get("service_slug")
+        slug = request.get("servico")
         return next((item for item in self.catalog.products if item.slug == slug), None)
 
     def _required(self, product: Product | None) -> tuple[str, ...]:
@@ -178,31 +178,31 @@ class DeterministicAppointment:
         window = _extract_window(message)
         size = _extract_size(message)
         if name:
-            request["customer_name"] = name
+            request["nome_cliente"] = name
         if date:
-            request["desired_date"] = date
+            request["data_desejada"] = date
         if window:
-            request["time_window"] = window
+            request["janela_horario"] = window
         if size:
             request["vehicle_size"] = size
 
         plain = _plain_value(message)
         if not plain or not expected or request.get(expected):
             return
-        if expected == "customer_name":
+        if expected == "nome_cliente":
             if re.fullmatch(r"[A-Za-zÀ-ÿ]{2,}(?:\s+[A-Za-zÀ-ÿ]{2,}){0,3}", plain):
                 request[expected] = plain
         elif expected == "vehicle_size":
             if size:
                 request[expected] = size
-        elif expected == "desired_date":
+        elif expected == "data_desejada":
             if date:
                 request[expected] = date
-        elif expected == "time_window":
+        elif expected == "janela_horario":
             if window:
                 request[expected] = window
         else:
-            # Any other field (vehicle_model, condition, vehicle_year,
+            # Any other field (modelo_veiculo, condicao, vehicle_year,
             # vehicle_color, objective, can_visit_in_person, and future
             # per-product fields) accepts free text as-is.
             request[expected] = plain
@@ -328,11 +328,11 @@ class DeterministicAppointment:
                 else "request_quote"
                 if explicit_quote
                 else {
-                    "vehicle_model": "provide_vehicle",
+                    "modelo_veiculo": "provide_vehicle",
                     "vehicle_size": "provide_vehicle",
-                    "condition": "provide_condition",
-                    "desired_date": "provide_date",
-                    "time_window": "provide_time_window",
+                    "condicao": "provide_condition",
+                    "data_desejada": "provide_date",
+                    "janela_horario": "provide_time_window",
                 }.get(expected or "", "request_booking")
             )
             prefix = ""

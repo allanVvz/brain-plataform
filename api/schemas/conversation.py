@@ -38,6 +38,7 @@ class ConversationContext(StrictModel):
     rag_paths: list[list[str]]
     rag_chunks: list[dict[str, Any]] = Field(default_factory=list)
     system_prompt: str = ""
+    available_services: list[dict[str, str]] = Field(default_factory=list)
 
 
 class ConversationDecision(StrictModel):
@@ -60,3 +61,4 @@ class AgentResponse(StrictModel):
     cart_state: dict[str, Any]
     handoff_required: bool = False
     extracted_fields: dict[str, str] = Field(default_factory=dict)
+    identified_service_slug: str | None = None

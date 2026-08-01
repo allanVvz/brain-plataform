@@ -201,6 +201,37 @@ def test_aurora_agentic_workflow_requests_and_forwards_extracted_fields():
     assert "response: $json.response" in persist_node["parameters"]["body"]
 
 
+def test_aurora_agentic_workflow_requests_and_forwards_identified_service_slug():
+    """Regression test for the 2026-08-01 service-inference fix.
+
+    A customer describing a symptom ("risco fundo na porta") got a reply
+    that correctly recommended chapeacao, but the service was never
+    captured structurally — extracted_fields only covers what the
+    customer explicitly says. Draft agentic reply must expose the real
+    service catalog (so the model can name a real slug) and Merge model
+    reply safely must parse and forward identified_service_slug through
+    to /internal/conversations/commit, which validates and applies it via
+    conversation_runtime._resolve_identified_service.
+    """
+    workflow = json.loads(
+        (ROOT / "api" / "n8n-workflows" / "aurora-conversation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    draft_node = next(
+        node for node in workflow["nodes"] if node["name"] == "Draft agentic reply"
+    )
+    assert "servicos_disponiveis" in draft_node["parameters"]["body"]
+    assert "available_services" in draft_node["parameters"]["body"]
+
+    merge_node = next(
+        node for node in workflow["nodes"] if node["name"] == "Merge model reply safely"
+    )
+    js_code = merge_node["parameters"]["jsCode"]
+    assert "identified_service_slug" in js_code
+    assert "identifiedServiceSlug" in js_code
+
+
 def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatch):
     graph = compile_persona_documents(
         ROOT / "docs" / "sdr",

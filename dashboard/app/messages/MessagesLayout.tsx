@@ -25,11 +25,11 @@ interface Lead {
   interesse_produto: string | null;
   metadata?: {
     commercial_note?: {
-      vehicle_model?: string;
+      modelo_veiculo?: string;
       vehicle_size?: string;
-      condition?: string;
-      desired_date?: string;
-      time_window?: string;
+      condicao?: string;
+      data_desejada?: string;
+      janela_horario?: string;
     };
     [key: string]: any;
   } | null;
@@ -1941,12 +1941,12 @@ export function MessagesLayout({
                       {selectedLead.interesse_produto}
                     </span>
                   )}
-                  {selectedLead.metadata?.commercial_note?.vehicle_model && (
+                  {selectedLead.metadata?.commercial_note?.modelo_veiculo && (
                     <span
                       title="Nota comercial vinculada ao lead"
                       className="rounded border border-violet-300/50 bg-violet-100/70 px-1.5 py-0.5 text-[10px] text-violet-700"
                     >
-                      Nota comercial · veículo: {selectedLead.metadata.commercial_note.vehicle_model}
+                      Nota comercial · veículo: {selectedLead.metadata.commercial_note.modelo_veiculo}
                     </span>
                   )}
                   <span className="text-[10px] text-obs-faint ml-auto">

@@ -99,7 +99,7 @@ def test_catalog_reads_duration_price_qualifier_and_manual_confirmation():
     assert service.capacity == 1
     assert service.confirmation_required is True
     assert service.booking_provider == "manual"
-    assert "vehicle_model" in service.required_fields
+    assert "modelo_veiculo" in service.required_fields
 
 
 def test_appointment_collects_partial_request_and_always_hands_confirmation_to_human():
@@ -111,7 +111,7 @@ def test_appointment_collects_partial_request_and_always_hands_confirmation_to_h
     result = engine.handle("Quero agendar higienização interna")
     assert result.intent == "request_booking"
     assert result.handoff is False
-    assert result.state["missing_fields"][0] == "customer_name"
+    assert result.state["missing_fields"][0] == "nome_cliente"
 
     for answer in ("Allan", "Onix", "2020", "Quero vender em breve", "Consigo levar até a Aurora"):
         result = engine.handle(answer, state=result.state)
@@ -123,13 +123,13 @@ def test_appointment_collects_partial_request_and_always_hands_confirmation_to_h
     assert result.handoff_reason == "appointment_confirmation_required"
     assert result.state["missing_fields"] == []
     assert result.state["appointment_request"] == {
-        "service_slug": "higienizacao-interna",
-        "customer_name": "Allan",
-        "vehicle_model": "Onix",
+        "servico": "higienizacao-interna",
+        "nome_cliente": "Allan",
+        "modelo_veiculo": "Onix",
         "vehicle_year": "2020",
         "objective": "Quero vender em breve",
         "can_visit_in_person": "Consigo levar até a Aurora",
-        "condition": "Bancos meio manchados",
+        "condicao": "Bancos meio manchados",
     }
     assert result.reply == (
         "A higienização interna leva cerca de 3 horas e parte de R$ 350,00. "
@@ -178,7 +178,7 @@ def test_commercial_note_fields_are_declared_per_persona_not_hardcoded():
     """
     context = context_for("Oi", cart={"business_model": "appointment"})
     assert conversation_runtime._commercial_note_fields(context) == [
-        "vehicle_model", "vehicle_size", "condition", "desired_date", "time_window",
+        "modelo_veiculo", "vehicle_size", "condicao", "data_desejada", "janela_horario",
     ]
 
 
@@ -199,12 +199,12 @@ def test_runtime_selects_appointment_classifier_stage_and_graph_evidence(monkeyp
                 "business_model": "appointment",
                 "conversation_state": "collecting",
                 "appointment_request": {
-                    "service_slug": "higienizacao-interna",
-                    "customer_name": "Allan",
-                    "vehicle_model": "Onix",
+                    "servico": "higienizacao-interna",
+                    "nome_cliente": "Allan",
+                    "modelo_veiculo": "Onix",
                     "vehicle_year": "2020",
                     "objective": "Quero vender em breve",
-                    "condition": "bancos manchados",
+                    "condicao": "bancos manchados",
                 },
                 "missing_fields": ["can_visit_in_person"],
                 "_lead_stage": "qualificado",
@@ -265,12 +265,12 @@ def test_confirmation_faq_interrupts_collection_without_losing_booking_state(mon
         "business_model": "appointment",
         "conversation_state": "collecting",
         "appointment_request": {
-            "service_slug": "polimento-tecnico",
+            "servico": "polimento-tecnico",
             "vehicle_year": "2019",
             "objective": "Quero manter e cuidar do carro",
             "can_visit_in_person": "Consigo ir presencialmente",
         },
-        "missing_fields": ["customer_name", "vehicle_model", "vehicle_color", "condition"],
+        "missing_fields": ["nome_cliente", "modelo_veiculo", "vehicle_color", "condicao"],
         "_lead_stage": "qualificado",
     }
 
@@ -463,43 +463,93 @@ def test_merge_extracted_fields_fills_multiple_missing_fields_at_once():
     one field's value. The agentic engine reads the full message and can
     extract more than one field — this applies that extraction safely."""
     cart_state = {
-        "missing_fields": ["vehicle_model", "vehicle_year", "condition"],
-        "appointment_request": {"customer_name": "Allan Roberto", "service_slug": "chapeacao"},
+        "missing_fields": ["modelo_veiculo", "vehicle_year", "condicao"],
+        "appointment_request": {"nome_cliente": "Allan Roberto", "servico": "chapeacao"},
     }
     merged = conversation_runtime._merge_extracted_fields(
-        cart_state, {"vehicle_model": "Tracker", "vehicle_year": "2024"},
+        cart_state, {"modelo_veiculo": "Tracker", "vehicle_year": "2024"},
     )
-    assert merged["appointment_request"]["vehicle_model"] == "Tracker"
+    assert merged["appointment_request"]["modelo_veiculo"] == "Tracker"
     assert merged["appointment_request"]["vehicle_year"] == "2024"
-    assert merged["appointment_request"]["customer_name"] == "Allan Roberto"  # untouched
-    assert merged["missing_fields"] == ["condition"]
+    assert merged["appointment_request"]["nome_cliente"] == "Allan Roberto"  # untouched
+    assert merged["missing_fields"] == ["condicao"]
 
 
 def test_merge_extracted_fields_never_overwrites_an_already_filled_field():
     cart_state = {
-        "missing_fields": ["vehicle_model"],
-        "appointment_request": {"vehicle_model": "Onix"},
+        "missing_fields": ["modelo_veiculo"],
+        "appointment_request": {"modelo_veiculo": "Onix"},
     }
     # vehicle_model isn't even in missing_fields anymore, so this must be a
     # no-op regardless of what the agent claims to have extracted.
     merged = conversation_runtime._merge_extracted_fields(
-        cart_state, {"vehicle_model": "Civic"},
+        cart_state, {"modelo_veiculo": "Civic"},
     )
-    assert merged["appointment_request"]["vehicle_model"] == "Onix"
+    assert merged["appointment_request"]["modelo_veiculo"] == "Onix"
 
 
 def test_merge_extracted_fields_ignores_keys_outside_missing_fields():
     """The agent must never be able to inject a field that isn't
     genuinely on the missing_fields list — no hallucinated or
     out-of-scope key gets accepted."""
-    cart_state = {"missing_fields": ["vehicle_model"], "appointment_request": {}}
+    cart_state = {"missing_fields": ["modelo_veiculo"], "appointment_request": {}}
     merged = conversation_runtime._merge_extracted_fields(
         cart_state, {"discount_percent": "50"},
     )
     assert "discount_percent" not in merged["appointment_request"]
-    assert merged["missing_fields"] == ["vehicle_model"]
+    assert merged["missing_fields"] == ["modelo_veiculo"]
 
 
 def test_merge_extracted_fields_is_noop_without_extraction():
-    cart_state = {"missing_fields": ["vehicle_model"], "appointment_request": {}}
+    cart_state = {"missing_fields": ["modelo_veiculo"], "appointment_request": {}}
     assert conversation_runtime._merge_extracted_fields(cart_state, {}) == cart_state
+
+
+def test_resolve_identified_service_accepts_a_real_catalog_slug():
+    """Regression test for the 2026-08-01 finding: a customer describing
+    a symptom ("risco fundo na porta") got a reply correctly recommending
+    chapeacao, but 'servico' stayed in missing_fields forever because the
+    customer never said the word — extracted_fields only covers answers
+    the customer literally gave. identified_service_slug is the model's
+    way of reporting what it inferred, accepted only against a real slug.
+    """
+    resolved = conversation_runtime._resolve_identified_service(
+        {}, "chapeacao", [{"slug": "chapeacao", "label": "Chapeação"}],
+    )
+    assert resolved == {"servico": "chapeacao"}
+
+
+def test_resolve_identified_service_rejects_an_invented_slug():
+    resolved = conversation_runtime._resolve_identified_service(
+        {}, "servico-que-nao-existe", [{"slug": "chapeacao", "label": "Chapeação"}],
+    )
+    assert resolved == {}
+
+
+def test_resolve_identified_service_never_overrides_an_explicit_answer():
+    resolved = conversation_runtime._resolve_identified_service(
+        {"servico": "vitrificacao"},
+        "chapeacao",
+        [{"slug": "chapeacao", "label": "Chapeação"}, {"slug": "vitrificacao", "label": "Vitrificação"}],
+    )
+    assert resolved == {"servico": "vitrificacao"}
+
+
+def test_resolve_identified_service_is_noop_without_a_slug():
+    assert conversation_runtime._resolve_identified_service({}, None, []) == {}
+
+
+def test_build_context_wires_available_services_from_graph_products(monkeypatch):
+    """The n8n Draft node needs the persona's real service catalog (slug +
+    label) so the model can report identified_service_slug against
+    something real instead of inventing one."""
+    _mock_build_context_deps(monkeypatch)
+
+    context = conversation_runtime.build_context(
+        persona_slug="aurora", lead_ref=23, message="Oi",
+    )
+
+    slugs = {svc["slug"] for svc in context.available_services}
+    assert "chapeacao" in slugs
+    assert "vitrificacao" in slugs
+    assert all("label" in svc for svc in context.available_services)

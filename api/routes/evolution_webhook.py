@@ -140,7 +140,33 @@ async def evolution_webhook(binding_id: str, request: Request):
             ignored += 1
             continue
         contact = str(event.get("external_contact_id") or "")
-        if not contact or contact.endswith(IGNORED_SUFFIXES) or event.get("from_me"):
+        if not contact or contact.endswith(IGNORED_SUFFIXES):
+            ignored += 1
+            continue
+        if event.get("from_me"):
+            # Sent by hand from the linked phone, bypassing the platform.
+            # Record it for history (never re-dispatch — it already went
+            # out — and never trigger an AI reply to the business's own
+            # message).
+            external_id = str(event.get("external_message_id") or "")
+            if external_id:
+                lead = supabase_client.ensure_channel_lead(
+                    persona_id=binding["persona_id"],
+                    channel_binding_id=binding_id,
+                    external_contact_id=contact,
+                    display_name=None,
+                )
+                supabase_client.insert_message({
+                    "lead_id": lead["id"],
+                    "direction": "outbound",
+                    "sender_type": "human",
+                    "content": event.get("text") or "",
+                    "channel": "whatsapp",
+                    "external_message_id": external_id,
+                    "channel_binding_id": binding_id,
+                    "correlation_id": f"evolution_phone:{binding_id}:{external_id}",
+                    "metadata": {"provider": "evolution_baileys", "source": "phone_manual"},
+                })
             ignored += 1
             continue
         if not _allowed(binding, contact):
