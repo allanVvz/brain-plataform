@@ -83,7 +83,20 @@ class Catalog:
                 term_tokens = set(term.split())
                 overlap = len(query_tokens & term_tokens)
                 if term and term in query:
-                    overlap = max(overlap, len(term_tokens) + 10)
+                    # A multi-word term appearing verbatim is a strong,
+                    # specific signal regardless of message length. A
+                    # single generic word (e.g. "pintura", the paint
+                    # material — also this persona's full-repaint service
+                    # name) is only trustworthy at that strength inside a
+                    # short, direct message ("quero pintura"); inside a
+                    # long descriptive sentence ("minha pintura ta toda
+                    # fosca...") it's usually the customer describing
+                    # their car, not naming a service — confirmed live
+                    # 2026-08-01, where this false-positive silently
+                    # locked in the wrong service before the agentic
+                    # engine's own symptom-based inference could run.
+                    if len(term_tokens) > 1 or len(query_tokens) <= 5:
+                        overlap = max(overlap, len(term_tokens) + 10)
                 if overlap > best_overlap:
                     best_overlap = overlap
                     best_term_length = len(term_tokens)

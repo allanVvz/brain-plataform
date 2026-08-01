@@ -539,6 +539,30 @@ def test_resolve_identified_service_is_noop_without_a_slug():
     assert conversation_runtime._resolve_identified_service({}, None, []) == {}
 
 
+def test_find_product_ignores_a_generic_word_inside_a_long_description():
+    """Regression test for the 2026-08-01 finding: 'pintura' is both the
+    word for car paint (the material) and the exact name of Aurora's
+    full-repaint service. A customer describing symptoms ('minha pintura
+    ta toda fosca e sem brilho') got auto-matched to the repaint service
+    before the agentic engine's own symptom-based inference (which
+    correctly said polimento tecnico) ever got a chance — because once
+    servico is filled, _merge_extracted_fields refuses to overwrite it.
+    """
+    catalog = catalog_from_graph(aurora_graph())
+    result = catalog.find_product(
+        "Oi, minha pintura ta toda fosca e sem brilho, da pra resolver?"
+    )
+    assert result is None
+
+
+def test_find_product_still_matches_a_short_direct_request():
+    """The fix above must not break genuine short, direct requests, where
+    a single generic word naming a product is a reliable signal."""
+    catalog = catalog_from_graph(aurora_graph())
+    assert catalog.find_product("pintura").slug == "pintura"
+    assert catalog.find_product("quero fazer pintura no carro").slug == "pintura"
+
+
 def test_build_context_wires_available_services_from_graph_products(monkeypatch):
     """The n8n Draft node needs the persona's real service catalog (slug +
     label) so the model can report identified_service_slug against
