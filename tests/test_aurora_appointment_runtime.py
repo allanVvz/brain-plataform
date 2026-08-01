@@ -397,6 +397,25 @@ def test_build_system_prompt_is_persona_agnostic_and_reads_tone_and_rules():
     assert "Nunca confirme preco final" in prompt
 
 
+def test_build_system_prompt_paces_one_question_at_a_time():
+    """Regression test for live feedback 2026-08-01: the first agentic
+    reply asked for name, service, and vehicle model all at once. A good
+    SDR paces the conversation — one question per message, not a form
+    dumped in the opener."""
+    prompt = conversation_runtime.build_system_prompt(aurora_graph())
+    assert "UMA informacao pendente por mensagem" in prompt
+    assert "Nunca liste tres ou mais perguntas" in prompt
+
+
+def test_build_system_prompt_instructs_multi_field_extraction():
+    """The instruction to return extracted_fields (so a customer's single
+    message answering several missing fields at once doesn't lose all
+    but the first) lives in the generated prompt, not the n8n workflow
+    JSON — this is what actually tells DeepSeek the response schema."""
+    prompt = conversation_runtime.build_system_prompt(aurora_graph())
+    assert "extracted_fields" in prompt
+
+
 def test_build_system_prompt_mentions_json_for_deepseek_response_format(monkeypatch):
     """Regression test for a real production 400 confirmed live 2026-08-01:
     DeepSeek (like OpenAI) rejects any request using
@@ -433,3 +452,54 @@ def test_build_context_wires_the_generated_system_prompt(monkeypatch):
     )
     assert context.system_prompt == conversation_runtime.build_system_prompt(aurora_graph())
     assert context.system_prompt != ""
+
+
+def test_merge_extracted_fields_fills_multiple_missing_fields_at_once():
+    """Regression test for the 2026-08-01 production finding: a customer
+    answering several missing fields in one natural sentence ("meu nome é
+    Allan, carro é Tracker 2024") only ever got the first one captured,
+    because deterministic_appointment._collect() only fills whichever
+    field is next in missing_fields, treating the whole message as that
+    one field's value. The agentic engine reads the full message and can
+    extract more than one field — this applies that extraction safely."""
+    cart_state = {
+        "missing_fields": ["vehicle_model", "vehicle_year", "condition"],
+        "appointment_request": {"customer_name": "Allan Roberto", "service_slug": "chapeacao"},
+    }
+    merged = conversation_runtime._merge_extracted_fields(
+        cart_state, {"vehicle_model": "Tracker", "vehicle_year": "2024"},
+    )
+    assert merged["appointment_request"]["vehicle_model"] == "Tracker"
+    assert merged["appointment_request"]["vehicle_year"] == "2024"
+    assert merged["appointment_request"]["customer_name"] == "Allan Roberto"  # untouched
+    assert merged["missing_fields"] == ["condition"]
+
+
+def test_merge_extracted_fields_never_overwrites_an_already_filled_field():
+    cart_state = {
+        "missing_fields": ["vehicle_model"],
+        "appointment_request": {"vehicle_model": "Onix"},
+    }
+    # vehicle_model isn't even in missing_fields anymore, so this must be a
+    # no-op regardless of what the agent claims to have extracted.
+    merged = conversation_runtime._merge_extracted_fields(
+        cart_state, {"vehicle_model": "Civic"},
+    )
+    assert merged["appointment_request"]["vehicle_model"] == "Onix"
+
+
+def test_merge_extracted_fields_ignores_keys_outside_missing_fields():
+    """The agent must never be able to inject a field that isn't
+    genuinely on the missing_fields list — no hallucinated or
+    out-of-scope key gets accepted."""
+    cart_state = {"missing_fields": ["vehicle_model"], "appointment_request": {}}
+    merged = conversation_runtime._merge_extracted_fields(
+        cart_state, {"discount_percent": "50"},
+    )
+    assert "discount_percent" not in merged["appointment_request"]
+    assert merged["missing_fields"] == ["vehicle_model"]
+
+
+def test_merge_extracted_fields_is_noop_without_extraction():
+    cart_state = {"missing_fields": ["vehicle_model"], "appointment_request": {}}
+    assert conversation_runtime._merge_extracted_fields(cart_state, {}) == cart_state

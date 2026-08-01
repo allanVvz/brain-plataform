@@ -160,6 +160,47 @@ def test_aurora_agentic_workflow_uses_generated_prompt_and_golden_dataset_rag():
     assert "estética automotiva" not in body.lower()
 
 
+def test_aurora_agentic_workflow_requests_and_forwards_extracted_fields():
+    """Regression test for the 2026-08-01 multi-field extraction fix.
+
+    A customer answering several missing fields in one message ("meu
+    nome é Allan, carro é Tracker 2024") only ever got the first one
+    captured by deterministic_appointment._collect(). Draft agentic reply
+    must tell the model which fields are still missing (so it knows what
+    keys to use) and Merge model reply safely must parse and forward
+    extracted_fields through to /internal/conversations/commit, which
+    applies them via conversation_runtime._merge_extracted_fields.
+    """
+    workflow = json.loads(
+        (ROOT / "api" / "n8n-workflows" / "aurora-conversation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    draft_node = next(
+        node for node in workflow["nodes"] if node["name"] == "Draft agentic reply"
+    )
+    # The request tells the model which fields are still missing (so it
+    # knows what keys to use); the instruction to return extracted_fields
+    # itself lives in the dynamically-generated system_prompt (tested in
+    # test_aurora_appointment_runtime.py), not hardcoded in this file.
+    assert "missing_fields" in draft_node["parameters"]["body"]
+    assert "informacoes_pendentes" in draft_node["parameters"]["body"]
+
+    merge_node = next(
+        node for node in workflow["nodes"] if node["name"] == "Merge model reply safely"
+    )
+    js_code = merge_node["parameters"]["jsCode"]
+    assert "extracted_fields" in js_code
+    assert "extractedFields" in js_code
+
+    persist_node = next(
+        node for node in workflow["nodes"] if node["name"] == "Persist once and enqueue send"
+    )
+    # response is forwarded wholesale, so extracted_fields rides along
+    # without needing its own explicit mention here.
+    assert "response: $json.response" in persist_node["parameters"]["body"]
+
+
 def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatch):
     graph = compile_persona_documents(
         ROOT / "docs" / "sdr",

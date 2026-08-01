@@ -199,8 +199,16 @@ _AGENTIC_SAFETY_INSTRUCTIONS = (
     "equipe vai confirmar e continue coletando as informacoes que faltam. "
     "Responda apenas com base nos fatos aprovados fornecidos no contexto "
     "(trecho 'Conhecimento aprovado' abaixo) e no historico da conversa — "
-    "nunca invente um fato que nao esteja la. Responda sempre em formato "
-    "JSON, exatamente {\"reply_text\": \"...\"}, sem nenhum texto fora do JSON."
+    "nunca invente um fato que nao esteja la. Se o cliente responder mais "
+    "de uma informacao pendente na mesma mensagem (por exemplo nome e "
+    "modelo do carro juntos), identifique cada uma separadamente — nao "
+    "deixe nenhuma se perder so porque vieram juntas. Responda sempre em "
+    "formato JSON, exatamente {\"reply_text\": \"...\", \"extracted_fields\": "
+    "{...}}, sem nenhum texto fora do JSON. extracted_fields deve conter "
+    "somente os campos da lista 'Informacoes pendentes' que o cliente "
+    "realmente respondeu nesta mensagem, com a chave exata fornecida — "
+    "nunca invente uma chave nova nem preencha um campo que o cliente nao "
+    "respondeu."
 )
 
 
@@ -248,7 +256,14 @@ def build_system_prompt(graph: Any) -> str:
         "Enquanto estiver ativo, responda o que voce consegue com base no "
         "conhecimento aprovado e conduza a conversa fazendo perguntas de "
         "qualificacao adequadas, como um bom vendedor faria — nao apenas "
-        "responda e espere a proxima pergunta."
+        "responda e espere a proxima pergunta. Va com calma: peca apenas "
+        "UMA informacao pendente por mensagem (no maximo duas, e so se "
+        "forem intimamente relacionadas, como marca e modelo do mesmo "
+        "item). Nunca liste tres ou mais perguntas na mesma mensagem, "
+        "principalmente na primeira interacao com o cliente — isso "
+        "cansa e afasta. Deixe a conversa fluir por varias mensagens "
+        "curtas, como uma pessoa conversando de verdade, nao um "
+        "formulario."
     )
     return "\n\n".join(lines)
 
@@ -269,6 +284,40 @@ def _commercial_note_fields(context: ConversationContext) -> list[str]:
     data = (persona_node or {}).get("data") or {}
     fields = data.get("commercial_note_fields") or []
     return [str(field) for field in fields if field]
+
+
+def _merge_extracted_fields(cart_state: dict[str, Any], extracted_fields: dict[str, str]) -> dict[str, Any]:
+    """Apply agentic-flow field extraction into appointment_request, safely.
+
+    Confirmed live 2026-08-01: the deterministic engine's own extraction
+    (deterministic_appointment._collect) only accepts a value for whichever
+    field is next in missing_fields, and treats the *entire* message as
+    that field's value. A customer answering several fields in one
+    natural sentence ("meu nome é Allan, carro é Tracker 2024") only ever
+    fills the first — the agent's reply claimed the rest was "anotado"
+    when it never reached appointment_request at all.
+
+    The agentic engine (DeepSeek) reads the whole message and the list of
+    missing fields, so it can extract more than one at once — but it must
+    never be trusted blindly: only fields genuinely still in
+    missing_fields get accepted, and an already-filled field is never
+    overwritten by agent output, exactly mirroring _collect()'s own
+    `request.get(expected)` guard.
+    """
+    if not extracted_fields:
+        return cart_state
+    missing = list(cart_state.get("missing_fields") or [])
+    if not missing:
+        return cart_state
+    request = dict(cart_state.get("appointment_request") or {})
+    still_missing = []
+    for field in missing:
+        value = extracted_fields.get(field)
+        if value and str(value).strip() and not request.get(field):
+            request[field] = str(value).strip()
+        else:
+            still_missing.append(field)
+    return {**cart_state, "appointment_request": request, "missing_fields": still_missing}
 
 
 def _approved_faq_match(graph: Any, message: str) -> Any | None:
@@ -964,6 +1013,15 @@ def commit(
                 ),
                 "role": ConversationRoute.HUMAN,
                 "handoff_required": True,
+            }
+        )
+
+    if response.extracted_fields:
+        response = response.model_copy(
+            update={
+                "cart_state": _merge_extracted_fields(
+                    response.cart_state, response.extracted_fields
+                )
             }
         )
 

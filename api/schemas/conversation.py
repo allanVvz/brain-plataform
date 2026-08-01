@@ -59,3 +59,4 @@ class AgentResponse(StrictModel):
     evidence_node_ids: list[str] = Field(default_factory=list)
     cart_state: dict[str, Any]
     handoff_required: bool = False
+    extracted_fields: dict[str, str] = Field(default_factory=dict)
