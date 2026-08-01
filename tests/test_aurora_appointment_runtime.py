@@ -138,6 +138,34 @@ def test_appointment_collects_partial_request_and_always_hands_confirmation_to_h
     )
 
 
+def test_already_handed_off_lead_keeps_handoff_flag_on_new_messages():
+    """Regression test for the 2026-08-01 production finding.
+
+    Once a lead's conversation_state becomes "handoff" (via the exceptional
+    or human-request branches above, both of which correctly pass
+    handoff=True), every later message short-circuits at the top of
+    handle(). That branch used AppointmentResult's default handoff=False,
+    so conversation_runtime.commit() never re-set response.handoff_required
+    — the worker treated a silently-empty reply as a normal completed turn
+    instead of keeping the lead flagged for a human. Confirmed live: a
+    customer messaging an already-escalated conversation got zero reply
+    and the lead was not kept paused.
+    """
+    graph = aurora_graph()
+    engine = DeterministicAppointment(
+        catalog_from_graph(graph),
+        policy=conversation_runtime._appointment_policy(graph),
+    )
+    handoff_result = engine.handle("Quero falar com atendente")
+    assert handoff_result.handoff is True
+    assert handoff_result.state["conversation_state"] == "handoff"
+
+    result = engine.handle("Oi, ainda estao ai?", state=handoff_result.state)
+    assert result.intent == "handoff"
+    assert result.reply is None
+    assert result.handoff is True
+
+
 def test_runtime_selects_appointment_classifier_stage_and_graph_evidence(monkeypatch):
     graph = install_graph(monkeypatch)
     decision, response = conversation_runtime.decide(

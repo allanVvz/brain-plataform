@@ -222,7 +222,17 @@ class DeterministicAppointment:
         request = state["appointment_request"]
 
         if state.get("conversation_state") == "handoff":
-            return AppointmentResult(None, "handoff", state)
+            # Every other transition into "handoff" in this function passes
+            # handoff=True (propagates to response.handoff_required, which
+            # is what keeps ai_paused set and the lead visibly escalated).
+            # This branch — messages arriving *after* the lead is already
+            # in the sticky handoff state — used AppointmentResult's
+            # default handoff=False, so the worker treated a silently
+            # dropped message as a normal "sent" turn instead of
+            # re-confirming the lead needs a human. Confirmed live
+            # 2026-08-01: repeated messages to an already-handed-off lead
+            # got zero reply and no re-pause.
+            return AppointmentResult(None, "handoff", state, True, "already_handoff")
 
         exceptional_terms = (
             "reclamacao", "reclamar", "garantia", "desconto", "problema",
