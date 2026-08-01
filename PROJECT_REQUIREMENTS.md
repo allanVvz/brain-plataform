@@ -270,6 +270,16 @@ Testes obrigatorios:
 
 ## 11. WhatsApp, Meta Business e n8n self-hosted
 
+> **AVISO DE DESATUALIZACAO (2026-08-01):** esta secao descreve o modelo
+> `personas.process_mode` + `outbound_webhook_url`, que a migration
+> `069_block_legacy_n8n_direct_transport.sql` ja bloqueia para escrita em
+> bindings WhatsApp diretos. O roteamento real de producao usa
+> `workflow_bindings.metadata.decision_owner`, nao `process_mode`. Antes de
+> qualquer mudanca na pipeline WhatsApp, leia primeiro
+> `docs/architecture/WHATSAPP_N8N_RUNTIME.md` — e a referencia atual, com a
+> maquina de estados completa do `lead_buffer` e um risco critico conhecido
+> (Evolution/Baileys + WhatsApp LID) que esta secao nao menciona.
+
 WhatsApp e o canal operacional de atendimento. Meta Business e a origem oficial
 do numero/catologo. n8n self-hosted e o executor de automacoes de entrada/saida.
 Brain AI e o motor de inteligencia, persistencia, roteamento, memoria e
