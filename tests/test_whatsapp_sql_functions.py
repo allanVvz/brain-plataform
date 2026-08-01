@@ -530,6 +530,51 @@ class TestHandoffWhatsappLead:
             )
         pg_conn.rollback()
 
+    def test_does_not_discard_pending_outbound_reply(self, cur, scenario):
+        """Migration 077 regression test.
+
+        Confirmed live 2026-08-01: when a burst of backlogged inbound
+        messages for the same lead gets reprocessed (e.g. right after
+        resume-ai's requeue) and a later one triggers handoff, the sweep
+        used to catch the *earlier* messages' own just-created outbound
+        replies while they were still 'pending_send' — flipping them to
+        waiting_human with zero delivery attempts. The platform showed the
+        drafted reply text; the real customer never received anything.
+        """
+        pending_reply_id = _enqueue(
+            cur, persona_id=scenario["persona_id"], lead_ref=scenario["lead_ref"],
+            binding_id=scenario["binding_id"], direction="outbound",
+        )["buffer_id"]
+        cur.execute(
+            "update public.lead_buffer set status = 'pending_send' where id = %s",
+            (pending_reply_id,),
+        )
+
+        cur.execute("select public.handoff_whatsapp_lead(%s)", (scenario["lead_ref"],))
+
+        cur.execute("select status, attempt_count from public.lead_buffer where id = %s", (pending_reply_id,))
+        row = cur.fetchone()
+        assert row["status"] == "pending_send"
+        assert row["attempt_count"] == 0
+
+    def test_state_variant_does_not_discard_pending_outbound_reply(self, cur, scenario):
+        pending_reply_id = _enqueue(
+            cur, persona_id=scenario["persona_id"], lead_ref=scenario["lead_ref"],
+            binding_id=scenario["binding_id"], direction="outbound",
+        )["buffer_id"]
+        cur.execute(
+            "update public.lead_buffer set status = 'pending_send' where id = %s",
+            (pending_reply_id,),
+        )
+
+        cur.execute(
+            "select public.handoff_whatsapp_lead_state(%s, %s::jsonb, %s)",
+            (scenario["lead_ref"], json.dumps({}), "fechamento"),
+        )
+
+        cur.execute("select status from public.lead_buffer where id = %s", (pending_reply_id,))
+        assert cur.fetchone()["status"] == "pending_send"
+
 
 # ── claim_conversation_commit / complete_conversation_commit ─────────────
 
