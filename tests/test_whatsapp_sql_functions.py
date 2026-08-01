@@ -118,6 +118,7 @@ def _enqueue(cur, *, persona_id, lead_ref, binding_id, direction="inbound",
         "status": "buffered",
         "channel": "whatsapp",
         "sender_id": external_message_id or idempotency_key,
+        "external_message_id": external_message_id,
         "channel_binding_id": binding_id,
         "correlation_id": correlation_id,
     }
@@ -649,3 +650,52 @@ class TestCompleteWhatsappOutboundResult:
         )
         result = cur.fetchone()["result"]
         assert result["deduplicated"] is True
+
+    def test_shared_correlation_id_with_inbound_does_not_corrupt_inbound_row(self, cur, scenario):
+        """Migration 076 regression test.
+
+        Confirmed live 2026-08-01: conversation_runtime.commit() used to
+        reuse the *inbound* message's correlation_id for the outbound reply
+        it generated. When both a lead_buffer/messages inbound row and an
+        outbound row shared one correlation_id, this function's UPDATE
+        (scoped only by channel_binding_id + correlation_id, not direction)
+        matched both rows and tried to force the same external_message_id
+        onto both, tripping idx_messages_channel_external_unique and
+        aborting the whole completion even though the provider had already
+        delivered the message. Direction-scoping the UPDATE fixes it; the
+        Python-side root cause (giving the outbound leg its own
+        correlation_id) is fixed separately.
+        """
+        shared_correlation_id = f"shared:{uuid.uuid4()}"
+        inbound_id = _enqueue(
+            cur, persona_id=scenario["persona_id"], lead_ref=scenario["lead_ref"],
+            binding_id=scenario["binding_id"], direction="inbound",
+            correlation_id=shared_correlation_id,
+            external_message_id="INBOUND-ORIGINAL-ID",
+        )["buffer_id"]
+        outbound_id = _enqueue(
+            cur, persona_id=scenario["persona_id"], lead_ref=scenario["lead_ref"],
+            binding_id=scenario["binding_id"], direction="outbound",
+            correlation_id=shared_correlation_id,
+        )["buffer_id"]
+
+        cur.execute(
+            "select public.complete_whatsapp_outbound_result(%s, %s, %s, %s, %s, %s, %s) as result",
+            (outbound_id, scenario["binding_id"], shared_correlation_id, "wamid.shared", True, None, "exec-1"),
+        )
+        result = cur.fetchone()["result"]
+        assert result["ok"] is True
+        assert result["status"] == "sent"
+
+        cur.execute(
+            "select direction, status, external_message_id from public.messages "
+            "where channel_binding_id = %s and correlation_id = %s order by direction",
+            (scenario["binding_id"], shared_correlation_id),
+        )
+        rows = {row["direction"]: row for row in cur.fetchall()}
+        assert rows["inbound"]["external_message_id"] == "INBOUND-ORIGINAL-ID"
+        assert rows["outbound"]["status"] == "sent"
+        assert rows["outbound"]["external_message_id"] == "wamid.shared"
+
+        cur.execute("select status from public.lead_buffer where id = %s", (inbound_id,))
+        assert cur.fetchone()["status"] == "buffered"

@@ -1056,12 +1056,19 @@ def commit(
 
     buffer = None
     if response.reply_text:
+        # message_id ("ai:<inbound correlation_id>") is unique to this
+        # outbound leg — reusing the inbound correlation_id here made the
+        # outbound message row share it with the inbound row that triggered
+        # it, so complete_whatsapp_outbound_result's `WHERE correlation_id =
+        # ...` (scoped only by binding, not direction) matched both rows and
+        # tried to force the same external_message_id onto both, tripping
+        # idx_messages_channel_external_unique. Confirmed live 2026-08-01.
         envelope = whatsapp_outbox.enqueue_outbound(
             lead=lead,
             text=response.reply_text,
             sender_type="agent",
             message_id=message_id,
-            correlation_id=correlation_id,
+            correlation_id=message_id,
             idempotency_key=message_id,
             metadata={
                 "agent_slug": context.agent_slug,
