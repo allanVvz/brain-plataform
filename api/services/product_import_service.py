@@ -514,15 +514,20 @@ def _materialize_product(
         )
         created_nodes["copy"] = copy_node.get("id")
 
+        # The question must read like something a customer would actually
+        # type — never a meta-question about the data's own review/approval
+        # status. Approval is tracked via `status` (pending_validation ->
+        # validated) for agents to read structurally; it must never leak
+        # into customer-facing copy.
         faq = supabase_client.upsert_knowledge_node(
             {
                 "persona_id": persona_id,
                 "node_type": "faq",
                 "slug": _slugify(f"faq-{slug}-informacoes"),
-                "title": f"Quais informações estão confirmadas sobre {norm['name']}?",
+                "title": f"O que é {norm['name']}?",
                 "summary": copy_summary[:400],
                 "metadata": {
-                    "question": f"Quais informações estão confirmadas sobre {norm['name']}?",
+                    "question": f"O que é {norm['name']}?",
                     "answer": copy_summary[:400],
                     "source": norm["source"],
                     "parent_slug": copy_node.get("slug"),

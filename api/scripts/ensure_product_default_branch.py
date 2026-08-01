@@ -60,11 +60,11 @@ def ensure_product_branches(persona_slug: str) -> dict:
             "persona_id": persona_id,
             "node_type": "faq",
             "slug": f"faq-{slug}-informacoes",
-            "title": f"Quais informacoes estao confirmadas sobre {title}?",
+            "title": f"O que e {title}?",
             "summary": body[:400],
             "tags": ["faq", "default_product_branch"],
             "metadata": {
-                "question": f"Quais informacoes estao confirmadas sobre {title}?",
+                "question": f"O que e {title}?",
                 "answer": body[:400],
                 "source": source,
                 "parent_node_id": copy["id"],

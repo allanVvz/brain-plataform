@@ -40,11 +40,11 @@ def validate() -> dict:
         "aurora_orphan_faqs": len(faqs) - len({edge.source for edge in faq_edges}),
     }
     expected = {
-        "aurora_nodes": 42,
-        "aurora_edges": 54,
-        "aurora_markdown_documents": 40,
-        "aurora_faqs": 14,
-        "aurora_faq_embedded_edges": 14,
+        "aurora_nodes": 47,
+        "aurora_edges": 64,
+        "aurora_markdown_documents": 45,
+        "aurora_faqs": 19,
+        "aurora_faq_embedded_edges": 19,
         "aurora_orphan_faqs": 0,
     }
     if checks != expected:

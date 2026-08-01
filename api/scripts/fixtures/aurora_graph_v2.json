@@ -346,6 +346,34 @@
       }
     },
     {
+      "id": "aurora-faq-wash-includes",
+      "node_type": "faq",
+      "slug": "faq-lavagem-detalhada-inclui",
+      "label": "O que está incluído na lavagem detalhada?",
+      "parent_id": "aurora-copy-wash",
+      "data": {
+        "source": "user_authorized_demo_briefing_2026_07_29",
+        "status": "validated",
+        "question": "O que está incluído na lavagem detalhada?",
+        "answer": "A lavagem detalhada limpa frisos, cantinhos, emblemas e caixas de rodas, além de portas, consoles e painel. Inclui também aspiração de bancos e carpetes, e aplicação de produto revitalizador nas partes plásticas para brilho e proteção.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-wash",
+          "aurora-copy-wash"
+        ],
+        "source_node_id": "aurora-product-wash",
+        "source_node_type": "product",
+        "markdown": "# O que está incluído na lavagem detalhada?\n\n## Pergunta\n\nO que está incluído na lavagem detalhada?\n\n## Resposta\n\nA lavagem detalhada limpa frisos, cantinhos, emblemas e caixas de rodas, além de portas, consoles e painel. Inclui também aspiração de bancos e carpetes, e aplicação de produto revitalizador nas partes plásticas para brilho e proteção.",
+        "markdown_document": true,
+        "question_count": 1
+      }
+    },
+    {
       "id": "aurora-product-interior",
       "node_type": "product",
       "slug": "higienizacao-interna",
@@ -421,6 +449,34 @@
         "source_node_id": "aurora-product-interior",
         "source_node_type": "product",
         "markdown": "# Quanto custa e quanto dura a higienização interna?\n\n## Pergunta\n\nQuanto custa e quanto dura a higienização interna?\n\n## Resposta\n\nA higienização interna leva cerca de 3 horas e parte de R$ 350,00. O valor final e o horário dependem de confirmação humana.",
+        "markdown_document": true,
+        "question_count": 1
+      }
+    },
+    {
+      "id": "aurora-faq-interior-includes",
+      "node_type": "faq",
+      "slug": "faq-higienizacao-interna-inclui",
+      "label": "O que está incluído na higienização interna?",
+      "parent_id": "aurora-copy-interior",
+      "data": {
+        "source": "user_authorized_demo_briefing_2026_07_29",
+        "status": "validated",
+        "question": "O que está incluído na higienização interna?",
+        "answer": "A limpeza vai do teto do carro às colunas, cintos, painel e consoles. Os bancos são higienizados, carpete e tapetes também são limpos, e bancos de couro recebem hidratação para evitar rachaduras.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-interior",
+          "aurora-copy-interior"
+        ],
+        "source_node_id": "aurora-product-interior",
+        "source_node_type": "product",
+        "markdown": "# O que está incluído na higienização interna?\n\n## Pergunta\n\nO que está incluído na higienização interna?\n\n## Resposta\n\nA limpeza vai do teto do carro às colunas, cintos, painel e consoles. Os bancos são higienizados, carpete e tapetes também são limpos, e bancos de couro recebem hidratação para evitar rachaduras.",
         "markdown_document": true,
         "question_count": 1
       }
@@ -507,6 +563,34 @@
       }
     },
     {
+      "id": "aurora-faq-polish-includes",
+      "node_type": "faq",
+      "slug": "faq-polimento-tecnico-inclui",
+      "label": "Como funciona o processo de polimento técnico?",
+      "parent_id": "aurora-copy-polish",
+      "data": {
+        "source": "user_authorized_demo_briefing_2026_07_29",
+        "status": "validated",
+        "question": "Como funciona o processo de polimento técnico?",
+        "answer": "O processo inclui lavagem detalhada, descontaminação da pintura e isolamento de partes sensíveis, seguido do polimento — que pode ser feito para ativar o brilho ou de forma mais profunda para corrigir riscos, dependendo do estado do veículo.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish",
+          "aurora-copy-polish"
+        ],
+        "source_node_id": "aurora-product-polish",
+        "source_node_type": "product",
+        "markdown": "# Como funciona o processo de polimento técnico?\n\n## Pergunta\n\nComo funciona o processo de polimento técnico?\n\n## Resposta\n\nO processo inclui lavagem detalhada, descontaminação da pintura e isolamento de partes sensíveis, seguido do polimento — que pode ser feito para ativar o brilho ou de forma mais profunda para corrigir riscos, dependendo do estado do veículo.",
+        "markdown_document": true,
+        "question_count": 1
+      }
+    },
+    {
       "id": "aurora-product-vitrification",
       "node_type": "product",
       "slug": "vitrificacao",
@@ -578,6 +662,34 @@
         "source_node_id": "aurora-product-vitrification",
         "source_node_type": "product",
         "markdown": "# Quanto custa e quanto dura a vitrificação?\n\n## Pergunta\n\nQuanto custa e quanto dura a vitrificação?\n\n## Resposta\n\nO processo é o mesmo do polimento técnico, finalizado com a aplicação do vitrificador. O valor final depende da durabilidade escolhida e só é definido após avaliação do veículo.",
+        "markdown_document": true,
+        "question_count": 1
+      }
+    },
+    {
+      "id": "aurora-faq-vitrification-difference",
+      "node_type": "faq",
+      "slug": "faq-vitrificacao-diferenca-polimento",
+      "label": "Qual a diferença entre vitrificação e polimento técnico?",
+      "parent_id": "aurora-copy-vitrification",
+      "data": {
+        "source": "user_authorized_demo_briefing_2026_07_29",
+        "status": "validated",
+        "question": "Qual a diferença entre vitrificação e polimento técnico?",
+        "answer": "As etapas iniciais são as mesmas — limpeza, descontaminação, isolamento e correção de riscos. A diferença é que a vitrificação termina com a aplicação do vitrificador, uma camada de proteção química cuja durabilidade você escolhe.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-vitrification",
+          "aurora-copy-vitrification"
+        ],
+        "source_node_id": "aurora-product-vitrification",
+        "source_node_type": "product",
+        "markdown": "# Qual a diferença entre vitrificação e polimento técnico?\n\n## Pergunta\n\nQual a diferença entre vitrificação e polimento técnico?\n\n## Resposta\n\nAs etapas iniciais são as mesmas — limpeza, descontaminação, isolamento e correção de riscos. A diferença é que a vitrificação termina com a aplicação do vitrificador, uma camada de proteção química cuja durabilidade você escolhe.",
         "markdown_document": true,
         "question_count": 1
       }
@@ -1003,6 +1115,30 @@
       }
     },
     {
+      "id": "aurora-faq-why-objective",
+      "node_type": "faq",
+      "slug": "faq-por-que-pergunta-objetivo",
+      "label": "Por que vocês perguntam se vou vender o carro?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "user_authorized_demo_briefing_2026_07_29",
+        "status": "validated",
+        "question": "Por que vocês perguntam se vou vender o carro?",
+        "answer": "Perguntamos se você vai vender o veículo em breve ou vai continuar com ele porque isso muda o serviço mais indicado — quem vai vender geralmente busca destacar o carro para a venda, enquanto quem vai continuar usando costuma investir em cuidado e proteção de longo prazo.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown": "# Por que vocês perguntam se vou vender o carro?\n\n## Pergunta\n\nPor que vocês perguntam se vou vender o carro?\n\n## Resposta\n\nPerguntamos se você vai vender o veículo em breve ou vai continuar com ele porque isso muda o serviço mais indicado — quem vai vender geralmente busca destacar o carro para a venda, enquanto quem vai continuar usando costuma investir em cuidado e proteção de longo prazo.",
+        "markdown_document": true,
+        "question_count": 1
+      }
+    },
+    {
       "id": "aurora-gallery",
       "node_type": "gallery",
       "slug": "gallery",
@@ -1343,6 +1479,46 @@
       "metadata": {}
     },
     {
+      "id": "aurora-e-rule-why-objective",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-why-objective",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-wash-faq-includes",
+      "source": "aurora-copy-wash",
+      "target": "aurora-faq-wash-includes",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-interior-faq-includes",
+      "source": "aurora-copy-interior",
+      "target": "aurora-faq-interior-includes",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-polish-faq-includes",
+      "source": "aurora-copy-polish",
+      "target": "aurora-faq-polish-includes",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-vitrification-faq-difference",
+      "source": "aurora-copy-vitrification",
+      "target": "aurora-faq-vitrification-difference",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
       "id": "aurora-e-persona-gallery",
       "source": "aurora-persona",
       "target": "aurora-gallery",
@@ -1457,6 +1633,46 @@
     {
       "id": "aurora-e-deposit-embedded",
       "source": "aurora-faq-deposit",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-why-objective-embedded",
+      "source": "aurora-faq-why-objective",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-wash-includes-embedded",
+      "source": "aurora-faq-wash-includes",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-interior-includes-embedded",
+      "source": "aurora-faq-interior-includes",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-polish-includes-embedded",
+      "source": "aurora-faq-polish-includes",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-vitrification-difference-embedded",
+      "source": "aurora-faq-vitrification-difference",
       "target": "aurora-embedded",
       "relation": "visible_to_agent",
       "primary_tree": false,
