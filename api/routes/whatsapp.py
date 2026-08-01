@@ -60,7 +60,11 @@ def _binding(phone_number_id: str) -> dict[str, Any] | None:
 
 def _allowed(binding: dict[str, Any], sender: str | None) -> bool:
     metadata = binding.get("metadata") or {}
-    mode = metadata.get("mode", "disabled")
+    # "active" is the default for bindings that never set mode explicitly
+    # (every provider except meta_cloud today); meta_cloud always sets it
+    # via PUT /meta/whatsapp/personas/{slug}/binding, so this fallback is
+    # never actually exercised there.
+    mode = metadata.get("mode", "active")
     if mode == "active":
         return True
     if mode != "test_allowlist":

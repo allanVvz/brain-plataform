@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
@@ -17,6 +18,30 @@ router = APIRouter(prefix="/webhooks/evolution", tags=["evolution-webhook"])
 logger = logging.getLogger(__name__)
 MAX_WEBHOOK_BYTES = int(os.environ.get("EVOLUTION_WEBHOOK_MAX_BYTES", str(2 * 1024 * 1024)))
 IGNORED_SUFFIXES = ("@g.us", "@broadcast", "@newsletter")
+
+
+def _mask(contact: str | None) -> str | None:
+    if not contact:
+        return None
+    return f"{contact[:3]}******{contact[-4:]}" if len(contact) > 7 else "***"
+
+
+def _normalize_phone(value: str | None) -> str:
+    return re.sub(r"\D", "", value or "")
+
+
+def _allowed(binding: dict, contact: str | None) -> bool:
+    metadata = binding.get("metadata") or {}
+    # Mirrors api/routes/whatsapp.py::_allowed. "active" is the default
+    # since no current Evolution binding-creation path (portal.py,
+    # configure_whatsapp_hotfix_bindings.py) sets mode explicitly.
+    mode = metadata.get("mode", "active")
+    if mode == "active":
+        return True
+    if mode != "test_allowlist":
+        return False
+    allowed = {_normalize_phone(str(x)) for x in metadata.get("allowlist", [])}
+    return _normalize_phone(contact) in allowed
 
 
 def _callback_token(binding_id: str) -> str:
@@ -118,6 +143,16 @@ async def evolution_webhook(binding_id: str, request: Request):
         if not contact or contact.endswith(IGNORED_SUFFIXES) or event.get("from_me"):
             ignored += 1
             continue
+        if not _allowed(binding, contact):
+            ignored += 1
+            supabase_client.insert_event({
+                "event_type": "whatsapp.inbound_ignored",
+                "entity_type": "whatsapp",
+                "entity_id": str(event.get("external_message_id") or "unknown"),
+                "persona_id": binding["persona_id"],
+                "payload": {"sender": _mask(contact), "binding_id": binding_id},
+            }, source="whatsapp.inbound")
+            continue
         external_id = str(event.get("external_message_id") or "")
         if not external_id:
             external_id = _safe_event_id(binding_id, event)
@@ -151,6 +186,7 @@ async def evolution_webhook(binding_id: str, request: Request):
                 },
                 "status": "buffered",
                 "batch_key": f"{binding['persona_id']}:{lead['id']}",
+                "available_at": supabase_client.debounce_available_at(3),
                 "idempotency_key": (
                     f"inbound:evolution_baileys:{binding_id}:{external_id}"
                 ),

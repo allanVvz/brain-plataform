@@ -39,3 +39,22 @@ class MetaWhatsAppProvider:
 
     def normalize_webhook(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         return [{"event_type": "META_RAW", "raw": payload}]
+
+    # Meta Cloud has no equivalent of these Evolution/Baileys instance
+    # concepts (QR pairing, restart, logout of a local session). Explicit
+    # stubs so a generic `binding.provider`-dispatched call fails with a
+    # clear message instead of a bare AttributeError.
+    def get_connection_status(self, binding: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError("Meta Cloud bindings have no connection-status polling; use webhook status callbacks")
+
+    def get_qr_code(self, binding: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError("Meta Cloud bindings are not paired via QR code")
+
+    def restart_instance(self, binding: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError("Meta Cloud bindings have no local instance to restart")
+
+    def logout_instance(self, binding: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError("Meta Cloud bindings have no local instance to log out")
+
+    def send_media(self, binding: dict[str, Any], recipient: str, media: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError("Meta Cloud media send is not implemented yet")
