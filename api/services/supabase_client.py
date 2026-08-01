@@ -4056,6 +4056,32 @@ def ensure_channel_lead(
     )
     if existing:
         return existing
+    # A lead may already exist for this same contact but only carry
+    # `telefone` (digits-only), not `external_contact_id` — e.g. leads
+    # created through the legacy /process route. Without this fallback,
+    # every inbound webhook for that contact spawns a permanent duplicate
+    # lead instead of continuing the existing conversation. Confirmed live
+    # 2026-08-01 on a real Baita customer (two "Allan" leads, messages
+    # split across them).
+    normalized_phone = re.sub(r"\D", "", external_contact_id or "")
+    if normalized_phone:
+        phone_match = _one(
+            get_client().table("leads").select("*")
+            .eq("persona_id", persona_id)
+            .eq("telefone", normalized_phone)
+            .is_("external_contact_id", "null")
+            .maybe_single()
+        )
+        if phone_match:
+            update_lead(phone_match["id"], {
+                "external_contact_id": external_contact_id,
+                "channel_binding_id": channel_binding_id,
+            })
+            return {
+                **phone_match,
+                "external_contact_id": external_contact_id,
+                "channel_binding_id": channel_binding_id,
+            }
     payload = {
         "lead_id": f"channel:{channel_binding_id}:{external_contact_id}",
         "persona_id": persona_id,
