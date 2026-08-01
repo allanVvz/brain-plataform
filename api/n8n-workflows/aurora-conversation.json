@@ -3,42 +3,91 @@
   "active": false,
   "nodes": [
     {
-      "parameters": {"httpMethod": "POST", "path": "aurora/conversation", "responseMode": "responseNode"},
-      "id": "inbound", "webhookId": "54014fd0-0bf9-5e80-99cc-0d9caeb3ad26", "name": "Canonical inbound", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [200, 300]
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aurora/conversation",
+        "responseMode": "responseNode"
+      },
+      "id": "inbound",
+      "webhookId": "54014fd0-0bf9-5e80-99cc-0d9caeb3ad26",
+      "name": "Canonical inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ]
     },
     {
       "parameters": {
         "jsCode": "const headers = $json.headers || {}; const supplied = headers['x-webhook-token'] || headers['X-Webhook-Token']; if (!supplied || supplied !== $env.AI_BRAIN_WEBHOOK_TOKEN) throw new Error('invalid webhook token'); const input = $json.body || $json; const binding = { persona_slug: 'aurora', agent_slug: 'aurora', decision_owner: 'n8n_agents', pipeline_contract: 'conversation_v1', classifier: 'deterministic_v1', reply_source: 'deepseek-v4-flash' }; if (input.persona_slug !== binding.persona_slug) throw new Error('persona binding mismatch'); if (input.pipeline_contract && input.pipeline_contract !== binding.pipeline_contract) throw new Error('pipeline contract mismatch'); if (!input.lead_ref || !input.buffer_id || !input.correlation_id || !input.channel_binding_id) throw new Error('invalid canonical event: missing lead_ref, buffer_id, correlation_id or channel_binding_id'); if (!input.message || !String(input.message).trim()) throw new Error('invalid canonical event: empty message'); return [{ json: { ...input, ...binding } }];"
       },
-      "id": "binding", "name": "Validate Aurora binding", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [440, 300]
+      "id": "binding",
+      "name": "Validate Aurora binding",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/context'}}",
         "sendHeaders": true,
-        "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Token",
+              "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"
+            }
+          ]
+        },
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
         "body": "={{JSON.stringify({persona_slug: 'aurora', lead_ref: $('Validate Aurora binding').item.json.lead_ref, message: $('Validate Aurora binding').item.json.message, message_id: $('Validate Aurora binding').item.json.external_message_id})}}",
         "options": {}
       },
-      "id": "context", "name": "Load published graph context", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [700, 300], "onError": "continueErrorOutput"
+      "id": "context",
+      "name": "Load published graph context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        300
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "method": "POST",
         "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/decide'}}",
         "sendHeaders": true,
-        "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Token",
+              "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"
+            }
+          ]
+        },
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
         "body": "={{JSON.stringify({context: $('Load published graph context').item.json})}}",
         "options": {}
       },
-      "id": "decision", "name": "Classify SDR Closer Human", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [940, 300], "onError": "continueErrorOutput"
+      "id": "decision",
+      "name": "Classify SDR Closer Human",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        300
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -47,64 +96,249 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
-        "headerParameters": {"parameters": [{"name": "Content-Type", "value": "application/json"}]},
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({model: 'deepseek-v4-flash', thinking: {type: 'disabled'}, temperature: 0.3, max_tokens: 300, response_format: {type: 'json_object'}, messages: [{role: 'system', content: 'Voce e um redator de SDR para uma estetica automotiva premium. Sua unica funcao e reescrever, no tom da marca (curto, objetivo, profissional, consultivo, sem emojis), a proxima mensagem que ja foi DECIDIDA por um motor deterministico. Voce NUNCA decide o proximo passo, NUNCA calcula ou confirma preco, NUNCA confirma data ou horario de agendamento, e NUNCA promete algo que nao esteja no texto original ou nos fatos aprovados fornecidos. Se o texto original ja e uma mensagem de handoff para atendimento humano, mantenha o mesmo significado. Responda somente JSON no formato {\"reply_text\": \"...\"}.'}, {role: 'user', content: JSON.stringify({texto_original_decidido: $json.response.reply_text, intent: $json.decision.intent, rota: $json.decision.route, handoff_obrigatorio: $json.response.handoff_required, fatos_aprovados: ($('Load published graph context').item.json.rag_nodes || []).map(n => ({tipo: n.node_type, titulo: n.title, dados: n.data})), historico_recente: ($('Load published graph context').item.json.messages || []).slice(-6)})}]})}}",
+        "body": "={{JSON.stringify({model: 'deepseek-v4-flash', thinking: {type: 'disabled'}, temperature: 0.4, max_tokens: 400, response_format: {type: 'json_object'}, messages: [{role: 'system', content: ($('Load published graph context').item.json.system_prompt || 'Voce e um assistente de atendimento. Responda apenas com base no conhecimento aprovado fornecido; nunca confirme preco ou agendamento.')}, {role: 'user', content: JSON.stringify({pergunta_do_cliente: $('Validate Aurora binding').item.json.message, intent_sinalizado: $json.decision.intent, rota_sinalizada: $json.decision.route, handoff_obrigatorio: $json.response.handoff_required, resposta_deterministica_referencia: $json.response.reply_text, conhecimento_aprovado: ($('Load published graph context').item.json.rag_chunks || []).map(function(c) { return {titulo: (c.entry && c.entry.title) || null, trecho: c.chunk_text || c.chunk_summary || ''}; }), historico_recente: ($('Load published graph context').item.json.messages || []).slice(-6)})}]})}}",
         "options": {}
       },
-      "id": "deepseek_reply", "name": "Draft agentic reply", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1180, 300], "onError": "continueErrorOutput"
+      "id": "deepseek_reply",
+      "name": "Draft agentic reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        300
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "jsCode": "const decide = $('Classify SDR Closer Human').item.json; const original = (decide.response && decide.response.reply_text) || ''; let candidate = null; try { const content = $json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content; if (content) { const parsed = JSON.parse(content); if (parsed && typeof parsed.reply_text === 'string') candidate = parsed.reply_text.trim(); } } catch (err) { candidate = null; } const unsafePatterns = [/r\\$\\s?\\d/i, /confirmad[oa]/i, /fechad[oa]\\s+(o\\s+)?(hor[aá]rio|agendamento|valor)/i, /\\b\\d{1,2}[:h]\\d{0,2}\\b.*\\b(confirmad|marcad|agendad)/i]; const isUnsafe = candidate ? unsafePatterns.some((re) => re.test(candidate)) : true; const finalText = (!isUnsafe && candidate) ? candidate : original; return [{ json: { ...decide, response: { ...decide.response, reply_text: finalText } } }];"
       },
-      "id": "merge_reply", "name": "Merge model reply safely", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1420, 300]
+      "id": "merge_reply",
+      "name": "Merge model reply safely",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        300
+      ]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/commit'}}",
         "sendHeaders": true,
-        "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Token",
+              "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"
+            }
+          ]
+        },
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
         "body": "={{JSON.stringify({lead_ref: $('Validate Aurora binding').item.json.lead_ref, context: $('Load published graph context').item.json, decision: $json.decision, response: $json.response, correlation_id: $('Validate Aurora binding').item.json.correlation_id, phone_number_id: $('Validate Aurora binding').item.json.phone_number_id, channel_binding_id: $('Validate Aurora binding').item.json.channel_binding_id, inbound_buffer_id: $('Validate Aurora binding').item.json.buffer_id})}}",
         "options": {}
       },
-      "id": "commit", "name": "Persist once and enqueue send", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1660, 300], "onError": "continueErrorOutput"
+      "id": "commit",
+      "name": "Persist once and enqueue send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1660,
+        300
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "method": "POST",
         "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/fail-safe-handoff'}}",
         "sendHeaders": true,
-        "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Token",
+              "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"
+            }
+          ]
+        },
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
         "body": "={{JSON.stringify({lead_ref: $('Validate Aurora binding').item.json.lead_ref, reason: 'workflow_step_failed', correlation_id: $('Validate Aurora binding').item.json.correlation_id})}}",
         "options": {}
       },
-      "id": "failsafe", "name": "Fail safe human handoff", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1660, 520]
+      "id": "failsafe",
+      "name": "Fail safe human handoff",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1660,
+        520
+      ]
     },
     {
-      "parameters": {"respondWith": "json", "responseBody": "={{$json}}"},
-      "id": "respond", "name": "Return canonical result", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.4, "position": [1920, 300]
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}"
+      },
+      "id": "respond",
+      "name": "Return canonical result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1920,
+        300
+      ]
     }
   ],
   "connections": {
-    "Canonical inbound": {"main": [[{"node": "Validate Aurora binding", "type": "main", "index": 0}]]},
-    "Validate Aurora binding": {"main": [[{"node": "Load published graph context", "type": "main", "index": 0}]]},
-    "Load published graph context": {"main": [[{"node": "Classify SDR Closer Human", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Classify SDR Closer Human": {"main": [[{"node": "Draft agentic reply", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Draft agentic reply": {"main": [[{"node": "Merge model reply safely", "type": "main", "index": 0}], [{"node": "Merge model reply safely", "type": "main", "index": 0}]]},
-    "Merge model reply safely": {"main": [[{"node": "Persist once and enqueue send", "type": "main", "index": 0}]]},
-    "Persist once and enqueue send": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Fail safe human handoff": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}]]}
+    "Canonical inbound": {
+      "main": [
+        [
+          {
+            "node": "Validate Aurora binding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Aurora binding": {
+      "main": [
+        [
+          {
+            "node": "Load published graph context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load published graph context": {
+      "main": [
+        [
+          {
+            "node": "Classify SDR Closer Human",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail safe human handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify SDR Closer Human": {
+      "main": [
+        [
+          {
+            "node": "Draft agentic reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail safe human handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft agentic reply": {
+      "main": [
+        [
+          {
+            "node": "Merge model reply safely",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge model reply safely",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge model reply safely": {
+      "main": [
+        [
+          {
+            "node": "Persist once and enqueue send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist once and enqueue send": {
+      "main": [
+        [
+          {
+            "node": "Return canonical result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail safe human handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fail safe human handoff": {
+      "main": [
+        [
+          {
+            "node": "Return canonical result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": {"executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all"},
-  "meta": {"binding": {"persona_slug": "aurora", "agent_slug": "aurora", "decision_owner": "n8n_agents", "pipeline_contract": "conversation_v1", "classifier": "deterministic_v1", "reply_source": "deepseek-v4-flash", "model_required": false, "model": "deepseek-v4-flash", "reply_authoring": "model_rephrases_deterministic_decision_only"}}
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "meta": {
+    "binding": {
+      "persona_slug": "aurora",
+      "agent_slug": "aurora",
+      "decision_owner": "n8n_agents",
+      "pipeline_contract": "conversation_v1",
+      "classifier": "deterministic_v1",
+      "reply_source": "deepseek-v4-flash",
+      "model_required": false,
+      "model": "deepseek-v4-flash",
+      "reply_authoring": "model_composes_grounded_in_golden_dataset_rag"
+    }
+  }
 }

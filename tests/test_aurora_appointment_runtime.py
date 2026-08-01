@@ -323,3 +323,100 @@ def test_successful_turn_resets_unknown_attempt_counter(monkeypatch):
     )
     assert decision.route == ConversationRoute.SDR
     assert next_unknown.cart_state["clarification_attempts"] == 1
+
+
+def _mock_build_context_deps(monkeypatch, *, rag_chunks_impl=None):
+    from services import supabase_client
+
+    install_graph(monkeypatch)
+    monkeypatch.setattr(
+        supabase_client, "get_lead_by_ref",
+        lambda _ref: {"id": 23, "persona_id": "aurora-id", "stage": "novo", "metadata": {}},
+    )
+    monkeypatch.setattr(supabase_client, "get_persona", lambda _slug: {"id": "aurora-id"})
+    monkeypatch.setattr(supabase_client, "get_messages", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        supabase_client, "search_active_rag_chunks",
+        rag_chunks_impl or (lambda **_k: []),
+    )
+
+
+def test_build_context_wires_golden_dataset_rag_chunks(monkeypatch):
+    """The n8n agentic flow needs a real RAG retrieval layer (Golden
+    Dataset: knowledge_rag_entries/knowledge_rag_chunks), separate from
+    rag_nodes' in-memory graph-node keyword filter used by the
+    deterministic engine. build_context() must surface it without
+    changing rag_nodes/rag_paths behavior."""
+    calls = []
+
+    def fake_search(**kwargs):
+        calls.append(kwargs)
+        return [{"rag_entry_id": "e1", "chunk_text": "Polimento leva 4 horas.", "source": "golden_dataset"}]
+
+    _mock_build_context_deps(monkeypatch, rag_chunks_impl=fake_search)
+
+    context = conversation_runtime.build_context(
+        persona_slug="aurora", lead_ref=23, message="Quanto custa o polimento?",
+    )
+
+    assert context.rag_chunks == [
+        {"rag_entry_id": "e1", "chunk_text": "Polimento leva 4 horas.", "source": "golden_dataset"}
+    ]
+    assert calls[0]["persona_id"] == "aurora-id"
+    assert calls[0]["query"] == "Quanto custa o polimento?"
+
+
+def test_build_context_survives_rag_search_failure(monkeypatch):
+    def broken_search(**_kwargs):
+        raise RuntimeError("golden dataset table unavailable")
+
+    _mock_build_context_deps(monkeypatch, rag_chunks_impl=broken_search)
+
+    context = conversation_runtime.build_context(
+        persona_slug="aurora", lead_ref=23, message="Oi",
+    )
+
+    assert context.rag_chunks == []
+
+
+def test_build_system_prompt_is_persona_agnostic_and_reads_tone_and_rules():
+    """The n8n agentic prompt used to be one hardcoded string embedded in
+    aurora-conversation.json, reused verbatim by any persona on the
+    agentic template. build_system_prompt() reads generic node types
+    (persona/tone/rule) from whatever graph it's given — nothing here
+    references Aurora, automotive services, or any persona-specific
+    vocabulary."""
+    prompt = conversation_runtime.build_system_prompt(aurora_graph())
+    assert "Aurora Estética Automotiva" in prompt
+    # From the tone node's markdown.
+    assert "sem emojis" in prompt
+    # From the rule node's markdown (operational facts, not invented).
+    assert "Pix" in prompt
+    assert "sinal de 10%" in prompt
+    # Non-negotiable safety instruction, independent of graph content.
+    assert "Nunca confirme preco final" in prompt
+
+
+def test_build_system_prompt_never_hardcodes_business_specific_vocabulary():
+    """A source-level guard against regressing to the old hardcoded
+    prompt: the function body must not contain Aurora-specific business
+    vocabulary, so it can never silently leak one persona's identity into
+    another persona's graph. (Docstrings/comments may reference Aurora as
+    historical context — only the code that actually builds the prompt
+    text is checked here.)"""
+    import inspect
+    source = inspect.getsource(conversation_runtime.build_system_prompt)
+    body = source.split('"""', 2)[-1]  # drop the function's own docstring
+    lowered = body.lower()
+    assert "estetica" not in lowered and "estética" not in lowered
+    assert "automotiv" not in lowered
+    assert "veiculo" not in lowered and "veículo" not in lowered
+
+
+def test_build_context_wires_the_generated_system_prompt(monkeypatch):
+    _mock_build_context_deps(monkeypatch)
+    context = conversation_runtime.build_context(
+        persona_slug="aurora", lead_ref=23, message="Oi",
+    )
+    assert context.system_prompt == conversation_runtime.build_system_prompt(aurora_graph())
+    assert context.system_prompt != ""

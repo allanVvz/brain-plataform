@@ -36,6 +36,8 @@ class ConversationContext(StrictModel):
     cart: dict[str, Any]
     rag_nodes: list[dict[str, Any]]
     rag_paths: list[list[str]]
+    rag_chunks: list[dict[str, Any]] = Field(default_factory=list)
+    system_prompt: str = ""
 
 
 class ConversationDecision(StrictModel):

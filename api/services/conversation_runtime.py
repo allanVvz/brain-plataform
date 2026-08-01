@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import unicodedata
 from datetime import datetime, timezone
 from typing import Any
+
+logger = logging.getLogger("conversation_runtime")
 
 from schemas.conversation import (
     AgentResponse,
@@ -184,6 +187,71 @@ def _appointment_policy(graph: Any) -> dict[str, Any]:
     return dict(data.get("appointment_policy") or {})
 
 
+# Non-negotiable regardless of persona content: the n8n agentic reply must
+# never be the sole authority on a price or schedule confirmation.
+# conversation_runtime.commit()'s _reply_confirms_price_or_schedule guard
+# already enforces this server-side independent of what the agent
+# produces — this instruction is a first line of defense, not the only one.
+_AGENTIC_SAFETY_INSTRUCTIONS = (
+    "Nunca confirme preco final, data ou horario de agendamento — mesmo "
+    "que o cliente insista. Isso sempre depende de confirmacao humana. Se "
+    "o cliente pedir uma confirmacao que voce nao pode dar, diga que a "
+    "equipe vai confirmar e continue coletando as informacoes que faltam. "
+    "Responda apenas com base nos fatos aprovados fornecidos no contexto "
+    "(trecho 'Conhecimento aprovado' abaixo) e no historico da conversa — "
+    "nunca invente um fato que nao esteja la."
+)
+
+
+def build_system_prompt(graph: Any) -> str:
+    """Compose this persona's n8n agentic system prompt from its own graph.
+
+    Reads generic node types (persona, tone, rule) present in ANY
+    persona's graph — nothing here is specific to Aurora or any other
+    single persona. A persona with no tone/rule nodes still gets a valid,
+    if minimal, prompt. Replaces the single static prompt string that used
+    to be hardcoded inside aurora-conversation.json and reused verbatim by
+    every persona on the agentic template.
+    """
+    persona_node = next(
+        (node for node in graph.nodes if node.node_type == "persona"),
+        None,
+    )
+    persona_data = (persona_node.data or {}) if persona_node else {}
+    persona_name = (persona_node.label if persona_node else None) or "a empresa"
+    summary = str(persona_data.get("summary") or "").strip()
+
+    tone_text = "\n\n".join(
+        str(node.data.get("markdown") or node.data.get("summary") or "").strip()
+        for node in graph.nodes
+        if node.node_type == "tone" and ((node.data or {}).get("markdown") or (node.data or {}).get("summary"))
+    ).strip()
+
+    rule_text = "\n\n".join(
+        str(node.data.get("markdown") or node.data.get("summary") or "").strip()
+        for node in graph.nodes
+        if node.node_type == "rule" and ((node.data or {}).get("markdown") or (node.data or {}).get("summary"))
+    ).strip()
+
+    lines = [
+        f"Voce e o agente de atendimento (SDR) de {persona_name}.",
+    ]
+    if summary:
+        lines.append(summary)
+    if tone_text:
+        lines.append("Tom de voz:\n" + tone_text)
+    if rule_text:
+        lines.append("Regras operacionais e comerciais:\n" + rule_text)
+    lines.append(_AGENTIC_SAFETY_INSTRUCTIONS)
+    lines.append(
+        "Enquanto estiver ativo, responda o que voce consegue com base no "
+        "conhecimento aprovado e conduza a conversa fazendo perguntas de "
+        "qualificacao adequadas, como um bom vendedor faria — nao apenas "
+        "responda e espere a proxima pergunta."
+    )
+    return "\n\n".join(lines)
+
+
 def _commercial_note_fields(context: ConversationContext) -> list[str]:
     """Field names this persona wants mirrored into leads.metadata.commercial_note.
 
@@ -283,10 +351,9 @@ def build_context(
 ) -> ConversationContext:
     version, checksum, graph = _current_graph(persona_slug)
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
-    if lead.get("persona_id"):
-        persona = supabase_client.get_persona(persona_slug) or {}
-        if persona.get("id") and persona["id"] != lead["persona_id"]:
-            raise PermissionError("lead does not belong to requested persona")
+    persona = supabase_client.get_persona(persona_slug) or {}
+    if lead.get("persona_id") and persona.get("id") and persona["id"] != lead["persona_id"]:
+        raise PermissionError("lead does not belong to requested persona")
     messages = supabase_client.get_messages(str(lead_ref), limit=20) or []
     if message and not any(
         str(row.get("message_id") or row.get("external_message_id") or "")
@@ -331,6 +398,25 @@ def build_context(
         }
     cart.setdefault("_lead_stage", lead.get("stage") or "novo")
     nodes = _relevant_nodes(graph, message)
+    # Golden Dataset RAG (knowledge_rag_entries/knowledge_rag_chunks,
+    # persona-scoped, approved/validated only) — a real retrieval layer
+    # distinct from rag_nodes' in-memory graph-node keyword filter above.
+    # Built for the n8n agentic flow (deterministic ignores this field and
+    # keeps using rag_nodes/rag_paths unchanged).
+    try:
+        rag_chunks = supabase_client.search_active_rag_chunks(
+            persona_id=str(persona.get("id") or lead.get("persona_id") or ""),
+            query=message,
+            limit=12,
+        )
+    except Exception as exc:  # noqa: BLE001 — RAG is best-effort context, never fatal
+        logger.warning("search_active_rag_chunks failed: %s", exc)
+        rag_chunks = []
+    try:
+        system_prompt = build_system_prompt(graph)
+    except Exception as exc:  # noqa: BLE001 — the deterministic path never needs this
+        logger.warning("build_system_prompt failed: %s", exc)
+        system_prompt = ""
     agent_slug = next(
         (
             str((node.data or {}).get("metadata", {}).get("agent_slug"))
@@ -371,6 +457,8 @@ def build_context(
             for node in nodes
         ],
         rag_paths=[_node_path(graph, node.id) for node in nodes],
+        rag_chunks=rag_chunks,
+        system_prompt=system_prompt,
     )
 
 

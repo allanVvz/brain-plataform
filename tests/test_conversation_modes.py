@@ -131,6 +131,35 @@ def test_n8n_and_local_modes_use_the_same_three_stage_contract():
     assert workflow["meta"]["binding"]["field_extractor"] == "deepseek-v4-flash"
 
 
+def test_aurora_agentic_workflow_uses_generated_prompt_and_golden_dataset_rag():
+    """Regression test for the 2026-08-01 agentic-flow redesign.
+
+    Draft agentic reply used to embed one hardcoded, Aurora-specific
+    system prompt string directly in the workflow JSON, and grounded the
+    model in rag_nodes (the deterministic engine's simple graph-node
+    keyword filter) instead of the real Golden Dataset RAG layer
+    (knowledge_rag_entries/knowledge_rag_chunks via search_active_rag_
+    chunks). Any other persona put on this template would have gotten
+    Aurora's literal prompt. The node must now consume the dynamically
+    generated `system_prompt` and `rag_chunks` fields that
+    conversation_runtime.build_context() produces per persona.
+    """
+    workflow = json.loads(
+        (ROOT / "api" / "n8n-workflows" / "aurora-conversation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    draft_node = next(
+        node for node in workflow["nodes"] if node["name"] == "Draft agentic reply"
+    )
+    body = draft_node["parameters"]["body"]
+    assert "system_prompt" in body
+    assert "rag_chunks" in body
+    # No hardcoded business-specific vocabulary left in the workflow file.
+    assert "estetica automotiva" not in body.lower()
+    assert "estética automotiva" not in body.lower()
+
+
 def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatch):
     graph = compile_persona_documents(
         ROOT / "docs" / "sdr",
