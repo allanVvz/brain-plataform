@@ -4360,6 +4360,19 @@ def handoff_whatsapp_lead(lead_ref: int) -> None:
     _execute_with_retry(get_client().rpc("handoff_whatsapp_lead", {"p_lead_ref": lead_ref}))
 
 
+def requeue_waiting_human_whatsapp_buffer(lead_ref: int) -> int:
+    """Move a lead's stuck inbound messages back into the claimable queue.
+
+    Resuming AI on a lead does nothing on its own to messages that piled up
+    in `waiting_human` while it was paused — this is the retroactive
+    reprocessing step that was missing.
+    """
+    result = get_client().rpc(
+        "requeue_waiting_human_whatsapp_buffer", {"p_lead_ref": lead_ref}
+    ).execute()
+    return int(getattr(result, "data", 0) or 0)
+
+
 def handoff_whatsapp_lead_state(
     lead_ref: int,
     *,

@@ -205,7 +205,15 @@ def pause_lead(lead_ref: int) -> bool:
 def resume_lead(lead_ref: int) -> bool:
     try:
         supabase_client.update_lead(lead_ref, {"ai_paused": False})
-        return True
     except Exception as exc:
         logger.warning("resume_lead failed: %s", exc)
         return False
+    try:
+        requeued = supabase_client.requeue_waiting_human_whatsapp_buffer(lead_ref)
+        if requeued:
+            logger.info("resume_lead requeued %d waiting_human message(s)", requeued)
+    except Exception as exc:
+        # ai_paused is already cleared; a requeue failure must not be
+        # reported as a failed resume, just logged for follow-up.
+        logger.warning("resume_lead requeue failed: %s", exc)
+    return True
