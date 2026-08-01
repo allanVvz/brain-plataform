@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { MessageSquare, User, Clock, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, PanelRightClose, PanelRightOpen, ArrowLeft, ChevronLeft, ChevronRight, Tag } from "lucide-react";
+import { LeadInfoModal } from "@/components/leads/LeadInfoModal";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -1342,6 +1343,7 @@ export function MessagesLayout({
   const validationScope = validationMode ? "only" as const : "exclude" as const;
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isConversationSidebarOpen, setIsConversationSidebarOpen] = useState(!focused);
+  const [showLeadInfo, setShowLeadInfo] = useState(false);
   const [isKnowledgeSidebarOpen, setIsKnowledgeSidebarOpen] = useState(true);
   const [personaFilterId, setPersonaFilterId] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1914,14 +1916,21 @@ export function MessagesLayout({
         >
           {selectedLead ? (
             <>
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
+              <button
+                type="button"
+                onClick={() => setShowLeadInfo(true)}
+                title="Ver/editar informacoes do lead"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 transition hover:opacity-80"
                 style={{ background: "rgba(124,111,255,0.20)", color: "rgb(var(--obs-violet))" }}
               >
                 {chatName[0].toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-obs-text truncate">{chatName}</p>
+              </button>
+              <div
+                className="flex-1 min-w-0 cursor-pointer"
+                onClick={() => setShowLeadInfo(true)}
+                title="Ver/editar informacoes do lead"
+              >
+                <p className="text-sm font-semibold text-obs-text truncate hover:text-obs-violet">{chatName}</p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <StageBadge stage={selectedLead.stage} />
                   {selectedLead.telefone && (
@@ -2117,6 +2126,16 @@ export function MessagesLayout({
           <KnowledgeSidebar ctx={knowledge} loading={knowledgeLoading} leadSelected={!!selectedLead} />
         </div>
       </aside>
+      )}
+
+      {showLeadInfo && selectedLead && (
+        <LeadInfoModal
+          lead={selectedLead}
+          onClose={() => setShowLeadInfo(false)}
+          onSaved={async () => {
+            await refreshSelectedLead(selectedLead.id);
+          }}
+        />
       )}
     </div>
   );

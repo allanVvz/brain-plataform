@@ -576,6 +576,75 @@ def get_lead(lead_id: str, request: Request):
     return lead_qualification.decorate_lead(lead)
 
 
+class LeadInfoUpdateBody(BaseModel):
+    nome: str | None = None
+    interesse_produto: str | None = None
+    commercial_note: dict[str, str] | None = None
+
+
+@router.patch("/{lead_ref}")
+def update_lead_info(lead_ref: int, body: LeadInfoUpdateBody, request: Request):
+    """Manual edits to a lead's name/product/commercial note.
+
+    Writes land in two places: the lead's own columns (for display) and
+    metadata.conversation_state.appointment_request (the AI's working
+    memory), so the next reply treats edited fields as already known
+    instead of asking for them again.
+    """
+    lead = supabase_client.get_lead_by_ref(lead_ref)
+    if not lead:
+        raise HTTPException(404, "Lead nao encontrado")
+    if lead.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=lead["persona_id"])
+
+    update: dict = {}
+    if body.nome is not None:
+        stripped = body.nome.strip()
+        if not stripped:
+            raise HTTPException(400, "Nome nao pode ser vazio")
+        update["nome"] = stripped
+    if body.interesse_produto is not None:
+        update["interesse_produto"] = body.interesse_produto.strip() or None
+
+    if body.commercial_note is not None:
+        clean_note = {
+            str(k).strip(): str(v).strip()
+            for k, v in body.commercial_note.items()
+            if str(k).strip() and str(v).strip()
+        }
+        metadata = dict(lead.get("metadata") or {})
+        metadata["commercial_note"] = {
+            **clean_note,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "source": "manual",
+        }
+        conversation_state = dict(metadata.get("conversation_state") or {})
+        appointment_request = dict(conversation_state.get("appointment_request") or {})
+        appointment_request.update(clean_note)
+        conversation_state["appointment_request"] = appointment_request
+        missing_fields = list(conversation_state.get("missing_fields") or [])
+        conversation_state["missing_fields"] = [
+            field for field in missing_fields if field not in clean_note
+        ]
+        metadata["conversation_state"] = conversation_state
+        update["metadata"] = metadata
+
+    if not update:
+        raise HTTPException(400, "Nenhum campo para atualizar")
+
+    supabase_client.update_lead(lead_ref, update)
+    updated = supabase_client.get_lead_by_ref(lead_ref)
+    event_emitter.emit(
+        "lead.info_updated",
+        entity_type="lead",
+        entity_id=str(lead_ref),
+        persona_id=lead.get("persona_id"),
+        payload={"fields": list(update.keys())},
+        source="leads.update_lead_info",
+    )
+    return {"ok": True, "lead": updated}
+
+
 def _resolve_target_audience(body: LeadAudienceChangeBody, request: Request) -> dict:
     """Resolve a audience destino. Se o slug requisitado for `import` e
     a persona destino ainda nao tiver, criamos via helper idempotente em vez

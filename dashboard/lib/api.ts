@@ -187,6 +187,11 @@ export const api = {
     if (personaId) form.append("persona_id", personaId);
     return reqForm<any>("/leads/imports", form);
   },
+  updateLeadInfo: (leadRef: number, body: {
+    nome?: string;
+    interesse_produto?: string;
+    commercial_note?: Record<string, string>;
+  }) => req<any>(`/leads/${leadRef}`, { method: "PATCH", body: JSON.stringify(body) }),
   pauseAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/pause-ai`, { method: "POST" }),
   resumeAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/resume-ai`, { method: "POST" }),
   messages: (leadId: string) => req<any[]>(`/messages/${leadId}`),

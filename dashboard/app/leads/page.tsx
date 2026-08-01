@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, MessageSquare, Plus, Search, Share2, Upload, Users } from "lucide-react";
+import { ArrowRight, MessageSquare, Plus, Search, Settings2, Share2, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { AudiencePill } from "@/components/leads/AudiencePill";
 import { CreateAudiencePrompt } from "@/components/leads/CreateAudiencePrompt";
+import { LeadInfoModal } from "@/components/leads/LeadInfoModal";
 import { MoveShareModal, MoveShareMode } from "@/components/leads/MoveShareModal";
 import { ALL_AUDIENCE_KEY, buildLeadsFilters } from "@/lib/leads";
 
@@ -90,6 +91,7 @@ function LeadsPageInner() {
   const [loading, setLoading] = useState(true);
   const [creatingAudience, setCreatingAudience] = useState(false);
   const [moveShare, setMoveShare] = useState<{ lead: Lead; mode: MoveShareMode } | null>(null);
+  const [infoLead, setInfoLead] = useState<Lead | null>(null);
 
   // Read persona from header global state
   useEffect(() => {
@@ -361,6 +363,14 @@ function LeadsPageInner() {
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
+                            onClick={() => setInfoLead(lead)}
+                            className="lg-btn lg-btn-secondary"
+                            title="Informacoes do lead"
+                          >
+                            <Settings2 size={12} /> Info
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setMoveShare({ lead, mode: "move" })}
                             className="lg-btn lg-btn-secondary"
                             title="Mover para outra audiencia"
@@ -420,6 +430,18 @@ function LeadsPageInner() {
           onClose={() => setMoveShare(null)}
           onDone={async () => {
             await Promise.all([loadAudiences(), loadLeads()]);
+          }}
+        />
+      )}
+
+      {infoLead && (
+        <LeadInfoModal
+          lead={infoLead}
+          onClose={() => setInfoLead(null)}
+          onSaved={async (updated) => {
+            setLeads((prev) =>
+              prev.map((l) => (l.id === updated.id ? { ...l, ...updated } : l)),
+            );
           }}
         />
       )}
