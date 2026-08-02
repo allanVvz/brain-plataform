@@ -48,7 +48,6 @@ describe("settings central", () => {
     for (const label of [
       "Geral",
       "Mensageria",
-      "ChatBot",
       "Ferramentas",
       "Logs",
       "Acessos",
@@ -56,5 +55,15 @@ describe("settings central", () => {
     ]) {
       expect(getByRole("button", { name: label })).toBeInTheDocument();
     }
+  });
+
+  it("redirects the legacy ChatBot tab to messaging agents", async () => {
+    window.history.replaceState({}, "", "/settings?tab=chatbot");
+    const { container } = render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(container.querySelector("[data-settings-tab='messaging']")).toBeInTheDocument();
+    });
+    expect(window.location.search).toBe("?tab=messaging&sub=agentes");
   });
 });
