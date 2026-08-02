@@ -658,6 +658,24 @@ def validate_persona_integration(
             raise IntegrationValidationError("DeepSeek is not provisioned in n8n.")
         if not ok:
             raise IntegrationValidationError("n8n is unavailable.")
+        wiring = deepseek_n8n_service.check_workflow_wiring(existing.get("config_json") or {})
+        if not wiring["ok"]:
+            existing["status"] = "error"
+            existing["last_error"] = wiring["reason"]
+            existing["last_validated_at"] = _utcnow()
+            supabase_client.save_persona_integration_connection(existing)
+            supabase_client.insert_event(
+                {
+                    "event_type": "deepseek.workflow_wiring_invalid",
+                    "entity_type": "persona",
+                    "entity_id": persona_id,
+                    "persona_id": persona_id,
+                    "payload": {"reason": wiring["reason"]},
+                },
+                level="error",
+                source="services.integration_service",
+            )
+            raise IntegrationValidationError(wiring["reason"])
         existing["last_validated_at"] = _utcnow()
         existing["status"] = "connected"
         existing["last_error"] = None

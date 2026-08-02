@@ -69,6 +69,23 @@ def get_workflows() -> list:
         return response.json().get("data", [])
 
 
+def get_workflow(workflow_id: str) -> Optional[dict]:
+    """Fetch one workflow's definition. Returns None if it no longer exists.
+
+    n8n's public API has no read endpoint for credentials themselves (GET by
+    id or list both 405) — a node's stored `credentials.<type>.id` can go
+    stale (object deleted elsewhere in n8n) with nothing here to detect it.
+    This only confirms the *workflow* still exists and which credential id
+    its node currently references, not that the credential object is real.
+    """
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+        response = client.get(f"{_base()}/api/v1/workflows/{workflow_id}", headers=_headers())
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
+
 def create_credential(
     *,
     name: str,

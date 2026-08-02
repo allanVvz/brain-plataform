@@ -130,6 +130,7 @@ def fail_safe_handoff(
             "persona_id": lead.get("persona_id"),
             "payload": body.model_dump(),
         },
+        level="error",
         source="routes.conversations",
     )
     return {"ok": True, "handoff": True, "ai_paused": True}

@@ -22,6 +22,14 @@ function belongsToPersona(row: any, personaId: string) {
   return !rowPersona || String(rowPersona) === String(personaId);
 }
 
+type Level = "" | "error" | "warning" | "info";
+
+const LEVEL_STYLES: Record<string, string> = {
+  error: "border-rose-500/30 bg-rose-500/10 text-rose-200",
+  warning: "border-amber-500/30 bg-amber-500/10 text-amber-200",
+  info: "border-white/10 bg-white/5 text-obs-subtle",
+};
+
 export default function LogsPage() {
   const persona = useGlobalPersona();
   const [tab, setTab] = useState<Tab>("audit");
@@ -29,6 +37,7 @@ export default function LogsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const [level, setLevel] = useState<Level>("");
 
   const load = useCallback(async () => {
     if (!persona.id) {
@@ -39,7 +48,7 @@ export default function LogsPage() {
     setError("");
     try {
       if (tab === "audit") {
-        setRows(await api.auditLogs({ persona_id: persona.id, limit: 200 }));
+        setRows(await api.auditLogs({ persona_id: persona.id, level: level || undefined, limit: 200 }));
       } else if (tab === "agents") {
         setRows(await api.agentLogs(undefined, 150, persona.id));
       } else {
@@ -51,7 +60,7 @@ export default function LogsPage() {
     } finally {
       setLoading(false);
     }
-  }, [persona.id, tab]);
+  }, [persona.id, tab, level]);
 
   useEffect(() => {
     load();
@@ -109,13 +118,38 @@ export default function LogsPage() {
         ))}
       </nav>
 
-      <input
-        type="search"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Buscar evento, lead, componente ou status"
-        className="w-full rounded-xl border border-white/10 bg-obs-raised px-4 py-2.5 text-sm text-obs-text"
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Buscar evento, lead, componente ou status"
+          className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-obs-raised px-4 py-2.5 text-sm text-obs-text"
+        />
+        {tab === "audit" && (
+          <div className="flex gap-1.5" aria-label="Filtrar por severidade">
+            {([
+              ["", "Tudo"],
+              ["error", "Erros"],
+              ["warning", "Avisos"],
+              ["info", "Info"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value || "all"}
+                type="button"
+                onClick={() => setLevel(value)}
+                className={`rounded-lg border px-3 py-2 text-xs ${
+                  level === value
+                    ? "border-obs-violet/40 bg-obs-violet/15 text-obs-violet"
+                    : "border-white/10 text-obs-subtle"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {error && (
         <div role="alert" className="flex gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
@@ -134,11 +168,19 @@ export default function LogsPage() {
             <summary className="cursor-pointer list-none">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium text-obs-text">
-                    {row.event_type || row.action || row.workflow_name || row.component || "Registro"}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    {row.level && (
+                      <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${LEVEL_STYLES[row.level] || LEVEL_STYLES.info}`}>
+                        {row.level}
+                      </span>
+                    )}
+                    <p className="text-sm font-medium text-obs-text">
+                      {row.event_type || row.action || row.workflow_name || row.component || "Registro"}
+                    </p>
+                  </div>
                   <p className="mt-1 text-xs text-obs-faint">
                     {row.entity_type || row.agent_type || row.status || "informação operacional"}
+                    {row.source ? ` · ${row.source}` : ""}
                   </p>
                 </div>
                 <span className="text-xs text-obs-faint">

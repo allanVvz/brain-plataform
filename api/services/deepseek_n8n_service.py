@@ -196,6 +196,45 @@ def resync_workflow_for_persona(
     }
 
 
+def check_workflow_wiring(deepseek_config: dict[str, Any]) -> dict[str, Any]:
+    """Ask n8n whether the persona's workflow still exists and still points
+    at the credential id we have on file.
+
+    This is the strongest check available without either exposing the raw
+    DeepSeek key or triggering a live execution: n8n's public API has no
+    read endpoint for credentials themselves (GET by id and list both
+    return 405 — deliberately, credentials are write-only over the API).
+    So a workflow node can keep referencing a credential id that was
+    deleted elsewhere in n8n and this check will still report "ok" — it
+    only catches the workflow being deleted or the node's own credential
+    reference having drifted from what we have stored. Confirmed live
+    2026-08-02: this exact class of failure (credential silently gone,
+    node reference unchanged) only surfaced by actually triggering the
+    workflow and reading n8n's execution error — there is no safe way to
+    detect it proactively without that side effect.
+    """
+    workflow_id = str(deepseek_config.get("n8n_workflow_id") or "")
+    credential_id = str(deepseek_config.get("n8n_credential_id") or "")
+    if not workflow_id or not credential_id:
+        return {"ok": False, "reason": "DeepSeek nao provisionado (sem workflow ou credential id)."}
+    workflow = n8n_client.get_workflow(workflow_id)
+    if workflow is None:
+        return {"ok": False, "reason": f"Workflow n8n {workflow_id} nao existe mais."}
+    if not workflow.get("active"):
+        return {"ok": False, "reason": "Workflow n8n existe mas esta inativo."}
+    referenced_ids = {
+        str((node.get("credentials") or {}).get("httpHeaderAuth", {}).get("id") or "")
+        for node in workflow.get("nodes") or []
+        if "api.deepseek.com" in str((node.get("parameters") or {}).get("url") or "")
+    }
+    if credential_id not in referenced_ids:
+        return {
+            "ok": False,
+            "reason": "O node DeepSeek do workflow n8n referencia uma credencial diferente da configurada.",
+        }
+    return {"ok": True, "reason": None}
+
+
 def revoke(config: dict[str, Any] | None) -> None:
     credential_id = str((config or {}).get("n8n_credential_id") or "")
     if credential_id:

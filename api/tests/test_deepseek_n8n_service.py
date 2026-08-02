@@ -157,3 +157,50 @@ def test_resync_workflow_requires_prior_provisioning(monkeypatch):
         raise AssertionError("expected RuntimeError")
     except RuntimeError as exc:
         assert "provisionado" in str(exc)
+
+
+def _deepseek_node(credential_id: str) -> dict:
+    return {
+        "name": "DeepSeek field extraction",
+        "type": "n8n-nodes-base.httpRequest",
+        "parameters": {"url": "https://api.deepseek.com/chat/completions"},
+        "credentials": {"httpHeaderAuth": {"id": credential_id, "name": "Brain DeepSeek"}},
+    }
+
+
+def test_check_workflow_wiring_ok_when_workflow_active_and_credential_matches(monkeypatch):
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client, "get_workflow",
+        lambda workflow_id: {"id": workflow_id, "active": True, "nodes": [_deepseek_node("cred-1")]},
+    )
+    result = deepseek_n8n_service.check_workflow_wiring(
+        {"n8n_workflow_id": "wf-1", "n8n_credential_id": "cred-1"}
+    )
+    assert result == {"ok": True, "reason": None}
+
+
+def test_check_workflow_wiring_fails_when_workflow_deleted(monkeypatch):
+    monkeypatch.setattr(deepseek_n8n_service.n8n_client, "get_workflow", lambda workflow_id: None)
+    result = deepseek_n8n_service.check_workflow_wiring(
+        {"n8n_workflow_id": "wf-1", "n8n_credential_id": "cred-1"}
+    )
+    assert result["ok"] is False
+    assert "nao existe mais" in result["reason"]
+
+
+def test_check_workflow_wiring_fails_when_credential_reference_drifted(monkeypatch):
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client, "get_workflow",
+        lambda workflow_id: {"id": workflow_id, "active": True, "nodes": [_deepseek_node("cred-DIFFERENT")]},
+    )
+    result = deepseek_n8n_service.check_workflow_wiring(
+        {"n8n_workflow_id": "wf-1", "n8n_credential_id": "cred-1"}
+    )
+    assert result["ok"] is False
+    assert "credencial diferente" in result["reason"]
+
+
+def test_check_workflow_wiring_requires_config_present(monkeypatch):
+    result = deepseek_n8n_service.check_workflow_wiring({})
+    assert result["ok"] is False
+    assert "nao provisionado" in result["reason"]

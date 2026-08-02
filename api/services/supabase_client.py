@@ -4581,6 +4581,7 @@ def list_system_events(
     entity_id: Optional[str] = None,
     since: Optional[str] = None,
     search: Optional[str] = None,
+    level: Optional[str] = None,
     limit: int = 100,
 ) -> list:
     """Audit-trail query over system_events.
@@ -4607,6 +4608,8 @@ def list_system_events(
         q = q.gte("created_at", since)
     if search:
         q = q.ilike("payload", f"%{search}%")
+    if level:
+        q = q.eq("level", level)
     return _q(q)
 
 

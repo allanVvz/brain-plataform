@@ -451,6 +451,7 @@ export const api = {
     entity_id?: string;
     since?: string;
     search?: string;
+    level?: string;
     limit?: number;
   } = {}) => {
     const qs = new URLSearchParams();
@@ -460,6 +461,7 @@ export const api = {
     if (params.entity_id) qs.set("entity_id", params.entity_id);
     if (params.since) qs.set("since", params.since);
     if (params.search) qs.set("search", params.search);
+    if (params.level) qs.set("level", params.level);
     qs.set("limit", String(params.limit ?? 200));
     return req<any[]>(`/logs/audit?${qs.toString()}`);
   },
