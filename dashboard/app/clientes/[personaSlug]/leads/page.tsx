@@ -65,15 +65,6 @@ export default function ClientLeadsPage() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <Users size={23} /> Leads
-        </h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Contatos e informações comerciais da sua persona.
-        </p>
-      </header>
-
       <label className="relative block max-w-xl">
         <Search className="absolute left-3 top-3 text-slate-400" size={17} />
         <input

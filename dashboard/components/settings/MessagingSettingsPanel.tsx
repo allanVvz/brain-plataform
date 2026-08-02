@@ -1,20 +1,36 @@
 "use client";
 
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import {
   AlertTriangle,
+  Bot,
   CheckCircle2,
+  FlaskConical,
   LoaderCircle,
   MessageCircle,
+  MessageSquareText,
   QrCode,
   RefreshCw,
   RotateCcw,
+  Route,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useGlobalPersona } from "@/lib/useGlobalPersona";
 
 type Provider = "meta_cloud" | "evolution_baileys";
+type MessagingSubTab = "canal" | "agentes" | "validacoes";
+type ConversationMode = "deterministic" | "n8n_agents" | "orquestrador";
+type AutomationMode = "ai_with_handoff" | "human_only";
+
+type RoutingConfig = {
+  conversation_mode: ConversationMode;
+  automation_mode?: AutomationMode;
+  migration_applied?: boolean;
+  model_required?: boolean;
+  field_extractor?: string | null;
+};
 
 const CONNECTED = new Set(["connected", "open"]);
 const STATUS_LABELS: Record<string, string> = {
@@ -29,9 +45,107 @@ const STATUS_LABELS: Record<string, string> = {
   safety_paused: "pausado por segurança",
 };
 
+const MessagesLayout = dynamic(
+  () => import("@/app/messages/MessagesLayout").then((mod) => mod.MessagesLayout),
+  {
+    loading: () => (
+      <p className="rounded-xl border border-white/10 bg-obs-surface p-4 text-sm text-obs-subtle">
+        Carregando conversas de validação…
+      </p>
+    ),
+  },
+);
+const ValidatorWorkspace = dynamic(
+  () => import("@/app/wa-validator/page"),
+  {
+    loading: () => (
+      <p className="rounded-xl border border-white/10 bg-obs-surface p-4 text-sm text-obs-subtle">
+        Carregando testes do ChatBot…
+      </p>
+    ),
+  },
+);
+
+const SUB_TABS: Array<{ key: MessagingSubTab; label: string; icon: typeof MessageCircle }> = [
+  { key: "canal", label: "Canal", icon: MessageCircle },
+  { key: "agentes", label: "Agentes", icon: Bot },
+  { key: "validacoes", label: "Validações", icon: MessageSquareText },
+];
+
+function subTabFromLocation(): MessagingSubTab {
+  if (typeof window === "undefined") return "canal";
+  const candidate = new URLSearchParams(window.location.search).get("sub") || "";
+  return SUB_TABS.some((tab) => tab.key === candidate) ? (candidate as MessagingSubTab) : "canal";
+}
+
 export function MessagingSettingsPanel() {
   const persona = useGlobalPersona();
   const personaSlug = persona.slug;
+  const [subTab, setSubTab] = useState<MessagingSubTab>("canal");
+
+  useEffect(() => {
+    setSubTab(subTabFromLocation());
+  }, []);
+
+  function selectSubTab(next: MessagingSubTab) {
+    setSubTab(next);
+    const url = new URL(window.location.href);
+    if (next === "canal") url.searchParams.delete("sub");
+    else url.searchParams.set("sub", next);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  if (!personaSlug) {
+    return (
+      <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5 text-sm text-amber-200">
+        Selecione uma persona no filtro do cabeçalho para configurar a mensageria.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-obs-faint">
+            Persona selecionada no cabeçalho · {personaSlug}
+          </p>
+          <h2 className="mt-1 flex items-center gap-2 text-xl font-semibold text-obs-text">
+            <MessageCircle size={19} className="text-obs-violet" /> Mensageria
+          </h2>
+          <p className="mt-1 text-sm text-obs-subtle">
+            Canal, agente de IA e conversas de validação, tudo em um único lugar.
+          </p>
+        </div>
+        <nav aria-label="Sub-seções de mensageria" className="grid grid-cols-3 rounded-xl border border-white/10 bg-obs-base p-1">
+          {SUB_TABS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => selectSubTab(key)}
+              aria-selected={subTab === key}
+              className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition ${
+                subTab === key ? "bg-obs-violet/15 text-obs-violet" : "text-obs-subtle hover:text-obs-text"
+              }`}
+            >
+              <Icon size={13} /> {label}
+            </button>
+          ))}
+        </nav>
+      </header>
+
+      {subTab === "canal" && <CanalSubPanel personaSlug={personaSlug} />}
+      {subTab === "agentes" && <AgentesSubPanel personaSlug={personaSlug} />}
+      {subTab === "validacoes" && (
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-obs-surface">
+          <MessagesLayout validationMode />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CanalSubPanel({ personaSlug }: { personaSlug: string }) {
   const [channel, setChannel] = useState<any>(null);
   const [metaState, setMetaState] = useState<any>(null);
   const [provider, setProvider] = useState<Provider>("evolution_baileys");
@@ -174,28 +288,8 @@ export function MessagingSettingsPanel() {
     );
   }
 
-  if (!personaSlug) {
-    return (
-      <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5 text-sm text-amber-200">
-        Selecione uma persona no filtro do cabeçalho para configurar a mensageria.
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-5">
-      <header>
-        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-obs-faint">
-          Persona selecionada no cabeçalho · {personaSlug}
-        </p>
-        <h2 className="mt-1 flex items-center gap-2 text-xl font-semibold text-obs-text">
-          <MessageCircle size={19} className="text-obs-violet" /> Mensageria
-        </h2>
-        <p className="mt-1 text-sm text-obs-subtle">
-          Um provider WhatsApp ativo por persona, sem um segundo filtro local.
-        </p>
-      </header>
-
       {error && (
         <div role="alert" className="flex gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
           <AlertTriangle size={16} /> {error}
@@ -336,6 +430,218 @@ export function MessagingSettingsPanel() {
             </div>
           )}
         </div>
+      </section>
+    </div>
+  );
+}
+
+function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
+  const [routing, setRouting] = useState<RoutingConfig | null>(null);
+  const [routingBusy, setRoutingBusy] = useState(false);
+  const [routingMessage, setRoutingMessage] = useState("");
+  const [routingError, setRoutingError] = useState("");
+  const [integrations, setIntegrations] = useState<any[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    setRouting(null);
+    setRoutingMessage("");
+    setRoutingError("");
+    if (!personaSlug) return () => { active = false; };
+
+    Promise.all([
+      api.personaRouting(personaSlug),
+      api.personaIntegrations(personaSlug).catch(() => []),
+    ])
+      .then(([nextRouting, nextIntegrations]) => {
+        if (!active) return;
+        setRouting(nextRouting);
+        setIntegrations((nextIntegrations || []).filter((item: any) => ["deepseek", "openai", "anthropic"].includes(item.service)));
+      })
+      .catch((error) => {
+        if (active) setRoutingError(error?.message || "Não foi possível carregar o agente.");
+      });
+
+    return () => { active = false; };
+  }, [personaSlug]);
+
+  async function updateConversationMode(mode: ConversationMode) {
+    if (!personaSlug || routingBusy || routing?.conversation_mode === mode) return;
+    setRoutingBusy(true);
+    setRoutingMessage("");
+    setRoutingError("");
+    try {
+      const updated = await api.updatePersonaRouting(personaSlug, { conversation_mode: mode });
+      setRouting(updated);
+      setRoutingMessage(
+        mode === "deterministic"
+          ? "Fluxo determinístico ativado."
+          : mode === "n8n_agents"
+          ? "Orquestração n8n com IA ativada e workflow ressincronizado."
+          : "Orquestrador interno selecionado.",
+      );
+    } catch (error: any) {
+      setRoutingError(error?.message || "Falha ao atualizar o motor de atendimento.");
+    } finally {
+      setRoutingBusy(false);
+    }
+  }
+
+  async function toggleAutomation() {
+    if (!personaSlug || routingBusy || !routing) return;
+    const next: AutomationMode = routing.automation_mode === "human_only" ? "ai_with_handoff" : "human_only";
+    setRoutingBusy(true);
+    setRoutingMessage("");
+    setRoutingError("");
+    try {
+      const updated = await api.updatePersonaRouting(personaSlug, { automation_mode: next });
+      setRouting(updated);
+      setRoutingMessage(next === "human_only" ? "IA desligada para esta persona." : "IA ligada para esta persona.");
+    } catch (error: any) {
+      setRoutingError(error?.message || "Falha ao atualizar o estado da IA.");
+    } finally {
+      setRoutingBusy(false);
+    }
+  }
+
+  const aiOff = routing?.automation_mode === "human_only";
+  const needsAgent = routing?.conversation_mode === "n8n_agents" || routing?.conversation_mode === "orquestrador";
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-2xl border border-white/10 bg-obs-surface p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-obs-violet/25 bg-obs-violet/10 text-obs-violet">
+              <Bot size={16} />
+            </span>
+            <div>
+              <h3 className="text-sm font-semibold text-obs-text">Estado da IA</h3>
+              <p className="mt-1 text-xs leading-5 text-obs-subtle">
+                Liga/desliga a automação para toda a persona — quando desligada, toda
+                mensagem que chega fica aguardando um humano, mesmo com o motor configurado.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={toggleAutomation}
+            disabled={routingBusy || !routing}
+            title={aiOff ? "IA desligada — clique para ligar" : "IA ligada — clique para desligar"}
+            className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
+              aiOff
+                ? "border-amber-400/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20"
+                : "border-emerald-400/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${aiOff ? "bg-amber-400" : "bg-emerald-400"}`} />
+            {aiOff ? "IA desligada" : "IA ligada"}
+          </button>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-white/10 bg-obs-surface p-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-obs-violet/25 bg-obs-violet/10 text-obs-violet">
+            <Route size={16} />
+          </span>
+          <div>
+            <h3 className="text-sm font-semibold text-obs-text">Motor de atendimento</h3>
+            <p className="mt-1 text-xs leading-5 text-obs-subtle">
+              Configuração única da persona. O envio permanece direto pelo provider de WhatsApp.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {([
+            {
+              value: "deterministic",
+              title: "Determinístico",
+              description: "Usa o grafo e as regras publicadas, sem consumir um agente de IA.",
+            },
+            {
+              value: "n8n_agents",
+              title: "n8n",
+              description: "O n8n compõe a resposta com um agente de IA, com decisões comerciais determinísticas.",
+            },
+            {
+              value: "orquestrador",
+              title: "Orquestrador",
+              description: "Motor interno futuro, dentro do próprio backend. Hoje o executor real é o n8n.",
+              badge: "em breve",
+            },
+          ] as const).map((option) => {
+            const selected = routing?.conversation_mode === option.value;
+            const disabled = routingBusy || !routing?.migration_applied || option.value === "orquestrador";
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => updateConversationMode(option.value)}
+                disabled={disabled}
+                className={`rounded-xl border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  selected
+                    ? "border-obs-violet/40 bg-obs-violet/10"
+                    : "border-white/10 bg-obs-base/60 hover:border-white/20"
+                }`}
+              >
+                <span className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-obs-text">{option.title}</span>
+                  {selected && <CheckCircle2 size={15} className="text-obs-violet" />}
+                  {"badge" in option && (
+                    <span className="rounded-full border border-white/10 bg-obs-base px-2 py-0.5 text-[10px] uppercase tracking-wide text-obs-faint">
+                      {option.badge}
+                    </span>
+                  )}
+                </span>
+                <span className="mt-2 block text-xs leading-5 text-obs-subtle">
+                  {option.description}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {routingMessage && <p className="mt-3 text-xs text-green-300">{routingMessage}</p>}
+        {routingError && (
+          <p className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+            {routingError}
+          </p>
+        )}
+      </section>
+
+      <section className={`rounded-2xl border border-white/10 bg-obs-surface p-4 ${!needsAgent ? "opacity-60" : ""}`}>
+        <h3 className="text-sm font-semibold text-obs-text">Agente de IA</h3>
+        <p className="mt-1 text-xs leading-5 text-obs-subtle">
+          {needsAgent
+            ? "Provedor de modelo que compõe as respostas quando o motor não é determinístico."
+            : "Só é usado pelos motores n8n/Orquestrador — o motor atual (Determinístico) não precisa de um agente de IA."}
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {integrations.length === 0 && (
+            <p className="text-xs text-obs-faint">Nenhum provedor de IA configurado em Ferramentas ainda.</p>
+          )}
+          {integrations.map((item) => {
+            const ready = item.service === "deepseek" && item.enabled && item.configured;
+            return (
+              <div
+                key={item.service}
+                className={`rounded-xl border p-3 text-xs ${
+                  ready ? "border-obs-violet/40 bg-obs-violet/10" : "border-white/10 bg-obs-base/60"
+                }`}
+              >
+                <p className="font-medium text-obs-text">{item.label || item.service}</p>
+                <p className="mt-1 text-obs-faint">
+                  {ready ? "Ativo — usado pelo n8n" : item.configured ? "Requer provisionamento n8n" : "Não configurado"}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+        {routing?.field_extractor && (
+          <p className="mt-3 text-xs text-obs-subtle">Modelo ativo: {routing.field_extractor}.</p>
+        )}
       </section>
     </div>
   );

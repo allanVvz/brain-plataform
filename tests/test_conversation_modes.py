@@ -21,7 +21,12 @@ def test_active_whatsapp_binding_accepts_every_contact():
     assert whatsapp._allowed(binding, "559999999999") is True
 
 
-def test_routing_exposes_public_conversation_modes_without_new_storage():
+def test_routing_exposes_public_conversation_modes_without_new_storage(monkeypatch):
+    # No active binding for either persona here — _mask_routing now prefers
+    # the live binding's decision_owner (the real production routing
+    # switch) and only falls back to process_mode when none exists, which
+    # is exactly the fallback path this test exercises.
+    monkeypatch.setattr(personas.supabase_client, "get_workflow_bindings", lambda _id: [])
     deterministic = personas._mask_routing(
         {"slug": "baita", "id": "p1", "process_mode": "internal"}
     )

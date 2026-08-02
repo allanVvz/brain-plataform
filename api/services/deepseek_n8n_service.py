@@ -143,6 +143,33 @@ def provision(
     }
 
 
+def resync_workflow_for_persona(
+    persona: dict[str, Any],
+    deepseek_config: dict[str, Any],
+) -> str:
+    """Rebuild this persona's n8n workflow from the current template/graph
+    and republish it, reusing the DeepSeek credential already provisioned.
+
+    Called whenever the operator switches (or re-confirms) n8n_agents mode
+    from the settings UI, so the live n8n workflow always matches what's on
+    disk without a manual SSH resync — the same steps that were previously
+    run by hand for every persona-level change.
+    """
+    credential_id = str(deepseek_config.get("n8n_credential_id") or "")
+    workflow_id = str(deepseek_config.get("n8n_workflow_id") or "")
+    if not credential_id or not workflow_id:
+        raise RuntimeError("DeepSeek nao provisionado para esta persona")
+    credential_name = f"Brain DeepSeek — {persona.get('slug') or ''}"
+    workflow = _workflow_for_persona(
+        persona,
+        credential_id=credential_id,
+        credential_name=credential_name,
+    )
+    n8n_client.update_workflow(workflow_id, workflow)
+    n8n_client.activate_workflow(workflow_id)
+    return workflow_id
+
+
 def revoke(config: dict[str, Any] | None) -> None:
     credential_id = str((config or {}).get("n8n_credential_id") or "")
     if credential_id:

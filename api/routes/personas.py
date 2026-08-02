@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from schemas.persona import PersonaCreate, PersonaUpdate
 from services import public_site
-from services import auth_service, supabase_client, vault_sync
+from services import auth_service, deepseek_n8n_service, supabase_client, vault_sync
 
 router = APIRouter(prefix="/personas", tags=["personas"])
 logger = logging.getLogger("personas")
@@ -19,6 +19,7 @@ logger = logging.getLogger("personas")
 class RoutingUpdate(BaseModel):
     process_mode: str | None = None
     conversation_mode: str | None = None
+    automation_mode: str | None = None
     outbound_webhook_url: str | None = None
     outbound_webhook_secret: str | None = None
     inbound_webhook_token: str | None = None
@@ -35,24 +36,52 @@ class PublicSiteUpdate(BaseModel):
     catalog_url: Optional[str] = None
 
 
+_KNOWN_CONVERSATION_MODES = {"deterministic", "n8n_agents", "orquestrador"}
+
+
+def _active_decision_owner(persona_id: str | None) -> str | None:
+    """The routing switch that actually governs live dispatch — read
+    straight from the active binding, not the legacy process_mode column.
+
+    Confirmed live this session: decision_owner can be changed directly on
+    a binding (as production hotfixes did repeatedly) without process_mode
+    ever being touched, leaving any UI that only reads process_mode showing
+    a stale value while automation silently runs a different engine.
+    """
+    if not persona_id:
+        return None
+    for binding in supabase_client.get_workflow_bindings(persona_id):
+        if binding.get("active"):
+            return (binding.get("metadata") or {}).get("decision_owner")
+    return None
+
+
 def _mask_routing(routing: dict) -> dict:
     """Hide secret/token values from GET responses; return only presence flag."""
     if not routing:
         return routing
     process_mode = routing.get("process_mode") or "internal"
+    live_decision_owner = _active_decision_owner(routing.get("id"))
+    conversation_mode = (
+        live_decision_owner
+        if live_decision_owner in _KNOWN_CONVERSATION_MODES
+        else ("n8n_agents" if process_mode == "n8n" else "deterministic")
+    )
+    automation_mode = (
+        (routing.get("config") or {}).get("portal") or {}
+    ).get("automation_mode") or "ai_with_handoff"
     return {
         "slug": routing.get("slug"),
         "id": routing.get("id"),
         "process_mode": process_mode,
-        "conversation_mode": (
-            "n8n_agents" if process_mode == "n8n" else "deterministic"
-        ),
+        "conversation_mode": conversation_mode,
+        "automation_mode": automation_mode,
         "pipeline_contract": "conversation_v1",
         "classifier": "deterministic_v1",
         "field_extractor": (
-            "deepseek-v4-flash" if process_mode == "n8n" else None
+            "deepseek-v4-flash" if conversation_mode == "n8n_agents" else None
         ),
-        "model_required": process_mode == "n8n",
+        "model_required": conversation_mode == "n8n_agents",
         "outbound_webhook_url": routing.get("outbound_webhook_url"),
         "has_outbound_webhook_secret": bool(routing.get("outbound_webhook_secret")),
         "has_inbound_webhook_token": bool(routing.get("inbound_webhook_token")),
@@ -188,20 +217,25 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
         )
     payload: dict = {}
     rotated_token: str | None = None
+    requested_conversation_mode = body.conversation_mode
     aliases = {
         "deterministic": "internal",
         "n8n_agents": "n8n",
     }
-    if body.conversation_mode is not None:
-        if body.conversation_mode not in aliases:
+    if requested_conversation_mode is not None:
+        if requested_conversation_mode not in _KNOWN_CONVERSATION_MODES:
             raise HTTPException(
                 400,
-                "conversation_mode must be 'deterministic' or 'n8n_agents'",
+                "conversation_mode must be 'deterministic', 'n8n_agents' or 'orquestrador'",
             )
-        normalized = aliases[body.conversation_mode]
-        if body.process_mode is not None and body.process_mode != normalized:
-            raise HTTPException(400, "routing mode fields conflict")
-        payload["process_mode"] = normalized
+        normalized = aliases.get(requested_conversation_mode)
+        if normalized is not None:
+            if body.process_mode is not None and body.process_mode != normalized:
+                raise HTTPException(400, "routing mode fields conflict")
+            payload["process_mode"] = normalized
+        # "orquestrador" has no legacy process_mode equivalent yet (that
+        # column only understands internal/n8n) — leave it untouched
+        # rather than write an invalid value into a still-read legacy field.
     if body.process_mode is not None:
         if body.process_mode not in {"internal", "n8n"}:
             raise HTTPException(400, "process_mode must be 'internal' or 'n8n'")
@@ -225,15 +259,14 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
     if body.rotate_inbound_token:
         rotated_token = secrets.token_urlsafe(32)
         payload["inbound_webhook_token"] = rotated_token
-    if not payload:
+    if (
+        not payload
+        and requested_conversation_mode is None
+        and body.automation_mode is None
+    ):
         return _mask_routing(current)
-    updated = None
-    if "process_mode" in payload:
-        conversation_mode = (
-            "n8n_agents"
-            if payload["process_mode"] == "n8n"
-            else "deterministic"
-        )
+    if requested_conversation_mode is not None:
+        conversation_mode = requested_conversation_mode
         deepseek_config: dict = {}
         if conversation_mode == "n8n_agents":
             integration = (
@@ -278,7 +311,16 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                 str(binding["id"]),
                 binding_update,
             )
-        updated = supabase_client.update_persona_routing(slug, payload)
+        if payload:
+            supabase_client.update_persona_routing(slug, payload)
+        if conversation_mode == "n8n_agents":
+            # The workflow bindings above only point n8n at the right
+            # webhook/credential ids — the *content* of the live n8n
+            # workflow (system prompt wiring, extraction contract, etc.)
+            # only updates if we actually rebuild and republish it here,
+            # the same steps that were previously run by hand over SSH.
+            full_persona = supabase_client.get_persona(slug) or current
+            deepseek_n8n_service.resync_workflow_for_persona(full_persona, deepseek_config)
         supabase_client.insert_event(
             {
                 "event_type": "conversation.mode_updated",
@@ -299,9 +341,35 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
             },
             source="routes.personas",
         )
-    else:
-        updated = supabase_client.update_persona_routing(slug, payload)
-    response = _mask_routing(updated or current)
+    elif payload:
+        supabase_client.update_persona_routing(slug, payload)
+    if body.automation_mode is not None:
+        if body.automation_mode not in {"ai_with_handoff", "human_only"}:
+            raise HTTPException(400, "automation_mode must be 'ai_with_handoff' or 'human_only'")
+        persona_row = supabase_client.get_persona(slug) or {}
+        persona_config = dict(persona_row.get("config") or {})
+        portal_config = dict(persona_config.get("portal") or {})
+        portal_config["automation_mode"] = body.automation_mode
+        persona_config["portal"] = portal_config
+        supabase_client.get_client().table("personas").update(
+            {"config": persona_config}
+        ).eq("slug", slug).execute()
+        supabase_client.insert_event(
+            {
+                "event_type": (
+                    "whatsapp.automation_enabled"
+                    if body.automation_mode == "ai_with_handoff"
+                    else "whatsapp.automation_disabled"
+                ),
+                "entity_type": "persona",
+                "entity_id": str(current.get("id") or slug),
+                "persona_id": current.get("id"),
+                "payload": {"reason": "settings_ui", "automation_mode": body.automation_mode},
+            },
+            source="routes.personas",
+        )
+    final = supabase_client.get_persona_routing(slug) or current
+    response = _mask_routing(final)
     if rotated_token:
         response["inbound_webhook_token"] = rotated_token
     return response

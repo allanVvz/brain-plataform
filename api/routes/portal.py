@@ -448,6 +448,13 @@ def pipeline(request: Request, persona_slug: str = Query(...)):
     }
 
 
+@router.get("/personas/{slug}/automation")
+def get_automation(slug: str, request: Request):
+    persona = _persona(slug, request, "view")
+    mode = ((persona.get("config") or {}).get("portal") or {}).get("automation_mode") or "ai_with_handoff"
+    return {"mode": mode}
+
+
 @router.patch("/personas/{slug}/automation")
 def automation(slug: str, body: AutomationBody, request: Request):
     persona = _persona(slug, request, "manage")

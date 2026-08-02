@@ -38,12 +38,23 @@ type PortalContextValue = {
 
 const PortalContext = createContext<PortalContextValue | null>(null);
 
+// "Configurações" is deliberately not in this list: it already lives in
+// the account dropdown below (opens upward, near the user's name), and
+// having it here too just duplicates the same destination in two places.
 const links = [
   { key: "mensagens", label: "Mensagens", icon: MessageSquare },
   { key: "leads", label: "Leads", icon: Users },
   { key: "pipeline", label: "Pipeline", icon: Activity },
-  { key: "configuracoes", label: "Configurações", icon: Settings },
 ];
+
+// Every route's title, shown in the persistent header instead of each page
+// rendering its own — keeps one line of truth instead of two.
+const PAGE_TITLES: Record<string, string> = {
+  mensagens: "Mensagens",
+  leads: "Leads",
+  pipeline: "Pipeline",
+  configuracoes: "Configurações",
+};
 
 export function usePortal() {
   const value = useContext(PortalContext);
@@ -104,6 +115,10 @@ export default function PortalProvider({
 
   const base = `/clientes/${personaSlug}`;
   const value = useMemo(() => state, [state]);
+  const pageTitle = useMemo(() => {
+    const segment = pathname.replace(base, "").split("/").filter(Boolean)[0];
+    return (segment && PAGE_TITLES[segment]) || "Mensagens";
+  }, [pathname, base]);
 
   async function logout() {
     await api.logout().catch(() => undefined);
@@ -212,14 +227,14 @@ export default function PortalProvider({
         </aside>
 
         <div className="min-w-0 flex-1">
-          <header className="sticky top-0 z-30 flex h-16 items-center border-b border-slate-200 bg-white/95 px-4 backdrop-blur lg:px-8">
-            <div>
-              <p className="text-sm font-semibold lg:hidden">{value.persona.name}</p>
-              <p className="hidden text-xs text-slate-500 lg:block">
-                Ambiente seguro · dados exclusivos da sua operação
+          <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur lg:px-8">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-950">{pageTitle}</p>
+              <p className="hidden truncate text-xs text-slate-500 lg:block">
+                {value.persona.name} · Ambiente seguro · dados exclusivos da sua operação
               </p>
             </div>
-            <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
+            <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-slate-500">
               <span
                 className={`h-2 w-2 rounded-full ${
                   value.channel.status === "connected" ? "bg-emerald-500" : "bg-amber-400"

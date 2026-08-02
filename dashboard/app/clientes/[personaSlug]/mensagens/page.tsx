@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquare, PlugZap } from "lucide-react";
+import { PlugZap } from "lucide-react";
 import Link from "next/link";
 import { MessagesLayout } from "@/app/messages/MessagesLayout";
 import { usePortal } from "../PortalContext";
@@ -9,14 +9,6 @@ export default function ClientMessagesPage() {
   const { personaSlug, capabilities, channel } = usePortal();
   return (
     <div className="space-y-4">
-      <header>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-slate-950">
-          <MessageSquare size={23} /> Mensagens
-        </h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Conversas da sua operação em um único lugar.
-        </p>
-      </header>
       {!channel.configured && (
         <section className="flex flex-col gap-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 sm:flex-row sm:items-center">
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-amber-700 shadow-sm">

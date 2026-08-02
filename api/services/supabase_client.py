@@ -2855,6 +2855,7 @@ def get_persona_routing(slug: str) -> Optional[dict]:
         "slug": persona.get("slug"),
         "id": persona.get("id"),
         "process_mode": process_mode,
+        "config": persona.get("config") or {},
         "outbound_webhook_url": persona.get("outbound_webhook_url"),
         "outbound_webhook_secret": persona.get("outbound_webhook_secret"),
         "inbound_webhook_token": persona.get("inbound_webhook_token"),

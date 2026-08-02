@@ -76,3 +76,45 @@ def test_provision_rolls_back_only_new_credential_when_workflow_fails(monkeypatc
         assert str(exc) == "n8n failed"
 
     assert deleted == ["credential-new"]
+
+
+def test_resync_workflow_reuses_existing_credential_and_reactivates(monkeypatch):
+    """Regression test: this replaces the manual SSH ritual (rebuild
+    workflow from the template on disk, update_workflow, activate_workflow)
+    that was run by hand for every persona-level engine/config change this
+    session — the settings UI must be able to trigger the same steps."""
+    calls = {}
+
+    def update_workflow(workflow_id, workflow):
+        calls["workflow_id"] = workflow_id
+        calls["workflow"] = workflow
+        return {"id": workflow_id}
+
+    monkeypatch.setattr(deepseek_n8n_service.n8n_client, "update_workflow", update_workflow)
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client,
+        "activate_workflow",
+        lambda workflow_id: calls.setdefault("activated", workflow_id),
+    )
+
+    result = deepseek_n8n_service.resync_workflow_for_persona(
+        {"id": "persona-id", "slug": "baita-conveniencia", "name": "Baita", "config": {}},
+        {"n8n_credential_id": "credential-existing", "n8n_workflow_id": "workflow-existing"},
+    )
+
+    assert result == "workflow-existing"
+    assert calls["workflow_id"] == "workflow-existing"
+    assert calls["activated"] == "workflow-existing"
+    deepseek_node = next(node for node in calls["workflow"]["nodes"] if node["id"] == "deepseek")
+    assert deepseek_node["credentials"]["httpHeaderAuth"]["id"] == "credential-existing"
+
+
+def test_resync_workflow_requires_prior_provisioning(monkeypatch):
+    try:
+        deepseek_n8n_service.resync_workflow_for_persona(
+            {"slug": "baita-conveniencia", "name": "Baita", "config": {}},
+            {},
+        )
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "provisionado" in str(exc)

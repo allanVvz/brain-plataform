@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import dynamic from "next/dynamic";
 import {
-  BookOpenCheck,
   ChevronDown,
   Globe2,
   Keyboard,
@@ -24,7 +23,6 @@ import { api } from "@/lib/api";
 import { applyLanguage, getStoredLanguage, LANGUAGE_OPTIONS, type UiLanguage } from "@/lib/language";
 import { MessagingSettingsPanel } from "@/components/settings/MessagingSettingsPanel";
 import { SecuritySettingsPanel } from "@/components/settings/SecuritySettingsPanel";
-import { ChatBotSettingsPanel } from "@/components/settings/ChatBotSettingsPanel";
 
 const panelLoading = () => (
   <p className="rounded-xl border border-white/10 bg-obs-surface p-4 text-sm text-obs-subtle">
@@ -609,7 +607,6 @@ function GeneralSettingsPanel() {
 type SettingsTab =
   | "general"
   | "messaging"
-  | "chatbot"
   | "tools"
   | "logs"
   | "access"
@@ -622,7 +619,6 @@ const SETTINGS_TABS: Array<{
 }> = [
   { key: "general", label: "Geral", icon: Settings },
   { key: "messaging", label: "Mensageria", icon: MessageCircle },
-  { key: "chatbot", label: "ChatBot", icon: BookOpenCheck },
   { key: "tools", label: "Ferramentas", icon: SlidersHorizontal },
   { key: "logs", label: "Logs", icon: RefreshCw },
   { key: "access", label: "Acessos", icon: UserPlus },
@@ -641,6 +637,16 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
 
   useEffect(() => {
+    // ChatBot merged into Mensageria > Agentes — redirect old links/bookmarks
+    // instead of silently falling back to Geral.
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("tab") === "chatbot") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", "messaging");
+      url.searchParams.set("sub", params.get("view") === "validations" ? "validacoes" : "agentes");
+      url.searchParams.delete("view");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
     const sync = () => setActiveTab(tabFromLocation());
     sync();
     window.addEventListener("popstate", sync);
@@ -694,7 +700,6 @@ export default function SettingsPage() {
       <section data-settings-tab={activeTab}>
         {activeTab === "general" && <GeneralSettingsPanel />}
         {activeTab === "messaging" && <MessagingSettingsPanel />}
-        {activeTab === "chatbot" && <ChatBotSettingsPanel />}
         {activeTab === "tools" && <ToolsSettingsPanel />}
         {activeTab === "logs" && <LogsSettingsPanel />}
         {activeTab === "access" && <AccessSettingsPanel />}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CalendarCheck2 } from "lucide-react";
+import { CalendarCheck2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { usePortal } from "../PortalContext";
@@ -22,14 +22,6 @@ export default function ClientPipelinePage() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <Activity size={23} /> Pipeline
-        </h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Visão comercial exclusiva da sua operação.
-        </p>
-      </header>
       {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
       {!data && !error ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">

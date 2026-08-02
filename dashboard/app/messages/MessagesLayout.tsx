@@ -1327,16 +1327,25 @@ export function MessagesLayout({
   portalSlug,
   canEdit = true,
   validationMode = false,
+  heightClassName,
 }: {
   initialLeadId?: number | null;
   focused?: boolean;
   portalSlug?: string;
   canEdit?: boolean;
   validationMode?: boolean;
+  /** Overrides the outer container's height. Defaults to the admin shell's
+   * chrome budget (header 3rem + main padding 3rem = 6rem); the portal
+   * shell's chrome is different (header 4rem + main padding, no per-page
+   * header now that titles live in the persistent portal header) and gets
+   * its own default when portalSlug is set. */
+  heightClassName?: string;
 }) {
   const pathname = usePathname();
   const portalMatch = portalSlug ? [pathname, portalSlug] : pathname.match(/^\/clientes\/([^/]+)/);
   const isPortal = Boolean(portalSlug);
+  const resolvedHeightClassName =
+    heightClassName || (isPortal ? "h-[calc(100vh-11rem)] lg:h-[calc(100vh-8rem)]" : "h-[calc(100vh-6rem)]");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [search, setSearch] = useState("");
@@ -1736,7 +1745,7 @@ export function MessagesLayout({
 
   return (
     <div
-      className="messages-page flex h-[calc(100vh-6rem)] overflow-hidden rounded-xl p-3"
+      className={`messages-page flex ${resolvedHeightClassName} overflow-hidden rounded-xl p-3`}
       style={{
         background:
           "radial-gradient(circle at 15% 10%, rgba(124,92,255,0.10), transparent 28%), radial-gradient(circle at 85% 20%, rgba(120,180,255,0.10), transparent 26%), linear-gradient(180deg, #f7f7fc 0%, #f2f2f8 100%)",
