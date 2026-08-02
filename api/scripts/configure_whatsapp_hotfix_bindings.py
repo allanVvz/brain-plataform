@@ -97,28 +97,37 @@ def main() -> None:
     ):
         raise RuntimeError("Evolution binding credential is unavailable")
 
+    meta_preserved = _is_complete_n8n_agents_binding(meta_binding)
     evolution_preserved = _is_complete_n8n_agents_binding(evolution_binding)
 
     if args.apply:
-        # Meta/Baita always gets forced to the safe deterministic baseline
-        # on every deploy — it never uses the agentic engine, so there is
-        # no valid reason for it to be anything else.
-        supabase_client.update_workflow_binding(
-            meta_binding["id"],
-            {
-                "channel": "whatsapp",
-                "provider": "meta_cloud",
-                "n8n_workflow_id": None,
-                "provider_secret_ciphertext": meta_ciphertext,
-                "metadata": _canonical_metadata(meta_binding),
-            },
-        )
-        # Evolution/Aurora only gets reset if it is NOT already a complete,
+        # Either binding only gets reset if it is NOT already a complete,
         # valid n8n_agents configuration — a half-configured one (missing
         # workflow id or webhook) is exactly as dangerous as before and
         # still gets reset. Confirmed live 2026-08-01: this reset used to
         # unconditionally revert Aurora's decision_owner on every deploy,
         # silently undoing an intentional activation of the agentic flow.
+        # Confirmed live again 2026-08-02: Meta/Baita had the same
+        # unconditional reset with no exception at all — "Meta never uses
+        # the agentic engine" stopped being true the moment the settings
+        # UI let an operator switch any persona to n8n_agents, and this
+        # script silently undid that choice on the very next deploy.
+        if not meta_preserved:
+            supabase_client.update_workflow_binding(
+                meta_binding["id"],
+                {
+                    "channel": "whatsapp",
+                    "provider": "meta_cloud",
+                    "n8n_workflow_id": None,
+                    "provider_secret_ciphertext": meta_ciphertext,
+                    "metadata": _canonical_metadata(meta_binding),
+                },
+            )
+        else:
+            supabase_client.update_workflow_binding(
+                meta_binding["id"],
+                {"provider_secret_ciphertext": meta_ciphertext},
+            )
         if not evolution_preserved:
             supabase_client.update_workflow_binding(
                 evolution_binding["id"],
@@ -130,7 +139,7 @@ def main() -> None:
                 },
             )
         for persona, binding, preserved in (
-            (meta_persona, meta_binding, False),
+            (meta_persona, meta_binding, meta_preserved),
             (evolution_persona, evolution_binding, evolution_preserved),
         ):
             supabase_client.insert_event(
@@ -162,6 +171,7 @@ def main() -> None:
                 "binding_id": meta_binding["id"],
                 "provider": "meta_cloud",
                 "encrypted_secret_present": bool(meta_ciphertext),
+                "preserved_existing_n8n_agents_config": meta_preserved,
             },
             {
                 "persona_slug": args.evolution_persona,
