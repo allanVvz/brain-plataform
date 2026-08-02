@@ -748,7 +748,18 @@ def get_leads_for_audience_scope(
 
 def get_messages(lead_id: str, limit: int = 30) -> list:
     """
-    Fetch messages for a lead, ordered ascending (chronological chat order).
+    Fetch the most recent `limit` messages for a lead, returned in ascending
+    (chronological chat) order.
+
+    The DB query orders descending so `.limit()` keeps the newest rows, then
+    `_sort_messages_for_chat` flips them back to display order. Querying
+    ascending-then-limit (the previous behavior) silently returned the
+    *oldest* `limit` messages for any lead with more history than that —
+    every caller expecting recent context (AI conversation history, the
+    bot-echo-loop guard) was reading from the start of the conversation
+    instead. Confirmed live 2026-08-02: a lead with 143 messages had its
+    echo-loop guard permanently matching a 6-day-old outbound reply because
+    that old row never left the first-20-messages window.
     The self-hosted schema uses ``messages.lead_id``.  ``lead_ref`` remains a
     response compatibility alias through ``_normalize_message_row``.
     """
@@ -763,8 +774,8 @@ def get_messages(lead_id: str, limit: int = 30) -> list:
                 client.table("messages")
                 .select("*")
                 .eq("lead_id", int(digits))
-                .order("created_at", desc=False)
-                .order("id", desc=False)
+                .order("created_at", desc=True)
+                .order("id", desc=True)
                 .limit(limit)
             )
             if rows:
@@ -780,8 +791,8 @@ def get_messages(lead_id: str, limit: int = 30) -> list:
                 client.table("messages")
                 .select("*")
                 .eq("lead_id", lead["id"])
-                .order("created_at", desc=False)
-                .order("id", desc=False)
+                .order("created_at", desc=True)
+                .order("id", desc=True)
                 .limit(limit)
             )
             return _sort_messages_for_chat([_normalize_message_row(row) for row in rows])
