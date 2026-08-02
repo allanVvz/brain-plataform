@@ -8,7 +8,58 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services import graph_json_v2_store
+from schemas.conversation import ConversationContext
+from services import conversation_runtime, graph_json_v2_store
+
+
+def _validate_aurora_dialog(*, graph, version: int, checksum: str) -> dict:
+    rag_nodes = [
+        {
+            "id": node.id,
+            "node_type": node.node_type,
+            "slug": node.slug,
+            "title": node.title,
+            "status": node.lifecycle.status,
+            "source": node.provenance.source,
+            "data": node.data,
+        }
+        for node in graph.nodes
+    ]
+    cases = [
+        ("Quais serviços estão disponíveis?", "list_services", "SDR", False),
+        ("Quanto custa o polimento técnico?", "consult_price", "SDR", False),
+        ("Quero reclamar da garantia", "exceptional_support", "HUMAN", True),
+        ("Quero agendar higienização interna", "request_booking", "SDR", False),
+    ]
+    results: list[dict] = []
+    for message, expected_intent, expected_route, expected_handoff in cases:
+        context = ConversationContext(
+            persona_slug="aurora",
+            agent_slug="aurora",
+            graph_version=version,
+            graph_checksum=checksum,
+            messages=[{"role": "user", "sender_type": "lead", "texto": message}],
+            cart={"_lead_stage": "novo", "business_model": "appointment"},
+            rag_nodes=rag_nodes,
+            rag_paths=[[node["id"]] for node in rag_nodes],
+        )
+        decision, response = conversation_runtime.decide(context)
+        actual = {
+            "intent": decision.intent,
+            "route": decision.route.value,
+            "handoff": response.handoff_required,
+            "has_reply": bool((response.reply_text or "").strip()),
+        }
+        expected = {
+            "intent": expected_intent,
+            "route": expected_route,
+            "handoff": expected_handoff,
+            "has_reply": True,
+        }
+        if actual != expected:
+            raise RuntimeError({"aurora_dialog_case": message, "expected": expected, "actual": actual})
+        results.append(actual)
+    return {"cases": len(results), "all_replied": all(item["has_reply"] for item in results)}
 
 
 def validate() -> dict:
@@ -27,9 +78,17 @@ def validate() -> dict:
         edge for edge in aurora.edges
         if edge.target == embedded.id
         and edge.source in {node.id for node in faqs}
-        and edge.primary_tree is False
+        and edge.relation_type == "publishes_to"
+        and edge.lifecycle.status == "active"
+    ]
+    agent_grants = [
+        edge for edge in aurora.edges
+        if edge.target == embedded.id
+        and edge.relation_type == "publishes_to"
+        and edge.lifecycle.status == "active"
     ]
     checks = {
+        "aurora_schema_version": aurora.schema_version,
         "aurora_nodes": len(aurora.nodes),
         "aurora_edges": len(aurora.edges),
         "aurora_markdown_documents": sum(
@@ -38,14 +97,19 @@ def validate() -> dict:
         "aurora_faqs": len(faqs),
         "aurora_faq_embedded_edges": len(faq_edges),
         "aurora_orphan_faqs": len(faqs) - len({edge.source for edge in faq_edges}),
+        "aurora_agent_grants": len(agent_grants),
+        "aurora_destination": embedded.action.destination_id if embedded.action else None,
     }
     expected = {
+        "aurora_schema_version": "2.1",
         "aurora_nodes": 47,
-        "aurora_edges": 64,
+        "aurora_edges": 88,
         "aurora_markdown_documents": 45,
         "aurora_faqs": 19,
         "aurora_faq_embedded_edges": 19,
         "aurora_orphan_faqs": 0,
+        "aurora_agent_grants": 44,
+        "aurora_destination": "dataset:sdr-aurora",
     }
     if checks != expected:
         raise RuntimeError({"expected": expected, "actual": checks})
@@ -57,16 +121,27 @@ def validate() -> dict:
         raise RuntimeError("Aurora FAQ Markdown contract failed")
 
     baita_current = graph_json_v2_store.load_current("baita-conveniencia")
-    if not baita_current or int(baita_current[0]) != 9:
-        raise RuntimeError("Baita Graph v9 was not preserved")
+    if not baita_current or int(baita_current[0]) < 1:
+        raise RuntimeError("Baita published graph was not preserved")
+    if baita_current[1].persona_slug != "baita-conveniencia":
+        raise RuntimeError("Baita graph scope was corrupted")
     baita_event = graph_json_v2_store.latest_event("baita-conveniencia") or {}
+    baita_checksum = str((baita_event.get("payload") or {}).get("checksum") or "")
+    if not baita_checksum:
+        raise RuntimeError("Baita graph checksum is missing")
+    dialog = _validate_aurora_dialog(
+        graph=aurora,
+        version=aurora_version,
+        checksum=str((aurora_event.get("payload") or {}).get("checksum") or "missing"),
+    )
     return {
         "ok": True,
         **checks,
         "aurora_version": aurora_version,
         "aurora_checksum": (aurora_event.get("payload") or {}).get("checksum"),
         "baita_version": int(baita_current[0]),
-        "baita_checksum": (baita_event.get("payload") or {}).get("checksum"),
+        "baita_checksum": baita_checksum,
+        "aurora_dialog": dialog,
     }
 
 

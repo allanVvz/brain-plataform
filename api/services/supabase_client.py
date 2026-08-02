@@ -4613,6 +4613,85 @@ def list_system_events(
     return _q(q)
 
 
+def _rpc_json(name: str, params: dict) -> dict:
+    """Execute an internal RPC and normalize PostgREST's object/list shapes."""
+    result = _execute_with_retry(get_client().rpc(name, params))
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else None
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{name} returned an invalid result")
+    return payload
+
+
+def commit_graph_version_v2(
+    *,
+    persona_slug: str,
+    brand_slug: Optional[str],
+    expected_version: int,
+    idempotency_key: str,
+    reason: str,
+    graph_json: dict,
+    content_checksum: str,
+    source: str,
+    authored_by: Optional[str],
+) -> dict:
+    return _rpc_json(
+        "commit_graph_version_v2",
+        {
+            "p_persona_slug": persona_slug,
+            "p_brand_slug": brand_slug,
+            "p_expected_version": expected_version,
+            "p_idempotency_key": idempotency_key,
+            "p_reason": reason,
+            "p_graph_json": graph_json,
+            "p_content_checksum": content_checksum,
+            "p_source": source,
+            "p_authored_by": authored_by,
+        },
+    )
+
+
+def activate_graph_projection_v2(
+    *,
+    persona_slug: str,
+    brand_slug: Optional[str],
+    graph_version: int,
+    graph_checksum: str,
+    operation_id: str,
+    projections: dict,
+    source: str,
+) -> dict:
+    return _rpc_json(
+        "activate_graph_projection_v2",
+        {
+            "p_persona_slug": persona_slug,
+            "p_brand_slug": brand_slug,
+            "p_graph_version": graph_version,
+            "p_graph_checksum": graph_checksum,
+            "p_operation_id": operation_id,
+            "p_projections": projections,
+            "p_source": source,
+        },
+    )
+
+
+def record_graph_projection_event_v2(
+    *,
+    persona_slug: str,
+    projection: dict,
+    source: str,
+) -> dict:
+    return _rpc_json(
+        "record_graph_projection_event_v2",
+        {
+            "p_persona_slug": persona_slug,
+            "p_projection": projection,
+            "p_source": source,
+        },
+    )
+
+
 # â”€â”€ Pipeline Status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def get_pipeline_statuses() -> list:

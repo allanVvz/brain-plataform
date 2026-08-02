@@ -17,6 +17,10 @@ export type GraphNodeType =
   | "copy"
   | "faq"
   | "gallery"
+  | "embedded"
+  | "marketing_workspace"
+  | "rule"
+  | "tone"
   | "asset";
 
 export type GraphEdgeKind =
@@ -37,6 +41,10 @@ export const CANONICAL_NODE_TYPES: readonly GraphNodeType[] = [
   "copy",
   "faq",
   "gallery",
+  "embedded",
+  "marketing_workspace",
+  "rule",
+  "tone",
   "asset",
 ] as const;
 
@@ -79,6 +87,10 @@ export const NODE_TYPE_LABEL: Record<GraphNodeType, string> = {
   copy: "Copy",
   faq: "FAQ",
   gallery: "Gallery",
+  embedded: "Embedded",
+  marketing_workspace: "Marketing Workspace",
+  rule: "Rule",
+  tone: "Tone",
   asset: "Asset",
 };
 
@@ -94,6 +106,10 @@ export const NODE_TYPE_COLOR: Record<GraphNodeType, string> = {
   copy: "#64748b",
   faq: "#4ade80",
   gallery: "#d946ef",
+  embedded: "#8b5cf6",
+  marketing_workspace: "#ec4899",
+  rule: "#ef4444",
+  tone: "#14b8a6",
   asset: "#f59e0b",
 };
 

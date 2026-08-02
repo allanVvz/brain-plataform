@@ -265,11 +265,12 @@ export default function GraphPageClient() {
       const next = JSON.parse(JSON.stringify(docGraph));
       mutate(next);
       try {
-        await api.publishGraphDocument({
+        await api.commitGraphDocument({
           persona_slug: headerPersonaSlug,
           brand_slug: next.brand_slug ?? null,
           graph_json: next,
           source: "graph_ui",
+          reason: successText,
           expected_version: docVersion,
           idempotency_key: `graph-ui:${headerPersonaSlug}:${crypto.randomUUID()}`,
         });
@@ -391,8 +392,10 @@ export default function GraphPageClient() {
       // publish reindex updates the derived tables.
       if (docGraph) {
         const relation =
-          targetType === "gallery" ? "gallery_asset" : targetType === "embedded" ? "visible_to_agent" : targetType === "faq" ? "answers_question" : "contains";
-        const finalReceiver = targetType === "gallery" || targetType === "embedded";
+          ["gallery", "embedded", "marketing_workspace"].includes(targetType)
+            ? "publishes_to"
+            : targetType === "faq" ? "answers" : "contains";
+        const finalReceiver = ["gallery", "embedded", "marketing_workspace"].includes(targetType);
         await publishEditedGraph((graph) => {
           graph.edges = Array.isArray(graph.edges) ? graph.edges : [];
           graph.edges.push({
@@ -400,7 +403,16 @@ export default function GraphPageClient() {
             source: sourceId,
             target: targetId,
             relation,
+            relation_type: relation,
+            relation_class: relation === "publishes_to" ? "publication" : relation === "contains" ? "hierarchy" : "semantic",
             primary_tree: !finalReceiver,
+            lifecycle: { status: "active" },
+            ...(relation === "publishes_to" ? {
+              grant: {
+                mode: "manual",
+                reason: "Publicação manual pela interface do grafo",
+              },
+            } : {}),
             metadata: { created_from: "graph_ui", active: true },
           });
         }, targetType === "embedded" ? "FAQ publicado no Golden Dataset." : "Conexão criada.");
@@ -419,9 +431,10 @@ export default function GraphPageClient() {
       // V2 write-through: drop the edge from the canonical graph_json and re-publish.
       if (docGraph) {
         await publishEditedGraph((graph) => {
-          graph.edges = (Array.isArray(graph.edges) ? graph.edges : []).filter(
-            (edge: any) => String(edge?.id) !== rawEdgeId,
+          const edge = (Array.isArray(graph.edges) ? graph.edges : []).find(
+            (item: any) => String(item?.id) === rawEdgeId,
           );
+          if (edge) edge.lifecycle = { ...(edge.lifecycle || {}), status: "revoked" };
         }, "Conexão apagada.");
         return;
       }
@@ -443,18 +456,21 @@ export default function GraphPageClient() {
         return;
       }
       const nodeType = String(node?.data?.node_type || "");
-      if (["persona", "embedded", "gallery"].includes(nodeType) || node?.data?.protected) {
+      if (["persona", "embedded", "gallery", "marketing_workspace"].includes(nodeType) || node?.data?.protected) {
         setGraphNotice({ tone: "error", text: "Este node e protegido e nao pode ser excluido." });
         return;
       }
       try {
         await publishEditedGraph((graph) => {
-          graph.nodes = (Array.isArray(graph.nodes) ? graph.nodes : []).filter(
-            (item: any) => String(item?.id) !== nodeId,
+          const item = (Array.isArray(graph.nodes) ? graph.nodes : []).find(
+            (candidate: any) => String(candidate?.id) === nodeId,
           );
-          graph.edges = (Array.isArray(graph.edges) ? graph.edges : []).filter(
-            (edge: any) => String(edge?.source) !== nodeId && String(edge?.target) !== nodeId,
-          );
+          if (item) item.lifecycle = { ...(item.lifecycle || {}), status: "archived" };
+          for (const edge of Array.isArray(graph.edges) ? graph.edges : []) {
+            if (String(edge?.source) === nodeId || String(edge?.target) === nodeId) {
+              edge.lifecycle = { ...(edge.lifecycle || {}), status: "revoked" };
+            }
+          }
         }, "Card apagado.");
         if (selectedNode?.id === nodeId) setSelectedNode(null);
       } catch (error) {

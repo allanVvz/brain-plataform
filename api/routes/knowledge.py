@@ -4,11 +4,12 @@ import os
 from datetime import datetime, timezone
 from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
 from services import approved_knowledge_snapshots
 from services import graph_document_publisher, graph_json_v2_store
+from services import graph_context_resolver_v2
 from schemas.graph_json_v2 import Edge, GraphJson
 from services import integration_service, product_import_service
 from services.knowledge_rag_backfill import backfill_knowledge_rag
@@ -23,6 +24,44 @@ VAULT_SOURCE_MODE = os.environ.get("VAULT_SOURCE_MODE")
 OBSIDIAN_LOCAL_PATH = os.environ.get("OBSIDIAN_LOCAL_PATH")
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+
+
+class ResolveContextBody(BaseModel):
+    persona_slug: str
+    destination_id: str
+    graph_version: int
+    intent: str = "product_interest"
+    query: str = ""
+    seed_refs: list[str] = Field(default_factory=list)
+    max_nodes: int = 24
+    max_tokens: int = 8000
+
+
+@router.post("/context/resolve")
+def resolve_graph_context(body: ResolveContextBody, request: Request):
+    persona = supabase_client.get_persona(body.persona_slug)
+    if not persona:
+        raise HTTPException(404, f"Persona not found: {body.persona_slug}")
+    auth_service.assert_persona_access(
+        request,
+        persona_id=persona.get("id"),
+        persona_slug=body.persona_slug,
+    )
+    try:
+        return graph_context_resolver_v2.resolve_context(
+            persona_slug=body.persona_slug,
+            destination_id=body.destination_id,
+            graph_version=body.graph_version,
+            intent=body.intent,
+            query=body.query,
+            seed_refs=body.seed_refs,
+            max_nodes=max(1, min(body.max_nodes, 50)),
+            max_tokens=max(256, min(body.max_tokens, 32000)),
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 @router.get("/taxonomy")

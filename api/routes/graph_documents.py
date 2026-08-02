@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from schemas.graph_json_v2 import GraphJson
 from services import auth_service, graph_document_publisher, graph_json_importer, graph_json_v2_store
+from services import graph_json_v21_adapter
 from services import graph_json_v2_validator, supabase_client
 
 router = APIRouter(prefix="/graph-documents", tags=["graph-documents"])
@@ -51,6 +52,22 @@ class SyncBody(BaseModel):
 
 class ReindexBody(SyncBody):
     note: Optional[str] = None
+
+
+class ValidateGraphDocumentBody(BaseModel):
+    persona_slug: str = Field(..., min_length=1)
+    graph_json: dict
+
+
+class CommitGraphDocumentBody(BaseModel):
+    persona_slug: str = Field(..., min_length=1)
+    brand_slug: Optional[str] = None
+    expected_version: int = Field(..., ge=0)
+    idempotency_key: str = Field(..., min_length=1, max_length=200)
+    reason: str = Field(..., min_length=1, max_length=1000)
+    operations: list[dict[str, Any]] = Field(default_factory=list)
+    graph_json: Optional[dict] = None
+    source: str = "graph_documents.commit"
 
 
 def _latest_event(persona_slug: str, brand_slug: Optional[str]) -> Optional[dict]:
@@ -115,6 +132,36 @@ def _publish_or_http(**kwargs):
         raise HTTPException(502, str(exc)) from exc
 
 
+def _commit_or_http(**kwargs):
+    try:
+        return graph_document_publisher.commit(**kwargs)
+    except graph_document_publisher.VersionConflict as exc:
+        raise HTTPException(
+            409,
+            {
+                "code": "GRAPH_VERSION_CONFLICT",
+                "expected_version": exc.expected,
+                "current_version": exc.current,
+            },
+        ) from exc
+    except graph_document_publisher.GraphValidationError as exc:
+        raise HTTPException(422, {"code": "GRAPH_VALIDATION_FAILED", "errors": exc.errors}) from exc
+    except graph_document_publisher.ProjectionFailed as exc:
+        raise HTTPException(
+            502,
+            {
+                "code": "GRAPH_PROJECTION_FAILED",
+                "operation_id": exc.operation_id,
+                "graph_version": exc.version,
+                "error": str(exc),
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
 @router.get("/current")
 def graph_document_current(
     request: Request,
@@ -160,28 +207,173 @@ def graph_document_versions(
     _assert_persona_view(request, persona_slug)
     rows = supabase_client.list_system_events(
         entity_type="graph_document",
-        event_types=["graph_document_published"],
+        event_types=["graph_version_committed", "graph_version_activated", "graph_document_published"],
         limit=500,
     )
-    out: list[dict] = []
+    by_version: dict[int, dict] = {}
     for row in rows:
         payload = row.get("payload") or {}
         if payload.get("persona_slug") != persona_slug:
             continue
         if brand_slug is not None and (payload.get("brand_slug") or None) != brand_slug:
             continue
-        out.append(
-            {
+        version = int(payload.get("version") or 0)
+        candidate = {
                 "id": row.get("entity_id"),
-                "version": payload.get("version", 1),
+                "version": version,
                 "checksum": payload.get("checksum"),
                 "published_at": row.get("created_at"),
                 "source": payload.get("source"),
                 "note": payload.get("note"),
+                "status": "published" if row.get("event_type") in {"graph_version_activated", "graph_document_published"} else "committed",
             }
-        )
-    out.sort(key=lambda item: item.get("published_at") or "", reverse=True)
+        current = by_version.get(version)
+        if current is None or (candidate["status"] == "published" and current["status"] != "published"):
+            by_version[version] = candidate
+    out = sorted(by_version.values(), key=lambda item: item.get("version") or 0, reverse=True)
     return {"persona_slug": persona_slug, "brand_slug": brand_slug, "versions": out}
+
+
+@router.get("/{version}/diff")
+def graph_document_diff(
+    version: int,
+    request: Request,
+    persona_slug: str = Query(...),
+    against: int = Query(..., ge=1),
+    brand_slug: Optional[str] = Query(None),
+):
+    _assert_persona_view(request, persona_slug)
+    left = graph_json_v2_store.load_version(persona_slug, against, brand_slug)
+    right = graph_json_v2_store.load_version(persona_slug, version, brand_slug)
+    if left is None or right is None:
+        raise HTTPException(404, "Graph version not found")
+    left_nodes = {node.id: node.model_dump(mode="json") for node in left.nodes}
+    right_nodes = {node.id: node.model_dump(mode="json") for node in right.nodes}
+    left_edges = {edge.id: edge.model_dump(mode="json") for edge in left.edges}
+    right_edges = {edge.id: edge.model_dump(mode="json") for edge in right.edges}
+    return {
+        "against": against,
+        "version": version,
+        "nodes": {
+            "added": sorted(right_nodes.keys() - left_nodes.keys()),
+            "removed": sorted(left_nodes.keys() - right_nodes.keys()),
+            "changed": sorted(key for key in left_nodes.keys() & right_nodes.keys() if left_nodes[key] != right_nodes[key]),
+        },
+        "edges": {
+            "added": sorted(right_edges.keys() - left_edges.keys()),
+            "removed": sorted(left_edges.keys() - right_edges.keys()),
+            "changed": sorted(key for key in left_edges.keys() & right_edges.keys() if left_edges[key] != right_edges[key]),
+        },
+    }
+
+
+@router.post("/validate")
+def graph_document_validate(body: ValidateGraphDocumentBody, request: Request):
+    _assert_persona_edit(request, body.persona_slug)
+    graph = _validate_graph_json_or_422(body.graph_json)
+    _assert_graph_persona_matches(body.persona_slug, graph)
+    try:
+        canonical = graph_document_publisher.graph_markdown.canonicalize_graph(graph)
+    except Exception as exc:
+        errors = getattr(exc, "errors", [str(exc)])
+        raise HTTPException(422, {"code": "GRAPH_MARKDOWN_INVALID", "errors": errors}) from exc
+    policy_preview = graph_document_publisher.graph_action_policy.evaluate(canonical) if canonical.schema_version == "2.1" else []
+    return {
+        "ok": True,
+        "schema_version": canonical.schema_version,
+        "checksum": graph_json_v2_store.checksum_graph(canonical),
+        "graph_json": canonical.model_dump(mode="json"),
+        "policy_preview": policy_preview,
+    }
+
+
+@router.post("/commit")
+def graph_document_commit(body: CommitGraphDocumentBody, request: Request):
+    _assert_persona_edit(request, body.persona_slug)
+    if body.graph_json is not None:
+        try:
+            graph = GraphJson.model_validate(body.graph_json)
+        except Exception as exc:
+            raise HTTPException(422, f"Invalid graph_json payload: {exc}") from exc
+        if graph.schema_version == "2.0":
+            graph = graph_json_v21_adapter.upgrade_to_v21(graph)
+    else:
+        current = graph_json_v2_store.load_current(body.persona_slug, body.brand_slug)
+        if current is None:
+            raise HTTPException(409, "First v2.1 commit requires graph_json")
+        graph = graph_json_v21_adapter.upgrade_to_v21(current[1])
+    _assert_graph_persona_matches(body.persona_slug, graph)
+    if body.operations:
+        try:
+            graph = graph_document_publisher.apply_operations(graph, body.operations)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    is_valid, errors = graph_json_v2_validator.validate_graph_json(graph)
+    if not is_valid:
+        raise HTTPException(422, {"code": "GRAPH_VALIDATION_FAILED", "errors": errors})
+    return _commit_or_http(
+        graph=graph,
+        persona_slug=body.persona_slug,
+        brand_slug=body.brand_slug if body.brand_slug is not None else graph.brand_slug,
+        source=body.source,
+        reason=body.reason,
+        published_by=(auth_service.current_user(request) or {}).get("id"),
+        expected_version=body.expected_version,
+        idempotency_key=body.idempotency_key,
+    )
+
+
+@router.get("/current/actions")
+def graph_document_actions(
+    request: Request,
+    persona_slug: str = Query(...),
+    brand_slug: Optional[str] = Query(None),
+):
+    _assert_persona_view(request, persona_slug)
+    current = graph_json_v2_store.load_current(persona_slug, brand_slug)
+    if current is None:
+        return {"persona_slug": persona_slug, "version": 0, "actions": []}
+    version, graph = current
+    upgraded = graph_json_v21_adapter.upgrade_to_v21(graph)
+    return {
+        "persona_slug": persona_slug,
+        "version": version,
+        "actions": [
+            node.model_dump(mode="json") for node in upgraded.nodes if node.node_class == "action"
+        ],
+    }
+
+
+@router.get("/{version}/subgraph")
+def graph_document_subgraph(
+    version: int,
+    request: Request,
+    persona_slug: str = Query(...),
+    action_node_id: str = Query(...),
+    brand_slug: Optional[str] = Query(None),
+):
+    _assert_persona_view(request, persona_slug)
+    loaded = graph_json_v2_store.load_version(persona_slug, version, brand_slug)
+    if loaded is None:
+        raise HTTPException(404, "Graph version not found")
+    graph = graph_json_v21_adapter.upgrade_to_v21(loaded)
+    action = next((node for node in graph.nodes if node.id == action_node_id and node.node_class == "action"), None)
+    if action is None:
+        raise HTTPException(404, "Action node not found")
+    grants = [
+        edge for edge in graph.edges
+        if edge.target == action_node_id
+        and edge.relation_type == "publishes_to"
+        and edge.lifecycle.status == "active"
+    ]
+    source_ids = {edge.source for edge in grants}
+    return {
+        "persona_slug": persona_slug,
+        "graph_version": version,
+        "action": action.model_dump(mode="json"),
+        "nodes": [node.model_dump(mode="json") for node in graph.nodes if node.id in source_ids],
+        "edges": [edge.model_dump(mode="json") for edge in grants],
+    }
 
 
 @router.post("/publish")
@@ -334,3 +526,25 @@ def graph_document_events(
         )
     out.sort(key=lambda item: item.get("created_at") or "", reverse=True)
     return {"persona_slug": persona_slug, "brand_slug": brand_slug, "events": out}
+
+
+# Keep the single-segment dynamic route last; Starlette routes in declaration
+# order and otherwise `/publish`, `/commit`, etc. would be parsed as versions.
+@router.get("/{version}")
+def graph_document_version(
+    version: int,
+    request: Request,
+    persona_slug: str = Query(...),
+    brand_slug: Optional[str] = Query(None),
+):
+    _assert_persona_view(request, persona_slug)
+    graph = graph_json_v2_store.load_version(persona_slug, version, brand_slug)
+    if graph is None:
+        raise HTTPException(404, "Graph version not found")
+    return {
+        "persona_slug": persona_slug,
+        "brand_slug": brand_slug,
+        "version": version,
+        "checksum": graph.content_checksum or graph_json_v2_store.checksum_graph(graph),
+        "graph_json": graph.model_dump(mode="json"),
+    }

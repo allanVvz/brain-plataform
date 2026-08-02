@@ -4,6 +4,19 @@ export interface GraphJsonV2Node {
   node_type?: string;
   label?: string;
   title?: string;
+  node_class?: "knowledge" | "action";
+  lifecycle?: { status?: string; revision?: number; [key: string]: unknown };
+  provenance?: Record<string, unknown>;
+  spec?: Record<string, unknown>;
+  action?: {
+    destination_id?: string;
+    destination_type?: string;
+    enabled?: boolean;
+    consumer?: { kind?: string; ref?: string };
+    projection?: Record<string, unknown>;
+    policy?: Record<string, unknown>;
+  };
+  markdown?: { renderer?: string; checksum?: string; content?: string };
   status?: string;
   validated?: boolean;
   data?: Record<string, unknown>;
@@ -17,6 +30,9 @@ export interface GraphJsonV2Edge {
   target: string;
   relation?: string;
   relation_type?: string;
+  relation_class?: "hierarchy" | "semantic" | "provenance" | "publication";
+  lifecycle?: { status?: "proposed" | "active" | "revoked"; [key: string]: unknown };
+  grant?: Record<string, unknown>;
   primary_tree?: boolean;
   invalid?: boolean;
   metadata?: Record<string, unknown>;
@@ -24,6 +40,9 @@ export interface GraphJsonV2Edge {
 
 export interface GraphJsonV2Document {
   version?: string;
+  schema_version?: "2.0" | "2.1";
+  graph_version?: number;
+  content_checksum?: string;
   nodes?: GraphJsonV2Node[];
   edges?: GraphJsonV2Edge[];
   layout?: { positions?: Record<string, { x?: number; y?: number } | [number, number]> };
@@ -59,11 +78,17 @@ function toGraphNode(
     position: normalizePosition(positions[node.id] || node.position),
     data: {
       ...flexibleData,
+      node_class: node.node_class || (node.action ? "action" : "knowledge"),
+      lifecycle: node.lifecycle,
+      provenance: node.provenance,
+      spec: node.spec,
+      action: node.action,
+      markdown: node.markdown,
       slug: node.slug || flexibleData.slug,
       node_type: nodeType,
       label,
       validated: node.validated ?? flexibleData.validated,
-      status: node.status || flexibleData.status,
+      status: node.lifecycle?.status || node.status || flexibleData.status,
       metadata: flexibleData,
     },
   };
@@ -84,6 +109,10 @@ function toGraphEdge(edge: GraphJsonV2Edge) {
     data: {
       ...metadata,
       relation_type: relationType,
+      relation_class: edge.relation_class,
+      lifecycle: edge.lifecycle,
+      grant: edge.grant,
+      publication_edge: relationType === "publishes_to",
       primary_tree: primaryTree,
       invalid: edge.invalid === true,
       metadata,
@@ -107,6 +136,9 @@ export function parseGraphJsonV2Payload(payload: any): { nodes: any[]; edges: an
       total_items: nodes.length,
       semantic_nodes: nodes.length,
       semantic_edges: edges.length,
+      schema_version: doc.schema_version,
+      graph_version: doc.graph_version,
+      content_checksum: doc.content_checksum,
     },
   };
 }

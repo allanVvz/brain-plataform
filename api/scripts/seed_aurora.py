@@ -5,7 +5,6 @@ is written once to an operator-selected mode-0600 file. It is never printed.
 """
 from __future__ import annotations
 
-import json
 import os
 import secrets
 import sys
@@ -14,12 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from schemas.graph_json_v2 import GraphJson
 from services import (
     auth_service,
-    graph_document_publisher,
-    graph_json_v2_store,
-    graph_json_v2_validator,
     supabase_client,
 )
 
@@ -134,22 +129,9 @@ def ensure_account(persona: dict, *, credential_output_file: str | None) -> bool
 
 
 def publish_graph() -> dict:
-    payload = json.loads(
-        (Path(__file__).parent / "fixtures" / "aurora_graph_v2.json").read_text(encoding="utf-8")
-    )
-    graph = GraphJson.model_validate(payload)
-    valid, errors = graph_json_v2_validator.validate_graph_json(graph)
-    if not valid:
-        raise RuntimeError(f"Invalid Aurora Graph JSON v2: {errors}")
-    checksum = graph_json_v2_store.checksum_graph(graph)
-    return graph_document_publisher.publish(
-        graph=graph,
-        persona_slug="aurora",
-        brand_slug=graph.brand_slug,
-        source="user_authorized_demo_briefing_2026_07_29",
-        note="Aurora premium automotive onboarding seed",
-        idempotency_key=f"seed-aurora-graph-v2:{checksum}",
-    )
+    from scripts.publish_aurora_graph import publish
+
+    return publish()
 
 
 def main() -> None:

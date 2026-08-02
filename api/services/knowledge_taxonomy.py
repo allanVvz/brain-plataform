@@ -43,7 +43,11 @@ CANONICAL_NODE_TYPES: tuple[str, ...] = (
     "copy",
     "faq",
     "gallery",
+    "embedded",
+    "marketing_workspace",
     "asset",
+    "rule",
+    "tone",
 )
 
 NODE_TYPE_ALIASES: dict[str, str] = {
@@ -80,6 +84,19 @@ EDGE_KINDS: tuple[str, ...] = (
     "secondary",
     "asset_pending",
     "asset_approved",
+)
+
+V21_RELATIONS: tuple[dict[str, object], ...] = (
+    {"relation_type": "contains", "label": "contém", "edge_kind": "primary", "default_weight": 0.90},
+    {"relation_type": "targets", "label": "direciona para", "edge_kind": "secondary", "default_weight": 0.85},
+    {"relation_type": "represents", "label": "representa", "edge_kind": "secondary", "default_weight": 0.90},
+    {"relation_type": "uses_asset", "label": "usa asset", "edge_kind": "secondary", "default_weight": 0.85},
+    {"relation_type": "supports", "label": "apoia", "edge_kind": "secondary", "default_weight": 0.80},
+    {"relation_type": "answers", "label": "responde", "edge_kind": "secondary", "default_weight": 1.00},
+    {"relation_type": "applies_to", "label": "aplica-se a", "edge_kind": "secondary", "default_weight": 0.90},
+    {"relation_type": "derived_from", "label": "derivado de", "edge_kind": "secondary", "default_weight": 0.65},
+    {"relation_type": "references", "label": "referencia", "edge_kind": "secondary", "default_weight": 0.55},
+    {"relation_type": "publishes_to", "label": "publica em", "edge_kind": "secondary", "default_weight": 1.00},
 )
 
 
@@ -185,6 +202,8 @@ def list_relations(canonical_only: bool = True) -> list[dict]:
     rows = list(_cache.get("relations", []) or [])
     if canonical_only:
         rows = [r for r in rows if bool(r.get("canonical"))]
+    existing = {str(row.get("relation_type")) for row in rows}
+    rows.extend({**row, "canonical": True, "active": True} for row in V21_RELATIONS if row["relation_type"] not in existing)
     return rows
 
 

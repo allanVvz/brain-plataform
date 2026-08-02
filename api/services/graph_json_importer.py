@@ -208,7 +208,7 @@ def _node_status(node: Node) -> str:
     # Gallery and Embedded are protected terminal nodes.  They are operational
     # infrastructure, not content awaiting curation, so keep the DB state that
     # the public projection uses to discover them.
-    if node.node_type in {"gallery", "embedded"} and status in {"validated", "approved", "active", "ativo"}:
+    if node.node_type in {"gallery", "embedded", "marketing_workspace"} and status in {"validated", "approved", "active", "ativo"}:
         return "active"
     # Markdown uses `validated` as the canonical approval state. The legacy
     # FAQ -> Embedded database trigger still requires the historical
@@ -275,6 +275,24 @@ def _rag_status(node: Node) -> bool:
     ).lower() in {"validated", "approved", "active", "ativo"}
 
 
+def _publication_destinations(graph: GraphJson) -> dict[str, list[Node]]:
+    """Active Embedded grants keyed by source document node id."""
+    by_id = {node.id: node for node in graph.nodes}
+    destinations: dict[str, list[Node]] = {}
+    for edge in graph.edges:
+        relation = edge.relation_type or edge.relation
+        if relation != "publishes_to" or edge.lifecycle.status != "active":
+            continue
+        source = by_id.get(edge.source)
+        target = by_id.get(edge.target)
+        if not source or not target or target.node_type != "embedded" or not target.action:
+            continue
+        if not _rag_status(source):
+            continue
+        destinations.setdefault(source.id, []).append(target)
+    return destinations
+
+
 def _project_rag_document(
     *,
     graph: GraphJson,
@@ -283,11 +301,19 @@ def _project_rag_document(
     persona_id: str,
     version: int | None,
     graph_checksum: str | None,
+    action_node: Node | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Idempotently project one approved Markdown node to one RAG chunk."""
     body = _projected_body(graph, node)
     hierarchy_path = _branch_path(graph, node)
     now_iso = datetime.now(timezone.utc).isoformat()
+    action_node_id = action_node.id if action_node else None
+    destination_id = action_node.action.destination_id if action_node and action_node.action else None
+    embedding_profile = (
+        action_node.action.projection.embedding_profile_ref
+        if action_node and action_node.action
+        else None
+    ) or "default-1536"
     metadata = {
         **(node.data or {}),
         "source": "graph_json_markdown",
@@ -298,6 +324,8 @@ def _project_rag_document(
         "graph_checksum": graph_checksum,
         "hierarchy_path": hierarchy_path,
         "rag_index": "default",
+        "action_node_id": action_node_id,
+        "destination_id": destination_id,
         "active": True,
     }
     entry = supabase_client.upsert_knowledge_rag_entry(
@@ -308,20 +336,33 @@ def _project_rag_document(
             "title": node.label,
             "content": body,
             "summary": str((node.data or {}).get("summary") or body)[:500],
-            "canonical_key": f"{graph.persona_slug}:{node.node_type}:{node.slug}",
+            "canonical_key": (
+                f"{graph.persona_slug}:{action_node_id}:v{version}:{node.id}"
+                if action_node_id
+                else f"{graph.persona_slug}:{node.node_type}:{node.slug}"
+            ),
             "slug": node.slug,
             "language": str((node.data or {}).get("language") or "pt-BR"),
-            "status": "active",
+            # Destination-scoped rows stay invisible until the activation RPC
+            # atomically publishes this version and withdraws the previous one.
+            "status": "building" if action_node_id else "active",
             "tags": (node.data or {}).get("tags") or [node.node_type],
             "entities": [],
             "products": [node.slug] if node.node_type == "product" else [],
             "campaigns": [node.slug] if node.node_type == "campaign" else [],
             "metadata": metadata,
-            "embedding_model": node.node_type,
+            "embedding_model": embedding_profile,
             "confidence": 1.0,
             "importance": 0.75,
             "validated_at": now_iso,
             "source_node_id": graph_node.get("id"),
+            **({
+                "action_node_id": action_node_id,
+                "destination_id": destination_id,
+                "graph_version": version,
+                "graph_checksum": graph_checksum,
+                "projection_status": "building",
+            } if action_node_id else {}),
         }
     )
     if not entry or not entry.get("id"):
@@ -334,7 +375,7 @@ def _project_rag_document(
                 "chunk_index": 0,
                 "chunk_text": body,
                 "chunk_summary": str((node.data or {}).get("summary") or node.label)[:280],
-                "embedding_model": node.node_type,
+                "embedding_model": embedding_profile,
                 "metadata": {
                     "source": "graph_json_markdown",
                     "source_node_id": graph_node.get("id"),
@@ -345,6 +386,14 @@ def _project_rag_document(
                     "chunk_status": "pending_embedding",
                     "active": True,
                 },
+                **({
+                    "action_node_id": action_node_id,
+                    "destination_id": destination_id,
+                    "graph_version": version,
+                    "graph_checksum": graph_checksum,
+                    "source_node_id": graph_node.get("id"),
+                    "projection_status": "building",
+                } if action_node_id else {}),
             }
         ],
     )
@@ -586,8 +635,11 @@ def import_graph_json(
             version=version,
             graph_checksum=graph_checksum,
         )
-        if node.node_type in {"persona", "embedded", "gallery"}:
-            database_node_type = "embed" if node.node_type == "embedded" else node.node_type
+        if node.node_type in {"persona", "embedded", "gallery", "marketing_workspace"}:
+            if graph_json.schema_version == "2.1" and node.node_class == "action":
+                database_node_type = "action"
+            else:
+                database_node_type = "embed" if node.node_type == "embedded" else node.node_type
             graph_node = supabase_client.upsert_knowledge_node(
                 {
                     "persona_id": persona_id,
@@ -670,6 +722,8 @@ def import_graph_json(
 
     edge_ids: list[str] = []
     for edge in graph_json.edges:
+        if edge.lifecycle.status == "revoked":
+            continue
         source_node = graph_nodes_by_doc_id.get(edge.source)
         target_node = graph_nodes_by_doc_id.get(edge.target)
         if not source_node or not target_node:
@@ -682,7 +736,10 @@ def import_graph_json(
             persona_id=persona_id,
             metadata={
                 **(edge.metadata or {}),
-                "primary_tree": edge.primary_tree is True,
+                # v2.1 hierarchy is validated from the immutable document.
+                # The legacy DB trigger has a narrower hard-coded chain, so
+                # its projection must remain a reference edge during cutover.
+                "primary_tree": edge.primary_tree is True and graph_json.schema_version == "2.0",
                 "active": True,
                 "graph_json_id": graph_json.graph_id,
                 "graph_json_edge_id": edge.id,
@@ -694,41 +751,59 @@ def import_graph_json(
         edge_ids.append(imported["id"])
 
     rag_entries_by_doc_id: dict[str, dict[str, Any]] = {}
+    rag_entries_by_destination: dict[tuple[str, str], dict[str, Any]] = {}
     rag_chunk_ids: list[str] = []
+    v21_destinations = _publication_destinations(graph_json) if graph_json.schema_version == "2.1" else {}
     for node in graph_json.nodes:
-        if node.node_type in {"persona", "embedded", "gallery", "faq"}:
+        if node.node_type in {"persona", "embedded", "gallery", "marketing_workspace"}:
             continue
         if not _rag_status(node):
             continue
-        entry, chunks = _project_rag_document(
-            graph=graph_json,
-            node=node,
-            graph_node=graph_nodes_by_doc_id[node.id],
-            persona_id=persona_id,
-            version=version,
-            graph_checksum=graph_checksum,
-        )
-        rag_entries_by_doc_id[node.id] = entry
-        rag_chunk_ids.extend(
-            str(chunk["id"]) for chunk in chunks if chunk.get("id")
-        )
+        action_nodes: list[Node | None]
+        if graph_json.schema_version == "2.1":
+            action_nodes = list(v21_destinations.get(node.id) or [])
+            if not action_nodes:
+                continue
+        else:
+            if node.node_type == "faq":
+                continue
+            action_nodes = [None]
+        node_entry_ids: list[str] = []
+        node_chunk_ids: list[str] = []
+        for action_node in action_nodes:
+            entry, chunks = _project_rag_document(
+                graph=graph_json,
+                node=node,
+                graph_node=graph_nodes_by_doc_id[node.id],
+                persona_id=persona_id,
+                version=version,
+                graph_checksum=graph_checksum,
+                action_node=action_node,
+            )
+            rag_entries_by_doc_id.setdefault(node.id, entry)
+            if action_node:
+                rag_entries_by_destination[(node.id, action_node.id)] = entry
+            node_entry_ids.append(str(entry["id"]))
+            node_chunk_ids.extend(str(chunk["id"]) for chunk in chunks if chunk.get("id"))
+        rag_chunk_ids.extend(node_chunk_ids)
         imported_node = graph_nodes_by_doc_id[node.id]
         supabase_client.update_knowledge_node(
             imported_node["id"],
             {
                 "metadata": {
                     **(imported_node.get("metadata") or {}),
-                    "knowledge_rag_entry_id": entry["id"],
-                    "knowledge_rag_chunk_ids": [
-                        chunk.get("id") for chunk in chunks if chunk.get("id")
-                    ],
+                    "knowledge_rag_entry_id": node_entry_ids[0] if node_entry_ids else None,
+                    "knowledge_rag_entry_ids": node_entry_ids,
+                    "knowledge_rag_chunk_ids": node_chunk_ids,
                 }
             },
             mark_related_faqs=False,
         )
 
     active_doc_node_ids = set(graph_nodes_by_doc_id)
-    active_doc_edge_ids = {edge.id for edge in graph_json.edges}
+    active_doc_edge_ids = {
+        edge.id for edge in graph_json.edges if edge.lifecycle.status != "revoked"
+    }
     nodes_deactivated = 0
     edges_deactivated = 0
     stale_nodes = supabase_client.list_graph_json_projection_nodes(persona_id)
@@ -768,6 +843,8 @@ def import_graph_json(
         target_doc = next((item for item in graph_json.nodes if item.id == edge.target), None)
         if not source_doc or not target_doc:
             continue
+        if graph_json.schema_version == "2.1":
+            continue
         if source_doc.node_type != "faq" or target_doc.node_type != "embedded":
             continue
         status = str(
@@ -793,30 +870,103 @@ def import_graph_json(
 
     rag_link_ids: list[str] = []
     for edge in graph_json.edges:
-        source_entry = rag_entries_by_doc_id.get(edge.source)
-        target_entry = rag_entries_by_doc_id.get(edge.target)
-        if not source_entry or not target_entry:
+        relation = edge.relation_type or edge.relation
+        if relation == "publishes_to" or edge.lifecycle.status == "revoked":
             continue
-        link = supabase_client.upsert_knowledge_rag_link(
-            {
-                "persona_id": persona_id,
-                "source_entry_id": source_entry["id"],
-                "target_entry_id": target_entry["id"],
-                "relation_type": edge.relation,
-                "weight": 1.0,
-                "confidence": 1.0,
-                "created_by": source,
-                "metadata": {
-                    "graph_json_edge_id": edge.id,
-                    "graph_version": version,
-                    "graph_checksum": graph_checksum,
-                    "primary_tree": edge.primary_tree,
-                    "active": True,
-                },
+        if graph_json.schema_version == "2.1":
+            shared_actions = {
+                action_id for node_id, action_id in rag_entries_by_destination if node_id == edge.source
+            } & {
+                action_id for node_id, action_id in rag_entries_by_destination if node_id == edge.target
             }
-        )
-        if link.get("id"):
-            rag_link_ids.append(str(link["id"]))
+            pairs = [
+                (
+                    rag_entries_by_destination[(edge.source, action_id)],
+                    rag_entries_by_destination[(edge.target, action_id)],
+                    action_id,
+                )
+                for action_id in shared_actions
+            ]
+        else:
+            source_entry = rag_entries_by_doc_id.get(edge.source)
+            target_entry = rag_entries_by_doc_id.get(edge.target)
+            pairs = [(source_entry, target_entry, None)] if source_entry and target_entry else []
+        for source_entry, target_entry, action_id in pairs:
+            action_node = next((item for item in graph_json.nodes if item.id == action_id), None)
+            destination_id = action_node.action.destination_id if action_node and action_node.action else None
+            link = supabase_client.upsert_knowledge_rag_link(
+                {
+                    "persona_id": persona_id,
+                    "source_entry_id": source_entry["id"],
+                    "target_entry_id": target_entry["id"],
+                    "relation_type": relation,
+                    "weight": edge.weight or 1.0,
+                    "confidence": float((edge.metadata or {}).get("confidence") or 1.0),
+                    "created_by": source,
+                    "metadata": {
+                        "graph_json_edge_id": edge.id,
+                        "graph_version": version,
+                        "graph_checksum": graph_checksum,
+                        "action_node_id": action_id,
+                        "destination_id": destination_id,
+                        "primary_tree": edge.primary_tree,
+                        "active": True,
+                    },
+                    **({
+                        "action_node_id": action_id,
+                        "destination_id": destination_id,
+                        "graph_version": version,
+                        "graph_checksum": graph_checksum,
+                    } if action_id else {}),
+                }
+            )
+            if link.get("id"):
+                rag_link_ids.append(str(link["id"]))
+
+    action_projections: list[dict[str, Any]] = []
+    if graph_json.schema_version == "2.1":
+        for action_node in [node for node in graph_json.nodes if node.node_class == "action" and node.action]:
+            grant_edges = [
+                edge for edge in graph_json.edges
+                if edge.relation_type == "publishes_to"
+                and edge.target == action_node.id
+                and edge.lifecycle.status == "active"
+            ]
+            source_ids = sorted(edge.source for edge in grant_edges)
+            projection_checksum = "sha256:" + _content_hash(
+                json.dumps(
+                    {
+                        "graph_checksum": graph_checksum,
+                        "action_node_id": action_node.id,
+                        "destination_id": action_node.action.destination_id,
+                        "source_node_ids": source_ids,
+                        "source_edge_ids": sorted(edge.id for edge in grant_edges),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            projection = {
+                "projection_id": f"projection:{action_node.action.destination_id}:v{version}",
+                "projection_type": action_node.action.projection.kind,
+                "persona_slug": graph_json.persona_slug,
+                "action_node_id": action_node.id,
+                "destination_id": action_node.action.destination_id,
+                "graph_version": version,
+                "graph_checksum": graph_checksum,
+                "projection_checksum": projection_checksum,
+                "status": "published",
+                "source_node_ids": source_ids,
+                "source_edge_ids": sorted(edge.id for edge in grant_edges),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            action_projections.append(projection)
+            supabase_client.record_graph_projection_event_v2(
+                persona_slug=graph_json.persona_slug,
+                projection=projection,
+                source=source,
+            )
 
     supabase_client.insert_event(
         {
@@ -877,4 +1027,5 @@ def import_graph_json(
                 if (node.data or {}).get("source_file")
             }
         ),
+        "action_projections": action_projections,
     }
