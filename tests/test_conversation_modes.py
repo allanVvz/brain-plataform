@@ -225,6 +225,31 @@ def test_aurora_agentic_workflow_does_not_duplicate_the_price_safety_check():
     assert r"r\$" not in js_code
 
 
+def test_n8n_workflow_js_code_nodes_never_contain_a_dangerous_line_comment():
+    """Regression test for a real deploy break, 2026-08-02: a Code node's
+    jsCode written as one continuous string with no real newlines silently
+    loses everything after a `//` comment — including the return statement
+    — and n8n fails the whole execution with "Code doesn't return items
+    properly". Confirmed live: this exact mistake was made once already
+    while adding an explanatory comment to the Merge node's jsCode.
+    A `//` is only unsafe when the script has no real newlines at all (a
+    genuinely multi-line script, like whatsapp-error-handler.json's, is
+    normal JS and each `//` only swallows its own line, as intended).
+    """
+    for workflow_path in (ROOT / "api" / "n8n-workflows").glob("*.json"):
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        for node in workflow.get("nodes", []):
+            js_code = node.get("parameters", {}).get("jsCode")
+            if not js_code or "\n" in js_code:
+                continue
+            assert "//" not in js_code, (
+                f"{workflow_path.name}::{node['name']} is a single-line "
+                "script with a // comment — it will swallow everything "
+                "after it, including any return statement. Use /* */ "
+                "instead, or a real newline."
+            )
+
+
 def test_aurora_agentic_workflow_requests_and_forwards_identified_service_slug():
     """Regression test for the 2026-08-01 service-inference fix.
 
