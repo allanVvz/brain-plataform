@@ -5,6 +5,7 @@ import hmac
 import os
 
 from fastapi import APIRouter, Header, HTTPException
+from pydantic import field_validator
 
 from schemas.conversation import (
     AgentResponse,
@@ -34,6 +35,14 @@ class ContextRequest(StrictModel):
     lead_ref: int
     message: str
     message_id: str | None = None
+
+    @field_validator("message")
+    @classmethod
+    def message_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("message must not be blank")
+        return normalized
 
 
 class DecisionRequest(StrictModel):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +18,7 @@ from services import (
     graph_json_v2_store,
     graph_json_v2_validator,
     graph_markdown,
+    graph_action_policy,
     supabase_client,
 )
 
@@ -32,6 +34,87 @@ class GraphValidationError(RuntimeError):
     def __init__(self, errors: list[str]):
         super().__init__("Canonical graph validation failed")
         self.errors = errors
+
+
+class ProjectionFailed(RuntimeError):
+    def __init__(self, *, operation_id: str, version: int, error: str):
+        super().__init__(error)
+        self.operation_id = operation_id
+        self.version = version
+
+
+def _set_dotted(target: dict[str, Any], dotted_key: str, value: Any) -> None:
+    parts = [part for part in dotted_key.split(".") if part]
+    if not parts:
+        raise ValueError("patch path cannot be empty")
+    cursor = target
+    for part in parts[:-1]:
+        child = cursor.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            cursor[part] = child
+        cursor = child
+    cursor[parts[-1]] = value
+
+
+def apply_operations(graph: GraphJson, operations: list[dict[str, Any]]) -> GraphJson:
+    """Apply mutation conveniences to a complete document in memory."""
+    payload = deepcopy(graph.model_dump(mode="json"))
+    nodes = {str(node["id"]): node for node in payload.get("nodes") or []}
+    edges = {str(edge["id"]): edge for edge in payload.get("edges") or []}
+    for operation in operations:
+        op = str(operation.get("op") or "")
+        node_id = str(operation.get("node_id") or operation.get("id") or "")
+        edge_id = str(operation.get("edge_id") or operation.get("id") or "")
+        if op == "add_node":
+            node = deepcopy(operation.get("node") or {})
+            if not node.get("id") or node["id"] in nodes:
+                raise ValueError("add_node requires a new stable node id")
+            nodes[node["id"]] = node
+        elif op == "update_node":
+            if node_id not in nodes:
+                raise ValueError(f"node not found: {node_id}")
+            for key, value in (operation.get("patch") or {}).items():
+                _set_dotted(nodes[node_id], key, value)
+            lifecycle = nodes[node_id].setdefault("lifecycle", {})
+            lifecycle["revision"] = int(lifecycle.get("revision") or 1) + 1
+            # A material edit invalidates the prior approval.
+            lifecycle["status"] = "pending_validation"
+            lifecycle.pop("approved_revision_checksum", None)
+            nodes[node_id].pop("markdown", None)
+        elif op == "approve_node":
+            if node_id not in nodes:
+                raise ValueError(f"node not found: {node_id}")
+            nodes[node_id].setdefault("lifecycle", {})["status"] = "approved"
+        elif op in {"archive_node", "remove_node"}:
+            if node_id not in nodes:
+                raise ValueError(f"node not found: {node_id}")
+            nodes[node_id].setdefault("lifecycle", {})["status"] = "archived"
+            for edge in edges.values():
+                if node_id in {edge.get("source"), edge.get("target")}:
+                    edge.setdefault("lifecycle", {})["status"] = "revoked"
+        elif op == "add_edge":
+            edge = deepcopy(operation.get("edge") or {})
+            if not edge.get("id") or edge["id"] in edges:
+                raise ValueError("add_edge requires a new stable edge id")
+            edges[edge["id"]] = edge
+        elif op in {"revoke_edge", "remove_edge"}:
+            if edge_id not in edges:
+                raise ValueError(f"edge not found: {edge_id}")
+            edges[edge_id].setdefault("lifecycle", {})["status"] = "revoked"
+        elif op == "set_status":
+            if node_id not in nodes:
+                raise ValueError(f"node not found: {node_id}")
+            nodes[node_id].setdefault("lifecycle", {})["status"] = operation.get("value")
+        else:
+            raise ValueError(f"unsupported graph operation: {op}")
+    payload["nodes"] = list(nodes.values())
+    payload["edges"] = list(edges.values())
+    payload["schema_version"] = "2.1"
+    payload["status"] = "draft"
+    payload["graph_version"] = None
+    payload["content_checksum"] = None
+    return GraphJson.model_validate(payload)
 
 
 _LOCKS: dict[str, threading.RLock] = {}
@@ -125,6 +208,121 @@ def _idempotent_result(
             "projections": projections,
         }
     return None
+
+
+def commit(
+    *,
+    graph: GraphJson,
+    persona_slug: str,
+    brand_slug: str | None,
+    source: str,
+    reason: str,
+    published_by: str | None,
+    expected_version: int,
+    idempotency_key: str,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Commit an immutable 2.1 version, then build and atomically activate it.
+
+    Version allocation/idempotency happen under a Postgres advisory transaction
+    lock.  A failed projector leaves the committed version inactive, so readers
+    continue to use the previous activation.
+    """
+    if graph.schema_version != "2.1":
+        raise GraphValidationError(["commit requires schema_version 2.1"])
+    graph = GraphJson.model_validate(graph.model_dump(mode="json"))
+    graph.graph_version = expected_version + 1
+    graph.status = "committed"
+    graph.provenance.base_version = expected_version
+    graph.provenance.reason = reason
+    graph.provenance.source = source
+    graph.provenance.authored_by = published_by
+    graph, policy_changes = graph_action_policy.apply(graph)
+    try:
+        graph = graph_markdown.canonicalize_graph(graph)
+    except graph_markdown.GraphMarkdownError as exc:
+        raise GraphValidationError(exc.errors) from exc
+    is_valid, errors = graph_json_v2_validator.validate_graph_json(graph)
+    if not is_valid:
+        raise GraphValidationError(errors)
+    graph.content_checksum = graph_json_v2_store.checksum_graph(graph)
+
+    try:
+        committed = graph_json_v2_store.commit_version(
+            persona_slug=persona_slug,
+            brand_slug=brand_slug,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            reason=reason,
+            graph=graph,
+            source=source,
+            authored_by=published_by,
+        )
+    except Exception as exc:
+        message = str(exc)
+        if "GRAPH_VERSION_CONFLICT" in message:
+            current = expected_version
+            try:
+                loaded = _load_current(persona_slug, brand_slug)
+                current = int(loaded[0]) if loaded else 0
+            except Exception:
+                pass
+            raise VersionConflict(expected=expected_version, current=current) from exc
+        raise
+
+    version = int(committed["graph_version"])
+    operation_id = str(committed["operation_id"])
+    checksum = str(committed.get("checksum") or graph.content_checksum)
+    graph.graph_version = version
+    graph.content_checksum = checksum
+    try:
+        projections = graph_json_importer.import_graph_json(
+            graph_json=graph,
+            source=source,
+            session_id=session_id,
+            version=version,
+            graph_checksum=checksum,
+        )
+        if not projections or projections.get("ok") is not True:
+            raise RuntimeError(str((projections or {}).get("errors") or "projection failed"))
+    except Exception as exc:
+        _audit(
+            "graph_projection_failed",
+            persona_slug=persona_slug,
+            brand_slug=brand_slug,
+            version=version,
+            source=source,
+            idempotency_key=idempotency_key,
+            payload={
+                "operation_id": operation_id,
+                "checksum": checksum,
+                "error": str(exc)[:1000],
+            },
+            level="error",
+        )
+        raise ProjectionFailed(operation_id=operation_id, version=version, error=str(exc)) from exc
+
+    activation = graph_json_v2_store.activate_version(
+        persona_slug=persona_slug,
+        brand_slug=brand_slug,
+        version=version,
+        checksum=checksum,
+        operation_id=operation_id,
+        projections=projections,
+        source=source,
+    )
+    return {
+        "ok": True,
+        "operation_id": operation_id,
+        "graph_version": version,
+        "version": version,
+        "checksum": checksum,
+        "status": activation.get("status") or "published",
+        "idempotent_replay": bool(committed.get("idempotent_replay")),
+        "projection_status_url": f"/graph-projections/operations/{operation_id}",
+        "projections": projections,
+        "policy_changes": policy_changes,
+    }
 
 
 def publish(

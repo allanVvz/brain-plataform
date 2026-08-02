@@ -1,17 +1,72 @@
 ﻿from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from core.landing_slots import LandingSlot, slot_for_metadata
-from services import public_site, supabase_client
+from services import public_site, supabase_client, graph_json_v2_store, graph_json_v21_adapter
 from utils.rich_text import to_clean_markdown
 
 router = APIRouter(tags=["menu"])
 
 _MENU_CACHE_CONTROL = "public, max-age=30, s-maxage=300, stale-while-revalidate=600"
+
+
+def _canonical_json_checksum(value: dict) -> str:
+    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _public_graph_context(persona_slug: str) -> Optional[dict]:
+    """Return Gallery grants for an activated 2.1 graph; legacy stays untouched."""
+    try:
+        current = graph_json_v2_store.load_current(persona_slug)
+    except Exception:
+        return None
+    if not current or current[1].schema_version != "2.1":
+        return None
+    version, graph = current
+    graph = graph_json_v21_adapter.upgrade_to_v21(graph)
+    action = next(
+        (
+            node for node in graph.nodes
+            if node.node_type == "gallery" and node.action and node.action.enabled
+            and node.action.destination_type == "public_site"
+        ),
+        None,
+    )
+    if action is None:
+        return {"version": version, "checksum": graph.content_checksum, "action": None, "allowed": {}}
+    by_id = {node.id: node for node in graph.nodes}
+    granted = {
+        edge.source for edge in graph.edges
+        if edge.relation_type == "publishes_to"
+        and edge.target == action.id
+        and edge.lifecycle.status == "active"
+        and by_id.get(edge.source)
+        and by_id[edge.source].lifecycle.status in {"approved", "active"}
+    }
+    allowed: dict[str, set[str]] = {}
+    asset_registry_ids: set[str] = set()
+    for node_id in granted:
+        node = by_id[node_id]
+        allowed.setdefault(node.node_type, set()).add(node.slug)
+        if node.node_type == "asset":
+            blob = (node.spec or {}).get("blob") or {}
+            registry_id = blob.get("registry_id") or (node.spec or {}).get("registry_id")
+            if registry_id:
+                asset_registry_ids.add(str(registry_id))
+    return {
+        "version": version,
+        "checksum": graph.content_checksum or graph_json_v2_store.checksum_graph(graph),
+        "action": action,
+        "allowed": allowed,
+        "asset_registry_ids": asset_registry_ids,
+    }
 
 
 def _meta(row: Optional[dict]) -> dict:
@@ -650,7 +705,7 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
     brand = _brand_payload(persona, persona_slug, cache=cache)
     formats = supabase_client.list_public_site_formats(enabled_only=True)
 
-    return {
+    payload = {
         "ok": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "active_collection_id": collection["id"],
@@ -676,11 +731,62 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
             }],
         },
     }
+    publication = _public_graph_context(persona_slug)
+    if publication is not None:
+        action = publication.get("action")
+        allowed = publication.get("allowed") or {}
+        asset_ids = publication.get("asset_registry_ids") or set()
+        collection_payload = payload["persona"]["collections"][0]
+        filtered_categories = []
+        for category in collection_payload.get("categories") or []:
+            products = []
+            for product in category.get("products") or []:
+                if product.get("slug") not in allowed.get("product", set()):
+                    continue
+                product["copies"] = [
+                    row for row in product.get("copies") or []
+                    if row.get("slug") in allowed.get("copy", set())
+                ]
+                product["faqs"] = [
+                    row for row in product.get("faqs") or []
+                    if row.get("slug") in allowed.get("faq", set())
+                ]
+                product["assets"] = [
+                    row for row in product.get("assets") or []
+                    if str(row.get("asset_id") or row.get("id") or "") in asset_ids
+                ]
+                products.append(product)
+            category["products"] = products
+            if category.get("slug") in allowed.get("product_group", set()) or products:
+                filtered_categories.append(category)
+        collection_payload["categories"] = filtered_categories
+        collection_payload["assets"] = [
+            row for row in collection_payload.get("assets") or []
+            if str(row.get("asset_id") or row.get("id") or "") in asset_ids
+        ]
+        if payload["persona"].get("brand", {}).get("slug") not in allowed.get("brand", set()):
+            payload["persona"]["brand"] = {}
+        if action and action.action:
+            projection = action.action.projection.model_dump(mode="json")
+            site = payload.get("site") or {}
+            for key in ("site_slug", "site_name", "default_collection_slug"):
+                if projection.get(key):
+                    site[key] = projection[key]
+            payload["site"] = site
+        payload.update({
+            "graph_version": publication.get("version"),
+            "graph_checksum": publication.get("checksum"),
+            "action_node_id": action.id if action else None,
+        })
+        payload["projection_checksum"] = _canonical_json_checksum(payload)
+    return payload
 
 
 def _menu_response(persona_slug: str, collection_slug: Optional[str], response: Response, nocache: bool) -> dict:
     payload = build_menu_payload(persona_slug, collection_slug=collection_slug)
     response.headers["Cache-Control"] = "no-store" if nocache else _MENU_CACHE_CONTROL
+    if payload.get("projection_checksum"):
+        response.headers["ETag"] = f'"{payload["projection_checksum"]}"'
     return payload
 
 

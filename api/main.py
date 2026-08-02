@@ -17,7 +17,7 @@ load_dotenv()
 configure_trust_store()
 
 from middleware.auth import auth_middleware
-from routes import auth, health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, graph_documents, marketing, audiences, assets, menu, qa_contract, public_site_formats, whatsapp, conversations, access, portal, evolution_webhook
+from routes import auth, health, process, insights, leads, messages, kb, personas, integrations, logs, knowledge, pipeline, kb_intake, generation, wa_validator, graph, graph_documents, graph_projections, marketing, audiences, assets, menu, qa_contract, public_site_formats, whatsapp, conversations, access, portal, evolution_webhook
 from workers.flow_validator_worker import FlowValidatorWorker
 from workers.n8n_mirror_worker import N8nMirrorWorker
 from workers.health_check_worker import HealthCheckWorker
@@ -96,6 +96,7 @@ app.include_router(generation.router)
 app.include_router(wa_validator.router)
 app.include_router(graph.router)
 app.include_router(graph_documents.router)
+app.include_router(graph_projections.router)
 app.include_router(marketing.router)
 app.include_router(audiences.router)
 app.include_router(assets.router)

@@ -93,7 +93,7 @@ def ensure_platform_bootstrap(conn, password: str) -> None:
 
 
 def finalize_platform_grants(conn) -> None:
-    """Keep PostgREST grants aligned after new migrations create objects."""
+    """Keep PostgREST grants aligned without reopening internal graph tables."""
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -108,6 +108,25 @@ def finalize_platform_grants(conn) -> None:
             alter default privileges in schema public grant select, insert, update, delete on tables to service_role;
             alter default privileges in schema storage grant select on tables to anon, authenticated;
             alter default privileges in schema storage grant select, insert, update, delete on tables to service_role;
+
+            -- Graph/event/RAG tables are API-internal.  The blanket grants
+            -- above preserve compatibility for other legacy Data API tables;
+            -- these explicit revokes are the security boundary introduced by
+            -- migrations 082/083 and must run *after* blanket grants.
+            revoke all on table public.system_events from public, anon, authenticated;
+            revoke all on table public.knowledge_items from public, anon, authenticated;
+            revoke all on table public.knowledge_nodes from public, anon, authenticated;
+            revoke all on table public.knowledge_edges from public, anon, authenticated;
+            revoke all on table public.knowledge_rag_entries from public, anon, authenticated;
+            revoke all on table public.knowledge_rag_chunks from public, anon, authenticated;
+            revoke all on table public.knowledge_rag_links from public, anon, authenticated;
+            revoke all on table public.assets from public, anon, authenticated;
+            revoke all on table public.knowledge_graph_primary_tree from public, anon, authenticated;
+            revoke all on table public.knowledge_nodes_canonical from public, anon, authenticated;
+            revoke all on table public.v_knowledge_curation_backlog from public, anon, authenticated;
+            revoke all on table public.v_knowledge_lineage from public, anon, authenticated;
+            revoke all on table public.v_knowledge_products_missing_price from public, anon, authenticated;
+            revoke all on table public.v_knowledge_validation_failures from public, anon, authenticated;
             """
         )
     conn.commit()

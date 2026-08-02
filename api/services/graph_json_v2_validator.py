@@ -44,6 +44,17 @@ PROTECTED_PERSONA_CHILDREN: set[str] = {"gallery"}
 
 FAQ_APPROVED_STATUSES: set[str] = {"approved", "validated", "embedded", "active", "ativo"}
 
+V21_KNOWLEDGE_TYPES = {
+    "persona", "brand", "briefing", "campaign", "audience", "product_group",
+    "product", "offer", "copy", "faq", "rule", "tone", "asset",
+}
+V21_ACTION_TYPES = {"gallery", "embedded", "marketing_workspace"}
+V21_RELATIONS = {
+    "contains", "targets", "represents", "uses_asset", "supports", "answers",
+    "applies_to", "derived_from", "references", "publishes_to",
+}
+V21_APPROVED = {"approved", "active"}
+
 
 def _has_cycle(start_id: str, nodes_by_id: dict[str, "object"]) -> bool:
     seen: set[str] = set()
@@ -84,8 +95,124 @@ def _is_primary(edge: "object") -> bool:
     return getattr(edge, "primary_tree", True) is True
 
 
+def _validate_v21(graph: "GraphJson") -> tuple[bool, list[str]]:
+    """Validate the destination-scoped 2.1 contract without legacy parent rules."""
+    errors: list[str] = []
+    nodes_by_id = {node.id: node for node in graph.nodes}
+    if len(nodes_by_id) != len(graph.nodes):
+        errors.append("duplicate node id")
+
+    personas = [node for node in graph.nodes if node.node_type == "persona"]
+    if len(personas) != 1:
+        errors.append(f"graph must contain exactly one persona node, got {len(personas)}")
+    elif personas[0].slug != graph.persona_slug:
+        errors.append(
+            f"persona ownership mismatch: node slug={personas[0].slug} payload persona_slug={graph.persona_slug}"
+        )
+
+    seen_slugs: set[tuple[str, str]] = set()
+    for node in graph.nodes:
+        key = (node.node_type, node.slug)
+        if key in seen_slugs:
+            errors.append(f"duplicate node (type={node.node_type}, slug={node.slug})")
+        seen_slugs.add(key)
+        if node.node_class == "action":
+            if node.node_type not in V21_ACTION_TYPES:
+                errors.append(f"action node {node.id} has invalid node_type {node.node_type}")
+            if node.action is None:
+                errors.append(f"action node {node.id} requires action configuration")
+        elif node.node_type not in V21_KNOWLEDGE_TYPES:
+            errors.append(f"unknown node_type {node.node_type} on node {node.id}")
+        if node.node_type in V21_ACTION_TYPES and node.node_class != "action":
+            errors.append(f"node {node.id} type {node.node_type} must use node_class=action")
+        if node.node_type not in V21_ACTION_TYPES and node.node_class != "knowledge":
+            errors.append(f"node {node.id} type {node.node_type} must use node_class=knowledge")
+
+    contains_parents: dict[str, str] = {}
+    contains_children: dict[str, list[str]] = {}
+    edge_ids: set[str] = set()
+    edge_keys: set[tuple[str, str, str]] = set()
+    for edge in graph.edges:
+        relation = edge.relation_type or edge.relation or ""
+        if edge.id in edge_ids:
+            errors.append(f"duplicate edge id {edge.id}")
+        edge_ids.add(edge.id)
+        key = (edge.source, edge.target, relation)
+        if key in edge_keys:
+            errors.append(f"duplicate edge ({edge.source}, {edge.target}, {relation})")
+        edge_keys.add(key)
+        source = nodes_by_id.get(edge.source)
+        target = nodes_by_id.get(edge.target)
+        if source is None:
+            errors.append(f"edge {edge.id} source {edge.source} missing")
+        if target is None:
+            errors.append(f"edge {edge.id} target {edge.target} missing")
+        if source is None or target is None:
+            continue
+        if source.id == target.id:
+            errors.append(f"edge {edge.id} self-loop is not allowed")
+        if relation not in V21_RELATIONS:
+            errors.append(f"edge {edge.id} has unknown relation_type {relation}")
+            continue
+        if edge.lifecycle.status == "revoked":
+            continue
+        if relation == "contains":
+            if source.node_class != "knowledge" or target.node_class != "knowledge":
+                errors.append(f"contains edge {edge.id} may only connect knowledge nodes")
+            if target.node_type == "persona":
+                errors.append(f"persona cannot be target of contains edge {edge.id}")
+            previous = contains_parents.get(target.id)
+            if previous and previous != source.id:
+                errors.append(f"node {target.id} has multiple contains parents")
+            contains_parents[target.id] = source.id
+            contains_children.setdefault(source.id, []).append(target.id)
+        elif relation == "publishes_to":
+            if source.node_class != "knowledge" or target.node_class != "action":
+                errors.append(f"publishes_to edge {edge.id} must be knowledge -> action")
+            if source.lifecycle.status not in V21_APPROVED:
+                errors.append(f"publishes_to source {source.id} must be approved")
+            if target.action:
+                accepted = set(target.action.accepted_node_types)
+                if accepted and source.node_type not in accepted:
+                    errors.append(
+                        f"action {target.id} does not accept node_type {source.node_type}"
+                    )
+                if target.action.policy.requires_approved_content and source.lifecycle.status not in V21_APPROVED:
+                    errors.append(f"action {target.id} requires approved source {source.id}")
+            if edge.grant is None:
+                errors.append(f"publishes_to edge {edge.id} requires grant")
+
+    persona_id = personas[0].id if len(personas) == 1 else None
+    for node in graph.nodes:
+        if node.node_class == "action" or node.node_type == "persona":
+            continue
+        if node.id not in contains_parents:
+            errors.append(f"knowledge node {node.id} requires exactly one contains parent")
+
+    # Every hierarchy path must terminate at Persona; cycles and disconnected
+    # roots are both rejected by the same bounded walk.
+    if persona_id:
+        for node in graph.nodes:
+            if node.node_class == "action" or node.id == persona_id:
+                continue
+            current = node.id
+            visited: set[str] = set()
+            while current != persona_id and current in contains_parents:
+                if current in visited:
+                    errors.append(f"contains cycle detected starting at {node.id}")
+                    break
+                visited.add(current)
+                current = contains_parents[current]
+            if current != persona_id and not any("cycle detected" in err and node.id in err for err in errors):
+                errors.append(f"node {node.id} contains path does not reach persona")
+
+    return (not errors, errors)
+
+
 def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
     """Return (is_valid, errors) for the canonical chain rules in scope for MVP."""
+    if graph.schema_version == "2.1":
+        return _validate_v21(graph)
     errors: list[str] = []
     nodes_by_id = {n.id: n for n in graph.nodes}
 

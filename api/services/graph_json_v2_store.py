@@ -27,24 +27,55 @@ else:
 
 _LEGACY_DATA_ROOT = Path(__file__).resolve().parents[2] / "data" / "graph_documents"
 _EVENT_TYPE = "graph_document_published"
+_COMMITTED_EVENT_TYPE = "graph_version_committed"
+_ACTIVATED_EVENT_TYPE = "graph_version_activated"
 _ENTITY_TYPE = "graph_document"
 
 
 def _checksum(payload: dict) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def canonical_content_payload(graph: "GraphJson") -> dict[str, Any]:
+    """Return stable semantic content; UI layout and revision envelope do not affect it."""
+    payload = graph.model_dump(mode="json")
+    for key in ("layout", "validation", "graph_version", "content_checksum", "status", "provenance"):
+        payload.pop(key, None)
+    for node in payload.get("nodes") or []:
+        # Rendered Markdown is derived from the structured graph and must not
+        # recursively participate in its own checksum.
+        node.pop("markdown", None)
+        data = node.get("data") or {}
+        for key in ("markdown", "markdown_checksum", "markdown_renderer"):
+            data.pop(key, None)
+    return payload
 
 
 def checksum_graph(graph: "GraphJson") -> str:
-    return _checksum(graph.model_dump())
+    return _checksum(canonical_content_payload(graph))
 
 
-def _events(persona_slug: str, brand_slug: str | None = None, *, limit: int = 500) -> list[dict]:
-    rows = supabase_client.list_system_events(
-        entity_type=_ENTITY_TYPE,
-        event_types=[_EVENT_TYPE],
-        limit=limit,
-    )
+def _events(
+    persona_slug: str,
+    brand_slug: str | None = None,
+    *,
+    limit: int = 500,
+    event_types: list[str] | None = None,
+) -> list[dict]:
+    try:
+        rows = supabase_client.list_system_events(
+            entity_type=_ENTITY_TYPE,
+            event_types=event_types or [_ACTIVATED_EVENT_TYPE, _EVENT_TYPE],
+            limit=limit,
+        )
+    except KeyError as exc:
+        # Pure plan/preview tests and offline tooling deliberately run without
+        # Supabase environment variables. In that context there simply is no
+        # published document; production still propagates every database error.
+        if str(exc).strip("'") not in {"SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"}:
+            raise
+        return []
     matching: list[dict] = []
     for row in rows:
         payload = row.get("payload") or {}
@@ -76,7 +107,12 @@ def latest_event(persona_slug: str, brand_slug: str | None = None) -> dict | Non
 def list_versions(persona_slug: str, brand_slug: str | None = None) -> list[int]:
     versions = {
         int(((row.get("payload") or {}).get("version") or 0))
-        for row in _events(persona_slug, brand_slug, limit=500)
+        for row in _events(
+            persona_slug,
+            brand_slug,
+            limit=500,
+            event_types=[_COMMITTED_EVENT_TYPE, _ACTIVATED_EVENT_TYPE, _EVENT_TYPE],
+        )
     }
     return sorted(version for version in versions if version > 0)
 
@@ -86,7 +122,12 @@ def load_version(
     version: int,
     brand_slug: str | None = None,
 ) -> "GraphJson | None":
-    for row in _events(persona_slug, brand_slug, limit=500):
+    for row in _events(
+        persona_slug,
+        brand_slug,
+        limit=500,
+        event_types=[_COMMITTED_EVENT_TYPE, _ACTIVATED_EVENT_TYPE, _EVENT_TYPE],
+    ):
         payload = row.get("payload") or {}
         if int(payload.get("version") or 0) != int(version):
             continue
@@ -95,6 +136,83 @@ def load_version(
         except Exception:
             return None
     return None
+
+
+def load_activated_version(
+    persona_slug: str,
+    version: int,
+    brand_slug: str | None = None,
+) -> "GraphJson | None":
+    for row in _events(
+        persona_slug,
+        brand_slug,
+        limit=500,
+        event_types=[_ACTIVATED_EVENT_TYPE, _EVENT_TYPE],
+    ):
+        payload = row.get("payload") or {}
+        if int(payload.get("version") or 0) != int(version):
+            continue
+        try:
+            graph = GraphJson.model_validate(payload["graph_json"])
+            # Early v2.1 activation events copied the committed envelope
+            # verbatim. Activation is authoritative, so expose the correct
+            # runtime state without mutating the immutable historical event.
+            graph.status = "published"
+            return graph
+        except Exception:
+            return None
+    return None
+
+
+def commit_version(
+    *,
+    persona_slug: str,
+    brand_slug: str | None,
+    expected_version: int,
+    idempotency_key: str,
+    reason: str,
+    graph: "GraphJson",
+    source: str,
+    authored_by: str | None,
+) -> dict[str, Any]:
+    """Atomically allocate and append an immutable version through Postgres."""
+    checksum = checksum_graph(graph)
+    payload = graph.model_dump(mode="json")
+    result = supabase_client.commit_graph_version_v2(
+        persona_slug=persona_slug,
+        brand_slug=brand_slug,
+        expected_version=expected_version,
+        idempotency_key=idempotency_key,
+        reason=reason,
+        graph_json=payload,
+        content_checksum=checksum,
+        source=source,
+        authored_by=authored_by,
+    )
+    if not result or not result.get("graph_version"):
+        raise RuntimeError("commit_graph_version_v2 returned an invalid result")
+    return result
+
+
+def activate_version(
+    *,
+    persona_slug: str,
+    brand_slug: str | None,
+    version: int,
+    checksum: str,
+    operation_id: str,
+    projections: dict[str, Any],
+    source: str,
+) -> dict[str, Any]:
+    return supabase_client.activate_graph_projection_v2(
+        persona_slug=persona_slug,
+        brand_slug=brand_slug,
+        graph_version=version,
+        graph_checksum=checksum,
+        operation_id=operation_id,
+        projections=projections,
+        source=source,
+    )
 
 
 def load_current(
@@ -108,6 +226,8 @@ def load_current(
     try:
         version = int(payload.get("version") or 0)
         graph = GraphJson.model_validate(payload["graph_json"])
+        if row.get("event_type") == _ACTIVATED_EVENT_TYPE:
+            graph.status = "published"
     except Exception:
         return None
     if version < 1:

@@ -810,6 +810,12 @@ export const api = {
   // the whole document and materializes the derived knowledge_nodes/edges (reindex).
   publishGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json: any; source?: string; note?: string; expected_version?: number; idempotency_key?: string }) =>
     req<any>("/graph-documents/publish", { method: "POST", body: JSON.stringify({ source: "graph_ui", ...body }) }),
+  commitGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json?: any; operations?: any[]; source?: string; reason: string; expected_version: number; idempotency_key: string }) =>
+    req<any>("/graph-documents/commit", { method: "POST", body: JSON.stringify({ source: "graph_ui", ...body }) }),
+  graphDocumentActions: (personaSlug: string) =>
+    req<any>(`/graph-documents/current/actions?persona_slug=${encodeURIComponent(personaSlug)}`),
+  resolveGraphContext: (body: { persona_slug: string; destination_id: string; graph_version: number; intent: string; query: string; seed_refs?: string[]; max_nodes?: number; max_tokens?: number }) =>
+    req<any>("/knowledge/context/resolve", { method: "POST", body: JSON.stringify(body) }),
   applyGraphPatch: (body: { persona_slug: string; graph_json: any; source?: string; note?: string; expected_version?: number; idempotency_key?: string }) =>
     req<any>("/graph-documents/apply-patch", { method: "POST", body: JSON.stringify({ source: "graph_ui_patch", ...body }) }),
   syncGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; idempotency_key?: string }) =>
