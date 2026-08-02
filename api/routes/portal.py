@@ -49,6 +49,8 @@ class LeadPatchBody(BaseModel):
     cep: str | None = None
     notes: str | None = None
     tags: list[str] | None = None
+    interesse_produto: str | None = None
+    commercial_note: dict[str, str] | None = None
 
 
 class AutomationBody(BaseModel):
@@ -350,9 +352,11 @@ def lead_detail(lead_id: int, request: Request, persona_slug: str = Query(...)):
 def update_lead(lead_id: int, body: LeadPatchBody, request: Request, persona_slug: str = Query(...)):
     persona = _persona(persona_slug, request, "edit")
     lead = _lead(lead_id, persona["id"])
-    payload = {key: value for key, value in body.model_dump().items() if value is not None and key not in {"notes", "tags"}}
+    excluded = {"notes", "tags", "commercial_note"}
+    payload = {key: value for key, value in body.model_dump().items() if value is not None and key not in excluded}
     if body.stage and body.stage not in {item[0] for item in PIPELINE_STAGES}:
         raise HTTPException(400, "Etapa invalida.")
+    metadata: dict[str, Any] | None = None
     if body.notes is not None or body.tags is not None:
         metadata = dict(lead.get("metadata") or {})
         portal = dict(metadata.get("portal") or {})
@@ -361,6 +365,12 @@ def update_lead(lead_id: int, body: LeadPatchBody, request: Request, persona_slu
         if body.tags is not None:
             portal["tags"] = body.tags
         metadata["portal"] = portal
+    if body.commercial_note is not None:
+        metadata = supabase_client.merge_commercial_note(
+            metadata if metadata is not None else (lead.get("metadata") or {}),
+            body.commercial_note,
+        )
+    if metadata is not None:
         payload["metadata"] = metadata
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()
     rows = supabase_client.get_client().table("leads").update(payload).eq("id", lead_id).eq("persona_id", persona["id"]).execute().data or []

@@ -604,3 +604,106 @@ def test_evolution_pending_ack_is_audit_only(monkeypatch):
         "external_message_id": "message-1",
         "status": "PENDING",
     }
+
+
+class _FakeUpdateResult:
+    def __init__(self, data):
+        self.data = data
+
+
+class _FakeUpdateQuery:
+    def __init__(self, table_rows, payload):
+        self._rows = table_rows
+        self._payload = payload
+        self._filters: dict = {}
+
+    def eq(self, key, value):
+        self._filters[key] = value
+        return self
+
+    def execute(self):
+        row = dict(self._rows[0])
+        if all(row.get(k) == v for k, v in self._filters.items()):
+            row.update(self._payload)
+            self._rows[0] = row
+            return _FakeUpdateResult([row])
+        return _FakeUpdateResult([])
+
+
+class _FakeLeadsTable:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def update(self, payload):
+        return _FakeUpdateQuery(self._rows, payload)
+
+
+class _FakeLeadsClient:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def table(self, _name):
+        return _FakeLeadsTable(self._rows)
+
+
+def test_portal_update_lead_merges_commercial_note_into_appointment_request(monkeypatch):
+    """A client-portal edit must land the same way an admin edit does: the
+    commercial_note display mirror AND conversation_state.appointment_
+    request (the AI's actual working memory) both get the new value, via
+    the shared supabase_client.merge_commercial_note helper.
+    """
+    request = request_for(
+        {"id": "u1", "role": "user", "account_type": "client"},
+        [{
+            "persona_id": "p1", "persona_slug": "aurora",
+            "can_view": True, "can_edit": True, "can_manage": False,
+        }],
+    )
+    lead_row = {
+        "id": 29,
+        "persona_id": "p1",
+        "metadata": {
+            "conversation_state": {
+                "missing_fields": ["servico", "modelo_veiculo"],
+                "appointment_request": {},
+            },
+        },
+    }
+    monkeypatch.setattr(
+        portal.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "aurora"},
+    )
+    monkeypatch.setattr(
+        portal.supabase_client, "get_lead_by_ref", lambda _ref: lead_row,
+    )
+    rows = [dict(lead_row)]
+    monkeypatch.setattr(portal.supabase_client, "get_client", lambda: _FakeLeadsClient(rows))
+
+    body = portal.LeadPatchBody(commercial_note={"servico": "chapeacao"})
+    result = portal.update_lead(29, body, request, persona_slug="aurora")
+
+    state = result["metadata"]["conversation_state"]
+    assert state["appointment_request"]["servico"] == "chapeacao"
+    assert state["missing_fields"] == ["modelo_veiculo"]
+    assert result["metadata"]["commercial_note"]["servico"] == "chapeacao"
+
+
+def test_portal_update_lead_still_supports_interesse_produto(monkeypatch):
+    request = request_for(
+        {"id": "u1", "role": "user", "account_type": "client"},
+        [{
+            "persona_id": "p1", "persona_slug": "aurora",
+            "can_view": True, "can_edit": True, "can_manage": False,
+        }],
+    )
+    lead_row = {"id": 29, "persona_id": "p1", "metadata": {}}
+    monkeypatch.setattr(
+        portal.supabase_client, "get_persona", lambda _slug: {"id": "p1", "slug": "aurora"},
+    )
+    monkeypatch.setattr(portal.supabase_client, "get_lead_by_ref", lambda _ref: lead_row)
+    rows = [dict(lead_row)]
+    monkeypatch.setattr(portal.supabase_client, "get_client", lambda: _FakeLeadsClient(rows))
+
+    body = portal.LeadPatchBody(interesse_produto="chapeacao")
+    result = portal.update_lead(29, body, request, persona_slug="aurora")
+
+    assert result["interesse_produto"] == "chapeacao"

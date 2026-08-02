@@ -2135,6 +2135,11 @@ export function MessagesLayout({
           onSaved={async () => {
             await refreshSelectedLead(selectedLead.id);
           }}
+          onSubmit={
+            isPortal
+              ? (leadRef, body) => api.updatePortalLead(portalSlug!, leadRef, body)
+              : undefined
+          }
         />
       )}
     </div>

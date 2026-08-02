@@ -607,27 +607,9 @@ def update_lead_info(lead_ref: int, body: LeadInfoUpdateBody, request: Request):
         update["interesse_produto"] = body.interesse_produto.strip() or None
 
     if body.commercial_note is not None:
-        clean_note = {
-            str(k).strip(): str(v).strip()
-            for k, v in body.commercial_note.items()
-            if str(k).strip() and str(v).strip()
-        }
-        metadata = dict(lead.get("metadata") or {})
-        metadata["commercial_note"] = {
-            **clean_note,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "source": "manual",
-        }
-        conversation_state = dict(metadata.get("conversation_state") or {})
-        appointment_request = dict(conversation_state.get("appointment_request") or {})
-        appointment_request.update(clean_note)
-        conversation_state["appointment_request"] = appointment_request
-        missing_fields = list(conversation_state.get("missing_fields") or [])
-        conversation_state["missing_fields"] = [
-            field for field in missing_fields if field not in clean_note
-        ]
-        metadata["conversation_state"] = conversation_state
-        update["metadata"] = metadata
+        update["metadata"] = supabase_client.merge_commercial_note(
+            lead.get("metadata") or {}, body.commercial_note
+        )
 
     if not update:
         raise HTTPException(400, "Nenhum campo para atualizar")

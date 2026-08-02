@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Search, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { LeadInfoModal } from "@/components/leads/LeadInfoModal";
 import { usePortal } from "../PortalContext";
 
 const stages = [
@@ -23,6 +24,7 @@ export default function ClientLeadsPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [infoLead, setInfoLead] = useState<any | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -106,12 +108,23 @@ export default function ClientLeadsPage() {
               return (
                 <article key={lead.id} className="grid gap-4 p-5 lg:grid-cols-[1.3fr_1fr_1.3fr_auto] lg:items-center">
                   <div className="min-w-0">
-                    <Link
-                      href={`/clientes/${personaSlug}/mensagens/${lead.id}`}
-                      className="font-semibold text-slate-950 hover:text-violet-700"
-                    >
-                      {lead.nome || lead.telefone || `Lead #${lead.id}`}
-                    </Link>
+                    {capabilities.edit ? (
+                      <button
+                        type="button"
+                        onClick={() => setInfoLead(lead)}
+                        className="font-semibold text-slate-950 hover:text-violet-700"
+                        title="Ver/editar informações do lead"
+                      >
+                        {lead.nome || lead.telefone || `Lead #${lead.id}`}
+                      </button>
+                    ) : (
+                      <Link
+                        href={`/clientes/${personaSlug}/mensagens/${lead.id}`}
+                        className="font-semibold text-slate-950 hover:text-violet-700"
+                      >
+                        {lead.nome || lead.telefone || `Lead #${lead.id}`}
+                      </Link>
+                    )}
                     <p className="mt-1 truncate text-xs text-slate-500">
                       {[lead.telefone, lead.email, lead.cidade].filter(Boolean).join(" · ") || "Dados de contato pendentes"}
                     </p>
@@ -155,6 +168,19 @@ export default function ClientLeadsPage() {
           </div>
         )}
       </section>
+
+      {infoLead && (
+        <LeadInfoModal
+          lead={infoLead}
+          onClose={() => setInfoLead(null)}
+          onSaved={async (updated) => {
+            setRows((current) =>
+              current.map((lead) => (lead.id === updated.id ? { ...lead, ...updated } : lead)),
+            );
+          }}
+          onSubmit={(leadRef, body) => api.updatePortalLead(personaSlug, leadRef, body)}
+        />
+      )}
     </div>
   );
 }

@@ -13,14 +13,25 @@ function noteRowsFromLead(lead: any): NoteRow[] {
     .map(([key, value]) => ({ key, value: String(value ?? "") }));
 }
 
+export type LeadInfoUpdateBody = {
+  nome: string;
+  interesse_produto: string;
+  commercial_note: Record<string, string>;
+};
+
 export function LeadInfoModal({
   lead,
   onClose,
   onSaved,
+  onSubmit,
 }: {
   lead: any;
   onClose: () => void;
   onSaved: (updatedLead: any) => void | Promise<void>;
+  /** Defaults to the admin PATCH /leads/{id} endpoint (api.updateLeadInfo).
+   * Pass this to target a different surface, e.g. the client portal's
+   * own PATCH /portal/leads/{id} (api.updatePortalLead). */
+  onSubmit?: (leadRef: number, body: LeadInfoUpdateBody) => Promise<any>;
 }) {
   const [nome, setNome] = useState(lead?.nome || "");
   const [interesseProduto, setInteresseProduto] = useState(lead?.interesse_produto || "");
@@ -58,11 +69,14 @@ export function LeadInfoModal({
         const value = row.value.trim();
         if (key && value) commercialNote[key] = value;
       }
-      const result = await api.updateLeadInfo(Number(lead.id), {
+      const body: LeadInfoUpdateBody = {
         nome: trimmedName,
         interesse_produto: interesseProduto.trim(),
         commercial_note: commercialNote,
-      });
+      };
+      const result = onSubmit
+        ? await onSubmit(Number(lead.id), body)
+        : await api.updateLeadInfo(Number(lead.id), body);
       await onSaved(result?.lead || result);
       onClose();
     } catch (e: any) {

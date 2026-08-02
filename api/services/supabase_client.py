@@ -365,6 +365,39 @@ def update_lead(lead_ref: int, data: dict) -> None:
     _execute_with_retry(get_client().table("leads").update(data).eq("id", lead_ref))
 
 
+def merge_commercial_note(metadata: dict, commercial_note: dict[str, str]) -> dict:
+    """Apply a manual commercial-note edit into a lead's metadata.
+
+    Shared by the admin (`routes.leads`) and client-portal (`routes.portal`)
+    lead-update endpoints so an edit made from either surface lands the
+    same way: the display-only `commercial_note` mirror AND
+    `conversation_state.appointment_request` (the AI's actual working
+    memory) both get the new values, and any now-answered field is
+    dropped from `missing_fields` so the next reply doesn't ask again.
+    """
+    clean_note = {
+        str(k).strip(): str(v).strip()
+        for k, v in commercial_note.items()
+        if str(k).strip() and str(v).strip()
+    }
+    metadata = dict(metadata or {})
+    metadata["commercial_note"] = {
+        **clean_note,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "source": "manual",
+    }
+    conversation_state = dict(metadata.get("conversation_state") or {})
+    appointment_request = dict(conversation_state.get("appointment_request") or {})
+    appointment_request.update(clean_note)
+    conversation_state["appointment_request"] = appointment_request
+    missing_fields = list(conversation_state.get("missing_fields") or [])
+    conversation_state["missing_fields"] = [
+        field for field in missing_fields if field not in clean_note
+    ]
+    metadata["conversation_state"] = conversation_state
+    return metadata
+
+
 def get_lead_by_ref(lead_ref: int) -> Optional[dict]:
     """Fetch a lead row by its integer primary key (`leads.id`)."""
     return _one(get_client().table("leads").select("*").eq("id", lead_ref).maybe_single())
