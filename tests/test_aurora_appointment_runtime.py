@@ -416,6 +416,18 @@ def test_build_system_prompt_instructs_multi_field_extraction():
     assert "extracted_fields" in prompt
 
 
+def test_build_system_prompt_instructs_extraction_from_incidental_mentions():
+    """Regression test for the 2026-08-02 finding: a customer wrote 'estou
+    pensando em fazer um polimento tecnico no meu fordka' — naming their
+    vehicle while asking about a service, not directly answering the last
+    question asked — and DeepSeek's own extracted_fields came back empty.
+    The prompt must explicitly tell the model to scan the whole message
+    for any pending field, not just treat it as an answer to the last
+    question."""
+    prompt = conversation_runtime.build_system_prompt(aurora_graph())
+    assert "de passagem" in prompt
+
+
 def test_build_system_prompt_mentions_json_for_deepseek_response_format(monkeypatch):
     """Regression test for a real production 400 confirmed live 2026-08-01:
     DeepSeek (like OpenAI) rejects any request using
@@ -577,3 +589,70 @@ def test_build_context_wires_available_services_from_graph_products(monkeypatch)
     assert "chapeacao" in slugs
     assert "vitrificacao" in slugs
     assert all("label" in svc for svc in context.available_services)
+
+
+def test_next_field_question_reads_from_the_graph():
+    context = context_for("Oi")
+    cart_state = {
+        "business_model": "appointment",
+        "missing_fields": ["nome_cliente", "modelo_veiculo"],
+    }
+    assert conversation_runtime._next_field_question(cart_state, context) == "Qual é o seu nome?"
+
+
+def test_next_field_question_is_none_without_missing_fields():
+    context = context_for("Oi")
+    assert conversation_runtime._next_field_question(
+        {"business_model": "appointment", "missing_fields": []}, context,
+    ) is None
+
+
+def test_next_field_question_is_none_outside_appointment_business_model():
+    context = context_for("Oi")
+    assert conversation_runtime._next_field_question(
+        {"business_model": "sales", "missing_fields": ["customer_name"]}, context,
+    ) is None
+
+
+def test_ensure_trailing_question_appends_the_next_graph_question():
+    """Regression test for the 2026-08-02 finding: DeepSeek's own reply
+    correctly asked for the customer's name, but got discarded by an
+    overly broad safety fallback and replaced with a plain price fact
+    that never asks anything — silently dropping the qualification flow.
+    This is now a structural guarantee applied to whatever reply text
+    ends up used, not just a prompt instruction that can be skipped.
+    """
+    context = context_for("Oi")
+    cart_state = {
+        "business_model": "appointment",
+        "missing_fields": ["nome_cliente", "modelo_veiculo"],
+    }
+    result = conversation_runtime._ensure_trailing_question(
+        "Polimento técnico leva cerca de 4 horas e parte de R$ 650,00.",
+        cart_state,
+        context,
+    )
+    assert result == (
+        "Polimento técnico leva cerca de 4 horas e parte de R$ 650,00. "
+        "Qual é o seu nome?"
+    )
+
+
+def test_ensure_trailing_question_leaves_an_existing_question_alone():
+    context = context_for("Oi")
+    cart_state = {"business_model": "appointment", "missing_fields": ["nome_cliente"]}
+    original = "Entendi! Qual é o seu nome?"
+    assert conversation_runtime._ensure_trailing_question(original, cart_state, context) == original
+
+
+def test_ensure_trailing_question_is_noop_without_missing_fields():
+    context = context_for("Oi")
+    cart_state = {"business_model": "appointment", "missing_fields": []}
+    original = "Perfeito, obrigada."
+    assert conversation_runtime._ensure_trailing_question(original, cart_state, context) == original
+
+
+def test_ensure_trailing_question_preserves_a_deliberate_none_reply():
+    context = context_for("Oi")
+    cart_state = {"business_model": "appointment", "missing_fields": ["nome_cliente"]}
+    assert conversation_runtime._ensure_trailing_question(None, cart_state, context) is None

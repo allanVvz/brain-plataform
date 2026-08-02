@@ -202,7 +202,13 @@ _AGENTIC_SAFETY_INSTRUCTIONS = (
     "nunca invente um fato que nao esteja la. Se o cliente responder mais "
     "de uma informacao pendente na mesma mensagem (por exemplo nome e "
     "modelo do carro juntos), identifique cada uma separadamente — nao "
-    "deixe nenhuma se perder so porque vieram juntas. Responda sempre em "
+    "deixe nenhuma se perder so porque vieram juntas. Isso vale mesmo "
+    "quando a informacao aparece de passagem, dentro de uma frase sobre "
+    "outro assunto (por exemplo o cliente perguntar sobre um servico mas "
+    "ja citar o modelo do carro na mesma mensagem) — nao exija que a "
+    "mensagem seja uma resposta direta a ultima pergunta feita; releia a "
+    "mensagem inteira do cliente procurando por qualquer campo da lista "
+    "'Informacoes pendentes' antes de responder. Responda sempre em "
     "formato JSON, exatamente {\"reply_text\": \"...\", \"extracted_fields\": "
     "{...}, \"identified_service_slug\": \"...\"}, sem nenhum texto fora do "
     "JSON. extracted_fields deve conter somente os campos da lista "
@@ -349,6 +355,56 @@ def _resolve_identified_service(
     if identified_service_slug not in valid_slugs:
         return extracted_fields
     return {**extracted_fields, "servico": identified_service_slug}
+
+
+def _next_field_question(cart_state: dict[str, Any], context: ConversationContext) -> str | None:
+    """The question for whatever field is next in missing_fields.
+
+    Read from this persona's own graph data (appointment_policy.field_
+    questions), same source _commercial_note_fields uses — no hardcoded
+    field names or questions here, any persona with an appointment_policy.
+    """
+    if cart_state.get("business_model") != "appointment":
+        return None
+    missing = cart_state.get("missing_fields") or []
+    if not missing:
+        return None
+    persona_node = next(
+        (item for item in context.rag_nodes if item.get("node_type") == "persona"),
+        None,
+    )
+    field_questions = (
+        (persona_node or {}).get("data", {}).get("appointment_policy", {}).get("field_questions")
+        or {}
+    )
+    question = field_questions.get(missing[0])
+    return str(question) if question else None
+
+
+def _ensure_trailing_question(reply_text: str | None, cart_state: dict[str, Any], context: ConversationContext) -> str | None:
+    """Never leave the customer without a next step while info is missing.
+
+    Confirmed live 2026-08-01: DeepSeek's own candidate reply correctly
+    asked "Qual e o seu nome?", but got discarded by the unsafe-price
+    filter and fell back to the deterministic engine's plain price-fact
+    reply — which never asks anything, silently dropping the qualification
+    flow. Whatever reply text ends up used (agentic or deterministic
+    fallback), if it doesn't already end in a question and fields are
+    still missing, this appends the graph's own next question for it —
+    a structural guarantee, not just a prompt instruction the model (or a
+    safety fallback) can skip.
+    """
+    if reply_text is None:
+        return None
+    text = reply_text.strip()
+    if text.endswith("?"):
+        return reply_text
+    question = _next_field_question(cart_state, context)
+    if not question:
+        return reply_text
+    if not text:
+        return question
+    return f"{text} {question}"
 
 
 def _approved_faq_match(graph: Any, message: str) -> Any | None:
@@ -1066,6 +1122,14 @@ def commit(
                 )
             }
         )
+
+    response = response.model_copy(
+        update={
+            "reply_text": _ensure_trailing_question(
+                response.reply_text, response.cart_state, context
+            )
+        }
+    )
 
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     if not lead:

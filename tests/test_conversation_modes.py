@@ -201,6 +201,30 @@ def test_aurora_agentic_workflow_requests_and_forwards_extracted_fields():
     assert "response: $json.response" in persist_node["parameters"]["body"]
 
 
+def test_aurora_agentic_workflow_does_not_duplicate_the_price_safety_check():
+    """Regression test for the 2026-08-02 finding: the Merge node's own
+    'is this reply unsafe' check flagged any bare 'R$' + digit as unsafe,
+    discarding a compliant DeepSeek reply that correctly asked for the
+    customer's name after mentioning a starting price — falling back to
+    the deterministic engine's plain price fact, which never asks
+    anything. That safety guarantee already exists, correctly, exactly
+    once, server-side (conversation_runtime._reply_confirms_price_or_
+    schedule, which requires confirmation language AND a price/date token
+    together) — the workflow must not duplicate a cruder version of it.
+    """
+    workflow = json.loads(
+        (ROOT / "api" / "n8n-workflows" / "aurora-conversation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    merge_node = next(
+        node for node in workflow["nodes"] if node["name"] == "Merge model reply safely"
+    )
+    js_code = merge_node["parameters"]["jsCode"]
+    assert "unsafePatterns" not in js_code
+    assert r"r\$" not in js_code
+
+
 def test_aurora_agentic_workflow_requests_and_forwards_identified_service_slug():
     """Regression test for the 2026-08-01 service-inference fix.
 
