@@ -146,18 +146,32 @@ def provision(
 def resync_workflow_for_persona(
     persona: dict[str, Any],
     deepseek_config: dict[str, Any],
-) -> str:
+) -> dict[str, Any]:
     """Rebuild this persona's n8n workflow from the current template/graph
-    and republish it, reusing the DeepSeek credential already provisioned.
+    and publish it, reusing the DeepSeek credential already provisioned —
+    creating the workflow if it doesn't exist yet.
 
     Called whenever the operator switches (or re-confirms) n8n_agents mode
     from the settings UI, so the live n8n workflow always matches what's on
     disk without a manual SSH resync — the same steps that were previously
     run by hand for every persona-level change.
+
+    The credential is only ever reused, never recreated: once a DeepSeek
+    key is saved, its raw value isn't retrievable from our own storage
+    again (the only place it still lives is inside the n8n credential
+    object itself), so a genuinely first-time setup — no credential at all
+    — still requires the operator to (re)enter the key in Ferramentas. But
+    a persona that already has a credential and simply never got (or lost)
+    its workflow — the exact gap that made switching to n8n error out
+    instead of just working — gets one built here from the template, no
+    key re-entry needed.
+
+    Returns the config dict with n8n_workflow_id (and conversation_webhook_
+    path) filled in, so the caller can persist it back onto the persona's
+    integration record.
     """
     credential_id = str(deepseek_config.get("n8n_credential_id") or "")
-    workflow_id = str(deepseek_config.get("n8n_workflow_id") or "")
-    if not credential_id or not workflow_id:
+    if not credential_id:
         raise RuntimeError("DeepSeek nao provisionado para esta persona")
     credential_name = f"Brain DeepSeek — {persona.get('slug') or ''}"
     workflow = _workflow_for_persona(
@@ -165,9 +179,21 @@ def resync_workflow_for_persona(
         credential_id=credential_id,
         credential_name=credential_name,
     )
-    n8n_client.update_workflow(workflow_id, workflow)
+    workflow_id = str(deepseek_config.get("n8n_workflow_id") or "")
+    if workflow_id:
+        n8n_client.update_workflow(workflow_id, workflow)
+    else:
+        created = n8n_client.create_workflow(workflow)
+        workflow_id = str(created.get("id") or "")
+        if not workflow_id:
+            raise RuntimeError("n8n nao retornou um workflow id")
     n8n_client.activate_workflow(workflow_id)
-    return workflow_id
+    slug = str(persona.get("slug") or "")
+    return {
+        **deepseek_config,
+        "n8n_workflow_id": workflow_id,
+        "conversation_webhook_path": f"{slug}/conversation",
+    }
 
 
 def revoke(config: dict[str, Any] | None) -> None:

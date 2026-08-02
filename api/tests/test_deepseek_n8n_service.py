@@ -102,10 +102,49 @@ def test_resync_workflow_reuses_existing_credential_and_reactivates(monkeypatch)
         {"n8n_credential_id": "credential-existing", "n8n_workflow_id": "workflow-existing"},
     )
 
-    assert result == "workflow-existing"
+    assert result["n8n_workflow_id"] == "workflow-existing"
+    assert result["conversation_webhook_path"] == "baita-conveniencia/conversation"
     assert calls["workflow_id"] == "workflow-existing"
     assert calls["activated"] == "workflow-existing"
     deepseek_node = next(node for node in calls["workflow"]["nodes"] if node["id"] == "deepseek")
+    assert deepseek_node["credentials"]["httpHeaderAuth"]["id"] == "credential-existing"
+
+
+def test_resync_workflow_creates_it_when_missing_reusing_the_credential(monkeypatch):
+    """Regression test for the exact gap found live: a persona
+    (baita-conveniencia) already had a DeepSeek credential provisioned but
+    its workflow reference was missing, so switching to n8n_agents errored
+    out instead of just working. The raw API key isn't recoverable once
+    saved (it only lives inside the n8n credential from then on), so the
+    fix must build a new workflow from the credential that's already
+    there, never ask for the key again."""
+    calls = {}
+
+    def create_workflow(workflow):
+        calls["created"] = workflow
+        return {"id": "workflow-new"}
+
+    monkeypatch.setattr(deepseek_n8n_service.n8n_client, "create_workflow", create_workflow)
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client,
+        "update_workflow",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must create, not update, when no workflow id exists")),
+    )
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client,
+        "activate_workflow",
+        lambda workflow_id: calls.setdefault("activated", workflow_id),
+    )
+
+    result = deepseek_n8n_service.resync_workflow_for_persona(
+        {"id": "persona-id", "slug": "baita-conveniencia", "name": "Baita", "config": {}},
+        {"n8n_credential_id": "credential-existing"},
+    )
+
+    assert result["n8n_workflow_id"] == "workflow-new"
+    assert result["conversation_webhook_path"] == "baita-conveniencia/conversation"
+    assert calls["activated"] == "workflow-new"
+    deepseek_node = next(node for node in calls["created"]["nodes"] if node["id"] == "deepseek")
     assert deepseek_node["credentials"]["httpHeaderAuth"]["id"] == "credential-existing"
 
 

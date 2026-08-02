@@ -187,11 +187,12 @@ def test_update_routing_n8n_agents_resyncs_the_live_workflow(monkeypatch):
         },
     )
     monkeypatch.setattr(personas.supabase_client, "get_persona", lambda _slug: {**routing, "name": "Aurora"})
+    monkeypatch.setattr(personas.supabase_client, "save_persona_integration_connection", lambda *a, **k: None)
     monkeypatch.setenv("N8N_BASE_URL", "http://n8n:5678")
 
     def fake_resync(persona, deepseek_config):
         resynced.append((persona.get("slug"), deepseek_config))
-        return "wf-1"
+        return {**deepseek_config, "n8n_workflow_id": "wf-1", "conversation_webhook_path": "aurora/conversation"}
 
     monkeypatch.setattr(personas.deepseek_n8n_service, "resync_workflow_for_persona", fake_resync)
 
@@ -199,6 +200,90 @@ def test_update_routing_n8n_agents_resyncs_the_live_workflow(monkeypatch):
     personas.update_routing("aurora", body, _admin_request())
 
     assert resynced[0][1]["n8n_workflow_id"] == "wf-1"
+
+
+def test_update_routing_auto_creates_the_workflow_when_credential_exists_but_workflow_is_missing(monkeypatch):
+    """Regression test for the exact bug found live: baita-conveniencia had
+    a DeepSeek credential already provisioned (enabled, connected) but no
+    n8n_workflow_id — switching to n8n_agents in the UI errored with
+    "Configure a chave DeepSeek..." even though a key was already
+    configured. The fix must build the workflow from the existing
+    credential instead of demanding the key again."""
+    from routes import personas
+
+    routing = _routing_row()
+    saved_configs = []
+
+    monkeypatch.setattr(personas.auth_service, "is_admin", lambda _user: True)
+    monkeypatch.setattr(personas.supabase_client, "get_persona_routing", lambda _slug: routing)
+    monkeypatch.setattr(
+        personas.supabase_client,
+        "get_workflow_bindings",
+        lambda _id: [{"id": "binding-1", "active": True, "metadata": {}}],
+    )
+    monkeypatch.setattr(personas.supabase_client, "update_workflow_binding", lambda *a, **k: None)
+    monkeypatch.setattr(personas.supabase_client, "update_persona_routing", lambda _slug, _payload: routing)
+    monkeypatch.setattr(personas.supabase_client, "insert_event", lambda *a, **k: None)
+    monkeypatch.setattr(
+        personas.supabase_client,
+        "get_persona_integration_connection",
+        lambda _id, _service: {
+            "enabled": True,
+            "config_json": {"n8n_credential_id": "cred-existing"},  # no n8n_workflow_id
+        },
+    )
+    monkeypatch.setattr(personas.supabase_client, "get_persona", lambda _slug: {**routing, "name": "Baita"})
+    monkeypatch.setattr(
+        personas.supabase_client,
+        "save_persona_integration_connection",
+        lambda data: saved_configs.append(data),
+    )
+    monkeypatch.setenv("N8N_BASE_URL", "http://n8n:5678")
+
+    monkeypatch.setattr(
+        personas.deepseek_n8n_service,
+        "resync_workflow_for_persona",
+        lambda _persona, config: {
+            **config,
+            "n8n_workflow_id": "wf-brand-new",
+            "conversation_webhook_path": "baita-conveniencia/conversation",
+        },
+    )
+
+    body = personas.RoutingUpdate(conversation_mode="n8n_agents")
+    result = personas.update_routing("baita-conveniencia", body, _admin_request())
+
+    assert result is not None  # did not raise HTTPException
+    assert saved_configs[0]["config_json"]["n8n_workflow_id"] == "wf-brand-new"
+    assert saved_configs[0]["service"] == "deepseek"
+
+
+def test_update_routing_still_rejects_n8n_agents_with_no_credential_at_all(monkeypatch):
+    """A persona that was never connected to DeepSeek at all (no
+    credential, so no raw key exists anywhere to build one from) must
+    still get a clear error, not a crash trying to auto-provision."""
+    from fastapi import HTTPException
+    from routes import personas
+
+    monkeypatch.setattr(personas.auth_service, "is_admin", lambda _user: True)
+    monkeypatch.setattr(personas.supabase_client, "get_persona_routing", lambda _slug: _routing_row())
+    monkeypatch.setattr(
+        personas.supabase_client,
+        "get_persona_integration_connection",
+        lambda _id, _service: None,
+    )
+
+    def _boom(*_a, **_k):
+        raise AssertionError("must not attempt to resync without a credential")
+
+    monkeypatch.setattr(personas.deepseek_n8n_service, "resync_workflow_for_persona", _boom)
+
+    body = personas.RoutingUpdate(conversation_mode="n8n_agents")
+    try:
+        personas.update_routing("aurora", body, _admin_request())
+        raise AssertionError("expected HTTPException")
+    except HTTPException as exc:
+        assert exc.status_code == 409
 
 
 def test_update_routing_writes_automation_mode_to_persona_portal_config(monkeypatch):

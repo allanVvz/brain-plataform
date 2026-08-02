@@ -277,11 +277,26 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                 or {}
             )
             deepseek_config = dict(integration.get("config_json") or {})
-            if not integration.get("enabled") or not deepseek_config.get("n8n_workflow_id"):
+            if not integration.get("enabled") or not deepseek_config.get("n8n_credential_id"):
                 raise HTTPException(
                     409,
                     "Configure a chave DeepSeek da persona em Ferramentas antes de ativar o n8n.",
                 )
+            # Build (or rebuild) the live n8n workflow *before* pointing the
+            # binding at it, so switching to n8n_agents always ends with a
+            # real, existing workflow id and webhook path — including the
+            # first time this persona is ever switched, when no workflow
+            # exists yet. The credential is reused as-is; it's the only
+            # place the raw DeepSeek key still lives once saved.
+            full_persona = supabase_client.get_persona(slug) or current
+            deepseek_config = deepseek_n8n_service.resync_workflow_for_persona(
+                full_persona, deepseek_config,
+            )
+            supabase_client.save_persona_integration_connection({
+                "persona_id": current.get("id"),
+                "service": "deepseek",
+                "config_json": deepseek_config,
+            })
         for binding in supabase_client.get_workflow_bindings(current.get("id")):
             if not binding.get("id") or not binding.get("active"):
                 continue
@@ -313,14 +328,6 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
             )
         if payload:
             supabase_client.update_persona_routing(slug, payload)
-        if conversation_mode == "n8n_agents":
-            # The workflow bindings above only point n8n at the right
-            # webhook/credential ids — the *content* of the live n8n
-            # workflow (system prompt wiring, extraction contract, etc.)
-            # only updates if we actually rebuild and republish it here,
-            # the same steps that were previously run by hand over SSH.
-            full_persona = supabase_client.get_persona(slug) or current
-            deepseek_n8n_service.resync_workflow_for_persona(full_persona, deepseek_config)
         supabase_client.insert_event(
             {
                 "event_type": "conversation.mode_updated",
