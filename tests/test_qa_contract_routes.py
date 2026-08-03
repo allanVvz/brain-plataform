@@ -225,9 +225,8 @@ def test_sofia_graph_command_applies_reencaixe(monkeypatch):
     assert result["ok"] is True
     assert result["persisted"] is True
     assert any(call.get("tool") == "validate-canonical-chain" for call in result["tool_calls"])
-    assert any(call.get("tool") == "persist-graph-patch" for call in result["tool_calls"])
-    assert any(call.get("tool") == "refetch-graph" for call in result["tool_calls"])
-    assert len(edge_calls) == 1
+    assert any(call.get("tool") == "publish-canonical-graph" for call in result["tool_calls"])
+    assert len(edge_calls) == 0
 
 
 def test_sofia_graph_command_allanvvz_not_blocked_by_persona_gate(monkeypatch):

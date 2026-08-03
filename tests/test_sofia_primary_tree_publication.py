@@ -305,7 +305,7 @@ def _build_complete_plan() -> tuple[list[dict], list[dict], list[dict]]:
 
 def test_primary_tree_publication_and_graph_render(monkeypatch):
     graph_page = (ROOT / "dashboard" / "app" / "knowledge" / "graph" / "GraphPageClient.tsx").read_text(encoding="utf-8")
-    _assert('const mode = (searchParams.get("mode") as ViewMode) || "semantic_tree";' in graph_page, "graph page defaults to semantic tree mode")
+    _assert('const requestedMode = searchParams.get("mode");' in graph_page and ': "semantic_tree";' in graph_page, "graph page defaults to semantic tree mode")
 
     store = _FakeStore()
     plan_entries, plan_links, persisted_items = _build_complete_plan()

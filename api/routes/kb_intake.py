@@ -6,6 +6,10 @@ import os
 import time
 
 from services import auth_service, integration_service
+from services import supabase_client
+from schemas.agent_harness import MessageCreate
+from services.agent_harness import SofiaAgentHarness
+from services.agent_harness_repository import AgentHarnessRepository
 from services.catalog_crawler import crawl_catalog_url
 from services.kb_intake_service import (
     start_bootstrap_session,
@@ -129,7 +133,9 @@ def start_session(body: StartBody, request: Request):
     }
     if (body.mode or "").strip().lower() == "criar" and _invalid_criar_persona(body.persona_slug):
         raise HTTPException(400, "Selecione uma persona especifica antes de criar conhecimento.")
-    return start_bootstrap_session(
+    if body.persona_slug:
+        auth_service.assert_persona_access(request, persona_slug=body.persona_slug)
+    result = start_bootstrap_session(
         body.model,
         initial_context=body.initial_context,
         agent_key=body.agent_key,
@@ -137,17 +143,55 @@ def start_session(body: StartBody, request: Request):
         bootstrap_llm=body.bootstrap_llm,
         user_id=user.get("id"),
     )
+    try:
+        persona = supabase_client.get_persona(body.persona_slug) if body.persona_slug else None
+        if persona and result.get("session_id"):
+            harness = SofiaAgentHarness(AgentHarnessRepository())
+            durable_session = harness.adopt_legacy_session(
+                session_id=str(result["session_id"]), persona_id=str(persona["id"]),
+                user_id=str(user.get("id") or ""), source="kb-intake.start",
+                selected_context={"persona_slug": body.persona_slug, "mode": body.mode},
+                memory_summary=body.memory_summary or "",
+            )
+            result["agent_session_id"] = durable_session["id"]
+    except Exception:
+        # Compatibility remains available while migration 088 rolls through all
+        # environments; the legacy request itself must not regress.
+        pass
+    return result
 
 
 @router.post("/message")
 def send_message(body: MessageBody, request: Request):
-    _assert_session_access(body.session_id, request)
+    legacy_session = _assert_session_access(body.session_id, request)
+    harness_run = None
+    try:
+        repository = AgentHarnessRepository()
+        durable = repository.get_session(body.session_id)
+        if durable:
+            harness_run = SofiaAgentHarness(repository).add_message(
+                durable,
+                MessageCreate(
+                    message=body.message,
+                    expected_revision=int(durable.get("revision") or 1),
+                    idempotency_key=f"legacy-message:{body.session_id}:{int(time.time() * 1000)}",
+                    reason="Mensagem recebida pelo adapter /kb-intake",
+                    context=dict(durable.get("selected_context") or {}),
+                ),
+                user_id=str((auth_service.current_user(request) or {}).get("id") or ""),
+            )
+    except Exception:
+        # A falha do harness nao interrompe o adapter durante o rollout.
+        harness_run = None
     try:
         result = chat(body.session_id, body.message)
         # Validate serialization inside the handler so a non-serializable field
         # becomes a catchable error (with traceback) instead of a raw 500 raised
         # by FastAPI during response encoding, after this handler returns.
         _assert_json_serializable(result)
+        if harness_run:
+            result["agent_session_id"] = body.session_id
+            result["agent_run_id"] = harness_run["id"]
         return result
     except Exception as exc:
         # Full safety net: log structured event + return controlled body so

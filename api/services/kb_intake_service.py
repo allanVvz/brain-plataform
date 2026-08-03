@@ -5274,7 +5274,10 @@ def _parse_tree_counts(session: dict) -> tuple[int, int]:
     grouping ("3 grupos") changes the number of groups; bare plural mentions
     stay at one group and are handled as a clarification prompt elsewhere."""
     low = _fold(_session_user_text(session))
-    mg = re.search(r"(\d+)\s*grupos?", low)
+    mg = re.search(r"(\d+)\s*grupos?", low) or re.search(
+        r"\b(?:agrupo|agrupe|agrupar|agrupamos|agruparia)\s+(\d+)\b",
+        low,
+    )
     mp = re.search(r"(\d+)\s*produtos?", low)
     num_groups = int(mg.group(1)) if mg else 1
     num_products = int(mp.group(1)) if mp else 0
@@ -5294,6 +5297,7 @@ def _requested_single_group_title(session: dict) -> str | None:
     stop = {
         "produto", "produtos", "de", "para", "com", "e", "a", "o", "os", "as",
         "campanha", "fonte", "site", "audiencia", "publico", "padrao",
+        "do", "da", "dos", "das",
     }
     for pattern in patterns:
         match = re.search(pattern, text or "", re.I)
@@ -5604,32 +5608,29 @@ def _invoke_router_with_tools(
         if not tool_calls:
             final_text = text
             break
-        # Anexa o assistant turn (com tool_use blocks) ao working_messages
-        # no formato do provider corrente. Para nao reproduzir aqui dois
-        # protocolos diferentes, optamos por linearizar como texto + tool
-        # results em uma user message subsequente. Isso e suficiente para
-        # OpenAI/Anthropic continuarem a conversa, porque o resultado da
-        # tool aparece como um turno de usuario com o JSON da resposta.
-        working_messages.append({"role": "assistant", "content": text or "(chamando ferramentas)"})
-        results_payload_lines: list[str] = []
+        # Provider-neutral native transcript. ModelRouter converts this to
+        # OpenAI assistant.tool_calls + role=tool or Anthropic
+        # tool_use/tool_result while preserving the exact call id.
+        working_messages.append({
+            "role": "assistant",
+            "content": text,
+            "tool_calls": tool_calls,
+        })
         for call in tool_calls:
             name = call.get("name") or ""
             args = call.get("arguments") or {}
             result = dispatch_tool_call(session, name, args if isinstance(args, dict) else {})
-            executed_calls.append({"name": name, "arguments": args, "result": result})
-            try:
-                import json as _json
-                payload = _json.dumps(result, ensure_ascii=False, default=str)
-            except Exception:
-                payload = str(result)
-            results_payload_lines.append(f"tool_result[{name}]: {payload}")
-        working_messages.append({
-            "role": "user",
-            "content": "Resultado das tools chamadas:\n" + "\n".join(results_payload_lines)
-            + "\n\nUse o estado atualizado para continuar. Se ainda houver violacoes bloqueantes,"
-            + " chame novas tools. Quando terminar, responda em portugues com o resumo do plano e"
-            + " o bloco <classification>{...}</classification>.",
-        })
+            call_id = str(call.get("id") or "").strip()
+            if not call_id:
+                raise ValueError(f"tool call sem id: {name}")
+            executed_calls.append({"id": call_id, "name": name, "arguments": args, "result": result})
+            working_messages.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "name": name,
+                "content": result,
+                "is_error": not bool(result.get("ok", False)),
+            })
         # Persiste o session a cada iteracao para que mutacoes feitas pelas
         # tools sobrevivam mesmo se a proxima iteracao falhar.
         _save_session(session)

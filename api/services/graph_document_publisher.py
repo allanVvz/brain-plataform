@@ -478,6 +478,9 @@ def apply_sofia_patch(graph: GraphJson, patch: dict[str, Any]) -> GraphJson:
         for node in nodes.values():
             out[f"id:{node.id}"] = node.id
             out[f"slug:{node.slug.lower()}"] = node.id
+            if node.node_type == "persona":
+                out["persona:self"] = node.id
+                out["slug:self"] = node.id
             knowledge_id = str((node.data or {}).get("knowledge_node_id") or "")
             if knowledge_id:
                 out[f"id:{knowledge_id}"] = node.id
@@ -547,8 +550,23 @@ def apply_sofia_patch(graph: GraphJson, patch: dict[str, Any]) -> GraphJson:
         target = ref_map.get(target_ref) or ref_map.get(f"id:{target_ref}") or ref_map.get(f"slug:{target_ref.lower()}")
         if not source or not target:
             raise ValueError(f"Sofia edge reference not found: {source_ref} -> {target_ref}")
-        relation = str(raw.get("relation_type") or "contains").strip().lower()
+        source_relation = str(raw.get("relation_type") or "contains").strip().lower()
         primary = (raw.get("metadata") or {}).get("primary_tree") is not False
+        relation_aliases = {
+            "belongs_to_persona": "contains",
+            "persona_has_brand": "contains",
+            "brand_has_briefing": "contains",
+            "brand_has_campaign": "contains",
+            "briefing_has_campaign": "contains",
+            "campaign_has_audience": "contains",
+            "audience_has_product_group": "contains",
+            "product_group_has_product": "contains",
+            "supports_copy": "supports",
+            "answers_question": "answers",
+            "published_to_rag": "publishes_to",
+            "gallery_asset": "uses_asset",
+        }
+        relation = relation_aliases.get(source_relation, source_relation)
         existing_id = next(
             (
                 edge.id
@@ -564,7 +582,11 @@ def apply_sofia_patch(graph: GraphJson, patch: dict[str, Any]) -> GraphJson:
             target=target,
             relation=relation,
             primary_tree=primary,
-            metadata={**(raw.get("metadata") or {}), "created_from": "sofia_graph"},
+            metadata={
+                **(raw.get("metadata") or {}),
+                "created_from": "sofia_graph",
+                "semantic_relation": source_relation,
+            },
         )
         if primary and target in nodes:
             nodes[target].parent_id = source

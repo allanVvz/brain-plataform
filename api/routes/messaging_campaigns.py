@@ -121,23 +121,20 @@ def provider_health(request: Request, persona_id: str = Query(...)):
     persona = supabase_client.get_persona_by_id(persona_id)
     rollout_enabled = campaigns_service.rollout_one_enabled(persona)
     binding = supabase_client.get_active_whatsapp_binding(persona_id)
-    if not binding:
+    mock_enabled = campaigns_service.meta_mock_enabled()
+    if not binding and not mock_enabled:
         return {
             "provider": None, "ready": False, "status": "not_configured",
             "campaigns_enabled": False, "rollout_one_enabled": rollout_enabled,
         }
-    provider = binding.get("provider")
-    status = str(binding.get("connection_status") or "unknown").lower()
+    provider = "meta_cloud" if mock_enabled else binding.get("provider")
+    status = "mock" if mock_enabled else str(binding.get("connection_status") or "unknown").lower()
     return {
         "provider": provider,
-        "ready": bool(
-            provider == "meta_cloud"
-            and status in {"connected", "open"}
-            and binding.get("provider_secret_ciphertext")
-            and binding.get("whatsapp_phone_number_id")
-        ),
+        "ready": campaigns_service.meta_provider_ready(binding),
         "status": status,
         "campaigns_enabled": rollout_enabled and provider == "meta_cloud",
         "rollout_one_enabled": rollout_enabled,
         "evolution_experimental": provider == "evolution_baileys",
+        "mock": mock_enabled,
     }

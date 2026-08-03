@@ -824,6 +824,43 @@ export const api = {
   kbIntakeCrawlPreview: (url: string, session_id?: string) =>
     req<any>("/kb-intake/crawl-preview", { method: "POST", body: JSON.stringify({ url, session_id }) }),
 
+  // Durable Sofia agent harness (polling; no SSE in this rollout).
+  agentHarnessCapabilities: () => req<any>("/agent-harness/capabilities"),
+  agentHarnessCreateSession: (body: {
+    persona_id: string;
+    coordinator_key?: string;
+    selected_context?: Record<string, any>;
+    selected_node_ids?: string[];
+    graph_version?: number;
+    graph_hash?: string;
+    idempotency_key: string;
+    reason: string;
+  }) => req<any>("/agent-harness/sessions", { method: "POST", body: JSON.stringify(body) }),
+  agentHarnessSession: (sessionId: string) =>
+    req<any>(`/agent-harness/sessions/${encodeURIComponent(sessionId)}`),
+  agentHarnessMessage: (sessionId: string, body: {
+    message: string;
+    expected_revision: number;
+    idempotency_key: string;
+    reason: string;
+    context?: Record<string, any>;
+  }) => req<any>(`/agent-harness/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  agentHarnessRun: (runId: string) =>
+    req<any>(`/agent-harness/runs/${encodeURIComponent(runId)}`),
+  agentHarnessApprove: (runId: string, body: { expected_revision: number; idempotency_key: string; reason: string }) =>
+    req<any>(`/agent-harness/runs/${encodeURIComponent(runId)}/approve`, { method: "POST", body: JSON.stringify(body) }),
+  agentHarnessCancel: (runId: string, body: { expected_revision: number; idempotency_key: string; reason: string }) =>
+    req<any>(`/agent-harness/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST", body: JSON.stringify(body) }),
+  agentHarnessGrants: (personaId: string, userId?: string) => {
+    const params = new URLSearchParams({ persona_id: personaId });
+    if (userId) params.set("user_id", userId);
+    return req<any>(`/agent-harness/grants?${params.toString()}`);
+  },
+  agentHarnessPutGrants: (body: Record<string, any>) =>
+    req<any>("/agent-harness/grants", { method: "PUT", body: JSON.stringify(body) }),
+
   // Knowledge Graph
   graphData: (personaSlug?: string, opts?: any) => {
     const params = new URLSearchParams();

@@ -136,6 +136,9 @@ def finalize_platform_grants(conn) -> None:
             revoke all on table public.campaign_revisions from public, anon, authenticated;
             revoke all on table public.campaign_revision_imports from public, anon, authenticated;
             revoke all on table public.campaign_recipients from public, anon, authenticated;
+            revoke all on table public.agent_sessions from public, anon, authenticated;
+            revoke all on table public.agent_runs from public, anon, authenticated;
+            revoke all on table public.agent_run_steps from public, anon, authenticated;
             """
         )
     conn.commit()

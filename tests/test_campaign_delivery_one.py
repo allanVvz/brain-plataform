@@ -73,6 +73,27 @@ def test_eligibility_keeps_persona_consent_and_provider_blocks_distinct():
     assert service.evaluate_recipient_eligibility(**{**base, "provider_ready": False})[1] == "provider_unavailable"
 
 
+def test_meta_mock_is_qa_only_and_requires_an_active_meta_binding(monkeypatch):
+    from services import campaigns_service as service
+
+    binding = {
+        "provider": "meta_cloud",
+        "connection_status": "connected",
+        "provider_secret_ciphertext": None,
+        "whatsapp_phone_number_id": None,
+    }
+    monkeypatch.setenv("ENVIRONMENT", "qa")
+    monkeypatch.setenv("AI_BRAIN_META_MOCK", "true")
+    assert service.meta_mock_enabled() is True
+    assert service.meta_provider_ready(binding) is True
+    assert service.meta_provider_ready({**binding, "provider": "other"}) is True
+    assert service.meta_provider_ready(None) is True
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert service.meta_mock_enabled() is False
+    assert service.meta_provider_ready(binding) is False
+
+
 class _Query:
     def __init__(self, table: str):
         self.table = table

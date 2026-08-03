@@ -62,6 +62,26 @@ def rollout_one_enabled(persona: dict[str, Any] | None = None) -> bool:
     return globally_enabled and persona_config.get("enabled", True) is not False
 
 
+def meta_mock_enabled() -> bool:
+    environment = (os.environ.get("ENVIRONMENT") or "").strip().lower()
+    configured = (os.environ.get("AI_BRAIN_META_MOCK") or "").strip().lower()
+    return environment in {"qa", "test", "preview", "development", "local"} and configured in {
+        "1", "true", "yes", "on",
+    }
+
+
+def meta_provider_ready(binding: dict[str, Any] | None) -> bool:
+    if meta_mock_enabled():
+        return True
+    if not binding or binding.get("provider") != "meta_cloud":
+        return False
+    return bool(
+        str(binding.get("connection_status") or "").lower() in {"connected", "open"}
+        and binding.get("provider_secret_ciphertext")
+        and binding.get("whatsapp_phone_number_id")
+    )
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -338,13 +358,7 @@ def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:
     if provider != "meta_cloud":
         raise HTTPException(422, "A Entrega 1 aceita apenas Meta; Evolution permanece experimental.")
     binding = supabase_client.get_active_whatsapp_binding(persona_id)
-    provider_ready = bool(
-        binding
-        and binding.get("provider") == "meta_cloud"
-        and str(binding.get("connection_status") or "").lower() in {"connected", "open"}
-        and binding.get("provider_secret_ciphertext")
-        and binding.get("whatsapp_phone_number_id")
-    )
+    provider_ready = meta_provider_ready(binding)
 
     leads, batches_by_lead = _campaign_leads(import_ids)
     lead_ids = [int(row["id"]) for row in leads]
