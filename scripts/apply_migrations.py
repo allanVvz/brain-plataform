@@ -127,6 +127,15 @@ def finalize_platform_grants(conn) -> None:
             revoke all on table public.v_knowledge_lineage from public, anon, authenticated;
             revoke all on table public.v_knowledge_products_missing_price from public, anon, authenticated;
             revoke all on table public.v_knowledge_validation_failures from public, anon, authenticated;
+            -- Campaign delivery tables contain consent, targeting and audit
+            -- state. They are only reachable through the authenticated API
+            -- and the narrowly granted service-role RPCs.
+            revoke all on table public.lead_import_batches from public, anon, authenticated;
+            revoke all on table public.lead_import_rows from public, anon, authenticated;
+            revoke all on table public.contact_consents from public, anon, authenticated;
+            revoke all on table public.campaign_revisions from public, anon, authenticated;
+            revoke all on table public.campaign_revision_imports from public, anon, authenticated;
+            revoke all on table public.campaign_recipients from public, anon, authenticated;
             """
         )
     conn.commit()

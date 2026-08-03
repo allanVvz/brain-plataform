@@ -180,3 +180,20 @@ Nenhum teste automatizado ainda cobre a camada Evolution/Baileys real
 (seção 4) — o achado veio de teste manual em produção, não de suíte
 automatizada. Um teste automatizado não pegaria isso mesmo existindo,
 porque o bug é externo (na biblioteca Baileys), não no nosso código.
+
+## 6. Escopo de campanhas em massa
+
+Campanhas compartilham `lead_buffer`, mas nunca o comportamento implicito de
+uma conversa. A migration 087 adiciona `message_origin`, `campaign_id`,
+`campaign_revision`, `campaign_recipient_id`, `campaign_step` e
+`policy_checksum`. Uma linha com `message_origin=campaign` precisa ser outbound
+e carregar todo esse escopo; filas conversacionais continuam com
+`message_origin=conversation`.
+
+O rollout 1 apenas modela imports, consentimento, preview, revisao e recipients;
+nao cria outbounds. No rollout 2, claim, sweep, retry, handoff e reconciliacao de
+campanha devem filtrar `message_origin=campaign`. A logica atual de conversa nao
+pode reenviar campanha, descartar outbound de campanha, nem alterar `ai_paused`
+por causa de um sweep de campanha. Meta Cloud e o primeiro provider funcional;
+Evolution permanece experimental. O contrato completo esta em
+[`BULK_CAMPAIGNS.md`](BULK_CAMPAIGNS.md).

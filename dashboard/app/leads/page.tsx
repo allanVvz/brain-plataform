@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, MessageSquare, Plus, Search, Settings2, Share2, Upload, Users } from "lucide-react";
+import { MessageSquare, Plus, Search, Settings2, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { AudiencePill } from "@/components/leads/AudiencePill";
 import { CreateAudiencePrompt } from "@/components/leads/CreateAudiencePrompt";
 import { LeadInfoModal } from "@/components/leads/LeadInfoModal";
-import { MoveShareModal, MoveShareMode } from "@/components/leads/MoveShareModal";
+import { ManageGroupModal } from "@/components/leads/MoveShareModal";
 import { ALL_AUDIENCE_KEY, buildLeadsFilters } from "@/lib/leads";
 
 type Audience = {
@@ -61,16 +61,19 @@ function leadAudiences(lead: Lead): Audience[] {
   const list = (lead?.memberships as Membership[] | undefined) || [];
   return list
     .map((m) => m.audience)
-    .filter((a): a is Audience => Boolean(a));
+    .filter((audience): audience is Audience => {
+      if (!audience) return false;
+      return audience.slug !== "import" && audience.source_type !== "import";
+    });
 }
 
 function primaryAudienceLabel(lead: Lead, fallback: string): string {
   const list = (lead?.memberships as Membership[] | undefined) || [];
-  const primary = list.find((m) => m.membership_type === "primary") || list[0];
-  if (primary?.audience?.name) return primary.audience.name;
-  const canal = String(lead?.canal || "").toLowerCase();
-  const origem = String(lead?.origem || "").toLowerCase();
-  if (canal === "bulk_import" || origem === "bulk_import") return "Import";
+  const semantic = list.find((membership) => {
+    const audience = membership.audience;
+    return audience && audience.slug !== "import" && audience.source_type !== "import";
+  });
+  if (semantic?.audience?.name) return semantic.audience.name;
   return fallback;
 }
 
@@ -90,7 +93,7 @@ function LeadsPageInner() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [creatingAudience, setCreatingAudience] = useState(false);
-  const [moveShare, setMoveShare] = useState<{ lead: Lead; mode: MoveShareMode } | null>(null);
+  const [managedLead, setManagedLead] = useState<Lead | null>(null);
   const [infoLead, setInfoLead] = useState<Lead | null>(null);
 
   // Read persona from header global state
@@ -224,7 +227,7 @@ function LeadsPageInner() {
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-obs-faint">CRM</p>
             <h1 className="mt-1 text-xl font-semibold text-obs-text">Leads</h1>
             <p className="mt-0.5 text-xs text-obs-subtle">
-              Lead canonico por contato. Audiencias agrupam por persona; um mesmo lead pode estar em mais de uma audiencia via &quot;Compartilhar&quot;.
+              Cada lead pertence a um unico grupo semantico na persona; imports permanecem como coortes operacionais.
             </p>
           </div>
         </div>
@@ -310,12 +313,7 @@ function LeadsPageInner() {
                 {filteredLeads.map((lead) => {
                   const phone = lead.lead_id || lead.telefone || "";
                   const canStart = canStartConversation(lead);
-                  const memberships = (lead.memberships || []) as Membership[];
-                  const primaryName = primaryAudienceLabel(lead, "CRM");
-                  const sharedNames = memberships
-                    .filter((m) => m.membership_type === "shared")
-                    .map((m) => m.audience?.name)
-                    .filter(Boolean) as string[];
+                  const primaryName = primaryAudienceLabel(lead, "Sem grupo");
                   return (
                     <tr key={lead.id || phone}>
                       <td>
@@ -351,9 +349,6 @@ function LeadsPageInner() {
                       <td>
                         <div className="flex flex-wrap items-center gap-1">
                           <span className="lg-badge">{primaryName}</span>
-                          {sharedNames.map((n) => (
-                            <span key={n} className="lg-badge lg-badge-info">+{n}</span>
-                          ))}
                         </div>
                       </td>
                       <td className="lg-cell-truncate text-xs text-obs-subtle">
@@ -371,19 +366,11 @@ function LeadsPageInner() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setMoveShare({ lead, mode: "move" })}
+                            onClick={() => setManagedLead(lead)}
                             className="lg-btn lg-btn-secondary"
-                            title="Mover para outra audiencia"
+                            title="Gerenciar grupo semantico"
                           >
-                            <ArrowRight size={12} /> Mover
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setMoveShare({ lead, mode: "share" })}
-                            className="lg-btn lg-btn-secondary"
-                            title="Compartilhar em outra audiencia"
-                          >
-                            <Share2 size={12} /> Compartilhar
+                            <Settings2 size={12} /> Gerenciar grupo
                           </button>
                           {canStart ? (
                             <Link
@@ -420,14 +407,13 @@ function LeadsPageInner() {
         />
       )}
 
-      {moveShare && (
-        <MoveShareModal
-          leadRef={Number(moveShare.lead.id)}
-          leadName={moveShare.lead.nome || moveShare.lead.lead_id || `Lead #${moveShare.lead.id}`}
-          initialMode={moveShare.mode}
-          currentPersonaId={personaId || moveShare.lead.persona_id || null}
-          currentMemberships={(moveShare.lead.memberships || []) as Membership[]}
-          onClose={() => setMoveShare(null)}
+      {managedLead && (
+        <ManageGroupModal
+          leadRef={Number(managedLead.id)}
+          leadName={managedLead.nome || managedLead.lead_id || `Lead #${managedLead.id}`}
+          currentPersonaId={personaId || managedLead.persona_id || null}
+          currentMemberships={(managedLead.memberships || []) as Membership[]}
+          onClose={() => setManagedLead(null)}
           onDone={async () => {
             await Promise.all([loadAudiences(), loadLeads()]);
           }}

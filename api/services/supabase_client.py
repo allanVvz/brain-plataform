@@ -255,7 +255,15 @@ def ensure_lead_for_persona(
     persona_id = _resolve_persona_id(persona_slug_or_id)
     if not whatsapp_phone_number_id and persona_id:
         whatsapp_phone_number_id = get_default_whatsapp_phone_number_id(persona_id)
-    existing = get_lead_by_ref(lead_ref) if lead_ref is not None else get_lead(lead_id)
+    if lead_ref is not None:
+        existing = get_lead_by_ref(lead_ref)
+    elif persona_id:
+        existing = _one(
+            client.table("leads").select("*")
+            .eq("persona_id", persona_id).eq("lead_id", lead_id).maybe_single()
+        )
+    else:
+        existing = get_lead(lead_id)
     now_iso = datetime.now(timezone.utc).isoformat()
 
     update: dict = {
@@ -428,6 +436,11 @@ def get_audience_by_slug(persona_id: str, audience_slug: str) -> Optional[dict]:
 
 
 def create_audience(data: dict) -> dict:
+    metadata = dict(data.get("metadata") or {})
+    metadata.setdefault(
+        "kind",
+        "legacy_import_bucket" if (data.get("source_type") == "import" or data.get("slug") == "import") else "semantic_group",
+    )
     payload = {
         "persona_id": data.get("persona_id"),
         "slug": _slugify(data.get("slug") or data.get("name") or "audience"),
@@ -436,6 +449,7 @@ def create_audience(data: dict) -> dict:
         "source_type": data.get("source_type") or "manual",
         "is_system": bool(data.get("is_system", False)),
         "created_by_user_id": data.get("created_by_user_id"),
+        "metadata": metadata,
     }
     return _insert_one(get_client().table("audiences").insert(payload))
 
@@ -445,6 +459,7 @@ def update_audience(audience_id: str, data: dict) -> Optional[dict]:
         "name": data.get("name"),
         "description": data.get("description"),
         "updated_at": data.get("updated_at"),
+        "metadata": data.get("metadata"),
     }
     if data.get("slug"):
         payload["slug"] = _slugify(data["slug"])
@@ -1280,6 +1295,7 @@ def sync_audience_node(audience: dict) -> Optional[dict]:
         "summary": audience.get("description") or "Publico ou grupo operacional de leads.",
         "tags": ["audience", audience.get("source_type") or "manual"],
         "metadata": {
+            **(audience.get("metadata") or {}),
             "audience_id": audience.get("id"),
             "audience_slug": audience.get("slug"),
             "source_type": audience.get("source_type"),
@@ -4509,6 +4525,111 @@ def get_campaigns(persona_id: Optional[str] = None) -> list:
     if persona_id:
         q = q.eq("persona_id", persona_id)
     return _q(q)
+
+
+# -- Campaign delivery one -------------------------------------------------------
+
+def create_lead_import_batch(data: dict) -> dict:
+    return _insert_one(get_client().table("lead_import_batches").insert(data))
+
+
+def update_lead_import_batch(batch_id: str, data: dict) -> Optional[dict]:
+    result = _execute_with_retry(
+        get_client().table("lead_import_batches").update(data).eq("id", batch_id)
+    )
+    return (result.data or [None])[0] if result else None
+
+
+def insert_lead_import_row(data: dict) -> dict:
+    return _insert_one(get_client().table("lead_import_rows").insert(data))
+
+
+def list_lead_import_batches(persona_id: Optional[str] = None, limit: int = 100) -> list[dict]:
+    query = get_client().table("lead_import_batches").select("*").order("created_at", desc=True).limit(limit)
+    if persona_id:
+        query = query.eq("persona_id", persona_id)
+    return _q(query)
+
+
+def get_lead_import_batch(batch_id: str) -> Optional[dict]:
+    return _one(
+        get_client().table("lead_import_batches").select("*").eq("id", batch_id).maybe_single()
+    )
+
+
+def list_lead_import_rows(batch_id: str, limit: int = 5000) -> list[dict]:
+    return _q(
+        get_client().table("lead_import_rows").select("*")
+        .eq("batch_id", batch_id).order("row_index").limit(limit)
+    )
+
+
+def replace_lead_semantic_group(
+    *,
+    lead_id: int,
+    persona_id: str,
+    audience_id: str,
+    created_by_user_id: Optional[str],
+    idempotency_key: str,
+    reason: str,
+) -> dict:
+    audience = get_audience(audience_id)
+    if not audience or audience.get("persona_id") != persona_id:
+        raise ValueError("audience does not belong to persona")
+    if str((audience.get("metadata") or {}).get("kind") or "semantic_group") != "semantic_group":
+        raise ValueError("audience is not a semantic group")
+    result = _execute_with_retry(get_client().rpc("replace_lead_semantic_group_v1", {
+        "p_lead_id": lead_id,
+        "p_target_persona_id": persona_id,
+        "p_audience_id": audience_id,
+        "p_created_by_user_id": created_by_user_id,
+        "p_idempotency_key": idempotency_key,
+        "p_reason": reason,
+    }))
+    return {"audience": audience, "result": (result.data if result else None)}
+
+
+def insert_contact_consent(data: dict, audit_payload: Optional[dict] = None) -> dict:
+    event = {
+        "channel": data.get("channel"),
+        "purpose": data.get("purpose"),
+        "campaign_id": data.get("campaign_id"),
+        "import_batch_id": data.get("import_batch_id"),
+        "request_message_id": data.get("request_message_id"),
+        "response_message_id": data.get("response_message_id"),
+        "idempotency_key": data.get("idempotency_key"),
+        **(audit_payload or {}),
+    }
+    result = _execute_with_retry(get_client().rpc("record_contact_consent_v1", {
+        "p_consent": data,
+        "p_event": event,
+    }))
+    payload = result.data if result else None
+    return payload if isinstance(payload, dict) else ((payload or [{}])[0])
+
+
+def get_latest_contact_consent(
+    *, lead_id: int, persona_id: str, channel: str, purpose: str,
+) -> Optional[dict]:
+    rows = list_contact_consents(
+        lead_id=lead_id, persona_id=persona_id, channel=channel, purpose=purpose,
+    )
+    return rows[0] if rows else None
+
+
+def list_contact_consents(
+    *, lead_id: int, persona_id: str, channel: Optional[str] = None, purpose: Optional[str] = None,
+) -> list[dict]:
+    query = (
+        get_client().table("contact_consents").select("*")
+        .eq("lead_id", lead_id).eq("persona_id", persona_id)
+        .order("effective_at", desc=True).order("created_at", desc=True).limit(500)
+    )
+    if channel:
+        query = query.eq("channel", channel)
+    if purpose:
+        query = query.eq("purpose", purpose)
+    return _q(query)
 
 
 # â”€â”€ System Events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

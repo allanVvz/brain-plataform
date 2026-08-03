@@ -181,12 +181,50 @@ export const api = {
   leadImport: (batchId: string) => req<any>(`/leads/imports/${encodeURIComponent(batchId)}`),
   deleteLeadImport: (batchId: string) =>
     req<any>(`/leads/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" }),
-  uploadLeadImport: (file: File, personaId?: string) => {
+  uploadLeadImport: (file: File, personaId?: string, options?: {
+    audienceId?: string;
+    contactBasis?: "explicit_consent" | "customer_initiated" | "existing_customer" | "imported_without_evidence" | "legacy_unknown" | "unknown";
+    consentPurpose?: string;
+    contactBasisStatement?: string;
+  }) => {
     const form = new FormData();
     form.append("file", file);
     if (personaId) form.append("persona_id", personaId);
+    if (options?.audienceId) form.append("audience_id", options.audienceId);
+    if (options?.contactBasis) form.append("contact_basis", options.contactBasis);
+    if (options?.consentPurpose) form.append("consent_purpose", options.consentPurpose);
+    if (options?.contactBasisStatement) form.append("contact_basis_statement", options.contactBasisStatement);
     return reqForm<any>("/leads/imports", form);
   },
+  setLeadGroup: (leadRef: number, body: {
+    persona_id: string;
+    audience_id: string;
+    idempotency_key: string;
+    reason: string;
+  }) => req<any>(`/leads/${leadRef}/group`, { method: "POST", body: JSON.stringify(body) }),
+  leadConsents: (leadRef: number, personaId: string, purpose?: string) => {
+    const params = new URLSearchParams({ persona_id: personaId, channel: "whatsapp" });
+    if (purpose) params.set("purpose", purpose);
+    return req<any[]>(`/leads/${leadRef}/consents?${params.toString()}`);
+  },
+  grantLeadConsent: (leadRef: number, body: Record<string, unknown>) =>
+    req<any>(`/leads/${leadRef}/consent/grant`, { method: "POST", body: JSON.stringify(body) }),
+  revokeLeadConsent: (leadRef: number, body: Record<string, unknown>) =>
+    req<any>(`/leads/${leadRef}/consent/revoke`, { method: "POST", body: JSON.stringify(body) }),
+  campaignPreview: (body: Record<string, unknown>) =>
+    req<any>("/messaging/campaigns/preview", { method: "POST", body: JSON.stringify(body) }),
+  createCampaign: (body: Record<string, unknown>) =>
+    req<any>("/messaging/campaigns", { method: "POST", body: JSON.stringify(body) }),
+  campaigns: (personaId?: string) =>
+    req<any[]>(`/messaging/campaigns${personaId ? `?persona_id=${encodeURIComponent(personaId)}` : ""}`),
+  campaign: (campaignId: string) =>
+    req<any>(`/messaging/campaigns/${encodeURIComponent(campaignId)}`),
+  pauseCampaign: (campaignId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/campaigns/${encodeURIComponent(campaignId)}/pause`, { method: "POST", body: JSON.stringify(body) }),
+  cancelCampaign: (campaignId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/campaigns/${encodeURIComponent(campaignId)}/cancel`, { method: "POST", body: JSON.stringify(body) }),
+  campaignProviderHealth: (personaId: string) =>
+    req<any>(`/messaging/provider-health?persona_id=${encodeURIComponent(personaId)}`),
   updateLeadInfo: (leadRef: number, body: {
     nome?: string;
     interesse_produto?: string;

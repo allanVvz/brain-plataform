@@ -1,11 +1,12 @@
 import csv
+import hashlib
 import io
 import re
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from services import (
     agents_service,
     auth_service,
@@ -24,6 +25,35 @@ class LeadAudienceChangeBody(BaseModel):
     target_audience_slug: str | None = None
     source_audience_id: str | None = None
     source_audience_slug: str | None = None
+
+
+class LeadGroupBody(BaseModel):
+    persona_id: str
+    audience_id: str
+    idempotency_key: str
+    reason: str
+
+
+class ConsentChangeBody(BaseModel):
+    persona_id: str
+    channel: str = "whatsapp"
+    purpose: str
+    source: str = "manual"
+    request_message_id: int | None = None
+    response_message_id: int | None = None
+    campaign_id: str | None = None
+    import_batch_id: str | None = None
+    evidence: dict = Field(default_factory=dict)
+    idempotency_key: str
+    reason: str
+
+
+def _database_actor_id(user: dict | None) -> str | None:
+    value = (user or {}).get("id")
+    try:
+        return str(uuid.UUID(str(value))) if value else None
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 NAME_HEADERS = {"nome", "name", "nome completo", "cliente", "contato", "lead", "first name", "fn"}
@@ -70,42 +100,6 @@ def _decode_csv(content: bytes) -> str:
         except UnicodeDecodeError:
             continue
     raise HTTPException(400, "CSV must be UTF-8 text")
-
-
-def _create_audience_node(*, persona_id: str, batch_payload: dict) -> dict | None:
-    stats = batch_payload.get("stats") or {}
-    audience = supabase_client.ensure_import_audience(persona_id)
-    if not audience:
-        return None
-    node = supabase_client.sync_audience_node({
-        **audience,
-        "description": f"{stats.get('valid', 0)} leads validos; {stats.get('with_phone', 0)} com celular.",
-    })
-    if node:
-        supabase_client.upsert_knowledge_node({
-            "persona_id": persona_id,
-            "source_table": "audiences",
-            "source_id": audience["id"],
-            "node_type": "audience",
-            "slug": audience["slug"],
-            "title": audience["name"],
-            "summary": f"{stats.get('valid', 0)} leads validos; {stats.get('with_phone', 0)} com celular.",
-            "tags": ["audience", "lead_import", "crm"],
-            "metadata": {
-                **(node.get("metadata") or {}),
-                "lead_import_batch_id": batch_payload.get("batch_id"),
-                "filename": batch_payload.get("filename"),
-                "stats": stats,
-                "preview": batch_payload.get("preview") or [],
-                "open_url": f"/leads/{(supabase_client.get_persona_by_id(persona_id) or {}).get('slug', '')}/{audience['slug']}",
-                "source": "lead_import",
-            },
-            "status": "active",
-            "level": 55,
-            "importance": 0.72,
-            "confidence": 1,
-        })
-    return node
 
 
 @router.get("")
@@ -202,7 +196,247 @@ def _persist_terminal_batch_event(
 
 
 @router.post("/imports")
-async def import_leads_csv(
+async def import_leads_csv_v1(
+    request: Request,
+    file: UploadFile = File(...),
+    persona_id: str | None = Form(None),
+    audience_id: str | None = Form(None),
+    contact_basis: str = Form("imported_without_evidence"),
+    consent_purpose: str = Form("ofertas_e_novidades"),
+    contact_basis_statement: str | None = Form(None),
+):
+    """Persist an operational import cohort without projecting it into Graph."""
+    if not persona_id:
+        raise HTTPException(400, "Selecione uma persona antes de importar leads")
+    auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
+    current_user = auth_service.current_user(request)
+    database_actor_id = _database_actor_id(current_user)
+    filename = file.filename or "leads.csv"
+    if not filename.lower().endswith(".csv"):
+        raise HTTPException(400, "Only CSV files are supported for now")
+    if contact_basis not in {
+        "explicit_consent", "customer_initiated", "existing_customer",
+        "imported_without_evidence", "legacy_unknown", "unknown",
+    }:
+        raise HTTPException(422, "Base de contato invalida.")
+    if contact_basis == "explicit_consent" and not (contact_basis_statement or "").strip():
+        raise HTTPException(422, "Descreva a evidencia do consentimento explicito.")
+    if not consent_purpose.strip():
+        raise HTTPException(422, "A finalidade do contato e obrigatoria.")
+
+    audience = None
+    if audience_id:
+        audience = supabase_client.get_audience(audience_id)
+        if not audience or audience.get("persona_id") != persona_id:
+            raise HTTPException(404, "Grupo semantico nao encontrado nesta persona.")
+        if str((audience.get("metadata") or {}).get("kind") or "semantic_group") != "semantic_group":
+            raise HTTPException(422, "O destino do import deve ser um grupo semantico.")
+
+    content = await file.read()
+    text = _decode_csv(content)
+    try:
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t")
+    except Exception:
+        dialect = csv.excel
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+    if not reader.fieldnames:
+        raise HTTPException(400, "CSV header row is required")
+
+    batch_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc).isoformat()
+    headers = list(reader.fieldnames or [])
+    supabase_client.create_lead_import_batch({
+        "id": batch_id,
+        "persona_id": persona_id,
+        "audience_id": audience_id,
+        "filename": filename,
+        "file_checksum": "sha256:" + hashlib.sha256(content).hexdigest(),
+        "source": "csv_upload",
+        "contact_basis": contact_basis,
+        "status": "processing",
+        "provenance": {
+            "headers": headers,
+            "contact_basis_statement": contact_basis_statement,
+            "consent_purpose": consent_purpose,
+        },
+        "created_by_user_id": database_actor_id,
+        "created_at": started_at,
+        "updated_at": started_at,
+    })
+
+    stats = {
+        "total": 0, "valid": 0, "with_phone": 0, "email_only": 0,
+        "created": 0, "updated": 0, "invalid": 0,
+    }
+    preview: list[dict] = []
+    try:
+        for index, row in enumerate(reader, start=1):
+            stats["total"] += 1
+            raw_row = {str(k or ""): v for k, v in (row or {}).items()}
+            first_name = _pick_field(raw_row, NAME_HEADERS)
+            last_name = _pick_field(raw_row, LAST_NAME_HEADERS)
+            name = _display_name(first_name, last_name, _pick_field(raw_row, {"nome completo", "name", "nome"}))
+            phone = _normalize_phone(_pick_field(raw_row, PHONE_HEADERS))
+            email = _pick_field(raw_row, EMAIL_HEADERS)
+            city = _pick_field(raw_row, CITY_HEADERS)
+            state = _pick_field(raw_row, STATE_HEADERS)
+            zip_code = _pick_field(raw_row, ZIP_HEADERS)
+            country = _pick_field(raw_row, COUNTRY_HEADERS)
+            row_status, row_error, lead_ref = "created", "", None
+            has_phone = bool(phone and len(phone) >= 8)
+            has_email = bool(email)
+
+            if not has_phone and not has_email:
+                row_status, row_error = "invalid", "missing_email_and_phone"
+                stats["invalid"] += 1
+            elif not has_phone:
+                row_status = "email_only"
+                stats["valid"] += 1
+                stats["email_only"] += 1
+            else:
+                stats["valid"] += 1
+                stats["with_phone"] += 1
+                existing_rows = (
+                    supabase_client.get_client().table("leads").select("id")
+                    .eq("persona_id", persona_id).eq("lead_id", phone).limit(1).execute().data or []
+                )
+                lead = supabase_client.ensure_lead_for_persona(
+                    lead_id=phone,
+                    persona_slug_or_id=persona_id,
+                    nome=name or None,
+                    stage="novo",
+                    canal="bulk_import",
+                    cidade=city or None,
+                    cep=zip_code or None,
+                )
+                lead_ref = lead.get("id") if lead else None
+                if not lead_ref:
+                    raise RuntimeError(f"lead row {index} could not be persisted")
+                if audience:
+                    supabase_client.replace_lead_semantic_group(
+                        lead_id=int(lead_ref),
+                        persona_id=persona_id,
+                        audience_id=audience["id"],
+                        created_by_user_id=database_actor_id,
+                        idempotency_key=f"import-group:{batch_id}:lead:{lead_ref}",
+                        reason=f"Grupo selecionado no import {batch_id}",
+                    )
+                if existing_rows:
+                    row_status = "updated"
+                    stats["updated"] += 1
+                else:
+                    stats["created"] += 1
+
+            parsed = {
+                "nome": name, "fn": first_name, "ln": last_name,
+                "lead_id": phone, "email": email, "cidade": city,
+                "estado": state, "zip": zip_code, "country": country,
+            }
+            supabase_client.insert_lead_import_row({
+                "batch_id": batch_id,
+                "persona_id": persona_id,
+                "row_index": index,
+                "lead_id": lead_ref,
+                "status": row_status,
+                "error_code": row_error or None,
+                "parsed_data": parsed,
+            })
+            latest_consent = (
+                supabase_client.get_latest_contact_consent(
+                    lead_id=int(lead_ref), persona_id=persona_id,
+                    channel="whatsapp", purpose=consent_purpose,
+                )
+                if lead_ref else None
+            )
+            if lead_ref and (contact_basis == "explicit_consent" or not latest_consent):
+                consent_status = "granted" if contact_basis == "explicit_consent" else "pending"
+                supabase_client.insert_contact_consent({
+                    "lead_id": lead_ref,
+                    "persona_id": persona_id,
+                    "channel": "whatsapp",
+                    "purpose": consent_purpose,
+                    "status": consent_status,
+                    "source": "lead_import",
+                    "import_batch_id": batch_id,
+                    "effective_at": started_at,
+                    "granted_at": started_at if consent_status == "granted" else None,
+                    "evidence": {
+                        "contact_basis": contact_basis,
+                        "statement": contact_basis_statement,
+                        "filename": filename,
+                        "row_index": index,
+                    },
+                    "actor_user_id": database_actor_id,
+                    "idempotency_key": f"import:{batch_id}:lead:{lead_ref}:purpose:{consent_purpose}",
+                }, audit_payload={
+                    "contact_basis": contact_basis,
+                    "reason": "Consentimento classificado durante import operacional",
+                    "actor_ref": current_user.get("id"),
+                })
+            row_payload = {
+                "batch_id": batch_id, "row_index": index, "parsed": parsed,
+                "status": row_status, "error": row_error, "lead_ref": lead_ref,
+            }
+            if row_status != "invalid" and len(preview) < 5:
+                preview.append(row_payload)
+    except Exception as exc:
+        finished_at = datetime.now(timezone.utc).isoformat()
+        error = f"{type(exc).__name__}: {exc}"
+        supabase_client.update_lead_import_batch(batch_id, {
+            "status": "failed", "error": error,
+            "total_rows": stats["total"], "valid_rows": stats["valid"],
+            "phone_rows": stats["with_phone"], "email_only_rows": stats["email_only"],
+            "created_leads": stats["created"], "updated_leads": stats["updated"],
+            "invalid_rows": stats["invalid"], "completed_at": finished_at, "updated_at": finished_at,
+        })
+        _persist_terminal_batch_event(
+            batch_id=batch_id,
+            persona_id=persona_id,
+            payload={
+                "batch_id": batch_id, "filename": filename, "status": "failed",
+                "started_at": started_at, "finished_at": finished_at,
+                "stats": stats, "persona_id": persona_id, "error": error,
+            },
+            level="error",
+        )
+        raise HTTPException(500, f"Falha ao importar leads: {exc}")
+
+    finished_at = datetime.now(timezone.utc).isoformat()
+    terminal_status = "completed" if stats["valid"] > 0 else "failed"
+    error = None
+    if stats["total"] == 0:
+        error = "CSV sem linhas alem do cabecalho."
+    elif stats["valid"] == 0:
+        error = _EMPTY_HASHED_HINT
+    if error:
+        terminal_status = "failed"
+    supabase_client.update_lead_import_batch(batch_id, {
+        "status": terminal_status, "error": error,
+        "total_rows": stats["total"], "valid_rows": stats["valid"],
+        "phone_rows": stats["with_phone"], "email_only_rows": stats["email_only"],
+        "created_leads": stats["created"], "updated_leads": stats["updated"],
+        "invalid_rows": stats["invalid"], "completed_at": finished_at, "updated_at": finished_at,
+    })
+    batch_payload = {
+        "batch_id": batch_id, "filename": filename, "headers": headers,
+        "status": terminal_status, "started_at": started_at, "finished_at": finished_at,
+        "stats": stats, "preview": preview, "persona_id": persona_id,
+        "audience_id": audience_id, "contact_basis": contact_basis, "error": error,
+    }
+    batch_event = _persist_terminal_batch_event(
+        batch_id=batch_id,
+        persona_id=persona_id,
+        payload={key: value for key, value in batch_payload.items() if key != "preview"},
+        level="info" if terminal_status == "completed" else "warn",
+    )
+    return {
+        "ok": terminal_status == "completed", "status": terminal_status,
+        "batch": batch_payload, "batch_event": batch_event,
+        "preview": preview, "audience": audience, "error": error,
+    }
+
+
+async def _legacy_import_leads_csv(
     request: Request,
     file: UploadFile = File(...),
     persona_id: str | None = Form(None),
@@ -450,66 +684,86 @@ def list_lead_imports(
     persona_id: str | None = Query(None),
 ):
     if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
-    elif not auth_service.is_admin(auth_service.current_user(request)):
+        auth_service.assert_persona_capability(request, "view", persona_id=persona_id)
+        persona_ids = [persona_id]
+    elif auth_service.is_admin(auth_service.current_user(request)):
+        persona_ids = []
+    else:
         persona_ids = auth_service.allowed_persona_ids(request)
-        imports: list[dict] = []
-        for pid in persona_ids:
-            imports.extend(list_lead_imports(request, limit=limit, persona_id=pid))
-        imports.sort(key=lambda item: item.get("created_at") or "", reverse=True)
-        return imports[:limit]
-    events = supabase_client.get_events(
-        limit=limit * 5,
-        event_type="lead_import_batch",
-        persona_id=persona_id,
-    )
-    deleted = supabase_client.get_events(
-        limit=500,
-        event_type="lead_import_batch_deleted",
-        persona_id=persona_id,
-    )
-    deleted_ids = {
-        (event.get("payload") or {}).get("batch_id") or event.get("entity_id")
-        for event in deleted
-    }
-    by_batch: dict[str, dict] = {}
-    for event in events:
-        payload = event.get("payload") or {}
-        batch_id = payload.get("batch_id") or event.get("entity_id") or event.get("id")
-        if not batch_id or batch_id in deleted_ids or batch_id in by_batch:
-            continue
-        by_batch[batch_id] = {**payload, "event_id": event.get("id"), "created_at": event.get("created_at")}
-    items = [_reclassify_stale_running(item) for item in by_batch.values()]
-    return items[:limit]
+
+    batches: list[dict] = []
+    if persona_ids:
+        for allowed_id in persona_ids:
+            batches.extend(supabase_client.list_lead_import_batches(allowed_id, limit=limit))
+    else:
+        batches = supabase_client.list_lead_import_batches(limit=limit)
+    batches.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    projected: list[dict] = []
+    for batch in batches[:limit]:
+        rows = supabase_client.list_lead_import_rows(batch["id"], limit=10)
+        preview = [
+            {
+                "batch_id": batch["id"], "row_index": row.get("row_index"),
+                "parsed": row.get("parsed_data") or {}, "status": row.get("status"),
+                "error": row.get("error_code") or "", "lead_ref": row.get("lead_id"),
+            }
+            for row in rows if row.get("status") != "invalid"
+        ][:5]
+        projected.append({
+            **batch,
+            "batch_id": batch["id"],
+            "stats": {
+                "total": batch.get("total_rows", 0), "valid": batch.get("valid_rows", 0),
+                "with_phone": batch.get("phone_rows", 0), "email_only": batch.get("email_only_rows", 0),
+                "created": batch.get("created_leads", 0), "updated": batch.get("updated_leads", 0),
+                "invalid": batch.get("invalid_rows", 0),
+            },
+            "preview": preview,
+        })
+    return projected
 
 
 @router.get("/imports/{batch_event_id}")
 def get_lead_import(batch_event_id: str, request: Request, limit: int = Query(2000, le=5000)):
-    rows = supabase_client.get_events(
-        limit=limit,
-        event_type="lead_import_row",
-        entity_id=batch_event_id,
-    )
-    batches = supabase_client.get_events(
-        limit=10,
-        event_type="lead_import_batch",
-        entity_id=batch_event_id,
-    )
-    batch = (batches[0].get("payload") if batches else {}) or {"batch_id": batch_event_id}
-    if batch.get("persona_id"):
-        auth_service.assert_persona_access(request, persona_id=batch.get("persona_id"))
-    parsed_rows = [event.get("payload") or {} for event in rows]
-    parsed_rows.sort(key=lambda item: int(item.get("row_index") or 0))
-    return {"batch": batch, "rows": parsed_rows}
+    batch = supabase_client.get_lead_import_batch(batch_event_id)
+    if not batch:
+        raise HTTPException(404, "Import nao encontrado.")
+    auth_service.assert_persona_capability(request, "view", persona_id=batch.get("persona_id"))
+    rows = supabase_client.list_lead_import_rows(batch_event_id, limit=limit)
+    parsed_rows = [{
+        "batch_id": batch_event_id,
+        "row_index": row.get("row_index"),
+        "parsed": row.get("parsed_data") or {},
+        "status": row.get("status"),
+        "error": row.get("error_code") or "",
+        "lead_ref": row.get("lead_id"),
+    } for row in rows]
+    return {
+        "batch": {
+            **batch,
+            "batch_id": batch["id"],
+            "stats": {
+                "total": batch.get("total_rows", 0), "valid": batch.get("valid_rows", 0),
+                "with_phone": batch.get("phone_rows", 0), "email_only": batch.get("email_only_rows", 0),
+                "created": batch.get("created_leads", 0), "updated": batch.get("updated_leads", 0),
+                "invalid": batch.get("invalid_rows", 0),
+            },
+        },
+        "rows": parsed_rows,
+    }
 
 
 @router.delete("/imports/{batch_id}")
 def delete_lead_import(batch_id: str, request: Request):
-    batches = supabase_client.get_events(limit=10, event_type="lead_import_batch", entity_id=batch_id)
-    batch = (batches[0].get("payload") if batches else {}) or {"batch_id": batch_id}
+    batch = supabase_client.get_lead_import_batch(batch_id)
+    if not batch:
+        raise HTTPException(404, "Import nao encontrado.")
     persona_id = batch.get("persona_id")
-    if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
+    auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
+    archived_at = datetime.now(timezone.utc).isoformat()
+    supabase_client.update_lead_import_batch(batch_id, {
+        "status": "archived", "archived_at": archived_at, "updated_at": archived_at,
+    })
     supabase_client.insert_event(
         {
             "event_type": "lead_import_batch_deleted",
@@ -519,27 +773,14 @@ def delete_lead_import(batch_id: str, request: Request):
             "payload": {
                 "batch_id": batch_id,
                 "filename": batch.get("filename"),
-                "deleted_at": datetime.now(timezone.utc).isoformat(),
-                "status": "deleted",
+                "archived_at": archived_at,
+                "status": "archived",
             },
         },
         level="info",
         source="leads.import",
     )
-    if persona_id:
-        supabase_client.upsert_knowledge_node({
-            "persona_id": persona_id,
-            "source_table": "system_events",
-            "source_id": batch_id,
-            "node_type": "audience",
-            "slug": f"audiencia-import-{batch_id}",
-            "title": f"Audiencia importada - {batch.get('filename') or batch_id[:8]}",
-            "summary": "Grupo de leads arquivado.",
-            "tags": ["audience", "lead_import", "archived"],
-            "metadata": {**(batch or {}), "archived": True, "lead_import_batch_id": batch_id},
-            "status": "archived",
-        })
-    return {"ok": True, "batch_id": batch_id}
+    return {"ok": True, "batch_id": batch_id, "status": "archived"}
 
 
 @router.get("/{lead_id}")
@@ -689,113 +930,124 @@ def lead_memberships(lead_id: str, request: Request):
     return {"lead": lead, "memberships": allowed}
 
 
-@router.post("/{lead_ref}/move")
-def move_lead(lead_ref: int, body: LeadAudienceChangeBody, request: Request):
+@router.post("/{lead_ref}/group")
+def set_lead_group(lead_ref: int, body: LeadGroupBody, request: Request):
+    """Replace the single semantic group; import cohort history is untouched."""
     lead = supabase_client.get_lead_by_ref(lead_ref)
     if not lead:
         raise HTTPException(404, "Lead not found")
-    # Garante que a persona destino tenha audiences system antes de resolver.
-    try:
-        supabase_client.ensure_system_audiences_for_persona(body.target_persona_id)
-    except Exception:
-        pass
-    target_audience = _resolve_target_audience(body, request)
-    try:
-        memberships = supabase_client.get_lead_memberships(lead_ref) or []
-    except Exception:
-        memberships = []
-    for membership in memberships:
-        audience = membership.get("audience") or {}
-        if audience.get("persona_id"):
-            auth_service.assert_persona_access(request, persona_id=audience["persona_id"])
-    source_audience = _resolve_source_audience(lead_ref, body)
-    if source_audience:
-        supabase_client.delete_lead_membership(lead_ref, source_audience["id"])
-    supabase_client.ensure_lead_membership(
+    user = auth_service.current_user(request)
+    current_persona_id = lead.get("persona_id")
+    if not auth_service.is_admin(user) and current_persona_id != body.persona_id:
+        raise HTTPException(403, "Somente admin pode trocar a persona do lead.")
+    auth_service.assert_persona_capability(request, "edit", persona_id=body.persona_id)
+    if not body.idempotency_key.strip() or not body.reason.strip():
+        raise HTTPException(422, "idempotency_key e reason sao obrigatorios.")
+    audience = supabase_client.get_audience(body.audience_id)
+    if not audience or audience.get("persona_id") != body.persona_id:
+        raise HTTPException(404, "Grupo nao encontrado na persona selecionada.")
+    if str((audience.get("metadata") or {}).get("kind") or "semantic_group") != "semantic_group":
+        raise HTTPException(422, "Selecione um grupo semantico.")
+    result = supabase_client.replace_lead_semantic_group(
+        lead_id=lead_ref,
+        persona_id=body.persona_id,
+        audience_id=body.audience_id,
+        created_by_user_id=_database_actor_id(user),
+        idempotency_key=body.idempotency_key,
+        reason=body.reason,
+    )
+    return {
+        "ok": True,
+        "deduplicated": bool((result.get("result") or {}).get("deduplicated")),
+        "group": result,
+        "lead": supabase_client.get_lead_by_ref(lead_ref),
+        "memberships": supabase_client.get_lead_memberships(lead_ref),
+    }
+
+
+def _record_manual_consent(
+    lead_ref: int, body: ConsentChangeBody, request: Request, *, status: str,
+) -> dict:
+    lead = supabase_client.get_lead_by_ref(lead_ref)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    if lead.get("persona_id") != body.persona_id:
+        raise HTTPException(403, "Lead nao pertence a persona informada.")
+    auth_service.assert_persona_capability(request, "edit", persona_id=body.persona_id)
+    if not body.purpose.strip() or not body.idempotency_key.strip() or not body.reason.strip():
+        raise HTTPException(422, "purpose, idempotency_key e reason sao obrigatorios.")
+    now = datetime.now(timezone.utc).isoformat()
+    user = auth_service.current_user(request)
+    consent = supabase_client.insert_contact_consent({
+        "lead_id": lead_ref, "persona_id": body.persona_id,
+        "channel": body.channel, "purpose": body.purpose, "status": status,
+        "source": body.source, "request_message_id": body.request_message_id,
+        "response_message_id": body.response_message_id, "campaign_id": body.campaign_id,
+        "import_batch_id": body.import_batch_id, "effective_at": now,
+        "granted_at": now if status == "granted" else None,
+        "revoked_at": now if status == "revoked" else None,
+        "evidence": {**body.evidence, "reason": body.reason},
+        "actor_user_id": _database_actor_id(user),
+        "idempotency_key": body.idempotency_key,
+    }, audit_payload={
+        "reason": body.reason,
+        "actor_ref": user.get("id"),
+    })
+    return {"ok": True, "consent": consent}
+
+
+@router.get("/{lead_ref}/consents")
+def list_lead_consents(
+    lead_ref: int, request: Request, persona_id: str = Query(...),
+    channel: str | None = Query(None), purpose: str | None = Query(None),
+):
+    lead = supabase_client.get_lead_by_ref(lead_ref)
+    if not lead or lead.get("persona_id") != persona_id:
+        raise HTTPException(404, "Lead not found")
+    auth_service.assert_persona_capability(request, "view", persona_id=persona_id)
+    return supabase_client.list_contact_consents(
+        lead_id=lead_ref, persona_id=persona_id, channel=channel, purpose=purpose,
+    )
+
+
+@router.post("/{lead_ref}/consent/grant")
+def grant_lead_consent(lead_ref: int, body: ConsentChangeBody, request: Request):
+    return _record_manual_consent(lead_ref, body, request, status="granted")
+
+
+@router.post("/{lead_ref}/consent/revoke")
+def revoke_lead_consent(lead_ref: int, body: ConsentChangeBody, request: Request):
+    return _record_manual_consent(lead_ref, body, request, status="revoked")
+
+
+@router.post("/{lead_ref}/move")
+def move_lead(lead_ref: int, body: LeadAudienceChangeBody, request: Request):
+    target = _resolve_target_audience(body, request)
+    return set_lead_group(
         lead_ref,
-        target_audience["id"],
-        membership_type="primary",
-        created_by_user_id=auth_service.current_user(request).get("id"),
+        LeadGroupBody(
+            persona_id=body.target_persona_id,
+            audience_id=target["id"],
+            idempotency_key=f"legacy-move:{uuid.uuid4()}",
+            reason="Adaptador legado /move para grupo semantico unico",
+        ),
+        request,
     )
-    # leads.persona_id e legado/default; atualizamos por compatibilidade mas a
-    # visibilidade real e a posse operacional vem de memberships.
-    supabase_client.update_lead(lead_ref, {"persona_id": body.target_persona_id, "updated_at": datetime.now(timezone.utc).isoformat()})
-    supabase_client.insert_event(
-        {
-            "event_type": "lead_moved",
-            "entity_type": "lead",
-            "entity_id": str(lead_ref),
-            "persona_id": body.target_persona_id,
-            "payload": {
-                "lead_id": lead_ref,
-                "target_audience_id": target_audience["id"],
-                "source_audience_id": source_audience.get("id") if source_audience else None,
-                "target_persona_id": body.target_persona_id,
-                "by_user_id": auth_service.current_user(request).get("id"),
-            },
-        },
-        source="leads.move",
-    )
-    return {"ok": True, "lead": supabase_client.get_lead_by_ref(lead_ref), "memberships": supabase_client.get_lead_memberships(lead_ref)}
 
 
 @router.post("/{lead_ref}/share")
 def share_lead(lead_ref: int, body: LeadAudienceChangeBody, request: Request):
-    lead = supabase_client.get_lead_by_ref(lead_ref)
-    if not lead:
-        raise HTTPException(404, "Lead not found")
-    try:
-        supabase_client.ensure_system_audiences_for_persona(body.target_persona_id)
-    except Exception:
-        pass
-    target_audience = _resolve_target_audience(body, request)
-    try:
-        existing_memberships = supabase_client.get_lead_memberships(lead_ref) or []
-    except Exception:
-        existing_memberships = []
-    if not existing_memberships:
-        # Lead canonico ainda nao tem nenhuma audience: cria membership primary
-        # automaticamente na audience source da persona atual antes de
-        # compartilhar com a nova. Evita 400 desnecessario para leads legados.
-        source = _resolve_source_audience(lead_ref, body)
-        if not source and lead.get("persona_id"):
-            source = supabase_client.ensure_import_audience(lead.get("persona_id"))
-        if source:
-            supabase_client.ensure_lead_membership(
-                lead_ref,
-                source["id"],
-                membership_type="primary",
-                created_by_user_id=auth_service.current_user(request).get("id"),
-            )
-            existing_memberships = supabase_client.get_lead_memberships(lead_ref) or []
-        if not existing_memberships:
-            raise HTTPException(400, "Lead precisa pertencer a pelo menos uma audiencia antes de compartilhar")
-    for membership in existing_memberships:
-        audience = membership.get("audience") or {}
-        if audience.get("persona_id"):
-            auth_service.assert_persona_access(request, persona_id=audience["persona_id"])
-    supabase_client.ensure_lead_membership(
+    target = _resolve_target_audience(body, request)
+    return set_lead_group(
         lead_ref,
-        target_audience["id"],
-        membership_type="shared",
-        created_by_user_id=auth_service.current_user(request).get("id"),
+        LeadGroupBody(
+            persona_id=body.target_persona_id,
+            audience_id=target["id"],
+            idempotency_key=f"legacy-share:{uuid.uuid4()}",
+            reason="Adaptador legado /share convertido em troca de grupo",
+        ),
+        request,
     )
-    supabase_client.insert_event(
-        {
-            "event_type": "lead_shared",
-            "entity_type": "lead",
-            "entity_id": str(lead_ref),
-            "persona_id": body.target_persona_id,
-            "payload": {
-                "lead_id": lead_ref,
-                "target_audience_id": target_audience["id"],
-                "target_persona_id": body.target_persona_id,
-                "by_user_id": auth_service.current_user(request).get("id"),
-            },
-        },
-        source="leads.share",
-    )
-    return {"ok": True, "lead": lead, "memberships": supabase_client.get_lead_memberships(lead_ref)}
 
 
 @router.post("/{lead_ref}/pause-ai")
