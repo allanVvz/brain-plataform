@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from services import (
     agents_service,
     auth_service,
+    campaigns_service,
     event_emitter,
     knowledge_graph,
     lead_qualification,
@@ -60,6 +61,37 @@ class AutomationBody(BaseModel):
 class WhatsAppProviderBody(BaseModel):
     provider: str
     confirmed: bool = False
+
+
+class PortalCampaignPreviewBody(BaseModel):
+    persona_slug: str
+    name: str | None = None
+    objective: str | None = None
+    purpose: str
+    campaign_kind: str
+    import_batch_ids: list[str]
+    audience_id: str
+    provider: str = "meta_cloud"
+    template_name: str | None = None
+    template_language: str = "pt_BR"
+    message: str | None = None
+    variables: dict[str, Any] = {}
+    assets: list[dict[str, Any]] = []
+    policy_overrides: dict[str, Any] = {}
+
+
+class PortalCampaignCreateBody(PortalCampaignPreviewBody):
+    name: str
+    expected_revision: int = 0
+    expected_preview_checksum: str
+    idempotency_key: str
+    reason: str
+
+
+class PortalCampaignStatusBody(BaseModel):
+    expected_revision: int
+    idempotency_key: str
+    reason: str
 
 
 def _require_internal_admin(request: Request) -> dict[str, Any]:
@@ -410,6 +442,99 @@ def handoff(lead_id: int, request: Request, persona_slug: str = Query(...)):
     _lead(lead_id, persona["id"])
     supabase_client.handoff_whatsapp_lead(lead_id)
     return {"ok": True, "lead_id": lead_id, "ai_paused": True, "handoff": True}
+
+
+def _campaign_for_persona(campaign_id: str, persona_id: str) -> dict[str, Any]:
+    detail = campaigns_service.get_campaign_detail(campaign_id)
+    if str(detail["campaign"].get("persona_id")) != str(persona_id):
+        raise HTTPException(404, "Campanha nao encontrada.")
+    return detail
+
+
+@router.get("/campaigns")
+def portal_campaigns(request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request)
+    return campaigns_service.list_campaigns(persona["id"])
+
+
+@router.get("/campaigns/provider-health")
+def portal_campaign_provider_health(request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request)
+    rollout_enabled = campaigns_service.rollout_one_enabled(persona)
+    binding = supabase_client.get_active_whatsapp_binding(persona["id"])
+    mock_enabled = campaigns_service.meta_mock_enabled()
+    if not binding and not mock_enabled:
+        return {
+            "provider": None, "ready": False, "status": "not_configured",
+            "campaigns_enabled": False, "rollout_one_enabled": rollout_enabled,
+        }
+    provider = "meta_cloud" if mock_enabled else binding.get("provider")
+    status = "mock" if mock_enabled else str(binding.get("connection_status") or "unknown").lower()
+    return {
+        "provider": provider,
+        "ready": campaigns_service.meta_provider_ready(binding),
+        "status": status,
+        "campaigns_enabled": rollout_enabled and provider == "meta_cloud",
+        "rollout_one_enabled": rollout_enabled,
+        "mock": mock_enabled,
+    }
+
+
+@router.get("/lead-imports")
+def portal_lead_imports(request: Request, persona_slug: str = Query(...), limit: int = Query(20, le=100)):
+    persona = _persona(persona_slug, request)
+    batches = supabase_client.list_lead_import_batches(persona["id"], limit=limit)
+    batches.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    return batches
+
+
+@router.get("/audiences")
+def portal_audiences(request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request)
+    try:
+        rows = supabase_client.list_persona_audiences(persona["id"]) or []
+    except Exception:
+        return []
+    return rows
+
+
+@router.post("/campaigns/preview")
+def portal_campaign_preview(body: PortalCampaignPreviewBody, request: Request):
+    persona = _persona(body.persona_slug, request, "edit")
+    payload = {**body.model_dump(exclude={"persona_slug"}), "persona_id": persona["id"]}
+    return campaigns_service.preview_campaign(payload)
+
+
+@router.post("/campaigns")
+def portal_create_campaign(body: PortalCampaignCreateBody, request: Request):
+    persona = _persona(body.persona_slug, request, "edit")
+    user = auth_service.current_user(request)
+    payload = {**body.model_dump(exclude={"persona_slug"}), "persona_id": persona["id"]}
+    return campaigns_service.create_campaign_draft(payload, actor_user_id=user.get("id"))
+
+
+@router.post("/campaigns/{campaign_id}/pause")
+def portal_pause_campaign(campaign_id: str, body: PortalCampaignStatusBody, request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request, "edit")
+    detail = _campaign_for_persona(campaign_id, persona["id"])
+    if detail["campaign"].get("status") not in {"draft", "validated", "scheduled", "running", "paused"}:
+        raise HTTPException(409, "Campanha nao pode ser pausada neste estado.")
+    return campaigns_service.update_campaign_status(
+        campaign_id, expected_revision=body.expected_revision, status="paused",
+        idempotency_key=body.idempotency_key, reason=body.reason,
+        actor_user_id=auth_service.current_user(request).get("id"),
+    )
+
+
+@router.post("/campaigns/{campaign_id}/cancel")
+def portal_cancel_campaign(campaign_id: str, body: PortalCampaignStatusBody, request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request, "edit")
+    _campaign_for_persona(campaign_id, persona["id"])
+    return campaigns_service.update_campaign_status(
+        campaign_id, expected_revision=body.expected_revision, status="cancelled",
+        idempotency_key=body.idempotency_key, reason=body.reason,
+        actor_user_id=auth_service.current_user(request).get("id"),
+    )
 
 
 @router.get("/pipeline")

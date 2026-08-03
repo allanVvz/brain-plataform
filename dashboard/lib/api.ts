@@ -338,6 +338,32 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) },
     ),
   portalPipeline: (slug: string) => req<any>(`/portal/pipeline?${personaQuery(slug)}`),
+  portalCampaigns: (slug: string) => req<any[]>(`/portal/campaigns?${personaQuery(slug)}`),
+  portalCampaignProviderHealth: (slug: string) =>
+    req<any>(`/portal/campaigns/provider-health?${personaQuery(slug)}`),
+  portalLeadImports: (slug: string, limit = 20) =>
+    req<any[]>(`/portal/lead-imports?${personaQuery(slug)}&limit=${limit}`),
+  portalAudiences: (slug: string) => req<any[]>(`/portal/audiences?${personaQuery(slug)}`),
+  portalCampaignPreview: (slug: string, body: Record<string, unknown>) =>
+    req<any>("/portal/campaigns/preview", {
+      method: "POST",
+      body: JSON.stringify({ ...body, persona_slug: slug }),
+    }),
+  portalCreateCampaign: (slug: string, body: Record<string, unknown>) =>
+    req<any>("/portal/campaigns", {
+      method: "POST",
+      body: JSON.stringify({ ...body, persona_slug: slug }),
+    }),
+  portalPauseCampaign: (slug: string, campaignId: string, body: Record<string, unknown>) =>
+    req<any>(`/portal/campaigns/${campaignId}/pause?${personaQuery(slug)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  portalCancelCampaign: (slug: string, campaignId: string, body: Record<string, unknown>) =>
+    req<any>(`/portal/campaigns/${campaignId}/cancel?${personaQuery(slug)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   personaAutomation: (slug: string) =>
     req<{ mode: "ai_with_handoff" | "human_only" }>(`/portal/personas/${encodeURIComponent(slug)}/automation`),
   updatePersonaAutomation: (slug: string, mode: "ai_with_handoff" | "human_only") =>
