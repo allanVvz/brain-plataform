@@ -16,14 +16,24 @@ export default function LeadImportPage() {
   const [lastCreated, setLastCreated] = useState<number | null>(null);
   const [personaId, setPersonaId] = useState("");
   const [personaName, setPersonaName] = useState("");
+  const [audiences, setAudiences] = useState<any[]>([]);
+  const [audienceId, setAudienceId] = useState("");
+  const [contactBasis, setContactBasis] = useState("imported_without_evidence");
+  const [contactBasisStatement, setContactBasisStatement] = useState("");
+  const [consentPurpose, setConsentPurpose] = useState("ofertas_e_novidades");
 
   async function load() {
     const scoped = window.localStorage.getItem("ai-brain-persona-id") || "";
     const scopedName = window.localStorage.getItem("ai-brain-persona-slug") || "";
     setPersonaId(scoped);
     setPersonaName(scopedName);
-    const items = await api.leadImports(scoped || undefined);
+    const [items, groups] = await Promise.all([
+      api.leadImports(scoped || undefined),
+      scoped ? api.audiences(scoped) : Promise.resolve([]),
+    ]);
     setImports(items);
+    setAudiences(groups);
+    setAudienceId((current) => groups.some((row: any) => row.id === current) ? current : "");
     const open = new URLSearchParams(window.location.search).get("open");
     if (open) {
       const detail = await api.leadImport(open);
@@ -51,7 +61,12 @@ export default function LeadImportPage() {
     setNoticeKind("info");
     setLastCreated(null);
     try {
-      const result = await api.uploadLeadImport(file, personaId || undefined);
+      const result = await api.uploadLeadImport(file, personaId || undefined, {
+        audienceId: audienceId || undefined,
+        contactBasis: contactBasis as any,
+        consentPurpose,
+        contactBasisStatement: contactBasisStatement || undefined,
+      });
       await load();
       const status = result?.status || (result?.ok === false ? "failed" : "completed");
       const stats = result?.batch?.stats || {};
@@ -143,6 +158,53 @@ export default function LeadImportPage() {
           <AlertCircle size={15} />
           Selecione um cliente/persona no topo da plataforma antes de importar leads.
         </div>
+      )}
+
+      {personaId && (
+        <section className="lg-card grid gap-4 md:grid-cols-2">
+          <label className="text-xs text-obs-subtle">
+            Grupo semantico (opcional no import)
+            <select
+              className="mt-1 w-full rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-obs-text [border:1px_solid_var(--border-glass)]"
+              value={audienceId}
+              onChange={(event) => setAudienceId(event.target.value)}
+            >
+              <option value="">Sem grupo — campanhas ficarao bloqueadas</option>
+              {audiences.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+            </select>
+          </label>
+          <label className="text-xs text-obs-subtle">
+            Base declarada do contato
+            <select
+              className="mt-1 w-full rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-obs-text [border:1px_solid_var(--border-glass)]"
+              value={contactBasis}
+              onChange={(event) => setContactBasis(event.target.value)}
+            >
+              <option value="imported_without_evidence">Importado sem evidencia</option>
+              <option value="explicit_consent">Consentimento explicito</option>
+              <option value="customer_initiated">Contato iniciado pelo cliente</option>
+              <option value="existing_customer">Cliente existente</option>
+              <option value="legacy_unknown">Legado desconhecido</option>
+            </select>
+          </label>
+          <label className="text-xs text-obs-subtle">
+            Finalidade
+            <input
+              className="mt-1 w-full rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-obs-text [border:1px_solid_var(--border-glass)]"
+              value={consentPurpose}
+              onChange={(event) => setConsentPurpose(event.target.value)}
+            />
+          </label>
+          <label className="text-xs text-obs-subtle">
+            Evidencia / observacao {contactBasis === "explicit_consent" ? "(obrigatoria)" : "(opcional)"}
+            <input
+              className="mt-1 w-full rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-obs-text [border:1px_solid_var(--border-glass)]"
+              value={contactBasisStatement}
+              onChange={(event) => setContactBasisStatement(event.target.value)}
+              placeholder="Ex.: formulario X aceito em 2026-07-01"
+            />
+          </label>
+        </section>
       )}
 
       <section className="grid gap-3 md:grid-cols-4">
@@ -259,7 +321,7 @@ export default function LeadImportPage() {
       <button
         type="button"
         onClick={() => fileRef.current?.click()}
-        disabled={uploading || !personaId}
+        disabled={uploading || !personaId || !consentPurpose || (contactBasis === "explicit_consent" && !contactBasisStatement.trim())}
         className="fixed bottom-6 left-1/2 z-40 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full bg-obs-violet/25 text-obs-violet shadow-obs-node transition hover:bg-obs-violet/35 disabled:opacity-50 [border:1px_solid_rgb(var(--obs-violet)/0.45)]"
         title="Importar CSV"
       >

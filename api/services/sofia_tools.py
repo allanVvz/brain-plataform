@@ -26,7 +26,12 @@ APIs com transformacao simples — vide model_router.messages_create).
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from schemas.agent_harness import ToolEffect, ToolResult, ToolRisk
+from services.agent_tool_registry import ToolManifest, ToolRegistry
 
 # Importacoes do servico Sofia: ficam dentro das funcoes para evitar
 # import circular (kb_intake_service ja importa este modulo).
@@ -567,7 +572,7 @@ def tool_find_existing_persona_nodes(session: dict, **args: Any) -> dict:
 # Registry + JSON Schema                                                      #
 # --------------------------------------------------------------------------- #
 
-SOFIA_TOOLS_REGISTRY: dict[str, Callable[..., dict]] = {
+_LEGACY_TOOLS_REGISTRY_UNUSED: dict[str, Any] = {
     "create_node": tool_create_node,
     "set_parent": tool_set_parent,
     "connect_nodes": tool_connect_nodes,
@@ -581,7 +586,7 @@ SOFIA_TOOLS_REGISTRY: dict[str, Callable[..., dict]] = {
 }
 
 
-SOFIA_TOOLS_SCHEMA: list[dict] = [
+_LEGACY_TOOLS_SCHEMA_UNUSED: list[dict] = [
     {
         "name": "create_node",
         "description": (
@@ -723,13 +728,113 @@ SOFIA_TOOLS_SCHEMA: list[dict] = [
 ]
 
 
+class _ToolArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CreateNodeArgs(_ToolArgs):
+    content_type: str
+    title: str
+    content: str | None = None
+    slug: str | None = None
+    parent_slug: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    status: str = "pendente_validacao"
+
+
+class SetParentArgs(_ToolArgs):
+    slug: str
+    parent_slug: str
+
+
+class ConnectNodesArgs(_ToolArgs):
+    source_slug: str
+    target_slug: str
+    relation_type: str
+
+
+class SlugArgs(_ToolArgs):
+    slug: str
+
+
+class ExpansionArgs(_ToolArgs):
+    block: str
+
+
+class FaqArgs(_ToolArgs):
+    parent_slug: str
+    max_questions: int = Field(8, ge=1, le=20)
+
+
+class AssetArgs(_ToolArgs):
+    parent_slug: str
+    reading_index: int | None = Field(None, ge=0)
+    asset_function: str | None = None
+    title: str | None = None
+
+
+class EmptyArgs(_ToolArgs):
+    pass
+
+
+class FindNodesArgs(_ToolArgs):
+    types: list[str] = Field(default_factory=list)
+    query: str | None = None
+
+
+def _legacy_manifest(
+    name: str,
+    model: type[BaseModel],
+    handler: Any,
+    description: str,
+    *,
+    effect: ToolEffect = ToolEffect.DRAFT,
+    risk: ToolRisk = ToolRisk.LOW,
+    deprecated: bool = False,
+) -> ToolManifest:
+    return ToolManifest(
+        name=name,
+        version="1.0.0",
+        owner_agent="qa_validator" if name.startswith("validate") else "graph_card_specialist",
+        description=description,
+        input_model=model,
+        output_model=ToolResult,
+        effect=effect,
+        risk=risk,
+        permission="view" if effect == ToolEffect.READ else "edit",
+        persona_scoped=True,
+        timeout_seconds=30,
+        idempotent=True,
+        handler=handler,
+        deprecated=deprecated,
+    )
+
+
+SOFIA_TOOL_MANIFESTS = ToolRegistry([
+    _legacy_manifest("create_node", CreateNodeArgs, tool_create_node, "Cria um draft de node no plano canonico."),
+    _legacy_manifest("set_parent", SetParentArgs, tool_set_parent, "Move um draft para um parent canonico."),
+    _legacy_manifest("connect_nodes", ConnectNodesArgs, tool_connect_nodes, "Propoe uma edge semantica no plano."),
+    _legacy_manifest("delete_node", SlugArgs, tool_delete_node, "Compatibilidade antiga de remocao de draft.", effect=ToolEffect.DESTRUCTIVE, risk=ToolRisk.HIGH, deprecated=True),
+    _legacy_manifest("set_expansion_policy", ExpansionArgs, tool_set_expansion_policy, "Ferramenta removida.", deprecated=True),
+    _legacy_manifest("generate_faq_from_branch", FaqArgs, tool_generate_faq_from_branch, "Gera FAQ draft a partir do galho ancestral."),
+    _legacy_manifest("validate_hierarchy", SlugArgs, tool_validate_hierarchy, "Valida a hierarquia do draft.", effect=ToolEffect.READ),
+    _legacy_manifest("attach_session_asset", AssetArgs, tool_attach_session_asset, "Anexa asset persistido da sessao ao draft."),
+    _legacy_manifest("validate_plan", EmptyArgs, tool_validate_plan, "Valida o plano atual sem escrever.", effect=ToolEffect.READ),
+    _legacy_manifest("find_existing_persona_nodes", FindNodesArgs, tool_find_existing_persona_nodes, "Localiza nodes existentes da persona.", effect=ToolEffect.READ),
+])
+SOFIA_TOOLS_REGISTRY = {
+    manifest.name: manifest.handler for manifest in SOFIA_TOOL_MANIFESTS.all()
+}
+SOFIA_TOOLS_SCHEMA = SOFIA_TOOL_MANIFESTS.model_schemas()
+
+
 def dispatch_tool_call(session: dict, name: str, arguments: dict | None) -> dict:
     """Despacha uma tool call vinda do LLM para o handler apropriado."""
-    handler = SOFIA_TOOLS_REGISTRY.get(name)
-    if not handler:
+    manifest = SOFIA_TOOL_MANIFESTS.get(name)
+    if not manifest or manifest.deprecated:
         return _err(f"tool nao registrada: {name}")
-    args = arguments if isinstance(arguments, dict) else {}
     try:
-        return handler(session, **args)
+        return manifest.invoke(session, arguments if isinstance(arguments, dict) else {})
     except Exception as exc:
         return _err(f"erro ao executar {name}: {exc}", exception=type(exc).__name__)

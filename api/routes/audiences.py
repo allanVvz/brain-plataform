@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services import auth_service, supabase_client
 
@@ -16,12 +16,14 @@ class AudienceCreateBody(BaseModel):
     slug: str | None = None
     description: str | None = None
     source_type: str = "manual"
+    metadata: dict = Field(default_factory=dict)
 
 
 class AudienceUpdateBody(BaseModel):
     name: str | None = None
     slug: str | None = None
     description: str | None = None
+    metadata: dict | None = None
 
 
 @router.get("")
@@ -56,10 +58,15 @@ def list_audiences(request: Request, persona_id: str = Query(...)):
 
 @router.post("")
 def create_audience(body: AudienceCreateBody, request: Request):
-    auth_service.assert_persona_access(request, persona_id=body.persona_id)
+    auth_service.assert_persona_capability(request, "edit", persona_id=body.persona_id)
+    if body.source_type not in {"manual", "crm", "shared"}:
+        raise HTTPException(422, "A API publica cria apenas grupos semanticos.")
+    if body.metadata.get("kind") not in {None, "semantic_group"}:
+        raise HTTPException(422, "O tipo da audience nao pode ser alterado pela API.")
     user = auth_service.current_user(request)
     audience = supabase_client.create_audience({
         **body.model_dump(),
+        "metadata": {**body.metadata, "kind": "semantic_group"},
         "created_by_user_id": user.get("id"),
     })
     if not audience:
@@ -93,14 +100,22 @@ def rename_audience(audience_id: str, body: AudienceUpdateBody, request: Request
     audience = supabase_client.get_audience(audience_id)
     if not audience:
         raise HTTPException(404, "Audience not found")
-    auth_service.assert_persona_access(request, persona_id=audience.get("persona_id"))
+    auth_service.assert_persona_capability(request, "edit", persona_id=audience.get("persona_id"))
+    if body.metadata is not None:
+        current_kind = str((audience.get("metadata") or {}).get("kind") or "semantic_group")
+        requested_kind = str(body.metadata.get("kind") or current_kind)
+        if requested_kind != current_kind:
+            raise HTTPException(422, "O tipo da audience e imutavel.")
+    changes = body.model_dump(exclude_none=True)
+    if body.metadata is not None:
+        changes["metadata"] = {**(audience.get("metadata") or {}), **body.metadata}
     updated = supabase_client.update_audience(
         audience_id,
         {
-            **body.model_dump(exclude_none=True),
+            **changes,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },
-    ) or {**audience, **body.model_dump(exclude_none=True)}
+    ) or {**audience, **changes}
     node = supabase_client.sync_audience_node(updated)
     supabase_client.insert_event(
         {

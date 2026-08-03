@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Loader2, MessageCircle, Send, Undo2, CheckCircle2, X } from "lucide-react";
+import { AgentHarnessStatus } from "@/components/agents/AgentHarnessStatus";
 
 export interface SofiaChatMessage {
   id: string;
@@ -80,6 +81,7 @@ export default function SofiaChatPanel({
 
           <div className="flex h-[calc(100%-110px)] flex-col">
             <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
+              <AgentHarnessStatus sessionId={sessionId} compact />
               {planSummary && (
                 <div className="rounded border border-white/10 bg-white/[0.03] px-2.5 py-2 text-[10px] text-obs-subtle">
                   <p>persona: <span className="text-obs-text">{planSummary.persona || "-"}</span></p>

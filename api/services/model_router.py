@@ -17,6 +17,7 @@ Rules:
 from __future__ import annotations
 
 import logging
+import json
 import os
 from typing import Any, Optional
 
@@ -131,6 +132,94 @@ def _to_openai_tools(anthropic_tools: list[dict]) -> list[dict]:
                 "parameters": tool.get("input_schema") or {"type": "object", "properties": {}},
             },
         })
+    return result
+
+
+def _tool_content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        return str(value)
+
+
+def _messages_for_openai(messages: list[dict]) -> list[dict]:
+    """Translate the provider-neutral tool transcript to OpenAI's native roles."""
+    result: list[dict] = []
+    for message in messages or []:
+        role = message.get("role")
+        if role == "tool":
+            call_id = str(message.get("tool_call_id") or "").strip()
+            if not call_id:
+                raise ValueError("OpenAI tool result requires tool_call_id")
+            result.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": _tool_content(message.get("content")),
+            })
+            continue
+        if role == "assistant" and message.get("tool_calls"):
+            calls = []
+            for call in message.get("tool_calls") or []:
+                call_id = str(call.get("id") or "").strip()
+                if not call_id:
+                    raise ValueError("OpenAI assistant tool call requires id")
+                calls.append({
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": str(call.get("name") or ""),
+                        "arguments": _tool_content(call.get("arguments") or {}),
+                    },
+                })
+            result.append({"role": "assistant", "content": message.get("content") or None, "tool_calls": calls})
+            continue
+        result.append({"role": role, "content": message.get("content", "")})
+    return result
+
+
+def _messages_for_anthropic(messages: list[dict]) -> list[dict]:
+    """Translate canonical calls/results to Anthropic tool_use/tool_result blocks."""
+    result: list[dict] = []
+    index = 0
+    while index < len(messages or []):
+        message = messages[index]
+        role = message.get("role")
+        if role == "assistant" and message.get("tool_calls"):
+            blocks: list[dict] = []
+            if message.get("content"):
+                blocks.append({"type": "text", "text": str(message["content"])})
+            for call in message.get("tool_calls") or []:
+                call_id = str(call.get("id") or "").strip()
+                if not call_id:
+                    raise ValueError("Anthropic tool_use requires id")
+                blocks.append({
+                    "type": "tool_use", "id": call_id,
+                    "name": str(call.get("name") or ""),
+                    "input": call.get("arguments") or {},
+                })
+            result.append({"role": "assistant", "content": blocks})
+            index += 1
+            continue
+        if role == "tool":
+            blocks: list[dict] = []
+            while index < len(messages) and messages[index].get("role") == "tool":
+                tool_message = messages[index]
+                call_id = str(tool_message.get("tool_call_id") or "").strip()
+                if not call_id:
+                    raise ValueError("Anthropic tool_result requires tool_call_id")
+                blocks.append({
+                    "type": "tool_result",
+                    "tool_use_id": call_id,
+                    "content": _tool_content(tool_message.get("content")),
+                    "is_error": bool(tool_message.get("is_error", False)),
+                })
+                index += 1
+            result.append({"role": "user", "content": blocks})
+            continue
+        result.append({"role": role, "content": message.get("content", "")})
+        index += 1
     return result
 
 
@@ -292,7 +381,7 @@ class ModelRouter:
         oai_msgs: list = []
         if system:
             oai_msgs.append({"role": "system", "content": system})
-        oai_msgs.extend(messages)
+        oai_msgs.extend(_messages_for_openai(messages))
 
         # Build try-order: requested model first (only if it's an OpenAI id),
         # then the rest of the cascade. Never pass a claude-* id to OpenAI.
@@ -442,7 +531,11 @@ class ModelRouter:
                 target, _mask_key(self._anthropic_key), bool(tools),
             )
             client = anthropic.Anthropic(api_key=self._anthropic_key, http_client=_llm_http_client())
-            kwargs: dict = {"model": target, "max_tokens": max_tokens, "messages": messages}
+            kwargs: dict = {
+                "model": target,
+                "max_tokens": max_tokens,
+                "messages": _messages_for_anthropic(messages),
+            }
             if system:
                 kwargs["system"] = system
             if tools:

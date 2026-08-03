@@ -118,6 +118,5 @@ def test_sofia_v2_patch_loop_tool_sequence_for_five_commands(monkeypatch, operat
         "resolve-operation",
         "validate-canonical-chain",
         "generate-graph-patch",
-        "persist-graph-patch",
-        "refetch-graph",
+        "publish-canonical-graph",
     ]

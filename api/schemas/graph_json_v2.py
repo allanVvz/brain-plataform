@@ -293,5 +293,8 @@ class PatchOperation(BaseModel):
 
 class Patch(BaseModel):
     description: str
+    expected_graph_version: int | None = Field(None, ge=0)
+    graph_hash: str | None = None
+    idempotency_key: str | None = None
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     operations: list[PatchOperation] = Field(default_factory=list)

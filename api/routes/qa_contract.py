@@ -27,6 +27,8 @@ from services import (
     sofia_orchestrator,
     supabase_client,
 )
+from services.agent_harness import SofiaAgentHarness
+from services.agent_harness_repository import AgentHarnessRepository
 from utils.env import is_production_runtime
 
 router = APIRouter(tags=["qa-contract"])
@@ -1135,6 +1137,22 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
     if not persona_id:
         raise HTTPException(409, "Resolved persona has no id")
     persona_slug = _persona_slug(persona)
+    if session_id:
+        try:
+            current_user = auth_service.current_user(request) or {}
+            SofiaAgentHarness(AgentHarnessRepository()).adopt_legacy_session(
+                session_id=session_id,
+                persona_id=str(persona_id),
+                user_id=str(current_user.get("id") or "qa-shared-admin"),
+                source="sofia.graph-command",
+                selected_context={
+                    "persona_slug": persona_slug,
+                    "selected_node_ids": body.context.selected_node_ids,
+                    "legacy_session_id": session_id,
+                },
+            )
+        except Exception:
+            pass
 
     effective_command = str(body.command or "")
     last_ref = session_state.get("last_referenced_node") if isinstance(session_state, dict) else {}
@@ -1343,6 +1361,49 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
             409,
             {"code": "GRAPH_VERSION_CONFLICT", "expected_version": exc.expected, "current_version": exc.current},
         ) from exc
+    except graph_document_publisher.GraphValidationError as exc:
+        orphan_only = bool(exc.errors) and all(
+            "requires exactly one contains parent" in error
+            or "contains path does not reach persona" in error
+            for error in exc.errors
+        )
+        if orphan_only and session_id:
+            plan_json = sofia_orchestrator.apply_plan_json_patch(
+                session_id=session_id,
+                persona_slug=persona_slug,
+                patch=plan_json_patch_base,
+                command=effective_command,
+            )
+            sofia_orchestrator.remember_turn(
+                session_id=session_id,
+                persona_slug=persona_slug,
+                command=effective_command,
+                operation_result=operation_tool,
+                last_referenced_node=last_referenced_node,
+            )
+            fresh_state = sofia_orchestrator.get_session_state(session_id)
+            return {
+                "ok": True,
+                "sofia_message": (
+                    sofia_orchestrator.plan_json_partial_success_message(plan_json, effective_command)
+                    or "Atualizei o plano, mas o node precisa de um parent canonico antes da publicacao."
+                ),
+                "graph_patch": None,
+                "persisted": False,
+                "needs_clarification": True,
+                "validation": {"canonical_chain_respected": False, "violations": exc.errors},
+                "plan_json": plan_json,
+                "conversation_context": {
+                    "session_id": session_id,
+                    "active_persona_slug": persona_slug,
+                    "memory_turns": len(fresh_state.get("recent_turns") or []),
+                    "last_referenced_node": fresh_state.get("last_referenced_node") or None,
+                },
+            }
+        raise HTTPException(
+            422,
+            {"code": "GRAPH_VALIDATION_FAILED", "violations": exc.errors},
+        ) from exc
     except Exception as exc:
         raise HTTPException(422, {"code": "SOFIA_CANONICAL_PATCH_FAILED", "error": str(exc)}) from exc
     sofia_orchestrator.remember_turn(
@@ -1352,6 +1413,7 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         operation_result=operation_tool,
         last_referenced_node=last_referenced_node,
     )
+    fresh_state = sofia_orchestrator.get_session_state(session_id)
     return {
         "ok": True,
         "sofia_message": plan.get("sofia_message") or "Alteração publicada no Graph JSON canônico.",
@@ -1359,9 +1421,13 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         "persisted": True,
         "publication": publication,
         "tool_calls": [
-            *(plan.get("tool_calls") or []),
+            *[
+                {**call, "tool": call.get("tool") or call.get("name")}
+                for call in (plan.get("tool_calls") or [])
+            ],
             {
                 "name": "publish-canonical-graph",
+                "tool": "publish-canonical-graph",
                 "score": 1.0,
                 "result": {
                     "version": publication.get("version"),
@@ -1375,8 +1441,11 @@ def sofia_graph_command(body: SofiaGraphCommandBody, request: Request):
         "conversation_context": {
             "session_id": session_id or None,
             "active_persona_slug": persona_slug,
+            "memory_turns": len((fresh_state or {}).get("recent_turns") or []),
+            "last_referenced_node": (fresh_state or {}).get("last_referenced_node") or None,
         },
     }
+
 
     # Legacy direct knowledge_nodes/knowledge_edges path retained below only as
     # dead compatibility reference during rollout. Canonical publication above

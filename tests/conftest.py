@@ -33,6 +33,63 @@ DOCKER = shutil.which("docker")
 POSTGRES_IMAGE = "pgvector/pgvector:pg16"
 
 
+_SOFIA_CANONICAL_TEST_FILES = {
+    "test_qa_contract_routes.py",
+    "test_sofia_primary_tree_publication.py",
+    "test_sofia_session_context.py",
+    "test_sofia_v2_patch_loop.py",
+}
+
+
+@pytest.fixture(autouse=True)
+def _published_graph_for_sofia_route_tests(request, monkeypatch):
+    """Keep legacy route tests on the required canonical publication path.
+
+    These tests predate Graph JSON as the write authority and mock the legacy
+    projection repositories. They now receive an explicit published document
+    and a validating publisher double instead of making production fall back to
+    direct knowledge_nodes writes when no document exists.
+    """
+    if Path(str(request.fspath)).name not in _SOFIA_CANONICAL_TEST_FILES:
+        return
+    from routes import qa_contract
+    from schemas.graph_json_v2 import GraphJson
+    from services import graph_document_publisher, graph_json_v2_validator
+
+    def current(persona_slug: str, *_args):
+        graph = GraphJson.model_validate({
+            "schema_version": "2.1",
+            "graph_id": f"test:{persona_slug}",
+            "tenant": "test",
+            "persona_slug": persona_slug,
+            "graph_version": 1,
+            "status": "published",
+            "nodes": [{
+                "id": f"node:persona:{persona_slug}",
+                "node_type": "persona",
+                "slug": persona_slug,
+                "title": persona_slug,
+                "lifecycle": {"status": "active"},
+            }],
+            "edges": [],
+        })
+        return 1, graph
+
+    def publish(*, graph, **_kwargs):
+        valid, errors = graph_json_v2_validator.validate_graph_json(graph)
+        if not valid:
+            raise graph_document_publisher.GraphValidationError(errors)
+        return {
+            "ok": True,
+            "version": 2,
+            "checksum": graph.content_checksum or "sha256:test-canonical-publication",
+            "status": "published",
+        }
+
+    monkeypatch.setattr(qa_contract.graph_json_v2_store, "load_current", current)
+    monkeypatch.setattr(qa_contract.graph_document_publisher, "publish", publish)
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))

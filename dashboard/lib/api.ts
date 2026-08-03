@@ -181,12 +181,50 @@ export const api = {
   leadImport: (batchId: string) => req<any>(`/leads/imports/${encodeURIComponent(batchId)}`),
   deleteLeadImport: (batchId: string) =>
     req<any>(`/leads/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" }),
-  uploadLeadImport: (file: File, personaId?: string) => {
+  uploadLeadImport: (file: File, personaId?: string, options?: {
+    audienceId?: string;
+    contactBasis?: "explicit_consent" | "customer_initiated" | "existing_customer" | "imported_without_evidence" | "legacy_unknown" | "unknown";
+    consentPurpose?: string;
+    contactBasisStatement?: string;
+  }) => {
     const form = new FormData();
     form.append("file", file);
     if (personaId) form.append("persona_id", personaId);
+    if (options?.audienceId) form.append("audience_id", options.audienceId);
+    if (options?.contactBasis) form.append("contact_basis", options.contactBasis);
+    if (options?.consentPurpose) form.append("consent_purpose", options.consentPurpose);
+    if (options?.contactBasisStatement) form.append("contact_basis_statement", options.contactBasisStatement);
     return reqForm<any>("/leads/imports", form);
   },
+  setLeadGroup: (leadRef: number, body: {
+    persona_id: string;
+    audience_id: string;
+    idempotency_key: string;
+    reason: string;
+  }) => req<any>(`/leads/${leadRef}/group`, { method: "POST", body: JSON.stringify(body) }),
+  leadConsents: (leadRef: number, personaId: string, purpose?: string) => {
+    const params = new URLSearchParams({ persona_id: personaId, channel: "whatsapp" });
+    if (purpose) params.set("purpose", purpose);
+    return req<any[]>(`/leads/${leadRef}/consents?${params.toString()}`);
+  },
+  grantLeadConsent: (leadRef: number, body: Record<string, unknown>) =>
+    req<any>(`/leads/${leadRef}/consent/grant`, { method: "POST", body: JSON.stringify(body) }),
+  revokeLeadConsent: (leadRef: number, body: Record<string, unknown>) =>
+    req<any>(`/leads/${leadRef}/consent/revoke`, { method: "POST", body: JSON.stringify(body) }),
+  campaignPreview: (body: Record<string, unknown>) =>
+    req<any>("/messaging/campaigns/preview", { method: "POST", body: JSON.stringify(body) }),
+  createCampaign: (body: Record<string, unknown>) =>
+    req<any>("/messaging/campaigns", { method: "POST", body: JSON.stringify(body) }),
+  campaigns: (personaId?: string) =>
+    req<any[]>(`/messaging/campaigns${personaId ? `?persona_id=${encodeURIComponent(personaId)}` : ""}`),
+  campaign: (campaignId: string) =>
+    req<any>(`/messaging/campaigns/${encodeURIComponent(campaignId)}`),
+  pauseCampaign: (campaignId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/campaigns/${encodeURIComponent(campaignId)}/pause`, { method: "POST", body: JSON.stringify(body) }),
+  cancelCampaign: (campaignId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/campaigns/${encodeURIComponent(campaignId)}/cancel`, { method: "POST", body: JSON.stringify(body) }),
+  campaignProviderHealth: (personaId: string) =>
+    req<any>(`/messaging/provider-health?persona_id=${encodeURIComponent(personaId)}`),
   updateLeadInfo: (leadRef: number, body: {
     nome?: string;
     interesse_produto?: string;
@@ -300,6 +338,32 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) },
     ),
   portalPipeline: (slug: string) => req<any>(`/portal/pipeline?${personaQuery(slug)}`),
+  portalCampaigns: (slug: string) => req<any[]>(`/portal/campaigns?${personaQuery(slug)}`),
+  portalCampaignProviderHealth: (slug: string) =>
+    req<any>(`/portal/campaigns/provider-health?${personaQuery(slug)}`),
+  portalLeadImports: (slug: string, limit = 20) =>
+    req<any[]>(`/portal/lead-imports?${personaQuery(slug)}&limit=${limit}`),
+  portalAudiences: (slug: string) => req<any[]>(`/portal/audiences?${personaQuery(slug)}`),
+  portalCampaignPreview: (slug: string, body: Record<string, unknown>) =>
+    req<any>("/portal/campaigns/preview", {
+      method: "POST",
+      body: JSON.stringify({ ...body, persona_slug: slug }),
+    }),
+  portalCreateCampaign: (slug: string, body: Record<string, unknown>) =>
+    req<any>("/portal/campaigns", {
+      method: "POST",
+      body: JSON.stringify({ ...body, persona_slug: slug }),
+    }),
+  portalPauseCampaign: (slug: string, campaignId: string, body: Record<string, unknown>) =>
+    req<any>(`/portal/campaigns/${campaignId}/pause?${personaQuery(slug)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  portalCancelCampaign: (slug: string, campaignId: string, body: Record<string, unknown>) =>
+    req<any>(`/portal/campaigns/${campaignId}/cancel?${personaQuery(slug)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   personaAutomation: (slug: string) =>
     req<{ mode: "ai_with_handoff" | "human_only" }>(`/portal/personas/${encodeURIComponent(slug)}/automation`),
   updatePersonaAutomation: (slug: string, mode: "ai_with_handoff" | "human_only") =>
@@ -785,6 +849,43 @@ export const api = {
     req<any>("/kb-intake/save", { method: "POST", body: JSON.stringify({ session_id, content, plan_override }) }),
   kbIntakeCrawlPreview: (url: string, session_id?: string) =>
     req<any>("/kb-intake/crawl-preview", { method: "POST", body: JSON.stringify({ url, session_id }) }),
+
+  // Durable Sofia agent harness (polling; no SSE in this rollout).
+  agentHarnessCapabilities: () => req<any>("/agent-harness/capabilities"),
+  agentHarnessCreateSession: (body: {
+    persona_id: string;
+    coordinator_key?: string;
+    selected_context?: Record<string, any>;
+    selected_node_ids?: string[];
+    graph_version?: number;
+    graph_hash?: string;
+    idempotency_key: string;
+    reason: string;
+  }) => req<any>("/agent-harness/sessions", { method: "POST", body: JSON.stringify(body) }),
+  agentHarnessSession: (sessionId: string) =>
+    req<any>(`/agent-harness/sessions/${encodeURIComponent(sessionId)}`),
+  agentHarnessMessage: (sessionId: string, body: {
+    message: string;
+    expected_revision: number;
+    idempotency_key: string;
+    reason: string;
+    context?: Record<string, any>;
+  }) => req<any>(`/agent-harness/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  agentHarnessRun: (runId: string) =>
+    req<any>(`/agent-harness/runs/${encodeURIComponent(runId)}`),
+  agentHarnessApprove: (runId: string, body: { expected_revision: number; idempotency_key: string; reason: string }) =>
+    req<any>(`/agent-harness/runs/${encodeURIComponent(runId)}/approve`, { method: "POST", body: JSON.stringify(body) }),
+  agentHarnessCancel: (runId: string, body: { expected_revision: number; idempotency_key: string; reason: string }) =>
+    req<any>(`/agent-harness/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST", body: JSON.stringify(body) }),
+  agentHarnessGrants: (personaId: string, userId?: string) => {
+    const params = new URLSearchParams({ persona_id: personaId });
+    if (userId) params.set("user_id", userId);
+    return req<any>(`/agent-harness/grants?${params.toString()}`);
+  },
+  agentHarnessPutGrants: (body: Record<string, any>) =>
+    req<any>("/agent-harness/grants", { method: "PUT", body: JSON.stringify(body) }),
 
   // Knowledge Graph
   graphData: (personaSlug?: string, opts?: any) => {

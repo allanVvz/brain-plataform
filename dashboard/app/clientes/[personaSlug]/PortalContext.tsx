@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   LogOut,
+  Megaphone,
   MessageSquare,
   Settings,
   Sparkles,
@@ -45,6 +46,7 @@ const links = [
   { key: "mensagens", label: "Mensagens", icon: MessageSquare },
   { key: "leads", label: "Leads", icon: Users },
   { key: "pipeline", label: "Pipeline", icon: Activity },
+  { key: "disparos", label: "Disparos", icon: Megaphone },
 ];
 
 // Every route's title, shown in the persistent header instead of each page
@@ -53,6 +55,7 @@ const PAGE_TITLES: Record<string, string> = {
   mensagens: "Mensagens",
   leads: "Leads",
   pipeline: "Pipeline",
+  disparos: "Disparos",
   configuracoes: "Configurações",
 };
 

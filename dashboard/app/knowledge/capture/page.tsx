@@ -24,6 +24,7 @@ import {
 import { api } from "@/lib/api";
 import IntakeReadingPanel from "@/components/capture/IntakeReadingPanel";
 import BlockedPlanDiagnosticModal from "@/components/capture/BlockedPlanDiagnosticModal";
+import { AgentHarnessStatus } from "@/components/agents/AgentHarnessStatus";
 
 const MODELS = [
   { id: "gpt-4o-mini", label: "GPT-4o Mini - rapido" },
@@ -1911,6 +1912,10 @@ function ChatPanel({
             Nova sessao
           </button>
         </div>
+      </div>
+
+      <div className="px-4 pt-3">
+        <AgentHarnessStatus sessionId={sessionId} />
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
