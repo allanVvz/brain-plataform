@@ -19,6 +19,7 @@ from services import (
     agents_service,
     auth_service,
     campaigns_service,
+    context_cards as context_cards_service,
     event_emitter,
     knowledge_graph,
     lead_qualification,
@@ -262,6 +263,7 @@ def knowledge_chat_context(
     persona_slug: str = Query(...),
     lead_ref: int = Query(...),
     q: str | None = Query(None),
+    response_message_id: str | None = Query(None),
     limit: int = Query(12, ge=1, le=50),
 ):
     """Expose the operator evidence inside the authorized client portal."""
@@ -273,7 +275,28 @@ def knowledge_chat_context(
         user_text=q,
         limit=limit,
     )
-    return knowledge_graph.with_operator_context(context, limit=limit)
+    messages = supabase_client.get_messages(str(lead_ref), limit=500)
+    try:
+        projection_nodes, _projection_edges = supabase_client.list_all_knowledge_graph(
+            persona_id=str(persona["id"]),
+            limit_nodes=5000,
+        )
+    except Exception:
+        projection_nodes = list(context.get("nodes") or [])
+    try:
+        turn = context_cards_service.response_context(
+            persona_slug=persona_slug,
+            persona_id=str(persona["id"]),
+            lead_ref=lead_ref,
+            messages=messages,
+            response_message_id=response_message_id,
+            query=q or "",
+            projection_nodes=projection_nodes,
+            limit=limit,
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {**knowledge_graph.with_operator_context(context, limit=limit), **turn}
 
 
 @router.post("/messages", status_code=202)

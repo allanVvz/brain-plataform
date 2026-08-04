@@ -311,12 +311,13 @@ export const api = {
     req<any[]>(`/portal/conversations?${personaQuery(slug)}`),
   portalConversationMessages: (slug: string, leadRef: number) =>
     req<any[]>(`/portal/conversations/${leadRef}/messages?${personaQuery(slug)}`),
-  portalKnowledgeChatContext: (slug: string, leadRef: number, q?: string, limit = 12) => {
+  portalKnowledgeChatContext: (slug: string, leadRef: number, q?: string, limit = 12, responseMessageId?: string) => {
     const params = new URLSearchParams();
     params.set("persona_slug", slug);
     params.set("lead_ref", String(leadRef));
     params.set("limit", String(limit));
     if (q) params.set("q", q);
+    if (responseMessageId) params.set("response_message_id", responseMessageId);
     return req<any>(`/portal/knowledge/chat-context?${params.toString()}`);
   },
   portalLeads: (slug: string, limit = 500) =>
@@ -1050,13 +1051,24 @@ export const api = {
     req<any>("/sofia/faq/append", { method: "POST", body: JSON.stringify(body) }),
 
   // Knowledge — Chat sidebar context (semantic graph + KB fallback)
-  knowledgeChatContext: (leadRef: number, q?: string, personaId?: string) => {
+  knowledgeChatContext: (leadRef: number, q?: string, personaId?: string, responseMessageId?: string) => {
     const params = new URLSearchParams();
     params.set("lead_ref", String(leadRef));
     if (q) params.set("q", q);
     if (personaId) params.set("persona_id", personaId);
+    if (responseMessageId) params.set("response_message_id", responseMessageId);
     return req<any>(`/knowledge/chat-context?${params.toString()}`);
   },
+  publishContextCard: (nodeId: string, body: {
+    persona_slug: string;
+    content: string;
+    expected_version: number;
+    reason: string;
+    idempotency_key?: string;
+  }) => req<any>(`/knowledge/context-cards/${encodeURIComponent(nodeId)}/publish`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  }),
   knowledgeCatalog: (opts: { personaId?: string; personaSlug?: string } = {}) => {
     const params = new URLSearchParams();
     if (opts.personaId) params.set("persona_id", opts.personaId);

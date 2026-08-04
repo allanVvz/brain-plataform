@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import mimetypes
 import os
 from datetime import datetime, timezone
@@ -7,8 +8,10 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from typing import Optional
 from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle
+from services import context_cards as context_cards_service
 from services import approved_knowledge_snapshots
 from services import graph_document_publisher, graph_json_v2_store
+from services import graph_json_v21_adapter
 from services import graph_context_resolver_v2
 from schemas.graph_json_v2 import Edge, GraphJson
 from services import integration_service, product_import_service
@@ -35,6 +38,14 @@ class ResolveContextBody(BaseModel):
     seed_refs: list[str] = Field(default_factory=list)
     max_nodes: int = 24
     max_tokens: int = 8000
+
+
+class PublishContextCardBody(BaseModel):
+    persona_slug: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1, max_length=30000)
+    expected_version: int = Field(..., ge=1)
+    reason: str = Field(..., min_length=3, max_length=1000)
+    idempotency_key: Optional[str] = Field(None, min_length=1, max_length=200)
 
 
 @router.post("/context/resolve")
@@ -1397,26 +1408,163 @@ def knowledge_catalog(
 @router.get("/chat-context")
 def chat_context(
     request: Request,
-    lead_ref: int = Query(None),
+    lead_ref: int = Query(...),
     persona_id: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
+    response_message_id: Optional[str] = Query(None),
     limit: int = Query(12, le=50),
 ):
-    if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
     """Knowledge bundle for the messages sidebar.
 
     Resolves products/campaigns/assets/FAQs related to a lead's recent
     conversation (or to an explicit `q`). Falls back gracefully when the
     semantic graph has no data — always returns the same response shape.
     """
+    if persona_id:
+        auth_service.assert_persona_access(request, persona_id=persona_id)
+    else:
+        scoped_lead = supabase_client.get_lead_by_ref(lead_ref) or {}
+        if scoped_lead.get("persona_id"):
+            auth_service.assert_persona_access(
+                request, persona_id=str(scoped_lead["persona_id"])
+            )
     context = knowledge_graph.get_chat_context(
         lead_ref=lead_ref,
         persona_id=persona_id,
         user_text=q,
         limit=limit,
     )
-    return knowledge_graph.with_operator_context(context, limit=limit)
+    resolved_persona_id = str(context.get("persona_id") or persona_id or "")
+    if not resolved_persona_id:
+        raise HTTPException(403, "Lead sem persona autorizada.")
+    auth_service.assert_persona_access(request, persona_id=resolved_persona_id)
+    personas = supabase_client.get_personas() or []
+    persona = next((row for row in personas if str(row.get("id")) == resolved_persona_id), None)
+    if not persona:
+        raise HTTPException(404, "Persona not found")
+    messages = supabase_client.get_messages(str(lead_ref), limit=500) if lead_ref else []
+    try:
+        projection_nodes, _projection_edges = supabase_client.list_all_knowledge_graph(
+            persona_id=resolved_persona_id,
+            limit_nodes=5000,
+        )
+    except Exception:
+        projection_nodes = list(context.get("nodes") or [])
+    try:
+        turn = context_cards_service.response_context(
+            persona_slug=str(persona.get("slug")),
+            persona_id=resolved_persona_id,
+            lead_ref=int(lead_ref),
+            messages=messages,
+            response_message_id=response_message_id,
+            query=q or "",
+            projection_nodes=projection_nodes,
+            limit=limit,
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {**knowledge_graph.with_operator_context(context, limit=limit), **turn}
+
+
+@router.post("/context-cards/{node_id}/publish")
+def publish_context_card(
+    node_id: str,
+    body: PublishContextCardBody,
+    request: Request,
+):
+    """Edit, approve, project and activate one canonical card in one commit."""
+    persona = supabase_client.get_persona(body.persona_slug)
+    if not persona:
+        raise HTTPException(404, f"Persona not found: {body.persona_slug}")
+    user = auth_service.current_user(request)
+    if not auth_service.is_admin(user):
+        allowed = next(
+            (
+                row for row in auth_service.allowed_access(request)
+                if row.get("persona_slug") == body.persona_slug and row.get("can_edit")
+            ),
+            None,
+        )
+        if not allowed:
+            raise HTTPException(403, "Acesso de edicao negado para esta persona.")
+    current = graph_json_v2_store.load_current(body.persona_slug)
+    if not current:
+        raise HTTPException(404, "Published Graph JSON not found")
+    current_version, graph = current
+    graph = graph_json_v21_adapter.upgrade_to_v21(graph)
+    node = next((item for item in graph.nodes if item.id == node_id), None)
+    if not node or node.node_class != "knowledge":
+        raise HTTPException(404, "Context card node not found")
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(422, "Card content cannot be blank")
+    if node.node_type == "faq":
+        patch = {
+            "spec.answer": content,
+            "data.answer": content,
+            "data.content": content,
+        }
+    else:
+        patch = {
+            "spec.summary": content,
+            "data.summary": content,
+            "data.content": content,
+        }
+    digest = hashlib.sha256(f"{content}\n{body.reason}".encode("utf-8")).hexdigest()[:20]
+    key = body.idempotency_key or f"context-card:{node_id}:v{body.expected_version}:{digest}"
+    try:
+        next_graph = graph_document_publisher.apply_operations(
+            graph,
+            [
+                {"op": "update_node", "node_id": node_id, "patch": patch},
+                {
+                    "op": "approve_node", "node_id": node_id,
+                    "approved_by": (user or {}).get("id"), "reason": body.reason,
+                },
+            ],
+        )
+        result = graph_document_publisher.commit(
+            graph=next_graph,
+            persona_slug=body.persona_slug,
+            brand_slug=graph.brand_slug,
+            source="knowledge.context_card.publish",
+            reason=body.reason,
+            published_by=(user or {}).get("id"),
+            expected_version=body.expected_version,
+            idempotency_key=key,
+        )
+    except graph_document_publisher.VersionConflict as exc:
+        context_cards_service.emit_metric(
+            "knowledge_context.version_conflict",
+            persona_id=persona.get("id"), lead_ref=None,
+            payload={"node_id": node_id, "expected": exc.expected, "current": exc.current},
+        )
+        raise HTTPException(
+            409,
+            {"code": "GRAPH_VERSION_CONFLICT", "expected_version": exc.expected, "current_version": exc.current},
+        ) from exc
+    except graph_document_publisher.GraphValidationError as exc:
+        raise HTTPException(422, {"code": "GRAPH_VALIDATION_FAILED", "errors": exc.errors}) from exc
+    except graph_document_publisher.ProjectionFailed as exc:
+        raise HTTPException(502, {"code": "GRAPH_PROJECTION_FAILED", "graph_version": exc.version, "error": str(exc)}) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    activated = context_cards_service.current_graph(body.persona_slug)
+    version, checksum, active_graph = activated
+    card = context_cards_service.cards_for_ids(
+        graph=active_graph, graph_version=version, graph_checksum=checksum,
+        ids=[node_id],
+    )
+    context_cards_service.emit_metric(
+        "knowledge_context.card_published",
+        persona_id=persona.get("id"), lead_ref=None,
+        payload={
+            "node_id": node_id, "author": (user or {}).get("id"),
+            "reason": body.reason, "previous_version": current_version,
+            "new_version": version,
+        },
+    )
+    return {**result, "card": card[0].model_dump(mode="json") if card else None}
 
 
 # ── Published Graph JSON v2 context ───

@@ -27,6 +27,35 @@ class CartAction(StrEnum):
     CANCEL_ORDER = "cancel_order"
 
 
+class ContextCard(StrictModel):
+    """Immutable knowledge snapshot injected into one model turn.
+
+    ``id`` is always the stable Graph JSON node id. Database projection UUIDs
+    are deliberately kept as trace metadata and never become card identity.
+    """
+
+    id: str = Field(min_length=1)
+    projection_node_id: str | None = None
+    node_type: str = Field(min_length=1)
+    slug: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    rendered_content: str = Field(min_length=1)
+    editable_content: str = ""
+    content_checksum: str = Field(min_length=1)
+    revision: int = Field(ge=1)
+    graph_version: int = Field(ge=1)
+    graph_checksum: str = Field(min_length=1)
+    context_role: str
+    position: int = Field(ge=0)
+    selection_reason: dict[str, Any] = Field(default_factory=dict)
+    path: list[str] = Field(default_factory=list)
+    chunk_refs: list[str] = Field(default_factory=list)
+    source: str = "pending_source"
+    status: str = "approved"
+    relations: list[dict[str, Any]] = Field(default_factory=list)
+    technical_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ConversationContext(StrictModel):
     persona_slug: str
     agent_slug: str
@@ -37,6 +66,7 @@ class ConversationContext(StrictModel):
     rag_nodes: list[dict[str, Any]]
     rag_paths: list[list[str]]
     rag_chunks: list[dict[str, Any]] = Field(default_factory=list)
+    context_cards: list[ContextCard] = Field(default_factory=list)
     system_prompt: str = ""
     available_services: list[dict[str, str]] = Field(default_factory=list)
 

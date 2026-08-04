@@ -288,18 +288,14 @@ def test_fail_safe_handoff_captures_which_node_failed_and_why():
         assert "reason: 'workflow_step_failed'," not in body
 
 
-def test_aurora_agentic_workflow_uses_generated_prompt_and_golden_dataset_rag():
-    """Regression test for the 2026-08-01 agentic-flow redesign.
+def test_aurora_agentic_workflow_uses_generated_prompt_and_exact_context_cards():
+    """The model and operator must consume the same immutable card package.
 
     Draft agentic reply used to embed one hardcoded, Aurora-specific
     system prompt string directly in the workflow JSON, and grounded the
-    model in rag_nodes (the deterministic engine's simple graph-node
-    keyword filter) instead of the real Golden Dataset RAG layer
-    (knowledge_rag_entries/knowledge_rag_chunks via search_active_rag_
-    chunks). Any other persona put on this template would have gotten
-    Aurora's literal prompt. The node must now consume the dynamically
-    generated `system_prompt` and `rag_chunks` fields that
-    conversation_runtime.build_context() produces per persona.
+    The Golden Dataset still influences retrieval and contributes chunk_refs,
+    but the actual prompt payload must use context_cards.rendered_content so
+    the persisted response evidence is byte-for-byte the model input.
     """
     workflow = json.loads(
         (ROOT / "api" / "n8n-workflows" / "aurora-conversation.json").read_text(
@@ -311,7 +307,9 @@ def test_aurora_agentic_workflow_uses_generated_prompt_and_golden_dataset_rag():
     )
     body = draft_node["parameters"]["body"]
     assert "system_prompt" in body
-    assert "rag_chunks" in body
+    assert "context_cards" in body
+    assert "rendered_content" in body
+    assert "rag_chunks" not in body
     # No hardcoded business-specific vocabulary left in the workflow file.
     assert "estetica automotiva" not in body.lower()
     assert "estética automotiva" not in body.lower()

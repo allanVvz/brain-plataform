@@ -143,6 +143,17 @@ interface ChatContext {
   validated?: { nodes?: KnowledgeNode[]; kb_entries?: KnowledgeKbEntry[]; assets?: KnowledgeAsset[] };
   unvalidated?: { nodes?: KnowledgeNode[]; kb_entries?: KnowledgeKbEntry[]; assets?: KnowledgeAsset[] };
   summary: string;
+  mode?: "exact" | "reconstructed";
+  persona_slug?: string;
+  graph_version?: number;
+  graph_checksum?: string;
+  current_graph_version?: number;
+  current_graph_checksum?: string;
+  response?: { id?: number | string; message_id: string; created_at?: string; text?: string } | null;
+  used_cards?: ContextCard[];
+  related_cards?: ContextCard[];
+  current_cards?: Record<string, ContextCard>;
+  decisive_node_ids?: string[];
   operator_context?: {
     primary: Array<{
       id: string;
@@ -164,6 +175,29 @@ interface ChatContext {
     }>;
     graph_path: NonNullable<KnowledgeNode["path"]>;
   };
+}
+
+interface ContextCard {
+  id: string;
+  projection_node_id?: string | null;
+  node_type: string;
+  slug: string;
+  title: string;
+  rendered_content: string;
+  editable_content: string;
+  content_checksum: string;
+  revision: number;
+  graph_version: number;
+  graph_checksum: string;
+  context_role: string;
+  position: number;
+  selection_reason: Record<string, any>;
+  path: string[];
+  chunk_refs: string[];
+  source: string;
+  status: string;
+  relations: Array<Record<string, any>>;
+  technical_metadata: Record<string, any>;
 }
 
 interface Message {
@@ -308,7 +342,34 @@ function StageBadge({ stage }: { stage: string | null }) {
   );
 }
 
-function MessageBubble({ msg, lead }: { msg: Message; lead: Lead | null }) {
+function messageTurnId(msg: Message): string {
+  return String(msg.message_id || msg.sender_id || msg.id || "");
+}
+
+function hasKnowledgeEvidence(msg: Message): boolean {
+  const sender = String(msg.sender_type || "").toLowerCase();
+  if (!isOutbound(msg) || sender === "human" || sender === "operator") return false;
+  const metadata = msg.metadata || {};
+  const envelope = metadata.knowledge_context || {};
+  return Boolean(
+    (Array.isArray(envelope.cards) && envelope.cards.length > 0)
+    || (Array.isArray(envelope.decisive_node_ids) && envelope.decisive_node_ids.length > 0)
+    || (Array.isArray(metadata.evidence_node_ids) && metadata.evidence_node_ids.length > 0)
+    || metadata.graph_version,
+  );
+}
+
+function MessageBubble({
+  msg,
+  lead,
+  selected = false,
+  onSelectEvidence,
+}: {
+  msg: Message;
+  lead: Lead | null;
+  selected?: boolean;
+  onSelectEvidence?: (messageId: string) => void;
+}) {
   const out = isOutbound(msg);
   const mediaUrl = extractMediaUrl(msg.metadata);
   const hasText = (msg.texto || "").trim().length > 0;
@@ -329,7 +390,21 @@ function MessageBubble({ msg, lead }: { msg: Message; lead: Lead | null }) {
     : "";
 
   return (
-    <div className={`flex flex-col gap-0.5 ${out ? "items-end" : "items-start"}`}>
+    <div
+      className={`flex flex-col gap-0.5 rounded-xl p-1 transition ${out ? "items-end" : "items-start"} ${selected ? "ring-2 ring-obs-violet/60 bg-obs-violet/5" : ""}`}
+      role={hasKnowledgeEvidence(msg) ? "button" : undefined}
+      tabIndex={hasKnowledgeEvidence(msg) ? 0 : undefined}
+      aria-label={hasKnowledgeEvidence(msg) ? "Mostrar conhecimentos usados nesta resposta" : undefined}
+      aria-pressed={hasKnowledgeEvidence(msg) ? selected : undefined}
+      onClick={() => hasKnowledgeEvidence(msg) && onSelectEvidence?.(messageTurnId(msg))}
+      onKeyDown={(event) => {
+        if (!hasKnowledgeEvidence(msg) || !onSelectEvidence) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelectEvidence(messageTurnId(msg));
+        }
+      }}
+    >
       <span className="text-[10px] px-1 text-obs-faint">{senderName}</span>
 
       <div
@@ -1075,19 +1150,171 @@ function KnowledgeDetail({
   );
 }
 
+function ContextCardButton({
+  card,
+  decisive,
+  changed,
+  onClick,
+}: {
+  card: ContextCard;
+  decisive: boolean;
+  changed: boolean;
+  onClick: () => void;
+}) {
+  const summary = extractEvidenceSummary(card.title, card.rendered_content);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full rounded-lg border border-black/10 bg-white/70 p-2.5 text-left transition hover:border-obs-violet/40 focus:outline-none focus:ring-2 focus:ring-obs-violet/40"
+    >
+      <div className="flex items-start gap-1.5">
+        <span className="mt-0.5 rounded border border-obs-violet/30 px-1 py-0.5 text-[9px] font-semibold uppercase text-obs-violet">
+          {card.node_type}
+        </span>
+        <span className="min-w-0 flex-1 text-xs font-medium leading-snug text-obs-text">{card.title}</span>
+        <ChevronRight size={11} className="mt-0.5 shrink-0 text-obs-faint" />
+      </div>
+      {summary && <p className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-obs-subtle">{summary}</p>}
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {decisive && <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] text-emerald-600">decisivo</span>}
+        {changed && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-600">alterado depois</span>}
+      </div>
+    </button>
+  );
+}
+
+function ContextCardModal({
+  card,
+  current,
+  canEdit,
+  personaSlug,
+  currentGraphVersion,
+  onClose,
+  onPublished,
+}: {
+  card: ContextCard;
+  current?: ContextCard;
+  canEdit: boolean;
+  personaSlug?: string;
+  currentGraphVersion?: number;
+  onClose: () => void;
+  onPublished: () => void;
+}) {
+  const live = current || card;
+  const changed = Boolean(current && current.content_checksum !== card.content_checksum);
+  const [editing, setEditing] = useState(false);
+  const [content, setContent] = useState(live.editable_content || "");
+  const [reason, setReason] = useState("Atualização pelo card de conhecimento da conversa");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    if (!personaSlug || !currentGraphVersion || !content.trim() || !reason.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api.publishContextCard(card.id, {
+        persona_slug: personaSlug,
+        content: content.trim(),
+        expected_version: currentGraphVersion,
+        reason: reason.trim(),
+        idempotency_key: crypto.randomUUID(),
+      });
+      setEditing(false);
+      onPublished();
+    } catch (err) {
+      setError(getErrorMessage(err, "Falha ao salvar e publicar."));
+      onPublished();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true" aria-labelledby="context-card-title" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-black/10 bg-white p-5 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-obs-violet">{card.node_type} · revisão {card.revision}</p>
+            <h2 id="context-card-title" className="mt-1 text-lg font-semibold text-obs-text">{card.title}</h2>
+            <p className="mt-1 break-all font-mono text-[10px] text-obs-faint">{card.id}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md border border-black/10 px-2 py-1 text-xs text-obs-subtle">Fechar</button>
+        </div>
+
+        <section className="mt-5">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-obs-faint">Conteúdo exato usado na resposta</p>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-black/10 bg-zinc-50 p-3 text-[11px] leading-relaxed text-obs-subtle">{card.rendered_content}</pre>
+        </section>
+
+        {changed && current && (
+          <section className="mt-4">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-600">Versão atual · v{current.graph_version}</p>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-amber-300/40 bg-amber-50 p-3 text-[11px] leading-relaxed text-obs-subtle">{current.rendered_content}</pre>
+          </section>
+        )}
+
+        {canEdit && personaSlug && currentGraphVersion && (
+          <section className="mt-4 rounded-lg border border-black/10 p-3">
+            {!editing ? (
+              <button type="button" onClick={() => setEditing(true)} className="rounded-md bg-obs-violet px-3 py-1.5 text-xs font-medium text-white">Editar versão atual</button>
+            ) : (
+              <div className="space-y-2">
+                <label className="block text-[10px] font-semibold uppercase text-obs-faint">Conteúdo editável</label>
+                <textarea value={content} onChange={(event) => setContent(event.target.value)} rows={8} className="w-full rounded-md border border-black/10 p-2 text-xs text-obs-text" />
+                <label className="block text-[10px] font-semibold uppercase text-obs-faint">Motivo da publicação</label>
+                <input value={reason} onChange={(event) => setReason(event.target.value)} className="w-full rounded-md border border-black/10 p-2 text-xs text-obs-text" />
+                {error && <p className="text-xs text-red-500">{error}</p>}
+                <div className="flex gap-2">
+                  <button type="button" onClick={save} disabled={saving || !content.trim() || !reason.trim()} className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">{saving ? "Publicando…" : "Salvar e publicar"}</button>
+                  <button type="button" onClick={() => setEditing(false)} disabled={saving} className="rounded-md border border-black/10 px-3 py-1.5 text-xs">Cancelar</button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        <section className="mt-4 grid gap-2 text-[11px] text-obs-subtle sm:grid-cols-2">
+          <p><span className="text-obs-faint">Fonte:</span> {card.source}</p>
+          <p><span className="text-obs-faint">Estado:</span> {card.status}</p>
+          <p><span className="text-obs-faint">Grafo:</span> v{card.graph_version}</p>
+          <p className="break-all"><span className="text-obs-faint">Checksum:</span> {card.content_checksum}</p>
+        </section>
+
+        {card.relations.length > 0 && (
+          <details className="mt-4 rounded-lg border border-black/10 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-obs-text">Relações · {card.relations.length}</summary>
+            <pre className="mt-2 overflow-auto whitespace-pre-wrap text-[10px] text-obs-subtle">{JSON.stringify(card.relations, null, 2)}</pre>
+          </details>
+        )}
+        <details className="mt-2 rounded-lg border border-black/10 p-3">
+          <summary className="cursor-pointer text-xs font-medium text-obs-text">Metadata técnica</summary>
+          <pre className="mt-2 overflow-auto whitespace-pre-wrap text-[10px] text-obs-subtle">{JSON.stringify({ projection_node_id: card.projection_node_id, chunk_refs: card.chunk_refs, path: card.path, selection_reason: card.selection_reason, ...card.technical_metadata }, null, 2)}</pre>
+        </details>
+      </div>
+    </div>
+  );
+}
+
 export function KnowledgeSidebar({
   ctx,
   loading,
   leadSelected,
+  canEdit = false,
+  onPublished = () => undefined,
 }: {
   ctx: ChatContext | null;
   loading: boolean;
   leadSelected: boolean;
+  canEdit?: boolean;
+  onPublished?: () => void;
 }) {
   const [expanded, setExpanded] = useState<ExpandedKnowledge>(null);
+  const [selectedCard, setSelectedCard] = useState<ContextCard | null>(null);
 
   // Clear expand state when ctx changes (e.g., switching leads)
-  useEffect(() => { setExpanded(null); }, [ctx]);
+  useEffect(() => { setExpanded(null); setSelectedCard(null); }, [ctx?.response?.message_id]);
 
   if (!leadSelected) {
     return (
@@ -1101,6 +1328,62 @@ export function KnowledgeSidebar({
     return <div className="p-4 text-xs text-obs-faint">Carregando conhecimento…</div>;
   }
   if (!ctx) return null;
+  if (ctx.used_cards !== undefined) {
+    const used = [...(ctx.used_cards || [])].sort((a, b) => a.position - b.position);
+    const decisive = new Set(ctx.decisive_node_ids || []);
+    const related = ctx.related_cards || [];
+    return (
+      <div className="h-full overflow-y-auto p-3">
+        <div className="mb-3 rounded-lg border border-black/10 bg-white/60 p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${ctx.mode === "exact" ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-700"}`}>
+              {ctx.mode === "exact" ? "espelho exato" : "evidência reconstruída"}
+            </span>
+            <span className="text-[10px] text-obs-faint">grafo v{ctx.graph_version || "?"}</span>
+          </div>
+          {ctx.response?.created_at && <p className="mt-1 text-[10px] text-obs-faint">Resposta de {formatTs(ctx.response.created_at)}</p>}
+        </div>
+
+        <KnowledgeSection icon={<Boxes size={11} />} title="Usado nesta resposta" count={used.length} showEmpty>
+          {used.length > 0 ? used.map((card) => {
+            const current = ctx.current_cards?.[card.id];
+            return (
+              <ContextCardButton
+                key={`${card.id}:${card.content_checksum}`}
+                card={card}
+                decisive={decisive.has(card.id)}
+                changed={Boolean(current && current.content_checksum !== card.content_checksum)}
+                onClick={() => setSelectedCard(card)}
+              />
+            );
+          }) : <p className="text-[11px] text-obs-faint">Nenhum card confirmado para esta resposta.</p>}
+        </KnowledgeSection>
+
+        <details className="mt-4 rounded-lg border border-black/10 bg-white/50 p-2.5">
+          <summary className="cursor-pointer text-[11px] font-medium text-obs-text">Ver relacionados · {related.length}</summary>
+          <p className="mt-1 text-[10px] text-obs-faint">Não usados nesta resposta.</p>
+          <div className="mt-2 space-y-1.5">
+            {related.map((card) => (
+              <ContextCardButton key={`related:${card.id}`} card={card} decisive={false} changed={false} onClick={() => setSelectedCard(card)} />
+            ))}
+          </div>
+        </details>
+
+        {selectedCard && (
+          <ContextCardModal
+            key={`${selectedCard.id}:${selectedCard.content_checksum}`}
+            card={selectedCard}
+            current={ctx.current_cards?.[selectedCard.id]}
+            canEdit={canEdit}
+            personaSlug={ctx.persona_slug}
+            currentGraphVersion={ctx.current_graph_version}
+            onClose={() => setSelectedCard(null)}
+            onPublished={onPublished}
+          />
+        )}
+      </div>
+    );
+  }
   if (ctx.operator_context) {
     const operator = ctx.operator_context;
     // Cap and rank by "used in the last decision" so the cards most useful
@@ -1369,6 +1652,8 @@ export function MessagesLayout({
   const [now, setNow] = useState(() => Date.now());
   const [knowledge, setKnowledge] = useState<ChatContext | null>(null);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [selectedResponseMessageId, setSelectedResponseMessageId] = useState<string | null>(null);
+  const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -1394,6 +1679,7 @@ export function MessagesLayout({
       setSelectedId((current) => (current !== null ? null : current));
       setMessages((current) => (current.length > 0 ? [] : current));
       setKnowledge((current) => (current !== null ? null : current));
+      setSelectedResponseMessageId(null);
       setMessagesError(null);
       setKnowledgeError(null);
       setSendError(null);
@@ -1506,6 +1792,7 @@ export function MessagesLayout({
     selectedIdRef.current = lead.id;
     setMessages((current) => (current.length > 0 ? [] : current));
     setKnowledge((current) => (current !== null ? null : current));
+    setSelectedResponseMessageId(null);
     previousLastMessageIdRef.current = null;
     stickToBottomRef.current = true;
     setDraft("");
@@ -1540,6 +1827,12 @@ export function MessagesLayout({
       if (t !== "agent" && t !== "human" && t !== "assistant" && t !== "ai") {
         return (m.texto || "").trim();
       }
+    }
+    return "";
+  }, [messages]);
+  const latestEvidenceResponseId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (hasKnowledgeEvidence(messages[index])) return messageTurnId(messages[index]);
     }
     return "";
   }, [messages]);
@@ -1618,11 +1911,14 @@ export function MessagesLayout({
             portalSlug!,
             selectedId,
             lastClientText || selectedLeadInterest,
+            12,
+            selectedResponseMessageId || undefined,
           )
         : api.knowledgeChatContext(
             selectedId,
             lastClientText || selectedLeadInterest,
             selectedLeadPersonaId,
+            selectedResponseMessageId || undefined,
           )
     )
       .then((ctx) => {
@@ -1639,7 +1935,7 @@ export function MessagesLayout({
         setKnowledgeLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isPortal, portalSlug, selectedId, selectedLead?.id, lastClientText, selectedLeadInterest, selectedLeadPersonaId]);
+  }, [isPortal, portalSlug, selectedId, selectedLead?.id, lastClientText, latestEvidenceResponseId, selectedLeadInterest, selectedLeadPersonaId, selectedResponseMessageId, knowledgeRefreshKey]);
 
   const refreshSelectedLead = useCallback(async (id: number) => {
     try {
@@ -2046,6 +2342,17 @@ export function MessagesLayout({
               key={msg.id}
               msg={msg}
               lead={selectedLead}
+              selected={Boolean(
+                knowledge?.response
+                && (
+                  knowledge.response.message_id === messageTurnId(msg)
+                  || String(knowledge.response.id || "") === String(msg.id)
+                )
+              )}
+              onSelectEvidence={(messageId) => {
+                setSelectedResponseMessageId(messageId);
+                setIsKnowledgeSidebarOpen(true);
+              }}
             />
           ))}
 
@@ -2122,8 +2429,17 @@ export function MessagesLayout({
         >
           <Boxes size={13} className="text-obs-violet" />
           <span className="text-xs font-semibold text-obs-text">Conhecimento</span>
+          {selectedResponseMessageId && (
+            <button
+              type="button"
+              onClick={() => setSelectedResponseMessageId(null)}
+              className="ml-auto rounded border border-obs-violet/30 px-1.5 py-0.5 text-[9px] text-obs-violet"
+            >
+              Acompanhar mais recente
+            </button>
+          )}
           {knowledgeError && (
-            <span className="ml-auto text-[10px] text-red-500 truncate">{knowledgeError}</span>
+            <span className={`${selectedResponseMessageId ? "" : "ml-auto"} text-[10px] text-red-500 truncate`}>{knowledgeError}</span>
           )}
           {knowledge?.query_terms && knowledge.query_terms.length > 0 && (
             <span className="text-[10px] text-obs-faint truncate">
@@ -2132,7 +2448,13 @@ export function MessagesLayout({
           )}
         </div>
         <div className="flex-1 overflow-hidden">
-          <KnowledgeSidebar ctx={knowledge} loading={knowledgeLoading} leadSelected={!!selectedLead} />
+          <KnowledgeSidebar
+            ctx={knowledge}
+            loading={knowledgeLoading}
+            leadSelected={!!selectedLead}
+            canEdit={canEdit}
+            onPublished={() => setKnowledgeRefreshKey((value) => value + 1)}
+          />
         </div>
       </aside>
       )}

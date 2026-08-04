@@ -85,7 +85,13 @@ def apply_operations(graph: GraphJson, operations: list[dict[str, Any]]) -> Grap
         elif op == "approve_node":
             if node_id not in nodes:
                 raise ValueError(f"node not found: {node_id}")
-            nodes[node_id].setdefault("lifecycle", {})["status"] = "approved"
+            lifecycle = nodes[node_id].setdefault("lifecycle", {})
+            lifecycle["status"] = "approved"
+            lifecycle["approved_at"] = datetime.now(timezone.utc).isoformat()
+            if operation.get("approved_by"):
+                lifecycle["approved_by"] = str(operation["approved_by"])
+            if operation.get("reason"):
+                nodes[node_id].setdefault("provenance", {})["reason"] = str(operation["reason"])
         elif op in {"archive_node", "remove_node"}:
             if node_id not in nodes:
                 raise ValueError(f"node not found: {node_id}")

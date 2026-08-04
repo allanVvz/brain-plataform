@@ -19,6 +19,7 @@ from schemas.conversation import (
     ConversationRoute,
 )
 from services import (
+    context_cards as context_cards_service,
     graph_json_v2_store,
     lead_qualification,
     supabase_client,
@@ -224,7 +225,7 @@ _AGENTIC_SAFETY_INSTRUCTIONS = (
 )
 
 
-def build_system_prompt(graph: Any) -> str:
+def build_system_prompt(graph: Any, cards: list[Any] | None = None) -> str:
     """Compose this persona's n8n agentic system prompt from its own graph.
 
     Reads generic node types (persona, tone, rule) present in ANY
@@ -242,17 +243,32 @@ def build_system_prompt(graph: Any) -> str:
     persona_name = (persona_node.label if persona_node else None) or "a empresa"
     summary = str(persona_data.get("summary") or "").strip()
 
-    tone_text = "\n\n".join(
-        str(node.data.get("markdown") or node.data.get("summary") or "").strip()
-        for node in graph.nodes
-        if node.node_type == "tone" and ((node.data or {}).get("markdown") or (node.data or {}).get("summary"))
-    ).strip()
-
-    rule_text = "\n\n".join(
-        str(node.data.get("markdown") or node.data.get("summary") or "").strip()
-        for node in graph.nodes
-        if node.node_type == "rule" and ((node.data or {}).get("markdown") or (node.data or {}).get("summary"))
-    ).strip()
+    if cards is not None:
+        persona_name = "a empresa"
+        summary = ""
+        tone_text = "\n\n".join(
+            str(card.rendered_content).strip()
+            for card in cards if card.node_type == "tone"
+        ).strip()
+        rule_text = "\n\n".join(
+            str(card.rendered_content).strip()
+            for card in cards if card.node_type == "rule"
+        ).strip()
+        persona_card = next((card for card in cards if card.node_type == "persona"), None)
+        if persona_card:
+            persona_name = persona_card.title
+            summary = persona_card.rendered_content
+    else:
+        tone_text = "\n\n".join(
+            str(node.data.get("markdown") or node.data.get("summary") or "").strip()
+            for node in graph.nodes
+            if node.node_type == "tone" and ((node.data or {}).get("markdown") or (node.data or {}).get("summary"))
+        ).strip()
+        rule_text = "\n\n".join(
+            str(node.data.get("markdown") or node.data.get("summary") or "").strip()
+            for node in graph.nodes
+            if node.node_type == "rule" and ((node.data or {}).get("markdown") or (node.data or {}).get("summary"))
+        ).strip()
 
     lines = [
         f"Voce e o agente de atendimento (SDR) de {persona_name}.",
@@ -534,7 +550,6 @@ def build_context(
             "_previous_graph_checksum": prior_checksum,
         }
     cart.setdefault("_lead_stage", lead.get("stage") or "novo")
-    nodes = _relevant_nodes(graph, message)
     # Golden Dataset RAG (knowledge_rag_entries/knowledge_rag_chunks,
     # persona-scoped, approved/validated only) — a real retrieval layer
     # distinct from rag_nodes' in-memory graph-node keyword filter above.
@@ -579,6 +594,37 @@ def build_context(
             or "agent"
         ),
     )
+    try:
+        projection_nodes, _projection_edges = supabase_client.list_all_knowledge_graph(
+            persona_id=str(persona.get("id") or lead.get("persona_id") or ""),
+            limit_nodes=5000,
+        )
+    except Exception as exc:  # projection UUIDs are optional trace metadata
+        logger.warning("list_all_knowledge_graph failed: %s", exc)
+        projection_nodes = []
+    cards = context_cards_service.resolve_cards(
+        graph=graph,
+        graph_version=version,
+        graph_checksum=checksum,
+        query=message,
+        rag_chunks=rag_chunks,
+        projection_nodes=projection_nodes,
+        max_cards=12,
+        max_tokens=8000,
+    )
+    if not cards:
+        context_cards_service.emit_metric(
+            "knowledge_context.empty",
+            persona_id=persona.get("id"),
+            lead_ref=lead_ref,
+            payload={"persona_slug": persona_slug, "graph_version": version},
+        )
+    graph_nodes_by_id = {node.id: node for node in graph.nodes}
+    nodes = [graph_nodes_by_id[card.id] for card in cards if card.id in graph_nodes_by_id]
+    try:
+        system_prompt = build_system_prompt(graph, cards)
+    except Exception as exc:
+        logger.warning("build_system_prompt from context cards failed: %s", exc)
     return ConversationContext(
         persona_slug=persona_slug,
         agent_slug=agent_slug,
@@ -600,6 +646,7 @@ def build_context(
         ],
         rag_paths=[_node_path(graph, node.id) for node in nodes],
         rag_chunks=rag_chunks,
+        context_cards=cards,
         system_prompt=system_prompt,
         available_services=available_services,
     )
@@ -853,6 +900,49 @@ def _decide_appointment(
     return decision, response
 
 
+def _ground_decision_in_context_cards(
+    context: ConversationContext,
+    graph: Any,
+    decision: ConversationDecision,
+    response: AgentResponse,
+) -> tuple[ConversationDecision, AgentResponse]:
+    """Keep declared evidence inside the exact package carried by the turn."""
+    allowed = {card.id for card in context.context_cards}
+    if not allowed:  # compatibility for older internal callers/tests
+        return decision, response
+    by_id = {node.id: node for node in graph.nodes}
+    decisive_types = {"product", "offer", "faq", "copy", "rule"}
+    unavailable_decisive = [
+        node_id for node_id in decision.evidence_node_ids
+        if node_id in by_id
+        and by_id[node_id].node_type in decisive_types
+        and node_id not in allowed
+    ]
+    filtered = [node_id for node_id in decision.evidence_node_ids if node_id in allowed]
+    if unavailable_decisive:
+        fallback_decision = decision.model_copy(
+            update={
+                "route": ConversationRoute.HUMAN,
+                "confidence": 0.0,
+                "handoff_reason": "evidence_outside_context_package",
+                "evidence_node_ids": filtered,
+            }
+        )
+        fallback_response = response.model_copy(
+            update={
+                "reply_text": "Vou encaminhar para a equipe confirmar essa informação.",
+                "role": ConversationRoute.HUMAN,
+                "handoff_required": True,
+                "evidence_node_ids": filtered,
+            }
+        )
+        return fallback_decision, fallback_response
+    return (
+        decision.model_copy(update={"evidence_node_ids": filtered}),
+        response.model_copy(update={"evidence_node_ids": filtered}),
+    )
+
+
 def decide(
     context: ConversationContext,
     *,
@@ -888,13 +978,16 @@ def decide(
     current_stage = str(state.pop("_lead_stage", "novo"))
     graph_changed = bool(state.pop("_graph_changed", False))
     if business_model == "appointment":
-        return _decide_appointment(
+        appointment_decision, appointment_response = _decide_appointment(
             context,
             graph,
             graph_changed=graph_changed,
             current_stage=current_stage,
             state=state,
             message=message,
+        )
+        return _ground_decision_in_context_cards(
+            context, graph, appointment_decision, appointment_response
         )
     catalog = catalog_from_graph(graph)
     engine = DeterministicSDR(catalog)
@@ -1049,7 +1142,7 @@ def decide(
         cart_state=state,
         handoff_required=route == ConversationRoute.HUMAN,
     )
-    return decision, response
+    return _ground_decision_in_context_cards(context, graph, decision, response)
 
 
 _UNSAFE_CONFIRMATION_VERB = re.compile(
@@ -1076,6 +1169,22 @@ def _reply_confirms_price_or_schedule(text: str | None) -> bool:
     if not _UNSAFE_CONFIRMATION_VERB.search(text):
         return False
     return bool(_UNSAFE_MONEY_TOKEN.search(text) or _UNSAFE_SCHEDULE_TOKEN.search(text))
+
+
+def _knowledge_context_envelope(
+    context: ConversationContext,
+    decisive_node_ids: list[str],
+) -> dict[str, Any]:
+    """Serialize the exact immutable card package used for this response."""
+    return {
+        "contract_version": 1,
+        "mode": "exact",
+        "graph_version": context.graph_version,
+        "graph_checksum": context.graph_checksum,
+        "decisive_node_ids": list(dict.fromkeys(decisive_node_ids)),
+        "cards": [card.model_dump(mode="json") for card in context.context_cards],
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def commit(
@@ -1167,6 +1276,10 @@ def commit(
 
     if expected_decision_owner and not inbound_buffer_id:
         raise RuntimeError("inbound buffer id is required for a decision commit")
+    knowledge_context = _knowledge_context_envelope(
+        context,
+        decision.evidence_node_ids,
+    )
     commit_claim = None
     if inbound_buffer_id:
         commit_claim = supabase_client.claim_conversation_commit(
@@ -1218,6 +1331,7 @@ def commit(
             "evidence_node_ids": decision.evidence_node_ids,
             "graph_version": context.graph_version,
             "graph_checksum": context.graph_checksum,
+            "knowledge_context": knowledge_context,
             "qualification": (lead.get("metadata") or {}).get("qualification") or {},
             "stage": lead.get("stage") or decision.lead_stage,
         }
@@ -1256,6 +1370,7 @@ def commit(
             "last_intent": decision.intent,
             "last_route": decision.route.value,
             "evidence_node_ids": decision.evidence_node_ids,
+            "knowledge_context": knowledge_context,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },
     }
@@ -1321,6 +1436,7 @@ def commit(
                 "role": response.role.value,
                 "intent": decision.intent,
                 "evidence_node_ids": decision.evidence_node_ids,
+                "knowledge_context": knowledge_context,
             },
             "input": {"messages": context.messages[-20:]},
             "output": {
@@ -1354,6 +1470,7 @@ def commit(
                 "graph_version": context.graph_version,
                 "graph_checksum": context.graph_checksum,
                 "evidence_node_ids": decision.evidence_node_ids,
+                "knowledge_context": knowledge_context,
             },
         )
         buffer = {
@@ -1396,6 +1513,7 @@ def commit(
         "evidence_node_ids": decision.evidence_node_ids,
         "graph_version": context.graph_version,
         "graph_checksum": context.graph_checksum,
+        "knowledge_context": knowledge_context,
         "qualification": qualification,
         "stage": qualified_stage,
     }
