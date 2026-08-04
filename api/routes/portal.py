@@ -74,6 +74,8 @@ class PortalCampaignPreviewBody(BaseModel):
     provider: str = "meta_cloud"
     template_name: str | None = None
     template_language: str = "pt_BR"
+    template_id: str | None = None
+    send_mode: str | None = None
     message: str | None = None
     variables: dict[str, Any] = {}
     assets: list[dict[str, Any]] = []
@@ -92,6 +94,22 @@ class PortalCampaignStatusBody(BaseModel):
     expected_revision: int
     idempotency_key: str
     reason: str
+
+
+class PortalCampaignSendBody(BaseModel):
+    expected_revision: int
+    idempotency_key: str
+    reason: str | None = None
+
+
+class PortalTemplateCreateBody(BaseModel):
+    persona_slug: str
+    provider: str
+    template_key: str
+    body: str
+    meta_template_name: str | None = None
+    meta_template_language: str = "pt_BR"
+    meta_template_category: str = "MARKETING"
 
 
 def _require_internal_admin(request: Request) -> dict[str, Any]:
@@ -470,11 +488,12 @@ def portal_campaign_provider_health(request: Request, persona_slug: str = Query(
         }
     provider = "meta_cloud" if mock_enabled else binding.get("provider")
     status = "mock" if mock_enabled else str(binding.get("connection_status") or "unknown").lower()
+    ready = True if mock_enabled else campaigns_service.resolve_provider_ready(binding, provider)
     return {
         "provider": provider,
-        "ready": campaigns_service.meta_provider_ready(binding),
+        "ready": ready,
         "status": status,
-        "campaigns_enabled": rollout_enabled and provider == "meta_cloud",
+        "campaigns_enabled": rollout_enabled and provider in {"meta_cloud", "evolution_baileys"},
         "rollout_one_enabled": rollout_enabled,
         "mock": mock_enabled,
     }
@@ -535,6 +554,33 @@ def portal_cancel_campaign(campaign_id: str, body: PortalCampaignStatusBody, req
         idempotency_key=body.idempotency_key, reason=body.reason,
         actor_user_id=auth_service.current_user(request).get("id"),
     )
+
+
+@router.post("/campaigns/{campaign_id}/send")
+def portal_send_campaign(campaign_id: str, body: PortalCampaignSendBody, request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request, "edit")
+    detail = _campaign_for_persona(campaign_id, persona["id"])
+    if detail["campaign"].get("status") not in {"draft", "validated", "running"}:
+        raise HTTPException(409, "Campanha nao pode ser enviada neste estado.")
+    return campaigns_service.send_campaign(
+        campaign_id, expected_revision=body.expected_revision,
+        idempotency_key=body.idempotency_key, reason=body.reason,
+        actor_user_id=auth_service.current_user(request).get("id"),
+    )
+
+
+@router.get("/templates")
+def portal_list_templates(request: Request, persona_slug: str = Query(...), provider: str = Query(...)):
+    persona = _persona(persona_slug, request)
+    return campaigns_service.list_message_templates(persona["id"], provider)
+
+
+@router.post("/templates")
+def portal_create_template(body: PortalTemplateCreateBody, request: Request):
+    persona = _persona(body.persona_slug, request, "edit")
+    user = auth_service.current_user(request)
+    payload = {**body.model_dump(exclude={"persona_slug"}), "persona_id": persona["id"]}
+    return campaigns_service.create_message_template(payload, actor_user_id=user.get("id"))
 
 
 @router.get("/pipeline")

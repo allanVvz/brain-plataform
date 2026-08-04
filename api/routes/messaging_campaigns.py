@@ -19,9 +19,11 @@ class CampaignPreviewBody(BaseModel):
     campaign_kind: Literal["consent_request", "promotional"]
     import_batch_ids: list[str] = Field(min_length=1)
     audience_id: str
-    provider: Literal["meta_cloud"] = "meta_cloud"
+    provider: Literal["meta_cloud", "evolution_baileys"] = "meta_cloud"
     template_name: str | None = None
     template_language: str = "pt_BR"
+    template_id: str | None = None
+    send_mode: str | None = None
     message: str | None = None
     variables: dict[str, Any] = Field(default_factory=dict)
     assets: list[dict[str, Any]] = Field(default_factory=list)
@@ -39,6 +41,25 @@ class CampaignStatusBody(BaseModel):
     expected_revision: int = Field(gt=0)
     idempotency_key: str = Field(min_length=8, max_length=200)
     reason: str = Field(min_length=3, max_length=500)
+
+
+class CampaignSendBody(BaseModel):
+    expected_revision: int = Field(gt=0)
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    # Required for Meta sends, enforced in campaigns_service.send_campaign
+    # (can't be conditionally required at the schema level since it depends
+    # on the revision's provider, which lives in the DB).
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class MessageTemplateCreateBody(BaseModel):
+    persona_id: str
+    provider: Literal["meta_cloud", "evolution_baileys"]
+    template_key: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1)
+    meta_template_name: str | None = None
+    meta_template_language: str = "pt_BR"
+    meta_template_category: str = "MARKETING"
 
 
 def _assert_campaign_access(request: Request, campaign_id: str, capability: str = "view") -> dict:
@@ -115,6 +136,33 @@ def cancel_campaign(campaign_id: str, body: CampaignStatusBody, request: Request
     )
 
 
+@router.post("/campaigns/{campaign_id}/send")
+def send_campaign(campaign_id: str, body: CampaignSendBody, request: Request):
+    detail = _assert_campaign_access(request, campaign_id, "edit")
+    if detail["campaign"].get("status") not in {"draft", "validated", "running"}:
+        raise HTTPException(409, "Campanha nao pode ser enviada neste estado.")
+    return campaigns_service.send_campaign(
+        campaign_id,
+        expected_revision=body.expected_revision,
+        idempotency_key=body.idempotency_key,
+        reason=body.reason,
+        actor_user_id=auth_service.current_user(request).get("id"),
+    )
+
+
+@router.get("/templates")
+def list_templates(request: Request, persona_id: str = Query(...), provider: str = Query(...)):
+    auth_service.assert_persona_capability(request, "view", persona_id=persona_id)
+    return campaigns_service.list_message_templates(persona_id, provider)
+
+
+@router.post("/templates")
+def create_template(body: MessageTemplateCreateBody, request: Request):
+    auth_service.assert_persona_capability(request, "edit", persona_id=body.persona_id)
+    user = auth_service.current_user(request)
+    return campaigns_service.create_message_template(body.model_dump(), actor_user_id=user.get("id"))
+
+
 @router.get("/provider-health")
 def provider_health(request: Request, persona_id: str = Query(...)):
     auth_service.assert_persona_capability(request, "view", persona_id=persona_id)
@@ -129,12 +177,12 @@ def provider_health(request: Request, persona_id: str = Query(...)):
         }
     provider = "meta_cloud" if mock_enabled else binding.get("provider")
     status = "mock" if mock_enabled else str(binding.get("connection_status") or "unknown").lower()
+    ready = True if mock_enabled else campaigns_service.resolve_provider_ready(binding, provider)
     return {
         "provider": provider,
-        "ready": campaigns_service.meta_provider_ready(binding),
+        "ready": ready,
         "status": status,
-        "campaigns_enabled": rollout_enabled and provider == "meta_cloud",
+        "campaigns_enabled": rollout_enabled and provider in {"meta_cloud", "evolution_baileys"},
         "rollout_one_enabled": rollout_enabled,
-        "evolution_experimental": provider == "evolution_baileys",
         "mock": mock_enabled,
     }

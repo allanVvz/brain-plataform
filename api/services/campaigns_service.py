@@ -1,8 +1,9 @@
-"""Campaign delivery-one domain service.
+"""Campaign delivery domain service.
 
 The service deliberately separates policy resolution, consent resolution and
-recipient eligibility. Sending is not enabled here; delivery two will call the
-same eligibility functions again immediately before admitting an outbox row.
+recipient eligibility. `send_campaign` (delivery two) re-runs the same
+eligibility function again, live, immediately before admitting each outbox
+row, rather than trusting the frozen preview.
 """
 from __future__ import annotations
 
@@ -12,12 +13,12 @@ import os
 import re
 import uuid
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from fastapi import HTTPException
 
-from services import graph_json_v2_store, supabase_client
+from services import event_emitter, graph_json_v2_store, supabase_client, whatsapp_outbox
 
 
 DEFAULT_CONTACT_POLICY: dict[str, Any] = {
@@ -80,6 +81,26 @@ def meta_provider_ready(binding: dict[str, Any] | None) -> bool:
         and binding.get("provider_secret_ciphertext")
         and binding.get("whatsapp_phone_number_id")
     )
+
+
+def evolution_provider_ready(binding: dict[str, Any] | None) -> bool:
+    if not binding or binding.get("provider") != "evolution_baileys":
+        return False
+    return bool(
+        str(binding.get("connection_status") or "").lower() in {"connected", "open"}
+        and binding.get("provider_secret_ciphertext")
+        and binding.get("provider_instance_key")
+    )
+
+
+def resolve_provider_ready(binding: dict[str, Any] | None, provider: str) -> bool:
+    """Dispatches readiness by provider so Evolution is a normal, first-class
+    option once its binding is connected — not a separate/limited mode."""
+    if provider == "meta_cloud":
+        return meta_provider_ready(binding)
+    if provider == "evolution_baileys":
+        return evolution_provider_ready(binding)
+    return False
 
 
 def _now_iso() -> str:
@@ -317,6 +338,160 @@ def evaluate_recipient_eligibility(
     return True, None, "none", "valid"
 
 
+EVOLUTION_DELIVERY_CAVEAT = (
+    "Envios por Evolution podem aparecer como 'enviado' mesmo sem confirmacao "
+    "real de entrega no aparelho, por uma limitacao conhecida do WhatsApp/"
+    "Baileys (identidades @lid). Ver docs/architecture/WHATSAPP_N8N_RUNTIME.md."
+)
+
+
+def has_active_conversation_window(persona_id: str, lead_id: int, hours: int = 24) -> bool:
+    """Heuristic proxy for Meta's 24h customer-service window.
+
+    Meta doesn't expose real window state via an API, so this only checks for
+    a recent inbound message from this lead. A false positive here still
+    fails safely: the provider call itself rejects a plain-text send outside
+    the real window with a genuine Graph API error.
+    """
+    messages = supabase_client.get_messages(str(lead_id), limit=20) or []
+    for message in reversed(messages):
+        if message.get("direction") != "inbound":
+            continue
+        created_at = message.get("created_at")
+        if not created_at:
+            return False
+        try:
+            sent_at = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return (datetime.now(timezone.utc) - sent_at) <= timedelta(hours=hours)
+    return False
+
+
+def _build_meta_components(template_row: dict[str, Any], variables: dict[str, Any]) -> list[dict[str, Any]]:
+    components: list[dict[str, Any]] = []
+    for component in template_row.get("meta_component_schema") or []:
+        placeholders = component.get("placeholders") or []
+        if not placeholders:
+            continue
+        components.append({
+            "type": component.get("type") or "body",
+            "parameters": [{"type": "text", "text": str(variables.get(name, ""))} for name in placeholders],
+        })
+    return components
+
+
+def _render_evolution_body(template_row: dict[str, Any], variables: dict[str, Any]) -> str:
+    body = str(template_row.get("evolution_body_template") or "")
+    for key, value in variables.items():
+        body = body.replace("{{" + str(key) + "}}", str(value))
+    return body
+
+
+def resolve_send_payload(
+    *,
+    provider: str,
+    send_mode: str,
+    revision_content: dict[str, Any],
+    template: dict[str, Any] | None,
+    lead: dict[str, Any],
+    persona_id: str,
+) -> dict[str, Any]:
+    """Decide template vs. plain text for one recipient.
+
+    Meta: plain text is only ever allowed when explicitly flagged as a
+    controlled test AND there's evidence of an active conversation window for
+    this specific lead; otherwise an approved template is mandatory.
+    Evolution has no Meta-style approval/window constraint — it sends the
+    template's rendered body (if attached) or the frozen reference message.
+    """
+    if provider != "meta_cloud":
+        if template:
+            variables = dict(revision_content.get("variables") or {})
+            variables.setdefault("nome", lead.get("nome") or lead.get("name") or "")
+            text = _render_evolution_body(template, variables).strip()
+        else:
+            text = str(revision_content.get("message") or "").strip()
+        if not text:
+            return {"mode": "blocked", "reason": "message_required"}
+        return {"mode": "text", "text": text}
+
+    if template:
+        variables = dict(revision_content.get("variables") or {})
+        variables.setdefault("nome", lead.get("nome") or lead.get("name") or "")
+        components = _build_meta_components(template, variables)
+        preview_text = str(revision_content.get("message") or template.get("meta_template_name") or "")
+        return {
+            "mode": "template",
+            "text": preview_text,
+            "template": {
+                "name": template.get("meta_template_name"),
+                "language": template.get("meta_template_language") or "pt_BR",
+                "components": components,
+            },
+        }
+
+    if send_mode == "controlled_test" and has_active_conversation_window(persona_id, int(lead["id"])):
+        text = str(revision_content.get("message") or "").strip()
+        if not text:
+            return {"mode": "blocked", "reason": "message_required"}
+        return {"mode": "text", "text": text}
+
+    return {"mode": "blocked", "reason": "template_required"}
+
+
+def _extract_placeholders(text: str) -> list[str]:
+    seen: list[str] = []
+    for match in re.findall(r"\{\{\s*(\w+)\s*\}\}", text or ""):
+        if match not in seen:
+            seen.append(match)
+    return seen
+
+
+def list_message_templates(persona_id: str, provider: str) -> list[dict[str, Any]]:
+    return _rows(
+        supabase_client.get_client().table("message_templates").select("*")
+        .eq("persona_id", persona_id).eq("provider", provider).eq("status", "active")
+        .order("created_at", desc=True).limit(200)
+    )
+
+
+def create_message_template(payload: dict[str, Any], *, actor_user_id: str | None) -> dict[str, Any]:
+    persona_id = str(payload.get("persona_id") or "")
+    provider = str(payload.get("provider") or "")
+    template_key = str(payload.get("template_key") or "").strip()
+    body = str(payload.get("body") or "").strip()
+    if not persona_id or provider not in {"meta_cloud", "evolution_baileys"} or not template_key or not body:
+        raise HTTPException(422, "persona_id, provider, template_key e corpo do template sao obrigatorios.")
+
+    row: dict[str, Any] = {
+        "persona_id": persona_id,
+        "provider": provider,
+        "template_key": template_key,
+        "status": "active",
+        "created_by_user_id": _uuid_or_none(actor_user_id),
+    }
+    placeholders = _extract_placeholders(body)
+    if provider == "meta_cloud":
+        name = str(payload.get("meta_template_name") or "").strip()
+        if not name:
+            raise HTTPException(422, "Nome do template aprovado na Meta e obrigatorio.")
+        row.update({
+            "meta_template_name": name,
+            "meta_template_language": str(payload.get("meta_template_language") or "pt_BR").strip(),
+            "meta_template_category": str(payload.get("meta_template_category") or "MARKETING").strip(),
+            "meta_component_schema": [{"type": "body", "placeholders": placeholders}] if placeholders else [],
+        })
+    else:
+        row.update({
+            "evolution_body_template": body,
+            "evolution_variables": placeholders,
+        })
+    result = supabase_client.get_client().table("message_templates").insert(row).execute()
+    data = getattr(result, "data", None)
+    return data[0] if isinstance(data, list) and data else row
+
+
 def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:
     persona_id = str(payload.get("persona_id") or "")
     audience_id = str(payload.get("audience_id") or "")
@@ -355,10 +530,10 @@ def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:
         purpose=purpose,
     )
     provider = str(payload.get("provider") or "meta_cloud")
-    if provider != "meta_cloud":
-        raise HTTPException(422, "A Entrega 1 aceita apenas Meta; Evolution permanece experimental.")
+    if provider not in {"meta_cloud", "evolution_baileys"}:
+        raise HTTPException(422, "Provider de campanha invalido.")
     binding = supabase_client.get_active_whatsapp_binding(persona_id)
-    provider_ready = meta_provider_ready(binding)
+    provider_ready = resolve_provider_ready(binding, provider)
 
     leads, batches_by_lead = _campaign_leads(import_ids)
     lead_ids = [int(row["id"]) for row in leads]
@@ -424,6 +599,8 @@ def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:
         "content": {
             "template_name": payload.get("template_name"),
             "template_language": payload.get("template_language") or "pt_BR",
+            "template_id": payload.get("template_id"),
+            "send_mode": payload.get("send_mode") or "",
             "message": payload.get("message"),
             "variables": payload.get("variables") or {},
             "assets": payload.get("assets") or [],
@@ -482,6 +659,8 @@ def create_campaign_draft(payload: dict[str, Any], *, actor_user_id: str | None)
     content_snapshot = {
         "template_name": payload.get("template_name"),
         "template_language": payload.get("template_language") or "pt_BR",
+        "template_id": payload.get("template_id"),
+        "send_mode": payload.get("send_mode") or "",
         "message": payload.get("message"),
         "variables": payload.get("variables") or {},
         "assets": payload.get("assets") or [],
@@ -504,7 +683,7 @@ def create_campaign_draft(payload: dict[str, Any], *, actor_user_id: str | None)
         "campaign_kind": preview["campaign_kind"],
         "purpose": preview["purpose"],
         "channel": "whatsapp",
-        "provider": "meta_cloud",
+        "provider": preview["provider"],
         "audience_id": preview["audience"]["id"],
         "current_revision": 1,
         "idempotency_key": idempotency_key,
@@ -521,7 +700,7 @@ def create_campaign_draft(payload: dict[str, Any], *, actor_user_id: str | None)
         "purpose": preview["purpose"],
         "objective": payload.get("objective"),
         "channel": "whatsapp",
-        "provider": "meta_cloud",
+        "provider": preview["provider"],
         "graph_version": graph_version,
         "graph_checksum": graph_checksum,
         "audience": audience_snapshot,
@@ -540,7 +719,7 @@ def create_campaign_draft(payload: dict[str, Any], *, actor_user_id: str | None)
         "purpose": preview["purpose"],
         "objective": payload.get("objective"),
         "channel": "whatsapp",
-        "provider": "meta_cloud",
+        "provider": preview["provider"],
         "graph_version": graph_version,
         "graph_checksum": graph_checksum,
         "audience_snapshot": audience_snapshot,
@@ -550,6 +729,7 @@ def create_campaign_draft(payload: dict[str, Any], *, actor_user_id: str | None)
         "revision_checksum": _canonical_checksum(revision_snapshot),
         "status": "draft",
         "created_by_user_id": database_actor_id,
+        "template_id": payload.get("template_id") or None,
         "reason": reason,
         "created_at": now,
     }
@@ -648,7 +828,31 @@ def get_campaign_detail(campaign_id: str) -> dict[str, Any]:
         if import_ids:
             imports = _rows(client.table("lead_import_batches").select("*").in_("id", import_ids).limit(len(import_ids)))
     reasons = Counter(row.get("blocked_reason") for row in recipients if row.get("blocked_reason"))
-    return {
+    provider = (revision or {}).get("provider")
+    if recipients:
+        send_rows = _rows(
+            client.table("lead_buffer")
+            .select("campaign_recipient_id,status,external_message_id,last_error,updated_at,created_at")
+            .eq("campaign_id", campaign_id)
+            .eq("campaign_revision", campaign.get("current_revision") or 1)
+            .order("created_at", desc=True)
+            .limit(100000)
+        )
+        latest_send: dict[str, dict[str, Any]] = {}
+        for row in send_rows:
+            key = str(row.get("campaign_recipient_id") or "")
+            if key and key not in latest_send:
+                latest_send[key] = row
+        for row in recipients:
+            send_row = latest_send.get(str(row["id"]))
+            row["send"] = {
+                "provider": provider,
+                "status": send_row.get("status"),
+                "external_message_id": send_row.get("external_message_id"),
+                "error": send_row.get("last_error"),
+                "attempted_at": send_row.get("updated_at") or send_row.get("created_at"),
+            } if send_row else None
+    result = {
         "campaign": campaign,
         "revision": revision,
         "imports": imports,
@@ -661,6 +865,9 @@ def get_campaign_detail(campaign_id: str) -> dict[str, Any]:
         "blocked_reasons": dict(sorted(reasons.items())),
         "recipients": recipients,
     }
+    if provider == "evolution_baileys":
+        result["delivery_confidence_caveat"] = EVOLUTION_DELIVERY_CAVEAT
+    return result
 
 
 def update_campaign_status(
@@ -690,4 +897,179 @@ def update_campaign_status(
         "p_reason": reason,
         "p_actor_user_id": _uuid_or_none(actor_user_id),
     }).execute()
+    if status == "cancelled":
+        # Recipients that never got admitted stay visibly excluded; anything
+        # already 'queued' has a real outbox row and follows the outbox's own
+        # lifecycle instead (never force-cancelled, same as 1:1 conversation
+        # sends today).
+        supabase_client.get_client().table("campaign_recipients").update({
+            "sequence_status": "cancelled",
+        }).eq("campaign_id", campaign_id).eq(
+            "campaign_revision", expected_revision
+        ).eq("sequence_status", "eligible").execute()
+    return get_campaign_detail(campaign_id)
+
+
+def _mark_recipient_send_failed(recipient_id: str, blocked_reason: str) -> None:
+    supabase_client.get_client().table("campaign_recipients").update({
+        "sequence_status": "send_failed",
+        "blocked_reason": blocked_reason,
+    }).eq("id", recipient_id).execute()
+
+
+def send_campaign(
+    campaign_id: str,
+    *,
+    expected_revision: int,
+    idempotency_key: str,
+    reason: str | None,
+    actor_user_id: str | None,
+) -> dict[str, Any]:
+    if not idempotency_key:
+        raise HTTPException(422, "idempotency_key e obrigatorio.")
+    detail = get_campaign_detail(campaign_id)
+    campaign = detail["campaign"]
+    revision = detail["revision"]
+    if not revision:
+        raise HTTPException(409, "Campanha sem revisao congelada.")
+    if int(campaign.get("current_revision") or 1) != int(expected_revision):
+        raise HTTPException(409, "A campanha foi alterada; recarregue antes de continuar.")
+    if campaign.get("status") not in {"draft", "validated", "running"}:
+        raise HTTPException(409, "Campanha nao esta pronta para envio.")
+
+    provider = str(revision.get("provider") or "meta_cloud")
+    if provider not in {"meta_cloud", "evolution_baileys"}:
+        raise HTTPException(422, "Provider de campanha invalido.")
+
+    clean_reason = str(reason or "").strip()
+    if provider == "meta_cloud" and not clean_reason:
+        raise HTTPException(422, "reason e obrigatorio para envio via Meta.")
+
+    persona_id = str(campaign["persona_id"])
+    binding = supabase_client.get_active_whatsapp_binding(persona_id)
+    if not resolve_provider_ready(binding, provider):
+        raise HTTPException(409, "Canal de mensageria desta persona nao esta pronto para envio.")
+
+    content = revision.get("content_snapshot") or {}
+    send_mode = str(content.get("send_mode") or "")
+    template_row: dict[str, Any] | None = None
+    template_id = revision.get("template_id")
+    if template_id:
+        rows = _rows(
+            supabase_client.get_client().table("message_templates").select("*")
+            .eq("id", template_id).limit(1)
+        )
+        template_row = rows[0] if rows else None
+
+    audience_id = str(revision.get("audience_id") or "")
+    campaign_kind = str(revision.get("campaign_kind") or "consent_request")
+    purpose = str(revision.get("purpose") or "")
+
+    client = supabase_client.get_client()
+    recipients = _rows(
+        client.table("campaign_recipients").select("*")
+        .eq("campaign_id", campaign_id)
+        .eq("campaign_revision", campaign.get("current_revision") or 1)
+        .eq("sequence_status", "eligible")
+        .limit(100000)
+    )
+    if not recipients:
+        raise HTTPException(422, "Nenhum destinatario elegivel para envio.")
+
+    lead_ids = [int(row["lead_id"]) for row in recipients]
+    leads_by_id: dict[int, dict[str, Any]] = {}
+    for group in _chunks(lead_ids):
+        for lead in _rows(client.table("leads").select("*").in_("id", group).limit(len(group))):
+            leads_by_id[int(lead["id"])] = lead
+    memberships = _semantic_membership_map(persona_id, lead_ids)
+    consents = _latest_consents(persona_id=persona_id, lead_ids=lead_ids, channel="whatsapp", purpose=purpose)
+
+    queued = 0
+    failed = 0
+    for recipient in recipients:
+        lead_id = int(recipient["lead_id"])
+        lead = leads_by_id.get(lead_id)
+        if not lead:
+            _mark_recipient_send_failed(recipient["id"], "lead_not_found")
+            failed += 1
+            continue
+        consent_status, _consent_id = resolve_applicable_consent(consents, lead_id)
+        eligible, block_reason, _suppression, _contact_status = evaluate_recipient_eligibility(
+            lead=lead,
+            selected_audience_id=audience_id,
+            semantic_audience_id=memberships.get(lead_id),
+            campaign_kind=campaign_kind,
+            consent_status=consent_status,
+            provider_ready=True,
+            persona_id=persona_id,
+        )
+        if not eligible:
+            _mark_recipient_send_failed(recipient["id"], block_reason or "not_eligible")
+            failed += 1
+            continue
+
+        resolved = resolve_send_payload(
+            provider=provider,
+            send_mode=send_mode,
+            revision_content=content,
+            template=template_row,
+            lead=lead,
+            persona_id=persona_id,
+        )
+        if resolved["mode"] == "blocked":
+            _mark_recipient_send_failed(recipient["id"], resolved["reason"])
+            failed += 1
+            continue
+
+        step = int(recipient.get("commercial_attempt_count") or 0) + 1
+        try:
+            whatsapp_outbox.enqueue_outbound(
+                lead=lead,
+                text=resolved["text"],
+                sender_type="campaign",
+                message_id=f"campaign:{campaign_id}:{recipient['id']}:{step}",
+                correlation_id=f"campaign:{campaign_id}:{revision['revision']}:{recipient['id']}:{step}",
+                idempotency_key=f"campaign-send:{campaign_id}:{revision['revision']}:{recipient['id']}:{step}",
+                template=resolved.get("template"),
+                campaign_scope={
+                    "campaign_id": campaign_id,
+                    "campaign_revision": revision["revision"],
+                    "campaign_recipient_id": recipient["id"],
+                    "campaign_step": step,
+                    "policy_checksum": recipient.get("policy_checksum"),
+                },
+            )
+        except HTTPException as exc:
+            _mark_recipient_send_failed(recipient["id"], f"enqueue_error:{exc.status_code}")
+            failed += 1
+            continue
+
+        client.table("campaign_recipients").update({
+            "sequence_status": "queued",
+            "commercial_attempt_count": step,
+            "last_commercial_attempt_at": _now_iso(),
+        }).eq("id", recipient["id"]).execute()
+        queued += 1
+
+    if queued and campaign.get("status") != "running":
+        client.table("campaigns").update({
+            "status": "running", "updated_at": _now_iso(),
+        }).eq("id", campaign_id).execute()
+
+    event_emitter.emit(
+        "campaign_send_started",
+        entity_type="campaign",
+        entity_id=campaign_id,
+        persona_id=persona_id,
+        payload={
+            "campaign_revision": revision["revision"],
+            "idempotency_key": idempotency_key,
+            "reason": clean_reason,
+            "actor_user_id": actor_user_id,
+            "queued": queued,
+            "failed": failed,
+        },
+        source="campaigns.send",
+    )
+
     return get_campaign_detail(campaign_id)

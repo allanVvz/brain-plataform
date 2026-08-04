@@ -332,6 +332,17 @@ class WhatsAppDispatchWorker(BaseWorker):
                     "fileName": media.get("filename"),
                     "caption": str(outbound_payload.get("text") or ""),
                 })
+            elif outbound_payload.get("template") and binding.get("provider") == "meta_cloud":
+                template = outbound_payload["template"] or {}
+                if not self._begin_attempt(row, "provider"):
+                    return
+                result = provider.send_template(
+                    binding,
+                    recipient,
+                    template_name=str(template.get("name") or ""),
+                    template_language=str(template.get("language") or "pt_BR"),
+                    components=template.get("components") or [],
+                )
             else:
                 if outbound_payload.get("media"):
                     supabase_client.complete_whatsapp_buffer(

@@ -130,7 +130,18 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
                      message_id: str, correlation_id: str,
                      idempotency_key: str | None = None,
                      metadata: dict[str, Any] | None = None,
-                     media: dict[str, Any] | None = None) -> dict[str, Any]:
+                     media: dict[str, Any] | None = None,
+                     template: dict[str, Any] | None = None,
+                     campaign_scope: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Queue one outbound WhatsApp send.
+
+    `campaign_scope` (campaign_id/campaign_revision/campaign_recipient_id/
+    campaign_step/policy_checksum) is optional and additive: when absent this
+    behaves exactly as the ordinary 1:1 conversation path (message_origin
+    stays 'conversation'). When present it tags the row message_origin
+    'campaign' so the dispatch worker and campaign audit views can attribute
+    it back to a specific campaign send.
+    """
     binding = resolve_lead_binding(lead)
     _recipient_for_lead(lead)
     lock_key = idempotency_key or correlation_id
@@ -151,6 +162,13 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
             "deduplicated": True,
             "binding": binding,
         }
+    scope_fields = {
+        "message_origin": "campaign",
+        "campaign_id": campaign_scope.get("campaign_id"),
+        "campaign_revision": campaign_scope.get("campaign_revision"),
+        "campaign_recipient_id": campaign_scope.get("campaign_recipient_id"),
+        "policy_checksum": campaign_scope.get("policy_checksum"),
+    } if campaign_scope else {}
     envelope = supabase_client.enqueue_whatsapp_envelope(
         buffer={
             "persona_id": lead["persona_id"],
@@ -162,11 +180,14 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
                 "text": text,
                 "sender_type": sender_type,
                 "media": media,
+                "template": template,
             },
             "status": "pending_send",
             "batch_key": f"{lead['persona_id']}:{lead['id']}",
             "idempotency_key": lock_key,
             "correlation_id": correlation_id,
+            **scope_fields,
+            **({"campaign_step": campaign_scope.get("campaign_step")} if campaign_scope else {}),
         },
         message={
             "lead_id": lead["id"],
@@ -181,6 +202,7 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
             "correlation_id": correlation_id,
             "metadata": metadata or {},
             "created_at": datetime.now(timezone.utc).isoformat(),
+            **scope_fields,
         },
     )
     if envelope.get("deduplicated"):

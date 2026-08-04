@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, Loader2, Megaphone, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertCircle, Loader2, Megaphone, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { usePortal } from "../PortalContext";
 
@@ -12,6 +12,8 @@ const DEFAULT_POLICY = {
   daily_send_limit: 100,
   hourly_send_limit: 20,
 };
+
+const PROVIDER_LABEL: Record<string, string> = { meta_cloud: "Meta", evolution_baileys: "Evolution" };
 
 export default function ClientDisparosPage() {
   const { personaSlug, capabilities } = usePortal();
@@ -26,15 +28,21 @@ export default function ClientDisparosPage() {
   const [objective, setObjective] = useState("");
   const [purpose, setPurpose] = useState("ofertas_e_novidades");
   const [kind, setKind] = useState<"consent_request" | "promotional">("consent_request");
-  const [templateName, setTemplateName] = useState("");
+  const [provider, setProvider] = useState<"meta_cloud" | "evolution_baileys">("meta_cloud");
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  const [controlledTest, setControlledTest] = useState(false);
   const [message, setMessage] = useState("");
+  const [reason, setReason] = useState("");
   const [policy, setPolicy] = useState(DEFAULT_POLICY);
   const [preview, setPreview] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [statusAction, setStatusAction] = useState<{ campaign: any; action: "pause" | "cancel" } | null>(null);
+  const [statusAction, setStatusAction] = useState<{ campaign: any; action: "pause" | "cancel" | "send" } | null>(null);
   const [statusReason, setStatusReason] = useState("");
+  const [expandedId, setExpandedId] = useState("");
+  const [detail, setDetail] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,13 +70,21 @@ export default function ClientDisparosPage() {
     return () => window.clearInterval(timer);
   }, [load]);
 
+  useEffect(() => {
+    setTemplateId("");
+    if (!personaSlug) { setTemplates([]); return; }
+    api.portalMessageTemplates(personaSlug, provider).then(setTemplates).catch(() => setTemplates([]));
+  }, [personaSlug, provider]);
+
   const payload = useMemo(() => ({
     name, objective, purpose, campaign_kind: kind,
     import_batch_ids: selectedImports, audience_id: audienceId,
-    provider: "meta_cloud", template_name: templateName || null,
-    template_language: "pt_BR", message: message || null,
+    provider, template_name: null,
+    template_language: "pt_BR", template_id: templateId || null,
+    send_mode: provider === "meta_cloud" && controlledTest ? "controlled_test" : "",
+    message: message || null,
     variables: {}, assets: [], policy_overrides: policy,
-  }), [name, objective, purpose, kind, selectedImports, audienceId, templateName, message, policy]);
+  }), [name, objective, purpose, kind, selectedImports, audienceId, provider, templateId, controlledTest, message, policy]);
 
   async function runPreview() {
     setBusy(true); setError(""); setNotice("");
@@ -86,31 +102,44 @@ export default function ClientDisparosPage() {
         expected_revision: 0,
         expected_preview_checksum: preview.preview_checksum,
         idempotency_key: `campaign-draft:${crypto.randomUUID()}`,
-        reason: "Criação confirmada no portal do cliente",
+        reason,
       });
       setNotice("Draft criado com revisão, política e destinatários congelados.");
-      setPreview(null); setName(""); setObjective(""); setTemplateName(""); setMessage("");
+      setPreview(null); setName(""); setObjective(""); setMessage(""); setReason(""); setTemplateId(""); setControlledTest(false);
       await load();
     } catch (reason: any) { setError(reason?.message || "Falha ao criar campanha."); }
     finally { setBusy(false); }
   }
 
   async function confirmStatusChange() {
-    if (!statusAction || !statusReason.trim()) return;
+    if (!statusAction) return;
     const { campaign, action } = statusAction;
+    const needsReason = action !== "send" || campaign.provider === "meta_cloud";
+    if (needsReason && !statusReason.trim()) return;
     setBusy(true); setError("");
     const body = {
       expected_revision: campaign.current_revision || 1,
       idempotency_key: `campaign-${action}:${campaign.id}:${crypto.randomUUID()}`,
-      reason: statusReason.trim(),
+      reason: needsReason ? statusReason.trim() : undefined,
     };
     try {
       if (action === "pause") await api.portalPauseCampaign(personaSlug, campaign.id, body);
-      else await api.portalCancelCampaign(personaSlug, campaign.id, body);
+      else if (action === "cancel") await api.portalCancelCampaign(personaSlug, campaign.id, body);
+      else {
+        await api.portalSendCampaign(personaSlug, campaign.id, body);
+        setNotice("Envio iniciado. Acompanhe o status por destinatário abaixo.");
+      }
       setStatusAction(null); setStatusReason("");
       await load();
     } catch (reason: any) { setError(reason?.message || "Falha ao alterar campanha."); }
     finally { setBusy(false); }
+  }
+
+  async function toggleDetail(campaign: any) {
+    if (expandedId === campaign.id) { setExpandedId(""); setDetail(null); return; }
+    setExpandedId(campaign.id);
+    try { setDetail(await api.campaign(campaign.id)); }
+    catch { setDetail(null); }
   }
 
   if (loading) {
@@ -134,7 +163,7 @@ export default function ClientDisparosPage() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <p className="text-xs text-slate-500">
-          Provider {health?.provider === "meta_cloud" ? "Meta" : "indisponível"} ·{" "}
+          Provider {PROVIDER_LABEL[health?.provider] || "indisponível"} ·{" "}
           {health?.ready ? "pronto para elegibilidade" : "canal não conectado"}
         </p>
         <button
@@ -182,15 +211,37 @@ export default function ClientDisparosPage() {
               {groups.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
             </select>
           </Field>
-          <Field label="Template Meta">
-            <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} disabled={!capabilities.edit}
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50" placeholder="consentimento_ofertas_v1" />
+          <Field label="Provider">
+            <select value={provider} onChange={(e) => setProvider(e.target.value as any)} disabled={!capabilities.edit}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50">
+              <option value="meta_cloud">Meta</option>
+              <option value="evolution_baileys">Evolution</option>
+            </select>
+          </Field>
+          <Field label="Template">
+            <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} disabled={!capabilities.edit}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50">
+              <option value="">Nenhum (texto simples)</option>
+              {templates.map((row) => <option key={row.id} value={row.id}>{row.meta_template_name || row.template_key}</option>)}
+            </select>
           </Field>
         </div>
+        {provider === "meta_cloud" && (
+          <label className="mt-3 flex items-center gap-2 text-xs font-medium text-slate-500">
+            <input type="checkbox" checked={controlledTest} onChange={(e) => setControlledTest(e.target.checked)} disabled={!capabilities.edit} />
+            Modo texto controlado (teste) — só permitido com conversa ativa nas últimas 24h
+          </label>
+        )}
         <label className="mt-3 block text-xs font-medium text-slate-500">
           Mensagem de referência
           <textarea value={message} onChange={(e) => setMessage(e.target.value)} disabled={!capabilities.edit}
             className="mt-1 min-h-20 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50" />
+        </label>
+        <label className="mt-3 block text-xs font-medium text-slate-500">
+          Justificativa (motivo da campanha)
+          <textarea value={reason} onChange={(e) => setReason(e.target.value)} disabled={!capabilities.edit}
+            placeholder="Por que esta campanha está sendo criada"
+            className="mt-1 min-h-16 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50" />
         </label>
         <div className="mt-4">
           <p className="mb-2 text-xs font-medium text-slate-500">Listas importadas</p>
@@ -228,7 +279,7 @@ export default function ClientDisparosPage() {
           <div className="mt-4 flex justify-end">
             <button
               type="button"
-              disabled={!capabilities.edit || busy || !preview.counts.selected_unique}
+              disabled={!capabilities.edit || busy || !preview.counts.selected_unique || !reason.trim()}
               onClick={createDraft}
               className="rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
             >
@@ -241,15 +292,25 @@ export default function ClientDisparosPage() {
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-3">
           <h2 className="text-sm font-semibold text-slate-950">Campanhas</h2>
-          <p className="text-xs text-slate-500">O envio permanece desabilitado nesta entrega.</p>
         </div>
         {campaigns.map((row) => (
           <div key={row.id} className="border-b border-slate-100 p-5 last:border-b-0">
             <div className="flex flex-wrap items-center gap-3">
               <div className="min-w-48 flex-1">
                 <p className="text-sm font-medium text-slate-950">{row.name}</p>
-                <p className="text-xs text-slate-500">rev. {row.current_revision} · {row.status}</p>
+                <p className="text-xs text-slate-500">rev. {row.current_revision} · {PROVIDER_LABEL[row.provider] || row.provider} · {row.status}</p>
               </div>
+              {["draft", "validated", "running"].includes(row.status) && (
+                <button type="button" disabled={!capabilities.edit}
+                  onClick={() => { setStatusAction({ campaign: row, action: "send" }); setStatusReason(""); }}
+                  className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+                  <Send size={12} /> Enviar
+                </button>
+              )}
+              <button type="button" onClick={() => toggleDetail(row)}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                {expandedId === row.id ? "Ocultar" : "Detalhes"}
+              </button>
               <button type="button" disabled={!capabilities.edit}
                 onClick={() => { setStatusAction({ campaign: row, action: "pause" }); setStatusReason(""); }}
                 className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
@@ -263,10 +324,21 @@ export default function ClientDisparosPage() {
             </div>
             {statusAction && statusAction.campaign.id === row.id && (
               <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-3">
-                <input value={statusReason} onChange={(e) => setStatusReason(e.target.value)}
-                  placeholder={statusAction.action === "pause" ? "Motivo da pausa" : "Motivo do cancelamento"}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
-                <button type="button" disabled={busy || !statusReason.trim()} onClick={confirmStatusChange}
+                {(statusAction.action !== "send" || row.provider === "meta_cloud") && (
+                  <input value={statusReason} onChange={(e) => setStatusReason(e.target.value)}
+                    placeholder={
+                      statusAction.action === "pause" ? "Motivo da pausa"
+                        : statusAction.action === "cancel" ? "Motivo do cancelamento"
+                          : "Motivo do envio (obrigatório para Meta)"
+                    }
+                    className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                )}
+                {statusAction.action === "send" && row.provider !== "meta_cloud" && (
+                  <p className="text-xs text-slate-500">Evolution não exige justificativa para envio.</p>
+                )}
+                <button type="button" disabled={busy || (statusAction.action !== "send" && !statusReason.trim())
+                  || (statusAction.action === "send" && row.provider === "meta_cloud" && !statusReason.trim())}
+                  onClick={confirmStatusChange}
                   className="rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
                   Confirmar
                 </button>
@@ -274,6 +346,43 @@ export default function ClientDisparosPage() {
                   className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100">
                   Voltar
                 </button>
+              </div>
+            )}
+            {expandedId === row.id && detail && (
+              <div className="mt-3 space-y-2">
+                {detail.delivery_confidence_caveat && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    {detail.delivery_confidence_caveat}
+                  </div>
+                )}
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Lead</th>
+                        <th className="px-3 py-2 text-left">Status seq.</th>
+                        <th className="px-3 py-2 text-left">Provider</th>
+                        <th className="px-3 py-2 text-left">Status envio</th>
+                        <th className="px-3 py-2 text-left">Id externo</th>
+                        <th className="px-3 py-2 text-left">Erro</th>
+                        <th className="px-3 py-2 text-left">Horário</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(detail.recipients || []).map((recipient: any) => (
+                        <tr key={recipient.id} className="border-t border-slate-100">
+                          <td className="px-3 py-2 text-slate-800">{recipient.lead_id}</td>
+                          <td className="px-3 py-2 text-slate-600">{recipient.sequence_status}{recipient.blocked_reason ? ` (${recipient.blocked_reason})` : ""}</td>
+                          <td className="px-3 py-2 text-slate-600">{PROVIDER_LABEL[recipient.send?.provider] || recipient.send?.provider || "-"}</td>
+                          <td className="px-3 py-2 text-slate-600">{recipient.send?.status || "-"}</td>
+                          <td className="px-3 py-2 text-slate-400">{recipient.send?.external_message_id || "-"}</td>
+                          <td className="px-3 py-2 text-red-600">{recipient.send?.error || "-"}</td>
+                          <td className="px-3 py-2 text-slate-400">{recipient.send?.attempted_at || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>

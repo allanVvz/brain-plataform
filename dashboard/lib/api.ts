@@ -223,8 +223,14 @@ export const api = {
     req<any>(`/messaging/campaigns/${encodeURIComponent(campaignId)}/pause`, { method: "POST", body: JSON.stringify(body) }),
   cancelCampaign: (campaignId: string, body: Record<string, unknown>) =>
     req<any>(`/messaging/campaigns/${encodeURIComponent(campaignId)}/cancel`, { method: "POST", body: JSON.stringify(body) }),
+  sendCampaign: (campaignId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/campaigns/${encodeURIComponent(campaignId)}/send`, { method: "POST", body: JSON.stringify(body) }),
   campaignProviderHealth: (personaId: string) =>
     req<any>(`/messaging/provider-health?persona_id=${encodeURIComponent(personaId)}`),
+  messageTemplates: (personaId: string, provider: string) =>
+    req<any[]>(`/messaging/templates?persona_id=${encodeURIComponent(personaId)}&provider=${encodeURIComponent(provider)}`),
+  createMessageTemplate: (body: Record<string, unknown>) =>
+    req<any>("/messaging/templates", { method: "POST", body: JSON.stringify(body) }),
   updateLeadInfo: (leadRef: number, body: {
     nome?: string;
     interesse_produto?: string;
@@ -363,6 +369,18 @@ export const api = {
     req<any>(`/portal/campaigns/${campaignId}/cancel?${personaQuery(slug)}`, {
       method: "POST",
       body: JSON.stringify(body),
+    }),
+  portalSendCampaign: (slug: string, campaignId: string, body: Record<string, unknown>) =>
+    req<any>(`/portal/campaigns/${campaignId}/send?${personaQuery(slug)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  portalMessageTemplates: (slug: string, provider: string) =>
+    req<any[]>(`/portal/templates?${personaQuery(slug)}&provider=${encodeURIComponent(provider)}`),
+  portalCreateMessageTemplate: (slug: string, body: Record<string, unknown>) =>
+    req<any>("/portal/templates", {
+      method: "POST",
+      body: JSON.stringify({ ...body, persona_slug: slug }),
     }),
   personaAutomation: (slug: string) =>
     req<{ mode: "ai_with_handoff" | "human_only" }>(`/portal/personas/${encodeURIComponent(slug)}/automation`),

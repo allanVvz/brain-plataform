@@ -59,7 +59,10 @@ describe("Disparos rollout one", () => {
     fireEvent.change(screen.getByLabelText("Grupo semantico"), {
       target: { value: "audience-1" },
     });
-    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("checkbox", { name: /clientes\.csv/ }));
+    fireEvent.change(screen.getByPlaceholderText("Por que esta campanha esta sendo criada"), {
+      target: { value: "Reativacao de clientes inativos" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /Avaliar elegibilidade/i }));
 
     expect(await screen.findByText("1 elegiveis")).toBeInTheDocument();
@@ -72,6 +75,7 @@ describe("Disparos rollout one", () => {
       persona_id: "persona-1",
       audience_id: "audience-1",
       import_batch_ids: ["batch-1"],
+      reason: "Reativacao de clientes inativos",
     });
   });
 });

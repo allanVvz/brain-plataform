@@ -85,6 +85,9 @@ describe("client disparos page", () => {
     fireEvent.change(screen.getByPlaceholderText("Reativar clientes"), { target: { value: "Reengajar" } });
     fireEvent.change(screen.getByDisplayValue("Selecione"), { target: { value: "audience-1" } });
     fireEvent.click(screen.getByText("lista.csv"));
+    fireEvent.change(screen.getByPlaceholderText("Por que esta campanha está sendo criada"), {
+      target: { value: "Reengajar clientes inativos" },
+    });
 
     const previewButton = screen.getByRole("button", { name: /Avaliar elegibilidade/i });
     expect(previewButton).not.toBeDisabled();
