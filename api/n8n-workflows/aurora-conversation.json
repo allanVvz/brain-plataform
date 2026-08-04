@@ -178,7 +178,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({lead_ref: $('Validate Aurora binding').item.json.lead_ref, reason: 'workflow_step_failed', correlation_id: $('Validate Aurora binding').item.json.correlation_id})}}",
+        "body": "={{JSON.stringify({lead_ref: $('Validate Aurora binding').item.json.lead_ref, reason: 'workflow_step_failed:' + $prevNode.name + ':' + JSON.stringify($json).slice(0, 300), correlation_id: $('Validate Aurora binding').item.json.correlation_id})}}",
         "options": {}
       },
       "id": "failsafe",

@@ -136,6 +136,32 @@ def test_n8n_and_local_modes_use_the_same_three_stage_contract():
     assert workflow["meta"]["binding"]["field_extractor"] == "deepseek-v4-flash"
 
 
+def test_fail_safe_handoff_captures_which_node_failed_and_why():
+    """Regression test for the 2026-08-04 Baita silent-failure investigation.
+
+    Both templates' fail-safe node used to send a static
+    reason: 'workflow_step_failed' to /internal/conversations/fail-safe-handoff
+    on any pipeline error, and Baita's workflow settings additionally
+    discarded error execution data (saveDataErrorExecution: 'none') — so a
+    failure was neither visible in n8n's own execution history nor
+    diagnosable from our own system_events. The reason expression must now
+    include $prevNode.name (which node failed) and the actual error payload,
+    and error executions must be retained.
+    """
+    for filename in ("baita-vitoria.json", "aurora-conversation.json"):
+        workflow = json.loads(
+            (ROOT / "api" / "n8n-workflows" / filename).read_text(encoding="utf-8")
+        )
+        assert workflow["settings"]["saveDataErrorExecution"] == "all"
+        fail_safe = next(
+            node for node in workflow["nodes"] if node.get("name") == "Fail safe human handoff"
+        )
+        body = fail_safe["parameters"]["body"]
+        assert "$prevNode.name" in body
+        assert "JSON.stringify($json)" in body
+        assert "reason: 'workflow_step_failed'," not in body
+
+
 def test_aurora_agentic_workflow_uses_generated_prompt_and_golden_dataset_rag():
     """Regression test for the 2026-08-01 agentic-flow redesign.
 

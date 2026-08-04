@@ -79,7 +79,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({lead_ref: $('Validate Baita binding').item.json.lead_ref, reason: 'workflow_step_failed', correlation_id: $('Validate Baita binding').item.json.correlation_id})}}",
+        "body": "={{JSON.stringify({lead_ref: $('Validate Baita binding').item.json.lead_ref, reason: 'workflow_step_failed:' + $prevNode.name + ':' + JSON.stringify($json).slice(0, 300), correlation_id: $('Validate Baita binding').item.json.correlation_id})}}",
         "options": {}
       },
       "id": "failsafe", "name": "Fail safe human handoff", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1420, 520]
@@ -98,6 +98,6 @@
     "Persist once and enqueue send": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
     "Fail safe human handoff": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}]]}
   },
-  "settings": {"executionOrder": "v1", "saveDataErrorExecution": "none", "saveDataSuccessExecution": "none"},
+  "settings": {"executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all"},
   "meta": {"binding": {"persona_slug": "baita-conveniencia", "agent_slug": "vitoria", "decision_owner": "n8n_agents", "pipeline_contract": "conversation_v1", "classifier": "deterministic_v1", "field_extractor": "deepseek-v4-flash", "model_required": true, "model": "deepseek-v4-flash"}}
 }
