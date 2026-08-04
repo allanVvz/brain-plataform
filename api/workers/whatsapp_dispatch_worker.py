@@ -29,6 +29,15 @@ def _retry_delay(attempt: int) -> int:
     return min(300, 5 * (2 ** max(0, attempt - 1)))
 
 
+# Below this length an exact text match against a recent outbound message is
+# not a reliable echo signal — short greetings ("oi", "ok", "sim") are
+# equally likely to be typed by a real customer replying in kind as to be a
+# genuine WhatsApp-side echo of the bot's own message. Confirmed live
+# 2026-08-04: a customer replying "oi" (matching the bot's own earlier
+# greeting) got permanently handed off by this guard on every message.
+_ECHO_GUARD_MIN_LENGTH = 12
+
+
 class WhatsAppDispatchWorker(BaseWorker):
     name = "WhatsAppDispatchWorker"
     interval = int(os.environ.get("WHATSAPP_DISPATCH_INTERVAL", "2"))
@@ -78,7 +87,7 @@ class WhatsAppDispatchWorker(BaseWorker):
             raise RuntimeError("persona for inbound buffer no longer exists")
         lead = supabase_client.get_lead_by_ref(row.get("lead_ref")) if row.get("lead_ref") else {}
         inbound_text = str(payload.get("text") or "").strip()
-        if inbound_text and row.get("lead_ref"):
+        if inbound_text and len(inbound_text) >= _ECHO_GUARD_MIN_LENGTH and row.get("lead_ref"):
             recent_messages = supabase_client.get_messages(str(row["lead_ref"]), limit=20) or []
             recent_outbound_echo = next(
                 (

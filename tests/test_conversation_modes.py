@@ -116,6 +116,132 @@ def test_deterministic_worker_uses_canonical_pipeline_without_n8n(monkeypatch):
     assert completed[0][0] == ("buffer-1", "sent")
 
 
+def test_echo_guard_ignores_short_common_replies(monkeypatch):
+    """Regression test for the 2026-08-04 Baita false-positive handoff.
+
+    The bot-loop echo guard compares inbound text against recent outbound
+    messages for an exact match. A customer replying "oi" — the same
+    greeting the bot itself had sent earlier in the conversation — used to
+    match and get permanently handed off on every message, even though this
+    is completely ordinary conversation, not a WhatsApp-side echo loop.
+    """
+    calls: list[dict] = []
+    handoffs: list[int] = []
+    completed: list[tuple] = []
+    row = {
+        "id": "buffer-2",
+        "direction": "inbound",
+        "persona_id": "persona-1",
+        "lead_ref": 44,
+        "channel_binding_id": "binding-1",
+        "whatsapp_phone_number_id": "business-1",
+        "external_message_id": "wamid-2",
+        "correlation_id": "corr-2",
+        "payload": {"text": "oi"},
+    }
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_persona_by_id",
+        lambda _id: {"id": "persona-1", "slug": "baita-conveniencia", "process_mode": "internal"},
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_lead_by_ref",
+        lambda _ref: {"id": 44, "ai_paused": False},
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_messages",
+        lambda _lead_ref, limit=20: [
+            {"id": 627, "direction": "outbound", "content": "oi"},
+        ],
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.handoff_whatsapp_lead",
+        lambda lead_ref: handoffs.append(lead_ref),
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_workflow_binding_by_id",
+        lambda _binding_id: {
+            "id": "binding-1", "persona_id": "persona-1", "active": True,
+            "metadata": {"decision_owner": "deterministic", "mode": "active"},
+        },
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.mark_whatsapp_attempt",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.conversation_runtime.execute_pipeline",
+        lambda **kwargs: calls.append(kwargs)
+        or {"handoff": False, "classifier": "deterministic_v1", "route": "SDR"},
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.complete_whatsapp_buffer",
+        lambda *args, **kwargs: completed.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.event_emitter.emit",
+        lambda *_args, **_kwargs: None,
+    )
+
+    WhatsAppDispatchWorker()._dispatch_inbound(row)
+
+    assert handoffs == []
+    assert len(calls) == 1
+    assert completed[0][0] == ("buffer-2", "sent")
+
+
+def test_echo_guard_still_suppresses_long_distinctive_replies(monkeypatch):
+    """The original protection must still hold for real echo candidates —
+    a long, distinctive bot reply coming back verbatim as "inbound" is a
+    genuine signal, unlike a short greeting."""
+    handoffs: list[int] = []
+    completed: list[tuple] = []
+    events: list[tuple] = []
+    long_text = "Vou encaminhar sua conversa para a Equipe Aurora confirmar o valor final."
+    row = {
+        "id": "buffer-3",
+        "direction": "inbound",
+        "persona_id": "persona-1",
+        "lead_ref": 44,
+        "channel_binding_id": "binding-1",
+        "whatsapp_phone_number_id": "business-1",
+        "external_message_id": "wamid-3",
+        "correlation_id": "corr-3",
+        "payload": {"text": long_text},
+    }
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_persona_by_id",
+        lambda _id: {"id": "persona-1", "slug": "aurora", "process_mode": "internal"},
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_lead_by_ref",
+        lambda _ref: {"id": 44, "ai_paused": False},
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_messages",
+        lambda _lead_ref, limit=20: [
+            {"id": 900, "direction": "outbound", "content": long_text},
+        ],
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.handoff_whatsapp_lead",
+        lambda lead_ref: handoffs.append(lead_ref),
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.complete_whatsapp_buffer",
+        lambda *args, **kwargs: completed.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.event_emitter.emit",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+    )
+
+    WhatsAppDispatchWorker()._dispatch_inbound(row)
+
+    assert handoffs == [44]
+    assert completed[0][0] == ("buffer-3", "waiting_human")
+    assert events[0][0][0] == "whatsapp.bot_loop_suppressed"
+
+
 def test_n8n_and_local_modes_use_the_same_three_stage_contract():
     workflow = json.loads(
         (ROOT / "api" / "n8n-workflows" / "baita-vitoria.json").read_text(
