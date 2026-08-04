@@ -368,6 +368,18 @@ def has_active_conversation_window(persona_id: str, lead_id: int, hours: int = 2
     return False
 
 
+def _with_lead_name_fallbacks(variables: dict[str, Any], lead: dict[str, Any]) -> dict[str, Any]:
+    """Templates commonly greet the lead by name using either a named
+    placeholder ({{nome}}) or Meta's positional style ({{1}}); default both
+    to the lead's name so an operator doesn't have to configure this per
+    template for the common case."""
+    resolved = dict(variables)
+    name = lead.get("nome") or lead.get("name") or ""
+    resolved.setdefault("nome", name)
+    resolved.setdefault("1", name)
+    return resolved
+
+
 def _build_meta_components(template_row: dict[str, Any], variables: dict[str, Any]) -> list[dict[str, Any]]:
     components: list[dict[str, Any]] = []
     for component in template_row.get("meta_component_schema") or []:
@@ -407,8 +419,7 @@ def resolve_send_payload(
     """
     if provider != "meta_cloud":
         if template:
-            variables = dict(revision_content.get("variables") or {})
-            variables.setdefault("nome", lead.get("nome") or lead.get("name") or "")
+            variables = _with_lead_name_fallbacks(revision_content.get("variables") or {}, lead)
             text = _render_evolution_body(template, variables).strip()
         else:
             text = str(revision_content.get("message") or "").strip()
@@ -417,8 +428,7 @@ def resolve_send_payload(
         return {"mode": "text", "text": text}
 
     if template:
-        variables = dict(revision_content.get("variables") or {})
-        variables.setdefault("nome", lead.get("nome") or lead.get("name") or "")
+        variables = _with_lead_name_fallbacks(revision_content.get("variables") or {}, lead)
         components = _build_meta_components(template, variables)
         preview_text = str(revision_content.get("message") or template.get("meta_template_name") or "")
         return {
