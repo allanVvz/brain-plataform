@@ -27,6 +27,22 @@ mkdir -m 0700 "$DEST"
 cd "$ROOT_DIR"
 COMPOSE=(docker compose --env-file "$ENV_FILE")
 
+env_value() {
+  local key="$1"
+  local fallback="$2"
+  local value
+  value="$(
+    awk -F= -v wanted="$key" '
+      $1 == wanted {
+        sub(/^[^=]*=/, "")
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+        print
+      }
+    ' "$ENV_FILE" | tail -n 1
+  )"
+  printf '%s\n' "${value:-$fallback}"
+}
+
 echo "Creating verified release backup at $DEST"
 "${COMPOSE[@]}" exec -T db sh -c \
   'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
@@ -128,7 +144,14 @@ chmod 0600 "$DEST/env.compose.root-only"
 grep -qx '9' "$DEST/baita-graph-version.txt"
 grep -Eq '^[0-9a-f]{16,64}$' "$DEST/baita-graph-checksum.txt"
 test -s "$DEST/baita-graph-v9.json"
-"${COMPOSE[@]}" exec -T db sh -c \
+meta_persona_slug="$(env_value WHATSAPP_META_PERSONA_SLUG baita-conveniencia)"
+[[ "$meta_persona_slug" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || {
+  echo "Invalid WHATSAPP_META_PERSONA_SLUG: $meta_persona_slug" >&2
+  exit 2
+}
+"${COMPOSE[@]}" exec -T \
+  -e BACKUP_META_PERSONA_SLUG="$meta_persona_slug" \
+  db sh -c \
   'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "
     select jsonb_pretty(jsonb_build_object(
       '\''provider'\'', coalesce(
@@ -155,34 +178,19 @@ test -s "$DEST/baita-graph-v9.json"
     ))
     from workflow_bindings wb
     join personas p on p.id=wb.persona_id
-    where p.slug='\''baita-conveniencia'\''
+    where p.slug='\''$BACKUP_META_PERSONA_SLUG'\''
       and (to_jsonb(wb)->>'\''active'\'')::boolean=true
     order by (to_jsonb(wb)->>'\''updated_at'\'') desc nulls last
     limit 1
-  "' > "$DEST/baita-binding-redacted.json"
-grep -q '"provider": "meta_cloud"' "$DEST/baita-binding-redacted.json"
+  "' > "$DEST/meta-binding-redacted.json"
+grep -q '"provider": "meta_cloud"' "$DEST/meta-binding-redacted.json"
+printf '%s\n' "$meta_persona_slug" > "$DEST/meta-binding-persona-slug.txt"
 
 printf '%s\n' "$VERCEL_DEPLOYMENT_ID" > "$DEST/vercel-production-deployment-id.txt"
 "${COMPOSE[@]}" ps --all > "$DEST/docker-compose-ps.txt"
 docker ps --all --no-trunc > "$DEST/docker-ps.txt"
 docker image ls --digests --no-trunc > "$DEST/docker-images.txt"
 docker volume ls > "$DEST/docker-volumes.txt"
-
-env_value() {
-  local key="$1"
-  local fallback="$2"
-  local value
-  value="$(
-    awk -F= -v wanted="$key" '
-      $1 == wanted {
-        sub(/^[^=]*=/, "")
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "")
-        print
-      }
-    ' "$ENV_FILE" | tail -n 1
-  )"
-  printf '%s\n' "${value:-$fallback}"
-}
 
 api_image="$(env_value API_IMAGE brain-api)"
 migrate_image="$(env_value MIGRATE_IMAGE brain-migrate)"
