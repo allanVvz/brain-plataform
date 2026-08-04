@@ -202,9 +202,45 @@ def pause_lead(lead_ref: int) -> bool:
         return False
 
 
+def _cleared_conversation_state_metadata(lead_ref: int) -> Optional[dict]:
+    """Clear a lead's sticky "handoff" flag so /process actually retries.
+
+    conversation_runtime persists the deterministic engines' working state
+    under metadata.conversation_state (or metadata.vitoria_state for legacy
+    Baita leads — same fallback conversation_runtime._build_context uses).
+    Both DeterministicAppointment and DeterministicSDR short-circuit with an
+    empty reply the moment that state's own "conversation_state" field is
+    "handoff", regardless of ai_paused. Left untouched, resuming a lead just
+    makes it silently re-pause on the next inbound message instead of trying
+    to answer. Only the sticky flag and the stale clarification counter are
+    reset here — collected fields (appointment_request, items, etc.) must
+    survive the resume.
+    """
+    lead = supabase_client.get_lead_by_ref(lead_ref) or {}
+    metadata = dict(lead.get("metadata") or {})
+    for key in ("conversation_state", "vitoria_state"):
+        cart_state = metadata.get(key)
+        if isinstance(cart_state, dict) and cart_state.get("conversation_state") == "handoff":
+            cart_state = dict(cart_state)
+            cart_state["conversation_state"] = ""
+            cart_state["clarification_attempts"] = 0
+            metadata = {**metadata, key: cart_state}
+            return metadata
+    return None
+
+
 def resume_lead(lead_ref: int) -> bool:
+    update_payload: dict = {"ai_paused": False}
     try:
-        supabase_client.update_lead(lead_ref, {"ai_paused": False})
+        cleared_metadata = _cleared_conversation_state_metadata(lead_ref)
+        if cleared_metadata is not None:
+            update_payload["metadata"] = cleared_metadata
+    except Exception as exc:
+        # Best-effort: a lookup failure must not block the resume itself,
+        # it just means the sticky flag (if any) won't be cleared this time.
+        logger.warning("resume_lead conversation-state lookup failed: %s", exc)
+    try:
+        supabase_client.update_lead(lead_ref, update_payload)
     except Exception as exc:
         logger.warning("resume_lead failed: %s", exc)
         return False

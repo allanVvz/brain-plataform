@@ -76,6 +76,54 @@ export default function NodeDrawer({ node, selectedNodes = [], personaSlug, sess
   const [tagsRaw, setTagsRaw] = useState("");
   const [tipo,    setTipo]    = useState("");
 
+  // Persona handoff-message templates (appointment_policy.texts, published
+  // graph — a different store from the vault/queue/graph-node content
+  // above, see docs/sdr/aurora/rules/no-auto-confirm.md).
+  const [handoffTexts, setHandoffTexts]         = useState<Record<string, string>>({});
+  const [handoffLoading, setHandoffLoading]     = useState(false);
+  const [handoffSaving, setHandoffSaving]       = useState(false);
+  const [handoffFlash, setHandoffFlash]         = useState<"ok" | "err" | null>(null);
+
+  useEffect(() => {
+    const isPersonaNode = node?.type === "personaNode";
+    if (!isPersonaNode || !personaSlug) {
+      setHandoffTexts({});
+      return;
+    }
+    setHandoffLoading(true);
+    setHandoffFlash(null);
+    api.getPersonaAppointmentPolicy(personaSlug)
+      .then((res: any) => {
+        const texts = res?.texts || {};
+        setHandoffTexts({
+          atendimento_humano: texts.atendimento_humano || "",
+          encaminhamento_excepcional: texts.encaminhamento_excepcional || "",
+          esclarecimento_duvida: texts.esclarecimento_duvida || "",
+          encaminhamento_duvida_persistente: texts.encaminhamento_duvida_persistente || "",
+          complemento_confirmacao: texts.complemento_confirmacao || "",
+          cabecalho_servicos: texts.cabecalho_servicos || "",
+          saudacao_abertura: texts.saudacao_abertura || "",
+          sem_comparar_concorrentes: texts.sem_comparar_concorrentes || "",
+        });
+      })
+      .catch(() => setHandoffTexts({}))
+      .finally(() => setHandoffLoading(false));
+  }, [node?.id, personaSlug]);
+
+  async function saveHandoffTexts() {
+    if (!personaSlug) return;
+    setHandoffSaving(true);
+    try {
+      await api.updatePersonaAppointmentPolicy(personaSlug, handoffTexts);
+      setHandoffFlash("ok");
+    } catch {
+      setHandoffFlash("err");
+    } finally {
+      setHandoffSaving(false);
+      setTimeout(() => setHandoffFlash(null), 2500);
+    }
+  }
+
   // Fetch full item whenever the selected node changes
   useEffect(() => {
     const graphKnowledgeItem =
@@ -480,6 +528,67 @@ export default function NodeDrawer({ node, selectedNodes = [], personaSlug, sess
         {/* Persona description */}
         {isPersona && d.description && (
           <p className="text-sm text-obs-subtle leading-relaxed">{d.description}</p>
+        )}
+
+        {/* Persona handoff-message templates */}
+        {isPersona && personaSlug && (
+          <div className="space-y-2 border-t border-white/06 pt-4">
+            <p className="text-[10px] text-obs-subtle uppercase tracking-wide">
+              Mensagens de handoff
+            </p>
+            <p className="text-[11px] text-obs-faint leading-relaxed">
+              Textos enviados quando a IA passa a conversa para um humano —
+              inclusive ao ser reativada após um handoff (Retomar IA).
+            </p>
+            {handoffLoading ? (
+              <div className="flex items-center gap-2 text-xs text-obs-subtle">
+                <Loader2 size={11} className="animate-spin" /> Carregando...
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {(
+                  [
+                    ["atendimento_humano", "Cliente pede atendimento humano"],
+                    ["encaminhamento_excepcional", "Assunto excepcional (reclamação, garantia, etc.)"],
+                    ["esclarecimento_duvida", "IA não entendeu a mensagem (1ª vez)"],
+                    ["encaminhamento_duvida_persistente", "IA não entendeu de novo (encerra e chama humano)"],
+                    ["complemento_confirmacao", "Complemento ao confirmar um agendamento/pedido completo"],
+                    ["cabecalho_servicos", "Título da lista de serviços"],
+                    ["saudacao_abertura", "Saudação de abertura da conversa"],
+                    ["sem_comparar_concorrentes", "Regra: nunca comparar com concorrentes"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <div key={key} className="space-y-1">
+                    <label className="text-[10px] text-obs-subtle">{label}</label>
+                    <textarea
+                      value={handoffTexts[key] || ""}
+                      onChange={(e) =>
+                        setHandoffTexts((prev) => ({ ...prev, [key]: e.target.value }))
+                      }
+                      rows={2}
+                      className="w-full bg-obs-base border border-white/10 rounded px-2 py-1.5 text-xs text-obs-text focus:outline-none focus:border-obs-violet/40 resize-none"
+                    />
+                  </div>
+                ))}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={saveHandoffTexts}
+                    disabled={handoffSaving}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-obs-violet/10 border border-obs-violet/30 text-obs-violet hover:bg-obs-violet/15 disabled:opacity-50 transition-colors"
+                  >
+                    {handoffSaving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                    Salvar mensagens
+                  </button>
+                  {handoffFlash && (
+                    <span className={`text-[11px] flex items-center gap-1 ${handoffFlash === "ok" ? "text-green-400" : "text-obs-rose"}`}>
+                      {handoffFlash === "ok" ? <CheckCircle size={11} /> : <XCircle size={11} />}
+                      {handoffFlash === "ok" ? "Salvo" : "Erro ao salvar"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {/* Media preview (view mode only) */}

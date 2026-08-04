@@ -166,6 +166,58 @@ def test_already_handed_off_lead_keeps_handoff_flag_on_new_messages():
     assert result.handoff is True
 
 
+def test_resumed_lead_actually_retries_instead_of_staying_silent():
+    """A human clicking "Resume AI" must make the agent try to answer again.
+
+    api/services/agents_service.py::resume_lead clears the persisted sticky
+    "handoff" flag (and clarification_attempts) before flipping ai_paused —
+    mirror that reset here and confirm the engine reacts to the next message
+    for real (greeting/FAQ/etc.), instead of the "already_handoff" short
+    circuit a raw handoff-flagged state would still trigger.
+    """
+    graph = aurora_graph()
+    engine = DeterministicAppointment(
+        catalog_from_graph(graph),
+        policy=conversation_runtime._appointment_policy(graph),
+    )
+    handoff_result = engine.handle("Quero falar com atendente")
+    assert handoff_result.handoff is True
+
+    resumed_state = dict(handoff_result.state)
+    resumed_state["conversation_state"] = ""
+    resumed_state["clarification_attempts"] = 0
+
+    result = engine.handle("Oi", state=resumed_state)
+    assert result.intent == "greeting"
+    assert result.reply
+    assert result.handoff is False
+
+
+def test_resumed_lead_falls_back_to_policy_text_and_re_pauses_when_still_unrecognized():
+    """After resume, an unanswerable message must still end in an explicit
+    fallback message (not silence) and hand off again — same guarantee as a
+    first-time handoff, just reachable after a resume too."""
+    graph = aurora_graph()
+    engine = DeterministicAppointment(
+        catalog_from_graph(graph),
+        policy=conversation_runtime._appointment_policy(graph),
+    )
+    handoff_result = engine.handle("Quero falar com atendente")
+    resumed_state = dict(handoff_result.state)
+    resumed_state["conversation_state"] = ""
+    resumed_state["clarification_attempts"] = 0
+
+    first = engine.handle("xyzabc123 qwerty", state=resumed_state)
+    assert first.handoff is False
+    assert first.reply
+
+    second = engine.handle("xyzabc123 qwerty", state=first.state)
+    assert second.handoff is True
+    assert second.handoff_reason == "missing_approved_evidence"
+    assert second.reply
+    assert second.state["conversation_state"] == "handoff"
+
+
 def test_commercial_note_fields_are_declared_per_persona_not_hardcoded():
     """Regression test for the 2026-08-01 finding.
 

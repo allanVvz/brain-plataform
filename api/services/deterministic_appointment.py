@@ -213,7 +213,7 @@ class DeterministicAppointment:
             fact = _service_fact(product)
             qualifier = "." if fact.endswith(".") else ""
             lines.append(f"- {fact}{qualifier}")
-        return self._text("services_header", "Serviços disponíveis:") + "\n" + "\n".join(lines)
+        return self._text("cabecalho_servicos", "Serviços disponíveis:") + "\n" + "\n".join(lines)
 
     def handle(self, message: str, *, state: dict[str, Any] | None = None) -> AppointmentResult:
         text = (message or "").strip()
@@ -242,7 +242,7 @@ class DeterministicAppointment:
             state["conversation_state"] = "handoff"
             return AppointmentResult(
                 self._text(
-                    "exceptional_handoff",
+                    "encaminhamento_excepcional",
                     "Vou encaminhar sua solicitação para a equipe responsável.",
                 ),
                 "exceptional_support",
@@ -257,7 +257,7 @@ class DeterministicAppointment:
             state["conversation_state"] = "handoff"
             return AppointmentResult(
                 self._text(
-                    "human_handoff",
+                    "atendimento_humano",
                     "Vou encaminhar sua conversa para o atendimento humano.",
                 ),
                 "request_human",
@@ -310,7 +310,7 @@ class DeterministicAppointment:
                 if product:
                     fact = f"A {fact[:1].lower()}{fact[1:]}"
                 reply = f"{fact}. " + self._text(
-                    "confirmation_suffix",
+                    "complemento_confirmacao",
                     "Registrei sua preferência; a equipe confirmará "
                     "o valor final e o horário.",
                 )
@@ -364,7 +364,7 @@ class DeterministicAppointment:
             state["conversation_state"] = "handoff"
             return AppointmentResult(
                 self._text(
-                    "unknown_handoff",
+                    "encaminhamento_duvida_persistente",
                     "Já chamei a equipe para continuar com você. Se puder, me "
                     "diga seu nome, o serviço que procura e o modelo do carro "
                     "enquanto aguarda.",
@@ -376,7 +376,7 @@ class DeterministicAppointment:
             )
         return AppointmentResult(
             self._text(
-                "unknown_clarification",
+                "esclarecimento_duvida",
                 "Vou chamar a equipe para te ajudar direitinho nisso. "
                 "Enquanto isso, me conta seu nome, o serviço que você procura "
                 "e o modelo do carro?",

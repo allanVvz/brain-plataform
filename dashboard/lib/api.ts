@@ -935,6 +935,27 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  getPersonaAppointmentPolicy: (personaSlug: string) =>
+    req<{ ok: boolean; texts: Record<string, string | null> }>(
+      `/knowledge/personas/${encodeURIComponent(personaSlug)}/appointment-policy`,
+    ),
+  updatePersonaAppointmentPolicy: (
+    personaSlug: string,
+    body: {
+      atendimento_humano?: string;
+      encaminhamento_excepcional?: string;
+      esclarecimento_duvida?: string;
+      encaminhamento_duvida_persistente?: string;
+      complemento_confirmacao?: string;
+      cabecalho_servicos?: string;
+      saudacao_abertura?: string;
+      sem_comparar_concorrentes?: string;
+    },
+  ) =>
+    req<{ ok: boolean; graph_version: number; appointment_policy: any }>(
+      `/knowledge/personas/${encodeURIComponent(personaSlug)}/appointment-policy`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
   sofiaGraphCommand: (body: {
     message?: string;
     action?: "command" | "confirm_pending" | "undo_pending";

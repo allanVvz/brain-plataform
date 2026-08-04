@@ -9,6 +9,7 @@ without re-deriving the ontology in JS.
 
 import logging
 import json
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from services import auth_service, supabase_client, knowledge_graph, knowledge_lifecycle, approved_knowledge_snapshots
-from services import embedded_markdown
+from services import embedded_markdown, graph_document_publisher, graph_json_v2_store
 from services.event_emitter import emit
 from services.audit_helpers import current_actor
 
@@ -734,6 +735,118 @@ def update_graph_node(node_id: str, body: GraphNodeUpdateBody, request: Request)
         source="routes.graph",
     )
     return {"ok": True, "node": updated, "reverted_to_draft": reverted}
+
+
+_APPOINTMENT_POLICY_TEXT_KEYS = (
+    "atendimento_humano",
+    "encaminhamento_excepcional",
+    "esclarecimento_duvida",
+    "encaminhamento_duvida_persistente",
+    "complemento_confirmacao",
+    "cabecalho_servicos",
+    "saudacao_abertura",
+    "sem_comparar_concorrentes",
+)
+
+
+class AppointmentPolicyTextsBody(BaseModel):
+    atendimento_humano: Optional[str] = None
+    encaminhamento_excepcional: Optional[str] = None
+    esclarecimento_duvida: Optional[str] = None
+    encaminhamento_duvida_persistente: Optional[str] = None
+    complemento_confirmacao: Optional[str] = None
+    cabecalho_servicos: Optional[str] = None
+    saudacao_abertura: Optional[str] = None
+    sem_comparar_concorrentes: Optional[str] = None
+
+
+def _published_persona_node(persona_slug: str):
+    """Load the persona node from the *published* graph (graph_json_v2_store).
+
+    This is a different store from the live knowledge_nodes authoring table
+    the rest of this file edits — appointment_policy only exists here, and
+    it's what conversation_runtime._appointment_policy() actually reads at
+    runtime, so reads/writes of it must go through this store too.
+    """
+    loaded = graph_json_v2_store.load_current(persona_slug)
+    if not loaded:
+        raise HTTPException(404, "Graph publicado nao encontrado para a persona.")
+    version, graph = loaded
+    persona_node = next((n for n in graph.nodes if n.node_type == "persona"), None)
+    if not persona_node:
+        raise HTTPException(404, "Node de persona nao encontrado no grafo publicado.")
+    return version, graph, persona_node
+
+
+@router.get("/personas/{persona_slug}/appointment-policy")
+def get_persona_appointment_policy(persona_slug: str, request: Request):
+    """Read a persona's handoff-message templates for the card editor UI."""
+    auth_service.assert_persona_access(request, persona_slug=persona_slug)
+    _version, _graph, persona_node = _published_persona_node(persona_slug)
+    policy = (persona_node.data or {}).get("appointment_policy") or {}
+    texts = {key: policy.get("texts", {}).get(key) for key in _APPOINTMENT_POLICY_TEXT_KEYS}
+    return {"ok": True, "texts": texts}
+
+
+@router.patch("/personas/{persona_slug}/appointment-policy")
+def update_persona_appointment_policy(persona_slug: str, body: AppointmentPolicyTextsBody, request: Request):
+    """Edit a persona's handoff-message templates (`data.appointment_policy.texts`).
+
+    These are the fallback texts DeterministicAppointment sends when it
+    hands a conversation off to a human (e.g. "vou chamar a equipe") — see
+    docs/sdr/aurora/rules/no-auto-confirm.md. They live on the persona node
+    of the *published* graph, so this goes through the same
+    apply_operations + commit path agent_harness_tools.publish_patch uses
+    for Sofia's own card edits, instead of a parallel write mechanism.
+    """
+    auth_service.assert_persona_capability(request, "edit", persona_slug=persona_slug)
+    changes = {
+        key: value
+        for key, value in body.model_dump(exclude_none=True).items()
+        if key in _APPOINTMENT_POLICY_TEXT_KEYS
+    }
+    if not changes:
+        raise HTTPException(400, "Nothing to update")
+
+    version, graph, persona_node = _published_persona_node(persona_slug)
+
+    operation = {
+        "op": "update_node",
+        "node_id": persona_node.id,
+        "patch": {
+            f"data.appointment_policy.texts.{key}": value
+            for key, value in changes.items()
+        },
+    }
+    next_graph = graph_document_publisher.apply_operations(graph, [operation])
+    actor = current_actor(request)
+    result = graph_document_publisher.commit(
+        graph=next_graph,
+        persona_slug=persona_slug,
+        brand_slug=graph.brand_slug,
+        source="dashboard.persona_appointment_policy",
+        reason="Atualizacao das mensagens de handoff via card da persona",
+        published_by=actor.get("user_id"),
+        expected_version=version,
+        idempotency_key=f"appointment-policy:{persona_slug}:{uuid.uuid4()}",
+    )
+    persona_row = supabase_client.get_persona(persona_slug) or {}
+    emit(
+        "persona_appointment_policy_updated",
+        entity_type="knowledge_node",
+        entity_id=persona_node.id,
+        persona_id=persona_row.get("id"),
+        payload={"actor": actor, "fields": list(changes.keys())},
+        source="routes.graph",
+    )
+    updated_persona = next(
+        (n for n in next_graph.nodes if n.node_type == "persona"), None
+    )
+    return {
+        "ok": True,
+        "graph_version": result.get("graph_version"),
+        "appointment_policy": (updated_persona.data or {}).get("appointment_policy") if updated_persona else None,
+    }
 
 
 # knowledge_items statuses → nodeClass
