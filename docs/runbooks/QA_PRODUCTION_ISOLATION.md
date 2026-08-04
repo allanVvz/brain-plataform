@@ -2,7 +2,7 @@
 
 ## Estado atual
 
-- Producao: dashboard Vercel e backend `https://api.vzforeal.com`.
+- Producao: dashboard Vercel e backend servido em dois dominios permanentes, `https://api.vzforeal.com` e `https://lpapi.vzforeal.com` (decisao final, ver secao "Decisao final sobre dominios" abaixo — nao e mais um estado transitorio).
 - QA temporario: Docker Compose local com `.env.compose`.
 - Segunda VPS: pre-requisito pendente para QA persistente; nao simular QA em producao.
 
@@ -38,12 +38,14 @@ Executada em modo dual-domain para nao derrubar o webhook Meta/WhatsApp (persona
 3. `API_INTERNAL_BASE_URL` do projeto Vercel `brain-plataform` (Production) atualizado para `https://api.vzforeal.com`.
 4. Redeploy de producao disparado via `vercel redeploy` (rebuild a partir do deployment anterior, sem usar o working tree local que tem mudancas nao commitadas de outra feature). Confirmado `https://brain-plataform-plum.vercel.app/api-brain/health` -> `200 OK` atraves do novo dominio.
 
-### Pendente (acao manual fora deste repo)
+### Decisao final sobre dominios (2026-08-03)
 
-- `API_DOMAIN` no `.env.compose` da VPS **continua** `lpapi.vzforeal.com` (nao foi alterado) — o Caddyfile e que hoje serve os dois nomes. Isso e intencional ate o passo abaixo ser concluido.
-- Atualizar o Callback URL do WhatsApp no Meta App Dashboard (app da persona `baita-conveniencia`) de `https://lpapi.vzforeal.com/webhooks/whatsapp` para `https://api.vzforeal.com/webhooks/whatsapp` e revalidar o challenge com `META_WHATSAPP_VERIFY_TOKEN`.
-- So depois disso: remover `lpapi.vzforeal.com` do Caddyfile (voltar para `{$API_DOMAIN}` com `API_DOMAIN=api.vzforeal.com` no `.env.compose`), atualizar `ALLOWED_ORIGINS`/DNS se necessario, e recriar o Caddy mais uma vez.
-- Segredos do Meta (`META_WHATSAPP_ACCESS_TOKEN`, `META_WHATSAPP_APP_SECRET`, `META_WHATSAPP_VERIFY_TOKEN`) foram impressos por engano no terminal durante o diagnostico (comando `grep` sem filtrar valores) — recomendado rotacionar por precaucao, mesmo sem exposicao a terceiros.
+O dono do produto decidiu **manter `lpapi.vzforeal.com` permanentemente**, em vez de migrar tudo para `api.vzforeal.com` e desativar o antigo. Isso fecha o que antes estava listado como "pendente":
+
+- `API_DOMAIN` no `.env.compose` da VPS **continua e continuara** `lpapi.vzforeal.com` — nao ha plano de trocar. O Caddyfile serve os dois nomes (`api.vzforeal.com, lpapi.vzforeal.com`) de forma permanente, nao transitoria.
+- Callback URL do WhatsApp no Meta App Dashboard **permanece** `https://lpapi.vzforeal.com/webhooks/whatsapp` — decisao explicita de nao mexer, ja que o dominio nao vai sair do ar. Nenhuma acao necessaria no Meta.
+- `api.vzforeal.com` fica ativo como dominio alternativo/documentado (e o que a Vercel usa em `API_INTERNAL_BASE_URL`), mas ambos sao dominios de producao validos dali em diante — nao remover nenhum dos dois do Caddyfile/DNS sem nova decisao explicita.
+- Rotacao dos segredos do Meta (`META_WHATSAPP_ACCESS_TOKEN`, `META_WHATSAPP_APP_SECRET`, `META_WHATSAPP_VERIFY_TOKEN`), que foram impressos por engano no terminal durante o diagnostico anterior (comando `grep` sem filtrar valores): **dono do produto optou por nao rotacionar.** Risco residual aceito e registrado aqui — se esses valores vazarem de fato (fora deste ambiente), a rotacao volta a ser necessaria.
 
 ## Operacao local
 
@@ -60,9 +62,40 @@ Use `ENVIRONMENT=qa` somente localmente para o admin token compartilhado. O dash
 ## Campanhas
 
 - Rollout 1 local: `BULK_CAMPAIGNS_ROLLOUT1_ENABLED=true`, ou o default de `ENVIRONMENT=qa`.
-- Producao: flag ausente/false ate aprovacao do rollout; uma persona tambem pode ser bloqueada com `config.bulk_campaigns.enabled=false`.
-- Rollout 1 nao envia; cria apenas imports, consents, previews e drafts.
+- **Producao (desde 2026-08-03): `BULK_CAMPAIGNS_ROLLOUT1_ENABLED=true` globalmente**, aprovado e habilitado pelo dono do produto para todas as personas (nao ficou restrito a canario). Uma persona especifica ainda pode ser bloqueada individualmente com `config.bulk_campaigns.enabled=false`.
+- Rollout 1 nao envia; cria apenas imports, consents, previews e drafts. **Nao existe nenhum caminho de codigo, no admin ou no portal do cliente, que envie mensagem real** — isso e a Entrega 2, ainda nao construida.
 - Testes de provider usam mock. Credenciais Meta/Evolution reais nao entram no QA local sem autorizacao explicita.
+
+## Release de 2026-08-03: bulk campaigns + Sofia agent harness + Disparos no portal do cliente
+
+Merge de `feat/sofia-agent-harness` (que ja continha `feature/bulk-campaigns-rollout1`) em `main`, commit `ab16e57634dc2e644081543221f7c57d7bb1d74c`, com deploy completo em producao (nao ficou restrito a canario — decisao explicita do dono do produto).
+
+O que foi ao ar:
+- Import de leads, consentimento, audiences semanticas, preview/draft/pause/cancel de campanhas (admin, `/disparos`).
+- Mesma funcionalidade de campanhas portada para o portal do cliente em `/clientes/[personaSlug]/disparos`, via rotas novas `GET/POST /portal/campaigns*` em `api/routes/portal.py` (resolvem por `persona_slug`, reusam `campaigns_service` sem duplicar logica). Import de lista nova continua exclusivo do admin — o portal do cliente so le imports ja existentes.
+- Sofia agent harness (sessoes/runs/steps duraveis, RLS service-only, grants por ferramenta, QA gate antes de write/destructive).
+- Migrations `087_campaign_delivery_one.sql`, `088_sofia_agent_harness.sql`, `089_fix_semantic_group_replay.sql` aplicadas em producao.
+
+Validacao antes do deploy: suite completa do backend (366 passed, 2 skipped, 0 failed) e do dashboard (84 testes + build) rodada duas vezes — antes e depois do merge em `main` — sem regressao.
+
+### Incidente no deploy automatico
+
+O primeiro push para `main` **nao implantou** por causa de um secret do GitHub Actions quebrado:
+
+```
+Run appleboy/scp-action@v1.0.0
+Error: can't connect without a private SSH key or password
+```
+
+Diagnostico: o secret `VPS_SSH_KEY` esta vazio ou com conteudo invalido. Investigando as chaves autorizadas na VPS (`~/.ssh/authorized_keys` do `root`), existe uma chave com comentario `brain-deploy` — feita de proposito para CI/CD — cujo par privado e `C:\Users\allan\.ssh\id_ed25519` nesta maquina local. Confirmado por teste real de SSH que essa chave autentica na VPS.
+
+**Pendente (acao do dono do produto no GitHub, fora deste repo):** copiar o conteudo de `C:\Users\allan\.ssh\id_ed25519` para o secret `VPS_SSH_KEY` em Settings → Secrets and variables → Actions. Ate isso ser feito, deploys automaticos por push em `main` podem falhar na etapa de sincronizacao e precisar de re-run manual no GitHub Actions (o segundo run, sem nenhuma mudanca de secret, funcionou — sugerindo intermitencia, nao apenas ausencia total do secret).
+
+O deploy desta release acabou concluido pelo proprio pipeline numa nova tentativa (sem intervencao manual no backend); nao foi necessario aplicar o workaround manual (scp + `ops/vps/deploy.sh` direto) que havia sido preparado como contingencia.
+
+### Achado pendente: redirecionamento de login ignora tipo de conta
+
+`dashboard/lib/session-routing.ts`, funcao `resolveSessionDestination`: para contas que nao sao `client`, um `next=` na URL de login e seguido sem validacao (`return target && target !== "/login" ? target : fallback`), diferente do que acontece para conta `client` (que passa por `authorizedClientTarget`). Isso fez uma conta admin (`allanulisses@hotmail.com`, `role=admin`, `account_type=internal` — configuracao correta) cair no portal do cliente apos logar, porque havia acessado uma URL `/clientes/...` antes e ficou com esse `next` pendente. Nao e bug de permissao/dado; e o login "lembrando" o destino anterior sem checar se faz sentido para o tipo de conta. Fix proposto e ainda nao aplicado (aguardando decisao do dono do produto).
 
 ## Promocao
 
