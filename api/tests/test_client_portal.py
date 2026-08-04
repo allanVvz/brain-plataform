@@ -58,12 +58,32 @@ def test_portal_chat_context_reuses_operator_projection_and_persona_scope(monkey
             "limit": limit,
         },
     )
+    messages = [{"id": "m1", "role": "assistant"}]
+    monkeypatch.setattr(
+        portal.supabase_client,
+        "get_messages",
+        lambda _lead_id, *, limit: messages,
+    )
+    monkeypatch.setattr(
+        portal.supabase_client,
+        "list_all_knowledge_graph",
+        lambda **_kwargs: ([], []),
+    )
+    captured_turn = {}
+    monkeypatch.setattr(
+        portal.context_cards_service,
+        "response_context",
+        lambda **kwargs: captured_turn.update(kwargs) or {
+            "mode": "exact", "used_cards": [], "related_cards": [],
+        },
+    )
 
     result = portal.knowledge_chat_context(
         request,
         persona_slug="aurora",
         lead_ref=42,
         q="lavagem",
+        response_message_id="m1",
         limit=7,
     )
 
@@ -76,6 +96,17 @@ def test_portal_chat_context_reuses_operator_projection_and_persona_scope(monkey
     assert result["operator_context"] == {
         "primary": [], "faq_rules": [], "graph_path": [],
     }
+    assert captured_turn == {
+        "persona_slug": "aurora",
+        "persona_id": "p1",
+        "lead_ref": 42,
+        "messages": messages,
+        "response_message_id": "m1",
+        "query": "lavagem",
+        "projection_nodes": [],
+        "limit": 7,
+    }
+    assert result["mode"] == "exact"
     assert result["limit"] == 7
 
 
