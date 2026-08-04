@@ -36,7 +36,8 @@ def test_routing_exposes_public_conversation_modes_without_new_storage(monkeypat
     assert deterministic["conversation_mode"] == "deterministic"
     assert n8n["conversation_mode"] == "n8n_agents"
     assert deterministic["pipeline_contract"] == n8n["pipeline_contract"] == "conversation_v1"
-    assert deterministic["classifier"] == n8n["classifier"] == "deterministic_v1"
+    assert deterministic["classifier"] == "deterministic_v1"
+    assert n8n["classifier"] == "graph_agentic_v1"
     assert deterministic["model_required"] is False
     assert n8n["model_required"] is True
     assert n8n["field_extractor"] == "deepseek-v4-flash"
@@ -242,9 +243,9 @@ def test_echo_guard_still_suppresses_long_distinctive_replies(monkeypatch):
     assert events[0][0][0] == "whatsapp.bot_loop_suppressed"
 
 
-def test_n8n_and_local_modes_use_the_same_three_stage_contract():
+def test_n8n_agentic_template_and_local_mode_are_distinct_contracts():
     workflow = json.loads(
-        (ROOT / "api" / "n8n-workflows" / "baita-vitoria.json").read_text(
+        (ROOT / "api" / "n8n-workflows" / "persona-conversation-template.json").read_text(
             encoding="utf-8"
         )
     )
@@ -257,9 +258,9 @@ def test_n8n_and_local_modes_use_the_same_three_stage_contract():
     assert any("/internal/conversations/commit" in url for url in urls)
     source = inspect.getsource(conversation_runtime.execute_pipeline)
     assert source.index("build_context(") < source.index("decide(") < source.index("commit(")
-    assert workflow["meta"]["binding"]["classifier"] == "deterministic_v1"
+    assert workflow["meta"]["template"] == "graph_agentic_v1"
     assert workflow["meta"]["binding"]["model_required"] is True
-    assert workflow["meta"]["binding"]["field_extractor"] == "deepseek-v4-flash"
+    assert workflow["meta"]["binding"]["reply_source"] == "deepseek-v4-flash"
 
 
 def test_fail_safe_handoff_captures_which_node_failed_and_why():
@@ -274,7 +275,7 @@ def test_fail_safe_handoff_captures_which_node_failed_and_why():
     include $prevNode.name (which node failed) and the actual error payload,
     and error executions must be retained.
     """
-    for filename in ("baita-vitoria.json", "aurora-conversation.json"):
+    for filename in ("persona-conversation-template.json",):
         workflow = json.loads(
             (ROOT / "api" / "n8n-workflows" / filename).read_text(encoding="utf-8")
         )
@@ -284,7 +285,10 @@ def test_fail_safe_handoff_captures_which_node_failed_and_why():
         )
         body = fail_safe["parameters"]["body"]
         assert "$prevNode.name" in body
-        assert "JSON.stringify($json)" in body
+        assert "$json.error" in body
+        assert "http_code" in body
+        assert "workflow_template" in body
+        assert "JSON.stringify($json).slice" not in body
         assert "reason: 'workflow_step_failed'," not in body
 
 

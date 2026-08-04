@@ -72,6 +72,10 @@ jobs:
             api/tests/test_graph_markdown_catalog.py \
             api/tests/test_lead_qualification.py \
             api/tests/test_client_portal.py \
+            api/tests/test_deepseek_n8n_service.py \
+            api/tests/test_persona_routing.py \
+            api/tests/test_n8n_failure_diagnostics.py \
+            api/tests/test_n8n_mirror_diagnostics.py \
             -q
 
       - name: Configurar Node

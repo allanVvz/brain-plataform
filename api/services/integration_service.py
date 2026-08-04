@@ -670,7 +670,10 @@ def validate_persona_integration(
                     "entity_type": "persona",
                     "entity_id": persona_id,
                     "persona_id": persona_id,
-                    "payload": {"reason": wiring["reason"]},
+                    "payload": {
+                        "reason": wiring["reason"],
+                        "diagnostics": wiring.get("diagnostics") or {},
+                    },
                 },
                 level="error",
                 source="services.integration_service",
@@ -682,6 +685,20 @@ def validate_persona_integration(
         supabase_client.save_persona_integration_connection(existing)
         state = get_persona_integration_state(persona_id, service)
         state["response_ms"] = latency
+        state["workflow_diagnostics"] = wiring.get("diagnostics") or {}
+        supabase_client.insert_event(
+            {
+                "event_type": "deepseek.workflow_wiring_valid",
+                "entity_type": "persona",
+                "entity_id": persona_id,
+                "persona_id": persona_id,
+                "payload": {
+                    "response_ms": latency,
+                    "diagnostics": wiring.get("diagnostics") or {},
+                },
+            },
+            source="services.integration_service",
+        )
         return state
     secret_value, config_json = (
         normalize_credentials(service, credentials)

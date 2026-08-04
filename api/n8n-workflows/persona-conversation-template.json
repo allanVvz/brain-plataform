@@ -1,16 +1,30 @@
 {
-  "name": "__PERSONA_NAME__ — __AGENT_NAME__",
+  "name": "Brain — __PERSONA_NAME__ — Conversação",
   "active": false,
   "nodes": [
     {
-      "parameters": {"httpMethod": "POST", "path": "__PERSONA_SLUG__/conversation", "responseMode": "responseNode"},
-      "id": "inbound", "webhookId": "b4f0d00e-8ed0-4ca4-bf9c-2fb6e5b7f002", "name": "Canonical inbound", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [200, 300]
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "__PERSONA_SLUG__/conversation",
+        "responseMode": "responseNode"
+      },
+      "id": "inbound",
+      "webhookId": "__WEBHOOK_ID__",
+      "name": "Canonical inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300]
     },
     {
       "parameters": {
-        "jsCode": "const input = $json.body || $json; const binding = { persona_slug: '__PERSONA_SLUG__', agent_slug: '__AGENT_SLUG__', decision_owner: 'n8n_agents', pipeline_contract: 'conversation_v1', classifier: 'deterministic_v1' }; if (input.persona_slug !== binding.persona_slug) throw new Error('persona binding mismatch'); if (input.pipeline_contract && input.pipeline_contract !== binding.pipeline_contract) throw new Error('pipeline contract mismatch'); if (!input.lead_ref || !input.buffer_id || !input.correlation_id || !input.channel_binding_id) throw new Error('invalid canonical event'); return [{ json: { ...input, ...binding } }];"
+        "jsCode": "const headers = $json.headers || {}; const supplied = headers['x-webhook-token'] || headers['X-Webhook-Token']; if (!supplied || supplied !== $env.AI_BRAIN_WEBHOOK_TOKEN) throw new Error('invalid webhook token'); const input = $json.body || $json; const binding = { persona_slug: '__PERSONA_SLUG__', agent_slug: '__AGENT_SLUG__', decision_owner: 'n8n_agents', pipeline_contract: 'conversation_v1', reply_source: 'deepseek-v4-flash' }; if (input.persona_slug !== binding.persona_slug) throw new Error('persona binding mismatch'); if (input.decision_owner && input.decision_owner !== binding.decision_owner) throw new Error('decision owner mismatch'); if (input.pipeline_contract && input.pipeline_contract !== binding.pipeline_contract) throw new Error('pipeline contract mismatch'); if (!input.lead_ref || !input.buffer_id || !input.correlation_id || !input.channel_binding_id) throw new Error('invalid canonical event: missing lead_ref, buffer_id, correlation_id or channel_binding_id'); if (!input.message || !String(input.message).trim()) throw new Error('invalid canonical event: empty message'); return [{ json: { ...input, message: String(input.message).trim(), ...binding } }];"
       },
-      "id": "binding", "name": "Validate persona binding", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [440, 300]
+      "id": "binding",
+      "name": "Validate conversation binding",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -21,10 +35,15 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({persona_slug: $('Validate persona binding').item.json.persona_slug, lead_ref: $('Validate persona binding').item.json.lead_ref, message: $('Validate persona binding').item.json.message, message_id: $('Validate persona binding').item.json.external_message_id})}}",
+        "body": "={{JSON.stringify({persona_slug: $('Validate conversation binding').item.json.persona_slug, lead_ref: $('Validate conversation binding').item.json.lead_ref, message: $('Validate conversation binding').item.json.message, message_id: $('Validate conversation binding').item.json.external_message_id})}}",
         "options": {}
       },
-      "id": "context", "name": "Load published graph context", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [700, 300], "onError": "continueErrorOutput"
+      "id": "context",
+      "name": "Load published graph context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -35,10 +54,58 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({context: $json})}}",
+        "body": "={{JSON.stringify({context: $('Load published graph context').item.json})}}",
         "options": {}
       },
-      "id": "decision", "name": "Classify SDR Closer Human", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [960, 300], "onError": "continueErrorOutput"
+      "id": "policy",
+      "name": "Resolve conversation policy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const context = $('Load published graph context').item.json; const policy = $('Resolve conversation policy').item.json; const pending = (policy.response && policy.response.cart_state && policy.response.cart_state.missing_fields) || []; const cards = (context.context_cards || []).map(function(card) { return { id: card.id, type: card.node_type, title: card.title, content: card.rendered_content, checksum: card.content_checksum, role: card.context_role }; }); const requestBody = { model: 'deepseek-v4-flash', thinking: { type: 'disabled' }, temperature: 0.3, max_tokens: 700, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: context.system_prompt || 'Responda somente com base no conhecimento aprovado e em JSON.' }, { role: 'user', content: JSON.stringify({ customer_message: $('Validate conversation binding').item.json.message, policy_signal: { intent: policy.decision.intent, route: policy.decision.route, handoff_required: policy.response.handoff_required }, pending_fields: pending, approved_knowledge: cards, recent_messages: (context.messages || []).slice(-6), available_services: context.available_services || [] }) }] }; return [{ json: { request_body: requestBody } }];"
+      },
+      "id": "model_request",
+      "name": "Build graph grounded agent request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.deepseek.com/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "Content-Type", "value": "application/json"}]},
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify($json.request_body)}}",
+        "options": {}
+      },
+      "id": "deepseek",
+      "name": "DeepSeek agentic reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const policy = $('Resolve conversation policy').item.json; const content = $json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content; if (!content) throw new Error('DeepSeek returned empty content'); let parsed; try { parsed = JSON.parse(content); } catch (error) { throw new Error('DeepSeek returned invalid JSON: ' + error.message); } const replyText = typeof parsed.reply_text === 'string' ? parsed.reply_text.trim() : ''; if (!replyText) throw new Error('DeepSeek response is missing reply_text'); const extractedFields = parsed.extracted_fields && typeof parsed.extracted_fields === 'object' ? parsed.extracted_fields : {}; const identifiedServiceSlug = typeof parsed.identified_service_slug === 'string' ? parsed.identified_service_slug : null; return [{ json: { ...policy, response: { ...policy.response, reply_text: replyText, extracted_fields: extractedFields, identified_service_slug: identifiedServiceSlug } } }];"
+      },
+      "id": "model_response",
+      "name": "Validate agent response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1640, 300],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -49,10 +116,15 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({lead_ref: $('Validate persona binding').item.json.lead_ref, context: $('Load published graph context').item.json, decision: $json.decision, response: $json.response, correlation_id: $('Validate persona binding').item.json.correlation_id, phone_number_id: $('Validate persona binding').item.json.phone_number_id, channel_binding_id: $('Validate persona binding').item.json.channel_binding_id, inbound_buffer_id: $('Validate persona binding').item.json.buffer_id})}}",
+        "body": "={{JSON.stringify({lead_ref: $('Validate conversation binding').item.json.lead_ref, context: $('Load published graph context').item.json, decision: $json.decision, response: $json.response, correlation_id: $('Validate conversation binding').item.json.correlation_id, phone_number_id: $('Validate conversation binding').item.json.phone_number_id, channel_binding_id: $('Validate conversation binding').item.json.channel_binding_id, inbound_buffer_id: $('Validate conversation binding').item.json.buffer_id})}}",
         "options": {}
       },
-      "id": "commit", "name": "Persist decision cart and handoff", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1220, 300], "onError": "continueErrorOutput"
+      "id": "commit",
+      "name": "Persist once and enqueue send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 300],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -63,23 +135,46 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({lead_ref: $('Validate persona binding').item.json.lead_ref, reason: 'workflow_step_failed', correlation_id: $('Validate persona binding').item.json.correlation_id})}}",
+        "body": "={{(function() { var inbound = $('Canonical inbound').item.json; var input = inbound.body || inbound; var error = $json.error || {}; return JSON.stringify({lead_ref: input.lead_ref, reason: 'workflow_step_failed:' + $prevNode.name + ':' + String(error.message || $json.message || $json.description || 'unknown error').slice(0, 500), correlation_id: input.correlation_id, diagnostic: {failed_node: $prevNode.name, message: String(error.message || $json.message || 'unknown error').slice(0, 1000), description: String(error.description || $json.description || '').slice(0, 2000), http_code: error.httpCode || error.statusCode || $json.httpCode || $json.statusCode || null, workflow_template: 'graph_agentic_v1', persona_slug: input.persona_slug}}); })()}}",
         "options": {}
       },
-      "id": "failsafe", "name": "Fail safe human handoff", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1220, 520]
+      "id": "failsafe",
+      "name": "Fail safe human handoff",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 560]
     },
     {
       "parameters": {"respondWith": "json", "responseBody": "={{$json}}"},
-      "id": "respond", "name": "Return canonical result", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.4, "position": [1480, 300]
+      "id": "respond",
+      "name": "Return canonical result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [2120, 300]
     }
   ],
   "connections": {
-    "Canonical inbound": {"main": [[{"node": "Validate persona binding", "type": "main", "index": 0}]]},
-    "Validate persona binding": {"main": [[{"node": "Load published graph context", "type": "main", "index": 0}]]},
-    "Load published graph context": {"main": [[{"node": "Classify SDR Closer Human", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Classify SDR Closer Human": {"main": [[{"node": "Persist decision cart and handoff", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Persist decision cart and handoff": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Canonical inbound": {"main": [[{"node": "Validate conversation binding", "type": "main", "index": 0}]]},
+    "Validate conversation binding": {"main": [[{"node": "Load published graph context", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Load published graph context": {"main": [[{"node": "Resolve conversation policy", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Resolve conversation policy": {"main": [[{"node": "Build graph grounded agent request", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Build graph grounded agent request": {"main": [[{"node": "DeepSeek agentic reply", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "DeepSeek agentic reply": {"main": [[{"node": "Validate agent response", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Validate agent response": {"main": [[{"node": "Persist once and enqueue send", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Persist once and enqueue send": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
     "Fail safe human handoff": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}]]}
   },
-  "settings": {"executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all"}
+  "settings": {"executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all"},
+  "meta": {
+    "template": "graph_agentic_v1",
+    "binding": {
+      "persona_slug": "__PERSONA_SLUG__",
+      "agent_slug": "__AGENT_SLUG__",
+      "decision_owner": "n8n_agents",
+      "pipeline_contract": "conversation_v1",
+      "reply_source": "deepseek-v4-flash",
+      "model_required": true,
+      "model": "deepseek-v4-flash"
+    }
+  }
 }

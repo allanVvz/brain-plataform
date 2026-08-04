@@ -33,7 +33,11 @@ class N8nMirrorWorker(BaseWorker):
         if not integration_service.system_service_has_runtime_credentials("n8n"):
             sre_logger.info(self.name, "skipped: n8n integration credentials are not configured")
             return
-        executions = n8n_client.get_executions(limit=50)
+        # includeData is required for runData/node errors. Without it, n8n
+        # can report an execution as "success" while an HTTP node followed
+        # its continueErrorOutput branch, leaving the Logs tab empty exactly
+        # when an operator needs the failure payload.
+        executions = n8n_client.get_executions(limit=50, include_data=True)
         synced = 0
         for ex in executions:
             try:

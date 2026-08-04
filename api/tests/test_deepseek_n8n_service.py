@@ -1,7 +1,57 @@
 from services import deepseek_n8n_service
 
 
+def _silence_events(monkeypatch):
+    monkeypatch.setattr(deepseek_n8n_service.event_emitter, "emit", lambda *a, **k: None)
+
+
+def test_every_persona_uses_the_same_graph_agentic_template():
+    commerce = deepseek_n8n_service._workflow_for_persona(
+        {
+            "id": "p-commerce",
+            "slug": "commerce",
+            "name": "Commerce",
+            "config": {"portal": {"business_model": "commerce"}},
+        },
+        credential_id="cred-commerce",
+        credential_name="DeepSeek commerce",
+    )
+    appointment = deepseek_n8n_service._workflow_for_persona(
+        {
+            "id": "p-appointment",
+            "slug": "appointment",
+            "name": "Appointment",
+            "config": {"portal": {"business_model": "appointment"}},
+        },
+        credential_id="cred-appointment",
+        credential_name="DeepSeek appointment",
+    )
+
+    assert commerce["meta"]["template"] == "graph_agentic_v1"
+    assert appointment["meta"]["template"] == "graph_agentic_v1"
+    assert [node["id"] for node in commerce["nodes"]] == [
+        node["id"] for node in appointment["nodes"]
+    ]
+    assert commerce["connections"] == appointment["connections"]
+    assert "baita" not in str(commerce).lower()
+    assert "aurora" not in str(appointment).lower()
+
+
+def test_model_request_is_built_in_code_and_http_body_is_simple():
+    workflow = _live_workflow("cred-1")
+    request_node = next(node for node in workflow["nodes"] if node["id"] == "model_request")
+    deepseek_node = next(node for node in workflow["nodes"] if node["id"] == "deepseek")
+    fail_safe = next(node for node in workflow["nodes"] if node["id"] == "failsafe")
+
+    assert "context_cards" in request_node["parameters"]["jsCode"]
+    assert "rendered_content" in request_node["parameters"]["jsCode"]
+    assert deepseek_node["parameters"]["body"] == "={{JSON.stringify($json.request_body)}}"
+    assert "http_code" in fail_safe["parameters"]["body"]
+    assert "workflow_template" in fail_safe["parameters"]["body"]
+
+
 def test_provision_keeps_key_only_in_n8n_credential(monkeypatch):
+    _silence_events(monkeypatch)
     calls = {}
 
     def create_credential(**payload):
@@ -37,7 +87,8 @@ def test_provision_keeps_key_only_in_n8n_credential(monkeypatch):
     assert key not in str(calls["workflow"])
     deepseek_node = next(node for node in calls["workflow"]["nodes"] if node["id"] == "deepseek")
     assert deepseek_node["credentials"]["httpHeaderAuth"]["id"] == "credential-new"
-    assert calls["workflow"]["settings"]["saveDataSuccessExecution"] == "none"
+    assert calls["workflow"]["settings"]["saveDataSuccessExecution"] == "all"
+    assert calls["workflow"]["meta"]["template"] == "graph_agentic_v1"
     assert result["n8n_workflow_id"] == "workflow-existing"
     assert result["n8n_credential_id"] == "credential-new"
     assert key not in str(result)
@@ -45,6 +96,7 @@ def test_provision_keeps_key_only_in_n8n_credential(monkeypatch):
 
 
 def test_provision_rolls_back_only_new_credential_when_workflow_fails(monkeypatch):
+    _silence_events(monkeypatch)
     deleted = []
     monkeypatch.setattr(
         deepseek_n8n_service.n8n_client,
@@ -84,6 +136,7 @@ def test_resync_workflow_reuses_existing_credential_and_reactivates(monkeypatch)
     that was run by hand for every persona-level engine/config change this
     session — the settings UI must be able to trigger the same steps."""
     calls = {}
+    _silence_events(monkeypatch)
 
     def update_workflow(workflow_id, workflow):
         calls["workflow_id"] = workflow_id
@@ -119,6 +172,7 @@ def test_resync_workflow_creates_it_when_missing_reusing_the_credential(monkeypa
     fix must build a new workflow from the credential that's already
     there, never ask for the key again."""
     calls = {}
+    _silence_events(monkeypatch)
 
     def create_workflow(workflow):
         calls["created"] = workflow
@@ -149,6 +203,7 @@ def test_resync_workflow_creates_it_when_missing_reusing_the_credential(monkeypa
 
 
 def test_resync_workflow_requires_prior_provisioning(monkeypatch):
+    _silence_events(monkeypatch)
     try:
         deepseek_n8n_service.resync_workflow_for_persona(
             {"slug": "baita-conveniencia", "name": "Baita", "config": {}},
@@ -159,24 +214,32 @@ def test_resync_workflow_requires_prior_provisioning(monkeypatch):
         assert "provisionado" in str(exc)
 
 
-def _deepseek_node(credential_id: str) -> dict:
-    return {
-        "name": "DeepSeek field extraction",
-        "type": "n8n-nodes-base.httpRequest",
-        "parameters": {"url": "https://api.deepseek.com/chat/completions"},
-        "credentials": {"httpHeaderAuth": {"id": credential_id, "name": "Brain DeepSeek"}},
-    }
+def _live_workflow(credential_id: str) -> dict:
+    workflow = deepseek_n8n_service._workflow_for_persona(
+        {"id": "persona-1", "slug": "baita-conveniencia", "name": "Baita"},
+        credential_id=credential_id,
+        credential_name="Brain DeepSeek",
+    )
+    workflow["id"] = "wf-1"
+    workflow["active"] = True
+    return workflow
 
 
 def test_check_workflow_wiring_ok_when_workflow_active_and_credential_matches(monkeypatch):
     monkeypatch.setattr(
         deepseek_n8n_service.n8n_client, "get_workflow",
-        lambda workflow_id: {"id": workflow_id, "active": True, "nodes": [_deepseek_node("cred-1")]},
+        lambda workflow_id: _live_workflow("cred-1"),
     )
     result = deepseek_n8n_service.check_workflow_wiring(
-        {"n8n_workflow_id": "wf-1", "n8n_credential_id": "cred-1"}
+        {
+            "n8n_workflow_id": "wf-1",
+            "n8n_credential_id": "cred-1",
+            "conversation_webhook_path": "baita-conveniencia/conversation",
+        }
     )
-    assert result == {"ok": True, "reason": None}
+    assert result["ok"] is True
+    assert result["reason"] is None
+    assert result["diagnostics"]["checks"]["required_nodes"] is True
 
 
 def test_check_workflow_wiring_fails_when_workflow_deleted(monkeypatch):
@@ -191,7 +254,7 @@ def test_check_workflow_wiring_fails_when_workflow_deleted(monkeypatch):
 def test_check_workflow_wiring_fails_when_credential_reference_drifted(monkeypatch):
     monkeypatch.setattr(
         deepseek_n8n_service.n8n_client, "get_workflow",
-        lambda workflow_id: {"id": workflow_id, "active": True, "nodes": [_deepseek_node("cred-DIFFERENT")]},
+        lambda workflow_id: _live_workflow("cred-DIFFERENT"),
     )
     result = deepseek_n8n_service.check_workflow_wiring(
         {"n8n_workflow_id": "wf-1", "n8n_credential_id": "cred-1"}

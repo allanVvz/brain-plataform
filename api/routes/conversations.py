@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import hmac
 import os
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 from schemas.conversation import (
     AgentResponse,
@@ -65,6 +66,7 @@ class FailSafeHandoffRequest(StrictModel):
     lead_ref: int
     reason: str
     correlation_id: str
+    diagnostic: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.post("/context", response_model=ConversationContext)
@@ -131,6 +133,22 @@ def fail_safe_handoff(
     _authorize(x_webhook_token)
     lead = conversation_runtime.supabase_client.get_lead_by_ref(body.lead_ref) or {}
     conversation_runtime.supabase_client.handoff_whatsapp_lead(body.lead_ref)
+    if body.diagnostic:
+        conversation_runtime.supabase_client.insert_event(
+            {
+                "event_type": "n8n.workflow_step_failed",
+                "entity_type": "lead",
+                "entity_id": str(body.lead_ref),
+                "persona_id": lead.get("persona_id"),
+                "payload": {
+                    "lead_ref": body.lead_ref,
+                    "correlation_id": body.correlation_id,
+                    **body.diagnostic,
+                },
+            },
+            level="error",
+            source="routes.conversations",
+        )
     conversation_runtime.supabase_client.insert_event(
         {
             "event_type": "conversation.fail_safe_handoff",

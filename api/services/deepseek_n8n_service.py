@@ -7,21 +7,56 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from services import n8n_client
+from services import event_emitter, n8n_client
 
 
-_TEMPLATE = Path(__file__).resolve().parents[1] / "n8n-workflows" / "baita-vitoria.json"
-_AGENTIC_TEMPLATE = Path(__file__).resolve().parents[1] / "n8n-workflows" / "aurora-conversation.json"
-_AGENTIC_BUSINESS_MODELS = {"appointment"}
+_TEMPLATE = (
+    Path(__file__).resolve().parents[1]
+    / "n8n-workflows"
+    / "persona-conversation-template.json"
+)
+_TEMPLATE_VERSION = "graph_agentic_v1"
+_REQUIRED_NODE_IDS = {
+    "inbound", "binding", "context", "policy", "model_request",
+    "deepseek", "model_response", "commit", "failsafe", "respond",
+}
 
 
-def _uses_agentic_reply_template(persona: dict[str, Any]) -> bool:
-    """Appointment-style businesses get a model-authored reply (SDR script),
-    still gated by the deterministic engine for route/handoff/missing fields.
-    Everything else keeps the original field-extraction-only template."""
-    config = persona.get("config") or {}
-    business_model = str((config.get("portal") or {}).get("business_model") or "")
-    return business_model in _AGENTIC_BUSINESS_MODELS
+def _workflow_checksum(workflow: dict[str, Any]) -> str:
+    payload = {
+        key: workflow.get(key)
+        for key in ("name", "nodes", "connections", "settings")
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _emit(
+    persona: dict[str, Any],
+    event_type: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    level: str = "info",
+) -> None:
+    persona_id = str(persona.get("id") or "") or None
+    event_emitter.emit(
+        event_type,
+        entity_type="persona",
+        entity_id=persona_id or str(persona.get("slug") or ""),
+        persona_id=persona_id,
+        payload={
+            "persona_slug": str(persona.get("slug") or ""),
+            "template": _TEMPLATE_VERSION,
+            **(payload or {}),
+        },
+        level=level,
+        source="services.deepseek_n8n_service",
+    )
 
 
 def _workflow_for_persona(
@@ -39,29 +74,19 @@ def _workflow_for_persona(
         or (config.get("automation") or {}).get("agent_slug")
         or "assistant"
     )
-    agentic = _uses_agentic_reply_template(persona)
-    template_path = _AGENTIC_TEMPLATE if agentic else _TEMPLATE
-    template = json.loads(template_path.read_text(encoding="utf-8"))
-    template_slug = str(template["meta"]["binding"]["persona_slug"])
-    template_agent_slug = str(template["meta"]["binding"]["agent_slug"])
-    serialized = json.dumps(template, ensure_ascii=False)
-    serialized = serialized.replace(template_slug, slug)
-    workflow = json.loads(serialized)
-    workflow["name"] = f"Brain — {persona.get('name') or slug} — Conversação"
-    workflow["active"] = False
-    # Webhook ids are global in n8n. Keep each persona clone isolated while
-    # remaining stable across reprovisioning.
+    template = json.loads(_TEMPLATE.read_text(encoding="utf-8"))
     webhook_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"brain-ai:{slug}:conversation"))
+    serialized = json.dumps(template, ensure_ascii=False)
+    for placeholder, value in {
+        "__PERSONA_SLUG__": slug,
+        "__PERSONA_NAME__": str(persona.get("name") or slug),
+        "__AGENT_SLUG__": agent_slug,
+        "__WEBHOOK_ID__": webhook_id,
+    }.items():
+        serialized = serialized.replace(placeholder, value)
+    workflow = json.loads(serialized)
+    workflow["active"] = False
     for node in workflow.get("nodes") or []:
-        if node.get("id") == "inbound":
-            node["webhookId"] = webhook_id
-        if node.get("id") == "binding":
-            code = str((node.get("parameters") or {}).get("jsCode") or "")
-            code = code.replace(
-                f"agent_slug: '{template_agent_slug}'",
-                f"agent_slug: {json.dumps(agent_slug)}",
-            )
-            node["parameters"]["jsCode"] = code
         url = str((node.get("parameters") or {}).get("url") or "")
         if node.get("type") == "n8n-nodes-base.httpRequest" and "api.deepseek.com" in url:
             node["credentials"] = {
@@ -78,7 +103,8 @@ def _workflow_for_persona(
         "agent_slug": agent_slug,
         "decision_owner": "n8n_agents",
         "pipeline_contract": "conversation_v1",
-        "classifier": "deterministic_v1",
+        "reply_source": "deepseek-v4-flash",
+        "model_required": True,
         "model": "deepseek-v4-flash",
     }
     return workflow
@@ -93,21 +119,32 @@ def provision(
     previous = dict(previous_config or {})
     slug = str(persona.get("slug") or "")
     credential_name = f"Brain DeepSeek — {slug}"
-    created = n8n_client.create_credential(
-        name=credential_name,
-        credential_type="httpHeaderAuth",
-        data={"name": "Authorization", "value": f"Bearer {api_key}"},
-    )
-    credential_id = str(created.get("id") or "")
-    if not credential_id:
-        raise RuntimeError("n8n did not return a credential id")
+    step = "create_credential"
+    credential_id = ""
+    _emit(persona, "n8n.workflow_provision.started")
     try:
+        created = n8n_client.create_credential(
+            name=credential_name,
+            credential_type="httpHeaderAuth",
+            data={"name": "Authorization", "value": f"Bearer {api_key}"},
+        )
+        credential_id = str(created.get("id") or "")
+        if not credential_id:
+            raise RuntimeError("n8n did not return a credential id")
+        _emit(
+            persona,
+            "n8n.workflow_provision.credential_created",
+            payload={"credential_id": credential_id},
+        )
+        step = "render_template"
         workflow = _workflow_for_persona(
             persona,
             credential_id=credential_id,
             credential_name=credential_name,
         )
+        workflow_checksum = _workflow_checksum(workflow)
         existing_workflow_id = str(previous.get("n8n_workflow_id") or "")
+        step = "save_workflow"
         if existing_workflow_id:
             saved = n8n_client.update_workflow(existing_workflow_id, workflow)
         else:
@@ -126,21 +163,43 @@ def provision(
         workflow_id = str(saved.get("id") or existing_workflow_id)
         if not workflow_id:
             raise RuntimeError("n8n did not return a workflow id")
+        step = "activate_workflow"
         n8n_client.activate_workflow(workflow_id)
-    except Exception:
-        n8n_client.delete_credential(credential_id)
+    except Exception as exc:
+        if credential_id:
+            n8n_client.delete_credential(credential_id)
+        _emit(
+            persona,
+            "n8n.workflow_provision.failed",
+            payload={"step": step, "error": str(exc)[:2000]},
+            level="error",
+        )
         raise
 
     old_credential_id = str(previous.get("n8n_credential_id") or "")
     if old_credential_id and old_credential_id != credential_id:
         n8n_client.delete_credential(old_credential_id)
-    return {
+    result = {
         "n8n_credential_id": credential_id,
         "n8n_workflow_id": workflow_id,
         "conversation_webhook_path": f"{slug}/conversation",
         "model": "deepseek-v4-flash",
         "fingerprint": hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12],
+        "persona_id": str(persona.get("id") or ""),
+        "persona_slug": slug,
+        "workflow_template": _TEMPLATE_VERSION,
+        "workflow_checksum": workflow_checksum,
     }
+    _emit(
+        persona,
+        "n8n.workflow_provision.succeeded",
+        payload={
+            "workflow_id": workflow_id,
+            "workflow_checksum": workflow_checksum,
+            "webhook_path": result["conversation_webhook_path"],
+        },
+    )
+    return result
 
 
 def resync_workflow_for_persona(
@@ -174,26 +233,62 @@ def resync_workflow_for_persona(
     if not credential_id:
         raise RuntimeError("DeepSeek nao provisionado para esta persona")
     credential_name = f"Brain DeepSeek — {persona.get('slug') or ''}"
-    workflow = _workflow_for_persona(
-        persona,
-        credential_id=credential_id,
-        credential_name=credential_name,
-    )
+    step = "render_template"
     workflow_id = str(deepseek_config.get("n8n_workflow_id") or "")
-    if workflow_id:
-        n8n_client.update_workflow(workflow_id, workflow)
-    else:
-        created = n8n_client.create_workflow(workflow)
-        workflow_id = str(created.get("id") or "")
-        if not workflow_id:
-            raise RuntimeError("n8n nao retornou um workflow id")
-    n8n_client.activate_workflow(workflow_id)
+    _emit(
+        persona,
+        "n8n.workflow_resync.started",
+        payload={"workflow_id": workflow_id or None},
+    )
+    try:
+        workflow = _workflow_for_persona(
+            persona,
+            credential_id=credential_id,
+            credential_name=credential_name,
+        )
+        workflow_checksum = _workflow_checksum(workflow)
+        step = "save_workflow"
+        if workflow_id:
+            n8n_client.update_workflow(workflow_id, workflow)
+        else:
+            created = n8n_client.create_workflow(workflow)
+            workflow_id = str(created.get("id") or "")
+            if not workflow_id:
+                raise RuntimeError("n8n nao retornou um workflow id")
+        step = "activate_workflow"
+        n8n_client.activate_workflow(workflow_id)
+    except Exception as exc:
+        _emit(
+            persona,
+            "n8n.workflow_resync.failed",
+            payload={
+                "workflow_id": workflow_id or None,
+                "step": step,
+                "error": str(exc)[:2000],
+            },
+            level="error",
+        )
+        raise
     slug = str(persona.get("slug") or "")
-    return {
+    result = {
         **deepseek_config,
         "n8n_workflow_id": workflow_id,
         "conversation_webhook_path": f"{slug}/conversation",
+        "persona_id": str(persona.get("id") or ""),
+        "persona_slug": slug,
+        "workflow_template": _TEMPLATE_VERSION,
+        "workflow_checksum": workflow_checksum,
     }
+    _emit(
+        persona,
+        "n8n.workflow_resync.succeeded",
+        payload={
+            "workflow_id": workflow_id,
+            "workflow_checksum": workflow_checksum,
+            "webhook_path": result["conversation_webhook_path"],
+        },
+    )
+    return result
 
 
 def check_workflow_wiring(deepseek_config: dict[str, Any]) -> dict[str, Any]:
@@ -215,24 +310,126 @@ def check_workflow_wiring(deepseek_config: dict[str, Any]) -> dict[str, Any]:
     """
     workflow_id = str(deepseek_config.get("n8n_workflow_id") or "")
     credential_id = str(deepseek_config.get("n8n_credential_id") or "")
+    diagnostics: dict[str, Any] = {
+        "workflow_id": workflow_id or None,
+        "template": deepseek_config.get("workflow_template") or None,
+        "checks": {},
+    }
     if not workflow_id or not credential_id:
-        return {"ok": False, "reason": "DeepSeek nao provisionado (sem workflow ou credential id)."}
+        return {
+            "ok": False,
+            "reason": "DeepSeek nao provisionado (sem workflow ou credential id).",
+            "diagnostics": diagnostics,
+        }
     workflow = n8n_client.get_workflow(workflow_id)
     if workflow is None:
-        return {"ok": False, "reason": f"Workflow n8n {workflow_id} nao existe mais."}
+        return {
+            "ok": False,
+            "reason": f"Workflow n8n {workflow_id} nao existe mais.",
+            "diagnostics": diagnostics,
+        }
+    diagnostics["checks"]["workflow_exists"] = True
     if not workflow.get("active"):
-        return {"ok": False, "reason": "Workflow n8n existe mas esta inativo."}
+        diagnostics["checks"]["active"] = False
+        return {
+            "ok": False,
+            "reason": "Workflow n8n existe mas esta inativo.",
+            "diagnostics": diagnostics,
+        }
+    diagnostics["checks"]["active"] = True
+    nodes = workflow.get("nodes") or []
+    node_ids = {str(node.get("id") or "") for node in nodes}
+    missing_nodes = sorted(_REQUIRED_NODE_IDS - node_ids)
+    diagnostics["checks"]["required_nodes"] = not missing_nodes
+    diagnostics["missing_nodes"] = missing_nodes
+    if missing_nodes:
+        return {
+            "ok": False,
+            "reason": "Workflow n8n nao corresponde ao template agentic canonico.",
+            "diagnostics": diagnostics,
+        }
+    inbound = next((node for node in nodes if node.get("id") == "inbound"), {})
+    live_path = str((inbound.get("parameters") or {}).get("path") or "").strip("/")
+    expected_path = str(
+        deepseek_config.get("conversation_webhook_path") or ""
+    ).strip("/")
+    diagnostics["checks"]["webhook_path"] = not expected_path or live_path == expected_path
+    diagnostics["live_webhook_path"] = live_path
+    diagnostics["expected_webhook_path"] = expected_path or None
+    if expected_path and live_path != expected_path:
+        return {
+            "ok": False,
+            "reason": "Webhook do workflow n8n nao corresponde a persona configurada.",
+            "diagnostics": diagnostics,
+        }
     referenced_ids = {
         str((node.get("credentials") or {}).get("httpHeaderAuth", {}).get("id") or "")
-        for node in workflow.get("nodes") or []
+        for node in nodes
         if "api.deepseek.com" in str((node.get("parameters") or {}).get("url") or "")
     }
+    diagnostics["checks"]["credential_reference"] = credential_id in referenced_ids
     if credential_id not in referenced_ids:
         return {
             "ok": False,
             "reason": "O node DeepSeek do workflow n8n referencia uma credencial diferente da configurada.",
+            "diagnostics": diagnostics,
         }
-    return {"ok": True, "reason": None}
+    expected_checksum = str(deepseek_config.get("workflow_checksum") or "")
+    live_checksum = _workflow_checksum(workflow)
+    diagnostics["live_workflow_checksum"] = live_checksum
+    diagnostics["expected_workflow_checksum"] = expected_checksum or None
+    diagnostics["checks"]["workflow_checksum"] = (
+        not expected_checksum or live_checksum == expected_checksum
+    )
+    if expected_checksum and live_checksum != expected_checksum:
+        return {
+            "ok": False,
+            "reason": "Workflow n8n ativo divergiu do template publicado.",
+            "diagnostics": diagnostics,
+        }
+    return {"ok": True, "reason": None, "diagnostics": diagnostics}
+
+
+def check_binding(
+    *,
+    persona: dict[str, Any],
+    binding: dict[str, Any],
+    deepseek_config: dict[str, Any],
+    n8n_base_url: str,
+) -> dict[str, Any]:
+    """Validate the persisted transport binding against the provisioned workflow."""
+    metadata = binding.get("metadata") or {}
+    expected_workflow_id = str(deepseek_config.get("n8n_workflow_id") or "")
+    expected_path = str(
+        deepseek_config.get("conversation_webhook_path") or ""
+    ).strip("/")
+    expected_url = f"{n8n_base_url.rstrip('/')}/webhook/{expected_path}"
+    checks = {
+        "active": bool(binding.get("active")),
+        "persona_id": str(binding.get("persona_id") or "")
+        == str(persona.get("id") or ""),
+        "decision_owner": metadata.get("decision_owner") == "n8n_agents",
+        "pipeline_contract": metadata.get("pipeline_contract") == "conversation_v1",
+        "workflow_id": str(binding.get("n8n_workflow_id") or "")
+        == expected_workflow_id,
+        "webhook_url": str(metadata.get("conversation_webhook_url") or "")
+        == expected_url,
+    }
+    failed = [name for name, ok in checks.items() if not ok]
+    diagnostics = {
+        "binding_id": binding.get("id"),
+        "workflow_id": expected_workflow_id or None,
+        "expected_webhook_url": expected_url,
+        "checks": checks,
+        "failed_checks": failed,
+    }
+    if failed:
+        return {
+            "ok": False,
+            "reason": "Binding n8n invalido: " + ", ".join(failed),
+            "diagnostics": diagnostics,
+        }
+    return {"ok": True, "reason": None, "diagnostics": diagnostics}
 
 
 def revoke(config: dict[str, Any] | None) -> None:

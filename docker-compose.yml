@@ -350,7 +350,7 @@ services:
       - sh
       - -ec
       - |
-        for workflow in /workflows/whatsapp-*.json /workflows/baita-vitoria.json; do
+        for workflow in /workflows/whatsapp-*.json; do
           n8n import:workflow --input="$${workflow}"
         done
     environment:

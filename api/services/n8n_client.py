@@ -42,8 +42,14 @@ def _base() -> str:
     return os.environ["N8N_BASE_URL"].rstrip("/")
 
 
-def get_executions(limit: int = 100, status: Optional[str] = None, workflow_id: Optional[str] = None) -> list:
-    params: dict = {"limit": limit}
+def get_executions(
+    limit: int = 100,
+    status: Optional[str] = None,
+    workflow_id: Optional[str] = None,
+    *,
+    include_data: bool = False,
+) -> list:
+    params: dict = {"limit": limit, "includeData": include_data}
     if status:
         params["status"] = status
     if workflow_id:
@@ -57,7 +63,11 @@ def get_executions(limit: int = 100, status: Optional[str] = None, workflow_id: 
 
 def get_execution(execution_id: str) -> dict:
     with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
-        response = client.get(f"{_base()}/api/v1/executions/{execution_id}", headers=_headers())
+        response = client.get(
+            f"{_base()}/api/v1/executions/{execution_id}",
+            headers=_headers(),
+            params={"includeData": True},
+        )
         response.raise_for_status()
         return response.json()
 

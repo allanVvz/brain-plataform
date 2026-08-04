@@ -195,6 +195,11 @@ def test_update_routing_n8n_agents_resyncs_the_live_workflow(monkeypatch):
         return {**deepseek_config, "n8n_workflow_id": "wf-1", "conversation_webhook_path": "aurora/conversation"}
 
     monkeypatch.setattr(personas.deepseek_n8n_service, "resync_workflow_for_persona", fake_resync)
+    monkeypatch.setattr(
+        personas.deepseek_n8n_service,
+        "check_workflow_wiring",
+        lambda _config: {"ok": True, "reason": None, "diagnostics": {}},
+    )
 
     body = personas.RoutingUpdate(conversation_mode="n8n_agents")
     personas.update_routing("aurora", body, _admin_request())
@@ -248,6 +253,11 @@ def test_update_routing_auto_creates_the_workflow_when_credential_exists_but_wor
             "n8n_workflow_id": "wf-brand-new",
             "conversation_webhook_path": "baita-conveniencia/conversation",
         },
+    )
+    monkeypatch.setattr(
+        personas.deepseek_n8n_service,
+        "check_workflow_wiring",
+        lambda _config: {"ok": True, "reason": None, "diagnostics": {}},
     )
 
     body = personas.RoutingUpdate(conversation_mode="n8n_agents")

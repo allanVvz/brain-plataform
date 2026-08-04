@@ -5,7 +5,25 @@ import { AlertTriangle, Bot, History, Network, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { useGlobalPersona } from "@/lib/useGlobalPersona";
 
-type Tab = "audit" | "agents" | "n8n";
+type Tab = "audit" | "agents" | "n8n-diagnostics" | "n8n";
+
+const N8N_DIAGNOSTIC_EVENTS = [
+  "n8n.workflow_provision.started",
+  "n8n.workflow_provision.credential_created",
+  "n8n.workflow_provision.succeeded",
+  "n8n.workflow_provision.failed",
+  "n8n.workflow_resync.started",
+  "n8n.workflow_resync.succeeded",
+  "n8n.workflow_resync.failed",
+  "n8n.workflow_validation.succeeded",
+  "n8n.workflow_validation.failed",
+  "n8n.binding_validation.succeeded",
+  "n8n.binding_validation.failed",
+  "n8n.workflow_step_failed",
+  "deepseek.workflow_wiring_valid",
+  "deepseek.workflow_wiring_invalid",
+  "conversation.fail_safe_handoff",
+].join(",");
 
 function dateLabel(value?: string) {
   if (!value) return "sem data";
@@ -51,6 +69,13 @@ export default function LogsPage() {
         setRows(await api.auditLogs({ persona_id: persona.id, level: level || undefined, limit: 200 }));
       } else if (tab === "agents") {
         setRows(await api.agentLogs(undefined, 150, persona.id));
+      } else if (tab === "n8n-diagnostics") {
+        setRows(await api.auditLogs({
+          persona_id: persona.id,
+          event_type: N8N_DIAGNOSTIC_EVENTS,
+          level: level || undefined,
+          limit: 200,
+        }));
       } else {
         const all = await api.n8nLogs(200);
         setRows(all.filter((row) => belongsToPersona(row, persona.id)));
@@ -101,6 +126,7 @@ export default function LogsPage() {
         {([
           ["audit", "Auditoria", <History key="audit" size={14} />],
           ["agents", "Chat e agentes", <Bot key="agents" size={14} />],
+          ["n8n-diagnostics", "Diagnóstico n8n", <AlertTriangle key="n8n-diagnostics" size={14} />],
           ["n8n", "Automações n8n", <Network key="n8n" size={14} />],
         ] as const).map(([value, label, icon]) => (
           <button
@@ -126,7 +152,7 @@ export default function LogsPage() {
           placeholder="Buscar evento, lead, componente ou status"
           className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-obs-raised px-4 py-2.5 text-sm text-obs-text"
         />
-        {tab === "audit" && (
+        {(tab === "audit" || tab === "n8n-diagnostics") && (
           <div className="flex gap-1.5" aria-label="Filtrar por severidade">
             {([
               ["", "Tudo"],

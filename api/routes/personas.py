@@ -77,7 +77,11 @@ def _mask_routing(routing: dict) -> dict:
         "conversation_mode": conversation_mode,
         "automation_mode": automation_mode,
         "pipeline_contract": "conversation_v1",
-        "classifier": "deterministic_v1",
+        "classifier": (
+            "graph_agentic_v1"
+            if conversation_mode == "n8n_agents"
+            else "deterministic_v1"
+        ),
         "field_extractor": (
             "deepseek-v4-flash" if conversation_mode == "n8n_agents" else None
         ),
@@ -292,6 +296,30 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
             deepseek_config = deepseek_n8n_service.resync_workflow_for_persona(
                 full_persona, deepseek_config,
             )
+            workflow_check = deepseek_n8n_service.check_workflow_wiring(
+                deepseek_config
+            )
+            supabase_client.insert_event(
+                {
+                    "event_type": (
+                        "n8n.workflow_validation.succeeded"
+                        if workflow_check["ok"]
+                        else "n8n.workflow_validation.failed"
+                    ),
+                    "entity_type": "persona",
+                    "entity_id": str(current.get("id") or slug),
+                    "persona_id": current.get("id"),
+                    "payload": {
+                        "persona_slug": slug,
+                        "reason": workflow_check.get("reason"),
+                        "diagnostics": workflow_check.get("diagnostics") or {},
+                    },
+                },
+                level="info" if workflow_check["ok"] else "error",
+                source="routes.personas",
+            )
+            if not workflow_check["ok"]:
+                raise HTTPException(409, workflow_check["reason"])
             supabase_client.save_persona_integration_connection({
                 "persona_id": current.get("id"),
                 "service": "deepseek",
@@ -322,10 +350,44 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
             else:
                 metadata.pop("conversation_webhook_url", None)
                 binding_update["n8n_workflow_id"] = None
-            supabase_client.update_workflow_binding(
+            updated_binding = supabase_client.update_workflow_binding(
                 str(binding["id"]),
                 binding_update,
             )
+            if conversation_mode == "n8n_agents":
+                effective_binding = updated_binding or {
+                    **binding,
+                    **binding_update,
+                    "persona_id": binding.get("persona_id") or current.get("id"),
+                    "metadata": metadata,
+                }
+                binding_check = deepseek_n8n_service.check_binding(
+                    persona=full_persona,
+                    binding=effective_binding,
+                    deepseek_config=deepseek_config,
+                    n8n_base_url=n8n_base,
+                )
+                supabase_client.insert_event(
+                    {
+                        "event_type": (
+                            "n8n.binding_validation.succeeded"
+                            if binding_check["ok"]
+                            else "n8n.binding_validation.failed"
+                        ),
+                        "entity_type": "workflow_binding",
+                        "entity_id": str(binding["id"]),
+                        "persona_id": current.get("id"),
+                        "payload": {
+                            "persona_slug": slug,
+                            "reason": binding_check.get("reason"),
+                            "diagnostics": binding_check.get("diagnostics") or {},
+                        },
+                    },
+                    level="info" if binding_check["ok"] else "error",
+                    source="routes.personas",
+                )
+                if not binding_check["ok"]:
+                    raise HTTPException(409, binding_check["reason"])
         if payload:
             supabase_client.update_persona_routing(slug, payload)
         supabase_client.insert_event(
@@ -338,7 +400,11 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                     "persona_slug": slug,
                     "conversation_mode": conversation_mode,
                     "pipeline_contract": "conversation_v1",
-                    "classifier": "deterministic_v1",
+                    "classifier": (
+                        "graph_agentic_v1"
+                        if conversation_mode == "n8n_agents"
+                        else "deterministic_v1"
+                    ),
                     "field_extractor": (
                         "deepseek-v4-flash"
                         if conversation_mode == "n8n_agents"
