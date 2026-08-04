@@ -209,6 +209,8 @@ jobs:
               docker compose --env-file .env.compose exec -T api \
                 python scripts/publish_aurora_graph.py
               docker compose --env-file .env.compose exec -T api \
+                python scripts/publish_persona_documents.py vz-lupas
+              docker compose --env-file .env.compose exec -T api \
                 python scripts/backfill_lead_qualification.py --apply
               docker compose --env-file .env.compose exec -T api \
                 python scripts/validate_knowledge_crm_release.py
