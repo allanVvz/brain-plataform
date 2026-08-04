@@ -514,7 +514,9 @@ def test_build_context_wires_the_generated_system_prompt(monkeypatch):
     context = conversation_runtime.build_context(
         persona_slug="aurora", lead_ref=23, message="Oi",
     )
-    assert context.system_prompt == conversation_runtime.build_system_prompt(aurora_graph())
+    assert context.system_prompt == conversation_runtime.build_system_prompt(
+        aurora_graph(), context.context_cards,
+    )
     assert context.system_prompt != ""
 
 
