@@ -228,11 +228,10 @@ _AGENTIC_SAFETY_INSTRUCTIONS = (
 def build_system_prompt(graph: Any, cards: list[Any] | None = None) -> str:
     """Compose this persona's n8n agentic system prompt from its own graph.
 
-    Reads generic node types (persona, tone, rule) present in ANY
-    persona's graph — nothing here is specific to Aurora or any other
-    single persona. A persona with no tone/rule nodes still gets a valid,
-    if minimal, prompt. Replaces the single static prompt string that used
-    to be hardcoded inside aurora-conversation.json and reused verbatim by
+    Reads generic node types (persona, tone, rule) present in any persona
+    graph. A persona with no tone/rule nodes still gets a valid, if minimal,
+    prompt. Replaces a static prompt formerly embedded in a persona export and
+    reused verbatim by
     every persona on the agentic template.
     """
     persona_node = next(
@@ -321,7 +320,7 @@ def _merge_extracted_fields(cart_state: dict[str, Any], extracted_fields: dict[s
     (deterministic_appointment._collect) only accepts a value for whichever
     field is next in missing_fields, and treats the *entire* message as
     that field's value. A customer answering several fields in one
-    natural sentence ("meu nome é Allan, carro é Tracker 2024") only ever
+    natural sentence containing multiple qualification facts only ever
     fills the first — the agent's reply claimed the rest was "anotado"
     when it never reached appointment_request at all.
 
@@ -394,14 +393,19 @@ def _next_field_question(cart_state: dict[str, Any], context: ConversationContex
         or {}
     )
     question = field_questions.get(missing[0])
-    return str(question) if question else None
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError(
+            "published graph appointment_policy.field_questions is missing "
+            f"required field {missing[0]}"
+        )
+    return question.strip()
 
 
 def _ensure_trailing_question(reply_text: str | None, cart_state: dict[str, Any], context: ConversationContext) -> str | None:
     """Never leave the customer without a next step while info is missing.
 
-    Confirmed live 2026-08-01: DeepSeek's own candidate reply correctly
-    asked "Qual e o seu nome?", but got discarded by the unsafe-price
+    Confirmed live 2026-08-01: the model's candidate correctly asked the
+    graph-defined next question, but got discarded by the unsafe-price
     filter and fell back to the deterministic engine's plain price-fact
     reply — which never asks anything, silently dropping the qualification
     flow. Whatever reply text ends up used (agentic or deterministic
@@ -532,9 +536,12 @@ def build_context(
     prior_runtime = lead_metadata.get("conversation_runtime") or {}
     prior_version = prior_runtime.get("graph_version")
     prior_checksum = prior_runtime.get("graph_checksum")
-    # A cart is evidence-bound.  It cannot be silently carried into a new
-    # publication because product aliases, prices, or availability may have
-    # changed.  The next decision will atomically hand the conversation over.
+    # Graph-backed selections must be revalidated on a new publication, but
+    # customer-provided facts are not graph evidence and must survive.  The
+    # decision engine receives an explicit marker and applies business-model
+    # policy: appointment flows can safely rebind their service against the
+    # current catalog, while transactional carts retain the conservative
+    # handoff behavior below.
     try:
         graph_changed = bool(prior_version) and (
             int(prior_version) != version
@@ -543,12 +550,9 @@ def build_context(
     except (TypeError, ValueError):
         graph_changed = True
     if graph_changed:
-        cart = {
-            "_lead_stage": lead.get("stage") or "novo",
-            "_graph_changed": True,
-            "_previous_graph_version": prior_version,
-            "_previous_graph_checksum": prior_checksum,
-        }
+        cart["_graph_changed"] = True
+        cart["_previous_graph_version"] = prior_version
+        cart["_previous_graph_checksum"] = prior_checksum
     cart.setdefault("_lead_stage", lead.get("stage") or "novo")
     # Golden Dataset RAG (knowledge_rag_entries/knowledge_rag_chunks,
     # persona-scoped, approved/validated only) — a real retrieval layer
@@ -679,23 +683,51 @@ def _apply_model_fields(
     observation: dict[str, Any] | None,
     *,
     business_model: str,
+    graph: Any | None = None,
 ) -> dict[str, Any]:
     """Append model-extracted facts without granting it business authority."""
     fields = (observation or {}).get("fields")
-    if not isinstance(fields, dict):
+    identified_service_raw = (observation or {}).get("identified_service_slug")
+    if not isinstance(fields, dict) and not identified_service_raw:
         return state
+    if not isinstance(fields, dict):
+        fields = {}
     merged = dict(state)
     if business_model == "appointment":
+        if graph is None:
+            raise ValueError("appointment model fields require published graph policy")
         request = dict(merged.get("appointment_request") or {})
-        for field in (
-            "nome_cliente",
-            "modelo_veiculo",
-            "vehicle_size",
-            "condicao",
-            "data_desejada",
-            "janela_horario",
-        ):
-            value = _observation_value(fields.get(field))
+        identified_service = _observation_value(identified_service_raw)
+        service_nodes = {
+            node.slug: node
+            for node in graph.nodes
+            if node.node_type in {"product", "service"} and node.slug
+        }
+        if identified_service in service_nodes:
+            # A service identified from the current inbound turn is allowed to
+            # replace a historical choice.  The deterministic appointment
+            # engine will recompute required fields from that service node.
+            request["servico"] = identified_service
+            merged["_identified_service_slug"] = identified_service
+
+        selected_service = service_nodes.get(str(request.get("servico") or ""))
+        booking = (
+            (selected_service.data or {}).get("booking")
+            if selected_service is not None
+            else {}
+        )
+        policy_required = _appointment_policy(graph).get("required_fields") or []
+        required_fields = (
+            booking.get("required_fields")
+            if isinstance(booking, dict) and booking.get("required_fields")
+            else policy_required
+        )
+        # Graph-required fields are the extraction allowlist. This also works
+        # on the first qualification turn, before missing_fields has ever been
+        # persisted, without embedding any field names in the backend.
+        for field in required_fields:
+            field = str(field).strip()
+            value = _observation_value(fields.get(field)) if field else None
             if value and not request.get(field):
                 request[field] = value
         merged["appointment_request"] = request
@@ -753,6 +785,7 @@ def _appointment_stage(current: str, intent: str) -> str:
     elif intent in {
         "request_quote",
         "request_booking",
+        "request_service",
         "provide_vehicle",
         "provide_condition",
         "provide_date",
@@ -818,26 +851,11 @@ def _decide_appointment(
     message: str,
 ) -> tuple[ConversationDecision, AgentResponse]:
     if graph_changed:
-        state["conversation_state"] = "handoff"
-        decision = ConversationDecision(
-            classifier="deterministic_appointment_v1",
-            intent="stale_graph",
-            route=ConversationRoute.HUMAN,
-            confidence=0,
-            lead_stage=current_stage,
-            handoff_reason="graph_version_changed",
-            evidence_node_ids=[],
-        )
-        return decision, AgentResponse(
-            reply_text=(
-                "Vou encaminhar para a equipe revisar sua solicitação com as "
-                "informações atuais."
-            ),
-            role=ConversationRoute.HUMAN,
-            evidence_node_ids=[],
-            cart_state=state,
-            handoff_required=True,
-        )
+        # Appointment state contains customer facts and an unconfirmed request,
+        # not a committed transaction. Re-evaluate it against the current graph
+        # instead of erasing it or pausing the agent.
+        state.pop("_previous_graph_version", None)
+        state.pop("_previous_graph_checksum", None)
 
     faq = _approved_faq_match(graph, message)
     if faq:
@@ -862,10 +880,15 @@ def _decide_appointment(
             )
 
     catalog = catalog_from_graph(graph)
+    identified_service_slug = state.pop("_identified_service_slug", None)
     result = DeterministicAppointment(
         catalog,
         policy=_appointment_policy(graph),
-    ).handle(message, state=state)
+    ).handle(
+        message,
+        state=state,
+        identified_service_slug=identified_service_slug,
+    )
     evidence = _appointment_evidence(
         graph,
         product_slug=result.product.slug if result.product else None,
@@ -974,6 +997,7 @@ def decide(
         dict(context.cart),
         model_observation,
         business_model=business_model,
+        graph=graph,
     )
     current_stage = str(state.pop("_lead_stage", "novo"))
     graph_changed = bool(state.pop("_graph_changed", False))
@@ -1034,7 +1058,7 @@ def decide(
         handoff_reason = "graph_version_changed"
         state["conversation_state"] = "handoff"
         result = {
-            "reply": "Vou encaminhar para o atendimento revisar seu pedido com a versão atual do cardápio.",
+            "reply": "Vou encaminhar para o atendimento revisar sua solicitação com as informações mais atuais.",
             "state": state,
             "handoff": True,
         }

@@ -50,6 +50,36 @@ def test_model_request_is_built_in_code_and_http_body_is_simple():
     assert "workflow_template" in fail_safe["parameters"]["body"]
 
 
+def test_model_fields_are_reconciled_against_graph_policy_before_commit():
+    workflow = _live_workflow("cred-1")
+    node_ids = [node["id"] for node in workflow["nodes"]]
+    reconcile = next(node for node in workflow["nodes"] if node["id"] == "reconcile")
+    model_response = next(
+        node for node in workflow["nodes"] if node["id"] == "model_response"
+    )
+    final_response = next(
+        node for node in workflow["nodes"] if node["id"] == "final_response"
+    )
+    commit = next(node for node in workflow["nodes"] if node["id"] == "commit")
+
+    assert node_ids.index("model_response") < node_ids.index("reconcile")
+    assert node_ids.index("reconcile") < node_ids.index("final_response")
+    assert node_ids.index("final_response") < node_ids.index("commit")
+    assert "model_observation" in reconcile["parameters"]["body"]
+    assert "identified_service_slug" in model_response["parameters"]["jsCode"]
+    assert "missing_fields" in final_response["parameters"]["jsCode"]
+    assert "field_questions" in final_response["parameters"]["jsCode"]
+    assert "response: $json.response" in commit["parameters"]["body"]
+
+
+def test_canonical_template_has_no_persona_or_business_hardcode():
+    workflow = _live_workflow("cred-1")
+    serialized = str(workflow).lower()
+
+    for forbidden in ("aurora", "sofia", "allan", "onix", "higienizacao"):
+        assert forbidden not in serialized
+
+
 def test_provision_keeps_key_only_in_n8n_credential(monkeypatch):
     _silence_events(monkeypatch)
     calls = {}

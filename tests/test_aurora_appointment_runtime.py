@@ -431,6 +431,100 @@ def test_build_context_survives_rag_search_failure(monkeypatch):
     assert context.rag_chunks == []
 
 
+def test_graph_publication_preserves_collected_appointment_facts(monkeypatch):
+    """A new graph version must rebind policy, not erase customer answers."""
+    from services import supabase_client
+
+    _mock_build_context_deps(monkeypatch)
+    monkeypatch.setattr(
+        supabase_client,
+        "get_lead_by_ref",
+        lambda _ref: {
+            "id": 29,
+            "persona_id": "aurora-id",
+            "stage": "qualificacao",
+            "metadata": {
+                "conversation_state": {
+                    "business_model": "appointment",
+                    "conversation_state": "collecting",
+                    "appointment_request": {
+                        "servico": "higienizacao-interna",
+                        "nome_cliente": "Allan",
+                    },
+                    "missing_fields": ["modelo_veiculo"],
+                },
+                "conversation_runtime": {
+                    "graph_version": 1,
+                    "graph_checksum": "old-checksum",
+                },
+            },
+        },
+    )
+
+    context = conversation_runtime.build_context(
+        persona_slug="aurora",
+        lead_ref=29,
+        message="Chevrolet Onix 2020",
+    )
+
+    assert context.cart["_graph_changed"] is True
+    assert context.cart["appointment_request"] == {
+        "servico": "higienizacao-interna",
+        "nome_cliente": "Allan",
+    }
+    assert context.cart["conversation_state"] == "collecting"
+
+
+def test_published_appointment_graph_requires_a_question_for_every_required_field():
+    graph = aurora_graph().model_copy(deep=True)
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    policy = persona.data["appointment_policy"]
+    missing_field = policy["required_fields"][0]
+    policy["field_questions"].pop(missing_field)
+
+    valid, errors = graph_json_v2_validator.validate_graph_json(graph)
+
+    assert valid is False
+    assert any(missing_field in error and "field_questions" in error for error in errors)
+
+
+def test_runtime_has_no_graph_field_question_copy_fallback():
+    import inspect
+
+    source = inspect.getsource(DeterministicAppointment)
+    fixture_questions = conversation_runtime._appointment_policy(aurora_graph())["field_questions"]
+
+    assert "DEFAULT_FIELD_QUESTIONS" not in source
+    assert "LEGACY_FIELD_QUESTIONS" not in source
+    assert all(question not in source for question in fixture_questions.values())
+
+def test_appointment_continues_on_new_graph_version_instead_of_handoff(monkeypatch):
+    install_graph(monkeypatch)
+    decision, response = conversation_runtime.decide(
+        context_for(
+            "Chevrolet Onix 2020",
+            cart={
+                "_graph_changed": True,
+                "_previous_graph_version": 1,
+                "_previous_graph_checksum": "old-checksum",
+                "business_model": "appointment",
+                "conversation_state": "collecting",
+                "appointment_request": {
+                    "servico": "higienizacao-interna",
+                    "nome_cliente": "Allan",
+                },
+                "missing_fields": ["modelo_veiculo"],
+            },
+        )
+    )
+
+    assert decision.intent != "stale_graph"
+    assert decision.route == ConversationRoute.SDR
+    assert response.handoff_required is False
+    assert response.cart_state["appointment_request"]["modelo_veiculo"] == "Chevrolet Onix 2020"
+    assert "_previous_graph_version" not in response.cart_state
+
+
 def test_build_system_prompt_is_persona_agnostic_and_reads_tone_and_rules():
     """The n8n agentic prompt used to be one hardcoded string embedded in
     aurora-conversation.json, reused verbatim by any persona on the
@@ -520,6 +614,60 @@ def test_build_context_wires_the_generated_system_prompt(monkeypatch):
     assert context.system_prompt != ""
 
 
+def test_explicit_service_interest_starts_qualification_without_booking_keyword():
+    """Saying "I want this service" is enough to start qualification.
+
+    The live Aurora E2E used "Quero fazer uma higienizacao interna".  The
+    old engine treated that as a one-off catalog consultation, so the next
+    answer was parsed outside collecting mode and the lead stalled.
+    """
+    graph = aurora_graph()
+    appointment_policy = conversation_runtime._appointment_policy(graph)
+    engine = DeterministicAppointment(
+        catalog_from_graph(graph),
+        policy=appointment_policy,
+    )
+
+    result = engine.handle("Quero fazer higienizacao interna")
+
+    assert result.intent == "request_service"
+    assert result.handoff is False
+    assert result.state["conversation_state"] == "collecting"
+    assert result.state["appointment_request"]["servico"] == "higienizacao-interna"
+    pending = result.state["missing_fields"][0]
+    expected = appointment_policy["field_questions"][pending]
+    assert result.reply and result.reply.endswith(expected)
+
+
+def test_model_identified_service_replaces_stale_service_and_recomputes_fields():
+    """A graph-valid service identified in the current turn wins over history."""
+    graph = aurora_graph()
+    engine = DeterministicAppointment(
+        catalog_from_graph(graph),
+        policy=conversation_runtime._appointment_policy(graph),
+    )
+    old_state = {
+        "business_model": "appointment",
+        "conversation_state": "collecting",
+        "appointment_request": {
+            "servico": "polimento-tecnico",
+            "nome_cliente": "Allan",
+            "vehicle_color": "preto",
+        },
+        "missing_fields": ["modelo_veiculo", "vehicle_year", "objective", "can_visit_in_person", "condicao"],
+    }
+
+    result = engine.handle(
+        "Quero fazer uma avaliacao e higienizacao interna",
+        state=old_state,
+        identified_service_slug="higienizacao-interna",
+    )
+
+    assert result.state["appointment_request"]["servico"] == "higienizacao-interna"
+    assert "vehicle_color" not in result.state["missing_fields"]
+    assert result.state["conversation_state"] == "collecting"
+
+
 def test_merge_extracted_fields_fills_multiple_missing_fields_at_once():
     """Regression test for the 2026-08-01 production finding: a customer
     answering several missing fields in one natural sentence ("meu nome é
@@ -569,6 +717,72 @@ def test_merge_extracted_fields_ignores_keys_outside_missing_fields():
 def test_merge_extracted_fields_is_noop_without_extraction():
     cart_state = {"missing_fields": ["modelo_veiculo"], "appointment_request": {}}
     assert conversation_runtime._merge_extracted_fields(cart_state, {}) == cart_state
+
+
+def test_reconciled_model_observation_switches_service_and_advances_pending_field(monkeypatch):
+    """The n8n extraction pass is reconciled by deterministic graph policy."""
+    install_graph(monkeypatch)
+    old_cart = {
+        "business_model": "appointment",
+        "conversation_state": "collecting",
+        "appointment_request": {
+            "servico": "polimento-tecnico",
+            "nome_cliente": "Allan",
+        },
+        "missing_fields": [
+            "modelo_veiculo",
+            "vehicle_year",
+            "vehicle_color",
+            "objective",
+            "can_visit_in_person",
+            "condicao",
+        ],
+    }
+
+    decision, response = conversation_runtime.decide(
+        context_for(
+            "Chevrolet Onix 2020",
+            cart=old_cart,
+        ),
+        model_observation={
+            "fields": {
+                "modelo_veiculo": "Chevrolet Onix",
+                "vehicle_year": "2020",
+            },
+            "identified_service_slug": "higienizacao-interna",
+        },
+    )
+
+    request = response.cart_state["appointment_request"]
+    assert request["servico"] == "higienizacao-interna"
+    assert request["modelo_veiculo"] == "Chevrolet Onix"
+    assert request["vehicle_year"] == "2020"
+    assert "vehicle_color" not in response.cart_state["missing_fields"]
+    assert response.cart_state["missing_fields"][0] == "objective"
+    assert decision.route == ConversationRoute.SDR
+
+
+def test_first_turn_model_fields_use_graph_required_fields_as_allowlist(monkeypatch):
+    install_graph(monkeypatch)
+    graph = aurora_graph()
+    policy = conversation_runtime._appointment_policy(graph)
+    first_field = policy["required_fields"][0]
+
+    _, response = conversation_runtime.decide(
+        context_for("Quero fazer higienizacao interna"),
+        model_observation={
+            "fields": {first_field: "Valor informado pelo cliente"},
+            "identified_service_slug": "higienizacao-interna",
+        },
+    )
+
+    request = response.cart_state["appointment_request"]
+    assert request[first_field] == "Valor informado pelo cliente"
+    assert first_field not in response.cart_state["missing_fields"]
+    pending = response.cart_state["missing_fields"][0]
+    assert response.reply_text and response.reply_text.endswith(
+        policy["field_questions"][pending]
+    )
 
 
 def test_resolve_identified_service_accepts_a_real_catalog_slug():

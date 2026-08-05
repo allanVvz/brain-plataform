@@ -1,0 +1,4 @@
+interface:
+  display_name: "Brain Appointment Graph"
+  short_description: "Constrói qualificação de agenda orientada pelo grafo"
+  default_prompt: "Use $brain-appointment-graph para criar ou validar required_fields e field_questions de uma persona de agendamento."

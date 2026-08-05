@@ -18,7 +18,8 @@ _TEMPLATE = (
 _TEMPLATE_VERSION = "graph_agentic_v1"
 _REQUIRED_NODE_IDS = {
     "inbound", "binding", "context", "policy", "model_request",
-    "deepseek", "model_response", "commit", "failsafe", "respond",
+    "deepseek", "model_response", "reconcile", "final_response", "commit",
+    "failsafe", "respond",
 }
 
 

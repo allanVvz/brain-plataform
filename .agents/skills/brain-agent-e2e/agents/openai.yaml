@@ -1,0 +1,4 @@
+interface:
+  display_name: "Brain Agent E2E"
+  short_description: "Valida agentes via Playwright, Evolution e n8n"
+  default_prompt: "Use $brain-agent-e2e para validar ponta a ponta um agente por Evolution e n8n."

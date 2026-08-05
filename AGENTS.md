@@ -577,3 +577,57 @@ entra no RAG?
 aparece no grafo?
 
 Se nao aparece no grafo, esta incompleto.
+
+## 25. E2E de agentes, Evolution e n8n
+
+- Mudancas em mensagens, workers, runtime de agentes, qualificacao, handoff,
+  pause/resume, Evolution ou n8n devem usar a skill
+  `.agents/skills/brain-agent-e2e/SKILL.md`.
+- O E2E deve provar o caminho completo nos dois lados da conversa. Status
+  `sent` ou `delivered` do provider nao substitui a mensagem persistida no
+  destino.
+- O agente de transporte deve permanecer pausado. A IA alvo so pode ser
+  retomada depois dessa confirmacao.
+- Cada inbound canonico pode gerar no maximo uma decisao e um outbound.
+  Duplicidade, cascata, contexto da persona errada ou confirmacao indevida de
+  preco/data/horario interrompem novos envios e exigem auditoria em `/logs`.
+- Pareamento deve usar binding, telefone mascarado, IDs, mensagens e timestamps;
+  nomes locais de lead podem ser diferentes entre as personas.
+- O relatorio deve registrar IDs tecnicos nao secretos, direcoes, timestamps,
+  status HTTP, latencias, versao/checksum do grafo, estado das IAs e screenshots.
+
+## 26. Template n8n reproduzivel e backend sem hardcoded
+
+- `api/n8n-workflows/persona-conversation-template.json` e a unica fonte
+  provisionavel para workflows de conversa `n8n_agents`.
+- O mesmo template deve atender qualquer persona sem fork de nodes ou codigo.
+  Provisionamento substitui somente binding tecnico, webhook e credencial.
+- Exports com nome de persona sao fixtures/legado de auditoria; nunca sao fonte
+  de runtime ou provisionamento.
+- Prompt comercial, servicos, produtos, precos, campos, politicas e copy vem de
+  `personas.config`, binding, Graph JSON publicado e `context_cards` aprovados.
+- Codigo de producao em `api/routes`, `api/services`, `api/core` e `api/workers`
+  nao pode ramificar por cliente, persona, marca, produto, campanha, servico,
+  dominio, FAQ ou nome de lead real.
+- Nomes reais sao permitidos apenas em testes, fixtures, migrations pontuais,
+  rotas explicitamente QA e exports legados sem influencia no runtime.
+- Pause/resume deve fazer claim atomico do buffer e usar a identidade canonica
+  do inbound como chave idempotente. Retry ou correlacao sintetica nao pode
+  produzir uma segunda decisao/outbound.
+- Mudanca de versao/checksum do grafo deve migrar ou invalidar estado
+  incompatível antes da proxima pergunta. Nova intencao explicita deve substituir
+  servico historico incompatível e recalcular campos faltantes.
+
+## 27. Qualificacao de agendamento orientada pelo grafo
+
+- Toda persona com `business_model=appointment` deve declarar no node Persona:
+  `data.appointment_policy.required_fields` e
+  `data.appointment_policy.field_questions`.
+- Cada campo obrigatorio comum ou presente em `product.data.booking.required_fields`
+  deve ter uma pergunta nao vazia no mapa da Persona.
+- A proxima pergunta e sempre resolvida por
+  `field_questions[missing_fields[0]]`; o backend nao pode conter fallback de
+  copy comercial, nome de campo ou pergunta de fixture.
+- Grafo de agendamento incompleto deve falhar na validacao antes da publicacao.
+- Sofia deve auxiliar o operador a preencher a matriz campo/pergunta, preservar
+  fonte/status e nao copiar perguntas de outra persona ou exemplo.

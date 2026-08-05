@@ -91,6 +91,69 @@ def _status_of(node: "object") -> str:
     return str(data.get("validation_status") or data.get("status") or "").strip().lower()
 
 
+def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> None:
+    """Require every appointment question to be authored in the graph.
+
+    A canonical graph cannot depend on backend copy. Its persona policy owns
+    the ordered required fields and the exact question for each one.
+    Product-specific required fields use the same question map.
+    """
+    persona = next(
+        (node for node in nodes if getattr(node, "node_type", None) == "persona"),
+        None,
+    )
+    if persona is None:
+        return
+    data = _node_data(persona)
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    business_model = str(
+        data.get("business_model") or metadata.get("business_model") or ""
+    ).strip().lower()
+    raw_policy = data.get("appointment_policy")
+    if business_model != "appointment" and not isinstance(raw_policy, dict):
+        return
+    if not isinstance(raw_policy, dict):
+        errors.append("appointment persona requires data.appointment_policy")
+        return
+
+    required = raw_policy.get("required_fields")
+    questions = raw_policy.get("field_questions")
+    if not isinstance(required, list) or not required:
+        errors.append("appointment_policy.required_fields must be a non-empty list")
+        required = []
+    if not isinstance(questions, dict):
+        errors.append("appointment_policy.field_questions must be an object")
+        questions = {}
+
+    all_required: list[str] = []
+    for field in required:
+        normalized = str(field).strip()
+        if not normalized:
+            errors.append("appointment_policy.required_fields contains an empty field")
+            continue
+        if normalized not in all_required:
+            all_required.append(normalized)
+
+    for node in nodes:
+        if getattr(node, "node_type", None) not in {"product", "service"}:
+            continue
+        booking = _node_data(node).get("booking")
+        product_required = booking.get("required_fields") if isinstance(booking, dict) else None
+        if not isinstance(product_required, list):
+            continue
+        for field in product_required:
+            normalized = str(field).strip()
+            if normalized and normalized not in all_required:
+                all_required.append(normalized)
+
+    for field in all_required:
+        question = questions.get(field)
+        if not isinstance(question, str) or not question.strip():
+            errors.append(
+                f"appointment_policy.field_questions missing non-empty question for required field {field}"
+            )
+
+
 def _is_primary(edge: "object") -> bool:
     return getattr(edge, "primary_tree", True) is True
 
@@ -206,6 +269,7 @@ def _validate_v21(graph: "GraphJson") -> tuple[bool, list[str]]:
             if current != persona_id and not any("cycle detected" in err and node.id in err for err in errors):
                 errors.append(f"node {node.id} contains path does not reach persona")
 
+    _validate_appointment_policy(graph.nodes, errors)
     return (not errors, errors)
 
 
@@ -390,4 +454,5 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
         if _status_of(node) not in FAQ_APPROVED_STATUSES and links:
             errors.append(f"pending FAQ cannot connect to embedded: {node.id}")
 
+    _validate_appointment_policy(graph.nodes, errors)
     return (not errors, errors)

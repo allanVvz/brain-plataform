@@ -98,13 +98,43 @@
     },
     {
       "parameters": {
-        "jsCode": "const policy = $('Resolve conversation policy').item.json; const content = $json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content; if (!content) throw new Error('DeepSeek returned empty content'); let parsed; try { parsed = JSON.parse(content); } catch (error) { throw new Error('DeepSeek returned invalid JSON: ' + error.message); } const replyText = typeof parsed.reply_text === 'string' ? parsed.reply_text.trim() : ''; if (!replyText) throw new Error('DeepSeek response is missing reply_text'); const extractedFields = parsed.extracted_fields && typeof parsed.extracted_fields === 'object' ? parsed.extracted_fields : {}; const identifiedServiceSlug = typeof parsed.identified_service_slug === 'string' ? parsed.identified_service_slug : null; return [{ json: { ...policy, response: { ...policy.response, reply_text: replyText, extracted_fields: extractedFields, identified_service_slug: identifiedServiceSlug } } }];"
+        "jsCode": "const content = $json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content; if (!content) throw new Error('DeepSeek returned empty content'); let parsed; try { parsed = JSON.parse(content); } catch (error) { throw new Error('DeepSeek returned invalid JSON: ' + error.message); } const replyText = typeof parsed.reply_text === 'string' ? parsed.reply_text.trim() : ''; if (!replyText) throw new Error('DeepSeek response is missing reply_text'); const extractedFields = parsed.extracted_fields && typeof parsed.extracted_fields === 'object' ? parsed.extracted_fields : {}; const identifiedServiceSlug = typeof parsed.identified_service_slug === 'string' ? parsed.identified_service_slug : null; return [{ json: { candidate_reply_text: replyText, model_observation: { fields: extractedFields, identified_service_slug: identifiedServiceSlug } } }];"
       },
       "id": "model_response",
       "name": "Validate agent response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1640, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/decide'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({context: $('Load published graph context').item.json, model_observation: $('Validate agent response').item.json.model_observation})}}",
+        "options": {}
+      },
+      "id": "reconcile",
+      "name": "Reconcile fields with graph policy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const reconciled = $json; const candidate = $('Validate agent response').item.json; const context = $('Load published graph context').item.json; const state = reconciled.response && reconciled.response.cart_state || {}; const missing = state.missing_fields || []; const persona = (context.rag_nodes || []).find(function(node) { return node.node_type === 'persona'; }) || {}; const fieldQuestions = persona.data && persona.data.appointment_policy && persona.data.appointment_policy.field_questions || {}; const expectedQuestion = missing.length ? fieldQuestions[missing[0]] : null; let replyText = candidate.candidate_reply_text; if (!replyText || (reconciled.response && reconciled.response.handoff_required) || (expectedQuestion && !replyText.includes(expectedQuestion))) replyText = reconciled.response.reply_text; return [{ json: { ...reconciled, response: { ...reconciled.response, reply_text: replyText, extracted_fields: candidate.model_observation.fields || {}, identified_service_slug: candidate.model_observation.identified_service_slug || null } } }];"
+      },
+      "id": "final_response",
+      "name": "Align reply with qualification state",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2120, 300],
       "onError": "continueErrorOutput"
     },
     {
@@ -123,7 +153,7 @@
       "name": "Persist once and enqueue send",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1880, 300],
+      "position": [2360, 300],
       "onError": "continueErrorOutput"
     },
     {
@@ -142,7 +172,7 @@
       "name": "Fail safe human handoff",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1880, 560]
+      "position": [2360, 560]
     },
     {
       "parameters": {"respondWith": "json", "responseBody": "={{$json}}"},
@@ -150,7 +180,7 @@
       "name": "Return canonical result",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
-      "position": [2120, 300]
+      "position": [2600, 300]
     }
   ],
   "connections": {
@@ -160,7 +190,9 @@
     "Resolve conversation policy": {"main": [[{"node": "Build graph grounded agent request", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
     "Build graph grounded agent request": {"main": [[{"node": "DeepSeek agentic reply", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
     "DeepSeek agentic reply": {"main": [[{"node": "Validate agent response", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Validate agent response": {"main": [[{"node": "Persist once and enqueue send", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Validate agent response": {"main": [[{"node": "Reconcile fields with graph policy", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Reconcile fields with graph policy": {"main": [[{"node": "Align reply with qualification state", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
+    "Align reply with qualification state": {"main": [[{"node": "Persist once and enqueue send", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
     "Persist once and enqueue send": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
     "Fail safe human handoff": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}]]}
   },

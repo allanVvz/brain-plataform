@@ -8,17 +8,6 @@ from typing import Any, Iterable
 from services.deterministic_sdr import Catalog, Product, _brl, _norm
 
 
-DEFAULT_REQUIRED_FIELDS = (
-    "nome_cliente",
-    "servico",
-    "modelo_veiculo",
-    "vehicle_size",
-    "condicao",
-    "data_desejada",
-    "janela_horario",
-)
-
-
 def _duration(minutes: int | None) -> str:
     if not minutes:
         return ""
@@ -108,21 +97,6 @@ def _plain_value(text: str) -> str | None:
     return value if 1 < len(value) <= 160 else None
 
 
-DEFAULT_FIELD_QUESTIONS = {
-    "nome_cliente": "Qual é o seu nome?",
-    "servico": "Qual serviço você deseja?",
-    "modelo_veiculo": "Qual é o modelo do veículo?",
-    "vehicle_year": "Qual é o ano do veículo?",
-    "vehicle_color": "Qual é a cor do veículo?",
-    "vehicle_size": "Qual é o porte do veículo, por exemplo hatch, sedan, SUV ou picape?",
-    "condicao": "Como está o veículo hoje e quais pontos precisam de atenção?",
-    "objective": "Você pretende vender o veículo em breve ou vai continuar com ele?",
-    "can_visit_in_person": "Você consegue vir até nós ou prefere seguir tudo à distância?",
-    "data_desejada": "Qual data você prefere?",
-    "janela_horario": "Qual período você prefere: manhã, tarde ou noite?",
-}
-
-
 @dataclass
 class AppointmentResult:
     reply: str | None
@@ -138,12 +112,19 @@ class DeterministicAppointment:
 
     def __init__(self, catalog: Catalog, *, policy: dict[str, Any] | None = None):
         self.catalog = catalog
-        self.policy = policy or {}
-        self.field_questions = {
-            **DEFAULT_FIELD_QUESTIONS,
-            **dict(self.policy.get("field_questions") or {}),
-        }
+        self.policy = dict(policy or {})
+        self.policy_required_fields = tuple(
+            str(field).strip()
+            for field in self.policy.get("required_fields") or []
+            if str(field).strip()
+        )
+        self.field_questions = dict(self.policy.get("field_questions") or {})
         self.texts = dict(self.policy.get("texts") or {})
+
+        if not self.policy_required_fields:
+            raise ValueError(
+                "appointment_policy.required_fields must be defined by the graph"
+            )
 
     def _text(self, key: str, fallback: str) -> str:
         return str(self.texts.get(key) or fallback)
@@ -161,7 +142,25 @@ class DeterministicAppointment:
         )
         return current
 
-    def _product(self, request: dict[str, Any], message: str) -> Product | None:
+    def _product(
+        self,
+        request: dict[str, Any],
+        message: str,
+        *,
+        identified_service_slug: str | None = None,
+    ) -> Product | None:
+        if identified_service_slug:
+            identified = next(
+                (
+                    item
+                    for item in self.catalog.products
+                    if item.slug == identified_service_slug
+                ),
+                None,
+            )
+            if identified:
+                request["servico"] = identified.slug
+                return identified
         product = self.catalog.find_product(message)
         if product:
             request["servico"] = product.slug
@@ -170,7 +169,22 @@ class DeterministicAppointment:
         return next((item for item in self.catalog.products if item.slug == slug), None)
 
     def _required(self, product: Product | None) -> tuple[str, ...]:
-        return product.required_fields if product and product.required_fields else DEFAULT_REQUIRED_FIELDS
+        required = (
+            product.required_fields
+            if product and product.required_fields
+            else self.policy_required_fields
+        )
+        missing_questions = [
+            field
+            for field in required
+            if not str(self.field_questions.get(field) or "").strip()
+        ]
+        if missing_questions:
+            raise ValueError(
+                "appointment_policy.field_questions missing required fields: "
+                + ", ".join(missing_questions)
+            )
+        return tuple(required)
 
     def _collect(self, message: str, request: dict[str, Any], expected: str | None) -> None:
         name = _extract_name(message)
@@ -215,7 +229,13 @@ class DeterministicAppointment:
             lines.append(f"- {fact}{qualifier}")
         return self._text("cabecalho_servicos", "Serviços disponíveis:") + "\n" + "\n".join(lines)
 
-    def handle(self, message: str, *, state: dict[str, Any] | None = None) -> AppointmentResult:
+    def handle(
+        self,
+        message: str,
+        *,
+        state: dict[str, Any] | None = None,
+        identified_service_slug: str | None = None,
+    ) -> AppointmentResult:
         text = (message or "").strip()
         normalized = _norm(text)
         state = self._new_state(state)
@@ -267,13 +287,28 @@ class DeterministicAppointment:
             )
 
         message_product = self.catalog.find_product(text)
-        product = self._product(request, text)
+        product = self._product(
+            request,
+            text,
+            identified_service_slug=identified_service_slug,
+        )
         explicit_booking = any(
             term in normalized
             for term in ("agendar", "agendamento", "marcar", "reservar", "quero horario")
         )
         explicit_quote = any(
             term in normalized for term in ("orcamento", "cotacao", "quanto fica")
+        )
+        explicit_service_interest = bool(product) and any(
+            term in normalized
+            for term in (
+                "quero fazer",
+                "quero contratar",
+                "quero realizar",
+                "gostaria de fazer",
+                "preciso fazer",
+                "tenho interesse",
+            )
         )
         is_price = any(term in normalized for term in ("preco", "custa", "valor", "quanto"))
         is_service_query = any(term in normalized for term in ("como funciona", "quanto tempo", "duracao", "leva"))
@@ -289,6 +324,7 @@ class DeterministicAppointment:
             or (product and (is_price or is_service_query))
             or explicit_booking
             or explicit_quote
+            or explicit_service_interest
             or state.get("conversation_state") == "collecting"
         ):
             state["clarification_attempts"] = 0
@@ -297,12 +333,16 @@ class DeterministicAppointment:
         previous_missing = list(state.get("missing_fields") or [])
         expected = previous_missing[0] if collecting and previous_missing else None
         self._collect(text, request, expected)
-        product = self._product(request, text)
+        product = self._product(
+            request,
+            text,
+            identified_service_slug=identified_service_slug,
+        )
         required = self._required(product)
         missing = _missing(request, required)
         state["missing_fields"] = missing
 
-        if collecting or explicit_booking or explicit_quote:
+        if collecting or explicit_booking or explicit_quote or explicit_service_interest:
             state["conversation_state"] = "collecting"
             if not missing:
                 state["conversation_state"] = "handoff"
@@ -327,6 +367,8 @@ class DeterministicAppointment:
                 if explicit_booking
                 else "request_quote"
                 if explicit_quote
+                else "request_service"
+                if explicit_service_interest
                 else {
                     "modelo_veiculo": "provide_vehicle",
                     "vehicle_size": "provide_vehicle",
@@ -336,7 +378,7 @@ class DeterministicAppointment:
                 }.get(expected or "", "request_booking")
             )
             prefix = ""
-            if product and (explicit_booking or explicit_quote):
+            if product and (explicit_booking or explicit_quote or explicit_service_interest):
                 prefix = f"{_service_fact(product)}. "
             return AppointmentResult(
                 prefix + self.field_questions[missing[0]],

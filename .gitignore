@@ -98,7 +98,15 @@ dashboard/modes.json
 # Local agent/runtime state
 .codex/
 .codex-run/
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/brain-agent-e2e/
+!.agents/skills/brain-agent-e2e/**
+!.agents/skills/brain-appointment-graph/
+!.agents/skills/brain-appointment-graph/**
+!.agents/commands/
+!.agents/commands/*.md
 .mcp.json
 .vault-dev/
 .claude/

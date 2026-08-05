@@ -33,3 +33,18 @@ Termos amplos ("oculos esportivos", "moda inverno", "linha premium", "produto
 feminino", "colecao nova") sao CONTEXTO, nao lista de produtos. So crie `product`
 quando houver nomes reais, quantidade explicita, "use estes produtos", "extraia do
 catalogo" ou catalogo conectado. Sem esses sinais, pergunte antes de criar.
+
+## Politica de qualificacao para agendamento
+
+Quando a persona usa `business_model=appointment`, edite cirurgicamente o node
+persona para manter `data.appointment_policy.required_fields` e
+`data.appointment_policy.field_questions`.
+
+- Cada campo comum e cada campo de `product.data.booking.required_fields` exige
+  uma pergunta nao vazia no mapa da persona.
+- A ordem de `required_fields` define a ordem de `missing_fields`.
+- Perguntas sao conteudo comercial do grafo: nunca use texto padrao do backend,
+  de fixture ou de outra persona.
+- Se faltar uma pergunta, pergunte ao operador e nao proponha publicacao valida.
+- Preserve toda chave nao relacionada do node e rode a validacao canonica antes
+  de concluir o patch.
