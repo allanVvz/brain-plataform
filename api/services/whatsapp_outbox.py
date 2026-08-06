@@ -10,6 +10,11 @@ from fastapi import HTTPException
 
 from services import supabase_client
 
+# Fallback when a binding does not set metadata.duplicate_guard_window_seconds.
+# Any workflow_bindings row can override or disable this per persona/channel
+# without a code change (see _guard_against_duplicate_content).
+DEFAULT_DUPLICATE_GUARD_WINDOW_SECONDS = 300
+
 
 def _recipient_for_lead(lead: dict[str, Any]) -> str:
     """Return the canonical WhatsApp recipient or fail before queueing.
@@ -126,6 +131,54 @@ def resolve_lead_binding(lead: dict[str, Any]) -> dict[str, Any]:
     return binding
 
 
+def _guard_against_duplicate_content(
+    *, lead: dict[str, Any], binding: dict[str, Any], text: str, correlation_id: str,
+) -> None:
+    """Block a new outbound send whose text duplicates a recent one.
+
+    Row-identity idempotency (idempotency_key/correlation_id, checked by the
+    caller before this runs) only catches a literal re-dispatch of the same
+    outbox row. It does not catch an operator or agent typing the same
+    answer again as a brand-new send because delivery looked ambiguous
+    (missing ACK from the provider) — that produces a second, distinct row
+    that sails through unblocked and doubles the number of WhatsApp sends
+    for one conversational turn. This closes that gap, generically for any
+    persona/binding: no persona, customer or content literal is referenced.
+    """
+    metadata = binding.get("metadata") or {}
+    if metadata.get("duplicate_guard_enabled") is False:
+        return
+    window_seconds = metadata.get("duplicate_guard_window_seconds")
+    if not isinstance(window_seconds, (int, float)) or window_seconds <= 0:
+        window_seconds = DEFAULT_DUPLICATE_GUARD_WINDOW_SECONDS
+    normalized = supabase_client.normalize_whatsapp_text(text)
+    if not normalized:
+        return
+    duplicate = supabase_client.find_recent_duplicate_whatsapp_outbound(
+        lead_ref=lead["id"],
+        channel_binding_id=binding["id"],
+        normalized_text=normalized,
+        window_seconds=int(window_seconds),
+    )
+    if not duplicate:
+        return
+    supabase_client.record_whatsapp_safety_violation(
+        binding_id=binding["id"],
+        lead_ref=lead.get("id"),
+        violation_key=f"duplicate_content_suppressed:{lead.get('id')}:{correlation_id}",
+        reason=(
+            "Texto identico a um outbound recente "
+            f"(buffer {duplicate.get('id')}, status {duplicate.get('status')}) "
+            f"dentro de {int(window_seconds)}s."
+        ),
+    )
+    raise HTTPException(
+        409,
+        "Mensagem identica ja enviada recentemente para este lead; "
+        "confirme a entrega antes de reenviar.",
+    )
+
+
 def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
                      message_id: str, correlation_id: str,
                      idempotency_key: str | None = None,
@@ -162,6 +215,9 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
             "deduplicated": True,
             "binding": binding,
         }
+    _guard_against_duplicate_content(
+        lead=lead, binding=binding, text=text, correlation_id=correlation_id,
+    )
     scope_fields = {
         "message_origin": "campaign",
         "campaign_id": campaign_scope.get("campaign_id"),

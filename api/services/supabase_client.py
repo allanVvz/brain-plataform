@@ -3857,6 +3857,11 @@ def search_active_rag_chunks(
     persona_id: str,
     query: str = "",
     limit: int = 12,
+    branch_anchor_node_id: str | None = None,
+    allowed_node_ids: list[str] | None = None,
+    active_path_node_ids: list[str] | None = None,
+    unresolved_fields: list[str] | None = None,
+    graph_version: int | None = None,
 ) -> list[dict]:
     """Return persona-scoped Golden Dataset chunks before any legacy fallback.
 
@@ -3892,10 +3897,34 @@ def search_active_rag_chunks(
         return {part for part in re.findall(r"[a-z0-9]+", normalized) if len(part) > 1}
 
     terms = _rag_terms(query)
-    ranked: list[tuple[int, int, dict]] = []
+    allowed = set(allowed_node_ids or [])
+    active_path = set(active_path_node_ids or [])
+    pending = set(unresolved_fields or [])
+    ranked: list[tuple[float, int, dict]] = []
     for chunk in chunks:
         entry = entry_by_id.get(str(chunk.get("rag_entry_id")))
         if not entry:
+            continue
+        metadata = {
+            **(entry.get("metadata") or {}),
+            **(chunk.get("metadata") or {}),
+        }
+        node_id = str(
+            metadata.get("graph_json_node_id")
+            or metadata.get("canonical_node_id")
+            or metadata.get("source_node_id")
+            or ""
+        )
+        chunk_branch = str(metadata.get("branch_anchor_node_id") or "")
+        try:
+            chunk_version = int(metadata.get("graph_version") or 0)
+        except (TypeError, ValueError):
+            chunk_version = 0
+        if graph_version is not None and chunk_version not in {0, int(graph_version)}:
+            continue
+        if branch_anchor_node_id and not (
+            chunk_branch == branch_anchor_node_id or node_id in allowed
+        ):
             continue
         haystack = " ".join(
             [
@@ -3906,9 +3935,25 @@ def search_active_rag_chunks(
             ]
         )
         normalized_haystack = " ".join(_rag_terms(haystack))
-        score = sum(1 for term in terms if term in normalized_haystack)
-        if terms and score == 0:
+        semantic_score = sum(1 for term in terms if term in normalized_haystack)
+        if terms and semantic_score == 0 and not branch_anchor_node_id:
             continue
+        path_ids = set(metadata.get("path_node_ids") or [])
+        path_overlap = len(path_ids & active_path) / max(1, len(active_path))
+        field_key = str(metadata.get("field_key") or "")
+        field_relevance = 1.0 if field_key and field_key in pending else 0.0
+        try:
+            priority = float(metadata.get("priority") or 0.0)
+        except (TypeError, ValueError):
+            priority = 0.0
+        graph_proximity = 1.0 if chunk_branch == branch_anchor_node_id else path_overlap
+        score = (
+            float(semantic_score)
+            + 1.25 * graph_proximity
+            + 0.75 * path_overlap
+            + 0.8 * field_relevance
+            + 0.2 * priority
+        )
         ranked.append(
             (
                 score,
@@ -3918,6 +3963,113 @@ def search_active_rag_chunks(
         )
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
     return [item[2] for item in ranked[:limit]]
+
+
+def get_active_graph_publication(persona_id: str) -> Optional[dict]:
+    if not persona_id:
+        return None
+    return _one(
+        get_client().table("graph_publications").select("*")
+        .eq("persona_id", persona_id).eq("status", "active")
+        .maybe_single()
+    )
+
+
+def get_graph_branch_contract(publication_id: str, branch_node_id: str) -> Optional[dict]:
+    if not publication_id or not branch_node_id:
+        return None
+    return _one(
+        get_client().table("graph_branch_contracts").select("*")
+        .eq("publication_id", publication_id).eq("branch_node_id", branch_node_id)
+        .maybe_single()
+    )
+
+
+def get_conversation_ledger(persona_id: str, lead_ref: int) -> Optional[dict]:
+    if not persona_id or not lead_ref:
+        return None
+    ledger = _one(
+        get_client().table("conversation_ledgers").select("*")
+        .eq("persona_id", persona_id).eq("lead_ref", lead_ref).maybe_single()
+    )
+    if not ledger:
+        return None
+    facts = _q(
+        get_client().table("conversation_facts").select("*")
+        .eq("ledger_id", ledger["id"]).eq("is_current", True).limit(1000)
+    )
+    ledger["facts"] = {
+        str(row["field_key"]): {
+            **row,
+            "value": row.get("value_json"),
+            "fact_id": row.get("id"),
+        }
+        for row in facts
+    }
+    return ledger
+
+
+def search_graph_rag_v3(
+    *,
+    persona_id: str,
+    publication_id: str,
+    branch_node_id: str,
+    query: str,
+    query_embedding: list[float] | None,
+    active_path_node_ids: list[str] | None = None,
+    missing_fields: list[str] | None = None,
+    limit: int = 24,
+) -> list[dict]:
+    result = get_client().rpc(
+        "graph_hybrid_search_v3",
+        {
+            "p_persona_id": persona_id,
+            "p_publication_id": publication_id,
+            "p_branch_node_id": branch_node_id,
+            "p_query": query,
+            "p_query_embedding": query_embedding,
+            "p_active_path_node_ids": active_path_node_ids or [],
+            "p_missing_fields": missing_fields or [],
+            "p_limit": max(1, min(int(limit), 200)),
+        },
+    ).execute()
+    return result.data or []
+
+
+def get_graph_rag_repair_chunks(
+    *, publication_id: str, branch_node_id: str, requirements: list[dict]
+) -> list[dict]:
+    node_ids = [str(item.get("id")) for item in requirements if item.get("kind") == "node"]
+    chunk_ids = [str(item.get("id")) for item in requirements if item.get("kind") == "chunk"]
+    query = (
+        get_client().table("knowledge_rag_chunks")
+        .select("id,rag_entry_id,source_graph_node_id,branch_anchor_node_id,chunk_text,chunk_summary,chunk_kind,chunk_checksum,path_checksum,metadata")
+        .eq("publication_id", publication_id).eq("branch_anchor_node_id", branch_node_id)
+    )
+    if chunk_ids and node_ids:
+        # PostgREST has no portable OR builder across all supported client
+        # versions; fetch two narrowly bounded sets and deduplicate below.
+        chunks = _q(query.in_("id", chunk_ids).limit(200))
+        nodes = _q(
+            get_client().table("knowledge_rag_chunks")
+            .select("id,rag_entry_id,source_graph_node_id,branch_anchor_node_id,chunk_text,chunk_summary,chunk_kind,chunk_checksum,path_checksum,metadata")
+            .eq("publication_id", publication_id).eq("branch_anchor_node_id", branch_node_id)
+            .in_("source_graph_node_id", node_ids).limit(200)
+        )
+        return list({str(row["id"]): row for row in [*chunks, *nodes]}.values())
+    if chunk_ids:
+        return _q(query.in_("id", chunk_ids).limit(200))
+    if node_ids:
+        return _q(query.in_("source_graph_node_id", node_ids).limit(200))
+    return []
+
+
+def commit_graph_turn_v3(**payload: Any) -> dict:
+    result = get_client().rpc("commit_graph_turn_v3", payload).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
 
 
 def find_knowledge_rag_entry_by_slug(
@@ -4220,6 +4372,51 @@ def get_whatsapp_buffer_by_idempotency(idempotency_key: str) -> Optional[dict]:
     )
 
 
+def normalize_whatsapp_text(text: str | None) -> str:
+    """Collapse whitespace and case so near-identical retries compare equal."""
+    import re
+
+    return re.sub(r"\s+", " ", (text or "").strip()).lower()
+
+
+def find_recent_duplicate_whatsapp_outbound(
+    *,
+    lead_ref: int,
+    channel_binding_id: str,
+    normalized_text: str,
+    window_seconds: int,
+) -> Optional[dict]:
+    """Return the most recent outbound row for this lead/channel whose text
+    normalizes to `normalized_text` and landed within `window_seconds`, or
+    None. Row identity (idempotency_key/correlation_id) already guards a
+    literal re-dispatch of the same send; this guards a *new* send whose
+    content matches one already in flight or unconfirmed, generically for
+    any persona/binding.
+    """
+    if not normalized_text or window_seconds <= 0:
+        return None
+    from datetime import datetime, timedelta, timezone
+
+    since = (datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).isoformat()
+    result = (
+        get_client()
+        .table("lead_buffer")
+        .select("id,payload,status,created_at")
+        .eq("lead_ref", lead_ref)
+        .eq("channel_binding_id", channel_binding_id)
+        .eq("direction", "outbound")
+        .gte("created_at", since)
+        .order("created_at", desc=True)
+        .limit(20)
+        .execute()
+    )
+    for row in result.data or []:
+        candidate = (row.get("payload") or {}).get("text")
+        if normalize_whatsapp_text(candidate) == normalized_text:
+            return row
+    return None
+
+
 def claim_whatsapp_buffer(worker_id: str, limit: int = 20, lease_seconds: int = 60) -> list[dict]:
     result = get_client().rpc("claim_whatsapp_buffer", {
         "p_worker": worker_id, "p_limit": limit, "p_lease_seconds": lease_seconds,
@@ -4357,6 +4554,39 @@ def release_whatsapp_buffer(buffer_id: str, status: str, *, delay_seconds: int, 
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     _execute_with_retry(get_client().table("lead_buffer").update(payload).eq("id", buffer_id))
+
+
+def recover_uncommitted_graph_inbound(buffer_id: str, reason: str) -> dict:
+    result = get_client().rpc(
+        "recover_uncommitted_graph_inbound",
+        {"p_buffer_id": buffer_id, "p_reason": reason},
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def recover_unsent_committed_outbound(buffer_id: str, reason: str) -> dict:
+    result = get_client().rpc(
+        "recover_unsent_committed_outbound",
+        {"p_buffer_id": buffer_id, "p_reason": reason},
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def reconcile_committed_graph_inbound(buffer_id: str, reason: str) -> dict:
+    result = get_client().rpc(
+        "reconcile_committed_graph_inbound",
+        {"p_buffer_id": buffer_id, "p_reason": reason},
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def update_whatsapp_delivery_by_binding(
@@ -4700,6 +4930,7 @@ def list_system_events(
     event_types: Optional[list[str]] = None,
     persona_id: Optional[str] = None,
     entity_id: Optional[str] = None,
+    payload_equals: Optional[dict[str, str]] = None,
     since: Optional[str] = None,
     search: Optional[str] = None,
     level: Optional[str] = None,
@@ -4725,6 +4956,10 @@ def list_system_events(
         q = q.eq("persona_id", persona_id)
     if entity_id:
         q = q.eq("entity_id", entity_id)
+    for key, value in (payload_equals or {}).items():
+        if key not in {"persona_slug", "brand_slug", "version", "operation_id"}:
+            raise ValueError(f"Unsupported system_events payload filter: {key}")
+        q = q.eq(f"payload->>{key}", str(value))
     if since:
         q = q.gte("created_at", since)
     if search:

@@ -8,6 +8,44 @@ import httpx
 from services import secret_store
 
 
+def _extract_meta_error_detail(response: httpx.Response) -> str:
+    """Pull Graph API's own error message out of a failed response.
+
+    Meta returns a structured body (`{"error": {"code", "message", ...}}`)
+    that explains exactly why a send was rejected (unapproved template,
+    parameter mismatch, invalid recipient, ...). Without this, only the
+    generic 'N Bad Request' status survives into our logs/dashboard,
+    leaving every failure equally undiagnosable.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        return response.text[:500]
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return json.dumps(payload)[:500]
+    parts = [
+        f"code={error.get('code')}",
+        f"subcode={error.get('error_subcode')}",
+        f"message={error.get('message')}",
+    ]
+    if error.get("error_data"):
+        parts.append(f"details={error.get('error_data')}")
+    return "; ".join(str(part) for part in parts)[:500]
+
+
+def _raise_for_status_with_detail(response: httpx.Response) -> None:
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = _extract_meta_error_detail(response)
+        raise httpx.HTTPStatusError(
+            f"{exc} | meta_error: {detail}" if detail else str(exc),
+            request=exc.request,
+            response=exc.response,
+        ) from exc
+
+
 class MetaWhatsAppProvider:
     """Binding-owned Meta Cloud transport."""
 
@@ -31,7 +69,7 @@ class MetaWhatsAppProvider:
             json={"messaging_product": "whatsapp", "to": recipient, "type": "text",
                   "text": {"body": text}}, timeout=30.0,
         )
-        response.raise_for_status()
+        _raise_for_status_with_detail(response)
         return response.json()
 
     def send_template(
@@ -65,7 +103,7 @@ class MetaWhatsAppProvider:
             json={"messaging_product": "whatsapp", "to": recipient, "type": "template",
                   "template": template}, timeout=30.0,
         )
-        response.raise_for_status()
+        _raise_for_status_with_detail(response)
         return response.json()
 
     def provision_instance(self, *_args, **_kwargs):
