@@ -82,12 +82,31 @@ def fact_compatible(field: dict[str, Any], fact: dict[str, Any] | None) -> bool:
     return fact.get("value") is None
 
 
+def _resolved_for_field_owner(field: dict[str, Any], fact: dict[str, Any] | None) -> bool:
+    """field_resolved(), plus an owner_node_id match.
+
+    Confirmed live 2026-08-06: field keys are shared across every product's
+    field declarations (nome_cliente, modelo_veiculo, servico, ...), each
+    with its own owner_node_id. field_resolved() alone only checks status
+    and value, never owner_node_id — so a fact accepted while a different
+    branch was active (same key, different owner_node_id) silently counted
+    as resolved for the new branch too after a switch. fact_compatible()
+    already carries this owner check, but until now it only ran when the
+    graph publication changed, never on an ordinary in-conversation branch
+    switch within the same publication. Requiring the same match here
+    closes that gap for every branch switch, generically, without pulling
+    in fact_compatible()'s schema re-validation (meant for publication
+    changes, not plain branch switches).
+    """
+    return field_resolved(field, fact) and bool(fact) and fact.get("owner_node_id") == field.get("owner_node_id")
+
+
 def pending_fields(contract: dict[str, Any], facts: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         field for field in contract.get("fields") or []
         if field.get("required", True)
         and _condition_matches(field.get("condition"), facts)
-        and not field_resolved(field, facts.get(field["key"]))
+        and not _resolved_for_field_owner(field, facts.get(field["key"]))
     ]
 
 
@@ -261,7 +280,7 @@ def check(
                 errors.append(f"fact_overwrite_confidence_too_low:{key}")
         for dependency in field.get("depends_on") or []:
             dependency_field = fields.get(dependency) or {}
-            if not field_resolved(dependency_field, facts.get(dependency)):
+            if not _resolved_for_field_owner(dependency_field, facts.get(dependency)):
                 errors.append(f"fact_dependency_unsatisfied:{key}:{dependency}")
         if not _condition_matches(field.get("condition"), facts):
             errors.append(f"fact_condition_not_met:{key}")

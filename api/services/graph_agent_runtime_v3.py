@@ -408,7 +408,36 @@ def decide(
         reply = graph_proof_checker_v3.compose_published_question(
             reply=proposal.reply, next_question_node_id=proposal.next_question_node_id, contract=contract
         )
-        state = {**context.cart, "facts": proof["ledger"]["facts"],
+        facts = dict(proof["ledger"]["facts"])
+        accepted_facts = list(proof.get("accepted_facts") or [])
+        servico_field = next(
+            (field for field in contract.get("fields") or [] if field.get("key") == "servico"), None
+        )
+        branch_node = (document.get("node_by_id") or {}).get(proposal.branch_anchor_node_id) or {}
+        if servico_field and branch_node and (
+            facts.get("servico", {}).get("owner_node_id") != proposal.branch_anchor_node_id
+        ):
+            # The branch anchor is already the structural source of truth
+            # for "which service" (proposal.branch_anchor_node_id).
+            # Deriving the servico fact from it here — instead of trusting
+            # a separately model-extracted fact — means the two can never
+            # disagree, and it's re-derived every turn the branch stays
+            # active, so it can never go stale the way a one-time
+            # extracted fact could. Only runs when the branch's own
+            # contract declares a "servico" field, so personas that don't
+            # use this convention are unaffected.
+            servico_fact = {
+                "field_key": "servico",
+                "status": "known",
+                "value": str(branch_node.get("slug") or branch_node.get("title") or proposal.branch_anchor_node_id),
+                "owner_node_id": proposal.branch_anchor_node_id,
+                "confidence": 1.0,
+                "evidence_span": None,
+                "source_message_id": _source_message_id(context.messages),
+            }
+            facts["servico"] = servico_fact
+            accepted_facts.append(servico_fact)
+        state = {**context.cart, "facts": facts,
                  "active_branch_node_id": proposal.branch_anchor_node_id,
                  "asked_question_node_ids": list(dict.fromkeys([
                      *(context.cart.get("asked_question_node_ids") or []),
@@ -423,7 +452,7 @@ def decide(
                                  evidence_node_ids=proposal.cited_node_ids),
             AgentResponse(reply_text=reply, role=route, evidence_node_ids=proposal.cited_node_ids,
                           cart_state=state, handoff_required=proposal.handoff_requested,
-                          proposal=proposal, proof=proof),
+                          proposal=proposal, proof={**proof, "accepted_facts": accepted_facts}),
         )
     # A technical failure emits only the next published question.  It never
     # fabricates commercial copy and never requests handoff by itself.

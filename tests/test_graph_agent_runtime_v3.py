@@ -375,3 +375,31 @@ def test_semantic_chunking_separates_question_answer_and_field_intent():
     }
     kinds = {chunk["kind"] for chunk in graph_compiler_v3.semantic_chunks(node_value)}
     assert {"question", "answer", "aliases", "field_intent"}.issubset(kinds)
+
+
+def test_pending_fields_ignores_a_fact_owned_by_a_different_branch():
+    """Regression test for the 2026-08-06 finding.
+
+    Field keys (e.g. "servico", "modelo_veiculo") are shared across every
+    product's own field declarations, each scoped by owner_node_id.
+    field_resolved() alone never checked owner_node_id, so a fact accepted
+    while a *different* branch was active kept counting as resolved for
+    the new branch after a switch — required fields the new branch
+    actually needs silently stayed out of missing_fields.
+    """
+    contract = {
+        "fields": [{
+            "key": "servico", "required": True, "condition": None,
+            "owner_node_id": "branch-b", "accepted_statuses": ["known"],
+        }],
+    }
+    stale_fact_from_another_branch = {
+        "servico": {"status": "known", "value": "polimento", "owner_node_id": "branch-a"},
+    }
+    pending = graph_proof_checker_v3.pending_fields(contract, stale_fact_from_another_branch)
+    assert [field["key"] for field in pending] == ["servico"]
+
+    matching_fact = {
+        "servico": {"status": "known", "value": "higienizacao", "owner_node_id": "branch-b"},
+    }
+    assert graph_proof_checker_v3.pending_fields(contract, matching_fact) == []

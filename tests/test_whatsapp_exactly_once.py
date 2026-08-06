@@ -370,6 +370,138 @@ def test_repeated_n8n_handoff_commit_is_persisted_once(monkeypatch):
     assert calls == {"lead": 1, "log": 1, "event": 1}
 
 
+def test_v3_commercial_note_drops_stale_field_from_a_different_branch(monkeypatch):
+    """Regression test for the 2026-08-06 finding.
+
+    A lead carried over from before v3 (or from an earlier, unrelated
+    branch/session) can still have a legacy `appointment_request` dict
+    sitting in cart_state with an answer from that old session (e.g.
+    modelo_veiculo). The old commit() logic merged that stale dict into
+    commercial_note every turn and never cleared it, so the CRM kept
+    showing an answer as "known" days after a completely different branch
+    started, even though v3's own fact ledger never captured it for the
+    live session. commercial_note (and the persisted cart_state) must
+    reflect only what v3's own `facts` ledger currently knows.
+    """
+    persisted = {}
+    lead = {
+        "id": 7,
+        "persona_id": "persona-1",
+        "channel_binding_id": "binding-1",
+        "stage": "novo",
+        "metadata": {"commercial_note": {"modelo_veiculo": "Chevrolet Onix"}},
+    }
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "get_lead_by_ref", lambda _ref: lead
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_workflow_binding_by_id",
+        lambda _id: {
+            "id": "binding-1",
+            "persona_id": "persona-1",
+            "active": True,
+            "metadata": {"decision_owner": "n8n_agents"},
+        },
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "get_persona", lambda _slug: {"id": "persona-1"}
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "claim_conversation_commit",
+        lambda **_kwargs: {"state": "claimed"},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "complete_conversation_commit",
+        lambda **kwargs: kwargs["result_payload"],
+    )
+
+    def update_lead(_ref, update):
+        persisted.update(update)
+
+    monkeypatch.setattr(conversation_runtime.supabase_client, "update_lead", update_lead)
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "insert_agent_log", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "insert_event", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "commit_graph_turn_v3",
+        lambda **_kwargs: {"proof_id": "proof-1", "ledger_revision": 1},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.whatsapp_outbox,
+        "enqueue_outbound",
+        lambda **_kwargs: pytest.fail("no-reply commit created an outbox"),
+    )
+
+    context = _context().model_copy(
+        update={
+            "runtime_version": conversation_runtime.graph_agent_runtime_v3.RUNTIME_VERSION,
+            "rag_nodes": [
+                {
+                    "node_type": "persona",
+                    "data": {"commercial_note_fields": ["modelo_veiculo", "nome_cliente"]},
+                }
+            ],
+        }
+    )
+    response = AgentResponse(
+        reply_text=None,
+        role=ConversationRoute.SDR,
+        cart_state={
+            # Legacy debris from a different, earlier branch/session.
+            "appointment_request": {"modelo_veiculo": "Chevrolet Onix"},
+            "active_branch_node_id": "aurora-product-interior",
+            # v3's own live ledger: nome_cliente and servico belong to the
+            # active branch; vehicle_color is a leftover fact from a
+            # *different* branch (same key convention, different
+            # owner_node_id) that should not leak into this branch's note.
+            "facts": {
+                "nome_cliente": {
+                    "status": "known", "value": "Allan",
+                    "owner_node_id": "aurora-product-interior",
+                },
+                "servico": {
+                    "status": "known", "value": "higienizacao-interna",
+                    "owner_node_id": "aurora-product-interior",
+                },
+                "vehicle_color": {
+                    "status": "known", "value": "Prata",
+                    "owner_node_id": "aurora-product-polish",
+                },
+            },
+        },
+        handoff_required=False,
+        proof={"missing_fields": ["modelo_veiculo"]},
+    )
+
+    conversation_runtime.commit(
+        lead_ref=7,
+        context=context,
+        decision=_decision(),
+        response=response,
+        correlation_id="corr-stale-note",
+        phone_number_id=None,
+        channel_binding_id="binding-1",
+        inbound_buffer_id="buffer-in",
+        expected_decision_owner="n8n_agents",
+    )
+
+    commercial_note = persisted["metadata"]["commercial_note"]
+    assert commercial_note.get("modelo_veiculo") is None
+    assert commercial_note["nome_cliente"] == "Allan"
+    assert commercial_note["servico"] == "higienizacao-interna"
+    assert commercial_note.get("vehicle_color") is None
+    assert "appointment_request" not in persisted["metadata"]["conversation_state"]
+    assert persisted["nome"] == "Allan"
+    assert persisted["interesse_produto"] == "higienizacao-interna"
+
+
 def test_concurrent_commit_reentry_pauses_the_lead(monkeypatch):
     violations = []
     monkeypatch.setattr(

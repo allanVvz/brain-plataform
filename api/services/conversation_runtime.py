@@ -1873,29 +1873,60 @@ def commit(
         # Backward-compatible mirror for Baita conversations already consumed
         # by the legacy deterministic/n8n flow.
         metadata["vitoria_state"] = response.cart_state
-    appointment_request = dict(
-        response.cart_state.get("appointment_request") or {}
-    )
-    commercial_note = dict(metadata.get("commercial_note") or {})
-    # No hardcoded field names or business_model gate: each persona declares
-    # its own commercial_note_fields in its graph's persona node data (any
-    # business model — appointment or otherwise). Values are resolved from
-    # whatever shape that persona's engine produces (appointment_request
-    # first, since that's where DeterministicAppointment nests its
-    # per-field state; cart_state itself as a fallback for other engines
-    # like Baita's cart/order-based DeterministicSDR).
-    note_fields = _commercial_note_fields(context)
-    note_pool = {**response.cart_state, **appointment_request}
-    for field in note_fields:
-        if note_pool.get(field):
-            commercial_note[field] = note_pool[field]
+    if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+        # v3's own fact ledger (branch-scoped, revisioned) is the only
+        # source of truth here — no separate, hand-typed field list.
+        # Confirmed live 2026-08-06: `commercial_note_fields` (a list
+        # authored once on the persona node) had drifted from the real
+        # per-branch field declarations — it named fields never actually
+        # collected and omitted others that were. Mirroring every known
+        # fact that belongs to the active branch, straight from `facts`,
+        # means there is nothing left to keep in sync by hand. Facts are
+        # further scoped to the active branch's own owner_node_id so a
+        # value from an abandoned branch/session never leaks into the
+        # note (same class of bug as the missing_fields owner check in
+        # graph_proof_checker_v3.pending_fields).
+        facts = response.cart_state.get("facts") or {}
+        active_branch = response.cart_state.get("active_branch_node_id")
+        commercial_note = {
+            key: fact["value"]
+            for key, fact in facts.items()
+            if isinstance(fact, dict)
+            and fact.get("status") == "known"
+            and fact.get("value")
+            and (active_branch is None or fact.get("owner_node_id") in (None, active_branch))
+        }
+        # Legacy debris that a pre-v3 lead may still carry in cart_state;
+        # v3 never reads or writes it, so it should not persist forever.
+        response.cart_state.pop("appointment_request", None)
+    else:
+        # No hardcoded field names or business_model gate: each persona
+        # declares its own commercial_note_fields in its graph's persona
+        # node data (any business model — appointment or otherwise).
+        note_fields = _commercial_note_fields(context)
+        appointment_request = dict(
+            response.cart_state.get("appointment_request") or {}
+        )
+        commercial_note = dict(metadata.get("commercial_note") or {})
+        # Values are resolved from whatever shape that persona's engine
+        # produces (appointment_request first, since that's where
+        # DeterministicAppointment nests its per-field state; cart_state
+        # itself as a fallback for other engines like Baita's cart/order-
+        # based DeterministicSDR).
+        note_pool = {**response.cart_state, **appointment_request}
+        for field in note_fields:
+            if note_pool.get(field):
+                commercial_note[field] = note_pool[field]
     if commercial_note:
         commercial_note["updated_at"] = datetime.now(timezone.utc).isoformat()
         metadata["commercial_note"] = commercial_note
+    elif "commercial_note" in metadata:
+        metadata.pop("commercial_note", None)
     lead_update = {"metadata": metadata, "stage": qualified_stage}
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
-        customer_name = None
-        service_interest = None
+        facts = response.cart_state.get("facts") or {}
+        customer_name = (facts.get("nome_cliente") or {}).get("value")
+        service_interest = (facts.get("servico") or {}).get("value")
     else:
         customer_name = (
             appointment_request.get("nome_cliente")
