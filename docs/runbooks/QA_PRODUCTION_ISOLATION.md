@@ -51,17 +51,60 @@ WhatsApp automatizado de ponta a ponta — so dashboard, API, grafo e banco).
   `EXPECTED_COMPOSE_PROJECT_NAME` (default `brain-ai`, retrocompativel) para
   aceitar `brain-ai-qa`.
 
-### Passos manuais pendentes (fora do repo)
+### Passos manuais — estado em 2026-08-06
 
-1. DNS: `api-qa.vzforeal.com` e `storage-qa.vzforeal.com` -> IP da VPS.
-2. Na VPS: `mkdir -p /opt/brain-ai-qa` + `.env.compose` de QA (ver acima).
-3. GitHub: Environment `qa` com secrets `VPS_HOST`, `VPS_USER`,
-   `VPS_SSH_KEY` (mesma VPS/chave da producao), `VPS_APP_DIR_QA=/opt/brain-ai-qa`.
-4. Crontab da VPS com a linha do `qa-refresh-db.sh` acima.
-5. `.env.compose` da **producao** ganha `API_DOMAIN_QA`/`STORAGE_DOMAIN_QA`
-   (o Caddy compartilhado le essas variaveis; sem elas usa um placeholder
-   `.invalid` que nunca resolve, entao a producao nunca quebra por falta
-   dessas variaveis).
+Feito (via SSH direto na VPS, `root@179.197.233.12`, e `gh` no repo):
+
+- `/opt/brain-ai-qa` criado com `docker-compose.yml`, `infra/kong.yml`,
+  `infra/generate_keys.py` e `ops/vps/*` sincronizados a partir da branch
+  `qa` local.
+- `.env.compose` de QA gerado (`COMPOSE_PROJECT_NAME=brain-ai-qa`,
+  `ENVIRONMENT=production`, dominios `-qa.vzforeal.com`, segredos proprios
+  via `generate_keys.py`, `API_PORT=8081` para nao colidir com o `8080` da
+  prod se algum dia for exposto em loopback), `chmod 600`, validado com
+  `EXPECTED_COMPOSE_PROJECT_NAME=brain-ai-qa ops/vps/validate_env.py` ->
+  `OK`.
+- Rede Docker externa `edge` criada na VPS (`docker network create edge`).
+  `docker network ls` confirma.
+- Crontab do `root` na VPS ganhou a linha do `qa-refresh-db.sh` (secao
+  acima). Dry-run manual confirmado: `QA db is not running; skipping
+  refresh.` (comportamento esperado, stack ainda desligado).
+- GitHub: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT`,
+  `GHCR_USERNAME`, `GHCR_TOKEN` **ja existiam como secrets a nivel de
+  repositorio** (nao passavelmente escopados so a producao) — o
+  `deploy-qa.yml` os herda automaticamente, sem duplicar nada. Unico secret
+  novo criado: `VPS_APP_DIR_QA=/opt/brain-ai-qa`. O Environment `qa`
+  referenciado pelo job `deploy` e criado automaticamente pelo GitHub na
+  primeira execucao do workflow, sem regra de protecao por padrao.
+- Achado: copiar arquivos manualmente do checkout local (Windows,
+  `core.autocrlf=true`) para a VPS via `scp` grava CRLF nos `.sh`, quebrando
+  `set -o pipefail` no bash do Linux. Os blobs no git em si **sao LF**
+  (confirmado com `git show HEAD:<arquivo> | file -`); o problema so
+  acontece copiando o working tree local diretamente. Corrigido nos arquivos
+  ja copiados (`sed -i 's/\r$//'`) e travado para o futuro com
+  `.gitattributes` (`*.sh text eol=lf`).
+
+Ainda pendente (bloqueado por acesso que nao tenho):
+
+1. **DNS**: `api-qa.vzforeal.com` e `storage-qa.vzforeal.com` -> IP da VPS
+   (`179.197.233.12`). Sem isso, mesmo com o Caddy configurado, o ACME nunca
+   emite certificado para esses hosts.
+2. **Push de `main`/`qa` para `origin`**: as mudancas de compose/Caddyfile
+   deste runbook (rede `edge`, blocos `API_DOMAIN_QA`/`STORAGE_DOMAIN_QA`)
+   so chegam na prod quando `main` for enviado ao GitHub e o pipeline
+   `deploy-production.yml` rodar — isso recria `kong`/`api`/`caddy` da
+   producao para anexar a rede `edge`. **Isso e uma acao com efeito real em
+   producao (ainda que breve) e nao foi feita** — precisa de confirmacao
+   explicita antes de `git push origin main`.
+3. Depois do passo 2 (prod com a rede `edge`), adicionar
+   `API_DOMAIN_QA=api-qa.vzforeal.com` e
+   `STORAGE_DOMAIN_QA=storage-qa.vzforeal.com` ao `.env.compose` da
+   **producao** na VPS, e recriar o `caddy` (`docker compose --env-file
+   .env.compose up -d --force-recreate caddy`) para o Caddy compartilhado
+   passar a servir os dois dominios novos.
+4. Primeiro `workflow_dispatch` de `deploy-qa.yml` com `action: up` (isso
+   builda e publica a imagem da branch `qa` no GHCR e roda
+   `ops/vps/deploy-qa.sh` pela primeira vez).
 
 ## Auditoria dos projetos Vercel (2026-08-03)
 
