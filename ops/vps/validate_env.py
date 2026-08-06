@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import re
 from pathlib import Path
 
@@ -51,8 +52,12 @@ def main() -> int:
             errors.append(f"{key} still contains a placeholder/development value")
     if env.get("ENVIRONMENT") != "production":
         errors.append("ENVIRONMENT must be production")
-    if env.get("COMPOSE_PROJECT_NAME", "brain-ai") != "brain-ai":
-        errors.append("COMPOSE_PROJECT_NAME must be brain-ai (backup volume labels depend on it)")
+    expected_project = os.environ.get("EXPECTED_COMPOSE_PROJECT_NAME", "brain-ai")
+    if env.get("COMPOSE_PROJECT_NAME", "brain-ai") != expected_project:
+        errors.append(
+            f"COMPOSE_PROJECT_NAME must be {expected_project} "
+            "(backup volume labels and cross-stack network aliases depend on it)"
+        )
     for key in ("POSTGRES_PASSWORD", "AI_BRAIN_AUTH_SECRET", "AI_BRAIN_WEBHOOK_TOKEN"):
         value = env.get(key, "")
         if len(value) < 32 or not re.fullmatch(r"[A-Za-z0-9_-]+", value):

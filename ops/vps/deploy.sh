@@ -12,6 +12,12 @@ python3 "$ROOT_DIR/ops/vps/validate_env.py" "$ENV_FILE"
 cd "$ROOT_DIR"
 export IMAGE_TAG="$TARGET_TAG"
 COMPOSE=(docker compose --env-file "$ENV_FILE")
+
+# `edge` is an external network shared with the QA stack (`brain-ai-qa`) so
+# the Caddy started below can reach QA's api/kong. Create it once,
+# idempotently, so a plain prod deploy never depends on QA being deployed
+# first.
+docker network inspect edge >/dev/null 2>&1 || docker network create edge
 evolution_enabled="$(
   awk -F= '
     /^[[:space:]]*EVOLUTION_ENABLED[[:space:]]*=/ {

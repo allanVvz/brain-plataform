@@ -48,3 +48,38 @@
 	reverse_proxy n8n:5678
 }
 
+# QA stack (`brain-ai-qa` Compose project). Only active when API_DOMAIN_QA /
+# STORAGE_DOMAIN_QA are set in the prod .env.compose. Reaches the QA
+# project's api/kong over the shared `edge` network by their
+# project-qualified aliases; QA has no Caddy or n8n of its own.
+{$API_DOMAIN_QA} {
+	encode zstd gzip
+	log {
+		output stdout
+		format json
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	handle {
+		reverse_proxy api-brain-ai-qa:8080
+	}
+}
+
+{$STORAGE_DOMAIN_QA} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+	handle /storage/v1/* {
+		reverse_proxy kong-brain-ai-qa:8000
+	}
+	respond 404
+}
+

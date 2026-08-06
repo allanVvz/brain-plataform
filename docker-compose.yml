@@ -235,7 +235,14 @@ services:
       retries: 20
     restart: unless-stopped
     logging: *default-logging
-    networks: [backend]
+    # `edge` lets the shared Caddy (prod stack) reverse-proxy into a QA
+    # stack's kong even though each Compose project has its own private
+    # `backend` network. Alias is project-qualified so prod and QA don't
+    # collide on the same shared network.
+    networks:
+      backend: {}
+      edge:
+        aliases: ["kong-${COMPOSE_PROJECT_NAME:-brain-ai}"]
 
   api:
     image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
@@ -266,7 +273,10 @@ services:
       start_period: 30s
     restart: unless-stopped
     logging: *default-logging
-    networks: [backend]
+    networks:
+      backend: {}
+      edge:
+        aliases: ["api-${COMPOSE_PROJECT_NAME:-brain-ai}"]
 
   workers:
     image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
@@ -454,6 +464,14 @@ services:
       STORAGE_DOMAIN: ${STORAGE_DOMAIN:?set STORAGE_DOMAIN}
       N8N_DOMAIN: ${N8N_DOMAIN:?set N8N_DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+      # Only set on the prod stack's .env.compose. The shared Caddy here
+      # also terminates TLS for the QA stack's api/kong, reached over the
+      # `edge` network by their project-qualified aliases. Default to
+      # `.invalid` placeholders (RFC 2606, never resolves) so an unset value
+      # still parses as a valid Caddyfile site address instead of breaking
+      # every site block, including prod's, with an empty host.
+      API_DOMAIN_QA: ${API_DOMAIN_QA:-qa-api.invalid}
+      STORAGE_DOMAIN_QA: ${STORAGE_DOMAIN_QA:-qa-storage.invalid}
     ports:
       - "80:80"
       - "443:443"
@@ -472,7 +490,7 @@ services:
     restart: unless-stopped
     profiles: ["edge"]
     logging: *default-logging
-    networks: [backend]
+    networks: [backend, edge]
 
 volumes:
   postgres-data:
@@ -491,3 +509,9 @@ volumes:
 networks:
   backend:
     driver: bridge
+  # Shared across the prod (`brain-ai`) and QA (`brain-ai-qa`) Compose
+  # projects so the prod stack's Caddy can reverse-proxy into QA's api/kong.
+  # Created once on the host with `docker network create edge` (deploy.sh
+  # also creates it idempotently before bringing services up).
+  edge:
+    external: true

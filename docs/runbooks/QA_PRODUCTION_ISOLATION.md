@@ -3,8 +3,65 @@
 ## Estado atual
 
 - Producao: dashboard Vercel e backend servido em dois dominios permanentes, `https://api.vzforeal.com` e `https://lpapi.vzforeal.com` (decisao final, ver secao "Decisao final sobre dominios" abaixo — nao e mais um estado transitorio).
-- QA temporario: Docker Compose local com `.env.compose`.
-- Segunda VPS: pre-requisito pendente para QA persistente; nao simular QA em producao.
+- QA temporario (docker local no laptop, sem persistencia): continua existindo como esta descrito na secao "Operacao local" abaixo, sem mudanca.
+- QA persistente: ver secao "QA persistente (mesma VPS)" abaixo. **Substitui** a nota antiga que pedia uma segunda VPS — decisao revertida explicitamente pelo dono do produto em 2026-08-06: QA persistente roda na mesma VPS da producao.
+
+## QA persistente (mesma VPS)
+
+Decisao de 2026-08-06: em vez de uma segunda VPS, o QA persistente roda como
+um segundo projeto Docker Compose (`brain-ai-qa`) na mesma VPS da producao
+(`brain-ai`), com API e banco proprios e isolados, compartilhando apenas
+`n8n`/Evolution com a producao (consequencia aceita: QA nao tem fluxo de
+WhatsApp automatizado de ponta a ponta — so dashboard, API, grafo e banco).
+
+- **Branch**: `qa`, criada a partir da `main`. Sem deploy automatico em push
+  — o workflow `.github/workflows/deploy-qa.yml` so roda via
+  `workflow_dispatch` (`action: up|down|refresh-db`). Essa e a feature flag
+  pedida: push em `qa` nao consome nada na VPS; so um disparo manual liga o
+  stack para uma sessao de teste, e `action: down` desliga tudo de novo
+  (containers removidos, so os volumes de dado ficam em disco).
+- **Layout na VPS**: segundo checkout em `/opt/brain-ai-qa`, `.env.compose`
+  proprio com `COMPOSE_PROJECT_NAME=brain-ai-qa`, dominios
+  `api-qa.vzforeal.com`/`storage-qa.vzforeal.com`, segredos gerados
+  separados (`infra/generate_keys.py --write .env.compose`).
+- **`ENVIRONMENT=production` no `.env.compose` de QA** (nao `qa`) —
+  `api/utils/env.py` so trata `ENVIRONMENT=production` como modo estrito
+  (cookie seguro, validacao obrigatoria). Como este QA e exposto
+  publicamente em HTTPS na mesma VPS da producao, precisa da mesma postura
+  de seguranca; o isolamento vem do dominio/banco/segredos separados, nao
+  desse valor. O `ENVIRONMENT=qa` que ja existia em `.env.compose.example`
+  continua servindo so para o QA local efemero no laptop (secao acima),
+  sem exposicao publica.
+- **Rede compartilhada `edge`**: o Caddy da producao (unico a segurar as
+  portas 80/443 da VPS) alcanca o `api`/`kong` do stack de QA por uma rede
+  Docker externa `edge`, com aliases qualificados por projeto
+  (`api-brain-ai-qa`, `kong-brain-ai-qa`) — ver `docker-compose.yml` e
+  `infra/Caddyfile`. Criada automaticamente (idempotente) por
+  `ops/vps/deploy.sh` e `ops/vps/deploy-qa.sh`.
+- **Refresh do banco**: `ops/vps/qa-refresh-db.sh`, agendado via crontab da
+  VPS (`0 4 * * * /opt/brain-ai-qa/ops/vps/qa-refresh-db.sh >> /var/log/brain-ai-qa-refresh.log 2>&1`).
+  `pg_dump -Fc` da producao seguido de `pg_restore --clean --if-exists
+  --no-owner` no banco de QA — snapshot completo, nao replicacao continua
+  (QA precisa poder rodar migrations/mutacoes proprias sem quebrar). So
+  le da producao, nunca escreve. No-op se o stack de QA estiver desligado.
+- **Scripts novos** (`ops/vps/`): `deploy-qa.sh`, `rollback-qa.sh`,
+  `qa-down.sh`, `qa-refresh-db.sh`. `ops/vps/audit.sh` e reutilizado sem
+  mudanca (ja e parametrizado por `ENV_FILE`, sem nada hardcoded de
+  producao). `ops/vps/validate_env.py` ganhou
+  `EXPECTED_COMPOSE_PROJECT_NAME` (default `brain-ai`, retrocompativel) para
+  aceitar `brain-ai-qa`.
+
+### Passos manuais pendentes (fora do repo)
+
+1. DNS: `api-qa.vzforeal.com` e `storage-qa.vzforeal.com` -> IP da VPS.
+2. Na VPS: `mkdir -p /opt/brain-ai-qa` + `.env.compose` de QA (ver acima).
+3. GitHub: Environment `qa` com secrets `VPS_HOST`, `VPS_USER`,
+   `VPS_SSH_KEY` (mesma VPS/chave da producao), `VPS_APP_DIR_QA=/opt/brain-ai-qa`.
+4. Crontab da VPS com a linha do `qa-refresh-db.sh` acima.
+5. `.env.compose` da **producao** ganha `API_DOMAIN_QA`/`STORAGE_DOMAIN_QA`
+   (o Caddy compartilhado le essas variaveis; sem elas usa um placeholder
+   `.invalid` que nunca resolve, entao a producao nunca quebra por falta
+   dessas variaveis).
 
 ## Auditoria dos projetos Vercel (2026-08-03)
 
