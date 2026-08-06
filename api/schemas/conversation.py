@@ -56,6 +56,54 @@ class ContextCard(StrictModel):
     technical_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ConversationFactStatus(StrEnum):
+    KNOWN = "known"
+    UNKNOWN = "unknown"
+    DECLINED = "declined"
+    NEEDS_CONFIRMATION = "needs_confirmation"
+    INVALID = "invalid"
+
+
+class BranchAction(StrEnum):
+    KEEP = "keep"
+    SELECT = "select"
+    SWITCH = "switch"
+
+
+class ExtractedFact(StrictModel):
+    field_key: str = Field(min_length=1)
+    value: Any | None = None
+    status: ConversationFactStatus = ConversationFactStatus.KNOWN
+    source_message_id: str | None = None
+    owner_node_id: str = Field(min_length=1)
+    evidence_span: str = ""
+    confidence: float = Field(default=0.0, ge=0, le=1)
+
+
+class CommercialClaim(StrictModel):
+    claim_type: str = Field(pattern="^(price|availability|schedule|stock|duration|other)$")
+    value: dict[str, Any] = Field(default_factory=dict)
+    evidence_node_ids: list[str] = Field(default_factory=list)
+    evidence_chunk_ids: list[str] = Field(default_factory=list)
+
+
+class ConversationProposal(StrictModel):
+    """One model suggestion that must be proved against the graph contract."""
+
+    branch_action: BranchAction = BranchAction.KEEP
+    branch_anchor_node_id: str
+    branch_path_checksum: str
+    branch_evidence_span: str = ""
+    extracted_facts: list[ExtractedFact] = Field(default_factory=list)
+    claims: list[CommercialClaim] = Field(default_factory=list)
+    next_question_node_id: str | None = None
+    cited_node_ids: list[str] = Field(default_factory=list)
+    cited_chunk_ids: list[str] = Field(default_factory=list)
+    reply: str = ""
+    qualification_complete: bool = False
+    handoff_requested: bool = False
+
+
 class ConversationContext(StrictModel):
     persona_slug: str
     agent_slug: str
@@ -69,6 +117,13 @@ class ConversationContext(StrictModel):
     context_cards: list[ContextCard] = Field(default_factory=list)
     system_prompt: str = ""
     available_services: list[dict[str, str]] = Field(default_factory=list)
+    active_branch_node_id: str | None = None
+    active_path_checksum: str | None = None
+    branch_node_ids: list[str] = Field(default_factory=list)
+    graph_contract: dict[str, Any] = Field(default_factory=dict)
+    publication_id: str | None = None
+    runtime_version: str = "conversation_v2"
+    retrieval_trace: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConversationDecision(StrictModel):
@@ -92,3 +147,6 @@ class AgentResponse(StrictModel):
     handoff_required: bool = False
     extracted_fields: dict[str, str] = Field(default_factory=dict)
     identified_service_slug: str | None = None
+    proposal: ConversationProposal | None = None
+    proof: dict[str, Any] = Field(default_factory=dict)
+    repair_context_cards: list[dict[str, Any]] = Field(default_factory=list)

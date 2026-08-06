@@ -16,10 +16,13 @@ from schemas.conversation import (
     CartAction,
     ConversationContext,
     ConversationDecision,
+    ConversationProposal,
     ConversationRoute,
 )
 from services import (
     context_cards as context_cards_service,
+    graph_agent_runtime_v3,
+    graph_conversation_contract,
     graph_json_v2_store,
     lead_qualification,
     supabase_client,
@@ -153,6 +156,7 @@ def _current_graph(persona_slug: str) -> tuple[int, str, Any]:
             f"No published Graph JSON v2 for {persona_slug}"
         )
     version, graph = current
+    graph.graph_version = version
     event = graph_json_v2_store.latest_event(persona_slug) or {}
     checksum = str(
         ((event.get("payload") or {}).get("checksum"))
@@ -194,34 +198,21 @@ def _appointment_policy(graph: Any) -> dict[str, Any]:
 # already enforces this server-side independent of what the agent
 # produces — this instruction is a first line of defense, not the only one.
 _AGENTIC_SAFETY_INSTRUCTIONS = (
-    "Nunca confirme preco final, data ou horario de agendamento — mesmo "
-    "que o cliente insista. Isso sempre depende de confirmacao humana. Se "
-    "o cliente pedir uma confirmacao que voce nao pode dar, diga que a "
-    "equipe vai confirmar e continue coletando as informacoes que faltam. "
-    "Responda apenas com base nos fatos aprovados fornecidos no contexto "
-    "(trecho 'Conhecimento aprovado' abaixo) e no historico da conversa — "
-    "nunca invente um fato que nao esteja la. Se o cliente responder mais "
-    "de uma informacao pendente na mesma mensagem (por exemplo nome e "
-    "modelo do carro juntos), identifique cada uma separadamente — nao "
-    "deixe nenhuma se perder so porque vieram juntas. Isso vale mesmo "
-    "quando a informacao aparece de passagem, dentro de uma frase sobre "
-    "outro assunto (por exemplo o cliente perguntar sobre um servico mas "
-    "ja citar o modelo do carro na mesma mensagem) — nao exija que a "
-    "mensagem seja uma resposta direta a ultima pergunta feita; releia a "
-    "mensagem inteira do cliente procurando por qualquer campo da lista "
-    "'Informacoes pendentes' antes de responder. Responda sempre em "
-    "formato JSON, exatamente {\"reply_text\": \"...\", \"extracted_fields\": "
-    "{...}, \"identified_service_slug\": \"...\"}, sem nenhum texto fora do "
-    "JSON. extracted_fields deve conter somente os campos da lista "
-    "'Informacoes pendentes' que o cliente realmente respondeu nesta "
-    "mensagem, com a chave exata fornecida — nunca invente uma chave nova "
-    "nem preencha um campo que o cliente nao respondeu. Se, pelo que o "
-    "cliente descreveu (mesmo sem citar o nome do servico), voce "
-    "identificar qual item da lista 'Servicos disponiveis' resolve o caso "
-    "dele, preencha identified_service_slug com o slug EXATO dessa lista — "
-    "nunca invente um slug que nao esteja nela. Se nenhum servico "
-    "especifico ficou claro ainda, omita identified_service_slug ou "
-    "deixe null."
+    "Nunca confirme preco final, disponibilidade, data ou horario sem uma "
+    "regra e evidencia publicadas que autorizem isso. Responda apenas com "
+    "base no pacote aprovado do galho ativo e cite somente IDs fornecidos. "
+    "Retorne uma proposta JSON com branch_anchor_node_id, "
+    "branch_path_checksum, extracted_facts, next_question_node_id, "
+    "cited_node_ids, reply, qualification_complete e handoff_requested. "
+    "Cada fato usa field_key, value, status, source_message_id e "
+    "owner_node_id. Os status permitidos sao known, unknown, declined, "
+    "needs_confirmation e invalid. Quando a pessoa disser que nao sabe, "
+    "nao possui ou nao consegue informar, use unknown com value null; "
+    "nunca salve essa frase como valor conhecido. Leia a mensagem inteira "
+    "e capture tambem informacoes mencionadas de passagem. Use "
+    "extracted_facts, que substitui o contrato legado extracted_fields. "
+    "Nao invente campos, "
+    "nodes, perguntas, produtos, regras ou evidencias."
 )
 
 
@@ -506,6 +497,61 @@ def build_context(
     message: str,
     message_id: str | None = None,
 ) -> ConversationContext:
+    lead_binding_probe = supabase_client.get_lead_by_ref(lead_ref) or {}
+    binding_probe = supabase_client.get_workflow_binding_by_id(
+        lead_binding_probe.get("channel_binding_id")
+    )
+    binding_probe_metadata = (binding_probe or {}).get("metadata") or {}
+    if (
+        not graph_agent_runtime_v3.binding_uses_v3(binding_probe)
+        and binding_probe_metadata.get("shadow_runtime_version")
+        == graph_agent_runtime_v3.RUNTIME_VERSION
+    ):
+        try:
+            shadow = graph_agent_runtime_v3.build_context(
+                persona_slug=persona_slug,
+                lead_ref=lead_ref,
+                message=message,
+                message_id=message_id,
+            )
+            supabase_client.insert_event(
+                {
+                    "event_type": "conversation.graph_v3_shadow_context",
+                    "entity_type": "lead",
+                    "entity_id": str(lead_ref),
+                    "persona_id": lead_binding_probe.get("persona_id"),
+                    "payload": {
+                        "runtime_version": graph_agent_runtime_v3.RUNTIME_VERSION,
+                        "publication_id": shadow.publication_id,
+                        "graph_checksum": shadow.graph_checksum,
+                        "retrieval_trace": shadow.retrieval_trace,
+                        "outbound_suppressed": True,
+                    },
+                },
+                source="conversation_runtime.shadow",
+            )
+        except Exception as exc:  # shadow must never change the live decision
+            supabase_client.insert_event(
+                {
+                    "event_type": "conversation.graph_v3_shadow_failed",
+                    "entity_type": "lead",
+                    "entity_id": str(lead_ref),
+                    "persona_id": lead_binding_probe.get("persona_id"),
+                    "payload": {"error": str(exc)[:1000], "outbound_suppressed": True},
+                },
+                level="warning",
+                source="conversation_runtime.shadow",
+            )
+    if graph_agent_runtime_v3.binding_uses_v3(binding_probe):
+        try:
+            return graph_agent_runtime_v3.build_context(
+                persona_slug=persona_slug,
+                lead_ref=lead_ref,
+                message=message,
+                message_id=message_id,
+            )
+        except RuntimeError as exc:
+            raise PublishedGraphUnavailable(str(exc)) from exc
     version, checksum, graph = _current_graph(persona_slug)
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     persona = supabase_client.get_persona(persona_slug) or {}
@@ -554,6 +600,43 @@ def build_context(
         cart["_previous_graph_version"] = prior_version
         cart["_previous_graph_checksum"] = prior_checksum
     cart.setdefault("_lead_stage", lead.get("stage") or "novo")
+    previous_branch_id = str(cart.get("active_branch_node_id") or "") or None
+    branch_resolution = graph_conversation_contract.resolve_branch_anchor(
+        graph,
+        message,
+        previous_anchor_node_id=previous_branch_id,
+    )
+    active_branch_id = branch_resolution["branch_anchor_node_id"]
+    contract = graph_conversation_contract.compile_branch_contract(
+        graph, active_branch_id
+    )
+    branch_ids = graph_conversation_contract.branch_closure(graph, active_branch_id)
+    active_coordinate = (
+        graph_conversation_contract.coordinate_for_node(
+            graph, active_branch_id, graph_version=version
+        )
+        if active_branch_id else {}
+    )
+    if branch_resolution["branch_changed"]:
+        allowed_fields = set(contract.get("required_fields") or [])
+        cart["facts"] = {
+            key: value for key, value in (cart.get("facts") or {}).items()
+            if key in allowed_fields
+        }
+        cart["appointment_request"] = {
+            key: value for key, value in (cart.get("appointment_request") or {}).items()
+            if key in allowed_fields
+        }
+        cart["asked_question_node_ids"] = []
+    if active_branch_id:
+        cart["active_branch_node_id"] = active_branch_id
+        cart["active_path_checksum"] = active_coordinate.get("path_checksum")
+        branch_node = next(node for node in graph.nodes if node.id == active_branch_id)
+        # Compatibility hint for the legacy deterministic fallback.  The
+        # graph contract itself never assumes the name of a branch field.
+        cart["_identified_service_slug"] = branch_node.slug
+    ledger = graph_conversation_contract.ledger_from_state(cart, contract)
+    unresolved_fields = graph_conversation_contract.missing_fields(ledger, contract)
     # Golden Dataset RAG (knowledge_rag_entries/knowledge_rag_chunks,
     # persona-scoped, approved/validated only) — a real retrieval layer
     # distinct from rag_nodes' in-memory graph-node keyword filter above.
@@ -564,6 +647,11 @@ def build_context(
             persona_id=str(persona.get("id") or lead.get("persona_id") or ""),
             query=message,
             limit=12,
+            branch_anchor_node_id=active_branch_id,
+            allowed_node_ids=sorted(branch_ids),
+            active_path_node_ids=active_coordinate.get("path_node_ids") or [],
+            unresolved_fields=unresolved_fields,
+            graph_version=version,
         )
     except Exception as exc:  # noqa: BLE001 — RAG is best-effort context, never fatal
         logger.warning("search_active_rag_chunks failed: %s", exc)
@@ -613,7 +701,10 @@ def build_context(
         query=message,
         rag_chunks=rag_chunks,
         projection_nodes=projection_nodes,
-        max_cards=12,
+        branch_node_ids=sorted(branch_ids),
+        active_path_node_ids=active_coordinate.get("path_node_ids") or [],
+        unresolved_fields=unresolved_fields,
+        max_cards=24,
         max_tokens=8000,
     )
     if not cards:
@@ -653,6 +744,10 @@ def build_context(
         context_cards=cards,
         system_prompt=system_prompt,
         available_services=available_services,
+        active_branch_node_id=active_branch_id,
+        active_path_checksum=active_coordinate.get("path_checksum"),
+        branch_node_ids=sorted(branch_ids),
+        graph_contract=contract,
     )
 
 
@@ -754,6 +849,222 @@ def _apply_model_fields(
         if current_address:
             merged["address"] = current_address
     return merged
+
+
+def _proposal_from_observation(
+    observation: dict[str, Any] | None,
+) -> ConversationProposal | None:
+    if not isinstance(observation, dict):
+        return None
+    raw = observation.get("proposal")
+    if not isinstance(raw, dict) and "branch_anchor_node_id" in observation:
+        raw = observation
+    if not isinstance(raw, dict):
+        return None
+    normalized = dict(raw)
+    normalized_facts = []
+    for fact in normalized.get("extracted_facts") or []:
+        if not isinstance(fact, dict):
+            continue
+        candidate = dict(fact)
+        if candidate.get("status") not in graph_conversation_contract.FACT_STATUSES:
+            candidate["status"] = "invalid"
+            candidate["value"] = None
+        normalized_facts.append(candidate)
+    normalized["extracted_facts"] = normalized_facts
+    return ConversationProposal.model_validate(normalized)
+
+
+def _state_from_ledger(
+    state: dict[str, Any],
+    ledger: dict[str, Any],
+    contract: dict[str, Any],
+    missing: list[str],
+) -> dict[str, Any]:
+    """Persist a factual ledger while preserving the legacy read projection."""
+    next_state = {
+        **state,
+        "business_model": "appointment",
+        "active_branch_node_id": ledger.get("active_branch_node_id"),
+        "active_path_checksum": ledger.get("active_path_checksum"),
+        "facts": ledger.get("facts") or {},
+        "asked_question_node_ids": ledger.get("asked_question_node_ids") or [],
+        "missing_fields": missing,
+        "conversation_state": "collecting" if missing else "qualified",
+    }
+    declared = {field["key"] for field in contract.get("fields") or []}
+    request = {
+        key: fact.get("value")
+        for key, fact in (ledger.get("facts") or {}).items()
+        if key in declared
+        and isinstance(fact, dict)
+        and fact.get("status") == "known"
+        and fact.get("value") not in (None, "")
+    }
+    next_state["appointment_request"] = request
+    next_state.pop("_identified_service_slug", None)
+    return next_state
+
+
+def _proposal_repair_cards(
+    context: ConversationContext,
+    graph: Any,
+    node_ids: list[str],
+) -> list[dict[str, Any]]:
+    if not node_ids:
+        return []
+    existing = {card.id for card in context.context_cards}
+    requested = [node_id for node_id in node_ids if node_id not in existing]
+    cards = context_cards_service.cards_for_ids(
+        graph=graph,
+        graph_version=context.graph_version,
+        graph_checksum=context.graph_checksum,
+        ids=requested,
+    )
+    return [card.model_dump(mode="json") for card in cards]
+
+
+def _decide_appointment_proposal(
+    context: ConversationContext,
+    graph: Any,
+    *,
+    state: dict[str, Any],
+    current_stage: str,
+    proposal: ConversationProposal,
+    observation: dict[str, Any],
+) -> tuple[ConversationDecision, AgentResponse]:
+    """Validate the model's conversation choice as a graph proof."""
+    by_id = {node.id: node for node in graph.nodes}
+    proposed_branch = by_id.get(proposal.branch_anchor_node_id)
+    branch_id = (
+        proposed_branch.id
+        if proposed_branch is not None
+        and proposed_branch.node_type in graph_conversation_contract.BRANCH_TYPES
+        else context.active_branch_node_id
+    )
+    contract = graph_conversation_contract.compile_branch_contract(graph, branch_id)
+    ledger = graph_conversation_contract.ledger_from_state(state, contract)
+    if ledger.get("active_branch_node_id") != branch_id:
+        declared = {field["key"] for field in contract.get("fields") or []}
+        ledger["facts"] = {
+            key: fact for key, fact in (ledger.get("facts") or {}).items()
+            if key in declared
+        }
+        ledger["asked_question_node_ids"] = []
+    ledger["active_branch_node_id"] = branch_id
+    ledger["active_path_checksum"] = contract.get("branch_path_checksum")
+    package_ids = {card.id for card in context.context_cards}
+    repair_context_ids = {
+        str(item) for item in observation.get("repair_context_node_ids") or []
+        if item
+    }
+    proof = graph_conversation_contract.check_proposal(
+        graph=graph,
+        contract=contract,
+        ledger=ledger,
+        proposal=proposal.model_dump(mode="json"),
+        package_node_ids=package_ids,
+        repair_context_node_ids=repair_context_ids,
+    )
+    checked_ledger = proof["ledger"]
+    checked_ledger["active_branch_node_id"] = branch_id
+    checked_ledger["active_path_checksum"] = contract.get("branch_path_checksum")
+    missing = list(proof["missing_fields"])
+    next_state = _state_from_ledger(state, checked_ledger, contract, missing)
+    repair_attempt = int(observation.get("repair_attempt") or 0)
+    if proof["valid"]:
+        next_question_id = proof.get("next_question_node_id")
+        if next_question_id:
+            asked = list(next_state.get("asked_question_node_ids") or [])
+            if next_question_id not in asked:
+                asked.append(next_question_id)
+            next_state["asked_question_node_ids"] = asked
+        complete = not missing
+        handoff = bool(complete and contract.get("confirmation_required"))
+        if handoff:
+            next_state["conversation_state"] = "handoff"
+        evidence = list(dict.fromkeys([
+            *proposal.cited_node_ids,
+            *(
+                graph_conversation_contract.coordinate_for_node(graph, branch_id)["path_node_ids"]
+                if branch_id else []
+            ),
+            *([next_question_id] if next_question_id else []),
+        ]))
+        intent = "complete_qualification" if complete else "collect_qualification"
+        route = ConversationRoute.HUMAN if handoff else ConversationRoute.SDR
+        decision = ConversationDecision(
+            classifier="graph_proof_checker_v1",
+            intent=intent,
+            route=route,
+            confidence=1.0,
+            product_slug=proposed_branch.slug if proposed_branch else None,
+            lead_stage=_appointment_stage(current_stage, "complete_booking_request" if complete else "request_service"),
+            handoff_reason="graph_confirmation_required" if handoff else None,
+            evidence_node_ids=evidence,
+        )
+        return decision, AgentResponse(
+            reply_text=proposal.reply,
+            role=route,
+            evidence_node_ids=evidence,
+            cart_state=next_state,
+            handoff_required=handoff,
+            proposal=proposal,
+            proof=proof,
+        )
+
+    repair_cards = _proposal_repair_cards(
+        context, graph, proof.get("repair_node_ids") or []
+    )
+    if proof.get("repair_required") and repair_attempt < 1 and repair_cards:
+        decision = ConversationDecision(
+            classifier="graph_proof_checker_v1",
+            intent="repair_retrieval",
+            route=ConversationRoute.SDR,
+            confidence=0.0,
+            lead_stage=current_stage,
+            evidence_node_ids=[],
+        )
+        return decision, AgentResponse(
+            reply_text=None,
+            role=ConversationRoute.SDR,
+            evidence_node_ids=[],
+            cart_state=next_state,
+            handoff_required=False,
+            proposal=proposal,
+            proof=proof,
+            repair_context_cards=repair_cards,
+        )
+
+    question_id, question = graph_conversation_contract.fallback_question(
+        contract, missing
+    )
+    if question_id:
+        asked = list(next_state.get("asked_question_node_ids") or [])
+        if question_id not in asked:
+            asked.append(question_id)
+        next_state["asked_question_node_ids"] = asked
+    evidence = [item for item in [branch_id, question_id] if item]
+    fallback_proof = {**proof, "repair_required": False, "fallback_used": True}
+    decision = ConversationDecision(
+        classifier="graph_proof_checker_v1",
+        intent="technical_proof_fallback",
+        route=ConversationRoute.SDR,
+        confidence=0.0,
+        product_slug=proposed_branch.slug if proposed_branch else None,
+        lead_stage=current_stage,
+        evidence_node_ids=evidence,
+    )
+    return decision, AgentResponse(
+        reply_text=question,
+        role=ConversationRoute.SDR,
+        evidence_node_ids=evidence,
+        cart_state=next_state,
+        handoff_required=False,
+        proposal=proposal,
+        proof=fallback_proof,
+        repair_context_cards=repair_cards,
+    )
 
 
 def _stage(current: str, intent: str, route: ConversationRoute) -> str:
@@ -943,23 +1254,60 @@ def _ground_decision_in_context_cards(
     ]
     filtered = [node_id for node_id in decision.evidence_node_ids if node_id in allowed]
     if unavailable_decisive:
-        fallback_decision = decision.model_copy(
-            update={
-                "route": ConversationRoute.HUMAN,
+        branch_scope = set(context.branch_node_ids or by_id)
+        expandable = [
+            node_id for node_id in unavailable_decisive if node_id in branch_scope
+        ]
+        cards = context_cards_service.cards_for_ids(
+            graph=graph,
+            graph_version=context.graph_version,
+            graph_checksum=context.graph_checksum,
+            ids=expandable,
+        )
+        if {card.id for card in cards} == set(unavailable_decisive):
+            context.context_cards.extend(cards)
+            for card in cards:
+                node = by_id[card.id]
+                context.rag_nodes.append({
+                    "id": node.id,
+                    "node_type": node.node_type,
+                    "slug": node.slug,
+                    "title": node.label,
+                    "status": (node.data or {}).get("status"),
+                    "source": (node.data or {}).get("source"),
+                    "data": node.data or {},
+                })
+            return decision, response
+
+        # A retrieval miss is technical, not a commercial handoff. Use the
+        # exact graph-owned pending question when the contract exposes one.
+        missing = list(response.cart_state.get("missing_fields") or [])
+        question_id, question = graph_conversation_contract.fallback_question(
+            context.graph_contract, missing
+        )
+        fallback_evidence = [
+            item for item in [context.active_branch_node_id, question_id] if item
+        ]
+        return (
+            decision.model_copy(update={
+                "route": ConversationRoute.SDR,
                 "confidence": 0.0,
-                "handoff_reason": "evidence_outside_context_package",
-                "evidence_node_ids": filtered,
-            }
+                "handoff_reason": None,
+                "evidence_node_ids": fallback_evidence,
+            }),
+            response.model_copy(update={
+                "reply_text": question,
+                "role": ConversationRoute.SDR,
+                "handoff_required": False,
+                "evidence_node_ids": fallback_evidence,
+                "proof": {
+                    "valid": False,
+                    "errors": ["evidence_outside_branch_package"],
+                    "repair_required": False,
+                    "fallback_used": True,
+                },
+            }),
         )
-        fallback_response = response.model_copy(
-            update={
-                "reply_text": "Vou encaminhar para a equipe confirmar essa informação.",
-                "role": ConversationRoute.HUMAN,
-                "handoff_required": True,
-                "evidence_node_ids": filtered,
-            }
-        )
-        return fallback_decision, fallback_response
     return (
         decision.model_copy(update={"evidence_node_ids": filtered}),
         response.model_copy(update={"evidence_node_ids": filtered}),
@@ -971,6 +1319,10 @@ def decide(
     *,
     model_observation: dict[str, Any] | None = None,
 ) -> tuple[ConversationDecision, AgentResponse]:
+    if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+        return graph_agent_runtime_v3.decide(
+            context, model_observation=model_observation
+        )
     version, checksum, graph = _current_graph(context.persona_slug)
     if version != context.graph_version or checksum != context.graph_checksum:
         decision = ConversationDecision(
@@ -993,15 +1345,59 @@ def decide(
     message = _message(context)
     normalized = _norm(message)
     business_model = _business_model(graph)
-    state = _apply_model_fields(
-        dict(context.cart),
-        model_observation,
-        business_model=business_model,
-        graph=graph,
-    )
+    proposal = _proposal_from_observation(model_observation)
+    state = dict(context.cart)
+    if proposal is None:
+        state = _apply_model_fields(
+            state,
+            model_observation,
+            business_model=business_model,
+            graph=graph,
+        )
     current_stage = str(state.pop("_lead_stage", "novo"))
     graph_changed = bool(state.pop("_graph_changed", False))
     if business_model == "appointment":
+        if isinstance(model_observation, dict) and model_observation.get("contract_probe") is True:
+            contract = context.graph_contract or graph_conversation_contract.compile_branch_contract(
+                graph, context.active_branch_node_id
+            )
+            ledger = graph_conversation_contract.ledger_from_state(state, contract)
+            pending = graph_conversation_contract.missing_fields(ledger, contract)
+            probe_state = _state_from_ledger(state, ledger, contract, pending)
+            return (
+                ConversationDecision(
+                    classifier="graph_contract_probe_v1",
+                    intent="await_model_proposal",
+                    route=ConversationRoute.SDR,
+                    confidence=1.0,
+                    lead_stage=current_stage,
+                    evidence_node_ids=[],
+                ),
+                AgentResponse(
+                    reply_text=None,
+                    role=ConversationRoute.SDR,
+                    evidence_node_ids=[],
+                    cart_state=probe_state,
+                    handoff_required=False,
+                    proof={
+                        "valid": True,
+                        "mode": "contract_probe",
+                        "missing_fields": pending,
+                    },
+                ),
+            )
+        if proposal is not None:
+            if graph_changed:
+                state.pop("_previous_graph_version", None)
+                state.pop("_previous_graph_checksum", None)
+            return _decide_appointment_proposal(
+                context,
+                graph,
+                state=state,
+                current_stage=current_stage,
+                proposal=proposal,
+                observation=model_observation or {},
+            )
         appointment_decision, appointment_response = _decide_appointment(
             context,
             graph,
@@ -1206,6 +1602,9 @@ def _knowledge_context_envelope(
         "graph_version": context.graph_version,
         "graph_checksum": context.graph_checksum,
         "decisive_node_ids": list(dict.fromkeys(decisive_node_ids)),
+        "active_branch_node_id": context.active_branch_node_id,
+        "active_path_checksum": context.active_path_checksum,
+        "graph_contract": context.graph_contract,
         "cards": [card.model_dump(mode="json") for card in context.context_cards],
         "captured_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1224,23 +1623,47 @@ def commit(
     expected_decision_owner: str | None = None,
 ) -> dict[str, Any]:
     if _reply_confirms_price_or_schedule(response.reply_text):
-        decision = decision.model_copy(
-            update={
-                "route": ConversationRoute.HUMAN,
-                "handoff_reason": decision.handoff_reason
-                or "unsafe_reply_blocked_price_or_schedule_confirmation",
-            }
-        )
-        response = response.model_copy(
-            update={
-                "reply_text": (
-                    "Vou encaminhar sua conversa para a equipe confirmar "
-                    "os detalhes."
-                ),
-                "role": ConversationRoute.HUMAN,
-                "handoff_required": True,
-            }
-        )
+        if response.proposal is not None:
+            authorized = bool(context.graph_contract.get("confirmation_required"))
+            safe_text = context.graph_contract.get("confirmation_text")
+            decision = decision.model_copy(
+                update={
+                    "route": ConversationRoute.HUMAN if authorized else ConversationRoute.SDR,
+                    "handoff_reason": (
+                        decision.handoff_reason or "unsafe_reply_blocked_by_graph_proof"
+                        if authorized else None
+                    ),
+                }
+            )
+            response = response.model_copy(
+                update={
+                    "reply_text": safe_text,
+                    "role": ConversationRoute.HUMAN if authorized else ConversationRoute.SDR,
+                    "handoff_required": authorized,
+                    "proof": {
+                        **response.proof,
+                        "unsafe_confirmation_blocked": True,
+                    },
+                }
+            )
+        else:
+            decision = decision.model_copy(
+                update={
+                    "route": ConversationRoute.HUMAN,
+                    "handoff_reason": decision.handoff_reason
+                    or "unsafe_reply_blocked_price_or_schedule_confirmation",
+                }
+            )
+            response = response.model_copy(
+                update={
+                    "reply_text": (
+                        "Vou encaminhar sua conversa para a equipe confirmar "
+                        "os detalhes."
+                    ),
+                    "role": ConversationRoute.HUMAN,
+                    "handoff_required": True,
+                }
+            )
 
     extracted_fields = _resolve_identified_service(
         dict(response.extracted_fields),
@@ -1256,13 +1679,14 @@ def commit(
             }
         )
 
-    response = response.model_copy(
-        update={
-            "reply_text": _ensure_trailing_question(
-                response.reply_text, response.cart_state, context
-            )
-        }
-    )
+    if context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION:
+        response = response.model_copy(
+            update={
+                "reply_text": _ensure_trailing_question(
+                    response.reply_text, response.cart_state, context
+                )
+            }
+        )
 
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     if not lead:
@@ -1340,6 +1764,28 @@ def commit(
         else None
     )
     if existing_outbound:
+        graph_turn = None
+        if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+            graph_turn = supabase_client.commit_graph_turn_v3(
+                p_canonical_inbound_id=str(inbound_buffer_id),
+                p_persona_id=str(lead.get("persona_id")),
+                p_lead_ref=lead_ref,
+                p_publication_id=str(context.publication_id),
+                p_graph_checksum=context.graph_checksum,
+                p_active_branch_node_id=response.cart_state.get("active_branch_node_id"),
+                p_asked_question_node_ids=response.cart_state.get("asked_question_node_ids") or [],
+                p_expected_revision=int(context.retrieval_trace.get("ledger_revision") or 0),
+                p_facts=(response.proof.get("accepted_facts") or []) if response.proof.get("valid") else [],
+                p_retrieval_trace=context.retrieval_trace,
+                p_model_proposal=(
+                    response.proposal.model_dump(mode="json") if response.proposal
+                    else response.proof.get("model_proposal") or {}
+                ),
+                p_proof_result=response.proof,
+                p_repair_result={"fallback_used": bool(response.proof.get("fallback_used"))},
+                p_final_decision=decision.model_dump(mode="json"),
+                p_outbound_id=str(existing_outbound.get("id") or "") or None,
+            )
         result = {
             "ok": True,
             "message_id": message_id,
@@ -1356,8 +1802,10 @@ def commit(
             "graph_version": context.graph_version,
             "graph_checksum": context.graph_checksum,
             "knowledge_context": knowledge_context,
+            "proof": response.proof,
             "qualification": (lead.get("metadata") or {}).get("qualification") or {},
             "stage": lead.get("stage") or decision.lead_stage,
+            "graph_turn": graph_turn,
         }
         if inbound_buffer_id:
             supabase_client.complete_conversation_commit(
@@ -1369,20 +1817,40 @@ def commit(
             )
         return result
     previous_metadata = dict(lead.get("metadata") or {})
-    qualification, qualified_stage = lead_qualification.calculate(
-        previous=previous_metadata.get("qualification"),
-        business_model=str(
-            response.cart_state.get("business_model") or "sales"
-        ).lower(),
-        intent=decision.intent,
-        state={
-            **response.cart_state,
-            "_decision_product_slug": decision.product_slug,
-        },
-        current_stage=lead.get("stage") or decision.lead_stage,
-        evidence_node_ids=decision.evidence_node_ids,
-        update_stage=True,
-    )
+    if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+        facts = response.cart_state.get("facts") or {}
+        resolved = sorted(
+            key for key, fact in facts.items()
+            if isinstance(fact, dict)
+            and fact.get("status") in {"known", "unknown", "declined"}
+        )
+        missing = list(response.proof.get("missing_fields") or [])
+        qualified_stage = decision.lead_stage
+        qualification = {
+            "version": graph_agent_runtime_v3.RUNTIME_VERSION,
+            "complete": not missing,
+            "resolved_fields": resolved,
+            "missing_fields": missing,
+            "source_evidence_node_ids": list(decision.evidence_node_ids),
+            "stage": qualified_stage,
+            "stage_source": "graph_contract",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    else:
+        qualification, qualified_stage = lead_qualification.calculate(
+            previous=previous_metadata.get("qualification"),
+            business_model=str(
+                response.cart_state.get("business_model") or "sales"
+            ).lower(),
+            intent=decision.intent,
+            state={
+                **response.cart_state,
+                "_decision_product_slug": decision.product_slug,
+            },
+            current_stage=lead.get("stage") or decision.lead_stage,
+            evidence_node_ids=decision.evidence_node_ids,
+            update_stage=True,
+        )
     metadata = {
         **previous_metadata,
         "conversation_state": response.cart_state,
@@ -1398,7 +1866,10 @@ def commit(
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },
     }
-    if response.cart_state.get("business_model") != "appointment":
+    if (
+        context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION
+        and response.cart_state.get("business_model") != "appointment"
+    ):
         # Backward-compatible mirror for Baita conversations already consumed
         # by the legacy deterministic/n8n flow.
         metadata["vitoria_state"] = response.cart_state
@@ -1422,12 +1893,16 @@ def commit(
         commercial_note["updated_at"] = datetime.now(timezone.utc).isoformat()
         metadata["commercial_note"] = commercial_note
     lead_update = {"metadata": metadata, "stage": qualified_stage}
-    customer_name = (
-        appointment_request.get("nome_cliente")
-        if response.cart_state.get("business_model") == "appointment"
-        else response.cart_state.get("customer_name")
-    )
-    service_interest = appointment_request.get("servico") or decision.product_slug
+    if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+        customer_name = None
+        service_interest = None
+    else:
+        customer_name = (
+            appointment_request.get("nome_cliente")
+            if response.cart_state.get("business_model") == "appointment"
+            else response.cart_state.get("customer_name")
+        )
+        service_interest = appointment_request.get("servico") or decision.product_slug
     if customer_name:
         lead_update["nome"] = str(customer_name).strip()
     if service_interest:
@@ -1502,6 +1977,29 @@ def commit(
             "status": envelope.get("status"),
         }
 
+    graph_turn = None
+    if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+        graph_turn = supabase_client.commit_graph_turn_v3(
+            p_canonical_inbound_id=str(inbound_buffer_id),
+            p_persona_id=str(lead.get("persona_id")),
+            p_lead_ref=lead_ref,
+            p_publication_id=str(context.publication_id),
+            p_graph_checksum=context.graph_checksum,
+            p_active_branch_node_id=response.cart_state.get("active_branch_node_id"),
+            p_asked_question_node_ids=response.cart_state.get("asked_question_node_ids") or [],
+            p_expected_revision=int(context.retrieval_trace.get("ledger_revision") or 0),
+            p_facts=(response.proof.get("accepted_facts") or []) if response.proof.get("valid") else [],
+            p_retrieval_trace=context.retrieval_trace,
+            p_model_proposal=(
+                response.proposal.model_dump(mode="json") if response.proposal
+                else response.proof.get("model_proposal") or {}
+            ),
+            p_proof_result=response.proof,
+            p_repair_result={"fallback_used": bool(response.proof.get("fallback_used"))},
+            p_final_decision=decision.model_dump(mode="json"),
+            p_outbound_id=str((buffer or {}).get("id") or "") or None,
+        )
+
     supabase_client.insert_event(
         {
             "event_type": "conversation.decision_committed",
@@ -1538,8 +2036,10 @@ def commit(
         "graph_version": context.graph_version,
         "graph_checksum": context.graph_checksum,
         "knowledge_context": knowledge_context,
+        "proof": response.proof,
         "qualification": qualification,
         "stage": qualified_stage,
+        "graph_turn": graph_turn,
     }
     if inbound_buffer_id:
         supabase_client.complete_conversation_commit(

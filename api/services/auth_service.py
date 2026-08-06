@@ -10,6 +10,7 @@ from typing import Any, Optional
 from fastapi import HTTPException, Request, Response
 
 from services import supabase_client
+from utils.env import get_auth_secret, is_production_runtime, is_strong_auth_secret
 
 SESSION_COOKIE = "ai_brain_session"
 HASH_ALGORITHM = "pbkdf2_sha256"
@@ -28,9 +29,13 @@ def _b64decode(value: str) -> bytes:
 
 
 def _auth_secret() -> bytes:
-    secret = os.environ.get("AI_BRAIN_AUTH_SECRET") or os.environ.get("NEXTAUTH_SECRET")
+    secret = get_auth_secret()
     if not secret:
+        if is_production_runtime():
+            raise RuntimeError("AI_BRAIN_AUTH_SECRET is required in production.")
         secret = "dev-only-ai-brain-auth-secret-change-me"
+    if is_production_runtime() and not is_strong_auth_secret(secret):
+        raise RuntimeError("AI_BRAIN_AUTH_SECRET must contain at least 32 random characters.")
     return secret.encode("utf-8")
 
 
@@ -173,23 +178,39 @@ def create_session_token(user: dict[str, Any], remember: bool = False) -> tuple[
     return f"{payload_raw}.{signature}", ttl
 
 
-def set_session_cookie(response: Response, token: str, ttl: int) -> None:
-    secure = (os.environ.get("AI_BRAIN_COOKIE_SECURE") or "").lower() in {"1", "true", "yes"}
-    if (os.environ.get("ENVIRONMENT") or os.environ.get("NODE_ENV") or "").lower() == "production":
-        secure = True
+def _cookie_secure() -> bool:
+    secure = (os.environ.get("AI_BRAIN_COOKIE_SECURE") or "").strip().lower() in {"1", "true", "yes"}
+    return secure or is_production_runtime()
+
+
+def set_session_cookie(
+    response: Response,
+    token: str,
+    ttl: int,
+    *,
+    remember: bool = False,
+) -> None:
     response.set_cookie(
         SESSION_COOKIE,
         token,
-        max_age=ttl,
+        # Without "remember me", keep a browser-session cookie. The signed
+        # token still expires server-side after SESSION_TTL_SECONDS.
+        max_age=ttl if remember else None,
         httponly=True,
-        secure=secure,
+        secure=_cookie_secure(),
         samesite="lax",
         path="/",
     )
 
 
 def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE, path="/", samesite="lax")
+    response.delete_cookie(
+        SESSION_COOKIE,
+        path="/",
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+    )
 
 
 def authenticate(identifier: str, password: str) -> dict[str, Any]:

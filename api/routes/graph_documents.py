@@ -208,6 +208,10 @@ def graph_document_versions(
     rows = supabase_client.list_system_events(
         entity_type="graph_document",
         event_types=["graph_version_committed", "graph_version_activated", "graph_document_published"],
+        payload_equals={
+            "persona_slug": persona_slug,
+            **({"brand_slug": brand_slug} if brand_slug is not None else {}),
+        },
         limit=500,
     )
     by_version: dict[int, dict] = {}
@@ -506,6 +510,10 @@ def graph_document_events(
             "graph_document_publish_failed",
             "graph_document_synced",
         ],
+        payload_equals={
+            "persona_slug": persona_slug,
+            **({"brand_slug": brand_slug} if brand_slug is not None else {}),
+        },
         limit=limit,
     )
     out: list[dict] = []

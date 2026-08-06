@@ -39,7 +39,7 @@ class PublicSiteUpdate(BaseModel):
 _KNOWN_CONVERSATION_MODES = {"deterministic", "n8n_agents", "orquestrador"}
 
 
-def _active_decision_owner(persona_id: str | None) -> str | None:
+def _active_binding(persona_id: str | None) -> dict:
     """The routing switch that actually governs live dispatch — read
     straight from the active binding, not the legacy process_mode column.
 
@@ -49,11 +49,11 @@ def _active_decision_owner(persona_id: str | None) -> str | None:
     a stale value while automation silently runs a different engine.
     """
     if not persona_id:
-        return None
+        return {}
     for binding in supabase_client.get_workflow_bindings(persona_id):
         if binding.get("active"):
-            return (binding.get("metadata") or {}).get("decision_owner")
-    return None
+            return binding
+    return {}
 
 
 def _mask_routing(routing: dict) -> dict:
@@ -61,7 +61,9 @@ def _mask_routing(routing: dict) -> dict:
     if not routing:
         return routing
     process_mode = routing.get("process_mode") or "internal"
-    live_decision_owner = _active_decision_owner(routing.get("id"))
+    live_binding = _active_binding(routing.get("id"))
+    live_metadata = live_binding.get("metadata") or {}
+    live_decision_owner = live_metadata.get("decision_owner")
     conversation_mode = (
         live_decision_owner
         if live_decision_owner in _KNOWN_CONVERSATION_MODES
@@ -76,15 +78,11 @@ def _mask_routing(routing: dict) -> dict:
         "process_mode": process_mode,
         "conversation_mode": conversation_mode,
         "automation_mode": automation_mode,
-        "pipeline_contract": "conversation_v1",
-        "classifier": (
-            "graph_agentic_v1"
-            if conversation_mode == "n8n_agents"
-            else "deterministic_v1"
+        "pipeline_contract": live_metadata.get("pipeline_contract") or "conversation_v1",
+        "classifier": live_metadata.get("runtime_version") or (
+            "deterministic_v1" if conversation_mode == "deterministic" else None
         ),
-        "field_extractor": (
-            "deepseek-v4-flash" if conversation_mode == "n8n_agents" else None
-        ),
+        "field_extractor": live_metadata.get("model"),
         "model_required": conversation_mode == "n8n_agents",
         "outbound_webhook_url": routing.get("outbound_webhook_url"),
         "has_outbound_webhook_secret": bool(routing.get("outbound_webhook_secret")),
@@ -293,6 +291,11 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
             # exists yet. The credential is reused as-is; it's the only
             # place the raw DeepSeek key still lives once saved.
             full_persona = supabase_client.get_persona(slug) or current
+            if not supabase_client.get_active_graph_publication(str(current.get("id") or "")):
+                raise HTTPException(
+                    409,
+                    "Ative uma publicacao GraphRAG v3 consistente antes de ativar o modelo.",
+                )
             deepseek_config = deepseek_n8n_service.resync_workflow_for_persona(
                 full_persona, deepseek_config,
             )
@@ -332,7 +335,10 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                 **(binding.get("metadata") or {}),
                 "conversation_mode": conversation_mode,
                 "decision_owner": conversation_mode,
-                "pipeline_contract": "conversation_v1",
+                "pipeline_contract": (
+                    deepseek_config.get("pipeline_contract") or "conversation_v3"
+                    if conversation_mode == "n8n_agents" else "conversation_v1"
+                ),
                 "transport_mode": "provider_direct",
             }
             binding_update: dict = {"metadata": metadata}
@@ -346,9 +352,16 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                 metadata["conversation_webhook_url"] = (
                     f"{n8n_base}/webhook/{webhook_path}"
                 )
+                metadata["runtime_version"] = (
+                    deepseek_config.get("runtime_version")
+                    or "graph_agent_runtime_v3"
+                )
+                metadata["model"] = deepseek_config.get("model")
+                metadata["reply_source"] = deepseek_config.get("reply_source")
                 binding_update["n8n_workflow_id"] = deepseek_config["n8n_workflow_id"]
             else:
                 metadata.pop("conversation_webhook_url", None)
+                metadata.pop("runtime_version", None)
                 binding_update["n8n_workflow_id"] = None
             updated_binding = supabase_client.update_workflow_binding(
                 str(binding["id"]),
@@ -399,14 +412,18 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                 "payload": {
                     "persona_slug": slug,
                     "conversation_mode": conversation_mode,
-                    "pipeline_contract": "conversation_v1",
+                    "pipeline_contract": (
+                        deepseek_config.get("pipeline_contract")
+                        if conversation_mode == "n8n_agents"
+                        else "conversation_v1"
+                    ),
                     "classifier": (
-                        "graph_agentic_v1"
+                        deepseek_config.get("runtime_version")
                         if conversation_mode == "n8n_agents"
                         else "deterministic_v1"
                     ),
                     "field_extractor": (
-                        "deepseek-v4-flash"
+                        deepseek_config.get("model")
                         if conversation_mode == "n8n_agents"
                         else None
                     ),

@@ -170,7 +170,28 @@ def _normalize_llm_api_key_payload(service: str, payload: dict[str, Any]) -> tup
         raise IntegrationValidationError("Anthropic api_key has an invalid format.")
     if service == "deepseek" and not api_key.startswith("sk-"):
         raise IntegrationValidationError("DeepSeek api_key has an invalid format.")
-    return api_key, {}
+    if service != "deepseek":
+        return api_key, {}
+    model = str(
+        payload.get("model")
+        or os.environ.get("DEEPSEEK_CONVERSATION_MODEL")
+        or "deepseek-v4-flash"
+    ).strip()
+    endpoint = str(
+        payload.get("endpoint")
+        or os.environ.get("DEEPSEEK_CONVERSATION_ENDPOINT")
+        or "https://api.deepseek.com/chat/completions"
+    ).strip()
+    reply_source = str(payload.get("reply_source") or model).strip()
+    if not model or not endpoint.startswith("https://"):
+        raise IntegrationValidationError(
+            "DeepSeek model binding requires model and HTTPS endpoint."
+        )
+    return api_key, {
+        "model": model,
+        "endpoint": endpoint,
+        "reply_source": reply_source,
+    }
 
 
 def normalize_credentials(service: str, payload: Optional[dict[str, Any]]) -> tuple[Optional[str], dict[str, Any]]:
@@ -263,7 +284,11 @@ def validate_meta(
         raise IntegrationValidationError(f"Meta validation failed: {exc}") from exc
 
 
-def validate_deepseek(api_key: str) -> tuple[str, Optional[str], Optional[int]]:
+def validate_deepseek(
+    api_key: str,
+    *,
+    model: str | None = None,
+) -> tuple[str, Optional[str], Optional[int]]:
     started = time.monotonic()
     try:
         with _http_client(timeout=8.0) as client:
@@ -282,9 +307,14 @@ def validate_deepseek(api_key: str) -> tuple[str, Optional[str], Optional[int]]:
             str(item.get("id") or "")
             for item in (response.json().get("data") or [])
         }
-        if "deepseek-v4-flash" not in models:
+        requested_model = str(
+            model
+            or os.environ.get("DEEPSEEK_CONVERSATION_MODEL")
+            or "deepseek-v4-flash"
+        ).strip()
+        if requested_model not in models:
             raise IntegrationValidationError(
-                "DeepSeek nao disponibilizou o modelo deepseek-v4-flash para esta chave."
+                f"DeepSeek nao disponibilizou o modelo configurado {requested_model}."
             )
         return "connected", None, latency_ms
     except IntegrationValidationError:
@@ -569,16 +599,17 @@ def save_persona_integration(
                 actor_user_id=actor_user_id,
                 service=service,
             )
-        secret_value, _ = normalize_credentials(service, credentials)
+        secret_value, model_binding = normalize_credentials(service, credentials)
         if not secret_value:
             raise IntegrationValidationError("DeepSeek api_key is required.")
-        validate_deepseek(secret_value)
+        validate_deepseek(secret_value, model=model_binding.get("model"))
         persona = supabase_client.get_persona_by_id(persona_id) or {}
         try:
             config_json = deepseek_n8n_service.provision(
                 persona=persona,
                 api_key=secret_value,
                 previous_config=existing.get("config_json") or {},
+                model_binding=model_binding,
             )
         except Exception as exc:
             raise IntegrationValidationError(

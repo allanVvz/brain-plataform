@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services import auth_service, supabase_client
 
@@ -9,14 +9,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class LoginBody(BaseModel):
-    identifier: str
-    password: str
+    identifier: str = Field(min_length=1, max_length=320)
+    password: str = Field(min_length=1, max_length=1024)
     remember: bool = False
 
 
 class ChangePasswordBody(BaseModel):
-    current_password: str
-    new_password: str
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=12, max_length=1024)
 
 
 @router.post("/login")
@@ -25,7 +25,7 @@ def login(body: LoginBody, response: Response):
         user = auth_service.authenticate(body.identifier, body.password)
         session_payload = auth_service.build_session_response(user)
         token, ttl = auth_service.create_session_token(user, remember=body.remember)
-        auth_service.set_session_cookie(response, token, ttl)
+        auth_service.set_session_cookie(response, token, ttl, remember=body.remember)
     except HTTPException:
         raise
     except Exception as exc:

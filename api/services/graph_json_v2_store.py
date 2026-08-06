@@ -67,6 +67,10 @@ def _events(
         rows = supabase_client.list_system_events(
             entity_type=_ENTITY_TYPE,
             event_types=event_types or [_ACTIVATED_EVENT_TYPE, _EVENT_TYPE],
+            payload_equals={
+                "persona_slug": persona_slug,
+                **({"brand_slug": brand_slug} if brand_slug is not None else {}),
+            },
             limit=limit,
         )
     except KeyError as exc:
@@ -100,7 +104,10 @@ def _events(
 
 
 def latest_event(persona_slug: str, brand_slug: str | None = None) -> dict | None:
-    rows = _events(persona_slug, brand_slug, limit=500)
+    # Each version emits only a small set of commit/activation events. Query a
+    # narrow persona-scoped window instead of deserializing hundreds of full
+    # Graph JSON payloads from unrelated personas.
+    rows = _events(persona_slug, brand_slug, limit=20)
     return rows[0] if rows else None
 
 

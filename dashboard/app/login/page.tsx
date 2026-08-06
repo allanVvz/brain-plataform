@@ -3,17 +3,26 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Lock, Mail, Sparkles } from "lucide-react";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import {
   resolveSessionDestination,
   safeLocalTarget,
 } from "@/lib/session-routing";
 
-function normalizeError(message: string) {
-  if (message.includes("Usuario inativo")) return "Usuario inativo. Fale com um administrador.";
-  if (message.includes("Nenhuma persona")) return "Nenhuma persona foi atribuida a este usuario.";
-  if (message.includes("401")) return "Email/usuario ou senha invalidos.";
-  return "Nao foi possivel entrar agora. Tente novamente.";
+export function normalizeLoginError(error: unknown) {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return "Email/usuário ou senha inválidos.";
+    if (error.detail.includes("Usuario inativo")) {
+      return "Usuário inativo. Fale com um administrador.";
+    }
+    if (error.detail.includes("Nenhuma persona")) {
+      return "Nenhuma persona foi atribuída a este usuário.";
+    }
+    if (error.kind === "network" || error.kind === "unavailable") {
+      return "O serviço de autenticação está indisponível. Tente novamente em instantes.";
+    }
+  }
+  return "Não foi possível entrar agora. Tente novamente.";
 }
 
 export default function LoginPage() {
@@ -21,7 +30,7 @@ export default function LoginPage() {
   const [safeTarget, setSafeTarget] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(true);
+  const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -42,7 +51,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const session = await api.login({ identifier, password, remember });
+      const session = await api.login({ identifier: identifier.trim(), password, remember });
       const personas = session?.personas || [];
       const firstPersona = personas[0];
       if (firstPersona?.slug) {
@@ -54,7 +63,7 @@ export default function LoginPage() {
       }
       router.replace(resolveSessionDestination(session, safeTarget));
     } catch (err) {
-      setError(normalizeError(err instanceof Error ? err.message : String(err)));
+      setError(normalizeLoginError(err));
     } finally {
       setLoading(false);
     }
@@ -87,6 +96,7 @@ export default function LoginPage() {
                 onChange={(event) => setIdentifier(event.target.value)}
                 autoComplete="username"
                 placeholder="operador@empresa.com"
+                autoFocus
                 required
               />
               <Mail className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white/70" size={19} />
@@ -128,12 +138,12 @@ export default function LoginPage() {
           </label>
 
           {error && (
-            <div className="login-error" role="alert">
+            <div className="login-error" role="alert" aria-live="assertive">
               {error}
             </div>
           )}
 
-          <button className="login-button" type="submit" disabled={loading}>
+          <button className="login-button" type="submit" disabled={loading} aria-busy={loading}>
             {loading ? "Entrando..." : "Entrar"}
           </button>
         </form>

@@ -98,6 +98,32 @@ describe("GraphPageClient v2 loading", () => {
     await screen.findByText("Nenhum Graph JSON v2 publicado para esta persona.");
   });
 
+  it("clears the previous persona graph before the next document resolves", async () => {
+    let resolveNext: ((value: unknown) => void) | undefined;
+    const pending = new Promise((resolve) => { resolveNext = resolve; });
+    const getGraphDocument = vi.spyOn(api, "getGraphDocument")
+      .mockResolvedValueOnce({
+        graph_json: {
+          nodes: [{ id: "aurora", slug: "aurora", node_type: "persona", title: "Aurora" }],
+          edges: [],
+        },
+      })
+      .mockReturnValueOnce(pending as any);
+
+    render(<GraphPageClient />);
+    await screen.findByText(/1 nodes/);
+
+    window.localStorage.setItem("ai-brain-persona-slug", "vz-lupas");
+    window.dispatchEvent(new CustomEvent("ai-brain-persona-change", {
+      detail: { slug: "vz-lupas" },
+    }));
+
+    await screen.findByText(/0 nodes/);
+    expect(screen.queryByText(/1 nodes/)).not.toBeInTheDocument();
+    expect(getGraphDocument).toHaveBeenLastCalledWith("vz-lupas");
+    resolveNext?.({});
+  });
+
   it("opens Tree explicitly and clears any stale focus", async () => {
     navigationMocks.searchParams = "mode=graph&focus=product%3Atest";
     vi.spyOn(api, "getGraphDocument").mockResolvedValue({

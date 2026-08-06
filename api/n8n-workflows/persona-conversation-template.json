@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const headers = $json.headers || {}; const supplied = headers['x-webhook-token'] || headers['X-Webhook-Token']; if (!supplied || supplied !== $env.AI_BRAIN_WEBHOOK_TOKEN) throw new Error('invalid webhook token'); const input = $json.body || $json; const binding = { persona_slug: '__PERSONA_SLUG__', agent_slug: '__AGENT_SLUG__', decision_owner: 'n8n_agents', pipeline_contract: 'conversation_v1', reply_source: 'deepseek-v4-flash' }; if (input.persona_slug !== binding.persona_slug) throw new Error('persona binding mismatch'); if (input.decision_owner && input.decision_owner !== binding.decision_owner) throw new Error('decision owner mismatch'); if (input.pipeline_contract && input.pipeline_contract !== binding.pipeline_contract) throw new Error('pipeline contract mismatch'); if (!input.lead_ref || !input.buffer_id || !input.correlation_id || !input.channel_binding_id) throw new Error('invalid canonical event: missing lead_ref, buffer_id, correlation_id or channel_binding_id'); if (!input.message || !String(input.message).trim()) throw new Error('invalid canonical event: empty message'); return [{ json: { ...input, message: String(input.message).trim(), ...binding } }];"
+        "jsCode": "const headers = $json.headers || {}; const supplied = headers['x-webhook-token'] || headers['X-Webhook-Token']; if (!supplied || supplied !== $env.AI_BRAIN_WEBHOOK_TOKEN) throw new Error('invalid webhook token'); const input = $json.body || $json; const binding = { persona_slug: '__PERSONA_SLUG__', agent_slug: '__AGENT_SLUG__', decision_owner: 'n8n_agents', pipeline_contract: 'conversation_v3', runtime_version: 'graph_agent_runtime_v3', reply_source: '__REPLY_SOURCE__', model: '__MODEL__', model_endpoint: '__MODEL_ENDPOINT__' }; if (input.persona_slug !== binding.persona_slug) throw new Error('persona binding mismatch'); if (input.decision_owner && input.decision_owner !== binding.decision_owner) throw new Error('decision owner mismatch'); if (input.pipeline_contract && input.pipeline_contract !== binding.pipeline_contract) throw new Error('pipeline contract mismatch'); if (!input.lead_ref || !input.buffer_id || !input.correlation_id || !input.channel_binding_id) throw new Error('invalid canonical event: missing lead_ref, buffer_id, correlation_id or channel_binding_id'); if (!input.message || !String(input.message).trim()) throw new Error('invalid canonical event: empty message'); return [{ json: { ...input, message: String(input.message).trim(), ...binding } }];"
       },
       "id": "binding",
       "name": "Validate conversation binding",
@@ -54,7 +54,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({context: $('Load published graph context').item.json})}}",
+        "body": "={{JSON.stringify({context: $('Load published graph context').item.json, model_observation: Object.fromEntries([['contract_probe', true]])})}}",
         "options": {}
       },
       "id": "policy",
@@ -66,7 +66,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const context = $('Load published graph context').item.json; const policy = $('Resolve conversation policy').item.json; const pending = (policy.response && policy.response.cart_state && policy.response.cart_state.missing_fields) || []; const cards = (context.context_cards || []).map(function(card) { return { id: card.id, type: card.node_type, title: card.title, content: card.rendered_content, checksum: card.content_checksum, role: card.context_role }; }); const requestBody = { model: 'deepseek-v4-flash', thinking: { type: 'disabled' }, temperature: 0.3, max_tokens: 700, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: context.system_prompt || 'Responda somente com base no conhecimento aprovado e em JSON.' }, { role: 'user', content: JSON.stringify({ customer_message: $('Validate conversation binding').item.json.message, policy_signal: { intent: policy.decision.intent, route: policy.decision.route, handoff_required: policy.response.handoff_required }, pending_fields: pending, approved_knowledge: cards, recent_messages: (context.messages || []).slice(-6), available_services: context.available_services || [] }) }] }; return [{ json: { request_body: requestBody } }];"
+        "jsCode": "const context = $('Load published graph context').item.json; const policy = $('Resolve conversation policy').item.json; const binding = $('Validate conversation binding').item.json; const cards = (context.context_cards || []).map(function(card) { return { node_id: card.id, type: card.node_type, title: card.title, content: card.rendered_content, checksum: card.content_checksum, chunk_ids: card.chunk_refs || [], coordinate: card.technical_metadata || {}, provenance: { source: card.source, status: card.status, publication_id: context.publication_id } }; }); const chunks = (context.rag_chunks || []).map(function(chunk) { return { chunk_id: chunk.chunk_id || chunk.id, source_node_id: chunk.source_node_id || chunk.source_graph_node_id, kind: chunk.chunk_kind, text: chunk.chunk_text, checksum: chunk.chunk_checksum, path_checksum: chunk.path_checksum, provenance: chunk.metadata && chunk.metadata.provenance || {} }; }); const proposalSchema = { type: 'object', additionalProperties: false, required: ['branch_action','branch_anchor_node_id','branch_path_checksum','branch_evidence_span','extracted_facts','claims','next_question_node_id','cited_node_ids','cited_chunk_ids','reply','qualification_complete','handoff_requested'], properties: { branch_action: { enum: ['keep','select','switch'] }, branch_anchor_node_id: { type: 'string' }, branch_path_checksum: { type: 'string' }, branch_evidence_span: { type: 'string' }, extracted_facts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['field_key','owner_node_id','status','value','source_message_id','evidence_span','confidence'], properties: { field_key: {type:'string'}, owner_node_id:{type:'string'}, status:{enum:['known','unknown','declined','needs_confirmation','invalid']}, value:{}, source_message_id:{type:'string'}, evidence_span:{type:'string'}, confidence:{type:'number',minimum:0,maximum:1} } } }, claims: { type:'array', items:{ type:'object', additionalProperties:false, required:['claim_type','value','evidence_node_ids','evidence_chunk_ids'], properties:{claim_type:{enum:['price','availability','schedule','stock','duration','other']},value:{type:'object'},evidence_node_ids:{type:'array',items:{type:'string'}},evidence_chunk_ids:{type:'array',items:{type:'string'}}} } }, next_question_node_id:{type:['string','null']}, cited_node_ids:{type:'array',items:{type:'string'}}, cited_chunk_ids:{type:'array',items:{type:'string'}}, reply:{type:'string'}, qualification_complete:{type:'boolean'}, handoff_requested:{type:'boolean'} } }; const requestBody = { model: binding.model, thinking: { type: 'disabled' }, temperature: 0.3, max_tokens: 1400, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: context.system_prompt || 'Responda somente com base no conhecimento publicado e em JSON.' }, { role: 'user', content: JSON.stringify({ customer_message: binding.message, source_message_id: binding.external_message_id, policy_signal: { intent: policy.decision.intent, route: policy.decision.route }, publication: { id: context.publication_id, version: context.graph_version, checksum: context.graph_checksum }, active_branch_node_id: context.active_branch_node_id, branch_candidates: context.retrieval_trace && context.retrieval_trace.branch_candidates || [], graph_contract: context.graph_contract || {}, factual_ledger: context.cart && context.cart.facts || {}, approved_nodes: cards, approved_chunks: chunks, recent_messages: (context.messages || []).slice(-6), proposal_json_schema: proposalSchema }) }] }; return [{ json: { request_body: requestBody, proposal_schema: proposalSchema } }];"
       },
       "id": "model_request",
       "name": "Build graph grounded agent request",
@@ -78,7 +78,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.deepseek.com/chat/completions",
+        "url": "__MODEL_ENDPOINT__",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
@@ -90,7 +90,7 @@
         "options": {}
       },
       "id": "deepseek",
-      "name": "DeepSeek agentic reply",
+      "name": "Bound conversation model",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [1400, 300],
@@ -98,7 +98,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const content = $json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content; if (!content) throw new Error('DeepSeek returned empty content'); let parsed; try { parsed = JSON.parse(content); } catch (error) { throw new Error('DeepSeek returned invalid JSON: ' + error.message); } const replyText = typeof parsed.reply_text === 'string' ? parsed.reply_text.trim() : ''; if (!replyText) throw new Error('DeepSeek response is missing reply_text'); const extractedFields = parsed.extracted_fields && typeof parsed.extracted_fields === 'object' ? parsed.extracted_fields : {}; const identifiedServiceSlug = typeof parsed.identified_service_slug === 'string' ? parsed.identified_service_slug : null; return [{ json: { candidate_reply_text: replyText, model_observation: { fields: extractedFields, identified_service_slug: identifiedServiceSlug } } }];"
+        "jsCode": "const content = $json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content; const parseErrors = []; let parsed = {}; try { parsed = content ? JSON.parse(content) : {}; } catch (error) { parseErrors.push('invalid_json:' + error.message); } const required = ['branch_action','branch_anchor_node_id','branch_path_checksum','branch_evidence_span','extracted_facts','claims','next_question_node_id','cited_node_ids','cited_chunk_ids','reply','qualification_complete','handoff_requested']; for (const key of required) if (!(key in parsed)) parseErrors.push('missing:' + key); const facts = Array.isArray(parsed.extracted_facts) ? parsed.extracted_facts.map(function(fact) { return { field_key: String(fact && fact.field_key || ''), owner_node_id: String(fact && fact.owner_node_id || ''), status: String(fact && fact.status || 'invalid'), value: fact && 'value' in fact ? fact.value : null, source_message_id: String(fact && fact.source_message_id || ''), evidence_span: String(fact && fact.evidence_span || ''), confidence: Number(fact && fact.confidence || 0) }; }) : []; const claims = Array.isArray(parsed.claims) ? parsed.claims.map(function(claim) { return { claim_type: String(claim && claim.claim_type || 'other'), value: claim && typeof claim.value === 'object' && claim.value || {}, evidence_node_ids: Array.isArray(claim && claim.evidence_node_ids) ? claim.evidence_node_ids : [], evidence_chunk_ids: Array.isArray(claim && claim.evidence_chunk_ids) ? claim.evidence_chunk_ids : [] }; }) : []; const proposal = { branch_action: String(parsed.branch_action || ''), branch_anchor_node_id: String(parsed.branch_anchor_node_id || ''), branch_path_checksum: String(parsed.branch_path_checksum || ''), branch_evidence_span: String(parsed.branch_evidence_span || ''), extracted_facts: facts, claims: claims, next_question_node_id: typeof parsed.next_question_node_id === 'string' ? parsed.next_question_node_id : null, cited_node_ids: Array.isArray(parsed.cited_node_ids) ? parsed.cited_node_ids.filter(function(id) { return typeof id === 'string'; }) : [], cited_chunk_ids: Array.isArray(parsed.cited_chunk_ids) ? parsed.cited_chunk_ids.filter(function(id) { return typeof id === 'string'; }) : [], reply: typeof parsed.reply === 'string' ? parsed.reply : '', qualification_complete: parsed.qualification_complete === true, handoff_requested: parsed.handoff_requested === true }; return [{ json: { model_observation: { proposal: proposal, repair_attempt: 0, proposal_parse_errors: parseErrors } } }];"
       },
       "id": "model_response",
       "name": "Validate agent response",
@@ -128,13 +128,91 @@
     },
     {
       "parameters": {
-        "jsCode": "const reconciled = $json; const candidate = $('Validate agent response').item.json; const context = $('Load published graph context').item.json; const state = reconciled.response && reconciled.response.cart_state || {}; const missing = state.missing_fields || []; const persona = (context.rag_nodes || []).find(function(node) { return node.node_type === 'persona'; }) || {}; const fieldQuestions = persona.data && persona.data.appointment_policy && persona.data.appointment_policy.field_questions || {}; const expectedQuestion = missing.length ? fieldQuestions[missing[0]] : null; let replyText = candidate.candidate_reply_text; if (!replyText || (reconciled.response && reconciled.response.handoff_required) || (expectedQuestion && !replyText.includes(expectedQuestion))) replyText = reconciled.response.reply_text; return [{ json: { ...reconciled, response: { ...reconciled.response, reply_text: replyText, extracted_fields: candidate.model_observation.fields || {}, identified_service_slug: candidate.model_observation.identified_service_slug || null } } }];"
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2},
+          "conditions": [{"id": "graph-proof-repair", "leftValue": "={{Boolean($json.response && $json.response.proof && $json.response.proof.repair_required)}}", "rightValue": true, "operator": {"type": "boolean", "operation": "true", "singleValue": true}}],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "repair_gate",
+      "name": "Graph proof needs repair",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2100, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const reconciled = $('Reconcile fields with graph policy').item.json; const original = $('Build graph grounded agent request').item.json.request_body; const repairCards = reconciled.response && reconciled.response.repair_context_cards || []; const proof = reconciled.response && reconciled.response.proof || {}; if (!repairCards.length) throw new Error('proof requested repair without graph cards'); const requestBody = { ...original, messages: [...original.messages, { role: 'system', content: 'A proposta anterior falhou na prova estrutural. Refaça uma única vez usando apenas o pacote expandido e o mesmo contrato JSON.' }, { role: 'user', content: JSON.stringify({ proof_errors: proof.errors || [], graph_contract: proof.repair_contract || {}, repair_requirements: proof.repair_requirements || [], repair_knowledge: repairCards.map(function(card) { return { node_id: card.id, type: card.node_type, title: card.title, content: card.rendered_content, chunk_ids: card.chunk_refs || [], coordinate: card.technical_metadata || {} }; }) }) }] }; return [{ json: { request_body: requestBody, repair_context_node_ids: repairCards.map(function(card) { return card.id; }), repair_context_chunk_ids: repairCards.flatMap(function(card) { return card.chunk_refs || []; }), repair_context_chunk_sources: Object.fromEntries(repairCards.flatMap(function(card) { return (card.chunk_refs || []).map(function(chunkId) { return [chunkId, card.id]; }); })) } }];"
+      },
+      "id": "repair_request",
+      "name": "Build graph repair request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2320, 180],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "__MODEL_ENDPOINT__",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "Content-Type", "value": "application/json"}]},
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify($json.request_body)}}",
+        "options": {}
+      },
+      "id": "deepseek_repair",
+      "name": "Bound model graph repair",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2540, 180],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const content = $json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content; const parseErrors = []; let parsed = {}; try { parsed = content ? JSON.parse(content) : {}; } catch (error) { parseErrors.push('invalid_json:' + error.message); } const required = ['branch_action','branch_anchor_node_id','branch_path_checksum','branch_evidence_span','extracted_facts','claims','next_question_node_id','cited_node_ids','cited_chunk_ids','reply','qualification_complete','handoff_requested']; for (const key of required) if (!(key in parsed)) parseErrors.push('missing:' + key); const facts = Array.isArray(parsed.extracted_facts) ? parsed.extracted_facts.map(function(fact) { return { field_key: String(fact && fact.field_key || ''), owner_node_id: String(fact && fact.owner_node_id || ''), status: String(fact && fact.status || 'invalid'), value: fact && 'value' in fact ? fact.value : null, source_message_id: String(fact && fact.source_message_id || ''), evidence_span: String(fact && fact.evidence_span || ''), confidence: Number(fact && fact.confidence || 0) }; }) : []; const claims = Array.isArray(parsed.claims) ? parsed.claims.map(function(claim) { return { claim_type: String(claim && claim.claim_type || 'other'), value: claim && typeof claim.value === 'object' && claim.value || {}, evidence_node_ids: Array.isArray(claim && claim.evidence_node_ids) ? claim.evidence_node_ids : [], evidence_chunk_ids: Array.isArray(claim && claim.evidence_chunk_ids) ? claim.evidence_chunk_ids : [] }; }) : []; const proposal = { branch_action: String(parsed.branch_action || ''), branch_anchor_node_id: String(parsed.branch_anchor_node_id || ''), branch_path_checksum: String(parsed.branch_path_checksum || ''), branch_evidence_span: String(parsed.branch_evidence_span || ''), extracted_facts: facts, claims: claims, next_question_node_id: typeof parsed.next_question_node_id === 'string' ? parsed.next_question_node_id : null, cited_node_ids: Array.isArray(parsed.cited_node_ids) ? parsed.cited_node_ids : [], cited_chunk_ids: Array.isArray(parsed.cited_chunk_ids) ? parsed.cited_chunk_ids : [], reply: typeof parsed.reply === 'string' ? parsed.reply : '', qualification_complete: parsed.qualification_complete === true, handoff_requested: parsed.handoff_requested === true }; const repair = $('Build graph repair request').item.json; return [{ json: { model_observation: { proposal: proposal, repair_attempt: 1, proposal_parse_errors: parseErrors, repair_context_node_ids: repair.repair_context_node_ids, repair_context_chunk_ids: repair.repair_context_chunk_ids, repair_context_chunk_sources: repair.repair_context_chunk_sources } } }];"
+      },
+      "id": "repair_response",
+      "name": "Validate repaired agent response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2760, 180],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/decide'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({context: $('Load published graph context').item.json, model_observation: $('Validate repaired agent response').item.json.model_observation})}}",
+        "options": {}
+      },
+      "id": "repair_reconcile",
+      "name": "Reconcile repaired graph proposal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2980, 180],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const reconciled = $json; if (!reconciled.response || !reconciled.response.proof) throw new Error('backend did not return graph proof'); return [{ json: reconciled }];"
       },
       "id": "final_response",
       "name": "Align reply with qualification state",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2120, 300],
+      "position": [3200, 300],
       "onError": "continueErrorOutput"
     },
     {
@@ -153,26 +231,26 @@
       "name": "Persist once and enqueue send",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2360, 300],
+      "position": [3420, 300],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/fail-safe-handoff'}}",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/technical-failure'}}",
         "sendHeaders": true,
         "headerParameters": {"parameters": [{"name": "X-Webhook-Token", "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"}]},
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{(function() { var inbound = $('Canonical inbound').item.json; var input = inbound.body || inbound; var error = $json.error || {}; return JSON.stringify({lead_ref: input.lead_ref, reason: 'workflow_step_failed:' + $prevNode.name + ':' + String(error.message || $json.message || $json.description || 'unknown error').slice(0, 500), correlation_id: input.correlation_id, diagnostic: {failed_node: $prevNode.name, message: String(error.message || $json.message || 'unknown error').slice(0, 1000), description: String(error.description || $json.description || '').slice(0, 2000), http_code: error.httpCode || error.statusCode || $json.httpCode || $json.statusCode || null, workflow_template: 'graph_agentic_v1', persona_slug: input.persona_slug}}); })()}}",
+        "body": "={{JSON.stringify({lead_ref: $('Validate conversation binding').item.json.lead_ref, buffer_id: $('Validate conversation binding').item.json.buffer_id, reason: 'workflow_step_failed:' + String(($json.error && $json.error.node && $json.error.node.name) || 'unknown'), correlation_id: $('Validate conversation binding').item.json.correlation_id, diagnostic: Object.fromEntries([['workflow_template', 'graph_agentic_v3'], ['failed_node', String(($json.error && $json.error.node && $json.error.node.name) || 'unknown')], ['message', String(($json.error && $json.error.message) || $json.message || 'unknown').slice(0, 1000)], ['http_code', ($json.error && ($json.error.httpCode || $json.error.statusCode)) || $json.httpCode || $json.statusCode || null]])})}}",
         "options": {}
       },
       "id": "failsafe",
-      "name": "Fail safe human handoff",
+      "name": "Quarantine technical failure",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2360, 560]
+      "position": [3420, 560]
     },
     {
       "parameters": {"respondWith": "json", "responseBody": "={{$json}}"},
@@ -180,33 +258,44 @@
       "name": "Return canonical result",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
-      "position": [2600, 300]
+      "position": [3640, 300]
     }
   ],
   "connections": {
     "Canonical inbound": {"main": [[{"node": "Validate conversation binding", "type": "main", "index": 0}]]},
-    "Validate conversation binding": {"main": [[{"node": "Load published graph context", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Load published graph context": {"main": [[{"node": "Resolve conversation policy", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Resolve conversation policy": {"main": [[{"node": "Build graph grounded agent request", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Build graph grounded agent request": {"main": [[{"node": "DeepSeek agentic reply", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "DeepSeek agentic reply": {"main": [[{"node": "Validate agent response", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Validate agent response": {"main": [[{"node": "Reconcile fields with graph policy", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Reconcile fields with graph policy": {"main": [[{"node": "Align reply with qualification state", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Align reply with qualification state": {"main": [[{"node": "Persist once and enqueue send", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Persist once and enqueue send": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}], [{"node": "Fail safe human handoff", "type": "main", "index": 0}]]},
-    "Fail safe human handoff": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}]]}
+    "Validate conversation binding": {"main": [[{"node": "Load published graph context", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Load published graph context": {"main": [[{"node": "Resolve conversation policy", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Resolve conversation policy": {"main": [[{"node": "Build graph grounded agent request", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Build graph grounded agent request": {"main": [[{"node": "Bound conversation model", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Bound conversation model": {"main": [[{"node": "Validate agent response", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Validate agent response": {"main": [[{"node": "Reconcile fields with graph policy", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Reconcile fields with graph policy": {"main": [[{"node": "Graph proof needs repair", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Graph proof needs repair": {"main": [[{"node": "Build graph repair request", "type": "main", "index": 0}], [{"node": "Align reply with qualification state", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Build graph repair request": {"main": [[{"node": "Bound model graph repair", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Bound model graph repair": {"main": [[{"node": "Validate repaired agent response", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Validate repaired agent response": {"main": [[{"node": "Reconcile repaired graph proposal", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Reconcile repaired graph proposal": {"main": [[{"node": "Align reply with qualification state", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Align reply with qualification state": {"main": [[{"node": "Persist once and enqueue send", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Persist once and enqueue send": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}], [{"node": "Quarantine technical failure", "type": "main", "index": 0}]]},
+    "Quarantine technical failure": {"main": [[{"node": "Return canonical result", "type": "main", "index": 0}]]}
   },
   "settings": {"executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all"},
   "meta": {
-    "template": "graph_agentic_v1",
+    "template": "graph_agentic_v3",
+    "contract_documents": [
+      "api/contracts/graph-agent-runtime-v3.md",
+      "docs/runbooks/graph-agent-runtime-v3-rollout.md"
+    ],
     "binding": {
       "persona_slug": "__PERSONA_SLUG__",
       "agent_slug": "__AGENT_SLUG__",
       "decision_owner": "n8n_agents",
-      "pipeline_contract": "conversation_v1",
-      "reply_source": "deepseek-v4-flash",
+      "pipeline_contract": "conversation_v3",
+      "runtime_version": "graph_agent_runtime_v3",
+      "reply_source": "__REPLY_SOURCE__",
       "model_required": true,
-      "model": "deepseek-v4-flash"
+      "model": "__MODEL__",
+      "endpoint": "__MODEL_ENDPOINT__"
     }
   }
 }

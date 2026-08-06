@@ -118,6 +118,7 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
 
     required = raw_policy.get("required_fields")
     questions = raw_policy.get("field_questions")
+    question_node_ids = raw_policy.get("field_question_node_ids")
     if not isinstance(required, list) or not required:
         errors.append("appointment_policy.required_fields must be a non-empty list")
         required = []
@@ -137,11 +138,27 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
     for node in nodes:
         if getattr(node, "node_type", None) not in {"product", "service"}:
             continue
-        booking = _node_data(node).get("booking")
+        node_data = _node_data(node)
+        booking = node_data.get("booking")
         product_required = booking.get("required_fields") if isinstance(booking, dict) else None
-        if not isinstance(product_required, list):
-            continue
-        for field in product_required:
+        if isinstance(product_required, list):
+            for field in product_required:
+                normalized = str(field).strip()
+                if normalized and normalized not in all_required:
+                    all_required.append(normalized)
+        qualification = node_data.get("qualification")
+        declared_fields = qualification.get("fields") if isinstance(qualification, dict) else None
+        if isinstance(declared_fields, list):
+            for item in declared_fields:
+                normalized = str(
+                    item.get("key") if isinstance(item, dict) else item
+                ).strip()
+                if normalized and normalized not in all_required:
+                    all_required.append(normalized)
+
+    conditional = raw_policy.get("conditional_fields")
+    if isinstance(conditional, dict):
+        for field in conditional:
             normalized = str(field).strip()
             if normalized and normalized not in all_required:
                 all_required.append(normalized)
@@ -152,6 +169,34 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
             errors.append(
                 f"appointment_policy.field_questions missing non-empty question for required field {field}"
             )
+
+    # Once a graph uses executable qualification FAQs, every required field
+    # must resolve to one matching FAQ node.  Legacy v2.0 documents remain
+    # readable until their next v2.1 publication materializes this map.
+    if question_node_ids is not None:
+        if not isinstance(question_node_ids, dict):
+            errors.append("appointment_policy.field_question_node_ids must be an object")
+            question_node_ids = {}
+        nodes_by_id = {getattr(node, "id", ""): node for node in nodes}
+        for field in all_required:
+            node_id = str(question_node_ids.get(field) or "").strip()
+            question_node = nodes_by_id.get(node_id)
+            if not node_id or question_node is None:
+                errors.append(
+                    f"appointment_policy.field_question_node_ids missing FAQ node for required field {field}"
+                )
+                continue
+            if getattr(question_node, "node_type", None) != "faq":
+                errors.append(f"qualification question node {node_id} must be faq")
+                continue
+            question_data = _node_data(question_node)
+            metadata = question_data.get("metadata") if isinstance(question_data.get("metadata"), dict) else {}
+            role = metadata.get("role") or question_data.get("role")
+            mapped_field = metadata.get("field_key") or question_data.get("field_key")
+            if role != "qualification_question" or mapped_field != field:
+                errors.append(
+                    f"qualification question node {node_id} does not declare field {field}"
+                )
 
 
 def _is_primary(edge: "object") -> bool:

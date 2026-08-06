@@ -10,7 +10,12 @@ from typing import Any, Iterable
 
 from schemas.conversation import ContextCard
 from schemas.graph_json_v2 import DEFAULT_RELATION_WEIGHTS, GraphJson, Node
-from services import graph_json_v2_store, graph_markdown, supabase_client
+from services import (
+    graph_conversation_contract,
+    graph_json_v2_store,
+    graph_markdown,
+    supabase_client,
+)
 
 
 PERMANENT_TYPES = {"persona", "brand", "tone", "rule"}
@@ -75,9 +80,17 @@ def _rendered(node: Node) -> str:
     title = str(node.title or node.label or node.slug).strip()
     lines = [f"# {title}"]
     if node.node_type == "faq":
-        question = str(spec.get("question") or data.get("question") or title).strip()
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        content = data.get("content")
+        structured_content = content if isinstance(content, dict) else {}
+        question = str(
+            spec.get("question") or data.get("question")
+            or structured_content.get("question") or title
+        ).strip()
         answer = str(
-            spec.get("answer") or data.get("answer") or data.get("content")
+            spec.get("answer") or data.get("answer")
+            or structured_content.get("answer")
+            or (content if isinstance(content, str) else "")
             or (data.get("metadata") or {}).get("answer") or ""
         ).strip()
         legacy_markdown = str(data.get("markdown") or "").strip() if node.markdown is None else ""
@@ -85,6 +98,8 @@ def _rendered(node: Node) -> str:
             lines.extend(["", "Pergunta: " + question])
         if answer:
             lines.extend(["", "Resposta: " + answer])
+        if not answer and (metadata.get("role") or data.get("role")) == "qualification_question":
+            return "\n".join(lines).strip()
         if not answer and legacy_markdown:
             return "\n".join([f"# {title}", "", legacy_markdown]).strip()
         return "\n".join(lines).strip() if answer else ""
@@ -121,10 +136,23 @@ def _editable(node: Node) -> str:
     spec = node.spec or {}
     data = node.data or {}
     if node.node_type == "faq":
-        return str(
-            spec.get("answer") or data.get("answer") or data.get("content")
+        content = data.get("content")
+        structured_content = content if isinstance(content, dict) else {}
+        value = str(
+            spec.get("answer") or data.get("answer")
+            or structured_content.get("answer")
+            or (content if isinstance(content, str) else "")
             or (data.get("metadata") or {}).get("answer") or ""
         ).strip()
+        if value and value != "{}":
+            return value
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        if (metadata.get("role") or data.get("role")) == "qualification_question":
+            return str(
+                spec.get("question") or data.get("question")
+                or structured_content.get("question") or node.title or ""
+            ).strip()
+        return value
     return str(
         spec.get("summary") or spec.get("content") or data.get("content")
         or data.get("summary") or (data.get("markdown") if node.markdown is None else "")
@@ -229,6 +257,9 @@ def _card(
     projection_id: str | None, chunk_refs: list[str],
 ) -> ContextCard:
     rendered = _rendered(node)
+    coordinate = graph_conversation_contract.coordinate_for_node(
+        graph, node.id, graph_version=graph_version
+    )
     return ContextCard(
         id=node.id,
         projection_node_id=projection_id,
@@ -257,6 +288,7 @@ def _card(
             "source_ref": node.provenance.source_ref,
             "source_checksum": node.provenance.source_checksum,
             "canonical_markdown_checksum": node.markdown.checksum if node.markdown else (node.data or {}).get("markdown_checksum"),
+            **coordinate,
         },
     )
 
@@ -266,6 +298,9 @@ def resolve_cards(
     rag_chunks: list[dict[str, Any]] | None = None,
     projection_nodes: list[dict[str, Any]] | None = None,
     decisive_node_ids: list[str] | None = None,
+    branch_node_ids: list[str] | None = None,
+    active_path_node_ids: list[str] | None = None,
+    unresolved_fields: list[str] | None = None,
     max_cards: int = 12, max_tokens: int = 8000, max_distance: int = 3,
 ) -> list[ContextCard]:
     """Resolve exactly the package that both model and UI consume."""
@@ -279,6 +314,8 @@ def resolve_cards(
         and node.node_type in PERMANENT_TYPES
         and node.lifecycle.status in APPROVED
     }
+    if branch_node_ids is not None:
+        allowed &= set(branch_node_ids)
     approved = {
         node.id for node in graph.nodes
         if node.id in allowed and node.node_class == "knowledge"
@@ -291,6 +328,8 @@ def resolve_cards(
         & {"cardapio", "catalogo", "produtos", "servicos", "opcoes", "menu"}
     )
     decisive = set(canonicalize_ids(decisive_node_ids or [], projection_nodes))
+    active_path = set(active_path_node_ids or [])
+    pending_fields = set(unresolved_fields or [])
 
     seed_scores: dict[str, float] = {}
     for node_id in approved:
@@ -305,6 +344,17 @@ def resolve_cards(
             + (0.2 if node_id in chunk_refs else 0.0)
             if matched_enough else 0.0
         )
+        coordinate = graph_conversation_contract.coordinate_for_node(
+            graph, node_id, graph_version=graph_version
+        )
+        path_overlap = len(set(coordinate["path_node_ids"]) & active_path) / max(1, len(active_path))
+        metadata = (node.data or {}).get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        field_key = str(metadata.get("field_key") or (node.data or {}).get("field_key") or "")
+        if path_overlap:
+            score += 0.3 * path_overlap
+        if field_key and field_key in pending_fields:
+            score += 0.35
         if catalog_request and node.node_type in {"product", "offer", "product_group"}:
             score = max(score, 0.72)
         if node_id in decisive:

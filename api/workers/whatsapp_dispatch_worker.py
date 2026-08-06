@@ -188,7 +188,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                 payload={
                     "correlation_id": row.get("correlation_id"),
                     "conversation_mode": "deterministic",
-                    "pipeline_contract": "conversation_v1",
+                    "pipeline_contract": binding_metadata.get("pipeline_contract") or "conversation_v1",
                     "classifier": result.get("classifier"),
                     "route": result.get("route"),
                     "handoff": bool(result.get("handoff")),
@@ -215,18 +215,41 @@ class WhatsAppDispatchWorker(BaseWorker):
                     "external_message_id": row.get("external_message_id"),
                     "correlation_id": row.get("correlation_id"),
                     "message": payload.get("text") or "",
-                    "pipeline_contract": "conversation_v1",
+                    "pipeline_contract": binding_metadata.get("pipeline_contract") or "conversation_v3",
                     "decision_owner": "n8n_agents",
                 },
                 secret=token or None,
                 timeout=45.0,
+                response_limit=65_536,
             )
             if not 200 <= status < 300:
                 raise RuntimeError(f"n8n conversation returned HTTP {status}")
             try:
                 n8n_result = json.loads(body)
             except Exception:
-                n8n_result = {}
+                n8n_result = None
+            if not isinstance(n8n_result, dict) or not any(
+                key in n8n_result
+                for key in ("ok", "technical_failure", "handoff", "message_id")
+            ):
+                raise RuntimeError(
+                    "n8n conversation returned an invalid result contract"
+                )
+            if n8n_result.get("technical_failure"):
+                event_emitter.emit(
+                    "whatsapp.inbound_decision_failed",
+                    entity_type="lead",
+                    entity_id=str(row.get("lead_ref") or ""),
+                    persona_id=row["persona_id"],
+                    payload={
+                        "correlation_id": row.get("correlation_id"),
+                        "buffer_id": row.get("id"),
+                        "pipeline_contract": binding_metadata.get("pipeline_contract"),
+                    },
+                    level="error",
+                    source="workers.whatsapp",
+                )
+                return
             if not n8n_result.get("handoff"):
                 supabase_client.complete_whatsapp_buffer(row["id"], "sent")
             event_emitter.emit(
@@ -237,7 +260,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                 payload={
                     "correlation_id": row.get("correlation_id"),
                     "conversation_mode": "n8n_agents",
-                    "pipeline_contract": "conversation_v1",
+                    "pipeline_contract": binding_metadata.get("pipeline_contract") or "conversation_v3",
                     "handoff": bool(n8n_result.get("handoff")),
                 },
                 source="workers.whatsapp",
@@ -417,6 +440,31 @@ class WhatsAppDispatchWorker(BaseWorker):
         attempts, maximum = int(row.get("attempt_count") or 1), int(row.get("max_attempts") or 5)
         error = f"{type(exc).__name__}: {str(exc)[:800]}"
         attempt_kind = row.get("_attempt_started")
+        if attempt_kind == "decision" and row.get("direction") == "inbound":
+            try:
+                reconciliation = supabase_client.reconcile_committed_graph_inbound(
+                    str(row["id"]), error
+                )
+            except Exception:
+                reconciliation = {}
+            if reconciliation.get("reconciled") or (
+                reconciliation.get("ok")
+                and reconciliation.get("reason") == "already_reconciled"
+            ):
+                event_emitter.emit(
+                    "whatsapp.inbound_commit_reconciled",
+                    entity_type="lead",
+                    entity_id=str(row.get("lead_ref") or ""),
+                    persona_id=row.get("persona_id"),
+                    payload={
+                        "buffer_id": row.get("id"),
+                        "correlation_id": row.get("correlation_id"),
+                        "outbound_id": reconciliation.get("outbound_id"),
+                    },
+                    level="warning",
+                    source="workers.whatsapp",
+                )
+                return
         if attempt_kind:
             if row.get("channel_binding_id"):
                 supabase_client.record_whatsapp_safety_violation(

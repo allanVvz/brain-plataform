@@ -1,4 +1,15 @@
+import json
+
+import pytest
+
 from services import deepseek_n8n_service
+
+
+MODEL_BINDING = {
+    "model": "fixture-model",
+    "endpoint": "https://models.example.test/chat/completions",
+    "reply_source": "fixture-model",
+}
 
 
 def _silence_events(monkeypatch):
@@ -15,6 +26,7 @@ def test_every_persona_uses_the_same_graph_agentic_template():
         },
         credential_id="cred-commerce",
         credential_name="DeepSeek commerce",
+        model_binding=MODEL_BINDING,
     )
     appointment = deepseek_n8n_service._workflow_for_persona(
         {
@@ -25,16 +37,36 @@ def test_every_persona_uses_the_same_graph_agentic_template():
         },
         credential_id="cred-appointment",
         credential_name="DeepSeek appointment",
+        model_binding=MODEL_BINDING,
     )
 
-    assert commerce["meta"]["template"] == "graph_agentic_v1"
-    assert appointment["meta"]["template"] == "graph_agentic_v1"
+    assert commerce["meta"]["template"] == "graph_agentic_v3"
+    assert appointment["meta"]["template"] == "graph_agentic_v3"
     assert [node["id"] for node in commerce["nodes"]] == [
         node["id"] for node in appointment["nodes"]
     ]
     assert commerce["connections"] == appointment["connections"]
     assert "baita" not in str(commerce).lower()
     assert "aurora" not in str(appointment).lower()
+
+
+def test_canonical_template_connections_resolve_to_published_node_names():
+    template = json.loads(
+        deepseek_n8n_service._TEMPLATE.read_text(encoding="utf-8")
+    )
+    deepseek_n8n_service._validate_workflow_topology(template)
+
+
+def test_workflow_topology_rejects_dangling_connection():
+    with pytest.raises(ValueError, match="connection target is missing"):
+        deepseek_n8n_service._validate_workflow_topology({
+            "nodes": [{"name": "Inbound"}],
+            "connections": {
+                "Inbound": {
+                    "main": [[{"node": "Missing", "type": "main", "index": 0}]],
+                },
+            },
+        })
 
 
 def test_model_request_is_built_in_code_and_http_body_is_simple():
@@ -46,14 +78,16 @@ def test_model_request_is_built_in_code_and_http_body_is_simple():
     assert "context_cards" in request_node["parameters"]["jsCode"]
     assert "rendered_content" in request_node["parameters"]["jsCode"]
     assert deepseek_node["parameters"]["body"] == "={{JSON.stringify($json.request_body)}}"
-    assert "http_code" in fail_safe["parameters"]["body"]
+    assert "buffer_id" in fail_safe["parameters"]["body"]
+    assert "correlation_id" in fail_safe["parameters"]["body"]
     assert "workflow_template" in fail_safe["parameters"]["body"]
 
 
-def test_model_fields_are_reconciled_against_graph_policy_before_commit():
+def test_model_proposal_is_proved_and_repaired_against_graph_before_commit():
     workflow = _live_workflow("cred-1")
     node_ids = [node["id"] for node in workflow["nodes"]]
     reconcile = next(node for node in workflow["nodes"] if node["id"] == "reconcile")
+    policy = next(node for node in workflow["nodes"] if node["id"] == "policy")
     model_response = next(
         node for node in workflow["nodes"] if node["id"] == "model_response"
     )
@@ -61,14 +95,20 @@ def test_model_fields_are_reconciled_against_graph_policy_before_commit():
         node for node in workflow["nodes"] if node["id"] == "final_response"
     )
     commit = next(node for node in workflow["nodes"] if node["id"] == "commit")
+    repair_gate = next(node for node in workflow["nodes"] if node["id"] == "repair_gate")
+    repair_reconcile = next(node for node in workflow["nodes"] if node["id"] == "repair_reconcile")
 
     assert node_ids.index("model_response") < node_ids.index("reconcile")
-    assert node_ids.index("reconcile") < node_ids.index("final_response")
+    assert node_ids.index("reconcile") < node_ids.index("repair_gate")
+    assert node_ids.index("repair_gate") < node_ids.index("repair_reconcile")
+    assert node_ids.index("repair_reconcile") < node_ids.index("final_response")
     assert node_ids.index("final_response") < node_ids.index("commit")
     assert "model_observation" in reconcile["parameters"]["body"]
-    assert "identified_service_slug" in model_response["parameters"]["jsCode"]
-    assert "missing_fields" in final_response["parameters"]["jsCode"]
-    assert "field_questions" in final_response["parameters"]["jsCode"]
+    assert "contract_probe" in policy["parameters"]["body"]
+    assert "extracted_facts" in model_response["parameters"]["jsCode"]
+    assert "repair_required" in str(repair_gate["parameters"])
+    assert "repair_attempt" in repair_reconcile["parameters"]["body"] or "model_observation" in repair_reconcile["parameters"]["body"]
+    assert "graph proof" in final_response["parameters"]["jsCode"]
     assert "response: $json.response" in commit["parameters"]["body"]
 
 
@@ -111,6 +151,7 @@ def test_provision_keeps_key_only_in_n8n_credential(monkeypatch):
             "n8n_workflow_id": "workflow-existing",
             "n8n_credential_id": "credential-old",
         },
+        model_binding=MODEL_BINDING,
     )
 
     assert calls["credential"]["data"]["value"] == f"Bearer {key}"
@@ -118,7 +159,8 @@ def test_provision_keeps_key_only_in_n8n_credential(monkeypatch):
     deepseek_node = next(node for node in calls["workflow"]["nodes"] if node["id"] == "deepseek")
     assert deepseek_node["credentials"]["httpHeaderAuth"]["id"] == "credential-new"
     assert calls["workflow"]["settings"]["saveDataSuccessExecution"] == "all"
-    assert calls["workflow"]["meta"]["template"] == "graph_agentic_v1"
+    assert calls["workflow"]["meta"]["template"] == "graph_agentic_v3"
+    assert calls["workflow"]["active"] is False
     assert result["n8n_workflow_id"] == "workflow-existing"
     assert result["n8n_credential_id"] == "credential-new"
     assert key not in str(result)
@@ -152,6 +194,7 @@ def test_provision_rolls_back_only_new_credential_when_workflow_fails(monkeypatc
                 "n8n_workflow_id": "workflow-existing",
                 "n8n_credential_id": "credential-old",
             },
+            model_binding=MODEL_BINDING,
         )
         raise AssertionError("provision should fail")
     except RuntimeError as exc:
@@ -182,7 +225,11 @@ def test_resync_workflow_reuses_existing_credential_and_reactivates(monkeypatch)
 
     result = deepseek_n8n_service.resync_workflow_for_persona(
         {"id": "persona-id", "slug": "baita-conveniencia", "name": "Baita", "config": {}},
-        {"n8n_credential_id": "credential-existing", "n8n_workflow_id": "workflow-existing"},
+        {
+            "n8n_credential_id": "credential-existing",
+            "n8n_workflow_id": "workflow-existing",
+            **MODEL_BINDING,
+        },
     )
 
     assert result["n8n_workflow_id"] == "workflow-existing"
@@ -191,6 +238,41 @@ def test_resync_workflow_reuses_existing_credential_and_reactivates(monkeypatch)
     assert calls["activated"] == "workflow-existing"
     deepseek_node = next(node for node in calls["workflow"]["nodes"] if node["id"] == "deepseek")
     assert deepseek_node["credentials"]["httpHeaderAuth"]["id"] == "credential-existing"
+
+
+def test_resync_can_update_same_template_and_keep_workflow_inactive(monkeypatch):
+    calls = {}
+    _silence_events(monkeypatch)
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client, "update_workflow",
+        lambda workflow_id, workflow: calls.update(
+            {"workflow_id": workflow_id, "workflow": workflow}
+        ) or {"id": workflow_id},
+    )
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client, "activate_workflow",
+        lambda _workflow_id: (_ for _ in ()).throw(
+            AssertionError("inactive resync must not activate")
+        ),
+    )
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client, "deactivate_workflow",
+        lambda workflow_id: calls.setdefault("deactivated", workflow_id),
+    )
+
+    result = deepseek_n8n_service.resync_workflow_for_persona(
+        {"id": "persona-off", "slug": "persona-off", "name": "Off", "config": {}},
+        {
+            "n8n_credential_id": "credential-existing",
+            "n8n_workflow_id": "workflow-existing",
+            **MODEL_BINDING,
+        },
+        activate_workflow=False,
+    )
+
+    assert calls["deactivated"] == "workflow-existing"
+    assert calls["workflow"]["meta"]["template"] == "graph_agentic_v3"
+    assert result["workflow_active"] is False
 
 
 def test_resync_workflow_creates_it_when_missing_reusing_the_credential(monkeypatch):
@@ -222,7 +304,7 @@ def test_resync_workflow_creates_it_when_missing_reusing_the_credential(monkeypa
 
     result = deepseek_n8n_service.resync_workflow_for_persona(
         {"id": "persona-id", "slug": "baita-conveniencia", "name": "Baita", "config": {}},
-        {"n8n_credential_id": "credential-existing"},
+        {"n8n_credential_id": "credential-existing", **MODEL_BINDING},
     )
 
     assert result["n8n_workflow_id"] == "workflow-new"
@@ -249,6 +331,7 @@ def _live_workflow(credential_id: str) -> dict:
         {"id": "persona-1", "slug": "baita-conveniencia", "name": "Baita"},
         credential_id=credential_id,
         credential_name="Brain DeepSeek",
+        model_binding=MODEL_BINDING,
     )
     workflow["id"] = "wf-1"
     workflow["active"] = True

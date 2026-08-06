@@ -7,10 +7,11 @@ export async function proxy(request: NextRequest) {
   const hasSession = Boolean(request.cookies.get("ai_brain_session")?.value);
 
   if (!hasSession && !isLogin) {
+    const requestedTarget = `${pathname}${request.nextUrl.search}`;
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";
-    url.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+    url.searchParams.set("next", requestedTarget);
     return NextResponse.redirect(url);
   }
 

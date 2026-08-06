@@ -27,6 +27,18 @@ AUTHORIZATION_HEADER = "authorization"
 ADMIN_TOKEN_ENV_NAMES = ("QA", "qa", "preview", "PREVIEW", "test", "TEST")
 
 
+def _disable_auth_response_cache(response):
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+def _auth_error(detail: str, status_code: int) -> JSONResponse:
+    return _disable_auth_response_cache(
+        JSONResponse({"detail": detail}, status_code=status_code)
+    )
+
+
 def is_public_path(path: str) -> bool:
     if path.startswith("/webhooks/evolution/"):
         return True
@@ -81,8 +93,11 @@ def _admin_test_token_user(request: Request) -> dict | None:
 
 
 async def auth_middleware(request: Request, call_next):
-    if request.method == "OPTIONS" or is_public_path(request.url.path):
-        return await call_next(request)
+    path = request.url.path
+    is_auth_path = path.startswith("/auth/")
+    if request.method == "OPTIONS" or is_public_path(path):
+        response = await call_next(request)
+        return _disable_auth_response_cache(response) if is_auth_path else response
 
     token_user = _admin_test_token_user(request)
     if token_user:
@@ -93,7 +108,7 @@ async def auth_middleware(request: Request, call_next):
     token = request.cookies.get(auth_service.SESSION_COOKIE)
     payload = auth_service.get_session_payload(token or "")
     if not payload:
-        return JSONResponse({"detail": "Sessao obrigatoria."}, status_code=401)
+        return _auth_error("Sessao obrigatoria.", 401)
 
     try:
         user = auth_service.get_user_by_id(payload.get("sub") or "")
@@ -107,10 +122,10 @@ async def auth_middleware(request: Request, call_next):
             )
         except Exception:
             pass
-        return JSONResponse({"detail": "Auth backend unavailable."}, status_code=503)
+        return _auth_error("Auth backend unavailable.", 503)
 
     if not user or not user.get("is_active", True):
-        return JSONResponse({"detail": "Sessao invalida."}, status_code=401)
+        return _auth_error("Sessao invalida.", 401)
 
     request.state.user = user
     if auth_service.is_admin(user):
@@ -131,7 +146,6 @@ async def auth_middleware(request: Request, call_next):
             request.state.persona_access = []
 
     account_type = user.get("account_type") or "internal"
-    path = request.url.path
     if account_type == "client":
         allowed = (
             path in {"/auth/me", "/auth/logout", "/auth/change-password"}
@@ -139,4 +153,5 @@ async def auth_middleware(request: Request, call_next):
         )
         if not allowed:
             return JSONResponse({"detail": "Acesso negado."}, status_code=403)
-    return await call_next(request)
+    response = await call_next(request)
+    return _disable_auth_response_cache(response) if is_auth_path else response

@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "api"))
@@ -37,10 +39,10 @@ def test_routing_exposes_public_conversation_modes_without_new_storage(monkeypat
     assert n8n["conversation_mode"] == "n8n_agents"
     assert deterministic["pipeline_contract"] == n8n["pipeline_contract"] == "conversation_v1"
     assert deterministic["classifier"] == "deterministic_v1"
-    assert n8n["classifier"] == "graph_agentic_v1"
+    assert n8n["classifier"] is None
     assert deterministic["model_required"] is False
     assert n8n["model_required"] is True
-    assert n8n["field_extractor"] == "deepseek-v4-flash"
+    assert n8n["field_extractor"] is None
 
 
 def test_deterministic_worker_uses_canonical_pipeline_without_n8n(monkeypatch):
@@ -115,6 +117,55 @@ def test_deterministic_worker_uses_canonical_pipeline_without_n8n(monkeypatch):
     assert calls[0]["persona_slug"] == "baita-conveniencia"
     assert calls[0]["message_id"] == "wamid-1"
     assert completed[0][0] == ("buffer-1", "sent")
+
+
+def test_n8n_worker_rejects_empty_http_200_as_an_invalid_result(monkeypatch):
+    row = {
+        "id": "buffer-n8n",
+        "direction": "inbound",
+        "persona_id": "persona-1",
+        "lead_ref": 44,
+        "channel_binding_id": "binding-1",
+        "whatsapp_phone_number_id": None,
+        "external_message_id": "wamid-n8n",
+        "correlation_id": "corr-n8n",
+        "payload": {"text": "Quero atendimento"},
+    }
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_persona_by_id",
+        lambda _id: {"id": "persona-1", "slug": "generic", "config": {}},
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_lead_by_ref",
+        lambda _ref: {"id": 44, "ai_paused": False},
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_messages",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.get_workflow_binding_by_id",
+        lambda _id: {
+            "id": "binding-1",
+            "persona_id": "persona-1",
+            "active": True,
+            "metadata": {
+                "decision_owner": "n8n_agents",
+                "conversation_webhook_url": "https://n8n.example.test/webhook/generic",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.mark_whatsapp_attempt",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.n8n_client.send_to_webhook",
+        lambda *_args, **_kwargs: (200, "{}"),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid result contract"):
+        WhatsAppDispatchWorker()._dispatch_inbound(row)
 
 
 def test_echo_guard_ignores_short_common_replies(monkeypatch):
@@ -258,21 +309,23 @@ def test_n8n_agentic_template_and_local_mode_are_distinct_contracts():
     assert any("/internal/conversations/commit" in url for url in urls)
     source = inspect.getsource(conversation_runtime.execute_pipeline)
     assert source.index("build_context(") < source.index("decide(") < source.index("commit(")
-    assert workflow["meta"]["template"] == "graph_agentic_v1"
+    assert workflow["meta"]["template"] == "graph_agentic_v3"
     assert workflow["meta"]["binding"]["model_required"] is True
-    assert workflow["meta"]["binding"]["reply_source"] == "deepseek-v4-flash"
+    assert workflow["meta"]["binding"]["reply_source"] == "__REPLY_SOURCE__"
+    assert workflow["meta"]["binding"]["model"] == "__MODEL__"
+    assert workflow["meta"]["binding"]["endpoint"] == "__MODEL_ENDPOINT__"
 
 
-def test_fail_safe_handoff_captures_which_node_failed_and_why():
+def test_technical_failure_captures_which_node_failed_and_why_without_handoff():
     """Regression test for the 2026-08-04 Baita silent-failure investigation.
 
-    Both templates' fail-safe node used to send a static
+    The canonical template's old fail-safe node used to send a static
     reason: 'workflow_step_failed' to /internal/conversations/fail-safe-handoff
     on any pipeline error, and Baita's workflow settings additionally
     discarded error execution data (saveDataErrorExecution: 'none') — so a
     failure was neither visible in n8n's own execution history nor
     diagnosable from our own system_events. The reason expression must now
-    include $prevNode.name (which node failed) and the actual error payload,
+    include the error node name and the actual error payload,
     and error executions must be retained.
     """
     for filename in ("persona-conversation-template.json",):
@@ -281,10 +334,13 @@ def test_fail_safe_handoff_captures_which_node_failed_and_why():
         )
         assert workflow["settings"]["saveDataErrorExecution"] == "all"
         fail_safe = next(
-            node for node in workflow["nodes"] if node.get("name") == "Fail safe human handoff"
+            node for node in workflow["nodes"] if node.get("id") == "failsafe"
         )
+        assert fail_safe["name"] == "Quarantine technical failure"
+        assert "/internal/conversations/technical-failure" in fail_safe["parameters"]["url"]
+        assert "fail-safe-handoff" not in fail_safe["parameters"]["url"]
         body = fail_safe["parameters"]["body"]
-        assert "$prevNode.name" in body
+        assert "failed_node" in body
         assert "$json.error" in body
         assert "http_code" in body
         assert "workflow_template" in body

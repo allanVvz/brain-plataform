@@ -164,3 +164,24 @@ def test_activated_event_exposes_published_runtime_status(monkeypatch):
     version, loaded = graph_json_v2_store.load_current("acme")
     assert version == 6
     assert loaded.status == "published"
+
+
+def test_latest_graph_event_is_scoped_in_postgrest(monkeypatch):
+    captured = {}
+
+    def fake_list_system_events(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        graph_json_v2_store.supabase_client,
+        "list_system_events",
+        fake_list_system_events,
+    )
+
+    assert graph_json_v2_store.latest_event("aurora", "aurora") is None
+    assert captured["payload_equals"] == {
+        "persona_slug": "aurora",
+        "brand_slug": "aurora",
+    }
+    assert captured["limit"] == 20

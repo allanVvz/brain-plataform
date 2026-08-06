@@ -416,6 +416,10 @@ def test_build_context_wires_golden_dataset_rag_chunks(monkeypatch):
     ]
     assert calls[0]["persona_id"] == "aurora-id"
     assert calls[0]["query"] == "Quanto custa o polimento?"
+    assert calls[0]["branch_anchor_node_id"] == "aurora-product-polish"
+    assert "aurora-product-polish" in calls[0]["allowed_node_ids"]
+    assert "aurora-product-interior" not in calls[0]["allowed_node_ids"]
+    assert context.active_branch_node_id == "aurora-product-polish"
 
 
 def test_build_context_survives_rag_search_failure(monkeypatch):

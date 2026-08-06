@@ -17,6 +17,7 @@ def send_to_webhook(
     payload: dict,
     secret: Optional[str] = None,
     timeout: float = 10.0,
+    response_limit: int = 300,
 ) -> tuple[int, str]:
     """POST a payload to an arbitrary n8n webhook URL.
 
@@ -35,7 +36,7 @@ def send_to_webhook(
         headers["X-Webhook-Token"] = secret
     with httpx.Client(timeout=timeout, verify=get_ca_bundle_path()) as client:
         resp = client.post(url, content=body, headers=headers)
-        return resp.status_code, (resp.text or "")[:300]
+        return resp.status_code, (resp.text or "")[:max(300, response_limit)]
 
 
 def _base() -> str:
@@ -160,6 +161,16 @@ def activate_workflow(workflow_id: str) -> dict[str, Any]:
     with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
         response = client.post(
             f"{_base()}/api/v1/workflows/{workflow_id}/activate",
+            headers=_headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def deactivate_workflow(workflow_id: str) -> dict[str, Any]:
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+        response = client.post(
+            f"{_base()}/api/v1/workflows/{workflow_id}/deactivate",
             headers=_headers(),
         )
         response.raise_for_status()

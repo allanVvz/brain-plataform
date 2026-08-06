@@ -19,6 +19,7 @@ from services import (
     graph_json_v2_validator,
     graph_markdown,
     graph_action_policy,
+    graph_conversation_contract,
     supabase_client,
 )
 
@@ -237,6 +238,7 @@ def commit(
     if graph.schema_version != "2.1":
         raise GraphValidationError(["commit requires schema_version 2.1"])
     graph = GraphJson.model_validate(graph.model_dump(mode="json"))
+    graph = graph_conversation_contract.materialize_qualification_questions(graph)
     graph.graph_version = expected_version + 1
     graph.status = "committed"
     graph.provenance.base_version = expected_version
@@ -344,6 +346,7 @@ def publish(
     session_id: str | None = None,
     current_version_override: int | None = None,
 ) -> dict[str, Any]:
+    graph = graph_conversation_contract.materialize_qualification_questions(graph)
     try:
         graph = graph_markdown.canonicalize_graph(graph)
     except graph_markdown.GraphMarkdownError as exc:

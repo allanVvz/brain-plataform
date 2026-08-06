@@ -4,6 +4,13 @@ import os
 from typing import Any
 
 
+_INSECURE_AUTH_SECRETS = {
+    "dev-only-ai-brain-auth-secret-change-me",
+    "local-dev-auth-secret-change-me",
+    "replace-with-url-safe-random-value",
+}
+
+
 def _bool_env(name: str) -> bool:
     value = (os.environ.get(name) or "").strip().lower()
     return value in {"1", "true", "yes", "on"}
@@ -16,6 +23,21 @@ def is_production_runtime() -> bool:
         or (os.environ.get("ENV", "").strip().lower() == "production")
         or (os.environ.get("PYTHON_ENV", "").strip().lower() == "production")
         or (os.environ.get("ENVIRONMENT", "").strip().lower() == "production")
+    )
+
+
+def get_auth_secret() -> str:
+    primary = (os.environ.get("AI_BRAIN_AUTH_SECRET") or "").strip()
+    fallback = (os.environ.get("NEXTAUTH_SECRET") or "").strip()
+    return primary or fallback
+
+
+def is_strong_auth_secret(secret: str) -> bool:
+    normalized = (secret or "").strip()
+    return (
+        len(normalized.encode("utf-8")) >= 32
+        and normalized.lower() not in _INSECURE_AUTH_SECRETS
+        and not normalized.lower().startswith("replace_with_")
     )
 
 
@@ -59,4 +81,6 @@ def validate_backend_env(strict: bool | None = None) -> list[str]:
             missing.append("SUPABASE_SERVICE_KEY")
         if not env["allowed_origins"]:
             missing.append("ALLOWED_ORIGINS")
+        if not is_strong_auth_secret(get_auth_secret()):
+            missing.append("AI_BRAIN_AUTH_SECRET (minimum 32 random characters)")
     return missing

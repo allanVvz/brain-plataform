@@ -1,0 +1,377 @@
+from __future__ import annotations
+
+import copy
+import sys
+from pathlib import Path
+
+import pytest
+
+
+API_ROOT = Path(__file__).resolve().parents[1] / "api"
+if str(API_ROOT) not in sys.path:
+    sys.path.insert(0, str(API_ROOT))
+
+from schemas.conversation import ConversationContext
+from services import graph_agent_runtime_v3, graph_compiler_v3, graph_proof_checker_v3
+
+
+PERSONA = {"id": "10000000-0000-0000-0000-000000000001", "slug": "generic"}
+
+
+def node(index: int, stable_id: str, *, parent_type: str = "knowledge", data=None, status="validated"):
+    return {
+        "id": f"20000000-0000-0000-0000-{index:012d}",
+        "node_type": parent_type,
+        "slug": stable_id.replace(":", "-"),
+        "title": stable_id,
+        "summary": stable_id,
+        "tags": [],
+        "status": status,
+        "metadata": {"graph_json_node_id": stable_id, **(data or {})},
+    }
+
+
+def edge(index: int, source: dict, target: dict, relation="contains", data=None):
+    return {
+        "id": f"30000000-0000-0000-0000-{index:012d}",
+        "source_node_id": source["id"],
+        "target_node_id": target["id"],
+        "relation_type": relation,
+        "weight": 1,
+        "metadata": {"active": True, "graph_json_edge_id": f"edge:{index}", **(data or {})},
+    }
+
+
+def compiled_fixture(*, accepted=None, depends_on=None, condition=None):
+    root = node(1, "persona:generic")
+    branch_a = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    branch_b = node(3, "branch:b", data={"capabilities": {"branch_anchor": True}})
+    q_a = node(4, "question:a", parent_type="faq", data={"question": "Qual é a metragem?"})
+    q_b = node(5, "question:b", parent_type="faq", data={"question": "Qual é a quantidade?"})
+    branch_a["metadata"]["qualification"] = {"fields": [{
+        "key": "metragem", "question_node_id": "question:a", "required": True,
+        "accepted_statuses": accepted or ["known"],
+        "value_schema": {"type": "number", "minimum": 0},
+        "depends_on": depends_on or [], "condition": condition,
+        "overwrite_policy": "explicit_correction",
+    }]}
+    branch_b["metadata"]["qualification"] = {"fields": [{
+        "key": "quantidade", "question_node_id": "question:b", "required": True,
+        "accepted_statuses": ["known"], "value_schema": {"type": "integer", "minimum": 1},
+    }]}
+    rows = [root, branch_a, branch_b, q_a, q_b]
+    edges = [
+        edge(1, root, branch_a), edge(2, root, branch_b),
+        edge(3, branch_a, q_a), edge(4, branch_b, q_b),
+    ]
+    return graph_compiler_v3.compile_graph(persona=PERSONA, node_rows=rows, edge_rows=edges)
+
+
+def publication(document):
+    return {
+        "id": "40000000-0000-0000-0000-000000000001",
+        "version": 1,
+        "checksum": document["checksum"],
+        "status": "active",
+        "document_json": document,
+    }
+
+
+def proposal(document, **updates):
+    contract = document["branch_contracts"]["branch:a"]
+    value = {
+        "branch_action": "select",
+        "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": contract["branch_path_checksum"],
+        "branch_evidence_span": "metragem",
+        "extracted_facts": [], "claims": [],
+        "next_question_node_id": "question:a",
+        "cited_node_ids": ["branch:a", "question:a"],
+        "cited_chunk_ids": ["chunk:a"],
+        "reply": "Posso te ajudar.",
+        "qualification_complete": False, "handoff_requested": False,
+    }
+    value.update(updates)
+    return value
+
+
+def check(document, value, *, ledger=None, active=None, message="quero informar a metragem"):
+    return graph_proof_checker_v3.check(
+        publication=publication(document),
+        contract=document["branch_contracts"][value["branch_anchor_node_id"]],
+        ledger=ledger or {"graph_checksum": document["checksum"], "facts": {}},
+        proposal=value, message=message, source_message_id="msg-1",
+        package_node_ids=set(document["branch_contracts"][value["branch_anchor_node_id"]]["closure_node_ids"]),
+        package_chunk_ids={"chunk:a", "chunk:b"},
+        active_branch_node_id=active,
+        branch_selection_allowed=active is None,
+        branch_switch_allowed=True,
+    )
+
+
+def test_compiler_uses_capability_and_keeps_branches_isolated():
+    document = compiled_fixture()
+    assert document["branch_anchors"] == ["branch:a", "branch:b"]
+    assert "question:b" not in document["branch_contracts"]["branch:a"]["closure_node_ids"]
+    assert "question:a" not in document["branch_contracts"]["branch:b"]["closure_node_ids"]
+    assert document["compiler_contract"]["path"].endswith("graph-agent-runtime-v3.md")
+
+
+def test_embedding_provider_auto_selects_real_local_or_openai(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("GRAPH_RAG_EMBEDDING_PROVIDER", "auto")
+    assert graph_compiler_v3.embedding_provider() == "local"
+    assert graph_compiler_v3.embedding_model_name() == graph_compiler_v3.LOCAL_EMBEDDING_MODEL
+
+    monkeypatch.setenv("OPENAI_API_KEY", "configured-for-selection-only")
+    assert graph_compiler_v3.embedding_provider() == "openai"
+    assert graph_compiler_v3.embedding_model_name() == "text-embedding-3-small"
+
+
+def test_native_embedding_is_losslessly_padded_for_pgvector_dimension():
+    native = [0.25, -0.5, 1.0]
+    projected = graph_compiler_v3._fit_embedding_dimension(native)
+    assert projected[:3] == native
+    assert len(projected) == graph_compiler_v3.EMBEDDING_DIMENSION
+    assert all(value == 0.0 for value in projected[3:])
+
+    with pytest.raises(RuntimeError, match="invalid native dimension"):
+        graph_compiler_v3._fit_embedding_dimension(
+            [1.0] * (graph_compiler_v3.EMBEDDING_DIMENSION + 1)
+        )
+
+
+def test_semantic_chunks_index_executable_contract_data():
+    chunks = graph_compiler_v3.semantic_chunks({
+        "id": "rule:generic", "title": "Regra genérica", "summary": "Regra",
+        "data": {
+            "claims": [{"claim_type": "availability", "policy": {"mode": "informational"}}],
+            "handoff_rule": {"condition": "qualification_complete"},
+            "validators": [{"kind": "json_schema"}],
+        },
+    })
+    kinds = {chunk["kind"] for chunk in chunks}
+    assert {"claims", "rule", "validators"}.issubset(kinds)
+
+
+def test_compiler_rejects_primary_ambiguity_and_dependency_cycle():
+    root = node(1, "root")
+    other = node(2, "other")
+    branch = node(3, "branch", data={"capabilities": {"branch_anchor": True}})
+    with pytest.raises(graph_compiler_v3.GraphCompilationError, match="ambiguous_primary_path"):
+        graph_compiler_v3.compile_graph(
+            persona=PERSONA, node_rows=[root, other, branch],
+            edge_rows=[edge(1, root, branch), edge(2, other, branch)],
+        )
+
+    q1 = node(4, "q1", parent_type="faq", data={"question": "Q1?"})
+    q2 = node(5, "q2", parent_type="faq", data={"question": "Q2?"})
+    branch["metadata"]["qualification"] = {"fields": [
+        {"key": "a", "question_node_id": "q1", "depends_on": ["b"]},
+        {"key": "b", "question_node_id": "q2", "depends_on": ["a"]},
+    ]}
+    with pytest.raises(graph_compiler_v3.GraphCompilationError, match="field_dependency_cycle"):
+        graph_compiler_v3.compile_graph(
+            persona=PERSONA, node_rows=[root, branch, q1, q2],
+            edge_rows=[edge(3, root, branch), edge(4, branch, q1), edge(5, branch, q2)],
+        )
+
+
+def test_compiler_rejects_question_owned_by_another_branch():
+    root = node(1, "root")
+    branch_a = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    branch_b = node(3, "branch:b", data={"capabilities": {"branch_anchor": True}})
+    question_b = node(4, "question:b", parent_type="faq", data={"question": "Pergunta B?"})
+    branch_a["metadata"]["qualification"] = {"fields": [{
+        "key": "arbitrary", "question_node_id": "question:b",
+        "value_schema": {"type": "string"},
+    }]}
+    with pytest.raises(graph_compiler_v3.GraphCompilationError, match="field_question_wrong_scope"):
+        graph_compiler_v3.compile_graph(
+            persona=PERSONA,
+            node_rows=[root, branch_a, branch_b, question_b],
+            edge_rows=[
+                edge(1, root, branch_a), edge(2, root, branch_b),
+                edge(3, branch_b, question_b),
+            ],
+        )
+
+@pytest.mark.parametrize("status", ["unknown", "declined", "needs_confirmation"])
+def test_semantic_fact_statuses_are_contract_owned(status):
+    document = compiled_fixture(accepted=["known", status])
+    value = proposal(document, branch_action="keep", branch_evidence_span="", extracted_facts=[{
+        "field_key": "metragem", "owner_node_id": "branch:a", "status": status,
+        "value": None, "source_message_id": "msg-1", "evidence_span": "não sei",
+        "confidence": 0.9,
+    }], next_question_node_id=None, qualification_complete=True,
+                     cited_node_ids=["branch:a"], cited_chunk_ids=[])
+    proof = check(document, value, active="branch:a", message="não sei")
+    assert proof["valid"], proof["errors"]
+    assert proof["missing_fields"] == []
+
+
+def test_unknown_rejected_and_json_schema_is_generic():
+    document = compiled_fixture()
+    unknown = proposal(document, extracted_facts=[{
+        "field_key": "metragem", "owner_node_id": "branch:a", "status": "unknown",
+        "value": None, "source_message_id": "msg-1", "evidence_span": "não sei", "confidence": 1,
+    }])
+    assert "fact_status_not_accepted:metragem:unknown" in check(document, unknown, message="não sei")["errors"]
+    invalid = proposal(document, extracted_facts=[{
+        "field_key": "metragem", "owner_node_id": "branch:a", "status": "known",
+        "value": "grande", "source_message_id": "msg-1", "evidence_span": "grande", "confidence": 1,
+    }])
+    invalid_proof = check(document, invalid, message="grande")
+    assert any(error.startswith("fact_schema_invalid:metragem") for error in invalid_proof["errors"])
+    assert invalid_proof["missing_fields"] == ["metragem"]
+    assert invalid_proof["accepted_facts"] == []
+
+
+def test_short_answer_keep_and_switch_require_literal_evidence():
+    document = compiled_fixture()
+    contract = document["branch_contracts"]["branch:a"]
+    keep = proposal(document, branch_action="keep", branch_evidence_span="",
+                    branch_path_checksum=contract["branch_path_checksum"])
+    assert check(document, keep, active="branch:a", message="2020")["valid"]
+    switched = copy.deepcopy(keep)
+    switched.update({
+        "branch_action": "switch", "branch_anchor_node_id": "branch:b",
+        "branch_path_checksum": document["branch_contracts"]["branch:b"]["branch_path_checksum"],
+        "branch_evidence_span": "outra coisa", "next_question_node_id": "question:b",
+        "cited_node_ids": ["branch:b", "question:b"], "cited_chunk_ids": ["chunk:b"],
+    })
+    bad = check(document, switched, active="branch:a", message="quero quantidade")
+    assert "branch_evidence_not_literal" in bad["errors"]
+
+
+def test_fact_correction_cannot_overwrite_silently():
+    document = compiled_fixture()
+    value = proposal(document, branch_action="keep", branch_evidence_span="", extracted_facts=[{
+        "field_key": "metragem", "owner_node_id": "branch:a", "status": "known",
+        "value": 20, "source_message_id": "msg-1", "evidence_span": "20", "confidence": 1,
+    }], next_question_node_id=None, qualification_complete=True,
+                     cited_node_ids=["branch:a"], cited_chunk_ids=[])
+    ledger = {"graph_checksum": document["checksum"], "facts": {
+        "metragem": {"status": "known", "value": 10, "confidence": 1}
+    }}
+    silent = check(document, value, ledger=ledger, active="branch:a", message="20")
+    assert "fact_correction_not_explicit:metragem" in silent["errors"]
+    explicit = check(document, value, ledger=ledger, active="branch:a", message="na verdade 20")
+    assert explicit["valid"], explicit["errors"]
+
+
+def test_claims_and_handoff_need_published_policy():
+    document = compiled_fixture()
+    value = proposal(document, claims=[{
+        "claim_type": "price", "value": {"amount": 10},
+        "evidence_node_ids": ["branch:a"], "evidence_chunk_ids": ["chunk:a"],
+    }])
+    proof = check(document, value)
+    assert "claim_not_authorized:price" in proof["errors"]
+    value["handoff_requested"] = True
+    assert "handoff_not_authorized" in check(document, value)["errors"]
+
+
+def test_claim_evidence_and_handoff_condition_are_exactly_authorized():
+    document = compiled_fixture()
+    contract = document["branch_contracts"]["branch:a"]
+    contract["claims"] = [{
+        "claim_type": "price", "policy": {"mode": "informational"},
+        "evidence_node_ids": ["branch:a"],
+    }]
+    value = proposal(document, claims=[{
+        "claim_type": "price", "value": {"amount": 10},
+        "evidence_node_ids": ["question:a"], "evidence_chunk_ids": [],
+    }])
+    assert "claim_evidence_not_authorized:price" in check(document, value)["errors"]
+
+    contract["handoff_rules"] = [{
+        "node_id": "rule:handoff", "condition": "qualification_complete",
+    }]
+    completed = proposal(
+        document, branch_action="keep", branch_evidence_span="",
+        extracted_facts=[{
+            "field_key": "metragem", "owner_node_id": "branch:a",
+            "status": "known", "value": 10, "source_message_id": "msg-1",
+            "evidence_span": "10", "confidence": 1,
+        }], claims=[], next_question_node_id=None,
+        cited_node_ids=["branch:a"], cited_chunk_ids=[],
+        qualification_complete=True, handoff_requested=False,
+    )
+    missing_handoff = check(document, completed, active="branch:a", message="10")
+    assert "handoff_required_by_rule" in missing_handoff["errors"]
+    completed["handoff_requested"] = True
+    assert check(document, completed, active="branch:a", message="10")["valid"]
+
+
+def test_dependencies_and_conditions_are_checked_without_field_hardcodes():
+    root = node(1, "root")
+    branch = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    q1 = node(3, "q:base", parent_type="faq", data={"question": "Base?"})
+    q2 = node(4, "q:conditional", parent_type="faq", data={"question": "Condicional?"})
+    branch["metadata"]["qualification"] = {"fields": [
+        {"key": "base", "question_node_id": "q:base", "value_schema": {"type": "string"}},
+        {"key": "conditional", "question_node_id": "q:conditional",
+         "value_schema": {"type": "string"}, "depends_on": ["base"],
+         "condition": {"field": "base", "operator": "equals", "value": "yes"}},
+    ]}
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA, node_rows=[root, branch, q1, q2],
+        edge_rows=[edge(1, root, branch), edge(2, branch, q1), edge(3, branch, q2)],
+    )
+    value = {
+        **proposal(document),
+        "branch_action": "keep", "branch_evidence_span": "",
+        "extracted_facts": [{
+            "field_key": "conditional", "owner_node_id": "branch:a",
+            "status": "known", "value": "value", "source_message_id": "msg-1",
+            "evidence_span": "value", "confidence": 1,
+        }],
+        "next_question_node_id": "q:base", "cited_node_ids": ["branch:a", "q:base"],
+        "cited_chunk_ids": [],
+    }
+    proof = check(document, value, active="branch:a", message="value")
+    assert "fact_dependency_unsatisfied:conditional:base" in proof["errors"]
+    assert "fact_condition_not_met:conditional" in proof["errors"]
+
+
+def test_strict_model_parse_failure_emits_only_published_fallback():
+    document = compiled_fixture()
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], messages=[], cart={"facts": {}},
+        rag_nodes=[], rag_paths=[], graph_contract=document["branch_contracts"]["branch:a"],
+        active_branch_node_id="branch:a", branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+    )
+    decision, response = graph_agent_runtime_v3.decide(
+        context,
+        model_observation={"proposal": proposal(document), "proposal_parse_errors": ["missing:claims"]},
+    )
+    assert decision.intent == "published_fallback"
+    assert response.reply_text == "Qual é a metragem?"
+    assert response.handoff_required is False
+
+
+def test_published_question_is_composed_not_required_in_model_reply():
+    document = compiled_fixture()
+    value = proposal(document, reply="Certo.")
+    proof = check(document, value)
+    assert proof["valid"], proof["errors"]
+    emitted = graph_proof_checker_v3.compose_published_question(
+        reply=value["reply"], next_question_node_id="question:a",
+        contract=document["branch_contracts"]["branch:a"],
+    )
+    assert emitted == "Certo.\n\nQual é a metragem?"
+
+
+def test_semantic_chunking_separates_question_answer_and_field_intent():
+    node_value = {
+        "id": "n", "title": "FAQ", "summary": "Resumo", "data": {
+            "question": "Pergunta?", "content": {"answer": "Resposta."},
+            "aliases": ["apelido"], "qualification": {"fields": [{
+                "key": "campo", "question_node_id": "q", "normalization": "texto",
+            }]},
+        },
+    }
+    kinds = {chunk["kind"] for chunk in graph_compiler_v3.semantic_chunks(node_value)}
+    assert {"question", "answer", "aliases", "field_intent"}.issubset(kinds)

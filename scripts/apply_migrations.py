@@ -139,6 +139,15 @@ def finalize_platform_grants(conn) -> None:
             revoke all on table public.agent_sessions from public, anon, authenticated;
             revoke all on table public.agent_runs from public, anon, authenticated;
             revoke all on table public.agent_run_steps from public, anon, authenticated;
+            -- GraphRAG v3 compiled publications and conversational proofs are
+            -- internal audit/decision state, never public Data API surface.
+            revoke all on table public.graph_publications from public, anon, authenticated;
+            revoke all on table public.graph_node_coordinates from public, anon, authenticated;
+            revoke all on table public.graph_branch_memberships from public, anon, authenticated;
+            revoke all on table public.graph_branch_contracts from public, anon, authenticated;
+            revoke all on table public.conversation_ledgers from public, anon, authenticated;
+            revoke all on table public.conversation_facts from public, anon, authenticated;
+            revoke all on table public.conversation_turn_proofs from public, anon, authenticated;
             """
         )
     conn.commit()

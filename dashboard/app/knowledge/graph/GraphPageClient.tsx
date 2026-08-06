@@ -1,8 +1,8 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import {
   RefreshCw,
   Search,
@@ -159,6 +159,7 @@ export default function GraphPageClient() {
   const [pendingGraphSnapshot, setPendingGraphSnapshot] = useState<GraphPayload | null>(null);
   const [sharedSessionId, setSharedSessionId] = useState<string | null>(null);
   const [sharedPlanJson, setSharedPlanJson] = useState<any | null>(null);
+  const graphLoadRequestId = useRef(0);
 
   // ── URL-driven state ──────────────────────────────────────────
   const focus = searchParams.get("focus") || "";
@@ -199,6 +200,16 @@ export default function GraphPageClient() {
   useEffect(() => {
     const syncFromHeader = () => {
       const stored = window.localStorage.getItem("ai-brain-persona-slug") || "";
+      // Clear tenant-owned state synchronously with the global persona event.
+      // Waiting for the next effect/fetch leaves the previous graph visible
+      // while the new persona document is in flight.
+      graphLoadRequestId.current += 1;
+      setDocGraph(null);
+      setDocVersion(0);
+      setData({ nodes: [], edges: [], meta: {} } as GraphPayload);
+      setSelectedNode(null);
+      setSelectedNodes([]);
+      setGraphNotice(null);
       setHeaderPersonaSlug(stored);
     };
     syncFromHeader();
@@ -221,19 +232,27 @@ export default function GraphPageClient() {
   }, []);
 
   const load = useCallback(async () => {
+    const requestId = ++graphLoadRequestId.current;
     setLoading(true);
+    const emptyPayload = { nodes: [], edges: [], meta: {} } as GraphPayload;
+    // Clear tenant-owned state before awaiting the next persona document. This
+    // prevents even a transient render of the previous client's graph.
+    setDocGraph(null);
+    setDocVersion(0);
+    setData(emptyPayload);
+    setSelectedNode(null);
+    setSelectedNodes([]);
+    setGraphNotice(null);
     try {
       if (!headerPersonaSlug) {
         const catalog = await api.knowledgeCatalog().catch(() => ({ catalogs: [] }));
+        if (requestId !== graphLoadRequestId.current) return emptyPayload;
         setPersonaSummaries(catalog?.catalogs || []);
-        const emptyPayload = { nodes: [], edges: [], meta: {} } as GraphPayload;
-        setDocGraph(null);
-        setDocVersion(0);
-        setData(emptyPayload);
         return emptyPayload;
       }
       setPersonaSummaries([]);
       const currentDoc = await api.getGraphDocument(headerPersonaSlug);
+      if (requestId !== graphLoadRequestId.current) return emptyPayload;
       const parsed = parseGraphJsonV2Payload(currentDoc);
       if (parsed) {
         const v2Payload = parsed as GraphPayload;
@@ -243,14 +262,24 @@ export default function GraphPageClient() {
         setData(v2Payload);
         return v2Payload;
       }
-      const emptyPayload = { nodes: [], edges: [], meta: {} } as GraphPayload;
-      setDocGraph(null);
-      setDocVersion(0);
-      setData(emptyPayload);
       setGraphNotice({ tone: "error", text: "Nenhum Graph JSON v2 publicado para esta persona." });
       return emptyPayload;
+    } catch (error) {
+      if (requestId !== graphLoadRequestId.current) return emptyPayload;
+      // A persona pode existir sem um documento canônico publicado. Sempre
+      // descarte o payload anterior para não exibir o grafo de outro cliente.
+      setPersonaSummaries([]);
+      setGraphNotice({
+        tone: "error",
+        text: error instanceof ApiError && error.status === 404
+          ? "Nenhum Graph JSON v2 publicado para esta persona."
+          : error instanceof Error
+            ? error.message
+            : "Falha ao carregar o Graph JSON desta persona.",
+      });
+      return emptyPayload;
     } finally {
-      setLoading(false);
+      if (requestId === graphLoadRequestId.current) setLoading(false);
     }
   }, [headerPersonaSlug]);
 

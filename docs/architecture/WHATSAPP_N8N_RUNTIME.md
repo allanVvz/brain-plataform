@@ -181,7 +181,49 @@ Nenhum teste automatizado ainda cobre a camada Evolution/Baileys real
 automatizada. Um teste automatizado não pegaria isso mesmo existindo,
 porque o bug é externo (na biblioteca Baileys), não no nosso código.
 
-## 6. Escopo de campanhas em massa
+## 6. Guard de conteudo duplicado (mitigacao do risco da secao 4)
+
+**Adicionado em 2026-08-05**, em resposta direta ao risco da secao 4: quando
+o ACK de entrega nao volta (bug conhecido do Evolution/Baileys com `@lid`),
+um operador ou agente tende a digitar a mesma resposta de novo como um
+**novo envio manual** — o que produz uma nova linha em `lead_buffer` com
+`idempotency_key`/`correlation_id` proprios. A idempotencia existente
+(`mark_whatsapp_attempt`, `enqueue_whatsapp_envelope` com `ON CONFLICT
+(idempotency_key)`) so impede duplicar a *mesma linha*; ela nao impede essa
+segunda linha, com o mesmo texto, de sair de verdade — dobrando o volume de
+envios reais para aquele lead, exatamente o padrao que a WhatsApp associa a
+abuso/automacao.
+
+`whatsapp_outbox._guard_against_duplicate_content` (chamado dentro de
+`enqueue_outbound`, depois da checagem de idempotency_key e antes do
+`enqueue_whatsapp_envelope`) fecha essa lacuna:
+
+- `supabase_client.find_recent_duplicate_whatsapp_outbound` procura, para o
+  mesmo `lead_ref` + `channel_binding_id`, um outbound recente (`direction
+  = 'outbound'`) cujo texto normalizado (`normalize_whatsapp_text`: trim +
+  colapsa espacos + lowercase) bate com o texto do novo envio, dentro de
+  uma janela de tempo.
+- Se encontrar, bloqueia o novo envio com HTTP 409 **antes** de criar a
+  linha, e chama `record_whatsapp_safety_violation` com
+  `violation_key = "duplicate_content_suppressed:{lead_ref}:{correlation_id}"`
+  — reaproveitando o contador/pausa ja existente (3 violacoes distintas em
+  5 minutos pausam o binding inteiro, `metadata.safety_paused = true`).
+  Nao foi criado nenhum mecanismo de contagem novo.
+- Parametrizado por `workflow_bindings.metadata`, sem literal de
+  persona/cliente/servico em nenhum ponto do codigo:
+  - `duplicate_guard_window_seconds` (default `300`s, em
+    `whatsapp_outbox.DEFAULT_DUPLICATE_GUARD_WINDOW_SECONDS`) — ajustavel
+    por binding.
+  - `duplicate_guard_enabled: false` desliga o guard para aquele binding
+    (ex.: campanhas legitimamente intencionais para reenviar o mesmo texto
+    a um lead dentro da janela).
+
+Nao resolve o bug externo do Evolution/Baileys (secao 4) — so reduz o
+numero de envios reais duplicados que o proprio sistema gera quando um
+humano reage a uma entrega ambigua. Testes:
+`tests/test_whatsapp_duplicate_content_guard.py`.
+
+## 7. Escopo de campanhas em massa
 
 Campanhas compartilham `lead_buffer`, mas nunca o comportamento implicito de
 uma conversa. A migration 087 adiciona `message_origin`, `campaign_id`,

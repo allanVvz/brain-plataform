@@ -69,6 +69,14 @@ class FailSafeHandoffRequest(StrictModel):
     diagnostic: dict[str, Any] = Field(default_factory=dict)
 
 
+class TechnicalFailureRequest(StrictModel):
+    lead_ref: int
+    buffer_id: str
+    reason: str
+    correlation_id: str
+    diagnostic: dict[str, Any] = Field(default_factory=dict)
+
+
 @router.post("/context", response_model=ConversationContext)
 def context(
     body: ContextRequest,
@@ -161,3 +169,35 @@ def fail_safe_handoff(
         source="routes.conversations",
     )
     return {"ok": True, "handoff": True, "ai_paused": True}
+
+
+@router.post("/technical-failure")
+def technical_failure(
+    body: TechnicalFailureRequest,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+) -> dict:
+    """Quarantine a failed turn without inventing a commercial handoff."""
+    _authorize(x_webhook_token)
+    lead = conversation_runtime.supabase_client.get_lead_by_ref(body.lead_ref) or {}
+    conversation_runtime.supabase_client.complete_whatsapp_buffer(
+        body.buffer_id,
+        "dead_letter",
+        error=body.reason[:1000],
+    )
+    conversation_runtime.supabase_client.insert_event(
+        {
+            "event_type": "conversation.technical_failure",
+            "entity_type": "lead",
+            "entity_id": str(body.lead_ref),
+            "persona_id": lead.get("persona_id"),
+            "payload": body.model_dump(),
+        },
+        level="error",
+        source="routes.conversations",
+    )
+    return {
+        "ok": False,
+        "technical_failure": True,
+        "handoff": False,
+        "ai_paused": bool(lead.get("ai_paused")),
+    }

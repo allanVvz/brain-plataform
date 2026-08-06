@@ -15,6 +15,9 @@ class IntegrationCredentialsBody(BaseModel):
     service_account_json: Optional[Any] = None
     spreadsheet_id: Optional[str] = None
     api_key: Optional[str] = None
+    model: Optional[str] = None
+    endpoint: Optional[str] = None
+    reply_source: Optional[str] = None
     base_id: Optional[str] = None
     # Meta (WhatsApp Business catalog)
     access_token: Optional[str] = None
@@ -28,6 +31,9 @@ class IntegrationValidateBody(BaseModel):
     service_account_json: Optional[Any] = None
     spreadsheet_id: Optional[str] = None
     api_key: Optional[str] = None
+    model: Optional[str] = None
+    endpoint: Optional[str] = None
+    reply_source: Optional[str] = None
     base_id: Optional[str] = None
     access_token: Optional[str] = None
     business_id: Optional[str] = None
@@ -97,6 +103,9 @@ def _public_binding(binding: dict[str, Any] | None) -> dict[str, Any] | None:
                 "decision_owner",
                 "transport_mode",
                 "pipeline_contract",
+                "runtime_version",
+                "model",
+                "reply_source",
             )
             if metadata.get(key) is not None
         },

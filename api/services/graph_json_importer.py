@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from schemas.graph_json_v2 import Edge, GraphJson, Node
-from services import graph_json_v2_validator, supabase_client
+from services import graph_conversation_contract, graph_json_v2_validator, supabase_client
 from services.vault_sync import VAULT_PATH as CONFIGURED_VAULT_PATH
 
 
@@ -68,7 +68,13 @@ def _content_hash(content: str) -> str:
 
 def _node_markdown(node: Node) -> str:
     data = node.data or {}
-    markdown = str(data.get("markdown") or data.get("content") or "").strip()
+    raw_content = data.get("content")
+    if isinstance(raw_content, dict) and node.node_type == "faq":
+        question = str(raw_content.get("question") or data.get("question") or node.label or "").strip()
+        answer = str(raw_content.get("answer") or data.get("answer") or "").strip()
+        markdown = f"# {question}" + (f"\n\n{answer}" if answer else "")
+    else:
+        markdown = str(data.get("markdown") or raw_content or "").strip()
     if markdown:
         return markdown
     title = node.label or node.slug
@@ -306,6 +312,9 @@ def _project_rag_document(
     """Idempotently project one approved Markdown node to one RAG chunk."""
     body = _projected_body(graph, node)
     hierarchy_path = _branch_path(graph, node)
+    coordinate = graph_conversation_contract.coordinate_for_node(
+        graph, node.id, graph_version=version
+    )
     now_iso = datetime.now(timezone.utc).isoformat()
     action_node_id = action_node.id if action_node else None
     destination_id = action_node.action.destination_id if action_node and action_node.action else None
@@ -317,7 +326,8 @@ def _project_rag_document(
     metadata = {
         **(node.data or {}),
         "source": "graph_json_markdown",
-        "source_node_id": graph_node.get("id"),
+        "source_node_id": node.id,
+        "knowledge_node_id": graph_node.get("id"),
         "graph_json_node_id": node.id,
         "graph_id": graph.graph_id,
         "graph_version": version,
@@ -327,6 +337,7 @@ def _project_rag_document(
         "action_node_id": action_node_id,
         "destination_id": destination_id,
         "active": True,
+        **coordinate,
     }
     entry = supabase_client.upsert_knowledge_rag_entry(
         {
@@ -378,13 +389,15 @@ def _project_rag_document(
                 "embedding_model": embedding_profile,
                 "metadata": {
                     "source": "graph_json_markdown",
-                    "source_node_id": graph_node.get("id"),
+                    "source_node_id": node.id,
+                    "knowledge_node_id": graph_node.get("id"),
                     "graph_json_node_id": node.id,
                     "graph_version": version,
                     "graph_checksum": graph_checksum,
                     "hierarchy_path": hierarchy_path,
                     "chunk_status": "pending_embedding",
                     "active": True,
+                    **coordinate,
                 },
                 **({
                     "action_node_id": action_node_id,
@@ -614,6 +627,12 @@ def import_graph_json(
     graph_nodes_by_doc_id: dict[str, dict] = {}
     item_ids: list[str] = []
     written_files: list[str] = []
+    projected_rows = supabase_client.list_graph_json_projection_nodes(persona_id)
+    projections_by_doc_id: dict[str, list[dict[str, Any]]] = {}
+    for projected in projected_rows:
+        stable_id = str((projected.get("metadata") or {}).get("graph_json_node_id") or "")
+        if stable_id:
+            projections_by_doc_id.setdefault(stable_id, []).append(projected)
 
     for node in graph_json.nodes:
         metadata = dict(node.data or {})
@@ -636,12 +655,8 @@ def import_graph_json(
             graph_checksum=graph_checksum,
         )
         if node.node_type in {"persona", "embedded", "gallery", "marketing_workspace"}:
-            if graph_json.schema_version == "2.1" and node.node_class == "action":
-                database_node_type = "action"
-            else:
-                database_node_type = "embed" if node.node_type == "embedded" else node.node_type
-            graph_node = supabase_client.upsert_knowledge_node(
-                {
+            database_node_type = "embed" if node.node_type == "embedded" else node.node_type
+            node_payload = {
                     "persona_id": persona_id,
                     "node_type": database_node_type,
                     "slug": node.slug,
@@ -651,7 +666,41 @@ def import_graph_json(
                     "metadata": node_meta,
                     "status": "validated" if node.node_type == "persona" else _node_status(node),
                 }
+            matches = projections_by_doc_id.get(node.id) or []
+            preferred = next(
+                (row for row in matches if row.get("node_type") == database_node_type),
+                matches[0] if matches else None,
             )
+            if preferred:
+                graph_node = supabase_client.update_knowledge_node(
+                    str(preferred["id"]),
+                    {
+                        "title": node_payload["title"],
+                        "summary": node_payload["summary"],
+                        "tags": node_payload["tags"],
+                        "metadata": {**(preferred.get("metadata") or {}), **node_meta},
+                        "status": node_payload["status"],
+                    },
+                    mark_related_faqs=False,
+                )
+                graph_node = {**preferred, **(graph_node or {})}
+                for duplicate in matches:
+                    if duplicate.get("id") == preferred.get("id"):
+                        continue
+                    supabase_client.update_knowledge_node(
+                        str(duplicate["id"]),
+                        {"metadata": {
+                            **(duplicate.get("metadata") or {}),
+                            "active": False,
+                            "projection_duplicate_of": preferred["id"],
+                            "projection_removed_in_version": version,
+                        }},
+                        mark_related_faqs=False,
+                    )
+                    for duplicate_edge in supabase_client.list_edges_for_nodes([str(duplicate["id"])]):
+                        supabase_client.delete_knowledge_edge(str(duplicate_edge["id"]))
+            else:
+                graph_node = supabase_client.upsert_knowledge_node(node_payload)
             if not graph_node or not graph_node.get("id"):
                 raise RuntimeError(f"knowledge_node import returned no id for {node.id}")
             graph_nodes_by_doc_id[node.id] = graph_node
@@ -801,9 +850,7 @@ def import_graph_json(
         )
 
     active_doc_node_ids = set(graph_nodes_by_doc_id)
-    active_doc_edge_ids = {
-        edge.id for edge in graph_json.edges if edge.lifecycle.status != "revoked"
-    }
+    active_projection_edge_ids = set(edge_ids)
     nodes_deactivated = 0
     edges_deactivated = 0
     stale_nodes = supabase_client.list_graph_json_projection_nodes(persona_id)
@@ -831,7 +878,7 @@ def import_graph_json(
     for stale in stale_edges:
         stale_meta = stale.get("metadata") or {}
         doc_edge_id = stale_meta.get("graph_json_edge_id")
-        if not doc_edge_id or doc_edge_id in active_doc_edge_ids:
+        if not doc_edge_id or stale.get("id") in active_projection_edge_ids:
             continue
         if supabase_client.delete_knowledge_edge(stale.get("id")):
             edges_deactivated += 1
@@ -869,6 +916,9 @@ def import_graph_json(
         )
 
     rag_link_ids: list[str] = []
+    graph_coordinates = graph_conversation_contract.coordinates(
+        graph_json, graph_version=version
+    )
     for edge in graph_json.edges:
         relation = edge.relation_type or edge.relation
         if relation == "publishes_to" or edge.lifecycle.status == "revoked":
@@ -911,6 +961,21 @@ def import_graph_json(
                         "destination_id": destination_id,
                         "primary_tree": edge.primary_tree,
                         "active": True,
+                        "source_coordinate": graph_coordinates.get(edge.source),
+                        "target_coordinate": graph_coordinates.get(edge.target),
+                        "path_checksum": "sha256:" + _content_hash(
+                            json.dumps(
+                                {
+                                    "graph_version": version,
+                                    "edge_id": edge.id,
+                                    "source": edge.source,
+                                    "target": edge.target,
+                                },
+                                ensure_ascii=False,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            )
+                        ),
                     },
                     **({
                         "action_node_id": action_id,

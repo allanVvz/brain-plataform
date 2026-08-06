@@ -160,6 +160,47 @@ def test_retry_backoff_and_dead_letter_are_bounded(monkeypatch):
     assert dead[0]["args"][:2] == ("b", "dead_letter")
 
 
+def test_decision_response_failure_reconciles_an_already_committed_turn(monkeypatch):
+    events: list[tuple] = []
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.reconcile_committed_graph_inbound",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "reconciled": True,
+            "outbound_id": "outbound-1",
+        },
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.complete_whatsapp_buffer",
+        lambda *_args, **_kwargs: pytest.fail("committed inbound was paused"),
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.record_whatsapp_safety_violation",
+        lambda **_kwargs: pytest.fail("committed inbound raised a safety violation"),
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.event_emitter.emit",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+    )
+
+    WhatsAppDispatchWorker()._retry_or_dead_letter(
+        {
+            "id": "inbound-1",
+            "direction": "inbound",
+            "persona_id": "persona-1",
+            "lead_ref": 29,
+            "correlation_id": "correlation-1",
+            "attempt_count": 1,
+            "max_attempts": 5,
+            "_attempt_started": "decision",
+        },
+        RuntimeError("n8n response was truncated after commit"),
+    )
+
+    assert events[0][0][0] == "whatsapp.inbound_commit_reconciled"
+    assert events[0][1]["payload"]["outbound_id"] == "outbound-1"
+
+
 def test_binding_payload_never_serializes_secret_metadata():
     payload = integrations._public_binding({
         "id": "binding", "persona_id": "baita", "active": True,

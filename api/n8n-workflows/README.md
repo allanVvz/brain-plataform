@@ -12,6 +12,16 @@ persona, agente, webhook e credencial. Prompt, políticas, campos e conhecimento
 vêm do Graph JSON publicado e dos `context_cards`; nunca existe função ou
 template específico por cliente.
 
+O template `graph_agentic_v3` usa proposta estruturada, proof checker e um
+único repair loop por expansão do galho. Falha técnica de grounding não vira
+handoff comercial; após a tentativa de reparo, a resposta segura é a pergunta
+exata publicada no node de qualificação pendente.
+
+O contrato em Markdown faz parte do fluxo auditável:
+`api/contracts/graph-agent-runtime-v3.md` é checksumado dentro de cada
+publicação, e `docs/runbooks/graph-agent-runtime-v3-rollout.md` governa
+ativação, E2E e rollback.
+
 Os exports com nomes de personas são legados de auditoria e não são importados
 nem usados pelo provisionador. O bootstrap local importa somente os workflows
 de transporte `whatsapp-*`; workflows de conversa são criados pela plataforma.

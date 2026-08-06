@@ -11,6 +11,8 @@ sys.path.insert(0, str(ROOT))
 
 from schemas.graph_json_v2 import Edge, EdgeLifecycle, GraphJson, PublicationGrant
 from services import (
+    graph_compiler_v3,
+    graph_conversation_contract,
     graph_document_publisher,
     graph_json_v21_adapter,
     graph_json_v2_store,
@@ -30,6 +32,87 @@ def build_graph() -> GraphJson:
     """
     legacy = GraphJson.model_validate(json.loads(FIXTURE.read_text(encoding="utf-8")))
     graph = graph_json_v21_adapter.upgrade_to_v21(legacy)
+    graph = graph_conversation_contract.materialize_qualification_questions(graph)
+    persona_node = next(node for node in graph.nodes if node.node_type == "persona")
+    appointment_policy = (persona_node.data or {}).get("appointment_policy") or {}
+    question_ids = appointment_policy.get("field_question_node_ids") or {}
+    conditional_fields = appointment_policy.get("conditional_fields") or {}
+
+    def value_schema(field_key: str) -> dict:
+        # Schema belongs to the published Aurora graph; the runtime never knows
+        # these field names or their vertical in advance.
+        if field_key == "vehicle_year":
+            return {"anyOf": [
+                {"type": "string", "pattern": "^[0-9]{4}$"},
+                {"type": "integer", "minimum": 1886, "maximum": 2200},
+            ]}
+        if field_key == "can_visit_in_person":
+            return {"type": ["string", "boolean"]}
+        return {"type": "string", "minLength": 1}
+
+    for node in graph.nodes:
+        data = dict(node.data or {})
+        capabilities = dict(data.get("capabilities") or {})
+        if node.node_type == "product":
+            capabilities["branch_anchor"] = True
+            booking = data.get("booking") if isinstance(data.get("booking"), dict) else {}
+            required = [str(field) for field in booking.get("required_fields") or [] if field]
+            for field_key, branch_slugs in conditional_fields.items():
+                if node.slug in (branch_slugs or []) and field_key not in required:
+                    required.append(str(field_key))
+            data["qualification"] = {"fields": [{
+                "key": field_key,
+                "owner_node_id": node.id,
+                "question_node_id": question_ids.get(field_key),
+                "required": True,
+                "accepted_statuses": (
+                    ["known", "unknown"] if field_key == "vehicle_color" else ["known"]
+                ),
+                "value_schema": value_schema(field_key),
+                "normalization": (
+                    "Retorne quatro dígitos." if field_key == "vehicle_year" else None
+                ),
+                "depends_on": [],
+                "condition": None,
+                "priority": 1.0 if field_key in {"servico", "modelo_veiculo"} else 0.7,
+                "overwrite_policy": "explicit_correction",
+            } for field_key in required]}
+            claims = list(data.get("claims") or [])
+            if data.get("price"):
+                claims.append({
+                    "claim_type": "price", "policy": {
+                        "mode": "informational",
+                        "qualifier": data.get("price_qualifier") or "published",
+                    }, "evidence_node_ids": [node.id],
+                })
+            if booking.get("duration_minutes"):
+                claims.append({
+                    "claim_type": "duration", "policy": {"mode": "informational"},
+                    "evidence_node_ids": [node.id],
+                })
+            data["claims"] = claims
+            data["completion"] = {"required_fields": required}
+            data["handoff"] = {"on_completion": "aurora-rule-operation"}
+        elif node.id == "aurora-rule-operation":
+            capabilities.update({"global_context": True, "handoff_rule": True})
+            data["handoff_rule"] = {
+                "id": "aurora-human-confirmation",
+                "condition": "qualification_complete",
+                "text": appointment_policy.get("texts", {}).get("complemento_confirmacao"),
+            }
+            data["claims"] = [
+                {"claim_type": "availability", "policy": {"mode": "informational"},
+                 "evidence_node_ids": [node.id],
+                 "intent_aliases": ["disponibilidade", "vaga", "tem horário"]},
+                {"claim_type": "schedule", "policy": {"mode": "human_confirmation_required"},
+                 "evidence_node_ids": [node.id],
+                 "intent_aliases": ["agenda", "agendamento", "confirmar horário"]},
+            ]
+        elif node.node_type in {"tone"}:
+            capabilities["global_context"] = True
+        if capabilities:
+            data["capabilities"] = capabilities
+        node.data = data
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
     if embedded.action is None:
         raise RuntimeError("Aurora Embedded action is missing")
@@ -95,11 +178,20 @@ def publish(*, expected_version: int | None = None) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--expected-version", type=int)
+    parser.add_argument("--skip-v3", action="store_true")
     args = parser.parse_args()
     result = publish(expected_version=args.expected_version)
+    v3_result = None
+    if result.get("ok") and not args.skip_v3:
+        v3_result = graph_compiler_v3.compile_persona_publication("aurora", activate=True)
     print(json.dumps({
         "ok": result.get("ok"),
         "version": result.get("version"),
         "checksum": result.get("checksum"),
         "idempotent_replay": result.get("idempotent_replay"),
+        "graph_agent_runtime_v3": ({
+            "publication_id": (v3_result or {}).get("publication", {}).get("id"),
+            "version": (v3_result or {}).get("publication", {}).get("version"),
+            "checksum": (v3_result or {}).get("publication", {}).get("checksum"),
+        } if v3_result else None),
     }))
