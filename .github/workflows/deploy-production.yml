@@ -169,7 +169,16 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      # Rollback with an explicit image_tag checks out that commit's own
+      # docker-compose.yml/Caddyfile/kong.yml/ops instead of main's latest,
+      # so an older image is never paired with newer, possibly incompatible
+      # config. Without an explicit tag, the previous tag is only resolved
+      # on the VPS itself (ops/vps/rollback.sh reads .deploy/previous-tag)
+      # — this workflow has no way to know it ahead of the checkout step,
+      # so that case still deploys with main's current manifests.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ (inputs.action == 'rollback' && inputs.image_tag) || github.sha }}
 
       - name: Synchronize deployment manifests
         uses: appleboy/scp-action@v1.0.0
@@ -201,6 +210,7 @@ jobs:
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            content_status=0
             if [ "$DEPLOY_ACTION" = "rollback" ]; then
               bash ops/vps/rollback.sh "$REQUESTED_TAG"
             else
@@ -212,7 +222,16 @@ jobs:
                 python scripts/publish_persona_documents.py vz-lupas
               docker compose --env-file .env.compose exec -T api \
                 python scripts/backfill_lead_qualification.py --apply
+              # Content-contract validation is a separate concern from "did
+              # the deploy succeed" — captured here instead of letting it
+              # abort the script, so audit.sh (the real health check)
+              # always runs next regardless, and a content-authoring gap
+              # can never silently skip it again.
               docker compose --env-file .env.compose exec -T api \
-                python scripts/validate_knowledge_crm_release.py
+                python scripts/validate_knowledge_crm_release.py || content_status=$?
             fi
             bash ops/vps/audit.sh
+            if [ "$content_status" -ne 0 ]; then
+              echo "::warning::Content release-contract validation failed (exit ${content_status}); deploy and audit above are healthy independent of this." >&2
+              exit "$content_status"
+            fi
