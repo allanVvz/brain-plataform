@@ -1,5 +1,19 @@
 # Isolamento QA e producao
 
+## Producao ainda e usada como ambiente de teste (2026-08-06)
+
+Decisao explicita do dono do produto em 2026-08-06: ate o QA persistente
+(secao abaixo) assumir esse papel, a **producao real continua sendo usada
+deliberadamente para validacao E2E ao vivo** do bot da Aurora, trocando
+mensagens WhatsApp de verdade com a persona VZ Lupas como transporte. Isso
+nao e um vazamento acidental de teste em producao — e a decisao vigente
+enquanto o QA persistente nao esta com DNS/dominio proprio no ar (ver
+"Passos manuais — estado em 2026-08-06" mais abaixo). Regra vigente durante
+essa fase: nunca reenviar/repetir uma mensagem WhatsApp sob nenhuma
+circunstancia (risco real de banimento do numero); qualquer entrega ambigua
+para o fluxo e nao repete o envio. Ver `.agents/skills/brain-agent-e2e/SKILL.md`
+para o protocolo completo desses testes ao vivo.
+
 ## Estado atual
 
 - Producao: dashboard Vercel e backend servido em dois dominios permanentes, `https://api.vzforeal.com` e `https://lpapi.vzforeal.com` (decisao final, ver secao "Decisao final sobre dominios" abaixo — nao e mais um estado transitorio).
