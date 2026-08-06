@@ -102,13 +102,13 @@ def validate() -> dict:
     }
     expected = {
         "aurora_schema_version": "2.1",
-        "aurora_nodes": 47,
-        "aurora_edges": 88,
-        "aurora_markdown_documents": 45,
-        "aurora_faqs": 19,
-        "aurora_faq_embedded_edges": 19,
+        "aurora_nodes": 55,
+        "aurora_edges": 104,
+        "aurora_markdown_documents": 53,
+        "aurora_faqs": 27,
+        "aurora_faq_embedded_edges": 27,
         "aurora_orphan_faqs": 0,
-        "aurora_agent_grants": 44,
+        "aurora_agent_grants": 52,
         "aurora_destination": "dataset:sdr-aurora",
     }
     if checks != expected:
