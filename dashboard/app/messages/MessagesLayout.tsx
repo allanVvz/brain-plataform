@@ -24,13 +24,10 @@ interface Lead {
   persona_id: string | null;
   interesse_produto: string | null;
   metadata?: {
-    commercial_note?: {
-      modelo_veiculo?: string;
-      vehicle_size?: string;
-      condicao?: string;
-      data_desejada?: string;
-      janela_horario?: string;
-    };
+    // Field set is dynamic — v3 leads derive this straight from whichever
+    // facts the active branch's graph contract declares (not a fixed list
+    // of legacy field names).
+    commercial_note?: Record<string, string> | null;
     [key: string]: any;
   } | null;
   qualification_score?: number;
@@ -318,6 +315,34 @@ function formatTs(ts: string): string {
 function truncateHash(hash: string, head = 14, tail = 6): string {
   if (!hash || hash.length <= head + tail + 1) return hash;
   return `${hash.slice(0, head)}…${hash.slice(-tail)}`;
+}
+
+const COMMERCIAL_NOTE_META_KEYS = new Set(["updated_at", "source"]);
+
+function commercialNoteEntries(note: Record<string, string> | null | undefined): [string, string][] {
+  if (!note) return [];
+  return Object.entries(note).filter(
+    ([key, value]) => !COMMERCIAL_NOTE_META_KEYS.has(key) && value,
+  );
+}
+
+// The header badge is a small inline pill, not a form — show a couple of
+// fields inline and count the rest, instead of only ever showing
+// modelo_veiculo (confirmed live 2026-08-07: a lead with 6+ known fields
+// still only ever displayed the vehicle, silently dropping everything else
+// the v3 fact ledger had already captured).
+function commercialNoteSummary(note: Record<string, string> | null | undefined): string {
+  const entries = commercialNoteEntries(note);
+  if (entries.length === 0) return "";
+  const shown = entries.slice(0, 2).map(([key, value]) => `${key.replace(/_/g, " ")}: ${value}`);
+  const rest = entries.length - shown.length;
+  return rest > 0 ? `${shown.join(" · ")} · +${rest}` : shown.join(" · ");
+}
+
+function commercialNoteTitle(note: Record<string, string> | null | undefined): string {
+  return commercialNoteEntries(note)
+    .map(([key, value]) => `${key.replace(/_/g, " ")}: ${value}`)
+    .join("\n");
 }
 
 function displayName(lead: Lead | null, msg?: Message): string {
@@ -641,6 +666,12 @@ function extractEvidenceSummary(title: string, markdown: string): string {
       const norm = normalizeKnowledgeText(line);
       if (!norm || norm === normalizedTitle) return false;
       if (norm === "pergunta" || norm === "resposta") return false;
+      // Confirmed live 2026-08-07: the backend's canonical markdown embeds
+      // a raw {"content_checksum": ..., "graph_id": ...} metadata line
+      // inline. This card summary is meant for humans — skip any line
+      // that's a JSON object/array rather than prose, instead of joining
+      // it straight into the visible text.
+      if (/^[[{].*[\]}]$/.test(line)) return false;
       return true;
     });
   return lines.join(" ").trim();
@@ -2282,12 +2313,12 @@ export function MessagesLayout({
                       {selectedLead.interesse_produto}
                     </span>
                   )}
-                  {selectedLead.metadata?.commercial_note?.modelo_veiculo && (
+                  {commercialNoteSummary(selectedLead.metadata?.commercial_note) && (
                     <span
-                      title="Nota comercial vinculada ao lead"
+                      title={commercialNoteTitle(selectedLead.metadata?.commercial_note)}
                       className="rounded border border-violet-300/50 bg-violet-100/70 px-1.5 py-0.5 text-[10px] text-violet-700"
                     >
-                      Nota comercial · veículo: {selectedLead.metadata.commercial_note.modelo_veiculo}
+                      Nota comercial · {commercialNoteSummary(selectedLead.metadata?.commercial_note)}
                     </span>
                   )}
                   <span className="text-[10px] text-obs-faint ml-auto">

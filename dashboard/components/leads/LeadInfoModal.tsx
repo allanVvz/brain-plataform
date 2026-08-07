@@ -6,6 +6,29 @@ import { api } from "@/lib/api";
 
 type NoteRow = { key: string; value: string };
 
+// Field keys are graph-driven (whatever the persona's contract declares),
+// not a fixed enum — this is a display convenience for the common ones,
+// with a readable fallback (snake_case -> Title Case) for anything else,
+// never a raw variable name shown as if it were the primary label.
+const FIELD_LABELS: Record<string, string> = {
+  nome_cliente: "Nome do cliente",
+  servico: "Serviço",
+  modelo_veiculo: "Modelo do veículo",
+  vehicle_year: "Ano do veículo",
+  vehicle_color: "Cor do veículo",
+  vehicle_size: "Porte do veículo",
+  objective: "Objetivo",
+  can_visit_in_person: "Pode visitar presencialmente",
+  condicao: "Condição do veículo",
+  data_desejada: "Data desejada",
+  janela_horario: "Janela de horário",
+};
+
+function humanizeFieldKey(key: string): string {
+  if (!key) return "Novo campo";
+  return FIELD_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function noteRowsFromLead(lead: any): NoteRow[] {
   const note = (lead?.metadata?.commercial_note || {}) as Record<string, string>;
   return Object.entries(note)
@@ -88,7 +111,7 @@ export function LeadInfoModal({
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-5">
-      <div className="modal-content flex w-full max-w-lg flex-col gap-5">
+      <div className="modal-content flex w-full max-w-lg max-h-[90vh] flex-col gap-5 overflow-y-auto">
         <div className="flex items-start justify-between">
           <div>
             <p className="text-[10px] uppercase tracking-[0.18em] text-obs-faint">CRM</p>
@@ -98,7 +121,7 @@ export function LeadInfoModal({
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-obs-subtle hover:text-obs-text"
-            style={{ background: "rgb(var(--glass-bg) / var(--glass-bg-hover))" }}
+            style={{ background: "rgb(var(--glass-bg) / var(--glass-solid-hover))" }}
           >
             <X size={16} />
           </button>
@@ -126,7 +149,9 @@ export function LeadInfoModal({
 
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-obs-subtle">Nota comercial</span>
+            <span className="text-xs text-obs-subtle">
+              Nota comercial{notes.length > 0 && <span className="text-obs-faint"> · {notes.length}</span>}
+            </span>
             <button
               type="button"
               onClick={addNoteRow}
@@ -140,30 +165,43 @@ export function LeadInfoModal({
               Nenhum campo ainda. Adicione o que a IA ja deve considerar como sabido (ex: modelo do veiculo, data desejada).
             </p>
           )}
-          {notes.map((row, index) => (
-            <div key={index} className="flex items-center gap-2">
-              <input
-                className="lg-input flex-1"
-                value={row.key}
-                onChange={(e) => updateNoteRow(index, { key: e.target.value })}
-                placeholder="campo (ex: vehicle_model)"
-              />
-              <input
-                className="lg-input flex-[1.5]"
-                value={row.value}
-                onChange={(e) => updateNoteRow(index, { value: e.target.value })}
-                placeholder="valor"
-              />
-              <button
-                type="button"
-                onClick={() => removeNoteRow(index)}
-                className="rounded-lg p-1.5 text-obs-faint hover:text-obs-rose"
-                title="Remover campo"
+          <div className="flex flex-col gap-2">
+            {notes.map((row, index) => (
+              <div
+                key={index}
+                className="rounded-xl p-2.5"
+                style={{ border: "1px solid var(--border-glass)" }}
               >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-obs-violet">
+                    {humanizeFieldKey(row.key)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeNoteRow(index)}
+                    className="shrink-0 rounded p-1 text-obs-faint hover:text-obs-rose"
+                    title="Remover campo"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <input
+                    className="lg-input w-36 shrink-0 text-[11px] text-obs-subtle"
+                    value={row.key}
+                    onChange={(e) => updateNoteRow(index, { key: e.target.value })}
+                    placeholder="campo (ex: vehicle_model)"
+                  />
+                  <input
+                    className="lg-input flex-1 font-medium"
+                    value={row.value}
+                    onChange={(e) => updateNoteRow(index, { value: e.target.value })}
+                    placeholder="valor"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
           <p className="text-[10px] text-obs-faint">
             Esses campos ficam vinculados ao lead e a IA passa a tratá-los como já respondidos — não pergunta de novo.
           </p>

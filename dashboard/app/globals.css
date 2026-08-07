@@ -183,6 +183,15 @@
   --glass-shadow:        0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.06);
   --glass-shadow-hover:  0 2px 4px rgba(15, 23, 42, 0.06), 0 16px 40px rgba(15, 23, 42, 0.10);
   --glass-inset-highlight: 0 1px 0 rgba(255, 255, 255, 0.6);
+  /* "Solid" glass: for surfaces that must fully read over busy content
+     underneath — modals/panels and any input nested inside one. Real
+     liquid-glass UI (macOS/iOS) still reads as opaque up close; the glass
+     effect comes from the blur softening whatever's behind into an
+     ambient tint, not from literally showing the pixels through. A modal
+     stacked over a dense data table needs this, not the lighter ambient
+     alpha meant for a single card floating on the plain body gradient. */
+  --glass-solid-alpha: 0.94;
+  --glass-solid-hover: 0.98;
 
   /* ReactFlow */
   --rf-bg: #ececef;
@@ -226,14 +235,21 @@
     linear-gradient(135deg, #09051f 0%, #120c38 35%, #231c5c 70%, #3b2a8f 100%);
 
   --glass-bg:        255 255 255;
-  /* Confirmed live 2026-08-07: 0.045 made .panel/.window/.drawer/
-     .modal-content (LeadInfoModal etc.) read as fully transparent against
-     the dark gradient body, making them unreadable. Raised enough to keep
-     real contrast while staying translucent/blurred — the header/nav glass
-     look is unaffected (those use --obs-surface with its own Tailwind
-     opacity modifier, not this variable). */
+  /* Confirmed live 2026-08-07: 0.045 made ambient surfaces (standalone
+     cards on the plain body gradient) read as fully transparent. This is
+     the ambient tier only now — modals/panels/inputs use --glass-solid-*
+     below, since they stack on top of busy content (tables, lists) where
+     even 0.18 let the page behind bleed straight through both the modal
+     panel and any nested input on top of it. */
   --glass-bg-alpha:  0.18;
   --glass-bg-hover:  0.24;
+  /* Confirmed live 2026-08-07: a modal (.modal-content) stacked over a
+     dense leads table, with .lg-input rows nested inside it, compounded
+     two translucent layers into an unreadable double-exposure of the
+     table's own text and row highlighting showing through the form
+     fields. Solid tier is intentionally close to opaque. */
+  --glass-solid-alpha: 0.92;
+  --glass-solid-hover: 0.97;
   --glass-shadow:        inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 12px 32px rgba(0, 0, 0, 0.18);
   --glass-shadow-hover:  inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 16px 44px rgba(0, 0, 0, 0.28);
   --glass-inset-highlight: 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -358,12 +374,14 @@ body {
     transition: all 180ms ease;
   }
 
-  /* Container helpers — windows that open inside the app */
+  /* Container helpers — windows that open inside the app. Solid tier: see
+     --glass-solid-alpha above for why these can't share the ambient
+     card/body alpha. */
   .panel,
   .window,
   .drawer,
   .modal-content {
-    background: rgb(var(--glass-bg) / var(--glass-bg-alpha));
+    background: rgb(var(--glass-bg) / var(--glass-solid-alpha));
     backdrop-filter: blur(18px) saturate(135%);
     -webkit-backdrop-filter: blur(18px) saturate(135%);
     border: 1px solid var(--border-glass);
@@ -390,10 +408,12 @@ body {
     box-shadow: var(--glass-shadow-hover);
   }
 
-  /* Inputs / search */
+  /* Inputs / search — solid tier: form fields must stay legible regardless
+     of what they're placed over (often nested inside a modal already
+     sitting over busy content). */
   .lg-input,
   .lg-search {
-    background: rgb(var(--glass-bg) / var(--glass-bg-alpha));
+    background: rgb(var(--glass-bg) / var(--glass-solid-alpha));
     backdrop-filter: blur(14px) saturate(130%);
     -webkit-backdrop-filter: blur(14px) saturate(130%);
     border: 1px solid var(--border-glass);
@@ -434,12 +454,12 @@ body {
     border-color: rgb(var(--obs-violet) / 0.45);
   }
   .lg-btn-secondary {
-    background: rgb(var(--glass-bg) / var(--glass-bg-alpha));
+    background: rgb(var(--glass-bg) / var(--glass-solid-alpha));
     border: 1px solid var(--border-glass);
     color: rgb(var(--obs-text));
   }
   .lg-btn-secondary:hover {
-    background: rgb(var(--glass-bg) / var(--glass-bg-hover));
+    background: rgb(var(--glass-bg) / var(--glass-solid-hover));
     border-color: var(--border-glass-strong);
   }
   .lg-btn-danger {
