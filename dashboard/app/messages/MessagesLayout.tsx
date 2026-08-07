@@ -365,7 +365,7 @@ function StageBadge({ stage }: { stage: string | null }) {
   return (
     <span
       className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${stageColor(stage)}`}
-      style={{ background: "rgba(255,255,255,0.7)" }}
+      style={{ background: "rgb(var(--glass-solid-bg) / 0.7)" }}
     >
       {stage || "novo"}
     </span>
@@ -441,8 +441,8 @@ function MessageBubble({
         className={`max-w-[72%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${out ? "rounded-tr-sm" : "rounded-tl-sm"}`}
         style={
           out
-            ? { background: "rgba(124,111,255,0.16)", border: "1px solid rgba(124,111,255,0.24)", color: "#252047" }
-            : { background: "rgba(255,255,255,0.74)", border: "1px solid rgba(20,20,40,0.08)", color: "#27272a" }
+            ? { background: "rgba(124,111,255,0.16)", border: "1px solid rgba(124,111,255,0.24)", color: "rgb(var(--obs-text))" }
+            : { background: "rgb(var(--glass-solid-bg) / 0.74)", border: "1px solid var(--border-glass)", color: "rgb(var(--obs-text))" }
         }
       >
         {hasText && <p className="whitespace-pre-wrap break-words">{msg.texto}</p>}
@@ -879,8 +879,8 @@ function KbCard({
       onClick={() => onSelect(id)}
       className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
       style={{
-        background: active ? "rgba(20,20,40,0.05)" : "rgba(255,255,255,0.72)",
-        border: `1px solid ${active ? "rgba(20,20,40,0.18)" : "var(--border-glass)"}`,
+        background: active ? "rgb(var(--obs-text) / 0.05)" : "rgb(var(--glass-solid-bg) / 0.72)",
+        border: `1px solid ${active ? "rgb(var(--obs-text) / 0.18)" : "var(--border-glass)"}`,
       }}
     >
       <div className="flex items-center gap-1 min-w-0">
@@ -908,7 +908,7 @@ function AssetCard({ asset }: { asset: KnowledgeAsset }) {
       target="_blank"
       rel="noopener noreferrer"
       className="block rounded-md overflow-hidden text-xs hover:opacity-90 transition"
-      style={{ background: "rgba(255,255,255,0.78)", border: "1px solid var(--border-glass)" }}
+      style={{ background: "rgb(var(--glass-solid-bg) / 0.78)", border: "1px solid var(--border-glass)" }}
     >
       {isImage ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -950,7 +950,7 @@ function RelationCard({
       type="button"
       onClick={handleClick}
       className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
-      style={{ background: "rgba(255,255,255,0.72)", border: "1px solid var(--border-glass)" }}
+      style={{ background: "rgb(var(--glass-solid-bg) / 0.72)", border: "1px solid var(--border-glass)" }}
     >
       <div className="flex items-center gap-1 min-w-0">
         <p className="font-medium text-obs-text truncate">{source?.title || edge.source_node_id || "origem"}</p>
@@ -1063,7 +1063,7 @@ function KnowledgeDetail({
           <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1">Conteúdo</p>
           <pre
             className="text-[11px] text-obs-subtle whitespace-pre-wrap break-words rounded-md p-2 leading-relaxed font-mono max-h-56 overflow-y-auto"
-            style={{ background: "rgba(255,255,255,0.72)", border: "1px solid var(--border-glass)" }}
+            style={{ background: "rgb(var(--glass-solid-bg) / 0.72)", border: "1px solid var(--border-glass)" }}
           >
             {kb.conteudo}
           </pre>
@@ -2111,7 +2111,7 @@ export function MessagesLayout({
       className={`messages-page flex ${resolvedHeightClassName} overflow-hidden rounded-xl p-3`}
       style={{
         background:
-          "radial-gradient(circle at 15% 10%, rgba(124,92,255,0.10), transparent 28%), radial-gradient(circle at 85% 20%, rgba(120,180,255,0.10), transparent 26%), linear-gradient(180deg, #f7f7fc 0%, #f2f2f8 100%)",
+          "radial-gradient(circle at 15% 10%, rgba(124,92,255,0.10), transparent 28%), radial-gradient(circle at 85% 20%, rgba(120,180,255,0.10), transparent 26%), rgb(var(--obs-deep))",
       }}
     >
       {/* ── Left: Leads list ───────────────────────────────────────────── */}
@@ -2119,17 +2119,17 @@ export function MessagesLayout({
       <aside
         className="conversation-sidebar w-72 shrink-0 flex flex-col overflow-hidden rounded-l-xl"
         style={{
-          border: "1px solid rgba(20,20,40,0.08)",
-          background: "rgba(255,255,255,0.68)",
+          border: "1px solid var(--border-glass)",
+          background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
           backdropFilter: "blur(18px) saturate(130%)",
           WebkitBackdropFilter: "blur(18px) saturate(130%)",
-          boxShadow: "0 12px 36px rgba(20,20,40,0.06)",
+          boxShadow: "var(--glass-shadow)",
         }}
       >
         {/* Header */}
         <div
           className="flex items-center justify-between px-4 py-3"
-          style={{ borderBottom: "1px solid rgba(20,20,40,0.08)" }}
+          style={{ borderBottom: "1px solid var(--border-glass)" }}
         >
           <div className="flex items-center gap-2">
             <User size={13} className="text-obs-violet" />
@@ -2147,10 +2147,10 @@ export function MessagesLayout({
         </div>
 
         {/* Search */}
-        <div className="px-3 py-2" style={{ borderBottom: "1px solid rgba(20,20,40,0.06)" }}>
+        <div className="px-3 py-2" style={{ borderBottom: "1px solid var(--border-glass-soft)" }}>
           <div
             className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
-            style={{ background: "rgba(255,255,255,0.70)", border: "1px solid rgba(20,20,40,0.08)" }}
+            style={{ background: "rgb(var(--glass-solid-bg) / 0.70)", border: "1px solid var(--border-glass)" }}
           >
             <Search size={11} className="text-obs-faint shrink-0" />
             <input
@@ -2197,7 +2197,7 @@ export function MessagesLayout({
                 className="w-full text-left px-4 py-3 flex flex-col gap-1 transition-colors"
                 style={{
                   ...attentionRowStyle(attention, active),
-                  borderBottom: "1px solid rgba(20,20,40,0.06)",
+                  borderBottom: "1px solid var(--border-glass-soft)",
                 }}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -2264,18 +2264,18 @@ export function MessagesLayout({
       <div
         className="message-panel relative flex-1 flex flex-col overflow-hidden rounded-xl"
         style={{
-          background: "rgba(255,255,255,0.68)",
-          border: "1px solid rgba(20,20,40,0.08)",
+          background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
+          border: "1px solid var(--border-glass)",
           backdropFilter: "blur(18px) saturate(130%)",
           WebkitBackdropFilter: "blur(18px) saturate(130%)",
-          boxShadow: "0 12px 36px rgba(20,20,40,0.06)",
+          boxShadow: "var(--glass-shadow)",
         }}
       >
         <button
           type="button"
           onClick={() => setIsConversationSidebarOpen((v) => !v)}
           className="absolute left-3 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full text-obs-text shadow-sm backdrop-blur transition hover:text-obs-violet"
-          style={{ background: "rgba(255,255,255,0.85)", border: "1px solid var(--border-glass-strong)" }}
+          style={{ background: "rgb(var(--glass-solid-bg) / var(--glass-solid-hover))", border: "1px solid var(--border-glass-strong)" }}
           aria-label={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
           title={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
         >
@@ -2284,7 +2284,7 @@ export function MessagesLayout({
         {/* Chat header */}
         <div
           className="flex items-center gap-3 px-14 py-3 shrink-0"
-          style={{ borderBottom: "1px solid rgba(20,20,40,0.08)", background: "rgba(255,255,255,0.58)" }}
+          style={{ borderBottom: "1px solid var(--border-glass)", background: "rgb(var(--glass-solid-bg) / 0.58)" }}
         >
           {selectedLead ? (
             <>
@@ -2355,7 +2355,7 @@ export function MessagesLayout({
                 type="button"
                 onClick={() => setIsKnowledgeSidebarOpen((v) => !v)}
                 title={isKnowledgeSidebarOpen ? "Esconder conhecimento" : "Mostrar conhecimento"}
-                className="p-1.5 rounded-md text-obs-subtle hover:text-obs-violet transition shrink-0 hover:[background:rgba(255,255,255,0.6)]"
+                className="p-1.5 rounded-md text-obs-subtle hover:text-obs-violet transition shrink-0 hover:[background:rgb(var(--glass-solid-bg)/0.6)]"
               >
                 {isKnowledgeSidebarOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
               </button>
@@ -2431,13 +2431,13 @@ export function MessagesLayout({
           <div
             className="px-4 py-3 shrink-0"
             style={{
-              borderTop: "1px solid rgba(20,20,40,0.08)",
-              background: "rgba(255,255,255,0.58)",
+              borderTop: "1px solid var(--border-glass)",
+              background: "rgb(var(--glass-solid-bg) / 0.58)",
             }}
           >
             <div
               className="rounded-xl p-3 space-y-2"
-              style={{ background: "rgba(255,255,255,0.72)", border: "1px solid rgba(20,20,40,0.08)" }}
+              style={{ background: "rgb(var(--glass-solid-bg) / 0.72)", border: "1px solid var(--border-glass)" }}
             >
               <textarea
                 ref={draftRef}
@@ -2483,16 +2483,16 @@ export function MessagesLayout({
       <aside
         className="knowledge-panel w-80 shrink-0 flex flex-col overflow-hidden rounded-r-xl"
         style={{
-          border: "1px solid rgba(20,20,40,0.08)",
-          background: "rgba(255,255,255,0.68)",
+          border: "1px solid var(--border-glass)",
+          background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
           backdropFilter: "blur(18px) saturate(130%)",
           WebkitBackdropFilter: "blur(18px) saturate(130%)",
-          boxShadow: "0 12px 36px rgba(20,20,40,0.06)",
+          boxShadow: "var(--glass-shadow)",
         }}
       >
         <div
           className="flex items-center gap-2 px-4 py-3 shrink-0"
-          style={{ borderBottom: "1px solid rgba(20,20,40,0.08)" }}
+          style={{ borderBottom: "1px solid var(--border-glass)" }}
         >
           <Boxes size={13} className="text-obs-violet" />
           <span className="text-xs font-semibold text-obs-text">Conhecimento</span>
