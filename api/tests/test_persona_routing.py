@@ -188,6 +188,11 @@ def test_update_routing_n8n_agents_resyncs_the_live_workflow(monkeypatch):
     )
     monkeypatch.setattr(personas.supabase_client, "get_persona", lambda _slug: {**routing, "name": "Aurora"})
     monkeypatch.setattr(personas.supabase_client, "save_persona_integration_connection", lambda *a, **k: None)
+    monkeypatch.setattr(
+        personas.supabase_client,
+        "get_active_graph_publication",
+        lambda _persona_id: {"id": "pub-1", "graph_schema_version": "2.1"},
+    )
     monkeypatch.setenv("N8N_BASE_URL", "http://n8n:5678")
 
     def fake_resync(persona, deepseek_config):
@@ -242,6 +247,11 @@ def test_update_routing_auto_creates_the_workflow_when_credential_exists_but_wor
         personas.supabase_client,
         "save_persona_integration_connection",
         lambda data: saved_configs.append(data),
+    )
+    monkeypatch.setattr(
+        personas.supabase_client,
+        "get_active_graph_publication",
+        lambda _persona_id: {"id": "pub-1", "graph_schema_version": "2.1"},
     )
     monkeypatch.setenv("N8N_BASE_URL", "http://n8n:5678")
 
