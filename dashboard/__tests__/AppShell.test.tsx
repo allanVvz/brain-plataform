@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => mocks.pathname,
   useRouter: () => mocks,
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {

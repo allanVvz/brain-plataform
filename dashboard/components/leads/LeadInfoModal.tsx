@@ -98,7 +98,7 @@ export function LeadInfoModal({
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-obs-subtle hover:text-obs-text"
-            style={{ background: "rgba(255,255,255,0.55)" }}
+            style={{ background: "rgb(var(--glass-bg) / var(--glass-bg-hover))" }}
           >
             <X size={16} />
           </button>

@@ -315,6 +315,11 @@ function formatTs(ts: string): string {
   catch { return ""; }
 }
 
+function truncateHash(hash: string, head = 14, tail = 6): string {
+  if (!hash || hash.length <= head + tail + 1) return hash;
+  return `${hash.slice(0, head)}…${hash.slice(-tail)}`;
+}
+
 function displayName(lead: Lead | null, msg?: Message): string {
   return (
     (lead?.nome?.trim()) ||
@@ -1238,7 +1243,6 @@ function ContextCardModal({
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-obs-violet">{card.node_type} · revisão {card.revision}</p>
             <h2 id="context-card-title" className="mt-1 text-lg font-semibold text-obs-text">{card.title}</h2>
-            <p className="mt-1 break-all font-mono text-[10px] text-obs-faint">{card.id}</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md border border-black/10 px-2 py-1 text-xs text-obs-subtle">Fechar</button>
         </div>
@@ -1279,18 +1283,51 @@ function ContextCardModal({
           <p><span className="text-obs-faint">Fonte:</span> {card.source}</p>
           <p><span className="text-obs-faint">Estado:</span> {card.status}</p>
           <p><span className="text-obs-faint">Grafo:</span> v{card.graph_version}</p>
-          <p className="break-all"><span className="text-obs-faint">Checksum:</span> {card.content_checksum}</p>
+          <p
+            className="cursor-pointer break-all font-mono text-[10px]"
+            title="Clique para copiar o checksum completo"
+            onClick={() => navigator.clipboard?.writeText(card.content_checksum)}
+          >
+            <span className="text-obs-faint font-sans">Checksum:</span> {truncateHash(card.content_checksum)}
+          </p>
         </section>
 
         {card.relations.length > 0 && (
-          <details className="mt-4 rounded-lg border border-black/10 p-3">
-            <summary className="cursor-pointer text-xs font-medium text-obs-text">Relações · {card.relations.length}</summary>
-            <pre className="mt-2 overflow-auto whitespace-pre-wrap text-[10px] text-obs-subtle">{JSON.stringify(card.relations, null, 2)}</pre>
-          </details>
+          <section className="mt-4 rounded-lg border border-black/10 p-3">
+            <p className="text-xs font-medium text-obs-text">Relações · {card.relations.length}</p>
+            <div className="mt-2 space-y-1 text-[11px] text-obs-subtle">
+              {card.relations.map((rel, i) => (
+                <div key={i} className="flex flex-wrap items-baseline gap-x-1.5">
+                  <span className="font-medium text-obs-text">
+                    {String(rel.relation_type || rel.type || rel.relation || "relação")}
+                  </span>
+                  <span className="text-obs-faint">→</span>
+                  <span>{String(rel.title || rel.target_title || rel.name || rel.target_id || rel.id || "—")}</span>
+                  {rel.node_type && <span className="text-obs-faint">({String(rel.node_type)})</span>}
+                </div>
+              ))}
+            </div>
+          </section>
         )}
         <details className="mt-2 rounded-lg border border-black/10 p-3">
-          <summary className="cursor-pointer text-xs font-medium text-obs-text">Metadata técnica</summary>
-          <pre className="mt-2 overflow-auto whitespace-pre-wrap text-[10px] text-obs-subtle">{JSON.stringify({ projection_node_id: card.projection_node_id, chunk_refs: card.chunk_refs, path: card.path, selection_reason: card.selection_reason, ...card.technical_metadata }, null, 2)}</pre>
+          <summary className="cursor-pointer text-xs font-medium text-obs-text">Detalhes técnicos</summary>
+          <div className="mt-2 space-y-1 text-[11px] text-obs-subtle">
+            <p className="break-all font-mono text-[10px]"><span className="text-obs-faint font-sans">ID:</span> {card.id}</p>
+            {card.projection_node_id && (
+              <p className="break-all font-mono text-[10px]"><span className="text-obs-faint font-sans">Node de projeção:</span> {card.projection_node_id}</p>
+            )}
+            {card.path.length > 0 && <p><span className="text-obs-faint">Caminho:</span> {card.path.join(" → ")}</p>}
+            {card.chunk_refs.length > 0 && (
+              <p><span className="text-obs-faint">Trechos usados:</span> {card.chunk_refs.length}</p>
+            )}
+            {card.selection_reason && Object.keys(card.selection_reason).length > 0 &&
+              Object.entries(card.selection_reason).map(([key, value]) => (
+                <p key={key}><span className="text-obs-faint">{key}:</span> {typeof value === "object" ? JSON.stringify(value) : String(value)}</p>
+              ))}
+            {card.technical_metadata && Object.entries(card.technical_metadata).map(([key, value]) => (
+              <p key={key}><span className="text-obs-faint">{key}:</span> {typeof value === "object" ? JSON.stringify(value) : String(value)}</p>
+            ))}
+          </div>
         </details>
       </div>
     </div>
@@ -1334,7 +1371,7 @@ export function KnowledgeSidebar({
     const related = ctx.related_cards || [];
     return (
       <div className="h-full overflow-y-auto p-3">
-        <div className="mb-3 rounded-lg border border-black/10 bg-white/60 p-2.5">
+        <div className="mb-3 px-0.5">
           <div className="flex items-center justify-between gap-2">
             <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${ctx.mode === "exact" ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-700"}`}>
               {ctx.mode === "exact" ? "espelho exato" : "evidência reconstruída"}
@@ -1999,10 +2036,9 @@ export function MessagesLayout({
   }, [selectedId, draft, sending, personaFilterId, isPortal, portalSlug, validationScope]);
 
   const onDraftKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      onSend();
-    }
+    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    onSend();
   };
 
   const togglePause = useCallback(async () => {
@@ -2273,10 +2309,10 @@ export function MessagesLayout({
                 onClick={togglePause}
                 disabled={pausing}
                 title={selectedLead.ai_paused ? "IA pausada — clique para retomar" : "IA ativa — clique para pausar"}
-                className={`text-[10px] px-2.5 py-1 rounded-full shrink-0 border transition disabled:opacity-50 ${
+                className={`text-[10px] font-medium px-2.5 py-1 rounded-full shrink-0 border transition disabled:opacity-50 ${
                   selectedLead.ai_paused
-                    ? "border-amber-400/50 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25"
-                    : "border-emerald-400/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                    ? "border-amber-400/60 bg-amber-500/25 text-amber-300 hover:bg-amber-500/35"
+                    : "border-emerald-400/50 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
                 }`}
               >
                 <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle ${selectedLead.ai_paused ? "bg-amber-400" : "bg-emerald-400"}`} />
@@ -2379,8 +2415,8 @@ export function MessagesLayout({
                 onKeyDown={onDraftKey}
                 placeholder={
                   selectedLead.ai_paused
-                    ? "IA pausada — você está respondendo como operador. Ctrl+Enter envia."
-                    : "Responder como operador (envia ao agente + WhatsApp). Ctrl+Enter envia."
+                    ? "IA pausada — você está respondendo como operador. Enter envia, Shift+Enter quebra linha."
+                    : "Responder como operador (envia ao agente + WhatsApp). Enter envia, Shift+Enter quebra linha."
                 }
                 rows={2}
                 disabled={sending}

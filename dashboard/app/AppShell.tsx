@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import { getStoredLanguage, UI_LANGUAGE_EVENT, type UiLanguage } from "@/lib/language";
+import { applyTheme, getStoredTheme, type Theme } from "@/lib/theme";
 import { resolveSessionDestination } from "@/lib/session-routing";
 import {
   Activity,
@@ -15,12 +16,14 @@ import {
   LogOut,
   MessageSquare,
   Megaphone,
+  Moon,
   Network,
   Package,
   Plus,
   RefreshCw,
   Settings,
   Sparkles,
+  Sun,
   UserCircle,
   Users,
 } from "lucide-react";
@@ -82,8 +85,20 @@ function navText(language: UiLanguage, value: string) {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  // useSearchParams() (added to read ?persona=) requires a Suspense
+  // boundary for static prerendering — without this wrapper, every route
+  // mounting AppShell (i.e. every route) fails to build.
+  return (
+    <Suspense fallback={null}>
+      <AppShellInner>{children}</AppShellInner>
+    </Suspense>
+  );
+}
+
+function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [persona, setPersona] = useState("");
   const [personas, setPersonas] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
@@ -91,6 +106,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [sessionPhase, setSessionPhase] = useState<"resolving" | "internal" | "redirecting" | "error">("resolving");
   const [sessionRetry, setSessionRetry] = useState(0);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [theme, setTheme] = useState<Theme>("clean");
+
+  useEffect(() => {
+    setTheme(getStoredTheme());
+  }, []);
+
+  function toggleTheme() {
+    const next: Theme = theme === "dark" ? "clean" : "dark";
+    setTheme(next);
+    applyTheme(next);
+  }
 
   useEffect(() => {
     if (
@@ -105,7 +131,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     let active = true;
     setSessionPhase("resolving");
     setLanguage(getStoredLanguage());
-    const saved = window.localStorage.getItem("ai-brain-persona-slug");
+    // The URL's own ?persona= wins when present, so each browser tab can
+    // stay on a different persona independently — the localStorage value
+    // is only a fallback default for links/tabs opened without one
+    // (confirmed live 2026-08-07: sharing one global localStorage value
+    // across tabs made two simultaneous conversations fight over the same
+    // persona).
+    const fromUrl = searchParams.get("persona");
+    const saved = fromUrl || window.localStorage.getItem("ai-brain-persona-slug");
     api.me()
       .then((session) => {
         if (!active) return;
@@ -178,6 +211,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     window.addEventListener("ai-brain-persona-change", handlePersonaChange as EventListener);
     return () => window.removeEventListener("ai-brain-persona-change", handlePersonaChange as EventListener);
   }, []);
+
+  // Keeps this tab's own URL in sync with the dropdown, so switching
+  // persona here never affects any other open tab — only localStorage
+  // (the shared fallback default for links without ?persona=) is common.
+  function selectPersona(slug: string) {
+    setPersona(slug);
+    const params = new URLSearchParams(searchParams.toString());
+    if (slug) params.set("persona", slug); else params.delete("persona");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  }
 
   async function handleLogout() {
     try {
@@ -280,7 +324,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <select
               className="min-w-36 bg-transparent text-xs font-medium text-obs-text outline-none"
               value={persona}
-              onChange={(e) => setPersona(e.target.value)}
+              onChange={(e) => selectPersona(e.target.value)}
             >
               {personas.length > 0 ? (
                 <>
@@ -296,7 +340,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               )}
             </select>
           </div>
-          <div className="relative ml-auto">
+          <div className="relative z-10 ml-auto">
             <button
               type="button"
               onClick={() => setUserMenuOpen((open) => !open)}
@@ -304,7 +348,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               style={{
                 border: "1px solid var(--border-glass-strong)",
                 background: "rgb(var(--glass-bg) / var(--glass-bg-alpha))",
-                color: "rgb(17 24 39)",
+                color: "rgb(var(--obs-text))",
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = "rgb(var(--glass-bg) / var(--glass-bg-hover))"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "rgb(var(--glass-bg) / var(--glass-bg-alpha))"; }}
@@ -320,6 +364,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </button>
             {userMenuOpen && (
               <div className="absolute right-0 top-10 z-50 w-52 rounded-xl border border-white/10 bg-obs-raised p-1.5 shadow-2xl">
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-obs-subtle transition hover:bg-white/[0.06] hover:text-obs-text"
+                >
+                  {theme === "dark" ? <Moon size={14} /> : <Sun size={14} />}
+                  {theme === "dark" ? "Tema escuro" : "Tema claro"}
+                </button>
                 <Link
                   href="/settings"
                   onClick={() => setUserMenuOpen(false)}

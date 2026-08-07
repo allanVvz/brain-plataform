@@ -12,6 +12,7 @@ Validate the real path `operator -> Evolution -> target persona -> agent -> Evol
 - Read [references/n8n-template-contract.md](references/n8n-template-contract.md) whenever n8n, backend behavior, provisioning or cross-persona reuse is in scope.
 - Read [references/evidence-report.md](references/evidence-report.md) before executing a live E2E or writing its report.
 - Read [references/qualification-repair.md](references/qualification-repair.md) when the E2E exposes stale graph state, a service switch, a stalled field or duplicate processing after resume.
+- Read [references/browser-mechanics.md](references/browser-mechanics.md) before driving the dashboard through claude-in-chrome or Playwright — it covers the shared-tenant-selector gotcha, the reliable JS-based persona switch, fact polling via `/api-brain/leads/{id}`, and the send-button-over-Ctrl+Enter workaround. Read it first; it prevents re-deriving these mechanics turn by turn.
 
 ## Establish the test contract
 
@@ -24,6 +25,8 @@ Validate the real path `operator -> Evolution -> target persona -> agent -> Evol
 ## Drive the browser
 
 Use the repository Playwright installation or another Playwright-compatible browser controller. Prefer an isolated persistent session and manual login. Keep the visible authenticated browser attached to automation.
+
+The dashboard's `CLIENTE` persona selector is shared state across every tab in the same profile, not scoped per tab — a second tab does not stay pinned to a second persona. Re-assert the correct persona on the active tab immediately before every read or send; see [references/browser-mechanics.md](references/browser-mechanics.md) for the reliable JS-based switch (coordinate clicks on the native dropdown are unreliable).
 
 Before the first mutation:
 

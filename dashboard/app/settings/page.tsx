@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { applyLanguage, getStoredLanguage, LANGUAGE_OPTIONS, type UiLanguage } from "@/lib/language";
+import { applyTheme, getStoredTheme, type Theme } from "@/lib/theme";
 import { MessagingSettingsPanel } from "@/components/settings/MessagingSettingsPanel";
 import { SecuritySettingsPanel } from "@/components/settings/SecuritySettingsPanel";
 
@@ -43,7 +44,6 @@ const AccessSettingsPanel = dynamic(
 );
 
 const PAN_KEY_STORAGE = "ai-brain-graph-pan-key";
-const THEME_STORAGE = "ai-brain-theme";
 const GRAPH_NODE_OPACITY_STORAGE = "ai-brain-graph-node-opacity";
 // Settings used to hardcode baita-conveniencia + cardapio-baita-v14.
 // Now reads the active persona from localStorage; collection_slug stays
@@ -51,7 +51,6 @@ const GRAPH_NODE_OPACITY_STORAGE = "ai-brain-graph-node-opacity";
 const PERSONA_SLUG_STORAGE = "ai-brain-persona-slug";
 const PERSONA_ID_STORAGE = "ai-brain-persona-id";
 
-type Theme = "clean" | "dark";
 type PublicSiteDraft = {
   site_slug: string;
   site_name: string;
@@ -71,14 +70,6 @@ const emptySiteDraft: PublicSiteDraft = {
   whatsapp_message_template: "",
   catalog_url: "",
 };
-
-function applyTheme(theme: Theme) {
-  if (typeof document === "undefined") return;
-  document.documentElement.setAttribute("data-theme", theme);
-  try {
-    window.localStorage.setItem(THEME_STORAGE, theme);
-  } catch {}
-}
 
 function statusDot(ok: boolean) {
   return ok ? "bg-green-400" : "bg-yellow-400";
@@ -141,8 +132,7 @@ function GeneralSettingsPanel() {
 
   useEffect(() => {
     setPanKey(window.localStorage.getItem(PAN_KEY_STORAGE) || "Control");
-    const savedTheme = (window.localStorage.getItem(THEME_STORAGE) as Theme) || "clean";
-    setTheme(savedTheme === "dark" ? "dark" : "clean");
+    setTheme(getStoredTheme());
     setLanguage(getStoredLanguage());
     setGraphNodeOpacity(window.localStorage.getItem(GRAPH_NODE_OPACITY_STORAGE) === "true");
     const syncPersona = (event?: Event) => {

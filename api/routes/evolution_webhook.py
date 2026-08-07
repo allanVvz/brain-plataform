@@ -125,6 +125,24 @@ async def evolution_webhook(binding_id: str, request: Request):
                     str(status_code)[:40],
                     str(reason)[:160],
                 )
+                # Confirmed live 2026-08-06/07: a channel dropped silently
+                # with no visible trace in Settings > Logs > Auditoria,
+                # because this only ever reached the raw function logger.
+                # Mirroring the reason/status code into system_events (same
+                # shape as the whatsapp.inbound_ignored event below) makes
+                # disconnects investigable from the product itself.
+                supabase_client.insert_event({
+                    "event_type": "whatsapp.connection_update",
+                    "entity_type": "whatsapp",
+                    "entity_id": binding_id,
+                    "persona_id": binding["persona_id"],
+                    "payload": {
+                        "state": normalized,
+                        "status_code": str(status_code)[:40] if status_code is not None else None,
+                        "reason": str(reason)[:160] if reason is not None else None,
+                    },
+                    "level": "warning" if normalized == "disconnected" else "info",
+                }, source="whatsapp.connection")
             ignored += 1
             continue
         if event_type not in {"MESSAGES_UPSERT", "MESSAGES_UPDATE", "SEND_MESSAGE"}:
