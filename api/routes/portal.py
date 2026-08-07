@@ -33,7 +33,7 @@ router = APIRouter(prefix="/portal", tags=["portal"])
 
 PIPELINE_STAGES = [
     ("novo", "Novo"),
-    ("nao_qualificado", "Nao qualificado"),
+    ("nao_qualificado", "Não qualificado"),
     ("contatado", "Contatado"),
     ("engajado", "Engajado"),
     ("qualificado", "Qualificado"),

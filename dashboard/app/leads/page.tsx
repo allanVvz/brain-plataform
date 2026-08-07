@@ -31,7 +31,7 @@ type Lead = any;
 
 const STAGE_LABEL: Record<string, string> = {
   novo: "Novo",
-  "nao qualificado": "Nao qualificado",
+  nao_qualificado: "Não qualificado",
   contatado: "Contatado",
   engajado: "Engajado",
   qualificado: "Qualificado",
@@ -42,7 +42,7 @@ const STAGE_LABEL: Record<string, string> = {
 
 const STAGE_COLOR: Record<string, string> = {
   novo: "text-obs-subtle",
-  "nao qualificado": "text-obs-faint",
+  nao_qualificado: "text-obs-faint",
   contatado: "text-blue-400",
   engajado: "text-amber-400",
   qualificado: "text-orange-400",

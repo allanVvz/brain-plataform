@@ -280,6 +280,44 @@
   --border-glass-soft: rgba(15, 23, 42, 0.06);
 }
 
+/* The Pipeline board's horizontally-scrolling stage columns rely on the
+   platform's native scrollbar, which on most modern OSes/browsers is a
+   thin overlay that's invisible until actively scrolling — nothing on
+   screen hints there's more content off to the right. A persistent,
+   visible track plus a right-edge fade (only shown while there's actually
+   more to scroll to) makes the affordance obvious at rest. */
+.portal-scroll-x {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(15 23 42 / 0.22) transparent;
+}
+.portal-scroll-x::-webkit-scrollbar {
+  height: 8px;
+}
+.portal-scroll-x::-webkit-scrollbar-track {
+  background: transparent;
+}
+.portal-scroll-x::-webkit-scrollbar-thumb {
+  background-color: rgb(15 23 42 / 0.22);
+  border-radius: 999px;
+}
+.portal-scroll-x::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(15 23 42 / 0.34);
+}
+
+/* .portal-theme only overrides --obs-* tokens on its own (nested) div, it
+   never touches <body>'s own background — so when the admin dashboard's
+   data-theme="dark" is set on <html>, <body>'s --body-bg still resolves to
+   the dark theme's near-black value everywhere, portal included. Normally
+   the portal div's own light background fully covers the viewport and
+   this never shows, but on overscroll/rubber-band bounce past the top or
+   bottom edge, the real <body> background is what's revealed — flashing
+   black behind an otherwise all-light page. Force it back to the portal's
+   own light chrome whenever a .portal-theme subtree is present. */
+body:has(.portal-theme) {
+  background-color: #f4f6fa;
+  background-image: none;
+}
+
 /* Legacy alias for any consumer that still reads --brain-* */
 :root {
   --brain-bg:      var(--body-bg);

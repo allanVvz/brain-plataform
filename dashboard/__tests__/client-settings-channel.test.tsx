@@ -17,6 +17,8 @@ vi.mock("@/app/clientes/[personaSlug]/PortalContext", () => ({
       must_change_password: false,
     },
   }),
+  isChannelConnected: (status?: string | null) =>
+    ["connected", "open"].includes(String(status || "").toLowerCase()),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {

@@ -39,6 +39,16 @@ type PortalContextValue = {
 
 const PortalContext = createContext<PortalContextValue | null>(null);
 
+// "open" is Evolution/Baileys' own vocabulary for a live session; "connected"
+// covers other providers. Both mean the same thing to a client — anywhere in
+// the portal that shows connection state must treat them the same way, or
+// the header and the Configurações page contradict each other over the
+// exact same channel.
+const CONNECTED_STATES = new Set(["connected", "open"]);
+export function isChannelConnected(status?: string | null) {
+  return CONNECTED_STATES.has(String(status || "").toLowerCase());
+}
+
 // "Configurações" is deliberately not in this list: it already lives in
 // the account dropdown below (opens upward, near the user's name), and
 // having it here too just duplicates the same destination in two places.
@@ -240,10 +250,14 @@ export default function PortalProvider({
             <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-slate-500">
               <span
                 className={`h-2 w-2 rounded-full ${
-                  value.channel.status === "connected" ? "bg-emerald-500" : "bg-amber-400"
+                  isChannelConnected(value.channel.status) ? "bg-emerald-500" : "bg-amber-400"
                 }`}
               />
-              {value.channel.configured ? value.channel.status : "Canal não conectado"}
+              {!value.channel.configured
+                ? "Canal não conectado"
+                : isChannelConnected(value.channel.status)
+                  ? "Conectado"
+                  : "Aguardando conexão"}
             </div>
           </header>
           <main className="mx-auto w-full max-w-[1500px] p-4 pb-24 lg:p-8">

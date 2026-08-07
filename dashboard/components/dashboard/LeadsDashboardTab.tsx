@@ -9,7 +9,7 @@ interface LeadsDashboardTabProps {
 }
 
 const funnelStages = [
-  { key: "novo", label: "Novo", aliases: ["novo", "new", "nao qualificado"] },
+  { key: "novo", label: "Novo", aliases: ["novo", "new", "nao_qualificado", "nao qualificado"] },
   { key: "qualificado", label: "Qualificado", aliases: ["qualificado", "qualified", "interested"] },
   { key: "em_conversa", label: "Em Conversa", aliases: ["em conversa", "contatado", "engajado", "conversation", "conversando"] },
   { key: "proposta", label: "Proposta", aliases: ["proposta", "oportunidade", "proposal", "opportunity"] },

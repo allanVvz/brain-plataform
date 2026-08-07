@@ -4,9 +4,7 @@ import Image from "next/image";
 import { Bot, ChevronDown, KeyRound, QrCode, Smartphone } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { usePortal } from "../PortalContext";
-
-const CONNECTED_STATES = new Set(["connected", "open"]);
+import { isChannelConnected, usePortal } from "../PortalContext";
 
 export default function ClientSettingsPage() {
   const { personaSlug, capabilities, user } = usePortal();
@@ -88,7 +86,7 @@ export default function ClientSettingsPage() {
     }
   }
 
-  const connected = CONNECTED_STATES.has(String(channel?.status || "").toLowerCase());
+  const connected = isChannelConnected(channel?.status);
   const evolutionPending = (
     channel?.configured
     && channel?.provider === "evolution_baileys"

@@ -62,7 +62,7 @@ def analyze(persona_id: Optional[str] = None) -> list[dict]:
         by_stage[s] = by_stage.get(s, 0) + 1
 
     total = len(leads)
-    novos = by_stage.get("novo", 0) + by_stage.get("nao qualificado", 0)
+    novos = by_stage.get("novo", 0) + by_stage.get("nao_qualificado", 0)
     if total > 0 and novos / total > 0.70:
         insights.append({
             "persona_id": persona_id,

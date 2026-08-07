@@ -134,7 +134,7 @@ export default function ClientLeadsPage() {
                     </select>
                   </label>
                   <label className="text-xs font-medium text-slate-500">
-                    Nota comercial
+                    Anotação
                     <input
                       defaultValue={notes}
                       disabled={!capabilities.edit}
@@ -143,7 +143,7 @@ export default function ClientLeadsPage() {
                           updateLead(lead.id, { notes: event.target.value });
                         }
                       }}
-                      placeholder="Adicione um contexto"
+                      placeholder="Observação interna sobre este lead"
                       className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 disabled:bg-slate-50"
                     />
                   </label>
