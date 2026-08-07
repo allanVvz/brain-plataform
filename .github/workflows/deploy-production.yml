@@ -180,7 +180,17 @@ jobs:
         with:
           ref: ${{ (inputs.action == 'rollback' && inputs.image_tag) || github.sha }}
 
+      # The GitHub-hosted runner's outbound connection to the VPS
+      # intermittently hits a bare TCP dial timeout (confirmed via VPS-side
+      # sshd logs showing zero incoming attempts at the failure timestamps,
+      # and no local/provider firewall involved) — transient network jitter
+      # between the runner's datacenter and the VPS, not a config issue on
+      # either end. Retrying is safe here specifically because the failure
+      # is at the TCP handshake, before any remote command runs, so a retry
+      # never risks re-running a partially-completed step.
       - name: Synchronize deployment manifests
+        id: scp_attempt_1
+        continue-on-error: true
         uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -191,6 +201,31 @@ jobs:
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
 
+      - name: Wait before retrying manifest sync
+        if: steps.scp_attempt_1.outcome == 'failure'
+        run: sleep 20
+
+      - name: Synchronize deployment manifests (retry)
+        if: steps.scp_attempt_1.outcome == 'failure'
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: docker-compose.yml,infra/Caddyfile,infra/kong.yml,ops/vps
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          overwrite: true
+
+      # Unlike the manifest-sync step above, this step has not been observed
+      # failing on its own — every deploy failure to date happened at the
+      # scp step and never reached here (it shows as skipped in the run
+      # history). It runs multi-stage side effects (backup, deploy,
+      # publish/migration scripts), so it intentionally does NOT get a blind
+      # connection retry: a mid-script failure retried blindly could re-run
+      # those stages under a masked root cause. Revisit only if this step
+      # itself starts showing the same bare "dial tcp ...: i/o timeout" at
+      # its very first connection attempt.
       - name: Deploy immutable images over SSH
         uses: appleboy/ssh-action@v1.2.2
         env:
@@ -205,7 +240,6 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           envs: GHCR_USERNAME,GHCR_TOKEN,VPS_APP_DIR,DEPLOY_ACTION,REQUESTED_TAG
-          script_stop: true
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
