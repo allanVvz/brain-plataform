@@ -486,6 +486,98 @@ def apply_extracted_facts(
     return result, errors
 
 
+# --------------------------------------------------------------------------
+# Price disclosure guard (shared with services.conversation_runtime)
+#
+# A persona whose published policy says
+# ``appointment_policy.price_disclosure == "human_only"`` must never let the
+# agent state money for a service — not a value, not a range, not an
+# approximation, not an installment.  The regex and the carve-out live here,
+# next to the rest of the graph-contract proof checks, so the runtime guard
+# and check_proposal() enforce exactly the same rule from one definition.
+# --------------------------------------------------------------------------
+
+# Any number immediately followed by one of these reads as a duration, a
+# count or a percentage, never as money ("cerca de 2 horas", "48 horas",
+# "10%", "4x sem juros").
+_NOT_MONEY_UNIT = (
+    r"(?!\s*(?:%|x\b|h\b|hs\b|hora|horas|min\b|minuto|minutos|dia|dias|"
+    r"semana|semanas|m[eê]s|meses|ano|anos|km|kg|vezes|parcelas))"
+)
+# ``(?![\d.,])`` stops the number from being truncated so the unit lookahead
+# always inspects what follows the *whole* figure ("30 minutos", not "0 …").
+_AMOUNT = r"\d[\d.,]*(?![\d.,])" + _NOT_MONEY_UNIT
+_PRICE_LEAD_IN = (
+    r"cust\w*|sai\s+por|fic(?:a|am|ou)\s+(?:em|por)?|"
+    r"valor(?:es)?\s*(?:de|é|e|em|:)?|pre[çc]o\w*\s*(?:de|é|e|:)?|"
+    r"or[çc]amento\w*\s*(?:de|é|e|:)?|investimento\s*(?:de|é|e|:)?|"
+    r"a\s+partir\s+d[eoa]s?|em\s+torno\s+de|por\s+volta\s+de|cerca\s+de|"
+    r"aproximadamente|faixa\s+de|entre|por\s+apenas|apenas"
+)
+_MONETARY_FIGURE = re.compile(
+    r"r\$\s*\d"
+    rf"|{_AMOUNT}\s*(?:reais|real\b|conto?s?\b|pila\b)"
+    rf"|(?:{_PRICE_LEAD_IN})\s*(?:r\$\s*)?{_AMOUNT}",
+    re.IGNORECASE,
+)
+
+
+def persona_appointment_policy(graph: GraphJson) -> dict[str, Any]:
+    """Published ``appointment_policy`` of this graph's persona node."""
+    persona = next((node for node in graph.nodes if node.node_type == "persona"), None)
+    data = (persona.data or {}) if persona is not None else {}
+    policy = data.get("appointment_policy")
+    return policy if isinstance(policy, dict) else {}
+
+
+def price_disclosure_is_human_only(policy: dict[str, Any] | None) -> bool:
+    return (
+        str((policy or {}).get("price_disclosure") or "").strip().lower()
+        == "human_only"
+    )
+
+
+def _node_data(node: Any) -> dict[str, Any]:
+    """Read ``data`` from a Node model or from a flattened rag_node dict."""
+    data = node.get("data") if isinstance(node, dict) else getattr(node, "data", None)
+    return data if isinstance(data, dict) else {}
+
+
+def carries_payment_policy_claim(nodes: Iterable[Any] | None) -> bool:
+    """True when any given node publishes a ``payment_policy`` claim.
+
+    Payment terms (deposit threshold, installment plans) are money figures the
+    graph explicitly authorizes the agent to state, so they must survive the
+    price guard.  The authorization is read from the node's own published
+    claims — never from the wording of the reply.
+    """
+    for node in nodes or ():
+        for claim in _node_data(node).get("claims") or []:
+            if isinstance(claim, dict) and str(
+                claim.get("claim_type") or ""
+            ) == "payment_policy":
+                return True
+    return False
+
+
+def states_monetary_figure(text: str | None) -> bool:
+    """True when the text states a value, range or approximation in money."""
+    return bool(text) and bool(_MONETARY_FIGURE.search(text))
+
+
+def reply_discloses_blocked_price(
+    text: str | None,
+    policy: dict[str, Any] | None,
+    cited_nodes: Iterable[Any] | None = (),
+) -> bool:
+    """The reply states money the persona's policy reserves for a human."""
+    if not price_disclosure_is_human_only(policy):
+        return False
+    if not states_monetary_figure(text):
+        return False
+    return not carries_payment_policy_claim(cited_nodes)
+
+
 def _question_field_map(contract: dict[str, Any]) -> dict[str, str]:
     return {
         str(field.get("question_node_id")): field["key"]
@@ -568,7 +660,17 @@ def check_proposal(
         errors.append("handoff_not_authorized_by_graph")
 
     reply = str(proposal.get("reply") or "")
-    if re.search(r"r\$\s*\d", reply, re.IGNORECASE):
+    policy = persona_appointment_policy(graph)
+    if price_disclosure_is_human_only(policy):
+        # This persona reserves every price statement for a human, so price
+        # evidence in the graph does NOT authorize the reply — only a cited
+        # node publishing a payment_policy claim does (deposit threshold,
+        # installment terms), and the check covers ranges and approximations,
+        # not just "R$ ...".
+        cited_nodes = [by_id[node_id] for node_id in cited if node_id in by_id]
+        if reply_discloses_blocked_price(reply, policy, cited_nodes):
+            errors.append("price_disclosure_requires_human")
+    elif re.search(r"r\$\s*\d", reply, re.IGNORECASE):
         has_price_evidence = any(
             node_id in by_id and bool((by_id[node_id].data or {}).get("price"))
             for node_id in cited

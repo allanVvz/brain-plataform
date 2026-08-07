@@ -100,6 +100,7 @@ def test_get_persona_appointment_policy_returns_current_texts(monkeypatch):
         "atendimento_humano", "encaminhamento_excepcional", "esclarecimento_duvida",
         "encaminhamento_duvida_persistente", "complemento_confirmacao", "cabecalho_servicos",
         "saudacao_abertura", "sem_comparar_concorrentes",
+        "mensagem_ausencia", "preco_humano", "avaliacao_presencial", "lacuna_conhecimento",
     }
 
 

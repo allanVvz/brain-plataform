@@ -13,37 +13,41 @@
       "label": "Aurora Estética Automotiva",
       "parent_id": null,
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "business_model": "appointment",
-        "greeting": "Olá! Aqui é o atendimento da Aurora Estética Automotiva. Para eu te indicar a melhor opção, me conta: qual é o modelo do seu carro e o que você gostaria de melhorar nele?",
-        "summary": "Atendimento premium de estética automotiva para dúvidas, orçamento, agendamento e coleta para atendimento humano.",
+        "greeting": "Olá! Aqui é o atendimento da Aurora Estética Automotiva. Como você se chama? E me conta: qual é o modelo do seu carro e o que você gostaria de melhorar nele?",
+        "summary": "Atendimento da Aurora para tirar dúvidas, fazer orçamento, agendar serviços e coletar informações para um atendente humano.",
         "commercial_note_fields": [
           "modelo_veiculo",
+          "vehicle_year",
           "vehicle_size",
           "condicao",
-          "data_desejada",
-          "janela_horario"
+          "objective"
         ],
         "appointment_policy": {
           "responsible_team": "Equipe Aurora (Guilherme e Danielle)",
           "provider": "manual",
-          "capacity": 1,
+          "capacity": 5,
           "confirmation_required": true,
+          "price_disclosure": "human_only",
           "final_price_depends_on": [
+            "tamanho do veículo",
+            "condições do veículo",
+            "objetivo do cliente"
+          ],
+          "quote_prerequisites": [
             "modelo",
             "ano",
-            "cor (quando o serviço envolve pintura)",
-            "estado do veículo",
-            "objetivo do cliente"
+            "cor (quando o serviço envolve pintura)"
           ],
           "required_fields": [
             "nome_cliente",
             "servico",
-            "modelo_veiculo",
-            "vehicle_year",
             "objective",
             "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
             "condicao"
           ],
           "conditional_fields": {
@@ -55,27 +59,32 @@
             ]
           },
           "field_questions": {
-            "nome_cliente": "Qual é o seu nome?",
-            "servico": "Qual serviço você deseja?",
-            "modelo_veiculo": "Qual é o modelo do veículo?",
-            "vehicle_year": "Qual é o ano do veículo?",
-            "vehicle_color": "Qual é a cor do veículo?",
+            "nome_cliente": "Antes de tudo, como você se chama?",
+            "servico": "Qual serviço te interessa: lavagem técnica detalhada, higienização interna, polimento, vitrificação, PPF, polimento de vidros, chapeação ou pintura?",
             "objective": "Você pretende vender o carro em breve ou vai continuar com ele e quer investir em cuidado e proteção?",
             "can_visit_in_person": "Você consegue trazer o carro aqui na Aurora para uma avaliação rápida, ou prefere seguir tudo por aqui mesmo?",
-            "condicao": "Como está o veículo hoje e quais pontos você gostaria de melhorar?"
+            "modelo_veiculo": "Qual é o modelo do seu carro?",
+            "vehicle_year": "E qual é o ano dele?",
+            "vehicle_color": "Qual é a cor do veículo?",
+            "condicao": "O que mais te incomoda no carro hoje?",
+            "usage_profile": "Você costuma rodar em estrada de chão ou transportar alguma coisa que suja o veículo?",
+            "photos": "Consegue me mandar fotos das áreas que mais te incomodam?"
           },
           "texts": {
-            "cabecalho_servicos": "Serviços disponíveis:",
+            "cabecalho_servicos": "Serviços da Aurora:",
             "saudacao_abertura": "Obrigada por aguardar.",
-            "sem_comparar_concorrentes": "Não comparar ou comentar sobre concorrentes.",
-            "encaminhamento_excepcional": "Vou encaminhar sua solicitação para a Equipe Aurora.",
-            "atendimento_humano": "Vou encaminhar sua conversa para a Equipe Aurora.",
-            "complemento_confirmacao": "Anotei tudo por aqui; a Equipe Aurora vai te chamar para confirmar o valor final e o melhor horário.",
+            "sem_comparar_concorrentes": "Não comentar nem comparar com concorrentes.",
+            "mensagem_ausencia": "Olá! Obrigada por entrar em contato com a Aurora Estética Automotiva. No momento estamos em atendimento, mas retorno assim que possível. Se puder, já me diga: 🚗 modelo do carro e 🎯 o que você busca melhorar nele.",
+            "preco_humano": "O orçamento é personalizado conforme o tamanho, as condições do veículo e o seu objetivo — quem fecha o valor é a Equipe Aurora. Você consegue trazer o carro para uma avaliação rápida e sem custo?",
+            "avaliacao_presencial": "A avaliação presencial é importante porque cada carro tem um nível diferente de desgaste. É rápida e sem custo. Qual dia fica melhor para você?",
+            "lacuna_conhecimento": "Sobre esse ponto quem te explica melhor é a Equipe Aurora. Vou registrar suas informações e chamar o time. Pode me passar o modelo e o ano do carro?",
+            "encaminhamento_excepcional": "Vou encaminhar sua solicitação para a Equipe Aurora. Enquanto isso, me conta o modelo do seu carro?",
+            "atendimento_humano": "Vou encaminhar sua conversa para a Equipe Aurora. Posso adiantar alguma informação para eles?",
+            "complemento_confirmacao": "Anotei tudo por aqui. A Equipe Aurora vai te chamar para confirmar o valor e o melhor horário. Tem mais alguma coisa que você gostaria de melhorar no carro?",
             "esclarecimento_duvida": "Vou chamar a Equipe Aurora para te ajudar direitinho nisso. Enquanto isso, me conta seu nome, o serviço que você procura e o modelo do carro?",
             "encaminhamento_duvida_persistente": "Já chamei a Equipe Aurora para continuar com você. Se puder, me diga seu nome, o serviço que procura e o modelo do carro enquanto aguarda."
           }
-        },
-        "markdown": "# Aurora Estética Automotiva\n\nAtendimento premium de estética automotiva para dúvidas, orçamento, agendamento e coleta para atendimento humano.\n\n## Business model\n\nappointment\n\n## Greeting\n\nOlá! Aqui é o atendimento da Aurora Estética Automotiva. Para eu te indicar a melhor opção, me conta: qual é o modelo do seu carro e o que você gostaria de melhorar nele?\n\n## Commercial note fields\n\n- modelo_veiculo\n- vehicle_size\n- condicao\n- data_desejada\n- janela_horario\n\n## Appointment policy\n\n- **Responsible team:** Equipe Aurora (Guilherme e Danielle)\n- **Provider:** manual\n- **Capacity:** 1\n- **Confirmation required:** True\n### Final price depends on\n\n- modelo\n- ano\n- cor (quando o serviço envolve pintura)\n- estado do veículo\n- objetivo do cliente\n\n### Required fields\n\n- nome_cliente\n- servico\n- modelo_veiculo\n- vehicle_year\n- objective\n- can_visit_in_person\n- condicao\n\n### Conditional fields\n\n#### Vehicle color\n\n- polimento-tecnico\n- vitrificacao\n- chapeacao\n- pintura\n\n\n### Field questions\n\n- **Nome cliente:** Qual é o seu nome?\n- **Servico:** Qual serviço você deseja?\n- **Modelo veiculo:** Qual é o modelo do veículo?\n- **Vehicle year:** Qual é o ano do veículo?\n- **Vehicle color:** Qual é a cor do veículo?\n- **Objective:** Você pretende vender o carro em breve ou vai continuar com ele e quer investir em cuidado e proteção?\n- **Can visit in person:** Você consegue trazer o carro aqui na Aurora para uma avaliação rápida, ou prefere seguir tudo por aqui mesmo?\n- **Condicao:** Como está o veículo hoje e quais pontos você gostaria de melhorar?\n\n### Texts\n\n- **Services header:** Serviços disponíveis:\n- **Opening gratitude:** Obrigada por aguardar.\n- **No competitor talk:** Não comparar ou comentar sobre concorrentes.\n- **Exceptional handoff:** Vou encaminhar sua solicitação para a Equipe Aurora.\n- **Human handoff:** Vou encaminhar sua conversa para a Equipe Aurora.\n- **Confirmation suffix:** Anotei tudo por aqui; a Equipe Aurora vai te chamar para confirmar o valor final e o melhor horário.\n- **Unknown clarification:** Vou chamar a Equipe Aurora para te ajudar direitinho nisso. Enquanto isso, me conta seu nome, o serviço que você procura e o modelo do carro?\n- **Unknown handoff:** Já chamei a Equipe Aurora para continuar com você. Se puder, me diga seu nome, o serviço que procura e o modelo do carro enquanto aguarda."
+        }
       }
     },
     {
@@ -87,8 +96,7 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Cuidado automotivo detalhista, premium e consultivo.",
-        "markdown": "# Aurora Estética Automotiva\n\nCuidado automotivo detalhista, premium e consultivo."
+        "summary": "Aurora Estética Automotiva — cuidado estético e valorização do veículo."
       }
     },
     {
@@ -100,8 +108,7 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Operação manual de um veículo por vez, com confirmação humana obrigatória de valor final, data e horário.",
-        "markdown": "# Briefing da operação demonstrativa\n\nOperação manual de um veículo por vez, com confirmação humana obrigatória de valor final, data e horário."
+        "summary": "O atendimento deve entender o interesse do cliente, coletar as informações necessárias e conduzir para orçamento, avaliação ou agendamento."
       }
     },
     {
@@ -113,8 +120,7 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Campanha demonstrativa de dúvidas, orçamento e solicitação de agendamento.",
-        "markdown": "# Agenda Premium\n\nCampanha demonstrativa de dúvidas, orçamento e solicitação de agendamento."
+        "summary": "Atendimento para tirar dúvidas, fazer orçamento, agendar serviços e coletar informações para um atendente."
       }
     },
     {
@@ -126,8 +132,7 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Pessoas que buscam conservação, acabamento e atendimento consultivo.",
-        "markdown": "# Proprietários que valorizam cuidado\n\nPessoas que buscam conservação, acabamento e atendimento consultivo."
+        "summary": "Pessoas que buscam conservação, acabamento e atendimento consultivo."
       }
     },
     {
@@ -139,8 +144,7 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Serviços com preços demonstrativos; o valor final depende do modelo, porte e estado do veículo.",
-        "markdown": "# Serviços agendáveis\n\nServiços com preços demonstrativos; o valor final depende do modelo, porte e estado do veículo."
+        "summary": "Serviços agendáveis da Aurora. O orçamento é personalizado e definido pela Equipe Aurora após avaliação."
       }
     },
     {
@@ -150,12 +154,8 @@
       "label": "Regras operacionais e comerciais",
       "parent_id": "aurora-briefing",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
-        "hours": {
-          "monday_friday": "08:00-18:00",
-          "saturday": "08:00-13:00"
-        },
         "capacity": "Até 5 clientes por dia.",
         "payment": [
           "Pix",
@@ -163,7 +163,6 @@
           "cartão até 4x sem juros",
           "cartão até 10x com acréscimo"
         ],
-        "payment_timing": "após o serviço",
         "deposit_policy": "Serviços acima de R$ 2.000,00 exigem sinal de 10% do valor para reservar a agenda.",
         "reschedule_notice_hours": 48,
         "no_competitor_talk": true,
@@ -175,8 +174,25 @@
           "serviço não cadastrado",
           "exceções de cancelamento ou reagendamento"
         ],
-        "confirmation_policy": "Toda data, horário e valor final dependem de confirmação humana.",
-        "markdown": "# Regras operacionais e comerciais\n\n## Hours\n\n- **Monday friday:** 08:00-18:00\n- **Saturday:** 08:00-13:00\n\n## Capacity\n\nAté 5 clientes por dia.\n\n## Payment\n\n- Pix\n- dinheiro\n- cartão até 4x sem juros\n- cartão até 10x com acréscimo\n\n## Payment timing\n\napós o serviço\n\n## Deposit policy\n\nServiços acima de R$ 2.000,00 exigem sinal de 10% do valor para reservar a agenda.\n\n## Reschedule notice hours\n\n48\n\n## No competitor talk\n\nTrue\n\n## Human only topics\n\n- descontos\n- garantia\n- reclamações\n- dúvidas técnicas\n- serviço não cadastrado\n- exceções de cancelamento ou reagendamento\n\n## Confirmation policy\n\nToda data, horário e valor final dependem de confirmação humana."
+        "confirmation_policy": "Toda data, horário e valor dependem de confirmação da Equipe Aurora.",
+        "claims": [
+          {
+            "claim_type": "payment_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-rule-operation"
+            ],
+            "intent_aliases": [
+              "pagamento",
+              "parcelamento",
+              "sinal",
+              "cartão",
+              "pix"
+            ]
+          }
+        ]
       }
     },
     {
@@ -186,48 +202,60 @@
       "label": "Tom premium, cordial e consultivo",
       "parent_id": "aurora-briefing",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
-        "summary": "Mensagens curtas, objetivas e sem emojis por padrão.",
-        "markdown": "# Tom premium, cordial e consultivo\n\nMensagens curtas, objetivas e sem emojis por padrão."
+        "summary": "Tom acolhedor, direto e educado, com linguagem próxima e técnica, adaptando-se ao clima da conversa com o cliente.",
+        "traits": [
+          "objetivo",
+          "amigável",
+          "profissional",
+          "consultivo",
+          "mensagens curtas"
+        ],
+        "avoid": [
+          "falar sobre concorrentes"
+        ],
+        "capabilities": {
+          "global_context": true
+        }
       }
     },
     {
       "id": "aurora-product-evaluation",
       "node_type": "product",
       "slug": "avaliacao-inicial",
-      "label": "Avaliação inicial",
+      "label": "Avaliação presencial",
       "parent_id": "aurora-services",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
           "avaliação",
           "avaliar veículo",
           "avaliação do carro"
         ],
-        "summary": "Avaliação inicial do veículo.",
-        "price": {
-          "amount": 80.0,
-          "currency": "BRL"
-        },
-        "price_qualifier": "fixed",
+        "summary": "Avaliação presencial do veículo, rápida e sem custo, para a Equipe Aurora montar o orçamento.",
+        "price_qualifier": "quote_only",
         "booking": {
-          "duration_minutes": 30,
-          "capacity": 1,
+          "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
           "required_fields": [
             "nome_cliente",
             "servico",
-            "modelo_veiculo",
-            "vehicle_year",
             "objective",
             "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
             "condicao"
           ]
         },
-        "markdown": "# Avaliação inicial\n\nAvaliação inicial do veículo.\n\n## Aliases\n\n- avaliação\n- avaliar veículo\n- avaliação do carro\n\n## Price\n\n- **Amount:** 80.0\n- **Currency:** BRL\n\n## Price qualifier\n\nfixed\n\n## Booking\n\n- **Duration minutes:** 30\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_year\n- objective\n- can_visit_in_person\n- condition"
+        "requires_in_person_evaluation": false,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-scheduling"
+        },
+        "no_charge": true
       }
     },
     {
@@ -237,24 +265,23 @@
       "label": "Copy — Avaliação inicial",
       "parent_id": "aurora-product-evaluation",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Comece com uma avaliação cuidadosa do seu veículo. A equipe confirma o horário.",
-        "markdown": "# Copy — Avaliação inicial\n\nComece com uma avaliação cuidadosa do seu veículo. A equipe confirma o horário.\n\n## Channel\n\nwhatsapp"
+        "content": "Avaliação presencial rápida e sem custo. O dia e o horário são confirmados pela Equipe Aurora."
       }
     },
     {
       "id": "aurora-faq-evaluation",
       "node_type": "faq",
-      "slug": "faq-avaliacao-inicial",
-      "label": "Quanto custa e quanto dura a avaliação inicial?",
+      "slug": "faq-avaliacao-presencial",
+      "label": "A avaliação presencial tem custo?",
       "parent_id": "aurora-copy-evaluation",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
-        "question": "Quanto custa e quanto dura a avaliação inicial?",
-        "answer": "A avaliação inicial leva cerca de 30 minutos e custa R$ 80,00. O horário depende de confirmação humana.",
+        "question": "A avaliação presencial tem custo?",
+        "answer": "Não. A avaliação presencial é importante porque cada carro tem um nível diferente de desgaste — ela é rápida e sem custo. Qual dia fica melhor para você?",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -265,9 +292,8 @@
           "aurora-product-evaluation",
           "aurora-copy-evaluation"
         ],
-        "source_node_id": "aurora-product-evaluation",
-        "source_node_type": "product",
-        "markdown": "# Quanto custa e quanto dura a avaliação inicial?\n\n## Pergunta\n\nQuanto custa e quanto dura a avaliação inicial?\n\n## Resposta\n\nA avaliação inicial leva cerca de 30 minutos e custa R$ 80,00. O horário depende de confirmação humana.",
+        "source_node_id": "aurora-copy-evaluation",
+        "source_node_type": "copy",
         "markdown_document": true,
         "question_count": 1
       }
@@ -279,35 +305,34 @@
       "label": "Lavagem detalhada",
       "parent_id": "aurora-services",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
           "lavagem",
           "lavagem completa",
           "lavar carro"
         ],
-        "summary": "Lavagem detalhada com preço inicial demonstrativo.",
-        "price": {
-          "amount": 180.0,
-          "currency": "BRL"
-        },
-        "price_qualifier": "starting_at",
+        "summary": "Lavagem técnica detalhada: frisos, cantinhos, emblemas, caixas de rodas, portas, consoles e painel, com aspiração de bancos e carpetes e produto revitalizador nos plásticos.",
+        "price_qualifier": "quote_only",
         "booking": {
-          "duration_minutes": 120,
-          "capacity": 1,
+          "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
           "required_fields": [
             "nome_cliente",
             "servico",
-            "modelo_veiculo",
-            "vehicle_year",
             "objective",
             "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
             "condicao"
           ]
         },
-        "markdown": "# Lavagem detalhada\n\nLavagem detalhada com preço inicial demonstrativo.\n\n## Aliases\n\n- lavagem\n- lavagem completa\n- lavar carro\n\n## Price\n\n- **Amount:** 180.0\n- **Currency:** BRL\n\n## Price qualifier\n\nstarting_at\n\n## Booking\n\n- **Duration minutes:** 120\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_year\n- objective\n- can_visit_in_person\n- condition"
+        "requires_in_person_evaluation": false,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-scheduling"
+        }
       }
     },
     {
@@ -317,39 +342,10 @@
       "label": "Copy — Lavagem detalhada",
       "parent_id": "aurora-product-wash",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Lavagem detalhada para renovar o cuidado com o veículo, mediante confirmação de agenda.",
-        "markdown": "# Copy — Lavagem detalhada\n\nLavagem detalhada para renovar o cuidado com o veículo, mediante confirmação de agenda.\n\n## Channel\n\nwhatsapp"
-      }
-    },
-    {
-      "id": "aurora-faq-wash",
-      "node_type": "faq",
-      "slug": "faq-lavagem-detalhada",
-      "label": "Quanto custa e quanto dura a lavagem detalhada?",
-      "parent_id": "aurora-copy-wash",
-      "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
-        "status": "validated",
-        "question": "Quanto custa e quanto dura a lavagem detalhada?",
-        "answer": "A lavagem detalhada leva cerca de 2 horas e parte de R$ 180,00. O valor final e o horário dependem de confirmação humana.",
-        "branch_path": [
-          "aurora-persona",
-          "aurora-brand",
-          "aurora-briefing",
-          "aurora-campaign",
-          "aurora-audience",
-          "aurora-services",
-          "aurora-product-wash",
-          "aurora-copy-wash"
-        ],
-        "source_node_id": "aurora-product-wash",
-        "source_node_type": "product",
-        "markdown": "# Quanto custa e quanto dura a lavagem detalhada?\n\n## Pergunta\n\nQuanto custa e quanto dura a lavagem detalhada?\n\n## Resposta\n\nA lavagem detalhada leva cerca de 2 horas e parte de R$ 180,00. O valor final e o horário dependem de confirmação humana.",
-        "markdown_document": true,
-        "question_count": 1
+        "content": "Lavagem técnica detalhada, feita ponto a ponto, com revitalização dos plásticos."
       }
     },
     {
@@ -373,9 +369,8 @@
           "aurora-product-wash",
           "aurora-copy-wash"
         ],
-        "source_node_id": "aurora-product-wash",
-        "source_node_type": "product",
-        "markdown": "# O que está incluído na lavagem detalhada?\n\n## Pergunta\n\nO que está incluído na lavagem detalhada?\n\n## Resposta\n\nA lavagem detalhada limpa frisos, cantinhos, emblemas e caixas de rodas, além de portas, consoles e painel. Inclui também aspiração de bancos e carpetes, e aplicação de produto revitalizador nas partes plásticas para brilho e proteção.",
+        "source_node_id": "aurora-copy-wash",
+        "source_node_type": "copy",
         "markdown_document": true,
         "question_count": 1
       }
@@ -387,35 +382,34 @@
       "label": "Higienização interna",
       "parent_id": "aurora-services",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
           "higienização",
           "limpeza interna",
           "higienizar bancos"
         ],
-        "summary": "Higienização interna com preço inicial demonstrativo.",
-        "price": {
-          "amount": 350.0,
-          "currency": "BRL"
-        },
-        "price_qualifier": "starting_at",
+        "summary": "Higienização interna completa, do teto ao carpete, com higienização dos bancos e hidratação quando o banco é de couro.",
+        "price_qualifier": "quote_only",
         "booking": {
-          "duration_minutes": 180,
-          "capacity": 1,
+          "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
           "required_fields": [
             "nome_cliente",
             "servico",
-            "modelo_veiculo",
-            "vehicle_year",
             "objective",
             "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
             "condicao"
           ]
         },
-        "markdown": "# Higienização interna\n\nHigienização interna com preço inicial demonstrativo.\n\n## Aliases\n\n- higienização\n- limpeza interna\n- higienizar bancos\n\n## Price\n\n- **Amount:** 350.0\n- **Currency:** BRL\n\n## Price qualifier\n\nstarting_at\n\n## Booking\n\n- **Duration minutes:** 180\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_year\n- objective\n- can_visit_in_person\n- condition"
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-scheduling"
+        }
       }
     },
     {
@@ -425,39 +419,10 @@
       "label": "Copy — Higienização interna",
       "parent_id": "aurora-product-interior",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Renove o interior do veículo com uma higienização cuidadosa e atendimento confirmado.",
-        "markdown": "# Copy — Higienização interna\n\nRenove o interior do veículo com uma higienização cuidadosa e atendimento confirmado.\n\n## Channel\n\nwhatsapp"
-      }
-    },
-    {
-      "id": "aurora-faq-interior",
-      "node_type": "faq",
-      "slug": "faq-higienizacao-interna",
-      "label": "Quanto custa e quanto dura a higienização interna?",
-      "parent_id": "aurora-copy-interior",
-      "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
-        "status": "validated",
-        "question": "Quanto custa e quanto dura a higienização interna?",
-        "answer": "A higienização interna leva cerca de 3 horas e parte de R$ 350,00. O valor final e o horário dependem de confirmação humana.",
-        "branch_path": [
-          "aurora-persona",
-          "aurora-brand",
-          "aurora-briefing",
-          "aurora-campaign",
-          "aurora-audience",
-          "aurora-services",
-          "aurora-product-interior",
-          "aurora-copy-interior"
-        ],
-        "source_node_id": "aurora-product-interior",
-        "source_node_type": "product",
-        "markdown": "# Quanto custa e quanto dura a higienização interna?\n\n## Pergunta\n\nQuanto custa e quanto dura a higienização interna?\n\n## Resposta\n\nA higienização interna leva cerca de 3 horas e parte de R$ 350,00. O valor final e o horário dependem de confirmação humana.",
-        "markdown_document": true,
-        "question_count": 1
+        "content": "Higienização interna completa, do teto ao carpete, com cuidado especial nos bancos."
       }
     },
     {
@@ -481,9 +446,8 @@
           "aurora-product-interior",
           "aurora-copy-interior"
         ],
-        "source_node_id": "aurora-product-interior",
-        "source_node_type": "product",
-        "markdown": "# O que está incluído na higienização interna?\n\n## Pergunta\n\nO que está incluído na higienização interna?\n\n## Resposta\n\nA limpeza vai do teto do carro às colunas, cintos, painel e consoles. Os bancos são higienizados, carpete e tapetes também são limpos, e bancos de couro recebem hidratação para evitar rachaduras.",
+        "source_node_id": "aurora-copy-interior",
+        "source_node_type": "copy",
         "markdown_document": true,
         "question_count": 1
       }
@@ -495,36 +459,34 @@
       "label": "Polimento técnico",
       "parent_id": "aurora-services",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
           "polimento",
           "polir carro",
           "correção de pintura"
         ],
-        "summary": "Polimento técnico com preço inicial demonstrativo.",
-        "price": {
-          "amount": 650.0,
-          "currency": "BRL"
-        },
-        "price_qualifier": "starting_at",
+        "summary": "Polimento com lavagem detalhada, descontaminação da pintura, isolamento de partes sensíveis e polimento para ativar o brilho ou corrigir riscos.",
+        "price_qualifier": "quote_only",
         "booking": {
-          "duration_minutes": 240,
-          "capacity": 1,
+          "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
           "required_fields": [
             "nome_cliente",
             "servico",
-            "modelo_veiculo",
-            "vehicle_year",
-            "vehicle_color",
             "objective",
             "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
             "condicao"
           ]
         },
-        "markdown": "# Polimento técnico\n\nPolimento técnico com preço inicial demonstrativo.\n\n## Aliases\n\n- polimento\n- polir carro\n- correção de pintura\n\n## Price\n\n- **Amount:** 650.0\n- **Currency:** BRL\n\n## Price qualifier\n\nstarting_at\n\n## Booking\n\n- **Duration minutes:** 240\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_year\n- vehicle_color\n- objective\n- can_visit_in_person\n- condition"
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-scheduling"
+        }
       }
     },
     {
@@ -534,39 +496,10 @@
       "label": "Copy — Polimento técnico",
       "parent_id": "aurora-product-polish",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Valorize o acabamento do veículo com polimento técnico e agenda confirmada.",
-        "markdown": "# Copy — Polimento técnico\n\nValorize o acabamento do veículo com polimento técnico e agenda confirmada.\n\n## Channel\n\nwhatsapp"
-      }
-    },
-    {
-      "id": "aurora-faq-polish",
-      "node_type": "faq",
-      "slug": "faq-polimento-tecnico",
-      "label": "Quanto custa e quanto dura o polimento técnico?",
-      "parent_id": "aurora-copy-polish",
-      "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
-        "status": "validated",
-        "question": "Quanto custa e quanto dura o polimento técnico?",
-        "answer": "O polimento técnico leva cerca de 4 horas e parte de R$ 650,00. O valor final e o horário dependem de confirmação humana.",
-        "branch_path": [
-          "aurora-persona",
-          "aurora-brand",
-          "aurora-briefing",
-          "aurora-campaign",
-          "aurora-audience",
-          "aurora-services",
-          "aurora-product-polish",
-          "aurora-copy-polish"
-        ],
-        "source_node_id": "aurora-product-polish",
-        "source_node_type": "product",
-        "markdown": "# Quanto custa e quanto dura o polimento técnico?\n\n## Pergunta\n\nQuanto custa e quanto dura o polimento técnico?\n\n## Resposta\n\nO polimento técnico leva cerca de 4 horas e parte de R$ 650,00. O valor final e o horário dependem de confirmação humana.",
-        "markdown_document": true,
-        "question_count": 1
+        "content": "Polimento para ativar o brilho ou corrigir riscos, conforme o estado da pintura."
       }
     },
     {
@@ -590,9 +523,8 @@
           "aurora-product-polish",
           "aurora-copy-polish"
         ],
-        "source_node_id": "aurora-product-polish",
-        "source_node_type": "product",
-        "markdown": "# Como funciona o processo de polimento técnico?\n\n## Pergunta\n\nComo funciona o processo de polimento técnico?\n\n## Resposta\n\nO processo inclui lavagem detalhada, descontaminação da pintura e isolamento de partes sensíveis, seguido do polimento — que pode ser feito para ativar o brilho ou de forma mais profunda para corrigir riscos, dependendo do estado do veículo.",
+        "source_node_id": "aurora-copy-polish",
+        "source_node_type": "copy",
         "markdown_document": true,
         "question_count": 1
       }
@@ -604,31 +536,34 @@
       "label": "Vitrificação",
       "parent_id": "aurora-services",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
           "vitrificação",
           "vitrificar carro",
           "cristalização"
         ],
-        "summary": "Mesmo processo do polimento técnico (limpeza, descontaminação, isolamento e correção de riscos), finalizado com aplicação de vitrificador — uma camada de proteção química cuja durabilidade o cliente escolhe. Preço final depende da durabilidade escolhida; somente após avaliação.",
+        "summary": "Vitrificação: mesmo processo do polimento, com foco em correção de riscos e aplicação final do vitrificador como camada de proteção química.",
         "price_qualifier": "quote_only",
         "booking": {
-          "capacity": 1,
+          "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
           "required_fields": [
             "nome_cliente",
             "servico",
-            "modelo_veiculo",
-            "vehicle_year",
-            "vehicle_color",
             "objective",
             "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
             "condicao"
           ]
         },
-        "markdown": "# Vitrificação\n\nMesmo processo do polimento técnico (limpeza, descontaminação, isolamento e correção de riscos), finalizado com aplicação de vitrificador — uma camada de proteção química cuja durabilidade o cliente escolhe. Preço final depende da durabilidade escolhida; somente após avaliação.\n\n## Aliases\n\n- vitrificação\n- vitrificar carro\n- cristalização\n\n## Price qualifier\n\nquote_only\n\n## Booking\n\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_year\n- vehicle_color\n- objective\n- can_visit_in_person\n- condition"
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-scheduling"
+        }
       }
     },
     {
@@ -638,24 +573,23 @@
       "label": "Copy — Vitrificação",
       "parent_id": "aurora-product-vitrification",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Proteja a pintura do veículo com a vitrificação: correção de riscos e uma camada de proteção química com a durabilidade que você escolher.",
-        "markdown": "# Copy — Vitrificação\n\nProteja a pintura do veículo com a vitrificação: correção de riscos e uma camada de proteção química com a durabilidade que você escolher.\n\n## Channel\n\nwhatsapp"
+        "content": "Vitrificação com camada de proteção química e durabilidade escolhida por você."
       }
     },
     {
       "id": "aurora-faq-vitrification",
       "node_type": "faq",
-      "slug": "faq-vitrificacao",
-      "label": "Quanto custa e quanto dura a vitrificação?",
+      "slug": "faq-vitrificacao-durabilidade",
+      "label": "Como funciona a vitrificação?",
       "parent_id": "aurora-copy-vitrification",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
-        "question": "Quanto custa e quanto dura a vitrificação?",
-        "answer": "O processo é o mesmo do polimento técnico, finalizado com a aplicação do vitrificador. O valor final depende da durabilidade escolhida e só é definido após avaliação do veículo.",
+        "question": "Como funciona a vitrificação?",
+        "answer": "O processo é o mesmo do polimento, com foco na correção de riscos, e a última etapa é a aplicação do vitrificador, que atua como uma camada de proteção química. Você escolhe a durabilidade do produto que quer aplicar. Qual é o modelo e a cor do seu carro?",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -666,9 +600,8 @@
           "aurora-product-vitrification",
           "aurora-copy-vitrification"
         ],
-        "source_node_id": "aurora-product-vitrification",
-        "source_node_type": "product",
-        "markdown": "# Quanto custa e quanto dura a vitrificação?\n\n## Pergunta\n\nQuanto custa e quanto dura a vitrificação?\n\n## Resposta\n\nO processo é o mesmo do polimento técnico, finalizado com a aplicação do vitrificador. O valor final depende da durabilidade escolhida e só é definido após avaliação do veículo.",
+        "source_node_id": "aurora-copy-vitrification",
+        "source_node_type": "copy",
         "markdown_document": true,
         "question_count": 1
       }
@@ -694,9 +627,8 @@
           "aurora-product-vitrification",
           "aurora-copy-vitrification"
         ],
-        "source_node_id": "aurora-product-vitrification",
-        "source_node_type": "product",
-        "markdown": "# Qual a diferença entre vitrificação e polimento técnico?\n\n## Pergunta\n\nQual a diferença entre vitrificação e polimento técnico?\n\n## Resposta\n\nAs etapas iniciais são as mesmas — limpeza, descontaminação, isolamento e correção de riscos. A diferença é que a vitrificação termina com a aplicação do vitrificador, uma camada de proteção química cuja durabilidade você escolhe.",
+        "source_node_id": "aurora-copy-vitrification",
+        "source_node_type": "copy",
         "markdown_document": true,
         "question_count": 1
       }
@@ -708,30 +640,34 @@
       "label": "PPF (película de proteção física)",
       "parent_id": "aurora-services",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
           "ppf",
           "pelicula de protecao",
           "pelicula protetora"
         ],
-        "summary": "Película de proteção física contra pequenos impactos, pedras e marcas de chuva ácida ou fezes de pássaros. Aplicada em áreas expostas ou sensíveis (quinas de porta, conchas de maçaneta, soleiras) ou em kit frontal (parachoque, capô, retrovisores); também disponível para áreas internas como telas e black piano. Preço e escopo definidos somente após avaliação.",
+        "summary": "PPF: película de proteção física contra pequenos impactos, pedras, marcas de chuva ácida e fezes de pássaros.",
         "price_qualifier": "quote_only",
         "booking": {
-          "capacity": 1,
+          "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
           "required_fields": [
             "nome_cliente",
             "servico",
-            "modelo_veiculo",
-            "vehicle_year",
             "objective",
             "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
             "condicao"
           ]
         },
-        "markdown": "# PPF (película de proteção física)\n\nPelícula de proteção física contra pequenos impactos, pedras e marcas de chuva ácida ou fezes de pássaros. Aplicada em áreas expostas ou sensíveis (quinas de porta, conchas de maçaneta, soleiras) ou em kit frontal (parachoque, capô, retrovisores); também disponível para áreas internas como telas e black piano. Preço e escopo definidos somente após avaliação.\n\n## Aliases\n\n- ppf\n- pelicula de protecao\n- pelicula protetora\n\n## Price qualifier\n\nquote_only\n\n## Booking\n\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_year\n- objective\n- can_visit_in_person\n- condition"
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-scheduling"
+        }
       }
     },
     {
@@ -741,24 +677,23 @@
       "label": "Copy — PPF",
       "parent_id": "aurora-product-ppf",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Proteja as áreas mais expostas do veículo com o PPF, contra impactos de pedra, chuva ácida e marcas de uso.",
-        "markdown": "# Copy — PPF\n\nProteja as áreas mais expostas do veículo com o PPF, contra impactos de pedra, chuva ácida e marcas de uso.\n\n## Channel\n\nwhatsapp"
+        "content": "PPF nas áreas mais expostas do veículo, por dentro e por fora."
       }
     },
     {
       "id": "aurora-faq-ppf",
       "node_type": "faq",
-      "slug": "faq-ppf",
-      "label": "Quanto custa e onde é aplicado o PPF?",
+      "slug": "faq-ppf-areas",
+      "label": "Onde o PPF é aplicado?",
       "parent_id": "aurora-copy-ppf",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
-        "question": "Quanto custa e onde é aplicado o PPF?",
-        "answer": "Pode ser aplicado em áreas mais expostas (quinas de porta, conchas de maçaneta, soleiras), em kit frontal (parachoque, capô, retrovisores) ou em áreas internas como telas e black piano. O valor depende da área escolhida e só é definido após avaliação.",
+        "question": "Onde o PPF é aplicado?",
+        "answer": "Geralmente nas áreas mais expostas ou sensíveis, como quinas de porta, conchas de maçaneta e soleiras. Há também o kit frontal para parachoque, capô e retrovisores, que podem ser atingidos por pedras na estrada. Na parte interna, é recomendado para áreas de tela e black piano, que podem riscar com o toque e a limpeza. Qual área te preocupa mais?",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -769,9 +704,8 @@
           "aurora-product-ppf",
           "aurora-copy-ppf"
         ],
-        "source_node_id": "aurora-product-ppf",
-        "source_node_type": "product",
-        "markdown": "# Quanto custa e onde é aplicado o PPF?\n\n## Pergunta\n\nQuanto custa e onde é aplicado o PPF?\n\n## Resposta\n\nPode ser aplicado em áreas mais expostas (quinas de porta, conchas de maçaneta, soleiras), em kit frontal (parachoque, capô, retrovisores) ou em áreas internas como telas e black piano. O valor depende da área escolhida e só é definido após avaliação.",
+        "source_node_id": "aurora-copy-ppf",
+        "source_node_type": "copy",
         "markdown_document": true,
         "question_count": 1
       }
@@ -783,30 +717,34 @@
       "label": "Polimento de vidros",
       "parent_id": "aurora-services",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
           "polimento de vidros",
           "polir vidros",
           "vidros"
         ],
-        "summary": "Polimento de vidros do veículo. Preço definido somente após avaliação.",
+        "summary": "Polimento de vidros.",
         "price_qualifier": "quote_only",
         "booking": {
-          "capacity": 1,
+          "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
           "required_fields": [
             "nome_cliente",
             "servico",
-            "modelo_veiculo",
-            "vehicle_year",
             "objective",
             "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
             "condicao"
           ]
         },
-        "markdown": "# Polimento de vidros\n\nPolimento de vidros do veículo. Preço definido somente após avaliação.\n\n## Aliases\n\n- polimento de vidros\n- polir vidros\n- vidros\n\n## Price qualifier\n\nquote_only\n\n## Booking\n\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_year\n- objective\n- can_visit_in_person\n- condition"
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-scheduling"
+        }
       }
     },
     {
@@ -816,24 +754,23 @@
       "label": "Copy — Polimento de vidros",
       "parent_id": "aurora-product-glass-polish",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Melhore a visibilidade e o acabamento com o polimento de vidros.",
-        "markdown": "# Copy — Polimento de vidros\n\nMelhore a visibilidade e o acabamento com o polimento de vidros.\n\n## Channel\n\nwhatsapp"
+        "content": "Polimento de vidros."
       }
     },
     {
       "id": "aurora-faq-glass-polish",
       "node_type": "faq",
       "slug": "faq-polimento-de-vidros",
-      "label": "Quanto custa o polimento de vidros?",
+      "label": "Vocês fazem polimento de vidros?",
       "parent_id": "aurora-copy-glass-polish",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
-        "question": "Quanto custa o polimento de vidros?",
-        "answer": "O valor é definido somente após avaliação do veículo.",
+        "question": "Vocês fazem polimento de vidros?",
+        "answer": "Fazemos, sim — o polimento de vidros faz parte dos serviços da Aurora. Qual é o modelo do seu carro?",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -844,9 +781,8 @@
           "aurora-product-glass-polish",
           "aurora-copy-glass-polish"
         ],
-        "source_node_id": "aurora-product-glass-polish",
-        "source_node_type": "product",
-        "markdown": "# Quanto custa o polimento de vidros?\n\n## Pergunta\n\nQuanto custa o polimento de vidros?\n\n## Resposta\n\nO valor é definido somente após avaliação do veículo.",
+        "source_node_id": "aurora-copy-glass-polish",
+        "source_node_type": "copy",
         "markdown_document": true,
         "question_count": 1
       }
@@ -858,30 +794,35 @@
       "label": "Chapeação",
       "parent_id": "aurora-services",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
           "chapeação",
           "funilaria"
         ],
-        "summary": "Serviço de chapeação. Escopo, prazo e valor exigem avaliação técnica presencial — não há informação demonstrativa disponível.",
+        "summary": "Chapeação. O processo é explicado pela Equipe Aurora.",
         "price_qualifier": "quote_only",
         "booking": {
-          "capacity": 1,
+          "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
           "required_fields": [
             "nome_cliente",
             "servico",
-            "modelo_veiculo",
-            "vehicle_year",
-            "vehicle_color",
             "objective",
             "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
             "condicao"
           ]
         },
-        "markdown": "# Chapeação\n\nServiço de chapeação. Escopo, prazo e valor exigem avaliação técnica presencial — não há informação demonstrativa disponível.\n\n## Aliases\n\n- chapeação\n- funilaria\n\n## Price qualifier\n\nquote_only\n\n## Booking\n\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_year\n- vehicle_color\n- objective\n- can_visit_in_person\n- condition"
+        "requires_in_person_evaluation": true,
+        "process_documented": false,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-scheduling",
+          "on_process_question": "aurora-rule-unknown-process"
+        }
       }
     },
     {
@@ -891,24 +832,23 @@
       "label": "Copy — Chapeação",
       "parent_id": "aurora-product-bodywork",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Serviço de chapeação sob avaliação técnica presencial da equipe.",
-        "markdown": "# Copy — Chapeação\n\nServiço de chapeação sob avaliação técnica presencial da equipe.\n\n## Channel\n\nwhatsapp"
+        "content": "Chapeação com orientação da Equipe Aurora."
       }
     },
     {
       "id": "aurora-faq-bodywork",
       "node_type": "faq",
       "slug": "faq-chapeacao",
-      "label": "Quanto custa e quanto tempo leva a chapeação?",
+      "label": "Vocês fazem chapeação?",
       "parent_id": "aurora-copy-bodywork",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
-        "question": "Quanto custa e quanto tempo leva a chapeação?",
-        "answer": "Esse serviço exige avaliação técnica presencial. Prazo e valor são definidos pela equipe após ver o veículo.",
+        "question": "Vocês fazem chapeação?",
+        "answer": "Fazemos, sim. Sobre o processo em si, quem te explica em detalhe é a Equipe Aurora — vou registrar suas informações e chamar o time. Pode me passar o modelo, o ano e a cor do carro?",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -919,11 +859,11 @@
           "aurora-product-bodywork",
           "aurora-copy-bodywork"
         ],
-        "source_node_id": "aurora-product-bodywork",
-        "source_node_type": "product",
-        "markdown": "# Quanto custa e quanto tempo leva a chapeação?\n\n## Pergunta\n\nQuanto custa e quanto tempo leva a chapeação?\n\n## Resposta\n\nEsse serviço exige avaliação técnica presencial. Prazo e valor são definidos pela equipe após ver o veículo.",
+        "source_node_id": "aurora-copy-bodywork",
+        "source_node_type": "copy",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "handoff_required": true
       }
     },
     {
@@ -933,30 +873,35 @@
       "label": "Pintura",
       "parent_id": "aurora-services",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
           "pintura",
           "repintura"
         ],
-        "summary": "Serviço de pintura. Escopo, prazo e valor exigem avaliação técnica presencial — não há informação demonstrativa disponível.",
+        "summary": "Pintura. O processo é explicado pela Equipe Aurora.",
         "price_qualifier": "quote_only",
         "booking": {
-          "capacity": 1,
+          "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
           "required_fields": [
             "nome_cliente",
             "servico",
-            "modelo_veiculo",
-            "vehicle_year",
-            "vehicle_color",
             "objective",
             "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
             "condicao"
           ]
         },
-        "markdown": "# Pintura\n\nServiço de pintura. Escopo, prazo e valor exigem avaliação técnica presencial — não há informação demonstrativa disponível.\n\n## Aliases\n\n- pintura\n- repintura\n\n## Price qualifier\n\nquote_only\n\n## Booking\n\n- **Capacity:** 1\n- **Confirmation required:** True\n- **Provider:** manual\n### Required fields\n\n- customer_name\n- service_slug\n- vehicle_model\n- vehicle_year\n- vehicle_color\n- objective\n- can_visit_in_person\n- condition"
+        "requires_in_person_evaluation": true,
+        "process_documented": false,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-scheduling",
+          "on_process_question": "aurora-rule-unknown-process"
+        }
       }
     },
     {
@@ -966,24 +911,23 @@
       "label": "Copy — Pintura",
       "parent_id": "aurora-product-paint",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Serviço de pintura sob avaliação técnica presencial da equipe.",
-        "markdown": "# Copy — Pintura\n\nServiço de pintura sob avaliação técnica presencial da equipe.\n\n## Channel\n\nwhatsapp"
+        "content": "Pintura com orientação da Equipe Aurora."
       }
     },
     {
       "id": "aurora-faq-paint",
       "node_type": "faq",
       "slug": "faq-pintura",
-      "label": "Quanto custa e quanto tempo leva a pintura?",
+      "label": "Vocês fazem pintura?",
       "parent_id": "aurora-copy-paint",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
-        "question": "Quanto custa e quanto tempo leva a pintura?",
-        "answer": "Esse serviço exige avaliação técnica presencial. Prazo e valor são definidos pela equipe após ver o veículo.",
+        "question": "Vocês fazem pintura?",
+        "answer": "Fazemos, sim. Sobre o processo em si, quem te explica em detalhe é a Equipe Aurora — vou registrar suas informações e chamar o time. Pode me passar o modelo, o ano e a cor do carro?",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -994,35 +938,11 @@
           "aurora-product-paint",
           "aurora-copy-paint"
         ],
-        "source_node_id": "aurora-product-paint",
-        "source_node_type": "product",
-        "markdown": "# Quanto custa e quanto tempo leva a pintura?\n\n## Pergunta\n\nQuanto custa e quanto tempo leva a pintura?\n\n## Resposta\n\nEsse serviço exige avaliação técnica presencial. Prazo e valor são definidos pela equipe após ver o veículo.",
+        "source_node_id": "aurora-copy-paint",
+        "source_node_type": "copy",
         "markdown_document": true,
-        "question_count": 1
-      }
-    },
-    {
-      "id": "aurora-faq-hours",
-      "node_type": "faq",
-      "slug": "faq-horarios-atendimento",
-      "label": "Qual é o horário de atendimento?",
-      "parent_id": "aurora-rule-operation",
-      "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
-        "status": "validated",
-        "question": "Qual é o horário de atendimento?",
-        "answer": "O atendimento ocorre de segunda a sexta, das 08h às 18h, e sábado, das 08h às 13h.",
-        "branch_path": [
-          "aurora-persona",
-          "aurora-brand",
-          "aurora-briefing",
-          "aurora-rule-operation"
-        ],
-        "source_node_id": "aurora-rule-operation",
-        "source_node_type": "rule",
-        "markdown": "# Qual é o horário de atendimento?\n\n## Pergunta\n\nQual é o horário de atendimento?\n\n## Resposta\n\nO atendimento ocorre de segunda a sexta, das 08h às 18h, e sábado, das 08h às 13h.",
-        "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "handoff_required": true
       }
     },
     {
@@ -1032,10 +952,10 @@
       "label": "Quais são as formas de pagamento?",
       "parent_id": "aurora-rule-operation",
       "data": {
-        "source": "user_authorized_demo_briefing_2026_07_29",
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Quais são as formas de pagamento?",
-        "answer": "O pagamento é feito após o serviço, via Pix, dinheiro ou cartão — até 4x sem juros ou até 10x com acréscimo. Para serviços acima de R$ 2.000,00 é necessário um sinal de 10% para reservar a agenda.",
+        "answer": "Aceitamos Pix, dinheiro e cartão — até 4x sem juros ou até 10x com acréscimo. Para serviços acima de R$ 2.000,00 é necessário um sinal de 10% do valor para reservar a agenda. Posso te ajudar com mais alguma coisa?",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -1044,7 +964,6 @@
         ],
         "source_node_id": "aurora-rule-operation",
         "source_node_type": "rule",
-        "markdown": "# Quais são as formas de pagamento?\n\n## Pergunta\n\nQuais são as formas de pagamento?\n\n## Resposta\n\nO pagamento é feito após o serviço, via Pix, dinheiro ou cartão — até 4x sem juros ou até 10x com acréscimo. Para serviços acima de R$ 2.000,00 é necessário um sinal de 10% para reservar a agenda.",
         "markdown_document": true,
         "question_count": 1
       }
@@ -1068,7 +987,6 @@
         ],
         "source_node_id": "aurora-rule-operation",
         "source_node_type": "rule",
-        "markdown": "# Como cancelar ou reagendar?\n\n## Pergunta\n\nComo cancelar ou reagendar?\n\n## Resposta\n\nSolicite cancelamento ou reagendamento com 48 horas de antecedência. Exceções são avaliadas pela equipe.",
         "markdown_document": true,
         "question_count": 1
       }
@@ -1092,7 +1010,6 @@
         ],
         "source_node_id": "aurora-rule-operation",
         "source_node_type": "rule",
-        "markdown": "# O agendamento é confirmado automaticamente?\n\n## Pergunta\n\nO agendamento é confirmado automaticamente?\n\n## Resposta\n\nNão. Toda data e horário dependem de confirmação humana da Equipe Aurora.",
         "markdown_document": true,
         "question_count": 1
       }
@@ -1116,7 +1033,6 @@
         ],
         "source_node_id": "aurora-rule-operation",
         "source_node_type": "rule",
-        "markdown": "# Preciso pagar sinal para agendar?\n\n## Pergunta\n\nPreciso pagar sinal para agendar?\n\n## Resposta\n\nSomente para serviços acima de R$ 2.000,00, é necessário um sinal de 10% do valor para reservar a agenda.",
         "markdown_document": true,
         "question_count": 1
       }
@@ -1140,7 +1056,6 @@
         ],
         "source_node_id": "aurora-rule-operation",
         "source_node_type": "rule",
-        "markdown": "# Por que vocês perguntam se vou vender o carro?\n\n## Pergunta\n\nPor que vocês perguntam se vou vender o carro?\n\n## Resposta\n\nPerguntamos se você vai vender o veículo em breve ou vai continuar com ele porque isso muda o serviço mais indicado — quem vai vender geralmente busca destacar o carro para a venda, enquanto quem vai continuar usando costuma investir em cuidado e proteção de longo prazo.",
         "markdown_document": true,
         "question_count": 1
       }
@@ -1169,6 +1084,409 @@
         "status": "validated",
         "protected": true,
         "empty": false
+      }
+    },
+    {
+      "id": "aurora-rule-conduct",
+      "node_type": "rule",
+      "slug": "conduta-de-atendimento",
+      "label": "Conduta obrigatória de atendimento",
+      "parent_id": "aurora-briefing",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "capabilities": {
+          "global_context": true
+        },
+        "obrigatorio": [
+          "Responder o mais rápido possível.",
+          "Se houver atraso, agradecer a espera: \"Obrigada por aguardar\" — nunca pedir desculpa pela demora.",
+          "Sempre usar o nome do cliente.",
+          "Se apresentar.",
+          "Ler toda a mensagem do cliente.",
+          "Responder todas as perguntas.",
+          "Explicar o serviço antes de falar de preço.",
+          "Sempre terminar as mensagens com uma pergunta.",
+          "Identificar cedo se o cliente pode ir presencialmente ou precisa resolver tudo pelo WhatsApp.",
+          "Conduzir a conversa: quem pergunta controla."
+        ],
+        "proibido": [
+          "Comentar ou comparar com concorrentes."
+        ]
+      }
+    },
+    {
+      "id": "aurora-rule-attendance-structure",
+      "node_type": "rule",
+      "slug": "estrutura-de-atendimento",
+      "label": "Estrutura padrão do atendimento",
+      "parent_id": "aurora-briefing",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "capabilities": {
+          "global_context": true
+        },
+        "steps": [
+          "1. Abertura e apresentação: chamar pelo nome, dizer o próprio nome e agradecer por aguardar.",
+          "2. Entender o interesse e o objetivo: vai vender o carro ou ficar com ele mais tempo?",
+          "3. Explicação breve do serviço, de forma estruturada e clara.",
+          "4. Validação de interesse: \"Isso se encaixa no que gostaria neste momento?\"",
+          "5. Perguntar se o cliente pode ir presencialmente — presencial converte mais.",
+          "6. Seguir a trilha correta, presencial ou remota.",
+          "7. Preço só depois do contexto explicado — e sempre por um atendente humano.",
+          "8. Encerrar sempre com uma pergunta."
+        ],
+        "entrada_por_anuncio": {
+          "prioridade": "maxima",
+          "nota": "Clientes que chegam pelo anúncio sempre iniciam a conversa. Esse cliente não espera — responder o mais rápido possível."
+        }
+      }
+    },
+    {
+      "id": "aurora-rule-track-in-person",
+      "node_type": "rule",
+      "slug": "trilha-avaliacao-presencial",
+      "label": "Trilha A — avaliação presencial",
+      "parent_id": "aurora-briefing",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "capabilities": {
+          "global_context": true
+        },
+        "quando": "O cliente consegue levar o carro até a Aurora.",
+        "texto": "A avaliação presencial é importante porque cada carro tem um nível diferente de desgaste. É rápida e sem custo.",
+        "acao": "Oferecer dia e horário e deixar a visita agendada.",
+        "aplica_se_a": [
+          "higienizacao-interna",
+          "polimento-tecnico",
+          "vitrificacao",
+          "ppf",
+          "polimento-de-vidros",
+          "chapeacao",
+          "pintura"
+        ]
+      }
+    },
+    {
+      "id": "aurora-rule-track-remote",
+      "node_type": "rule",
+      "slug": "trilha-remota",
+      "label": "Trilha B — atendimento à distância",
+      "parent_id": "aurora-briefing",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "capabilities": {
+          "global_context": true
+        },
+        "quando": "O cliente não consegue ir presencialmente.",
+        "coletar": [
+          "modelo e ano do carro, caso ainda não tenha informado",
+          "cor do carro",
+          "se costuma rodar em estrada de chão ou carregar algo que suja",
+          "fotos das áreas que mais incomodam, se possível"
+        ],
+        "fotos_obrigatorias_quando": "o serviço envolve pintura"
+      }
+    },
+    {
+      "id": "aurora-rule-price-human-only",
+      "node_type": "rule",
+      "slug": "precos-somente-humano",
+      "label": "Preço é definido por um atendente humano",
+      "parent_id": "aurora-briefing",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "capabilities": {
+          "global_context": true,
+          "handoff_rule": true
+        },
+        "regra": "A IA nunca informa preço, faixa de preço, valor aproximado, parcela ou desconto de nenhum serviço.",
+        "motivo": "Os orçamentos são personalizados conforme o tamanho, as condições do veículo e o objetivo do cliente. Existem pormenores que precisam ser avaliados.",
+        "papel_da_ia": "Colher as informações do veículo, entender o objetivo do cliente, explicar que o orçamento é personalizado e perguntar se é possível a avaliação presencial.",
+        "handoff_rule": {
+          "id": "aurora-price-human-only",
+          "condition": "price_requested",
+          "text_key": "preco_humano"
+        }
+      }
+    },
+    {
+      "id": "aurora-rule-unknown-process",
+      "node_type": "rule",
+      "slug": "lacuna-chapeacao-pintura",
+      "label": "Lacuna declarada — chapeação e pintura",
+      "parent_id": "aurora-briefing",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "capabilities": {
+          "global_context": true,
+          "handoff_rule": true
+        },
+        "regra": "A Aurora oferece chapeação e pintura, mas o processo desses dois serviços não está documentado. A IA não descreve como o processo funciona.",
+        "acao": "Confirmar que o serviço existe, coletar os dados e chamar a Equipe Aurora.",
+        "servicos": [
+          "chapeacao",
+          "pintura"
+        ],
+        "handoff_rule": {
+          "id": "aurora-process-unknown",
+          "condition": "process_question_without_evidence",
+          "text_key": "lacuna_conhecimento"
+        }
+      }
+    },
+    {
+      "id": "aurora-rule-scheduling",
+      "node_type": "rule",
+      "slug": "regras-de-agendamento",
+      "label": "Regras de agendamento",
+      "parent_id": "aurora-briefing",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "capabilities": {
+          "global_context": true,
+          "handoff_rule": true
+        },
+        "capacidade": "Até 5 clientes por dia.",
+        "papel_da_ia": "Agendar a visita e oferecer opções de horário. A agenda e o orçamento ficam com a pessoa responsável pelo atendimento.",
+        "nao_informado": [
+          "dias de atendimento",
+          "horários de atendimento",
+          "duração dos serviços",
+          "intervalo entre agendamentos"
+        ],
+        "handoff_rule": {
+          "id": "aurora-schedule-human-only",
+          "condition": "schedule_or_duration_requested",
+          "text_key": "lacuna_conhecimento"
+        }
+      }
+    },
+    {
+      "id": "aurora-rule-objections",
+      "node_type": "rule",
+      "slug": "objecoes-conhecidas",
+      "label": "Objeções conhecidas e orientação padrão",
+      "parent_id": "aurora-briefing",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "capabilities": {
+          "global_context": true,
+          "handoff_rule": true
+        },
+        "objecoes": [
+          "preço",
+          "disponibilidade de agenda",
+          "urgência para realizar o serviço"
+        ],
+        "orientacao_padrao": "Quando a informação não estiver disponível ou depender de avaliação, coletar os dados necessários, explicar que a equipe fará a confirmação e encaminhar a conversa para um atendente.",
+        "handoff_rule": {
+          "id": "aurora-missing-info",
+          "condition": "information_unavailable",
+          "text_key": "atendimento_humano"
+        }
+      }
+    },
+    {
+      "id": "aurora-faq-services",
+      "node_type": "faq",
+      "slug": "faq-servicos-oferecidos",
+      "label": "Quais serviços vocês oferecem?",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Quais serviços vocês oferecem?",
+        "answer": "A Aurora faz lavagem técnica detalhada, higienização interna, polimento, vitrificação, PPF, polimento de vidros, chapeação e pintura. Qual deles te interessa?",
+        "source_node_id": "aurora-services",
+        "source_node_type": "product_group",
+        "markdown_document": true,
+        "question_count": 1,
+        "scope": "product_group",
+        "grouped_faq": true,
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services"
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-ppf-protection",
+      "node_type": "faq",
+      "slug": "faq-ppf-protecao",
+      "label": "Do que o PPF protege?",
+      "parent_id": "aurora-copy-ppf",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Do que o PPF protege?",
+        "answer": "O PPF é uma película de proteção física que protege contra pequenos impactos, pedras e também marcas de chuva ácida e fezes de pássaros. Onde você gostaria de aplicar?",
+        "source_node_id": "aurora-copy-ppf",
+        "source_node_type": "copy",
+        "markdown_document": true,
+        "question_count": 1,
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-ppf",
+          "aurora-copy-ppf"
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-price",
+      "node_type": "faq",
+      "slug": "faq-como-funciona-o-orcamento",
+      "label": "Quanto custa o serviço?",
+      "parent_id": "aurora-rule-price-human-only",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Quanto custa o serviço?",
+        "answer": "O orçamento é personalizado conforme o tamanho, as condições do veículo e o seu objetivo — por isso quem fecha o valor é a Equipe Aurora. Eu coleto as informações e já chamo o time. Você consegue trazer o carro para uma avaliação rápida e sem custo?",
+        "source_node_id": "aurora-rule-price-human-only",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 1,
+        "handoff_required": true,
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-price-human-only"
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-hours-confirm",
+      "node_type": "faq",
+      "slug": "faq-horarios-confirmacao",
+      "label": "Qual é o horário de atendimento?",
+      "parent_id": "aurora-rule-scheduling",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Qual é o horário de atendimento?",
+        "answer": "Os dias e horários quem confirma é a Equipe Aurora — vou verificar e já te retorno com as opções. Enquanto isso, você consegue trazer o carro para uma avaliação rápida e sem custo?",
+        "source_node_id": "aurora-rule-scheduling",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 1,
+        "handoff_required": true,
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-scheduling"
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-duration",
+      "node_type": "faq",
+      "slug": "faq-duracao-servico",
+      "label": "Quanto tempo leva o serviço?",
+      "parent_id": "aurora-rule-scheduling",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Quanto tempo leva o serviço?",
+        "answer": "O prazo depende do veículo e do serviço, e quem confirma é a Equipe Aurora. Vou registrar suas informações e chamar o time. Qual é o modelo e o ano do seu carro?",
+        "source_node_id": "aurora-rule-scheduling",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 1,
+        "handoff_required": true,
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-scheduling"
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-capacity",
+      "node_type": "faq",
+      "slug": "faq-capacidade-diaria",
+      "label": "Quantos carros vocês atendem por dia?",
+      "parent_id": "aurora-rule-scheduling",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Quantos carros vocês atendem por dia?",
+        "answer": "Atendemos até 5 clientes por dia. Você já tem uma data em mente?",
+        "source_node_id": "aurora-rule-scheduling",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 1,
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-scheduling"
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-in-person",
+      "node_type": "faq",
+      "slug": "faq-avaliacao-presencial-como-funciona",
+      "label": "Por que vocês pedem avaliação presencial?",
+      "parent_id": "aurora-rule-track-in-person",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Por que vocês pedem avaliação presencial?",
+        "answer": "Porque cada carro tem um nível diferente de desgaste, e ver o veículo é o que permite indicar o processo certo. A avaliação é rápida e sem custo. Seria possível vir em qual dia?",
+        "source_node_id": "aurora-rule-track-in-person",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 1,
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-track-in-person"
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-remote",
+      "node_type": "faq",
+      "slug": "faq-atendimento-a-distancia",
+      "label": "E se eu não conseguir levar o carro aí?",
+      "parent_id": "aurora-rule-track-remote",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "E se eu não conseguir levar o carro aí?",
+        "answer": "Sem problema — nesse caso consigo te orientar à distância. Me diz o modelo e o ano do carro, a cor, se você costuma rodar em estrada de chão ou carregar algo que suja e, se possível, me manda fotos das áreas que mais te incomodam. Pode ser?",
+        "source_node_id": "aurora-rule-track-remote",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 1,
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-track-remote"
+        ]
       }
     }
   ],
@@ -1270,14 +1588,6 @@
       "metadata": {}
     },
     {
-      "id": "aurora-e-copy-wash-faq",
-      "source": "aurora-copy-wash",
-      "target": "aurora-faq-wash",
-      "relation": "answers_question",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
       "id": "aurora-e-services-interior",
       "source": "aurora-services",
       "target": "aurora-product-interior",
@@ -1294,14 +1604,6 @@
       "metadata": {}
     },
     {
-      "id": "aurora-e-copy-interior-faq",
-      "source": "aurora-copy-interior",
-      "target": "aurora-faq-interior",
-      "relation": "answers_question",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
       "id": "aurora-e-services-polish",
       "source": "aurora-services",
       "target": "aurora-product-polish",
@@ -1314,14 +1616,6 @@
       "source": "aurora-product-polish",
       "target": "aurora-copy-polish",
       "relation": "supports_copy",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-copy-polish-faq",
-      "source": "aurora-copy-polish",
-      "target": "aurora-faq-polish",
-      "relation": "answers_question",
       "primary_tree": true,
       "metadata": {}
     },
@@ -1446,14 +1740,6 @@
       "metadata": {}
     },
     {
-      "id": "aurora-e-rule-hours",
-      "source": "aurora-rule-operation",
-      "target": "aurora-faq-hours",
-      "relation": "answers_question",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
       "id": "aurora-e-rule-payment",
       "source": "aurora-rule-operation",
       "target": "aurora-faq-payment",
@@ -1542,30 +1828,6 @@
       "metadata": {}
     },
     {
-      "id": "aurora-e-wash-embedded",
-      "source": "aurora-faq-wash",
-      "target": "aurora-embedded",
-      "relation": "visible_to_agent",
-      "primary_tree": false,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-interior-embedded",
-      "source": "aurora-faq-interior",
-      "target": "aurora-embedded",
-      "relation": "visible_to_agent",
-      "primary_tree": false,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-polish-embedded",
-      "source": "aurora-faq-polish",
-      "target": "aurora-embedded",
-      "relation": "visible_to_agent",
-      "primary_tree": false,
-      "metadata": {}
-    },
-    {
       "id": "aurora-e-vitrification-embedded",
       "source": "aurora-faq-vitrification",
       "target": "aurora-embedded",
@@ -1600,14 +1862,6 @@
     {
       "id": "aurora-e-paint-embedded",
       "source": "aurora-faq-paint",
-      "target": "aurora-embedded",
-      "relation": "visible_to_agent",
-      "primary_tree": false,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-hours-embedded",
-      "source": "aurora-faq-hours",
       "target": "aurora-embedded",
       "relation": "visible_to_agent",
       "primary_tree": false,
@@ -1680,6 +1934,198 @@
     {
       "id": "aurora-e-vitrification-difference-embedded",
       "source": "aurora-faq-vitrification-difference",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-conduct",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-conduct",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-attendance-structure",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-attendance-structure",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-track-in-person",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-track-in-person",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-track-remote",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-track-remote",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-price-human-only",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-price-human-only",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-unknown-process",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-unknown-process",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-scheduling",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-scheduling",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-objections",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-objections",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-services",
+      "source": "aurora-services",
+      "target": "aurora-faq-services",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-ppf-protection",
+      "source": "aurora-copy-ppf",
+      "target": "aurora-faq-ppf-protection",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-price",
+      "source": "aurora-rule-price-human-only",
+      "target": "aurora-faq-price",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-hours-confirm",
+      "source": "aurora-rule-scheduling",
+      "target": "aurora-faq-hours-confirm",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-duration",
+      "source": "aurora-rule-scheduling",
+      "target": "aurora-faq-duration",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-capacity",
+      "source": "aurora-rule-scheduling",
+      "target": "aurora-faq-capacity",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-in-person",
+      "source": "aurora-rule-track-in-person",
+      "target": "aurora-faq-in-person",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-remote",
+      "source": "aurora-rule-track-remote",
+      "target": "aurora-faq-remote",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-services-embedded",
+      "source": "aurora-faq-services",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-ppf-protection-embedded",
+      "source": "aurora-faq-ppf-protection",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-price-embedded",
+      "source": "aurora-faq-price",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-hours-confirm-embedded",
+      "source": "aurora-faq-hours-confirm",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-duration-embedded",
+      "source": "aurora-faq-duration",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-capacity-embedded",
+      "source": "aurora-faq-capacity",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-in-person-embedded",
+      "source": "aurora-faq-in-person",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-remote-embedded",
+      "source": "aurora-faq-remote",
       "target": "aurora-embedded",
       "relation": "visible_to_agent",
       "primary_tree": false,

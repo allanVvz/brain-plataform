@@ -60,6 +60,14 @@ def build_graph() -> GraphJson:
             for field_key, branch_slugs in conditional_fields.items():
                 if node.slug in (branch_slugs or []) and field_key not in required:
                     required.append(str(field_key))
+            # Fields authored in the fixture (optional ones such as the remote-track
+            # questions) survive; a generated field always wins on key conflict so the
+            # required set stays derived from the published booking contract.
+            authored_fields = {
+                str(field.get("key")): field
+                for field in ((data.get("qualification") or {}).get("fields") or [])
+                if isinstance(field, dict) and field.get("key")
+            }
             data["qualification"] = {"fields": [{
                 "key": field_key,
                 "owner_node_id": node.id,
@@ -77,6 +85,9 @@ def build_graph() -> GraphJson:
                 "priority": 1.0 if field_key in {"servico", "modelo_veiculo"} else 0.7,
                 "overwrite_policy": "explicit_correction",
             } for field_key in required]}
+            data["qualification"]["fields"].extend(
+                field for key, field in authored_fields.items() if key not in required
+            )
             claims = list(data.get("claims") or [])
             if data.get("price"):
                 claims.append({
@@ -92,7 +103,12 @@ def build_graph() -> GraphJson:
                 })
             data["claims"] = claims
             data["completion"] = {"required_fields": required}
-            data["handoff"] = {"on_completion": "aurora-rule-operation"}
+            # The fixture authors which rule answers a price or scheduling question;
+            # only the completion target is imposed here.
+            data["handoff"] = {
+                "on_completion": "aurora-rule-operation",
+                **(data.get("handoff") or {}),
+            }
         elif node.id == "aurora-rule-operation":
             capabilities.update({"global_context": True, "handoff_rule": True})
             data["handoff_rule"] = {
@@ -100,14 +116,31 @@ def build_graph() -> GraphJson:
                 "condition": "qualification_complete",
                 "text": appointment_policy.get("texts", {}).get("complemento_confirmacao"),
             }
-            data["claims"] = [
+            # Claims authored in the fixture (payment policy) are preserved.
+            claims = list(data.get("claims") or [])
+            claims.extend([
                 {"claim_type": "availability", "policy": {"mode": "informational"},
                  "evidence_node_ids": [node.id],
                  "intent_aliases": ["disponibilidade", "vaga", "tem horário"]},
                 {"claim_type": "schedule", "policy": {"mode": "human_confirmation_required"},
                  "evidence_node_ids": [node.id],
                  "intent_aliases": ["agenda", "agendamento", "confirmar horário"]},
-            ]
+            ])
+            data["claims"] = claims
+        elif node.node_type == "rule" and (
+            data.get("handoff_rule") or capabilities.get("handoff_rule")
+        ):
+            # Any rule the fixture publishes as a handoff rule must reach every branch
+            # closure, otherwise graph_compiler_v3 rejects the references to it.
+            capabilities.update({"global_context": True, "handoff_rule": True})
+            handoff_rule = dict(data.get("handoff_rule") or {})
+            # The fixture names which published text answers this rule; the copy itself
+            # stays in appointment_policy.texts so it is authored in exactly one place.
+            text_key = handoff_rule.pop("text_key", None) or "atendimento_humano"
+            handoff_rule.setdefault(
+                "text", appointment_policy.get("texts", {}).get(text_key)
+            )
+            data["handoff_rule"] = handoff_rule
         elif node.node_type in {"tone"}:
             capabilities["global_context"] = True
         if capabilities:

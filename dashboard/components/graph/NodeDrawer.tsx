@@ -556,6 +556,10 @@ export default function NodeDrawer({ node, selectedNodes = [], personaSlug, sess
                     ["cabecalho_servicos", "Título da lista de serviços"],
                     ["saudacao_abertura", "Saudação de abertura da conversa"],
                     ["sem_comparar_concorrentes", "Regra: nunca comparar com concorrentes"],
+                    ["mensagem_ausencia", "Mensagem de ausência (fora do atendimento)"],
+                    ["preco_humano", "Cliente pergunta preço (quem informa valor é uma pessoa)"],
+                    ["avaliacao_presencial", "Convite para avaliação presencial"],
+                    ["lacuna_conhecimento", "Assunto sem resposta publicada (chama o time)"],
                   ] as const
                 ).map(([key, label]) => (
                   <div key={key} className="space-y-1">

@@ -270,6 +270,19 @@ def build_system_prompt(graph: Any, cards: list[Any] | None = None) -> str:
     if rule_text:
         lines.append("Regras operacionais e comerciais:\n" + rule_text)
     lines.append(_AGENTIC_SAFETY_INSTRUCTIONS)
+    if graph_conversation_contract.price_disclosure_is_human_only(
+        _appointment_policy(graph)
+    ):
+        # Only when the persona's own graph declares it: other personas
+        # legitimately quote published prices and must keep doing so.
+        lines.append(
+            "Nunca informe preco, faixa de preco, valor aproximado, "
+            "parcelamento ou desconto de qualquer servico, nem mesmo uma "
+            "estimativa ou um 'a partir de'. O valor e sempre definido por "
+            "uma pessoa da equipe. Quando perguntarem sobre valores, colete "
+            "as informacoes necessarias e encaminhe a conversa para o "
+            "atendimento humano."
+        )
     lines.append(
         "Enquanto estiver ativo, responda o que voce consegue com base no "
         "conhecimento aprovado e conduza a conversa fazendo perguntas de "
@@ -1170,24 +1183,30 @@ def _decide_appointment(
 
     faq = _approved_faq_match(graph, message)
     if faq:
-        answer = str((faq.data or {}).get("answer") or "").strip()
+        faq_data = faq.data or {}
+        answer = str(faq_data.get("answer") or "").strip()
         if answer:
             evidence = list(dict.fromkeys([*_node_path(graph, faq.id), faq.id]))
             state["clarification_attempts"] = 0
+            # A published FAQ may declare that its own answer is only the
+            # opening line and a person has to take over (knowledge-gap FAQs).
+            faq_handoff = bool(faq_data.get("handoff_required"))
+            route = ConversationRoute.HUMAN if faq_handoff else ConversationRoute.SDR
             decision = ConversationDecision(
                 classifier="deterministic_appointment_v1",
                 intent="answer_faq",
-                route=ConversationRoute.SDR,
+                route=route,
                 confidence=1.0,
                 lead_stage=current_stage,
+                handoff_reason="faq_requires_human" if faq_handoff else None,
                 evidence_node_ids=evidence,
             )
             return decision, AgentResponse(
                 reply_text=answer,
-                role=ConversationRoute.SDR,
+                role=route,
                 evidence_node_ids=evidence,
                 cart_state=state,
-                handoff_required=False,
+                handoff_required=faq_handoff,
             )
 
     catalog = catalog_from_graph(graph)
@@ -1591,6 +1610,59 @@ def _reply_confirms_price_or_schedule(text: str | None) -> bool:
     return bool(_UNSAFE_MONEY_TOKEN.search(text) or _UNSAFE_SCHEDULE_TOKEN.search(text))
 
 
+def _reply_states_a_price(
+    text: str | None,
+    appointment_policy: dict[str, Any],
+    *,
+    cited_nodes: Any = (),
+) -> bool:
+    """A price statement by a persona that reserves prices for a human.
+
+    Unlike _reply_confirms_price_or_schedule (which only catches a reply that
+    *confirms* something), this fires on any monetary figure — value, range,
+    approximation, installment — but only for a persona whose published graph
+    says ``appointment_policy.price_disclosure == "human_only"``. Personas
+    without that declaration are untouched.
+
+    Carve-out: the graph may publish payment terms that legitimately contain
+    money (a deposit threshold, installment plans). Those are allowed when a
+    node cited as evidence for this reply publishes a ``payment_policy``
+    claim. The regex and the carve-out live in graph_conversation_contract so
+    the runtime guard and check_proposal() enforce one single rule.
+    """
+    return graph_conversation_contract.reply_discloses_blocked_price(
+        text, appointment_policy, cited_nodes
+    )
+
+
+def _context_appointment_policy(context: ConversationContext) -> dict[str, Any]:
+    """Published appointment_policy, read from the turn's own rag_nodes.
+
+    commit() never holds the full GraphJson — only the flattened node dicts —
+    so this mirrors _commercial_note_fields() instead of _appointment_policy().
+    """
+    persona_node = next(
+        (item for item in context.rag_nodes if item.get("node_type") == "persona"),
+        None,
+    )
+    data = (persona_node or {}).get("data") or {}
+    policy = data.get("appointment_policy")
+    return policy if isinstance(policy, dict) else {}
+
+
+def _cited_context_nodes(
+    context: ConversationContext, decision: ConversationDecision
+) -> list[dict[str, Any]]:
+    """The decisive graph nodes behind this reply, as carried by the turn.
+
+    decision.evidence_node_ids is exactly what _knowledge_context_envelope
+    records as ``decisive_node_ids``; resolving it against context.rag_nodes
+    reuses the plumbing every other commit-time check already relies on.
+    """
+    cited = {str(node_id) for node_id in decision.evidence_node_ids or []}
+    return [item for item in context.rag_nodes if str(item.get("id")) in cited]
+
+
 def _knowledge_context_envelope(
     context: ConversationContext,
     decisive_node_ids: list[str],
@@ -1664,6 +1736,35 @@ def commit(
                     "handoff_required": True,
                 }
             )
+
+    appointment_policy = _context_appointment_policy(context)
+    if _reply_states_a_price(
+        response.reply_text,
+        appointment_policy,
+        cited_nodes=_cited_context_nodes(context, decision),
+    ):
+        texts = appointment_policy.get("texts") or {}
+        safe_text = str(texts.get("preco_humano") or "").strip() or (
+            "O valor é definido por uma pessoa da equipe. Vou encaminhar sua "
+            "conversa para o atendimento."
+        )
+        decision = decision.model_copy(
+            update={
+                "route": ConversationRoute.HUMAN,
+                "handoff_reason": "price_disclosure_requires_human",
+            }
+        )
+        response = response.model_copy(
+            update={
+                "reply_text": safe_text,
+                "role": ConversationRoute.HUMAN,
+                "handoff_required": True,
+                "proof": {
+                    **response.proof,
+                    "price_disclosure_blocked": True,
+                },
+            }
+        )
 
     extracted_fields = _resolve_identified_service(
         dict(response.extracted_fields),

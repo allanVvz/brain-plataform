@@ -969,6 +969,10 @@ export const api = {
       cabecalho_servicos?: string;
       saudacao_abertura?: string;
       sem_comparar_concorrentes?: string;
+      mensagem_ausencia?: string;
+      preco_humano?: string;
+      avaliacao_presencial?: string;
+      lacuna_conhecimento?: string;
     },
   ) =>
     req<{ ok: boolean; graph_version: number; appointment_policy: any }>(

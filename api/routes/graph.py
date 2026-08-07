@@ -746,6 +746,10 @@ _APPOINTMENT_POLICY_TEXT_KEYS = (
     "cabecalho_servicos",
     "saudacao_abertura",
     "sem_comparar_concorrentes",
+    "mensagem_ausencia",
+    "preco_humano",
+    "avaliacao_presencial",
+    "lacuna_conhecimento",
 )
 
 
@@ -758,6 +762,10 @@ class AppointmentPolicyTextsBody(BaseModel):
     cabecalho_servicos: Optional[str] = None
     saudacao_abertura: Optional[str] = None
     sem_comparar_concorrentes: Optional[str] = None
+    mensagem_ausencia: Optional[str] = None
+    preco_humano: Optional[str] = None
+    avaliacao_presencial: Optional[str] = None
+    lacuna_conhecimento: Optional[str] = None
 
 
 def _published_persona_node(persona_slug: str):

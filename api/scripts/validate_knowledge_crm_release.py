@@ -27,7 +27,9 @@ def _validate_aurora_dialog(*, graph, version: int, checksum: str) -> dict:
     ]
     cases = [
         ("Quais serviços estão disponíveis?", "list_services", "SDR", False),
-        ("Quanto custa o polimento técnico?", "consult_price", "SDR", False),
+        # price_disclosure == "human_only": the agent never states a value,
+        # it answers with the published text and escalates to a person.
+        ("Quanto custa o polimento técnico?", "consult_price", "HUMAN", True),
         ("Quero reclamar da garantia", "exceptional_support", "HUMAN", True),
         ("Quero agendar higienização interna", "request_booking", "SDR", False),
     ]

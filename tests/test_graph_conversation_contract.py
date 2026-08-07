@@ -354,3 +354,98 @@ def test_explicit_branch_switch_drops_incompatible_historical_facts(monkeypatch)
     assert response.proof["valid"] is True
     assert response.cart_state["active_branch_node_id"] == branch_id
     assert "vehicle_color" not in response.cart_state["facts"]
+
+
+def _price_proposal(graph, branch_id: str, reply: str, *, cited=None):
+    contract = contract_service.compile_branch_contract(graph, branch_id)
+    ledger = contract_service.ledger_from_state({}, contract)
+    first = contract["fields"][0]
+    proposal = {
+        "branch_anchor_node_id": branch_id,
+        "branch_path_checksum": contract["branch_path_checksum"],
+        "extracted_facts": [],
+        "next_question_node_id": first["question_node_id"],
+        "cited_node_ids": [branch_id, first["question_node_id"], *(cited or [])],
+        "reply": f"{reply} {first['question']}",
+        "qualification_complete": False,
+        "handoff_requested": False,
+    }
+    package = contract_service.branch_closure(graph, branch_id)
+    return contract_service.check_proposal(
+        graph=graph,
+        contract=contract,
+        ledger=ledger,
+        proposal=proposal,
+        package_node_ids=package,
+    )
+
+
+def test_check_proposal_rejects_any_price_shape_when_disclosure_is_human_only():
+    graph = _graph()
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    assert persona.data["appointment_policy"]["price_disclosure"] == "human_only"
+    for reply in (
+        "Fica em R$ 650.",
+        "Custa 897.",
+        "Fica em torno de 1.197.",
+        "A partir de 350.",
+        "São 650 reais.",
+    ):
+        proof = _price_proposal(graph, "aurora-product-polish", reply)
+        assert proof["valid"] is False, reply
+        assert "price_disclosure_requires_human" in proof["errors"], reply
+
+
+def test_check_proposal_allows_the_published_payment_policy_figures():
+    graph = _graph()
+    payment_rule = next(
+        node for node in graph.nodes
+        if any(
+            str((claim or {}).get("claim_type")) == "payment_policy"
+            for claim in (node.data or {}).get("claims") or []
+        )
+    )
+    reply = (
+        "Aceitamos Pix, dinheiro e cartão — até 4x sem juros ou até 10x com "
+        "acréscimo. Para serviços acima de R$ 2.000,00 é necessário um sinal "
+        "de 10% do valor para reservar a agenda."
+    )
+    with_claim = _price_proposal(
+        graph, "aurora-product-polish", reply, cited=[payment_rule.id]
+    )
+    assert "price_disclosure_requires_human" not in with_claim["errors"]
+    assert with_claim["valid"] is True
+
+    # Same sentence, no cited node authorizing payment terms: rejected.
+    without_claim = _price_proposal(graph, "aurora-product-polish", reply)
+    assert "price_disclosure_requires_human" in without_claim["errors"]
+
+
+def test_check_proposal_does_not_flag_durations_or_notice_periods():
+    graph = _graph()
+    for reply in (
+        "Reagendamentos precisam de 48 horas de antecedência.",
+        "A higienização leva cerca de 3 horas.",
+        "Atendemos até 5 clientes por dia.",
+        "Seu carro é de 2020, certo?",
+    ):
+        proof = _price_proposal(graph, "aurora-product-polish", reply)
+        assert "price_disclosure_requires_human" not in proof["errors"], reply
+
+
+def test_check_proposal_keeps_the_legacy_rule_for_price_quoting_personas():
+    graph = _graph()
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    persona.data = {
+        **persona.data,
+        "appointment_policy": {
+            **persona.data["appointment_policy"],
+            "price_disclosure": "agent",
+        },
+    }
+    proof = _price_proposal(graph, "aurora-product-polish", "Fica em R$ 650.")
+    assert "price_disclosure_requires_human" not in proof["errors"]
+    assert "price_without_graph_evidence" in proof["errors"]
+    # A range with no "R$" is not policed at all for these personas.
+    ranged = _price_proposal(graph, "aurora-product-polish", "A partir de 350.")
+    assert ranged["valid"] is True

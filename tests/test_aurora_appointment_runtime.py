@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -10,9 +11,32 @@ sys.path.insert(0, str(ROOT / "api"))
 
 from schemas.conversation import ConversationContext, ConversationRoute
 from schemas.graph_json_v2 import GraphJson
-from services import conversation_runtime, graph_json_v2_validator
+from scripts.publish_aurora_graph import build_graph
+from services import conversation_runtime, graph_json_v2_validator, graph_markdown
 from services.deterministic_appointment import DeterministicAppointment
 from services.deterministic_sdr import catalog_from_graph
+
+
+# The briefing rewrite of 2026-08-07 dropped every fact the client never stated
+# (service prices, durations, business hours). Two source stamps coexist on
+# purpose: nodes carried over untouched from the earlier authorized briefing
+# keep their original provenance instead of being relabelled.
+AURORA_SOURCES = {
+    "briefing_atendimento_conversacional_aurora_2026_08_07",
+    "user_authorized_demo_briefing_2026_07_29",
+}
+
+# Only Aurora's published payment policy may state a value: the R$ 2.000,00
+# threshold above which a 10% deposit reserves the agenda. No service price.
+PAYMENT_POLICY_NODE_IDS = {
+    "aurora-rule-operation",
+    "aurora-faq-payment",
+    "aurora-faq-deposit",
+}
+PAYMENT_POLICY_AMOUNTS = {"R$ 2.000,00"}
+
+MONEY_PATTERNS = (re.compile(r"r\$\s*\d", re.I), re.compile(r"\d+\s*reais", re.I))
+MONEY_AMOUNT = re.compile(r"R\$\s*[\d.,]*\d", re.I)
 
 
 def aurora_graph() -> GraphJson:
@@ -22,6 +46,34 @@ def aurora_graph() -> GraphJson:
         )
     )
     return GraphJson.model_validate(payload)
+
+
+def canonical_aurora_graph() -> GraphJson:
+    """The fixture as the platform stores it.
+
+    The fixture deliberately ships without ``data.markdown``:
+    ``graph_markdown.canonicalize_graph`` regenerates it from the data, which
+    is what guarantees no rendered document can state a price the data no
+    longer carries.
+    """
+    return graph_markdown.canonicalize_graph(aurora_graph())
+
+
+def published_aurora_graph() -> GraphJson:
+    """Exactly what a release publishes: v2.1 upgrade, materialized
+    qualification questions, publication grants, regenerated markdown."""
+    return graph_markdown.canonicalize_graph(build_graph())
+
+
+def node_texts(node) -> str:
+    """Everything a node can leak to a customer: its data and its markdown."""
+    data = node.data or {}
+    return "\n".join([json.dumps(data, ensure_ascii=False), str(data.get("markdown") or "")])
+
+
+def appointment_policy_of(graph: GraphJson) -> dict:
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    return persona.data["appointment_policy"]
 
 
 def context_for(message: str, *, cart: dict | None = None) -> ConversationContext:
@@ -60,15 +112,15 @@ def install_graph(monkeypatch) -> GraphJson:
 
 
 def test_aurora_graph_is_published_valid_and_every_faq_reaches_embedded_once():
-    graph = aurora_graph()
+    # Validate the canonicalized graph: the fixture authors data only and lets
+    # graph_markdown regenerate every document, so raw-fixture validation would
+    # (correctly) complain about the missing data.markdown.
+    graph = canonical_aurora_graph()
     valid, errors = graph_json_v2_validator.validate_graph_json(graph)
     assert valid, errors
     assert graph.status == "published"
     assert all(node.data.get("status") == "validated" for node in graph.nodes)
-    assert all(
-        node.data.get("source") == "user_authorized_demo_briefing_2026_07_29"
-        for node in graph.nodes
-    )
+    assert all(node.data.get("source") in AURORA_SOURCES for node in graph.nodes)
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
     faqs = [node for node in graph.nodes if node.node_type == "faq"]
     for faq in faqs:
@@ -90,16 +142,25 @@ def test_aurora_graph_is_published_valid_and_every_faq_reaches_embedded_once():
     )
 
 
-def test_catalog_reads_duration_price_qualifier_and_manual_confirmation():
+def test_catalog_reads_quote_only_capacity_and_manual_confirmation():
+    """The briefing never published a price or a duration for any service.
+
+    Every product is now ``quote_only`` with no price and no
+    ``booking.duration_minutes``; daily capacity is 5 vehicles, and the Equipe
+    Aurora still confirms every booking manually.
+    """
     catalog = catalog_from_graph(aurora_graph())
     service = next(item for item in catalog.products if item.slug == "higienizacao-interna")
-    assert service.price == 350
-    assert service.price_qualifier == "starting_at"
-    assert service.duration_minutes == 180
-    assert service.capacity == 1
+    assert service.price is None
+    assert service.price_qualifier == "quote_only"
+    assert service.duration_minutes is None
+    assert service.capacity == 5
     assert service.confirmation_required is True
     assert service.booking_provider == "manual"
     assert "modelo_veiculo" in service.required_fields
+    assert all(item.price is None for item in catalog.products)
+    assert all(item.price_qualifier == "quote_only" for item in catalog.products)
+    assert all(item.duration_minutes is None for item in catalog.products)
 
 
 def test_appointment_collects_partial_request_and_always_hands_confirmation_to_human():

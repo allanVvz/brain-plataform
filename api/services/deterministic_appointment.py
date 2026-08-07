@@ -19,12 +19,18 @@ def _duration(minutes: int | None) -> str:
     return f"{hours} hora e {remainder} minutos"
 
 
-def _service_fact(product: Product) -> str:
+def _service_fact(product: Product, *, allow_price: bool = True) -> str:
+    """One factual sentence about a service.
+
+    ``allow_price=False`` is used when the persona's published policy reserves
+    every price statement for a human: the money figure is then never emitted,
+    even if a price somehow survives in the catalog data.
+    """
     facts: list[str] = []
     duration = _duration(product.duration_minutes)
     if duration:
         facts.append(f"leva cerca de {duration}")
-    if product.price is not None:
+    if allow_price and product.price is not None:
         prefix = "parte de " if product.price_qualifier == "starting_at" else "custa "
         facts.append(f"{prefix}{_brl(product.price)}")
     if not facts:
@@ -120,6 +126,13 @@ class DeterministicAppointment:
         )
         self.field_questions = dict(self.policy.get("field_questions") or {})
         self.texts = dict(self.policy.get("texts") or {})
+        # Graph-declared, never persona-specific: when the published policy
+        # reserves price disclosure for a human, this engine must not state a
+        # value, a range or an approximation for any service.
+        self.price_human_only = (
+            str(self.policy.get("price_disclosure") or "").strip().lower()
+            == "human_only"
+        )
 
         if not self.policy_required_fields:
             raise ValueError(
@@ -128,6 +141,9 @@ class DeterministicAppointment:
 
     def _text(self, key: str, fallback: str) -> str:
         return str(self.texts.get(key) or fallback)
+
+    def _fact(self, product: Product) -> str:
+        return _service_fact(product, allow_price=not self.price_human_only)
 
     def _new_state(self, state: dict[str, Any] | None) -> dict[str, Any]:
         current = dict(state or {})
@@ -224,7 +240,7 @@ class DeterministicAppointment:
     def _list_services(self) -> str:
         lines = []
         for product in self.catalog.products:
-            fact = _service_fact(product)
+            fact = self._fact(product)
             qualifier = "." if fact.endswith(".") else ""
             lines.append(f"- {fact}{qualifier}")
         return self._text("cabecalho_servicos", "Serviços disponíveis:") + "\n" + "\n".join(lines)
@@ -312,6 +328,15 @@ class DeterministicAppointment:
         )
         is_price = any(term in normalized for term in ("preco", "custa", "valor", "quanto"))
         is_service_query = any(term in normalized for term in ("como funciona", "quanto tempo", "duracao", "leva"))
+        # "quanto tempo leva" also contains "quanto", so it reads as a price
+        # question below. Both branches used to return the same _service_fact
+        # sentence, so it never mattered; once the price branch hands off to a
+        # human it does, and a duration question must not be answered with the
+        # price-is-human-only text.
+        is_duration_query = any(
+            term in normalized
+            for term in ("quanto tempo", "duracao", "demora", "leva")
+        )
         is_list = (
             normalized in {"servicos", "listar servicos", "lista de servicos"}
             or any(term in normalized for term in ("quais servicos", "que servicos", "opcoes de servico"))
@@ -346,7 +371,7 @@ class DeterministicAppointment:
             state["conversation_state"] = "collecting"
             if not missing:
                 state["conversation_state"] = "handoff"
-                fact = _service_fact(product) if product else "O serviço solicitado"
+                fact = self._fact(product) if product else "O serviço solicitado"
                 if product:
                     fact = f"A {fact[:1].lower()}{fact[1:]}"
                 reply = f"{fact}. " + self._text(
@@ -379,7 +404,7 @@ class DeterministicAppointment:
             )
             prefix = ""
             if product and (explicit_booking or explicit_quote or explicit_service_interest):
-                prefix = f"{_service_fact(product)}. "
+                prefix = f"{self._fact(product)}. "
             return AppointmentResult(
                 prefix + self.field_questions[missing[0]],
                 intent,
@@ -395,10 +420,45 @@ class DeterministicAppointment:
             )
         if is_list:
             return AppointmentResult(self._list_services(), "list_services", state)
-        if product and is_price:
-            return AppointmentResult(f"{_service_fact(product)}.", "consult_price", state, product=product)
+        if product and is_price and not (self.price_human_only and is_duration_query):
+            if self.price_human_only:
+                # The graph reserves every price statement for a person on the
+                # team: answer with the published text and escalate, exactly
+                # like the other handoff paths in this method.
+                state["conversation_state"] = "handoff"
+                return AppointmentResult(
+                    self._text(
+                        "preco_humano",
+                        "O valor é definido por uma pessoa da equipe. Vou "
+                        "encaminhar sua conversa para o atendimento.",
+                    ),
+                    "consult_price",
+                    state,
+                    True,
+                    "price_requires_human",
+                    product,
+                )
+            return AppointmentResult(f"{self._fact(product)}.", "consult_price", state, product=product)
         if product and (is_service_query or message_product):
-            return AppointmentResult(f"{_service_fact(product)}.", "consult_service", state, product=product)
+            if (
+                is_duration_query
+                and product.duration_minutes is None
+                and str(self.texts.get("lacuna_conhecimento") or "").strip()
+            ):
+                # The duration is genuinely absent from the published graph and
+                # the persona published a knowledge-gap text for exactly this:
+                # hand off instead of inventing a number. Personas that publish
+                # no such text keep the previous behaviour.
+                state["conversation_state"] = "handoff"
+                return AppointmentResult(
+                    self.texts["lacuna_conhecimento"],
+                    "consult_service",
+                    state,
+                    True,
+                    "knowledge_gap_requires_human",
+                    product,
+                )
+            return AppointmentResult(f"{self._fact(product)}.", "consult_service", state, product=product)
 
         attempts = int(state.get("clarification_attempts") or 0) + 1
         state["clarification_attempts"] = attempts

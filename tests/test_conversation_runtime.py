@@ -157,3 +157,104 @@ def test_model_schema_gets_exactly_one_correction_attempt():
     )
     assert decision.route == ConversationRoute.SDR
     assert router.calls == 2
+
+
+HUMAN_ONLY = {"price_disclosure": "human_only"}
+PAYMENT_POLICY_NODE = {
+    "id": "rule-operation",
+    "node_type": "rule",
+    "data": {
+        "claims": [
+            {
+                "claim_type": "payment_policy",
+                "policy": {"mode": "informational"},
+                "evidence_node_ids": ["rule-operation"],
+            }
+        ]
+    },
+}
+
+
+def test_reply_states_a_price_blocks_every_price_shape():
+    blocked = conversation_runtime._reply_states_a_price
+    for text in (
+        "R$ 650",
+        "R$ 1.197,00",
+        "650 reais",
+        "custa 897",
+        "fica em torno de 1.197",
+        "a partir de 350",
+        "O polimento custa R$ 650,00.",
+        "O investimento fica por 1.290,00 dependendo do carro.",
+    ):
+        assert blocked(text, HUMAN_ONLY), text
+
+
+def test_reply_states_a_price_allows_non_price_figures():
+    blocked = conversation_runtime._reply_states_a_price
+    for text in (
+        "Reagendamentos precisam de 48 horas de antecedência.",
+        "Parcelamos em até 4x sem juros.",
+        "o carro é de 2020",
+        "A higienização leva cerca de 3 horas.",
+        "Atendemos até 5 clientes por dia.",
+    ):
+        assert not blocked(text, HUMAN_ONLY), text
+    assert not blocked(None, HUMAN_ONLY)
+    assert not blocked("", HUMAN_ONLY)
+
+
+def test_reply_states_a_price_carves_out_published_payment_policy():
+    """The carve-out is evidence-driven, never wording-driven.
+
+    The same sentence is blocked when nothing in the cited graph evidence
+    authorizes stating money, and allowed when a cited node publishes a
+    ``payment_policy`` claim (deposit threshold, installment terms).
+    """
+    blocked = conversation_runtime._reply_states_a_price
+    text = (
+        "Aceitamos Pix, dinheiro e cartão — até 4x sem juros ou até 10x com "
+        "acréscimo. Para serviços acima de R$ 2.000,00 é necessário um sinal "
+        "de 10% do valor para reservar a agenda."
+    )
+    assert not blocked(text, HUMAN_ONLY, cited_nodes=[PAYMENT_POLICY_NODE])
+    assert blocked(text, HUMAN_ONLY, cited_nodes=[{"id": "x", "data": {}}])
+    # No cited evidence at all is never an authorization.
+    assert blocked(text, HUMAN_ONLY)
+
+
+def test_reply_states_a_price_is_inert_without_the_published_policy():
+    """Personas that legitimately quote prices are untouched."""
+    blocked = conversation_runtime._reply_states_a_price
+    for policy in ({}, {"price_disclosure": "agent"}, {"required_fields": ["nome"]}):
+        assert not blocked("Red Bull 250 ml: R$ 15,00.", policy)
+        assert not blocked("a partir de 350", policy)
+
+
+def test_price_disclosure_guard_is_inert_for_a_persona_without_the_policy(monkeypatch):
+    """End-to-end: the price-quoting persona still answers with its price."""
+    install_graph(monkeypatch)
+    context = context_for("Quanto custa o Red Bull 250 ml?")
+    decision, response = conversation_runtime.decide(context)
+    assert conversation_runtime._context_appointment_policy(context) == {}
+    assert not conversation_runtime._reply_states_a_price(
+        response.reply_text,
+        conversation_runtime._context_appointment_policy(context),
+        cited_nodes=conversation_runtime._cited_context_nodes(context, decision),
+    )
+
+
+def test_build_system_prompt_adds_the_price_rule_only_when_the_graph_asks(monkeypatch):
+    graph = graph_fixture()
+    baseline = conversation_runtime.build_system_prompt(graph)
+    assert "Nunca informe preco" not in baseline
+
+    guarded = graph.model_copy(deep=True)
+    persona = next(node for node in guarded.nodes if node.node_type == "persona")
+    persona.data = {
+        **(persona.data or {}),
+        "appointment_policy": {"price_disclosure": "human_only"},
+    }
+    prompt = conversation_runtime.build_system_prompt(guarded)
+    assert "Nunca informe preco" in prompt
+    assert "parcelamento ou desconto" in prompt
