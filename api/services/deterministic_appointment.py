@@ -441,6 +441,22 @@ class DeterministicAppointment:
             return AppointmentResult(f"{self._fact(product)}.", "consult_price", state, product=product)
         if product and (is_service_query or message_product):
             if (
+                not product.process_documented
+                and str(self.texts.get("lacuna_conhecimento") or "").strip()
+            ):
+                # The graph sells this service but publishes no process for it.
+                # Describing it anyway is exactly the invention this guard
+                # exists to prevent.
+                state["conversation_state"] = "handoff"
+                return AppointmentResult(
+                    self.texts["lacuna_conhecimento"],
+                    "consult_service",
+                    state,
+                    True,
+                    "knowledge_gap_requires_human",
+                    product,
+                )
+            if (
                 is_duration_query
                 and product.duration_minutes is None
                 and str(self.texts.get("lacuna_conhecimento") or "").strip()

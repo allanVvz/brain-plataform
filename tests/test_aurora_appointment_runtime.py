@@ -174,7 +174,7 @@ def test_appointment_collects_partial_request_and_always_hands_confirmation_to_h
     assert result.handoff is False
     assert result.state["missing_fields"][0] == "nome_cliente"
 
-    for answer in ("Allan", "Onix", "2020", "Quero vender em breve", "Consigo levar até a Aurora"):
+    for answer in ("Allan", "Quero vender em breve", "Consigo levar até a Aurora", "Onix", "2020"):
         result = engine.handle(answer, state=result.state)
         assert result.handoff is False
     result = engine.handle("Bancos meio manchados", state=result.state)
@@ -193,10 +193,11 @@ def test_appointment_collects_partial_request_and_always_hands_confirmation_to_h
         "condicao": "Bancos meio manchados",
     }
     assert result.reply == (
-        "A higienização interna leva cerca de 3 horas e parte de R$ 350,00. "
-        "Anotei tudo por aqui; a Equipe Aurora vai te chamar para confirmar "
-        "o valor final e o melhor horário."
+        "A higienização interna. Anotei tudo por aqui. A Equipe Aurora vai te "
+        "chamar para confirmar o valor e o melhor horário. Tem mais alguma "
+        "coisa que você gostaria de melhorar no carro?"
     )
+    assert "R$" not in result.reply
 
 
 def test_already_handed_off_lead_keeps_handoff_flag_on_new_messages():
@@ -291,7 +292,8 @@ def test_commercial_note_fields_are_declared_per_persona_not_hardcoded():
     """
     context = context_for("Oi", cart={"business_model": "appointment"})
     assert conversation_runtime._commercial_note_fields(context) == [
-        "modelo_veiculo", "vehicle_size", "condicao", "data_desejada", "janela_horario",
+        "modelo_veiculo", "vehicle_year", "vehicle_color", "vehicle_size",
+        "condicao", "objective", "data_desejada", "janela_horario",
     ]
 
 
@@ -351,17 +353,27 @@ def test_list_services_records_every_product_and_faq_as_graph_evidence(monkeypat
         node.node_type == "product" and node.id in decision.evidence_node_ids
         for node in graph.nodes
     ) == 9
-    assert "Serviços disponíveis:" in (response.reply_text or "")
+    assert "Serviços da Aurora:" in (response.reply_text or "")
 
 
-def test_price_is_starting_at_and_exceptional_support_goes_directly_to_human(monkeypatch):
-    install_graph(monkeypatch)
+def test_price_always_goes_to_a_human_and_never_states_a_value(monkeypatch):
+    """The client's briefing checks only "Perguntar antes de informar" and
+    "Somente apos avaliacao" for price, and says explicitly that pricing has
+    to stay manual because there are details a person must assess. The graph
+    therefore publishes no service price at all and declares
+    price_disclosure == "human_only", so a price question is a handoff — not
+    a cheaper answer with a smaller number in it.
+    """
+    graph = install_graph(monkeypatch)
+    policy = conversation_runtime._appointment_policy(graph)
     decision, response = conversation_runtime.decide(
         context_for("Quanto custa o polimento técnico?")
     )
     assert decision.intent == "consult_price"
-    assert decision.route == ConversationRoute.SDR
-    assert "parte de R$ 650,00" in (response.reply_text or "")
+    assert decision.route == ConversationRoute.HUMAN
+    assert response.handoff_required is True
+    assert response.reply_text == policy["texts"]["preco_humano"]
+    assert "R$" not in (response.reply_text or "")
 
     decision, response = conversation_runtime.decide(
         context_for("Quero reclamar da garantia")
@@ -369,7 +381,7 @@ def test_price_is_starting_at_and_exceptional_support_goes_directly_to_human(mon
     assert decision.intent == "exceptional_support"
     assert decision.route == ConversationRoute.HUMAN
     assert response.handoff_required is True
-    assert response.reply_text == "Vou encaminhar sua solicitação para a Equipe Aurora."
+    assert response.reply_text == policy["texts"]["encaminhamento_excepcional"]
 
 
 def test_confirmation_faq_interrupts_collection_without_losing_booking_state(monkeypatch):
@@ -424,11 +436,11 @@ def test_successful_turn_resets_unknown_attempt_counter(monkeypatch):
     _, first = conversation_runtime.decide(context_for("xyzzy"))
     decision, understood = conversation_runtime.decide(
         context_for(
-            "Quanto custa a lavagem detalhada?",
+            "O que está incluído na lavagem detalhada?",
             cart=first.cart_state,
         )
     )
-    assert decision.intent == "consult_price"
+    assert decision.intent == "answer_faq"
     assert understood.cart_state["clarification_attempts"] == 0
 
     decision, next_unknown = conversation_runtime.decide(
@@ -597,10 +609,11 @@ def test_build_system_prompt_is_persona_agnostic_and_reads_tone_and_rules():
     (persona/tone/rule) from whatever graph it's given — nothing here
     references Aurora, automotive services, or any persona-specific
     vocabulary."""
-    prompt = conversation_runtime.build_system_prompt(aurora_graph())
+    prompt = conversation_runtime.build_system_prompt(canonical_aurora_graph())
     assert "Aurora Estética Automotiva" in prompt
     # From the tone node's markdown.
-    assert "sem emojis" in prompt
+    assert "consultivo" in prompt
+    assert "concorrentes" in prompt
     # From the rule node's markdown (operational facts, not invented).
     assert "Pix" in prompt
     assert "sinal de 10%" in prompt
@@ -613,7 +626,7 @@ def test_build_system_prompt_paces_one_question_at_a_time():
     reply asked for name, service, and vehicle model all at once. A good
     SDR paces the conversation — one question per message, not a form
     dumped in the opener."""
-    prompt = conversation_runtime.build_system_prompt(aurora_graph())
+    prompt = conversation_runtime.build_system_prompt(canonical_aurora_graph())
     assert "UMA informacao pendente por mensagem" in prompt
     assert "Nunca liste tres ou mais perguntas" in prompt
 
@@ -623,7 +636,7 @@ def test_build_system_prompt_instructs_multi_field_extraction():
     message answering several missing fields at once doesn't lose all
     but the first) lives in the generated prompt, not the n8n workflow
     JSON — this is what actually tells DeepSeek the response schema."""
-    prompt = conversation_runtime.build_system_prompt(aurora_graph())
+    prompt = conversation_runtime.build_system_prompt(canonical_aurora_graph())
     assert "extracted_fields" in prompt
 
 
@@ -635,7 +648,7 @@ def test_build_system_prompt_instructs_extraction_from_incidental_mentions():
     The prompt must explicitly tell the model to scan the whole message
     for any pending field, not just treat it as an answer to the last
     question."""
-    prompt = conversation_runtime.build_system_prompt(aurora_graph())
+    prompt = conversation_runtime.build_system_prompt(canonical_aurora_graph())
     assert "de passagem" in prompt
 
 
@@ -648,7 +661,7 @@ def test_build_system_prompt_mentions_json_for_deepseek_response_format(monkeypa
     accident ("Responda somente JSON..."); build_system_prompt() must
     keep doing so explicitly, or every agentic reply silently falls back
     to the raw deterministic text with no error surfaced to the user."""
-    prompt = conversation_runtime.build_system_prompt(aurora_graph())
+    prompt = conversation_runtime.build_system_prompt(canonical_aurora_graph())
     assert "json" in prompt.lower()
 
 
@@ -930,7 +943,7 @@ def test_next_field_question_reads_from_the_graph():
         "business_model": "appointment",
         "missing_fields": ["nome_cliente", "modelo_veiculo"],
     }
-    assert conversation_runtime._next_field_question(cart_state, context) == "Qual é o seu nome?"
+    assert conversation_runtime._next_field_question(cart_state, context) == "Antes de tudo, como você se chama?"
 
 
 def test_next_field_question_is_none_without_missing_fields():
@@ -967,7 +980,7 @@ def test_ensure_trailing_question_appends_the_next_graph_question():
     )
     assert result == (
         "Polimento técnico leva cerca de 4 horas e parte de R$ 650,00. "
-        "Qual é o seu nome?"
+        "Antes de tudo, como você se chama?"
     )
 
 
@@ -989,3 +1002,81 @@ def test_ensure_trailing_question_preserves_a_deliberate_none_reply():
     context = context_for("Oi")
     cart_state = {"business_model": "appointment", "missing_fields": ["nome_cliente"]}
     assert conversation_runtime._ensure_trailing_question(None, cart_state, context) is None
+
+
+def test_undocumented_process_hands_off_instead_of_describing_it(monkeypatch):
+    """The client wrote, about chapeacao and pintura: "eu nao tenho informacoes
+    para passar, nao conheco o processo a fundo". The graph therefore sells both
+    services but marks their process as undocumented, and a "how does it work"
+    question has to reach a person rather than be answered from nothing.
+    """
+    graph = install_graph(monkeypatch)
+    policy = conversation_runtime._appointment_policy(graph)
+
+    for message in ("Como funciona a pintura?", "Me explica o processo de chapeação"):
+        decision, response = conversation_runtime.decide(context_for(message))
+        assert decision.route == ConversationRoute.HUMAN, message
+        assert response.handoff_required is True, message
+        assert decision.handoff_reason == "knowledge_gap_requires_human", message
+        assert response.reply_text == policy["texts"]["lacuna_conhecimento"], message
+
+    # A service whose process the briefing does document is answered normally.
+    decision, _ = conversation_runtime.decide(context_for("Como funciona o polimento?"))
+    assert decision.route == ConversationRoute.SDR
+
+
+def test_no_published_node_states_a_service_price_duration_or_business_hours():
+    """The single invariant this whole rewrite exists to hold."""
+    graph = published_aurora_graph()
+    for node in graph.nodes:
+        text = node_texts(node)
+        if node.id not in PAYMENT_POLICY_NODE_IDS:
+            for pattern in MONEY_PATTERNS:
+                assert not pattern.search(text), f"{node.id} states money"
+        else:
+            assert set(MONEY_AMOUNT.findall(text)) <= PAYMENT_POLICY_AMOUNTS, node.id
+        assert "leva cerca de" not in text, f"{node.id} states a duration"
+        assert "duration_minutes" not in text, f"{node.id} states a duration"
+        assert not re.search(r"\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}", text), node.id
+        assert "segunda a sexta" not in text.lower(), f"{node.id} states business hours"
+
+    claim_types = {
+        claim.get("claim_type")
+        for node in graph.nodes
+        for claim in (node.data or {}).get("claims") or []
+    }
+    assert not claim_types & {"price", "duration"}
+
+
+def test_every_handoff_target_is_a_globally_reachable_handoff_rule():
+    """graph_compiler_v3 rejects a handoff pointing at a node that is not a
+    published handoff rule inside the branch closure. Catching it here is far
+    cheaper than a failed production compile that splits the two runtimes.
+    """
+    graph = published_aurora_graph()
+    by_id = {node.id: node for node in graph.nodes}
+    reachable_rules = {
+        node.id for node in graph.nodes
+        if (node.data or {}).get("capabilities", {}).get("global_context")
+        and (
+            (node.data or {}).get("capabilities", {}).get("handoff_rule")
+            or isinstance((node.data or {}).get("handoff_rule"), dict)
+        )
+    }
+    for node in graph.nodes:
+        handoff = (node.data or {}).get("handoff")
+        if not isinstance(handoff, dict):
+            continue
+        for key, target in handoff.items():
+            if not (isinstance(target, str) and key.startswith("on_")):
+                continue
+            assert target in by_id, f"{node.id}.{key} -> unknown node {target}"
+            assert target in reachable_rules, f"{node.id}.{key} -> {target} not reachable"
+
+
+def test_capacity_and_away_message_come_from_the_briefing():
+    policy = appointment_policy_of(published_aurora_graph())
+    assert policy["capacity"] == 5
+    assert policy["price_disclosure"] == "human_only"
+    assert policy["texts"]["mensagem_ausencia"].strip()
+    assert "modelo do carro" in policy["texts"]["mensagem_ausencia"]

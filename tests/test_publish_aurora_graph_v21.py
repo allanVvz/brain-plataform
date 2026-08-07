@@ -19,8 +19,8 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
 
     assert valid, errors
     assert graph.schema_version == "2.1"
-    assert len(graph.nodes) == 55
-    assert len(graph.edges) == 104
+    assert len(graph.nodes) == 62
+    assert len(graph.edges) == 118
 
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
     assert embedded.action is not None
@@ -33,7 +33,7 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
         and edge.relation_type == "publishes_to"
         and edge.lifecycle.status == "active"
     ]
-    assert len(grants) == 52
+    assert len(grants) == 59
     assert {edge.source for edge in grants} == {
         node.id
         for node in graph.nodes

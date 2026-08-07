@@ -21,9 +21,12 @@
         "commercial_note_fields": [
           "modelo_veiculo",
           "vehicle_year",
+          "vehicle_color",
           "vehicle_size",
           "condicao",
-          "objective"
+          "objective",
+          "data_desejada",
+          "janela_horario"
         ],
         "appointment_policy": {
           "responsible_team": "Equipe Aurora (Guilherme e Danielle)",
@@ -66,9 +69,7 @@
             "modelo_veiculo": "Qual é o modelo do seu carro?",
             "vehicle_year": "E qual é o ano dele?",
             "vehicle_color": "Qual é a cor do veículo?",
-            "condicao": "O que mais te incomoda no carro hoje?",
-            "usage_profile": "Você costuma rodar em estrada de chão ou transportar alguma coisa que suja o veículo?",
-            "photos": "Consegue me mandar fotos das áreas que mais te incomodam?"
+            "condicao": "O que mais te incomoda no carro hoje?"
           },
           "texts": {
             "cabecalho_servicos": "Serviços da Aurora:",
@@ -204,7 +205,7 @@
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
-        "summary": "Tom acolhedor, direto e educado, com linguagem próxima e técnica, adaptando-se ao clima da conversa com o cliente.",
+        "summary": "Tom objetivo, amigável, profissional e consultivo, em mensagens curtas. Acolhedor, direto e educado, com linguagem próxima e técnica, adaptando-se ao clima da conversa. Nunca comentar ou comparar com concorrentes.",
         "traits": [
           "objetivo",
           "amigável",
@@ -253,7 +254,7 @@
         "requires_in_person_evaluation": false,
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
-          "on_schedule_request": "aurora-rule-scheduling"
+          "on_schedule_request": "aurora-rule-lacunas"
         },
         "no_charge": true
       }
@@ -292,8 +293,8 @@
           "aurora-product-evaluation",
           "aurora-copy-evaluation"
         ],
-        "source_node_id": "aurora-copy-evaluation",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-evaluation",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1
       }
@@ -331,7 +332,7 @@
         "requires_in_person_evaluation": false,
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
-          "on_schedule_request": "aurora-rule-scheduling"
+          "on_schedule_request": "aurora-rule-lacunas"
         }
       }
     },
@@ -369,8 +370,8 @@
           "aurora-product-wash",
           "aurora-copy-wash"
         ],
-        "source_node_id": "aurora-copy-wash",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-wash",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1
       }
@@ -408,7 +409,7 @@
         "requires_in_person_evaluation": true,
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
-          "on_schedule_request": "aurora-rule-scheduling"
+          "on_schedule_request": "aurora-rule-lacunas"
         }
       }
     },
@@ -446,8 +447,8 @@
           "aurora-product-interior",
           "aurora-copy-interior"
         ],
-        "source_node_id": "aurora-copy-interior",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-interior",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1
       }
@@ -485,7 +486,7 @@
         "requires_in_person_evaluation": true,
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
-          "on_schedule_request": "aurora-rule-scheduling"
+          "on_schedule_request": "aurora-rule-lacunas"
         }
       }
     },
@@ -523,8 +524,8 @@
           "aurora-product-polish",
           "aurora-copy-polish"
         ],
-        "source_node_id": "aurora-copy-polish",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-polish",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1
       }
@@ -562,7 +563,7 @@
         "requires_in_person_evaluation": true,
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
-          "on_schedule_request": "aurora-rule-scheduling"
+          "on_schedule_request": "aurora-rule-lacunas"
         }
       }
     },
@@ -600,8 +601,8 @@
           "aurora-product-vitrification",
           "aurora-copy-vitrification"
         ],
-        "source_node_id": "aurora-copy-vitrification",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-vitrification",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1
       }
@@ -627,8 +628,8 @@
           "aurora-product-vitrification",
           "aurora-copy-vitrification"
         ],
-        "source_node_id": "aurora-copy-vitrification",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-vitrification",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1
       }
@@ -666,7 +667,7 @@
         "requires_in_person_evaluation": true,
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
-          "on_schedule_request": "aurora-rule-scheduling"
+          "on_schedule_request": "aurora-rule-lacunas"
         }
       }
     },
@@ -704,8 +705,8 @@
           "aurora-product-ppf",
           "aurora-copy-ppf"
         ],
-        "source_node_id": "aurora-copy-ppf",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-ppf",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1
       }
@@ -743,7 +744,7 @@
         "requires_in_person_evaluation": true,
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
-          "on_schedule_request": "aurora-rule-scheduling"
+          "on_schedule_request": "aurora-rule-lacunas"
         }
       }
     },
@@ -781,8 +782,8 @@
           "aurora-product-glass-polish",
           "aurora-copy-glass-polish"
         ],
-        "source_node_id": "aurora-copy-glass-polish",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-glass-polish",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1
       }
@@ -820,8 +821,8 @@
         "process_documented": false,
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
-          "on_schedule_request": "aurora-rule-scheduling",
-          "on_process_question": "aurora-rule-unknown-process"
+          "on_schedule_request": "aurora-rule-lacunas",
+          "on_process_question": "aurora-rule-lacunas"
         }
       }
     },
@@ -859,8 +860,8 @@
           "aurora-product-bodywork",
           "aurora-copy-bodywork"
         ],
-        "source_node_id": "aurora-copy-bodywork",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-bodywork",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1,
         "handoff_required": true
@@ -899,8 +900,8 @@
         "process_documented": false,
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
-          "on_schedule_request": "aurora-rule-scheduling",
-          "on_process_question": "aurora-rule-unknown-process"
+          "on_schedule_request": "aurora-rule-lacunas",
+          "on_process_question": "aurora-rule-lacunas"
         }
       }
     },
@@ -938,8 +939,8 @@
           "aurora-product-paint",
           "aurora-copy-paint"
         ],
-        "source_node_id": "aurora-copy-paint",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-paint",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1,
         "handoff_required": true
@@ -1087,111 +1088,6 @@
       }
     },
     {
-      "id": "aurora-rule-conduct",
-      "node_type": "rule",
-      "slug": "conduta-de-atendimento",
-      "label": "Conduta obrigatória de atendimento",
-      "parent_id": "aurora-briefing",
-      "data": {
-        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
-        "capabilities": {
-          "global_context": true
-        },
-        "obrigatorio": [
-          "Responder o mais rápido possível.",
-          "Se houver atraso, agradecer a espera: \"Obrigada por aguardar\" — nunca pedir desculpa pela demora.",
-          "Sempre usar o nome do cliente.",
-          "Se apresentar.",
-          "Ler toda a mensagem do cliente.",
-          "Responder todas as perguntas.",
-          "Explicar o serviço antes de falar de preço.",
-          "Sempre terminar as mensagens com uma pergunta.",
-          "Identificar cedo se o cliente pode ir presencialmente ou precisa resolver tudo pelo WhatsApp.",
-          "Conduzir a conversa: quem pergunta controla."
-        ],
-        "proibido": [
-          "Comentar ou comparar com concorrentes."
-        ]
-      }
-    },
-    {
-      "id": "aurora-rule-attendance-structure",
-      "node_type": "rule",
-      "slug": "estrutura-de-atendimento",
-      "label": "Estrutura padrão do atendimento",
-      "parent_id": "aurora-briefing",
-      "data": {
-        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
-        "capabilities": {
-          "global_context": true
-        },
-        "steps": [
-          "1. Abertura e apresentação: chamar pelo nome, dizer o próprio nome e agradecer por aguardar.",
-          "2. Entender o interesse e o objetivo: vai vender o carro ou ficar com ele mais tempo?",
-          "3. Explicação breve do serviço, de forma estruturada e clara.",
-          "4. Validação de interesse: \"Isso se encaixa no que gostaria neste momento?\"",
-          "5. Perguntar se o cliente pode ir presencialmente — presencial converte mais.",
-          "6. Seguir a trilha correta, presencial ou remota.",
-          "7. Preço só depois do contexto explicado — e sempre por um atendente humano.",
-          "8. Encerrar sempre com uma pergunta."
-        ],
-        "entrada_por_anuncio": {
-          "prioridade": "maxima",
-          "nota": "Clientes que chegam pelo anúncio sempre iniciam a conversa. Esse cliente não espera — responder o mais rápido possível."
-        }
-      }
-    },
-    {
-      "id": "aurora-rule-track-in-person",
-      "node_type": "rule",
-      "slug": "trilha-avaliacao-presencial",
-      "label": "Trilha A — avaliação presencial",
-      "parent_id": "aurora-briefing",
-      "data": {
-        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
-        "capabilities": {
-          "global_context": true
-        },
-        "quando": "O cliente consegue levar o carro até a Aurora.",
-        "texto": "A avaliação presencial é importante porque cada carro tem um nível diferente de desgaste. É rápida e sem custo.",
-        "acao": "Oferecer dia e horário e deixar a visita agendada.",
-        "aplica_se_a": [
-          "higienizacao-interna",
-          "polimento-tecnico",
-          "vitrificacao",
-          "ppf",
-          "polimento-de-vidros",
-          "chapeacao",
-          "pintura"
-        ]
-      }
-    },
-    {
-      "id": "aurora-rule-track-remote",
-      "node_type": "rule",
-      "slug": "trilha-remota",
-      "label": "Trilha B — atendimento à distância",
-      "parent_id": "aurora-briefing",
-      "data": {
-        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
-        "capabilities": {
-          "global_context": true
-        },
-        "quando": "O cliente não consegue ir presencialmente.",
-        "coletar": [
-          "modelo e ano do carro, caso ainda não tenha informado",
-          "cor do carro",
-          "se costuma rodar em estrada de chão ou carregar algo que suja",
-          "fotos das áreas que mais incomodam, se possível"
-        ],
-        "fotos_obrigatorias_quando": "o serviço envolve pintura"
-      }
-    },
-    {
       "id": "aurora-rule-price-human-only",
       "node_type": "rule",
       "slug": "precos-somente-humano",
@@ -1211,87 +1107,8 @@
           "id": "aurora-price-human-only",
           "condition": "price_requested",
           "text_key": "preco_humano"
-        }
-      }
-    },
-    {
-      "id": "aurora-rule-unknown-process",
-      "node_type": "rule",
-      "slug": "lacuna-chapeacao-pintura",
-      "label": "Lacuna declarada — chapeação e pintura",
-      "parent_id": "aurora-briefing",
-      "data": {
-        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
-        "capabilities": {
-          "global_context": true,
-          "handoff_rule": true
         },
-        "regra": "A Aurora oferece chapeação e pintura, mas o processo desses dois serviços não está documentado. A IA não descreve como o processo funciona.",
-        "acao": "Confirmar que o serviço existe, coletar os dados e chamar a Equipe Aurora.",
-        "servicos": [
-          "chapeacao",
-          "pintura"
-        ],
-        "handoff_rule": {
-          "id": "aurora-process-unknown",
-          "condition": "process_question_without_evidence",
-          "text_key": "lacuna_conhecimento"
-        }
-      }
-    },
-    {
-      "id": "aurora-rule-scheduling",
-      "node_type": "rule",
-      "slug": "regras-de-agendamento",
-      "label": "Regras de agendamento",
-      "parent_id": "aurora-briefing",
-      "data": {
-        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
-        "capabilities": {
-          "global_context": true,
-          "handoff_rule": true
-        },
-        "capacidade": "Até 5 clientes por dia.",
-        "papel_da_ia": "Agendar a visita e oferecer opções de horário. A agenda e o orçamento ficam com a pessoa responsável pelo atendimento.",
-        "nao_informado": [
-          "dias de atendimento",
-          "horários de atendimento",
-          "duração dos serviços",
-          "intervalo entre agendamentos"
-        ],
-        "handoff_rule": {
-          "id": "aurora-schedule-human-only",
-          "condition": "schedule_or_duration_requested",
-          "text_key": "lacuna_conhecimento"
-        }
-      }
-    },
-    {
-      "id": "aurora-rule-objections",
-      "node_type": "rule",
-      "slug": "objecoes-conhecidas",
-      "label": "Objeções conhecidas e orientação padrão",
-      "parent_id": "aurora-briefing",
-      "data": {
-        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
-        "capabilities": {
-          "global_context": true,
-          "handoff_rule": true
-        },
-        "objecoes": [
-          "preço",
-          "disponibilidade de agenda",
-          "urgência para realizar o serviço"
-        ],
-        "orientacao_padrao": "Quando a informação não estiver disponível ou depender de avaliação, coletar os dados necessários, explicar que a equipe fará a confirmação e encaminhar a conversa para um atendente.",
-        "handoff_rule": {
-          "id": "aurora-missing-info",
-          "condition": "information_unavailable",
-          "text_key": "atendimento_humano"
-        }
+        "summary": "A IA nunca informa preço, faixa, valor aproximado, parcela ou desconto. O orçamento é personalizado e quem fecha o valor é a Equipe Aurora."
       }
     },
     {
@@ -1332,8 +1149,8 @@
         "status": "validated",
         "question": "Do que o PPF protege?",
         "answer": "O PPF é uma película de proteção física que protege contra pequenos impactos, pedras e também marcas de chuva ácida e fezes de pássaros. Onde você gostaria de aplicar?",
-        "source_node_id": "aurora-copy-ppf",
-        "source_node_type": "copy",
+        "source_node_id": "aurora-product-ppf",
+        "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1,
         "branch_path": [
@@ -1377,13 +1194,13 @@
       "node_type": "faq",
       "slug": "faq-horarios-confirmacao",
       "label": "Qual é o horário de atendimento?",
-      "parent_id": "aurora-rule-scheduling",
+      "parent_id": "aurora-rule-lacunas",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Qual é o horário de atendimento?",
         "answer": "Os dias e horários quem confirma é a Equipe Aurora — vou verificar e já te retorno com as opções. Enquanto isso, você consegue trazer o carro para uma avaliação rápida e sem custo?",
-        "source_node_id": "aurora-rule-scheduling",
+        "source_node_id": "aurora-rule-lacunas",
         "source_node_type": "rule",
         "markdown_document": true,
         "question_count": 1,
@@ -1392,7 +1209,7 @@
           "aurora-persona",
           "aurora-brand",
           "aurora-briefing",
-          "aurora-rule-scheduling"
+          "aurora-rule-lacunas"
         ]
       }
     },
@@ -1401,13 +1218,13 @@
       "node_type": "faq",
       "slug": "faq-duracao-servico",
       "label": "Quanto tempo leva o serviço?",
-      "parent_id": "aurora-rule-scheduling",
+      "parent_id": "aurora-rule-lacunas",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Quanto tempo leva o serviço?",
         "answer": "O prazo depende do veículo e do serviço, e quem confirma é a Equipe Aurora. Vou registrar suas informações e chamar o time. Qual é o modelo e o ano do seu carro?",
-        "source_node_id": "aurora-rule-scheduling",
+        "source_node_id": "aurora-rule-lacunas",
         "source_node_type": "rule",
         "markdown_document": true,
         "question_count": 1,
@@ -1416,7 +1233,7 @@
           "aurora-persona",
           "aurora-brand",
           "aurora-briefing",
-          "aurora-rule-scheduling"
+          "aurora-rule-lacunas"
         ]
       }
     },
@@ -1425,13 +1242,13 @@
       "node_type": "faq",
       "slug": "faq-capacidade-diaria",
       "label": "Quantos carros vocês atendem por dia?",
-      "parent_id": "aurora-rule-scheduling",
+      "parent_id": "aurora-rule-lacunas",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Quantos carros vocês atendem por dia?",
         "answer": "Atendemos até 5 clientes por dia. Você já tem uma data em mente?",
-        "source_node_id": "aurora-rule-scheduling",
+        "source_node_id": "aurora-rule-lacunas",
         "source_node_type": "rule",
         "markdown_document": true,
         "question_count": 1,
@@ -1439,7 +1256,7 @@
           "aurora-persona",
           "aurora-brand",
           "aurora-briefing",
-          "aurora-rule-scheduling"
+          "aurora-rule-lacunas"
         ]
       }
     },
@@ -1448,13 +1265,13 @@
       "node_type": "faq",
       "slug": "faq-avaliacao-presencial-como-funciona",
       "label": "Por que vocês pedem avaliação presencial?",
-      "parent_id": "aurora-rule-track-in-person",
+      "parent_id": "aurora-rule-atendimento",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Por que vocês pedem avaliação presencial?",
         "answer": "Porque cada carro tem um nível diferente de desgaste, e ver o veículo é o que permite indicar o processo certo. A avaliação é rápida e sem custo. Seria possível vir em qual dia?",
-        "source_node_id": "aurora-rule-track-in-person",
+        "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
         "markdown_document": true,
         "question_count": 1,
@@ -1462,7 +1279,7 @@
           "aurora-persona",
           "aurora-brand",
           "aurora-briefing",
-          "aurora-rule-track-in-person"
+          "aurora-rule-atendimento"
         ]
       }
     },
@@ -1471,13 +1288,13 @@
       "node_type": "faq",
       "slug": "faq-atendimento-a-distancia",
       "label": "E se eu não conseguir levar o carro aí?",
-      "parent_id": "aurora-rule-track-remote",
+      "parent_id": "aurora-rule-atendimento",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "E se eu não conseguir levar o carro aí?",
         "answer": "Sem problema — nesse caso consigo te orientar à distância. Me diz o modelo e o ano do carro, a cor, se você costuma rodar em estrada de chão ou carregar algo que suja e, se possível, me manda fotos das áreas que mais te incomodam. Pode ser?",
-        "source_node_id": "aurora-rule-track-remote",
+        "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
         "markdown_document": true,
         "question_count": 1,
@@ -1485,8 +1302,116 @@
           "aurora-persona",
           "aurora-brand",
           "aurora-briefing",
-          "aurora-rule-track-remote"
+          "aurora-rule-atendimento"
         ]
+      }
+    },
+    {
+      "id": "aurora-rule-atendimento",
+      "node_type": "rule",
+      "slug": "conduta-e-estrutura-de-atendimento",
+      "label": "Conduta e estrutura do atendimento",
+      "parent_id": "aurora-briefing",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "summary": "Responder rápido; agradecer a espera em vez de pedir desculpa pela demora; usar o nome do cliente; se apresentar; ler a mensagem toda; responder todas as perguntas; explicar o serviço antes de falar de preço; terminar sempre com uma pergunta; identificar cedo se o cliente pode ir presencialmente; conduzir a conversa; não comentar concorrentes. A avaliação presencial é rápida e sem custo; quando não for possível, coletar modelo, ano, cor, perfil de uso e fotos.",
+        "capabilities": {
+          "global_context": true
+        },
+        "obrigatorio": [
+          "Responder o mais rápido possível.",
+          "Se houver atraso, agradecer a espera: \"Obrigada por aguardar\" — nunca pedir desculpa pela demora.",
+          "Sempre usar o nome do cliente.",
+          "Se apresentar.",
+          "Ler toda a mensagem do cliente.",
+          "Responder todas as perguntas.",
+          "Explicar o serviço antes de falar de preço.",
+          "Sempre terminar as mensagens com uma pergunta.",
+          "Identificar cedo se o cliente pode ir presencialmente ou precisa resolver tudo pelo WhatsApp.",
+          "Conduzir a conversa: quem pergunta controla."
+        ],
+        "proibido": [
+          "Comentar ou comparar com concorrentes."
+        ],
+        "steps": [
+          "1. Abertura e apresentação: chamar pelo nome, dizer o próprio nome e agradecer por aguardar.",
+          "2. Entender o interesse e o objetivo: vai vender o carro ou ficar com ele mais tempo?",
+          "3. Explicação breve do serviço, de forma estruturada e clara.",
+          "4. Validação de interesse: \"Isso se encaixa no que gostaria neste momento?\"",
+          "5. Perguntar se o cliente pode ir presencialmente — presencial converte mais.",
+          "6. Seguir a trilha correta, presencial ou remota.",
+          "7. Preço só depois do contexto explicado — e sempre por um atendente humano.",
+          "8. Encerrar sempre com uma pergunta."
+        ],
+        "entrada_por_anuncio": {
+          "prioridade": "maxima",
+          "nota": "Clientes que chegam pelo anúncio sempre iniciam a conversa. Esse cliente não espera — responder o mais rápido possível."
+        },
+        "quando": "O cliente não consegue ir presencialmente.",
+        "texto": "A avaliação presencial é importante porque cada carro tem um nível diferente de desgaste. É rápida e sem custo.",
+        "acao": "Oferecer dia e horário e deixar a visita agendada.",
+        "aplica_se_a": [
+          "higienizacao-interna",
+          "polimento-tecnico",
+          "vitrificacao",
+          "ppf",
+          "polimento-de-vidros",
+          "chapeacao",
+          "pintura"
+        ],
+        "coletar": [
+          "modelo e ano do carro, caso ainda não tenha informado",
+          "cor do carro",
+          "se costuma rodar em estrada de chão ou carregar algo que suja",
+          "fotos das áreas que mais incomodam, se possível"
+        ],
+        "fotos_obrigatorias_quando": "o serviço envolve pintura",
+        "perguntas": [
+          "Você costuma rodar em estrada de chão ou transportar alguma coisa que suja o veículo?",
+          "Consegue me mandar fotos das áreas que mais te incomodam?"
+        ]
+      }
+    },
+    {
+      "id": "aurora-rule-lacunas",
+      "node_type": "rule",
+      "slug": "lacunas-e-encaminhamento",
+      "label": "Lacunas de informação e encaminhamento",
+      "parent_id": "aurora-briefing",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "summary": "Chapeação e pintura são oferecidas, mas o processo não está documentado. Dias, horários, duração dos serviços e intervalos não foram informados. Até 5 clientes por dia. Objeções conhecidas: preço, disponibilidade de agenda e urgência. Sem informação, coletar os dados, explicar que a Equipe Aurora confirma e encaminhar.",
+        "capabilities": {
+          "global_context": true,
+          "handoff_rule": true
+        },
+        "regra": "A Aurora oferece chapeação e pintura, mas o processo desses dois serviços não está documentado. A IA não descreve como o processo funciona.",
+        "acao": "Confirmar que o serviço existe, coletar os dados e chamar a Equipe Aurora.",
+        "servicos": [
+          "chapeacao",
+          "pintura"
+        ],
+        "capacidade": "Até 5 clientes por dia.",
+        "papel_da_ia": "Agendar a visita e oferecer opções de horário. A agenda e o orçamento ficam com a pessoa responsável pelo atendimento.",
+        "nao_informado": [
+          "dias de atendimento",
+          "horários de atendimento",
+          "duração dos serviços",
+          "intervalo entre agendamentos"
+        ],
+        "objecoes": [
+          "preço",
+          "disponibilidade de agenda",
+          "urgência para realizar o serviço"
+        ],
+        "orientacao_padrao": "Quando a informação não estiver disponível ou depender de avaliação, coletar os dados necessários, explicar que a equipe fará a confirmação e encaminhar a conversa para um atendente.",
+        "handoff_rule": {
+          "id": "aurora-information-gap",
+          "condition": "information_unavailable",
+          "text_key": "lacuna_conhecimento"
+        }
       }
     }
   ],
@@ -1940,65 +1865,9 @@
       "metadata": {}
     },
     {
-      "id": "aurora-e-briefing-conduct",
-      "source": "aurora-briefing",
-      "target": "aurora-rule-conduct",
-      "relation": "contains",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-briefing-attendance-structure",
-      "source": "aurora-briefing",
-      "target": "aurora-rule-attendance-structure",
-      "relation": "contains",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-briefing-track-in-person",
-      "source": "aurora-briefing",
-      "target": "aurora-rule-track-in-person",
-      "relation": "contains",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-briefing-track-remote",
-      "source": "aurora-briefing",
-      "target": "aurora-rule-track-remote",
-      "relation": "contains",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
       "id": "aurora-e-briefing-price-human-only",
       "source": "aurora-briefing",
       "target": "aurora-rule-price-human-only",
-      "relation": "contains",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-briefing-unknown-process",
-      "source": "aurora-briefing",
-      "target": "aurora-rule-unknown-process",
-      "relation": "contains",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-briefing-scheduling",
-      "source": "aurora-briefing",
-      "target": "aurora-rule-scheduling",
-      "relation": "contains",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-briefing-objections",
-      "source": "aurora-briefing",
-      "target": "aurora-rule-objections",
       "relation": "contains",
       "primary_tree": true,
       "metadata": {}
@@ -2023,46 +1892,6 @@
       "id": "aurora-e-faq-price",
       "source": "aurora-rule-price-human-only",
       "target": "aurora-faq-price",
-      "relation": "answers_question",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-faq-hours-confirm",
-      "source": "aurora-rule-scheduling",
-      "target": "aurora-faq-hours-confirm",
-      "relation": "answers_question",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-faq-duration",
-      "source": "aurora-rule-scheduling",
-      "target": "aurora-faq-duration",
-      "relation": "answers_question",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-faq-capacity",
-      "source": "aurora-rule-scheduling",
-      "target": "aurora-faq-capacity",
-      "relation": "answers_question",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-faq-in-person",
-      "source": "aurora-rule-track-in-person",
-      "target": "aurora-faq-in-person",
-      "relation": "answers_question",
-      "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-faq-remote",
-      "source": "aurora-rule-track-remote",
-      "target": "aurora-faq-remote",
       "relation": "answers_question",
       "primary_tree": true,
       "metadata": {}
@@ -2129,6 +1958,62 @@
       "target": "aurora-embedded",
       "relation": "visible_to_agent",
       "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-atendimento",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-atendimento",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-briefing-lacunas",
+      "source": "aurora-briefing",
+      "target": "aurora-rule-lacunas",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-hours-confirm",
+      "source": "aurora-rule-lacunas",
+      "target": "aurora-faq-hours-confirm",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-duration",
+      "source": "aurora-rule-lacunas",
+      "target": "aurora-faq-duration",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-capacity",
+      "source": "aurora-rule-lacunas",
+      "target": "aurora-faq-capacity",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-in-person",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-in-person",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-remote",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-remote",
+      "relation": "answers_question",
+      "primary_tree": true,
       "metadata": {}
     }
   ],

@@ -95,7 +95,12 @@ def test_get_persona_appointment_policy_returns_current_texts(monkeypatch):
     out = graph.get_persona_appointment_policy("aurora", _req())
 
     assert out["ok"] is True
-    assert out["texts"]["atendimento_humano"] == "Vou encaminhar sua conversa para a Equipe Aurora."
+    # Every published text ends in a question: the briefing makes "sempre
+    # terminar mensagens com uma pergunta" a mandatory conduct rule.
+    assert out["texts"]["atendimento_humano"] == (
+        "Vou encaminhar sua conversa para a Equipe Aurora. "
+        "Posso adiantar alguma informação para eles?"
+    )
     assert set(out["texts"].keys()) == {
         "atendimento_humano", "encaminhamento_excepcional", "esclarecimento_duvida",
         "encaminhamento_duvida_persistente", "complemento_confirmacao", "cabecalho_servicos",

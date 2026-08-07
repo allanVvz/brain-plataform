@@ -42,6 +42,11 @@ class Product:
     required_fields: tuple[str, ...] = ()
     confirmation_required: bool = False
     booking_provider: str | None = None
+    # A graph may publish a service it sells without publishing how the service
+    # works. Answering "how does it work" from an undocumented process is how a
+    # confident invention gets sent to a customer, so the graph says so
+    # explicitly and the runtime hands the question to a person.
+    process_documented: bool = True
 
     @property
     def terms(self) -> tuple[str, ...]:
@@ -334,6 +339,7 @@ def catalog_from_graph(graph: Any) -> Catalog:
             confirmation_required=bool(
                 (data.get("booking") or {}).get("confirmation_required", False)
             ),
+            process_documented=bool(data.get("process_documented", True)),
             booking_provider=(
                 str((data.get("booking") or {}).get("provider"))
                 if (data.get("booking") or {}).get("provider")
