@@ -48,7 +48,7 @@ export function CreateAudiencePrompt({
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-obs-subtle hover:text-obs-text"
-            style={{ background: "rgb(var(--glass-bg) / var(--glass-solid-hover))" }}
+            style={{ background: "rgb(var(--glass-solid-bg) / var(--glass-solid-hover))" }}
           >
             <X size={16} />
           </button>

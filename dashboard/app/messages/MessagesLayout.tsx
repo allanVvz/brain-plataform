@@ -289,7 +289,7 @@ function stageColor(stage: string | null): string {
   if (s === "qualificado" || s === "interested") return "text-yellow-400 border-yellow-400/30";
   if (s === "fechado" || s === "won") return "text-green-400 border-green-400/30";
   if (s === "perdido" || s === "lost") return "text-red-400 border-red-400/30";
-  return "text-obs-subtle border-black/10";
+  return "text-obs-subtle border-obs-line";
 }
 
 function extractMediaUrl(metadata: any): string | null {
@@ -684,7 +684,7 @@ const EvidenceCard = memo(function EvidenceCard({
 }) {
   const summary = extractEvidenceSummary(item.title, item.markdown);
   return (
-    <article className="rounded-lg border border-white/06 bg-white/[0.03] p-2.5">
+    <article className="rounded-lg border border-obs-line bg-obs-surface/40 p-2.5">
       <div className="flex items-start gap-1.5">
         <span className="mt-0.5 shrink-0 rounded border border-obs-violet/30 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-obs-violet">
           {item.node_type}
@@ -765,7 +765,7 @@ function NodePill({
     >
       <div className="flex items-center gap-1 min-w-0">
         <p className="font-medium truncate">{node.title}</p>
-        <span className="shrink-0 rounded border border-black/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+        <span className="shrink-0 rounded border border-obs-line px-1 py-0.5 text-[9px] uppercase text-obs-faint">
           {node.node_type}
         </span>
         {pendingLabel(node)}
@@ -775,7 +775,7 @@ function NodePill({
       {facts.length > 0 && (
         <div className="mt-1 flex flex-wrap gap-1">
           {facts.map((fact) => (
-            <span key={fact} className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-obs-subtle [background:rgba(255,255,255,0.7)]">
+            <span key={fact} className="rounded border border-obs-line bg-obs-surface/70 px-1.5 py-0.5 text-[10px] text-obs-subtle">
               {fact}
             </span>
           ))}
@@ -815,7 +815,7 @@ function SimilarCard({
     >
       <div className="flex items-center gap-1 min-w-0">
         <p className="font-medium truncate">{node.title}</p>
-        <span className="shrink-0 rounded border border-black/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+        <span className="shrink-0 rounded border border-obs-line px-1 py-0.5 text-[9px] uppercase text-obs-faint">
           {node.node_type}
         </span>
         <span className="ml-auto shrink-0 text-[10px] text-obs-faint">d{node.graph_distance ?? "-"}</span>
@@ -1032,7 +1032,7 @@ function KnowledgeDetail({
           <span>Voltar</span>
         </button>
         {nodeType && (
-          <span className="ml-auto rounded border border-black/10 px-1.5 py-0.5 text-[9px] uppercase text-obs-faint">
+          <span className="ml-auto rounded border border-obs-line px-1.5 py-0.5 text-[9px] uppercase text-obs-faint">
             {nodeType}
           </span>
         )}
@@ -1077,7 +1077,7 @@ function KnowledgeDetail({
             {facts.map((f) => (
               <span
                 key={f}
-                className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-obs-subtle [background:rgba(255,255,255,0.7)]"
+                className="rounded border border-obs-line bg-obs-surface/70 px-1.5 py-0.5 text-[10px] text-obs-subtle"
               >
                 {f}
               </span>
@@ -1129,13 +1129,13 @@ function KnowledgeDetail({
               <div
                 key={`out-${relationIdentity(e)}`}
                 className="rounded-md px-2 py-1.5"
-                style={{ background: "rgba(255,255,255,0.72)", border: "1px solid var(--border-glass)" }}
+                style={{ background: "rgb(var(--obs-surface) / 0.72)", border: "1px solid var(--border-glass)" }}
               >
                 <div className="flex items-center gap-1 text-[11px] text-obs-text min-w-0">
                   <span className="text-[10px] text-obs-faint">→</span>
                   <span className="truncate">{dest?.title || e.target_node_id || "destino"}</span>
                   {dest?.node_type && (
-                    <span className="ml-auto shrink-0 rounded border border-black/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+                    <span className="ml-auto shrink-0 rounded border border-obs-line px-1 py-0.5 text-[9px] uppercase text-obs-faint">
                       {dest.node_type}
                     </span>
                   )}
@@ -1153,13 +1153,13 @@ function KnowledgeDetail({
               <div
                 key={`in-${relationIdentity(e)}`}
                 className="rounded-md px-2 py-1.5"
-                style={{ background: "rgba(255,255,255,0.72)", border: "1px solid var(--border-glass)" }}
+                style={{ background: "rgb(var(--obs-surface) / 0.72)", border: "1px solid var(--border-glass)" }}
               >
                 <div className="flex items-center gap-1 text-[11px] text-obs-text min-w-0">
                   <span className="text-[10px] text-obs-faint">←</span>
                   <span className="truncate">{src?.title || e.source_node_id || "origem"}</span>
                   {src?.node_type && (
-                    <span className="ml-auto shrink-0 rounded border border-black/10 px-1 py-0.5 text-[9px] uppercase text-obs-faint">
+                    <span className="ml-auto shrink-0 rounded border border-obs-line px-1 py-0.5 text-[9px] uppercase text-obs-faint">
                       {src.node_type}
                     </span>
                   )}
@@ -1202,7 +1202,7 @@ function ContextCardButton({
     <button
       type="button"
       onClick={onClick}
-      className="w-full rounded-lg border border-black/10 bg-white/70 p-2.5 text-left transition hover:border-obs-violet/40 focus:outline-none focus:ring-2 focus:ring-obs-violet/40"
+      className="w-full rounded-lg border border-obs-line bg-obs-surface/80 p-2.5 text-left transition hover:border-obs-violet/40 focus:outline-none focus:ring-2 focus:ring-obs-violet/40"
     >
       <div className="flex items-start gap-1.5">
         <span className="mt-0.5 rounded border border-obs-violet/30 px-1 py-0.5 text-[9px] font-semibold uppercase text-obs-violet">
@@ -1213,8 +1213,8 @@ function ContextCardButton({
       </div>
       {summary && <p className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-obs-subtle">{summary}</p>}
       <div className="mt-1.5 flex flex-wrap gap-1">
-        {decisive && <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] text-emerald-600">decisivo</span>}
-        {changed && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-600">alterado depois</span>}
+        {decisive && <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] text-emerald-400">decisivo</span>}
+        {changed && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-400">alterado depois</span>}
       </div>
     </button>
   );
@@ -1269,41 +1269,41 @@ function ContextCardModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true" aria-labelledby="context-card-title" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-black/10 bg-white p-5 shadow-2xl">
+      <div className="modal-content max-h-[90vh] w-full max-w-3xl overflow-y-auto">
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-obs-violet">{card.node_type} · revisão {card.revision}</p>
             <h2 id="context-card-title" className="mt-1 text-lg font-semibold text-obs-text">{card.title}</h2>
           </div>
-          <button type="button" onClick={onClose} className="rounded-md border border-black/10 px-2 py-1 text-xs text-obs-subtle">Fechar</button>
+          <button type="button" onClick={onClose} className="rounded-md border border-obs-line px-2 py-1 text-xs text-obs-subtle">Fechar</button>
         </div>
 
         <section className="mt-5">
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-obs-faint">Conteúdo exato usado na resposta</p>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-black/10 bg-zinc-50 p-3 text-[11px] leading-relaxed text-obs-subtle">{card.rendered_content}</pre>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-obs-line bg-obs-base/60 p-3 text-[11px] leading-relaxed text-obs-subtle">{card.rendered_content}</pre>
         </section>
 
         {changed && current && (
           <section className="mt-4">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-600">Versão atual · v{current.graph_version}</p>
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-amber-300/40 bg-amber-50 p-3 text-[11px] leading-relaxed text-obs-subtle">{current.rendered_content}</pre>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-obs-amber/30 bg-obs-amber-soft p-3 text-[11px] leading-relaxed text-obs-subtle">{current.rendered_content}</pre>
           </section>
         )}
 
         {canEdit && personaSlug && currentGraphVersion && (
-          <section className="mt-4 rounded-lg border border-black/10 p-3">
+          <section className="mt-4 rounded-lg border border-obs-line p-3">
             {!editing ? (
               <button type="button" onClick={() => setEditing(true)} className="rounded-md bg-obs-violet px-3 py-1.5 text-xs font-medium text-white">Editar versão atual</button>
             ) : (
               <div className="space-y-2">
                 <label className="block text-[10px] font-semibold uppercase text-obs-faint">Conteúdo editável</label>
-                <textarea value={content} onChange={(event) => setContent(event.target.value)} rows={8} className="w-full rounded-md border border-black/10 p-2 text-xs text-obs-text" />
+                <textarea value={content} onChange={(event) => setContent(event.target.value)} rows={8} className="lg-input w-full text-xs" />
                 <label className="block text-[10px] font-semibold uppercase text-obs-faint">Motivo da publicação</label>
-                <input value={reason} onChange={(event) => setReason(event.target.value)} className="w-full rounded-md border border-black/10 p-2 text-xs text-obs-text" />
+                <input value={reason} onChange={(event) => setReason(event.target.value)} className="lg-input w-full text-xs" />
                 {error && <p className="text-xs text-red-500">{error}</p>}
                 <div className="flex gap-2">
                   <button type="button" onClick={save} disabled={saving || !content.trim() || !reason.trim()} className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">{saving ? "Publicando…" : "Salvar e publicar"}</button>
-                  <button type="button" onClick={() => setEditing(false)} disabled={saving} className="rounded-md border border-black/10 px-3 py-1.5 text-xs">Cancelar</button>
+                  <button type="button" onClick={() => setEditing(false)} disabled={saving} className="lg-btn lg-btn-secondary text-xs">Cancelar</button>
                 </div>
               </div>
             )}
@@ -1324,7 +1324,7 @@ function ContextCardModal({
         </section>
 
         {card.relations.length > 0 && (
-          <section className="mt-4 rounded-lg border border-black/10 p-3">
+          <section className="mt-4 rounded-lg border border-obs-line p-3">
             <p className="text-xs font-medium text-obs-text">Relações · {card.relations.length}</p>
             <div className="mt-2 space-y-1 text-[11px] text-obs-subtle">
               {card.relations.map((rel, i) => (
@@ -1340,7 +1340,7 @@ function ContextCardModal({
             </div>
           </section>
         )}
-        <details className="mt-2 rounded-lg border border-black/10 p-3">
+        <details className="mt-2 rounded-lg border border-obs-line p-3">
           <summary className="cursor-pointer text-xs font-medium text-obs-text">Detalhes técnicos</summary>
           <div className="mt-2 space-y-1 text-[11px] text-obs-subtle">
             <p className="break-all font-mono text-[10px]"><span className="text-obs-faint font-sans">ID:</span> {card.id}</p>
@@ -1404,7 +1404,7 @@ export function KnowledgeSidebar({
       <div className="h-full overflow-y-auto p-3">
         <div className="mb-3 px-0.5">
           <div className="flex items-center justify-between gap-2">
-            <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${ctx.mode === "exact" ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-700"}`}>
+            <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${ctx.mode === "exact" ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-400"}`}>
               {ctx.mode === "exact" ? "espelho exato" : "evidência reconstruída"}
             </span>
             <span className="text-[10px] text-obs-faint">grafo v{ctx.graph_version || "?"}</span>
@@ -1427,7 +1427,7 @@ export function KnowledgeSidebar({
           }) : <p className="text-[11px] text-obs-faint">Nenhum card confirmado para esta resposta.</p>}
         </KnowledgeSection>
 
-        <details className="mt-4 rounded-lg border border-black/10 bg-white/50 p-2.5">
+        <details className="mt-4 rounded-lg border border-obs-line bg-obs-surface/50 p-2.5">
           <summary className="cursor-pointer text-[11px] font-medium text-obs-text">Ver relacionados · {related.length}</summary>
           <p className="mt-1 text-[10px] text-obs-faint">Não usados nesta resposta.</p>
           <div className="mt-2 space-y-1.5">

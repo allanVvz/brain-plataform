@@ -171,7 +171,14 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [pathname, router, sessionRetry]);
+    // searchParams.toString() (not searchParams itself, whose object
+    // identity can change without content changing) so that navigating to
+    // a new ?persona= while staying on the same pathname — a client-side
+    // route change, not a remount — actually re-resolves it. Without this,
+    // the effect only ran once per pathname and silently ignored the new
+    // ?persona= until the dropdown was used directly (confirmed live
+    // 2026-08-07: had to reselect the persona manually to get in).
+  }, [pathname, router, sessionRetry, searchParams.toString()]);
 
   useEffect(() => {
     function handleLanguageChange(event: Event) {
@@ -315,7 +322,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex min-h-screen flex-1 flex-col overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-4 bg-obs-surface/55 backdrop-blur-glass px-6 [border-bottom:1px_solid_var(--border-glass)]">
+        <header className="relative z-40 flex h-12 shrink-0 items-center gap-4 bg-obs-surface/55 backdrop-blur-glass px-6 [border-bottom:1px_solid_var(--border-glass)]">
           <div className="flex items-center gap-2 rounded-full bg-white/[0.05] px-3 py-1.5 [border:1px_solid_var(--border-glass)]">
             <Settings size={13} className="text-obs-faint" />
             <span className="hidden text-[10px] font-medium uppercase tracking-[0.16em] text-obs-faint sm:inline">
