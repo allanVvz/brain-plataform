@@ -26,9 +26,10 @@ CANONICAL_PARENT: dict[str, tuple[str, ...]] = {
     "audience": ("campaign", "briefing"),
     "product_group": ("audience",),
     "product": ("product_group", "audience"),
+    "service": ("product_group", "audience"),
     "offer": ("product", "product_group"),
     "copy": ("product", "product_group", "offer"),
-    "rule": ("campaign", "briefing", "brand", "persona"),
+    "rule": ("campaign", "briefing", "brand", "persona", "product", "service"),
     "tone": ("campaign", "briefing", "brand", "persona"),
     "faq": ("copy", "product", "product_group", "audience", "briefing", "campaign", "brand", "persona", "rule"),
     "embedded": ("faq",),
@@ -46,7 +47,7 @@ FAQ_APPROVED_STATUSES: set[str] = {"approved", "validated", "embedded", "active"
 
 V21_KNOWLEDGE_TYPES = {
     "persona", "brand", "briefing", "campaign", "audience", "product_group",
-    "product", "offer", "copy", "faq", "rule", "tone", "asset",
+    "product", "service", "offer", "copy", "faq", "rule", "tone", "asset",
 }
 V21_ACTION_TYPES = {"gallery", "embedded", "marketing_workspace"}
 V21_RELATIONS = {

@@ -28,8 +28,8 @@ PUBLISHED_STATUSES = {"approved", "active", "validated", "ativo", "embedded"}
 FACT_STATUSES = {"known", "unknown", "declined", "needs_confirmation", "invalid"}
 STRUCTURAL_RELATIONS = {"contains"}
 RAG_CONTENT_TYPES = {
-    "faq", "product", "product_group", "offer", "brand", "campaign", "rule",
-    "tone", "copy", "briefing", "audience", "asset", "entity", "general_note",
+    "faq", "product", "service", "product_group", "offer", "brand", "campaign",
+    "rule", "tone", "copy", "briefing", "audience", "asset", "entity", "general_note",
 }
 TECHNICAL_METADATA_KEYS = {
     "active", "content_hash", "file_path", "graph_checksum", "graph_json_id",

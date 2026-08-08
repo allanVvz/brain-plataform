@@ -69,7 +69,8 @@
             "modelo_veiculo": "Qual é o modelo do seu carro?",
             "vehicle_year": "E qual é o ano dele?",
             "vehicle_color": "Qual é a cor do veículo?",
-            "condicao": "O que mais te incomoda no carro hoje?"
+            "condicao": "O que mais te incomoda no carro hoje?",
+            "reclamacao_relato": "Sinto muito por isso. Pode me contar rapidamente o que aconteceu, por favor?"
           },
           "texts": {
             "cabecalho_servicos": "Serviços da Aurora:",
@@ -81,6 +82,7 @@
             "lacuna_conhecimento": "Sobre esse ponto quem te explica melhor é a Equipe Aurora. Vou registrar suas informações e chamar o time. Pode me passar o modelo e o ano do carro?",
             "encaminhamento_excepcional": "Vou encaminhar sua solicitação para a Equipe Aurora. Enquanto isso, me conta o modelo do seu carro?",
             "atendimento_humano": "Vou encaminhar sua conversa para a Equipe Aurora. Posso adiantar alguma informação para eles?",
+            "reclamacao_recebida": "Sinto muito pelo transtorno. Vou encaminhar isso agora mesmo para a Equipe Aurora resolver com você.",
             "complemento_confirmacao": "Anotei tudo por aqui. A Equipe Aurora vai te chamar para confirmar o valor e o melhor horário. Tem mais alguma coisa que você gostaria de melhorar no carro?",
             "esclarecimento_duvida": "Vou chamar a Equipe Aurora para te ajudar direitinho nisso. Enquanto isso, me conta seu nome, o serviço que você procura e o modelo do carro?",
             "encaminhamento_duvida_persistente": "Já chamei a Equipe Aurora para continuar com você. Se puder, me diga seu nome, o serviço que procura e o modelo do carro enquanto aguarda."
@@ -219,6 +221,135 @@
         "capabilities": {
           "global_context": true
         }
+      }
+    },
+    {
+      "id": "aurora-service-atendimento-humano",
+      "node_type": "service",
+      "slug": "atendimento-humano",
+      "label": "Atendimento com um humano",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "aliases": [
+          "atendente humano",
+          "falar com humano",
+          "falar com uma pessoa",
+          "atendente",
+          "pessoa de verdade",
+          "suporte humano",
+          "sac humano",
+          "falar com alguem"
+        ],
+        "summary": "Cliente pede explicitamente para falar com um atendente humano, sem querer seguir a qualificação automática de um serviço.",
+        "booking": {
+          "required_fields": [
+            "nome_cliente"
+          ]
+        },
+        "qualification": {
+          "fields": [
+            {
+              "key": "nome_cliente",
+              "owner_node_id": "aurora-persona",
+              "required": true,
+              "accepted_statuses": ["known"],
+              "value_schema": {"type": "string", "minLength": 1},
+              "priority": 1.0,
+              "overwrite_policy": "explicit_correction"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "aurora-rule-handoff-humano",
+      "node_type": "rule",
+      "slug": "regra-handoff-atendimento-humano",
+      "label": "Encaminhamento imediato para atendente humano",
+      "parent_id": "aurora-service-atendimento-humano",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "regra": "Quando o cliente pede explicitamente para falar com um atendente humano, a IA não tenta vender nem qualificar um serviço: colhe o nome e encaminha.",
+        "papel_da_ia": "Reconhecer o pedido, colher o nome do cliente e avisar que vai encaminhar para a Equipe Aurora, sem insistir em qualificação de veículo ou serviço.",
+        "handoff_rule": {
+          "id": "aurora-handoff-humano",
+          "condition": null,
+          "text_key": "atendimento_humano",
+          "scope": "branch"
+        },
+        "summary": "Encaminha para a Equipe Aurora assim que o nome do cliente é conhecido, sem exigir qualificação de veículo."
+      }
+    },
+    {
+      "id": "aurora-service-reclamacao",
+      "node_type": "service",
+      "slug": "reclamacao",
+      "label": "Reclamação ou problema com um serviço",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "aliases": [
+          "reclamação",
+          "reclamar",
+          "problema",
+          "insatisfeito",
+          "não gostei",
+          "reclame aqui",
+          "tive um problema"
+        ],
+        "summary": "Cliente relata um problema ou insatisfação com um serviço já realizado e quer registrar uma reclamação.",
+        "booking": {
+          "required_fields": [
+            "nome_cliente",
+            "reclamacao_relato"
+          ]
+        },
+        "qualification": {
+          "fields": [
+            {
+              "key": "nome_cliente",
+              "owner_node_id": "aurora-persona",
+              "required": true,
+              "accepted_statuses": ["known"],
+              "value_schema": {"type": "string", "minLength": 1},
+              "priority": 1.0,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "reclamacao_relato",
+              "owner_node_id": "aurora-service-reclamacao",
+              "required": true,
+              "accepted_statuses": ["known"],
+              "value_schema": {"type": "string", "minLength": 1},
+              "priority": 1.0,
+              "overwrite_policy": "explicit_correction"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "aurora-rule-reclamacao",
+      "node_type": "rule",
+      "slug": "regra-handoff-reclamacao",
+      "label": "Encaminhamento de reclamações para humano",
+      "parent_id": "aurora-service-reclamacao",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "regra": "Reclamação é sempre assunto de humano (human_only_topics inclui reclamações). A IA acolhe com empatia, registra o relato e o nome, e encaminha -- nunca tenta resolver, justificar ou oferecer desconto sozinha.",
+        "papel_da_ia": "Demonstrar empatia genuína pelo transtorno, colher o relato do que aconteceu e o nome do cliente, e avisar que a Equipe Aurora vai assumir a partir daí.",
+        "handoff_rule": {
+          "id": "aurora-handoff-reclamacao",
+          "condition": null,
+          "text_key": "reclamacao_recebida",
+          "scope": "branch"
+        },
+        "summary": "Acolhe a reclamação com empatia e encaminha para a Equipe Aurora assim que nome e relato são conhecidos."
       }
     },
     {
@@ -1468,6 +1599,38 @@
       "id": "aurora-e-briefing-tone",
       "source": "aurora-briefing",
       "target": "aurora-tone",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-atendimento-humano",
+      "source": "aurora-services",
+      "target": "aurora-service-atendimento-humano",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-atendimento-humano-rule",
+      "source": "aurora-service-atendimento-humano",
+      "target": "aurora-rule-handoff-humano",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-reclamacao",
+      "source": "aurora-services",
+      "target": "aurora-service-reclamacao",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-reclamacao-rule",
+      "source": "aurora-service-reclamacao",
+      "target": "aurora-rule-reclamacao",
       "relation": "contains",
       "primary_tree": true,
       "metadata": {}

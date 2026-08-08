@@ -10,7 +10,35 @@ if str(API_ROOT) not in sys.path:
 
 from scripts.publish_aurora_graph import build_graph
 from routes.conversations import ContextRequest
-from services import graph_json_v2_validator, graph_markdown
+from services import graph_compiler_v3, graph_json_v2_validator, graph_markdown
+
+
+def _compile(graph) -> dict:
+    """Convert a built+canonicalized GraphJson into compile_graph()'s DB-row
+    shape and compile it, mirroring how graph_compiler_v3.compile_graph is
+    actually fed in production (knowledge_nodes/knowledge_edges rows, not
+    GraphJson objects directly)."""
+    knowledge_ids = {node.id for node in graph.nodes if node.node_class == "knowledge"}
+    node_rows = [{
+        "id": node.id,
+        "node_type": node.node_type,
+        "slug": node.slug,
+        "title": node.title,
+        "summary": (node.data or {}).get("summary") or "",
+        "tags": [],
+        "status": node.lifecycle.status,
+        "metadata": {"graph_json_node_id": node.id, **(node.data or {})},
+    } for node in graph.nodes if node.node_class == "knowledge"]
+    edge_rows = [{
+        "id": edge.id,
+        "source_node_id": edge.source,
+        "target_node_id": edge.target,
+        "relation_type": edge.relation_type,
+        "metadata": {"active": True, "graph_json_edge_id": edge.id},
+    } for edge in graph.edges if edge.lifecycle.status == "active" and edge.target in knowledge_ids]
+    persona_node = next(node for node in graph.nodes if node.node_type == "persona")
+    persona = {"id": persona_node.id, "slug": graph.persona_slug}
+    return graph_compiler_v3.compile_graph(persona=persona, node_rows=node_rows, edge_rows=edge_rows)
 
 
 def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
@@ -19,8 +47,8 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
 
     assert valid, errors
     assert graph.schema_version == "2.1"
-    assert len(graph.nodes) == 62
-    assert len(graph.edges) == 118
+    assert len(graph.nodes) == 67
+    assert len(graph.edges) == 128
 
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
     assert embedded.action is not None
@@ -33,7 +61,7 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
         and edge.relation_type == "publishes_to"
         and edge.lifecycle.status == "active"
     ]
-    assert len(grants) == 59
+    assert len(grants) == 64
     assert {edge.source for edge in grants} == {
         node.id
         for node in graph.nodes
@@ -89,3 +117,58 @@ def test_aurora_conversation_contract_rejects_blank_message_cleanly() -> None:
         assert "message must not be blank" in str(exc)
     else:  # pragma: no cover - defensive assertion
         raise AssertionError("blank Aurora messages must be rejected before runtime")
+
+
+def test_non_sales_service_branches_are_reachable_with_authorized_handoff() -> None:
+    """Regression test for the atendente_humano/reclamacao gap (2026-08-08).
+
+    Confirmed live: leads asking to talk to a human or filing a complaint on
+    their first message always failed with keep_without_active_branch and
+    handoff_not_authorized, because no branch anchor existed for either
+    intent -- only sellable "product" nodes were branch anchors, and the
+    only published handoff rule required qualification_complete (a sales
+    concept). Both intents now publish as "service" branch anchors with
+    their own branch-scoped handoff rule (condition: null), so a request is
+    authorized as soon as the model recognizes the intent, without forcing
+    a car-detailing qualification.
+    """
+    graph = graph_markdown.canonicalize_graph(build_graph())
+    document = _compile(graph)
+
+    assert "aurora-service-atendimento-humano" in document["branch_anchors"]
+    assert "aurora-service-reclamacao" in document["branch_anchors"]
+
+    handoff_contract = document["branch_contracts"]["aurora-service-atendimento-humano"]
+    assert [field["key"] for field in handoff_contract["fields"]] == ["nome_cliente"]
+    assert all(field["question_node_id"] for field in handoff_contract["fields"])
+    handoff_rules_by_id = {rule["node_id"]: rule for rule in handoff_contract["handoff_rules"]}
+    assert handoff_rules_by_id["aurora-rule-handoff-humano"]["condition"] is None
+
+    complaint_contract = document["branch_contracts"]["aurora-service-reclamacao"]
+    assert {field["key"] for field in complaint_contract["fields"]} == {
+        "nome_cliente", "reclamacao_relato",
+    }
+    assert all(field["question_node_id"] for field in complaint_contract["fields"])
+    reclamacao_field = next(
+        field for field in complaint_contract["fields"] if field["key"] == "reclamacao_relato"
+    )
+    assert reclamacao_field["owner_node_id"] == "aurora-service-reclamacao"
+    complaint_rules_by_id = {rule["node_id"]: rule for rule in complaint_contract["handoff_rules"]}
+    assert complaint_rules_by_id["aurora-rule-reclamacao"]["condition"] is None
+
+
+def test_branch_scoped_handoff_rules_do_not_leak_into_unrelated_branches() -> None:
+    """The two new handoff rules use condition: null -- always-authorized --
+    so leaking into another branch's contract would wrongly let the model
+    declare handoff_requested on, say, a normal car-wash qualification.
+    aurora-rule-operation must keep reaching every branch (it's the one
+    genuinely global handoff rule, gating on qualification_complete)."""
+    graph = graph_markdown.canonicalize_graph(build_graph())
+    document = _compile(graph)
+
+    for anchor in document["branch_anchors"]:
+        rule_ids = {rule["node_id"] for rule in document["branch_contracts"][anchor]["handoff_rules"]}
+        assert "aurora-rule-operation" in rule_ids, f"aurora-rule-operation missing from {anchor}"
+        if anchor not in ("aurora-service-atendimento-humano", "aurora-service-reclamacao"):
+            assert "aurora-rule-handoff-humano" not in rule_ids, f"leaked into {anchor}"
+            assert "aurora-rule-reclamacao" not in rule_ids, f"leaked into {anchor}"

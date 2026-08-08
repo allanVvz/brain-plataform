@@ -126,6 +126,21 @@ def build_graph() -> GraphJson:
                 "on_completion": "aurora-rule-operation",
                 **(data.get("handoff") or {}),
             }
+        elif node.node_type == "service":
+            # A "service" branch anchor (BRANCH_TYPES in
+            # graph_conversation_contract.py already reserves this type)
+            # covers non-sales intents -- talking to a human, filing a
+            # complaint -- that don't need the product loop's vehicle
+            # qualification. The fixture authors qualification.fields
+            # directly (owner_node_id, value_schema and all); Python only
+            # backfills question_node_id, since that id is only known once
+            # materialize_qualification_questions() has run.
+            capabilities["branch_anchor"] = True
+            data["qualification"] = {"fields": [
+                {**field, "question_node_id": question_ids.get(str(field.get("key")))}
+                for field in ((data.get("qualification") or {}).get("fields") or [])
+                if isinstance(field, dict) and field.get("key")
+            ]}
         elif node.id == "aurora-rule-operation":
             capabilities.update({"global_context": True, "handoff_rule": True})
             data["handoff_rule"] = {
@@ -147,10 +162,19 @@ def build_graph() -> GraphJson:
         elif node.node_type == "rule" and (
             data.get("handoff_rule") or capabilities.get("handoff_rule")
         ):
-            # Any rule the fixture publishes as a handoff rule must reach every branch
-            # closure, otherwise graph_compiler_v3 rejects the references to it.
-            capabilities.update({"global_context": True, "handoff_rule": True})
             handoff_rule = dict(data.get("handoff_rule") or {})
+            # A rule authored with scope "branch" only needs to reach its own
+            # branch's closure -- normal parent/child reachability already
+            # gets it there, since these rules are authored as children of
+            # their own service/product node. Forcing global_context on them
+            # would leak an always-authorized handoff (condition: null) into
+            # every unrelated branch. Every other rule the fixture publishes
+            # as a handoff rule must still reach every branch closure,
+            # otherwise graph_compiler_v3 rejects the references to it.
+            branch_scoped = handoff_rule.pop("scope", None) == "branch"
+            capabilities["handoff_rule"] = True
+            if not branch_scoped:
+                capabilities["global_context"] = True
             # The fixture names which published text answers this rule; the copy itself
             # stays in appointment_policy.texts so it is authored in exactly one place.
             text_key = handoff_rule.pop("text_key", None) or "atendimento_humano"

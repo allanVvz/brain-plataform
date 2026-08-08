@@ -10,7 +10,7 @@ from schemas.graph_json_v2 import GraphJson, MarkdownDocument, Node
 
 FACTUAL_NODE_TYPES = {
     "persona", "brand", "briefing", "campaign", "audience", "product_group",
-    "product", "offer", "copy", "faq", "rule", "tone", "asset",
+    "product", "service", "offer", "copy", "faq", "rule", "tone", "asset",
 }
 VALIDATED_STATUSES = {"approved", "validated", "active", "ativo", "embedded"}
 _NON_FACTUAL_KEYS = {
@@ -203,6 +203,7 @@ def render_campaign_md(graph: GraphJson, node: Node) -> str: return _render_v21_
 def render_audience_md(graph: GraphJson, node: Node) -> str: return _render_v21_node(graph, node)
 def render_product_group_md(graph: GraphJson, node: Node) -> str: return _render_v21_node(graph, node)
 def render_product_md(graph: GraphJson, node: Node) -> str: return _render_v21_node(graph, node)
+def render_service_md(graph: GraphJson, node: Node) -> str: return _render_v21_node(graph, node)
 def render_offer_md(graph: GraphJson, node: Node) -> str: return _render_v21_node(graph, node)
 def render_copy_md(graph: GraphJson, node: Node) -> str: return _render_v21_node(graph, node)
 def render_faq_md(graph: GraphJson, node: Node) -> str: return _render_v21_node(graph, node)
@@ -216,7 +217,8 @@ _RENDERERS: dict[str, Callable[[GraphJson, Node], str]] = {
     "persona": render_persona_md, "brand": render_brand_md,
     "briefing": render_briefing_md, "campaign": render_campaign_md,
     "audience": render_audience_md, "product_group": render_product_group_md,
-    "product": render_product_md, "offer": render_offer_md, "copy": render_copy_md,
+    "product": render_product_md, "service": render_service_md,
+    "offer": render_offer_md, "copy": render_copy_md,
     "faq": render_faq_md, "asset": render_asset_md, "rule": render_rule_md,
     "tone": render_tone_md, "gallery": render_action_node_md,
     "embedded": render_action_node_md, "marketing_workspace": render_action_node_md,

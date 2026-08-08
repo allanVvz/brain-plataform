@@ -41,7 +41,7 @@ def _action(node: dict[str, Any], persona_slug: str) -> dict[str, Any]:
         "consumer": {"kind": "agent", "ref": slug},
         "accepted_node_types": [
             "brand", "briefing", "campaign", "audience", "product_group",
-            "product", "offer", "copy", "faq", "rule", "tone", "asset",
+            "product", "service", "offer", "copy", "faq", "rule", "tone", "asset",
         ],
         "projection": {
             "kind": "rag",
