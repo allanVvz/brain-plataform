@@ -815,7 +815,16 @@ async def run_session_direct(session_id: str) -> dict:
                             event,
                             secret=token or None,
                             timeout=45.0,
-                            response_limit=65_536,
+                            # send_to_webhook truncates its return value to
+                            # this many chars -- workers.whatsapp_dispatch_
+                            # worker only wants a short log preview, but this
+                            # caller parses the WHOLE body as JSON. Confirmed
+                            # live 2026-08-08: reusing the worker's 65_536
+                            # preview limit here truncated real Aurora
+                            # replies mid-string, turning a working turn into
+                            # a bogus JSONDecodeError. Large enough that no
+                            # realistic conversation turn is ever cut off.
+                            response_limit=5_000_000,
                         )
                         if status >= 400:
                             raise RuntimeError(
