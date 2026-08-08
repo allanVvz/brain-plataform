@@ -1983,19 +1983,42 @@ def commit(
         # collected and omitted others that were. Mirroring every known
         # fact that belongs to the active branch, straight from `facts`,
         # means there is nothing left to keep in sync by hand. Facts are
-        # further scoped to the active branch's own owner_node_id so a
-        # value from an abandoned branch/session never leaks into the
+        # further scoped to owners the active branch actually declares, so
+        # a value from an abandoned branch/session never leaks into the
         # note (same class of bug as the missing_fields owner check in
         # graph_proof_checker_v3.pending_fields).
+        #
+        # Confirmed live 2026-08-08: comparing owner_node_id to
+        # active_branch directly (instead of the branch's own declared
+        # field owners) broke the moment shared fields (nome_cliente,
+        # modelo_veiculo, vehicle_year, etc.) were fixed earlier that same
+        # day to share one owner -- the persona node -- across every
+        # branch, instead of each branch owning its own copy. Those
+        # fields' owner_node_id is now the persona, never the branch
+        # itself, so the old check silently excluded every one of them
+        # from the note. valid_owners always includes active_branch
+        # itself as a baseline (so this degrades to the old behavior if
+        # the publication lookup below comes back empty for any reason),
+        # plus whatever owner_node_id values the branch's own published
+        # contract actually declares for its fields.
         facts = response.cart_state.get("facts") or {}
         active_branch = response.cart_state.get("active_branch_node_id")
+        valid_owners = {active_branch} if active_branch else set()
+        if active_branch:
+            publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
+            contract = ((publication.get("document_json") or {}).get("branch_contracts") or {}).get(active_branch) or {}
+            valid_owners |= {
+                str(field.get("owner_node_id"))
+                for field in contract.get("fields") or []
+                if field.get("owner_node_id")
+            }
         commercial_note = {
             key: fact["value"]
             for key, fact in facts.items()
             if isinstance(fact, dict)
             and fact.get("status") == "known"
             and fact.get("value")
-            and (active_branch is None or fact.get("owner_node_id") in (None, active_branch))
+            and (not active_branch or fact.get("owner_node_id") in valid_owners or fact.get("owner_node_id") is None)
         }
         # Legacy debris that a pre-v3 lead may still carry in cart_state;
         # v3 never reads or writes it, so it should not persist forever.

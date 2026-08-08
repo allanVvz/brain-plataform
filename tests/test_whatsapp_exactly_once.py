@@ -438,6 +438,13 @@ def test_v3_commercial_note_drops_stale_field_from_a_different_branch(monkeypatc
         "enqueue_outbound",
         lambda **_kwargs: pytest.fail("no-reply commit created an outbox"),
     )
+    # No published document available -- commit() must degrade to
+    # comparing owner_node_id against active_branch alone (the pre-
+    # 2026-08-08 behavior) rather than crash or wrongly include/exclude
+    # anything.
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "get_active_graph_publication", lambda *_a, **_k: None
+    )
 
     context = _context().model_copy(
         update={
@@ -500,6 +507,152 @@ def test_v3_commercial_note_drops_stale_field_from_a_different_branch(monkeypatc
     assert "appointment_request" not in persisted["metadata"]["conversation_state"]
     assert persisted["nome"] == "Allan"
     assert persisted["interesse_produto"] == "higienizacao-interna"
+
+
+def test_v3_commercial_note_includes_a_shared_field_owned_by_the_persona(monkeypatch):
+    """Regression test for the 2026-08-08 finding.
+
+    Fixing the repeated-question bug that same day (unifying shared
+    qualification fields like nome_cliente/modelo_veiculo/vehicle_year to
+    a single owner -- the persona node -- across every branch, instead of
+    each branch owning its own copy) broke this exact commercial_note
+    filter: comparing owner_node_id to active_branch directly meant a
+    fact legitimately owned by the persona (not the branch) was silently
+    excluded from the note, even though it was correctly captured in v3's
+    own fact ledger and shown as resolved in the lead's qualification
+    metadata. Reading the active branch's own declared field owners from
+    its published contract -- which includes the persona wherever the
+    branch's contract says a field is persona-owned -- fixes it, while a
+    fact genuinely owned by a *different, unrelated* branch must still be
+    excluded (same case the sibling test above covers).
+    """
+    persisted = {}
+    lead = {
+        "id": 8,
+        "persona_id": "persona-1",
+        "channel_binding_id": "binding-1",
+        "stage": "novo",
+        "metadata": {},
+    }
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "get_lead_by_ref", lambda _ref: lead
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_workflow_binding_by_id",
+        lambda _id: {
+            "id": "binding-1",
+            "persona_id": "persona-1",
+            "active": True,
+            "metadata": {"decision_owner": "n8n_agents"},
+        },
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "get_persona", lambda _slug: {"id": "persona-1"}
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "claim_conversation_commit",
+        lambda **_kwargs: {"state": "claimed"},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "complete_conversation_commit",
+        lambda **kwargs: kwargs["result_payload"],
+    )
+
+    def update_lead(_ref, update):
+        persisted.update(update)
+
+    monkeypatch.setattr(conversation_runtime.supabase_client, "update_lead", update_lead)
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "insert_agent_log", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "insert_event", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "commit_graph_turn_v3",
+        lambda **_kwargs: {"proof_id": "proof-1", "ledger_revision": 1},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.whatsapp_outbox,
+        "enqueue_outbound",
+        lambda **_kwargs: pytest.fail("no-reply commit created an outbox"),
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_active_graph_publication",
+        lambda *_a, **_k: {
+            "document_json": {
+                "branch_contracts": {
+                    "aurora-product-interior": {
+                        "fields": [
+                            {"key": "nome_cliente", "owner_node_id": "aurora-persona"},
+                            {"key": "servico", "owner_node_id": "aurora-product-interior"},
+                        ]
+                    }
+                }
+            }
+        },
+    )
+
+    context = _context().model_copy(
+        update={
+            "runtime_version": conversation_runtime.graph_agent_runtime_v3.RUNTIME_VERSION,
+            "rag_nodes": [
+                {
+                    "node_type": "persona",
+                    "data": {"commercial_note_fields": ["modelo_veiculo", "nome_cliente"]},
+                }
+            ],
+        }
+    )
+    response = AgentResponse(
+        reply_text=None,
+        role=ConversationRoute.SDR,
+        cart_state={
+            "active_branch_node_id": "aurora-product-interior",
+            "facts": {
+                # Persona-owned, not the active branch itself -- the exact
+                # case the old owner_node_id == active_branch check broke.
+                "nome_cliente": {
+                    "status": "known", "value": "Allan",
+                    "owner_node_id": "aurora-persona",
+                },
+                "servico": {
+                    "status": "known", "value": "higienizacao-interna",
+                    "owner_node_id": "aurora-product-interior",
+                },
+                # A genuinely stale fact from an unrelated branch, absent
+                # from this branch's own contract entirely -- must stay excluded.
+                "vehicle_color": {
+                    "status": "known", "value": "Prata",
+                    "owner_node_id": "aurora-product-polish",
+                },
+            },
+        },
+        handoff_required=False,
+        proof={"missing_fields": []},
+    )
+
+    conversation_runtime.commit(
+        lead_ref=8,
+        context=context,
+        decision=_decision(),
+        response=response,
+        correlation_id="corr-shared-owner",
+        phone_number_id=None,
+        channel_binding_id="binding-1",
+        inbound_buffer_id="buffer-in",
+        expected_decision_owner="n8n_agents",
+    )
+
+    commercial_note = persisted["metadata"]["commercial_note"]
+    assert commercial_note["nome_cliente"] == "Allan"
+    assert commercial_note["servico"] == "higienizacao-interna"
+    assert commercial_note.get("vehicle_color") is None
 
 
 def test_validation_lead_commit_persists_the_reply_without_a_real_send(monkeypatch):
