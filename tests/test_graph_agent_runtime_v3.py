@@ -730,3 +730,69 @@ def test_drop_stale_branch_citations_is_a_noop_without_overlap():
         proposal, previous_branch_closure=set(), chunk_sources=chunk_sources,
     )
     assert also_unchanged is proposal
+
+
+def test_keep_without_an_active_branch_cannot_silently_establish_one():
+    """Regression test for the phantom-branch switch-rejection bug (2026-08-08).
+
+    Confirmed live against production ledger 248675f9-100c-4bc6-8e97-42a8c0fdaa77
+    (lead_ref 92): the customer's *explicit* switch request -- "Na verdade,
+    prefiro fazer chapeação em vez de PPF" (9 words -- the short_expected_answer
+    <=8-word retrieval gate in graph_agent_runtime_v3.build_context() was NOT
+    involved; retrieval_trace confirmed short_expected_answer=false and
+    global_branch_search_executed=true for this exact turn, and
+    aurora-product-bodywork scored 0.513249 in branch_candidates, comfortably
+    above the 0.18 possible_switches threshold) -- was rejected with
+    branch_switch_not_authorized anyway. The real cause: turn 1's legitimate
+    branch_action="select" for aurora-product-ppf was rejected for an
+    unrelated reason (branch_evidence_not_literal), so no active branch was
+    ever committed. Turn 2 processed the customer's name ("Isabela" -- zero
+    branch/service signal), so _fallback_retrieval_branch() picked a branch to
+    retrieve context against the only way it can when nothing scored: the
+    alphabetically-first branch anchor (by design -- see
+    test_fallback_retrieval_branch_never_leaves_a_greeting_without_context --
+    and it happened to be aurora-product-bodywork). check()'s "keep" branch
+    below only validates branch continuity when active_branch_node_id is
+    already set:
+
+        if action == "keep":
+            if active_branch_node_id and branch != active_branch_node_id:
+                errors.append("keep_changed_branch")
+
+    With no active branch yet, ANY branch_anchor_node_id passes for "keep" --
+    unlike "select", it never consults branch_selection_allowed or requires a
+    literal evidence span. The model echoed the retrieval-only fallback branch
+    back as branch_action="keep", and graph_agent_runtime_v3.decide() (line
+    ~611-612: state["active_branch_node_id"] = proposal.branch_anchor_node_id)
+    silently committed it as the real active branch -- one the customer never
+    actually asked for. Two turns later, when the customer explicitly asked to
+    switch to that exact branch, check()'s "switch" branch rejected it
+    unconditionally because branch == active_branch_node_id already:
+
+        elif action == "switch":
+            if not branch_switch_allowed or not active_branch_node_id or branch == active_branch_node_id:
+                errors.append("branch_switch_not_authorized")
+
+    -- the customer's real, explicit switch collided with a branch that was
+    never legitimately selected in the first place.
+
+    This test currently FAILS: "keep" has no active-branch guard, so this
+    proposal is (wrongly) accepted. The proposed fix is to require an active
+    branch for "keep" to mean anything, mirroring how "select" already
+    requires branch_selection_allowed and "switch" already requires
+    branch_switch_allowed:
+
+        if action == "keep":
+            if not active_branch_node_id:
+                errors.append("keep_without_active_branch")
+            elif branch != active_branch_node_id:
+                errors.append("keep_changed_branch")
+    """
+    document = compiled_fixture()
+    value = proposal(
+        document, branch_action="keep", branch_anchor_node_id="branch:b",
+        branch_path_checksum=document["branch_contracts"]["branch:b"]["branch_path_checksum"],
+        branch_evidence_span="", cited_node_ids=["branch:b"], cited_chunk_ids=[],
+    )
+    proof = check(document, value, active=None, message="Isabela")
+    assert "keep_without_active_branch" in proof["errors"], proof["errors"]

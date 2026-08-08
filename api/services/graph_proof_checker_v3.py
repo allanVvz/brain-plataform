@@ -198,7 +198,22 @@ def check(
         errors.append("branch_path_checksum_mismatch")
     branch_span = proposal.get("branch_evidence_span")
     if action == "keep":
-        if active_branch_node_id and branch != active_branch_node_id:
+        if not active_branch_node_id:
+            # Confirmed live 2026-08-08: with no active branch yet, "keep"
+            # never validated anything (unlike "select"/"switch", which
+            # require branch_selection_allowed/branch_switch_allowed and a
+            # literal evidence span). A retrieval-only fallback branch
+            # picked by graph_agent_runtime_v3._fallback_retrieval_branch()
+            # for a message with zero branch signal (e.g. just a name) could
+            # get silently promoted to the *real* active branch the moment
+            # the model echoed it back as "keep" -- one the customer never
+            # actually selected. Two turns later, an explicit switch request
+            # to that exact branch was then rejected outright because it was
+            # already (wrongly) active. "keep" now requires an active branch
+            # to mean anything, same as "select"/"switch" require their own
+            # authorization.
+            errors.append("keep_without_active_branch")
+        elif branch != active_branch_node_id:
             errors.append("keep_changed_branch")
     elif action == "select":
         if not branch_selection_allowed or active_branch_node_id:
