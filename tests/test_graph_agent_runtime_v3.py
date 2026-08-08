@@ -394,6 +394,33 @@ def test_published_question_is_still_appended_for_a_genuinely_different_reply():
     assert emitted == "Perfeito, anotado!\n\nQual é a metragem?"
 
 
+def test_published_question_is_not_duplicated_when_its_only_content_word_is_swapped():
+    """Regression test for a gap in the fix above, found live 2026-08-08.
+
+    Word-overlap alone still missed a short question whose only real
+    content word is exactly the one the model personalizes away: "Qual é a
+    cor do veículo?" -> the model says "...Qual é a cor do seu Onix?" --
+    "veículo" is gone, replaced by the car model, so content-word overlap
+    was 0. The shared sentence structure around the swapped word (character
+    -run coverage) must catch this even when word overlap alone can't.
+    """
+    contract = {"questions": {"q:color": {"text": "Qual é a cor do veículo?", "field_key": "vehicle_color"}}}
+    emitted = graph_proof_checker_v3.compose_published_question(
+        reply="Entendi, Beatriz! Bancos manchados são comuns. Qual é a cor do seu Onix?",
+        next_question_node_id="q:color", contract=contract,
+    )
+    assert "Qual é a cor do veículo?" not in emitted
+
+
+def test_published_question_still_appends_for_a_similarly_worded_different_question():
+    """The character-run signal must not blur two genuinely different questions."""
+    contract = {"questions": {"q:color": {"text": "Qual é a cor do veículo?", "field_key": "vehicle_color"}}}
+    emitted = graph_proof_checker_v3.compose_published_question(
+        reply="Perfeito! Anotado.", next_question_node_id="q:color", contract=contract,
+    )
+    assert emitted == "Perfeito! Anotado.\n\nQual é a cor do veículo?"
+
+
 def test_qualification_complete_is_derived_not_validated_against_the_model():
     """Regression test for the qualification_completion_mismatch gap (2026-08-08 report).
 

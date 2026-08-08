@@ -1,6 +1,7 @@
 """Generic proof checker for structured GraphRAG model proposals."""
 from __future__ import annotations
 
+import difflib
 import re
 import unicodedata
 from copy import deepcopy
@@ -391,19 +392,34 @@ def _question_already_asked(question: str, text: str) -> bool:
     the model personalizes the canonical question -- swapping "o carro" for
     the customer's actual model ("o Onix", "o Civic") -- so the same
     question got silently appended a second time in the same message.
-    Comparing content-word overlap tolerates that kind of substitution
-    without weakening detection of a genuinely different question: short/
-    common tokens (articles, prepositions) are excluded so the overlap
-    reflects the question's actual content, not words shared by nearly
-    every sentence.
+    Content-word overlap alone (first attempt at this fix, same day) still
+    missed a short question whose *only* real content word is exactly the
+    one that gets personalized away (e.g. "Qual é a cor do veículo?" ->
+    "...a cor do seu Onix?" -- "veículo" is the one content word, and it's
+    gone). Matching contiguous character runs between the two folded
+    strings catches that: the shared prefix/suffix around the swapped word
+    still accounts for most of the question's length, even when word-level
+    overlap alone would not. Checking both signals (word overlap OR
+    character-run coverage) covers substitutions in either a single word or
+    the sentence's structure, without weakening detection of a genuinely
+    different question -- unrelated questions share only a few short/
+    common words either way.
     """
     if question.casefold() in text.casefold():
         return True
-    content_tokens = {token for token in _fold(question).split() if len(token) >= 4}
-    if not content_tokens:
+    q_folded = _fold(question)
+    if not q_folded:
         return False
-    text_tokens = set(_fold(text).split())
-    return len(content_tokens & text_tokens) / len(content_tokens) >= 0.7
+    content_tokens = {token for token in q_folded.split() if len(token) >= 4}
+    if content_tokens:
+        text_tokens = set(_fold(text).split())
+        if len(content_tokens & text_tokens) / len(content_tokens) >= 0.7:
+            return True
+    matched_chars = sum(
+        block.size for block in
+        difflib.SequenceMatcher(None, q_folded, _fold(text), autojunk=False).get_matching_blocks()
+    )
+    return matched_chars / len(q_folded) >= 0.6
 
 
 def compose_published_question(
