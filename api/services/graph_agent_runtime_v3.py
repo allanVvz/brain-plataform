@@ -53,6 +53,42 @@ def _normalize_servico_owner(
     return proposal.model_copy(update={"extracted_facts": normalized_facts})
 
 
+def _normalize_premature_servico_requestion(
+    proposal: ConversationProposal, contract: dict[str, Any], ledger_facts: dict[str, Any],
+) -> ConversationProposal:
+    """Repoint a next_question_node_id that re-asks an already-known "servico".
+
+    Confirmed live 2026-08-08, re-validating the report's other fixes in
+    production: right after a branch gets selected (turn N), the model's
+    very next turn (N+1) often proposes next_question_node_id pointing back
+    at the "servico" question, even though servico was already resolved by
+    the branch selection itself. check_proposal() correctly rejects that
+    (servico isn't a pending field anymore) with
+    next_question_not_for_pending_field, but the rejection discards the
+    *entire* otherwise-correct proposal -- including whatever fact the
+    model did extract that same turn (a customer's name, in the confirmed
+    case), reintroducing the exact repeated-question symptom this session's
+    other fixes closed. Since "servico" is always auto-derived and never
+    actually pending once a branch is active, repoint the question to
+    whatever field genuinely is still pending, before validation -- the
+    same normalize-before-validating principle as the owner_node_id fix
+    above. Only runs when the branch's own contract declares a "servico"
+    field and it is already known, matching that same fix's convention.
+    """
+    servico_field = next((f for f in contract.get("fields") or [] if f.get("key") == "servico"), None)
+    if not servico_field or not servico_field.get("question_node_id"):
+        return proposal
+    if proposal.next_question_node_id != servico_field["question_node_id"]:
+        return proposal
+    if (ledger_facts.get("servico") or {}).get("status") != "known":
+        return proposal
+    pending = graph_proof_checker_v3.pending_fields(contract, ledger_facts)
+    substitute = next((field.get("question_node_id") for field in pending if field.get("question_node_id")), None)
+    if not substitute or substitute == proposal.next_question_node_id:
+        return proposal
+    return proposal.model_copy(update={"next_question_node_id": substitute})
+
+
 def _drop_stale_branch_citations(
     proposal: ConversationProposal,
     *,
@@ -424,6 +460,7 @@ def decide(
     document = publication.get("document_json") or {}
     contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
     proposal = _normalize_servico_owner(proposal, contract)
+    proposal = _normalize_premature_servico_requestion(proposal, contract, context.cart.get("facts") or {})
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(
             row.get("source_node_id") or row.get("source_graph_node_id") or ""

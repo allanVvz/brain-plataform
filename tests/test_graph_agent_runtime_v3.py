@@ -629,6 +629,56 @@ def test_normalize_servico_owner_is_a_noop_without_a_servico_field_or_mismatch()
     assert graph_agent_runtime_v3._normalize_servico_owner(mismatched, contract_without_servico_convention) is mismatched
 
 
+def test_normalize_premature_servico_requestion_repoints_to_the_real_pending_field():
+    """Regression test for a gap re-surfaced live 2026-08-08 while validating the report's fixes.
+
+    Right after a branch gets selected, the model's very next turn often
+    proposes next_question_node_id pointing back at the "servico" question
+    even though servico was already resolved by the branch selection
+    itself. check_proposal() correctly rejects that as
+    next_question_not_for_pending_field, but the rejection discards the
+    entire otherwise-correct proposal -- including whatever fact the model
+    DID extract that turn (a customer's name, confirmed live), reopening
+    the exact repeated-question symptom the other fixes in this session
+    closed.
+    """
+    contract = {"fields": [
+        {"key": "servico", "question_node_id": "faq:servico"},
+        {"key": "nome_cliente", "question_node_id": "faq:nome_cliente"},
+    ]}
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a", branch_path_checksum="checksum",
+        next_question_node_id="faq:servico",
+    )
+    ledger_facts = {"servico": {"status": "known", "value": "pintura"}}
+
+    normalized = graph_agent_runtime_v3._normalize_premature_servico_requestion(proposal, contract, ledger_facts)
+    assert normalized.next_question_node_id == "faq:nome_cliente"
+
+
+def test_normalize_premature_servico_requestion_is_a_noop_when_not_applicable():
+    contract = {"fields": [
+        {"key": "servico", "question_node_id": "faq:servico"},
+        {"key": "nome_cliente", "question_node_id": "faq:nome_cliente"},
+    ]}
+    # servico genuinely still pending -- asking about it is correct, not premature.
+    still_pending = ConversationProposal(
+        branch_action="select", branch_anchor_node_id="branch:a", branch_path_checksum="checksum",
+        next_question_node_id="faq:servico",
+    )
+    assert graph_agent_runtime_v3._normalize_premature_servico_requestion(still_pending, contract, {}) is still_pending
+
+    # asking about something other than servico is untouched regardless.
+    other_question = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a", branch_path_checksum="checksum",
+        next_question_node_id="faq:nome_cliente",
+    )
+    ledger_facts = {"servico": {"status": "known", "value": "pintura"}}
+    assert graph_agent_runtime_v3._normalize_premature_servico_requestion(
+        other_question, contract, ledger_facts
+    ) is other_question
+
+
 def _switch_proposal(*, cited_node_ids: list[str], cited_chunk_ids: list[str]) -> ConversationProposal:
     return ConversationProposal(
         branch_action="switch",
