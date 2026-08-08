@@ -70,7 +70,24 @@ def build_graph() -> GraphJson:
             }
             data["qualification"] = {"fields": [{
                 "key": field_key,
-                "owner_node_id": node.id,
+                # Confirmed live 2026-08-08: every product/service node lists
+                # the same qualification fields (nome_cliente, objective,
+                # can_visit_in_person, modelo_veiculo, vehicle_year,
+                # condicao, vehicle_color) with a *different* owner_node_id
+                # per branch, even though they mean the same thing and share
+                # the same question node regardless of which service the
+                # customer is asking about. graph_proof_checker_v3 requires
+                # fact.owner_node_id == field.owner_node_id before counting a
+                # field resolved (commit 6538461), so any branch switch --
+                # including one caused only by the classifier's own
+                # imprecision, not a real change of mind -- reopened every
+                # one of these as unanswered. "servico" is the one field
+                # that legitimately differs per branch (it's who the branch
+                # even is) and is auto-derived from active_branch_node_id
+                # server-side regardless of what's declared here, so it
+                # keeps its own branch as owner; every other field shares
+                # the persona node as owner across all branches.
+                "owner_node_id": node.id if field_key == "servico" else persona_node.id,
                 "question_node_id": question_ids.get(field_key),
                 "required": True,
                 "accepted_statuses": (
