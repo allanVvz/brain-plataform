@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from copy import deepcopy
 from typing import Any
 
@@ -309,8 +310,16 @@ def check(
                 repair.append({"kind": "node", "id": question_id})
     elif question_id:
         errors.append("question_after_completion")
-    if bool(proposal.get("qualification_complete")) != (not missing):
-        errors.append("qualification_completion_mismatch")
+    # qualification_complete is 100% derivable from `missing` -- the same
+    # reasoning as re-deriving "servico" from active_branch_node_id
+    # server-side (graph_agent_runtime_v3.decide()) rather than trusting a
+    # separately model-declared value. Confirmed live 2026-08-08: the model
+    # regularly mis-self-reports this (both false positives and false
+    # negatives) right at qualification's last field, and the proposal was
+    # rejected wholesale over a value the caller can just compute -- costing
+    # a natural closing reply for a generic fallback question at exactly the
+    # moment it mattered most. The authoritative value is returned below;
+    # callers should use that instead of proposal["qualification_complete"].
 
     for claim in proposal.get("claims") or []:
         claim_type = str(claim.get("claim_type") or "other")
@@ -365,7 +374,36 @@ def check(
         "repair_requirements": repair, "ledger": next_ledger,
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
         "next_question_node_id": question_id,
+        "qualification_complete": not missing,
     }
+
+
+def _fold(value: str) -> str:
+    text = unicodedata.normalize("NFKD", value)
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _question_already_asked(question: str, text: str) -> bool:
+    """True when `text` already asks `question`, even personalized/reworded.
+
+    Confirmed live 2026-08-08: a literal substring match breaks the moment
+    the model personalizes the canonical question -- swapping "o carro" for
+    the customer's actual model ("o Onix", "o Civic") -- so the same
+    question got silently appended a second time in the same message.
+    Comparing content-word overlap tolerates that kind of substitution
+    without weakening detection of a genuinely different question: short/
+    common tokens (articles, prepositions) are excluded so the overlap
+    reflects the question's actual content, not words shared by nearly
+    every sentence.
+    """
+    if question.casefold() in text.casefold():
+        return True
+    content_tokens = {token for token in _fold(question).split() if len(token) >= 4}
+    if not content_tokens:
+        return False
+    text_tokens = set(_fold(text).split())
+    return len(content_tokens & text_tokens) / len(content_tokens) >= 0.7
 
 
 def compose_published_question(
@@ -376,6 +414,6 @@ def compose_published_question(
     if not next_question_node_id:
         return text
     question = str(((contract.get("questions") or {}).get(next_question_node_id) or {}).get("text") or "").strip()
-    if not question or question.casefold() in text.casefold():
+    if not question or _question_already_asked(question, text):
         return text
     return f"{text}\n\n{question}".strip()

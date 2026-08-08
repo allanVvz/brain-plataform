@@ -53,6 +53,43 @@ def _normalize_servico_owner(
     return proposal.model_copy(update={"extracted_facts": normalized_facts})
 
 
+def _drop_stale_branch_citations(
+    proposal: ConversationProposal,
+    *,
+    previous_branch_closure: set[str],
+    chunk_sources: dict[str, str],
+) -> ConversationProposal:
+    """Drop citations left over from the branch a switch is leaving behind.
+
+    Confirmed live 2026-08-08: when the model proposes branch_action=switch,
+    it sometimes still cites a node/chunk from the branch it is leaving --
+    plausibly because that content was still in view while it was composing
+    the reply explaining the switch. check_proposal() correctly rejects any
+    citation outside the *new* branch's closure (cited_node_outside_branch /
+    cited_chunk_outside_branch), and unlike a citation that's merely outside
+    the retrieved *package* (cited_node_outside_package), there is no repair
+    that can fix this -- the old branch's content will never belong to the
+    new branch's closure, so check_proposal() has no choice but to reject
+    the *entire* otherwise-correct proposal, including the switch itself and
+    every fact extracted alongside it. The customer's request to change
+    service then goes silently unfulfilled for the rest of the conversation.
+    Dropping only the citations pointing at the branch being left (before
+    validation ever sees them) preserves grounding for every other citation
+    while letting the switch itself go through.
+    """
+    if not previous_branch_closure:
+        return proposal
+    cited_node_ids = [n for n in proposal.cited_node_ids if n not in previous_branch_closure]
+    cited_chunk_ids = [
+        c for c in proposal.cited_chunk_ids if chunk_sources.get(c) not in previous_branch_closure
+    ]
+    if cited_node_ids == proposal.cited_node_ids and cited_chunk_ids == proposal.cited_chunk_ids:
+        return proposal
+    return proposal.model_copy(update={
+        "cited_node_ids": cited_node_ids, "cited_chunk_ids": cited_chunk_ids,
+    })
+
+
 def _invalid_proposal_fallback(
     context: ConversationContext, raw: Any, errors: list[str]
 ) -> tuple[ConversationDecision, AgentResponse]:
@@ -193,6 +230,32 @@ def _candidate_branches(
     return sorted(candidates, key=lambda item: (-item["score"], item["branch_anchor_node_id"]))
 
 
+def _fallback_retrieval_branch(
+    *, active_branch: str | None, candidates: list[dict[str, Any]], branch_anchors: list[str],
+) -> str | None:
+    """Pick a branch to retrieve context against when nothing scored.
+
+    Confirmed live 2026-08-08: a message with no service/product signal at
+    all (a bare greeting, "Oi") scores every Phase-A candidate near zero,
+    so `candidates` comes back empty; with no active branch yet either,
+    build_context() used to raise and the whole turn produced no reply at
+    all, not even a generic one -- retrieval requires *some* branch to
+    query against today. This never selects a branch on the customer's
+    behalf (the returned context's active_branch_node_id stays untouched,
+    so branch_selection_allowed for the model's own proposal is unaffected)
+    -- it only picks a deterministic retrieval target so context still
+    loads; persona-level content (tone, brand, global rules) is part of
+    every branch's closure regardless of which one is picked here.
+    """
+    if active_branch:
+        return active_branch
+    if candidates:
+        return candidates[0]["branch_anchor_node_id"]
+    if branch_anchors:
+        return sorted(branch_anchors)[0]
+    return None
+
+
 def build_context(
     *, persona_slug: str, lead_ref: int, message: str, message_id: str | None,
 ) -> ConversationContext:
@@ -242,7 +305,10 @@ def build_context(
         persona_id=str(persona["id"]), publication=publication, message=message,
         embedding=embedding, active_path=active_path, missing=missing,
     )
-    retrieval_branch = active_branch or (candidates[0]["branch_anchor_node_id"] if candidates else None)
+    retrieval_branch = _fallback_retrieval_branch(
+        active_branch=active_branch, candidates=candidates,
+        branch_anchors=document.get("branch_anchors") or [],
+    )
     if not retrieval_branch:
         raise RuntimeError("GraphRAG publication has no resolvable branch")
     contract = (document.get("branch_contracts") or {}).get(retrieval_branch) or {}
@@ -358,6 +424,26 @@ def decide(
     document = publication.get("document_json") or {}
     contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
     proposal = _normalize_servico_owner(proposal, contract)
+    chunk_sources = {
+        str(row.get("chunk_id") or row.get("id")): str(
+            row.get("source_node_id") or row.get("source_graph_node_id") or ""
+        )
+        for row in context.rag_chunks
+    } | {
+        str(chunk_id): str(source_id)
+        for chunk_id, source_id in (observation.get("repair_context_chunk_sources") or {}).items()
+    }
+    if (
+        proposal.branch_action.value == "switch"
+        and context.active_branch_node_id
+        and context.active_branch_node_id != proposal.branch_anchor_node_id
+    ):
+        previous_contract = (document.get("branch_contracts") or {}).get(context.active_branch_node_id) or {}
+        proposal = _drop_stale_branch_citations(
+            proposal,
+            previous_branch_closure=set(previous_contract.get("closure_node_ids") or []),
+            chunk_sources=chunk_sources,
+        )
     ledger = {
         "active_branch_node_id": context.active_branch_node_id,
         "publication_id": context.publication_id, "graph_checksum": context.graph_checksum,
@@ -382,17 +468,7 @@ def decide(
             item.get("branch_anchor_node_id") for item in context.retrieval_trace.get("branch_candidates") or []
         },
         branch_switch_allowed=proposal.branch_anchor_node_id in set(context.retrieval_trace.get("possible_switches") or []),
-        package_chunk_sources={
-            str(row.get("chunk_id") or row.get("id")): str(
-                row.get("source_node_id") or row.get("source_graph_node_id") or ""
-            )
-            for row in context.rag_chunks
-        } | {
-            str(chunk_id): str(source_id)
-            for chunk_id, source_id in (
-                observation.get("repair_context_chunk_sources") or {}
-            ).items()
-        },
+        package_chunk_sources=chunk_sources,
     )
     # An explicit switch is only a Phase-A decision on the first pass. Force
     # one directed Phase-B retrieval for the selected branch before any reply
@@ -477,10 +553,13 @@ def decide(
                      *([proposal.next_question_node_id] if proposal.next_question_node_id else []),
                  ]))}
         route = ConversationRoute.HUMAN if proposal.handoff_requested else ConversationRoute.SDR
+        # qualification_complete is derived from missing_fields (proof.py),
+        # not trusted from the model's own claim -- see the comment there.
+        qualification_complete = bool(proof.get("qualification_complete"))
         return (
             ConversationDecision(classifier="graph_proof_checker_v3",
-                                 intent="qualification_complete" if proposal.qualification_complete else "collect_graph_fields",
-                                 route=route, confidence=1, lead_stage="qualificado" if proposal.qualification_complete else "engajado",
+                                 intent="qualification_complete" if qualification_complete else "collect_graph_fields",
+                                 route=route, confidence=1, lead_stage="qualificado" if qualification_complete else "engajado",
                                  handoff_reason="graph_handoff_rule" if proposal.handoff_requested else None,
                                  evidence_node_ids=proposal.cited_node_ids),
             AgentResponse(reply_text=reply, role=route, evidence_node_ids=proposal.cited_node_ids,

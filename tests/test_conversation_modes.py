@@ -693,6 +693,9 @@ def test_wa_validator_run_direct_n8n_sends_webhook_token_and_reports_empty_body(
     monkeypatch.setattr(
         wa_validator_service.supabase_client, "insert_event", lambda *_a, **_k: None
     )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "get_messages", lambda *_a, **_k: []
+    )
 
     captured_calls = []
 
@@ -856,6 +859,9 @@ def test_wa_validator_run_direct_names_the_validation_lead_by_flow_and_graph_ver
         "execute_pipeline",
         lambda **_kwargs: {"reply_text": "Oi!"},
     )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "get_messages", lambda *_a, **_k: []
+    )
 
     session_id = "session-naming"
     wa_validator_service._sessions[session_id] = {
@@ -877,3 +883,42 @@ def test_wa_validator_run_direct_names_the_validation_lead_by_flow_and_graph_ver
 
     assert len(captured_lead_calls) == 1
     assert captured_lead_calls[0]["nome"] == "sdr_qualificacao_carro v10"
+
+
+def test_wait_for_reply_delivered_returns_as_soon_as_a_new_message_lands(monkeypatch):
+    """Regression test for the WA Validator message-batching gap (2026-08-08 report).
+
+    Confirmed live: scripted steps advanced on a fixed sleep capped at 3s
+    regardless of the real pipeline's latency, so several client messages
+    could go out before the first reply landed -- concurrent turns for the
+    same lead then raced graph_agent_runtime_v3's optimistic ledger lock,
+    and every turn that lost the race silently produced no reply at all.
+    """
+    import asyncio as _asyncio
+
+    call_count = {"n": 0}
+
+    def fake_get_messages(_lead_ref, limit=200):
+        call_count["n"] += 1
+        # First two polls: no new message yet. Third poll: the reply landed.
+        return [{"id": i} for i in range(3 if call_count["n"] >= 3 else 2)]
+
+    monkeypatch.setattr(wa_validator_service.supabase_client, "get_messages", fake_get_messages)
+
+    _asyncio.run(wa_validator_service._wait_for_reply_delivered(
+        1, 2, max_wait_s=5.0, poll_interval_s=0.01,
+    ))
+    assert call_count["n"] == 3
+
+
+def test_wait_for_reply_delivered_gives_up_after_max_wait(monkeypatch):
+    import asyncio as _asyncio
+
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "get_messages", lambda *_a, **_k: [{"id": 1}]
+    )
+    _asyncio.run(wa_validator_service._wait_for_reply_delivered(
+        1, 1, max_wait_s=0.05, poll_interval_s=0.01,
+    ))
+    # Reaching here without hanging is the assertion: it must give up, not
+    # block forever, when the reply never lands.

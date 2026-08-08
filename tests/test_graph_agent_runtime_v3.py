@@ -364,6 +364,98 @@ def test_published_question_is_composed_not_required_in_model_reply():
     assert emitted == "Certo.\n\nQual é a metragem?"
 
 
+def test_published_question_is_not_duplicated_when_model_personalizes_it():
+    """Regression test for the duplicate-question-in-one-message gap (2026-08-08 report).
+
+    Evidence across several Aurora transcripts: the model asks a field
+    question in its own words, personalized with a value already known
+    (e.g. "Você consegue trazer o Onix aqui..." instead of the published
+    "...o carro..."), and the literal-substring check in
+    compose_published_question() failed to recognize that as the same
+    question, so it appended the canonical text again in the same message.
+    Content-word overlap should recognize the personalized rewording as
+    already asking it.
+    """
+    document = compiled_fixture()
+    contract = document["branch_contracts"]["branch:a"]
+    emitted = graph_proof_checker_v3.compose_published_question(
+        reply="Perfeito! E qual é a metragem do seu apartamento, você sabe me dizer?",
+        next_question_node_id="question:a", contract=contract,
+    )
+    assert emitted == "Perfeito! E qual é a metragem do seu apartamento, você sabe me dizer?"
+
+
+def test_published_question_is_still_appended_for_a_genuinely_different_reply():
+    document = compiled_fixture()
+    contract = document["branch_contracts"]["branch:a"]
+    emitted = graph_proof_checker_v3.compose_published_question(
+        reply="Perfeito, anotado!", next_question_node_id="question:a", contract=contract,
+    )
+    assert emitted == "Perfeito, anotado!\n\nQual é a metragem?"
+
+
+def test_qualification_complete_is_derived_not_validated_against_the_model():
+    """Regression test for the qualification_completion_mismatch gap (2026-08-08 report).
+
+    qualification_complete is 100% derivable from `missing_fields`, the same
+    reasoning that already drives "servico" being re-derived from
+    active_branch_node_id server-side instead of trusted from the model.
+    Confirmed live: the model unreliably self-reports this right at the
+    last field either way (claims complete when a field is still missing,
+    or the reverse), and check() used to reject the *entire* otherwise
+    -valid proposal over it. It must no longer be a rejection reason, and
+    check()'s own returned value must reflect the true state regardless of
+    what the model claimed.
+    """
+    document = compiled_fixture()
+    value = proposal(document, branch_action="keep", branch_evidence_span="", extracted_facts=[{
+        "field_key": "metragem", "owner_node_id": "branch:a", "status": "known",
+        "value": 20, "source_message_id": "msg-1", "evidence_span": "20", "confidence": 1,
+    }], next_question_node_id=None, qualification_complete=False,  # wrong on purpose
+        cited_node_ids=["branch:a"], cited_chunk_ids=[])
+    proof = check(document, value, active="branch:a", message="20")
+    assert "qualification_completion_mismatch" not in proof["errors"]
+    assert proof["valid"], proof["errors"]
+    assert proof["qualification_complete"] is True  # true regardless of the model's claim
+
+    still_missing = proposal(document, branch_action="keep", branch_evidence_span="",
+                              qualification_complete=True,  # wrong on purpose
+                              cited_node_ids=["branch:a"], cited_chunk_ids=[])
+    proof2 = check(document, still_missing, active="branch:a", message="oi")
+    assert "qualification_completion_mismatch" not in proof2["errors"]
+    assert proof2["qualification_complete"] is False
+
+
+def test_fallback_retrieval_branch_never_leaves_a_greeting_without_context():
+    """Regression test for the branch-less-turn crash (2026-08-08 report).
+
+    A bare greeting ("Oi") scores every Phase-A candidate near zero and
+    there's no active branch yet on a fresh conversation, so build_context()
+    used to raise RuntimeError and the whole turn produced no reply at all.
+    """
+    # Active branch always wins outright -- this never re-litigates branch
+    # selection on the customer's behalf.
+    assert graph_agent_runtime_v3._fallback_retrieval_branch(
+        active_branch="branch:a", candidates=[{"branch_anchor_node_id": "branch:b"}],
+        branch_anchors=["branch:a", "branch:b"],
+    ) == "branch:a"
+    # A scored candidate is used when there's no active branch yet.
+    assert graph_agent_runtime_v3._fallback_retrieval_branch(
+        active_branch=None, candidates=[{"branch_anchor_node_id": "branch:b"}],
+        branch_anchors=["branch:a", "branch:b"],
+    ) == "branch:b"
+    # Nothing scored and nothing is active -- fall back deterministically
+    # instead of raising, so context still loads for a generic reply.
+    assert graph_agent_runtime_v3._fallback_retrieval_branch(
+        active_branch=None, candidates=[], branch_anchors=["branch:b", "branch:a"],
+    ) == "branch:a"
+    # A publication with no branch anchors at all is a real, unrecoverable
+    # error -- still signaled by returning None so the caller still raises.
+    assert graph_agent_runtime_v3._fallback_retrieval_branch(
+        active_branch=None, candidates=[], branch_anchors=[],
+    ) is None
+
+
 def test_semantic_chunking_separates_question_answer_and_field_intent():
     node_value = {
         "id": "n", "title": "FAQ", "summary": "Resumo", "data": {
@@ -508,3 +600,56 @@ def test_normalize_servico_owner_is_a_noop_without_a_servico_field_or_mismatch()
     mismatched = _servico_proposal(branch_anchor="aurora-product-interior", servico_owner="aurora-product-wash")
     contract_without_servico_convention = {"fields": [{"key": "nome_cliente"}]}
     assert graph_agent_runtime_v3._normalize_servico_owner(mismatched, contract_without_servico_convention) is mismatched
+
+
+def _switch_proposal(*, cited_node_ids: list[str], cited_chunk_ids: list[str]) -> ConversationProposal:
+    return ConversationProposal(
+        branch_action="switch",
+        branch_anchor_node_id="branch:b",
+        branch_path_checksum="checksum",
+        cited_node_ids=cited_node_ids,
+        cited_chunk_ids=cited_chunk_ids,
+    )
+
+
+def test_drop_stale_branch_citations_removes_only_citations_from_the_old_branch():
+    """Regression test for the silent-switch-failure gap (2026-08-08 report).
+
+    A customer explicitly asking to switch service (e.g. "na verdade,
+    prefiro fazer chapeação em vez de pintura") got the switch silently
+    dropped: the model's reply cited a node/chunk from the branch it was
+    leaving, which is *never* going to be in the new branch's closure
+    (unlike a package-retrieval gap, there is no repair that fixes this),
+    so check_proposal() rejected the whole proposal -- switch, extracted
+    facts and all -- and the conversation stayed on the old service for the
+    rest of the turn. Only citations pointing at the branch being left
+    should be dropped; anything else must survive untouched so grounding
+    still catches a genuinely unrelated/fabricated citation.
+    """
+    proposal = _switch_proposal(
+        cited_node_ids=["branch:a", "faq:a-1", "branch:b"],
+        cited_chunk_ids=["chunk:a-1", "chunk:b-1"],
+    )
+    chunk_sources = {"chunk:a-1": "faq:a-1", "chunk:b-1": "faq:b-1"}
+
+    cleaned = graph_agent_runtime_v3._drop_stale_branch_citations(
+        proposal, previous_branch_closure={"branch:a", "faq:a-1"}, chunk_sources=chunk_sources,
+    )
+
+    assert cleaned.cited_node_ids == ["branch:b"]
+    assert cleaned.cited_chunk_ids == ["chunk:b-1"]
+
+
+def test_drop_stale_branch_citations_is_a_noop_without_overlap():
+    proposal = _switch_proposal(cited_node_ids=["branch:b"], cited_chunk_ids=["chunk:b-1"])
+    chunk_sources = {"chunk:b-1": "faq:b-1"}
+
+    unchanged = graph_agent_runtime_v3._drop_stale_branch_citations(
+        proposal, previous_branch_closure={"branch:a"}, chunk_sources=chunk_sources,
+    )
+    assert unchanged is proposal
+
+    also_unchanged = graph_agent_runtime_v3._drop_stale_branch_citations(
+        proposal, previous_branch_closure=set(), chunk_sources=chunk_sources,
+    )
+    assert also_unchanged is proposal

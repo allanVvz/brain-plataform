@@ -11,6 +11,7 @@ import os
 import random
 import subprocess
 import threading
+import time
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -712,6 +713,34 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
     return insights
 
 
+async def _wait_for_reply_delivered(
+    lead_ref: int, messages_before: int, *, max_wait_s: float, poll_interval_s: float = 1.0,
+) -> None:
+    """Wait for the pipeline to actually persist a reply before the next scripted step.
+
+    Confirmed live 2026-08-08: scripted steps advanced on a fixed sleep
+    (capped at 3s) regardless of how long the real pipeline took, so on a
+    slower turn (branch retrieval + agentic model + possible repair round)
+    the next script message could go out before the previous one's reply
+    had landed. Several inbound messages for the same lead in flight at
+    once then raced graph_agent_runtime_v3's optimistic ledger lock
+    (commit_graph_turn_v3's expected_revision check) -- every turn that
+    lost that race silently produced no reply at all, while the customer
+    message itself was still persisted, leaving several client turns in a
+    row with no bot reply between them. Polling for an actual new message
+    to land (up to max_wait_s) makes the validator behave like a real
+    customer -- one message, wait for the reply, then the next -- instead
+    of outrunning the pipeline. Generic: applies to every persona/flow the
+    validator runs, not just Aurora.
+    """
+    deadline = time.monotonic() + max_wait_s
+    while time.monotonic() < deadline:
+        messages = supabase_client.get_messages(str(lead_ref), limit=200) or []
+        if len(messages) > messages_before:
+            return
+        await asyncio.sleep(poll_interval_s)
+
+
 async def run_session_direct(session_id: str) -> dict:
     """Execute through the selected mode using the conversation_v1 contract."""
     with _sessions_lock:
@@ -801,10 +830,11 @@ async def run_session_direct(session_id: str) -> dict:
             token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
             for i, step in enumerate(steps):
                 text = step.get("text", "")
-                wait_s = min(step.get("wait", 10), 3)
+                configured_wait = float(step.get("wait", 10) or 10)
                 ts_now = datetime.now(timezone.utc).isoformat()
                 message_id = f"validator:{session_id}:{i}"
                 correlation_id = f"validator:{session_id}:{i}"
+                messages_before = len(supabase_client.get_messages(str(lead_ref), limit=200) or [])
                 conversation.append({
                     "role": "validator",
                     "text": text,
@@ -966,7 +996,9 @@ async def run_session_direct(session_id: str) -> dict:
                     }
 
                 if i < len(steps) - 1:
-                    await asyncio.sleep(wait_s)
+                    await _wait_for_reply_delivered(
+                        int(lead_ref), messages_before, max_wait_s=max(configured_wait, 20.0),
+                    )
 
             final_output = {"conversation": conversation, "status": "done"}
             with _sessions_lock:
