@@ -795,3 +795,85 @@ def test_wa_validator_generate_script_rejects_flow_incompatible_with_persona(
 
     with pytest.raises(ValueError, match="não é válido"):
         wa_validator_service.generate_script("aurora", "compra_simples", "Allan")
+
+
+def test_wa_validator_run_direct_names_the_validation_lead_by_flow_and_graph_version(
+    monkeypatch,
+):
+    """Validation leads must be identifiable at a glance in the leads list.
+
+    Previously every validation lead was named "Validador [aurora]"
+    regardless of which flow or graph version it ran against, so two
+    sessions for the same persona were indistinguishable in the CRM. Name
+    it "<flow_id> v<graph_version>" instead -- also makes a run against a
+    since-republished graph version obvious from the name alone.
+    """
+    import asyncio as _asyncio
+
+    monkeypatch.setenv("WA_VALIDATOR_DIRECT_WAIT", "1")
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_persona",
+        lambda _slug: {"id": "persona-1", "slug": "aurora", "name": "Aurora"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_persona_routing",
+        lambda _slug: {"process_mode": "internal"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_workflow_bindings",
+        lambda _persona_id: [],
+    )
+    captured_lead_calls = []
+
+    def fake_ensure_lead(**kwargs):
+        captured_lead_calls.append(kwargs)
+        return {"id": 999, "metadata": {}}
+
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "ensure_lead_for_persona", fake_ensure_lead
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "update_lead", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_lead_by_ref",
+        lambda _ref: {"channel_binding_id": "binding-1"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "enqueue_whatsapp_envelope",
+        lambda **_kwargs: {"buffer_id": "buf-1"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "insert_event", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        wa_validator_service.conversation_runtime,
+        "execute_pipeline",
+        lambda **_kwargs: {"reply_text": "Oi!"},
+    )
+
+    session_id = "session-naming"
+    wa_validator_service._sessions[session_id] = {
+        "id": session_id,
+        "persona_slug": "aurora",
+        "flow_id": "sdr_qualificacao_carro",
+        "status": "ready",
+        "script": {
+            "meta": {"agent_slug": "aurora", "graph_version": 10, "graph_checksum": "abc"},
+            "steps": [{"text": "Oi", "wait": 1}],
+        },
+        "output": None,
+        "insights": None,
+        "created_at": "2026-08-08T00:00:00+00:00",
+        "updated_at": "2026-08-08T00:00:00+00:00",
+    }
+
+    _asyncio.run(wa_validator_service.run_session_direct(session_id))
+
+    assert len(captured_lead_calls) == 1
+    assert captured_lead_calls[0]["nome"] == "sdr_qualificacao_carro v10"

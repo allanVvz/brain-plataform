@@ -706,10 +706,17 @@ async def run_session_direct(session_id: str) -> dict:
     ).strip()
     if conversation_mode == "n8n_agents" and not workflow_url:
         raise ValueError("Workflow n8n_agents ativo não configurado")
+    flow_id = session.get("flow_id", "")
+    graph_version = script.get("meta", {}).get("graph_version")
+    # Flow name + graph version it was generated against (not just the
+    # persona slug) so two validation leads for the same persona are
+    # distinguishable at a glance, and a stale run against an old graph
+    # version is obvious from the name alone.
+    lead_label = f"{flow_id} v{graph_version}" if graph_version is not None else flow_id
     lead = supabase_client.ensure_lead_for_persona(
         lead_id=f"validator_{session_id[:8]}",
         persona_slug_or_id=persona_slug,
-        nome=f"Validador [{persona_slug}]",
+        nome=lead_label,
         stage="novo",
         canal="whatsapp",
     ) or {}
