@@ -11,7 +11,7 @@ API_ROOT = Path(__file__).resolve().parents[1] / "api"
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
-from schemas.conversation import ConversationContext
+from schemas.conversation import ConversationContext, ConversationProposal, ExtractedFact
 from services import graph_agent_runtime_v3, graph_compiler_v3, graph_proof_checker_v3
 
 
@@ -403,3 +403,108 @@ def test_pending_fields_ignores_a_fact_owned_by_a_different_branch():
         "servico": {"status": "known", "value": "higienizacao", "owner_node_id": "branch-b"},
     }
     assert graph_proof_checker_v3.pending_fields(contract, matching_fact) == []
+
+
+def test_persona_wide_field_duplicated_per_branch_is_wrongly_reasked_on_switch():
+    """Regression test for docs/handoffs/AURORA_QUALIFICATION_REPEAT_QUESTION_HANDOFF_2026-08-08.md.
+
+    test_pending_fields_ignores_a_fact_owned_by_a_different_branch above
+    covers a field that is *legitimately* branch-specific (e.g. "servico"):
+    it is correct for that fact to reset on a branch switch. This test
+    covers the opposite, currently-unhandled case: a field whose question
+    and expected answer never change across branches (e.g. "nome_cliente",
+    "can_visit_in_person" in the Aurora transcripts) but whose graph
+    content redeclares it on every branch node instead of once on the
+    shared persona node. _field_declarations() (graph_compiler_v3.py)
+    defaults owner_node_id to whichever node happens to declare the field,
+    so each branch's redundant copy gets a *different* owner_node_id even
+    though the field means the same thing everywhere. _resolved_for_field_owner
+    (added 2026-08-06 to stop real cross-branch leakage of fields like
+    "servico") then wipes this kind of field out on every branch switch too,
+    forcing the agent to re-ask a question the customer already answered --
+    this is the mechanism behind the repeated-question bug.
+    """
+    root = node(1, "persona:generic")
+    branch_a = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    branch_b = node(3, "branch:b", data={"capabilities": {"branch_anchor": True}})
+    question_a = node(4, "question:nome:a", parent_type="faq", data={"question": "Como você se chama?"})
+    question_b = node(5, "question:nome:b", parent_type="faq", data={"question": "Como você se chama?"})
+    # Same field key, same literal question text -- authored redundantly on
+    # each branch instead of once on the persona node they all share.
+    branch_a["metadata"]["qualification"] = {"fields": [{
+        "key": "nome_cliente", "question_node_id": "question:nome:a", "required": True,
+        "accepted_statuses": ["known"],
+    }]}
+    branch_b["metadata"]["qualification"] = {"fields": [{
+        "key": "nome_cliente", "question_node_id": "question:nome:b", "required": True,
+        "accepted_statuses": ["known"],
+    }]}
+    rows = [root, branch_a, branch_b, question_a, question_b]
+    edges = [
+        edge(1, root, branch_a), edge(2, root, branch_b),
+        edge(3, branch_a, question_a), edge(4, branch_b, question_b),
+    ]
+    document = graph_compiler_v3.compile_graph(persona=PERSONA, node_rows=rows, edge_rows=edges)
+
+    contract_a = document["branch_contracts"]["branch:a"]
+    contract_b = document["branch_contracts"]["branch:b"]
+    owner_a = next(f["owner_node_id"] for f in contract_a["fields"] if f["key"] == "nome_cliente")
+    owner_b = next(f["owner_node_id"] for f in contract_b["fields"] if f["key"] == "nome_cliente")
+    assert owner_a != owner_b  # the authoring mistake: same field, two owners
+
+    facts_known_while_branch_a_was_active = {
+        "nome_cliente": {"status": "known", "value": "Allan", "owner_node_id": owner_a},
+    }
+    pending = graph_proof_checker_v3.pending_fields(contract_b, facts_known_while_branch_a_was_active)
+    assert [field["key"] for field in pending] == ["nome_cliente"]
+
+
+def _servico_proposal(*, branch_anchor: str, servico_owner: str) -> ConversationProposal:
+    return ConversationProposal(
+        branch_action="select",
+        branch_anchor_node_id=branch_anchor,
+        branch_path_checksum="checksum",
+        extracted_facts=[
+            ExtractedFact(field_key="servico", value="polimento", owner_node_id=servico_owner),
+            ExtractedFact(field_key="nome_cliente", value="Allan", owner_node_id="aurora-persona"),
+        ],
+    )
+
+
+def test_normalize_servico_owner_repoints_mismatched_fact_to_selected_branch():
+    """Regression test for the wrong-branch-selection bug found validating the fix above.
+
+    Confirmed live 2026-08-08: the model sometimes proposes branch_anchor_node_id
+    for the branch it actually means to select (matching the customer's literal
+    request), but declares the redundant "servico" fact's owner_node_id as a
+    *different* Phase-A candidate branch -- plausibly copied from that other
+    candidate's evidence chunks in the same prompt. Before this fix,
+    check_proposal() rejected the *entire* otherwise-correct proposal on the
+    owner-match guard (commit 6538461), so a customer explicitly naming a
+    service (e.g. "higienização interna") could still end up parked on an
+    unrelated branch once retries exhausted the literal match. Since
+    graph_agent_runtime_v3.decide() always re-derives "servico" from
+    branch_anchor_node_id once a proposal is valid anyway, the model's own
+    owner_node_id for that field is pure noise worth correcting, not grounds
+    for rejection.
+    """
+    contract = {"fields": [{"key": "servico"}, {"key": "nome_cliente"}]}
+    mismatched = _servico_proposal(branch_anchor="aurora-product-interior", servico_owner="aurora-product-wash")
+
+    normalized = graph_agent_runtime_v3._normalize_servico_owner(mismatched, contract)
+
+    servico_fact = next(f for f in normalized.extracted_facts if f.field_key == "servico")
+    assert servico_fact.owner_node_id == "aurora-product-interior"
+    # Untouched fields are not disturbed by the normalization.
+    nome_fact = next(f for f in normalized.extracted_facts if f.field_key == "nome_cliente")
+    assert nome_fact.owner_node_id == "aurora-persona"
+
+
+def test_normalize_servico_owner_is_a_noop_without_a_servico_field_or_mismatch():
+    matching = _servico_proposal(branch_anchor="aurora-product-interior", servico_owner="aurora-product-interior")
+    contract = {"fields": [{"key": "servico"}]}
+    assert graph_agent_runtime_v3._normalize_servico_owner(matching, contract) is matching
+
+    mismatched = _servico_proposal(branch_anchor="aurora-product-interior", servico_owner="aurora-product-wash")
+    contract_without_servico_convention = {"fields": [{"key": "nome_cliente"}]}
+    assert graph_agent_runtime_v3._normalize_servico_owner(mismatched, contract_without_servico_convention) is mismatched

@@ -21,6 +21,38 @@ from services import graph_compiler_v3, graph_proof_checker_v3, supabase_client
 RUNTIME_VERSION = "graph_agent_runtime_v3"
 
 
+def _normalize_servico_owner(
+    proposal: ConversationProposal, contract: dict[str, Any]
+) -> ConversationProposal:
+    """Repoint a mismatched "servico" fact to the branch the model just picked.
+
+    Confirmed live 2026-08-08: the model sometimes copies a Phase-A candidate
+    branch's owner_node_id into the "servico" extracted fact instead of its
+    own proposal.branch_anchor_node_id -- plausibly picked up from that other
+    candidate's evidence chunks in the same prompt. check_proposal() then
+    rejects the *entire* proposal on the owner-match guard added in commit
+    6538461, even though the value is discarded anyway: the block below
+    always re-derives "servico" from branch_anchor_node_id once the proposal
+    is valid, so a model-declared owner_node_id for it is pure noise. Fixing
+    it before validation, instead of only after, lets an otherwise-correct
+    branch selection go through. Only runs when the branch's own contract
+    declares a "servico" field, matching the same convention as the
+    auto-derivation block below, so personas that don't use it are
+    unaffected.
+    """
+    if not any(field.get("key") == "servico" for field in contract.get("fields") or []):
+        return proposal
+    normalized_facts = [
+        fact.model_copy(update={"owner_node_id": proposal.branch_anchor_node_id})
+        if fact.field_key == "servico" and fact.owner_node_id != proposal.branch_anchor_node_id
+        else fact
+        for fact in proposal.extracted_facts
+    ]
+    if normalized_facts == proposal.extracted_facts:
+        return proposal
+    return proposal.model_copy(update={"extracted_facts": normalized_facts})
+
+
 def _invalid_proposal_fallback(
     context: ConversationContext, raw: Any, errors: list[str]
 ) -> tuple[ConversationDecision, AgentResponse]:
@@ -325,6 +357,7 @@ def decide(
         raise RuntimeError("GraphRAG publication changed during turn")
     document = publication.get("document_json") or {}
     contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
+    proposal = _normalize_servico_owner(proposal, contract)
     ledger = {
         "active_branch_node_id": context.active_branch_node_id,
         "publication_id": context.publication_id, "graph_checksum": context.graph_checksum,
