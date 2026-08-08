@@ -1,25 +1,49 @@
-"""One-off: move an active Meta Cloud WhatsApp binding from one persona to
-another, in place.
+"""Move an active WhatsApp binding (meta_cloud or evolution_baileys) from one
+persona to another, in place.
 
-This re-parents the existing workflow_bindings row (same id, same
-provider_secret_ciphertext, same whatsapp_phone_number_id) rather than
-creating a new one, so the encrypted Meta credential is never re-entered,
-re-encrypted, or exposed as plaintext anywhere. Because it's a single row
-throughout, the partial unique index on (whatsapp_phone_number_id) WHERE
-active is never at risk of a two-active-rows conflict.
+This re-parents the existing workflow_bindings row (same id, same encrypted
+credential, same phone/instance identity) rather than creating a new one, so
+the credential is never re-entered, re-encrypted, or exposed as plaintext
+anywhere.
+
+Re-parenting persona_id alone is NOT enough: every persona-scoped routing
+field (decision_owner, conversation_webhook_url, n8n_workflow_id) still
+points at the source persona's config until you run set_binding_deterministic
+or set_binding_n8n_webhook afterward -- confirmed live 2026-08-04 (a moved
+Baita binding kept executing Baita's n8n workflow under VZ Lupas). This
+script also can't atomically fix that for you: choosing the right target
+routing (clone from an existing binding? attach to a new n8n workflow? fall
+back to deterministic?) is a decision, not something to guess.
+
+Every lead still pointing at the moved binding (channel_binding_id) is
+reparented to belong to a persona it no longer matches -- every outbound
+send to it then 403s (whatsapp_outbox.resolve_lead_binding) and every write
+to it then hard-fails with Postgres error 23514 (trigger
+enforce_lead_channel_binding, migration 067). This script clears
+channel_binding_id on those leads (never deletes the row) so they stop
+error-looping; a lead still receiving real inbound traffic on the OLD
+channel_binding_id will self-heal onto whatever binding the source persona
+activates next.
+
+See .agents/skills/whatsapp-binding-reassignment/SKILL.md for the full
+procedure this script is one step of.
 
 Dry-run by default; pass --apply to actually write.
 
 Usage (on the VPS, inside the api container):
   docker compose --env-file .env.compose exec -T api \
     python scripts/move_whatsapp_binding.py \
-    --from-persona-slug baita-conveniencia --to-persona-slug vz-lupas --apply
+    --from-persona-slug aurora --to-persona-slug tock-fatal --apply
+
+If the source persona has more than one active WhatsApp binding, pass
+--provider {meta_cloud|evolution_baileys} to disambiguate.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 API_DIR = Path(__file__).resolve().parents[1]
@@ -31,10 +55,27 @@ for path in (API_DIR, ROOT_DIR):
 from services import supabase_client
 
 
+def _active_whatsapp_binding(persona_id: str, provider: str | None) -> dict | None:
+    candidates = [
+        b for b in supabase_client.get_workflow_bindings(persona_id)
+        if b.get("channel") == "whatsapp" and b.get("active")
+    ]
+    if provider:
+        candidates = [b for b in candidates if b.get("provider") == provider]
+    if len(candidates) > 1:
+        found = sorted({str(b.get("provider")) for b in candidates})
+        raise SystemExit(
+            f"persona has {len(candidates)} active WhatsApp bindings ({found}); "
+            "pass --provider to disambiguate"
+        )
+    return candidates[0] if candidates else None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--from-persona-slug", required=True)
     parser.add_argument("--to-persona-slug", required=True)
+    parser.add_argument("--provider", choices=["meta_cloud", "evolution_baileys"], default=None)
     parser.add_argument("--workflow-name", default=None, help="Optional rename; keeps the original if omitted.")
     parser.add_argument("--apply", action="store_true", help="Without this flag, only prints the plan.")
     args = parser.parse_args()
@@ -46,35 +87,50 @@ def main() -> None:
     if not target_persona:
         raise SystemExit(f"persona not found: {args.to_persona_slug}")
 
-    source_binding = next(
-        (
-            b for b in supabase_client.get_workflow_bindings(source_persona["id"])
-            if b.get("provider") == "meta_cloud" and b.get("active")
-        ),
-        None,
-    )
+    source_binding = _active_whatsapp_binding(source_persona["id"], args.provider)
     if not source_binding:
-        raise SystemExit(f"no active meta_cloud binding found for {args.from_persona_slug}")
+        raise SystemExit(f"no active WhatsApp binding found for {args.from_persona_slug}")
 
     existing_target_binding = next(
         (
             b for b in supabase_client.get_workflow_bindings(target_persona["id"])
-            if b.get("provider") == "meta_cloud"
+            if b.get("channel") == "whatsapp" and b.get("provider") == source_binding.get("provider")
         ),
         None,
     )
 
+    affected_leads = (
+        supabase_client.get_client().table("leads").select("id,nome,stage")
+        .eq("persona_id", source_persona["id"])
+        .eq("channel_binding_id", source_binding["id"])
+        .execute()
+    ).data or []
+
     plan = {
         "binding_id": source_binding["id"],
-        "whatsapp_phone_number_id": source_binding.get("whatsapp_phone_number_id"),
+        "provider": source_binding.get("provider"),
         "from_persona_slug": args.from_persona_slug,
         "to_persona_slug": args.to_persona_slug,
-        "target_already_has_meta_binding": bool(existing_target_binding),
+        "target_already_has_binding_of_same_provider": bool(existing_target_binding),
+        "leads_to_detach": [lead["id"] for lead in affected_leads],
+        "reminder": (
+            "persona-scoped routing (decision_owner/n8n_workflow_id/"
+            "conversation_webhook_url) is NOT touched by this script -- run "
+            "set_binding_deterministic.py or set_binding_n8n_webhook.py next, "
+            "or clone routing from another binding as documented in the skill"
+        ),
     }
-    if existing_target_binding:
+    if existing_target_binding and existing_target_binding.get("active"):
         plan["warning"] = (
-            "Target persona already has a meta_cloud binding row; moving the "
-            "source row on top of it may leave a stale duplicate. Review before --apply."
+            "Target persona already has an ACTIVE binding of this provider; "
+            "the unique index (persona_id, channel) WHERE active will reject "
+            "this write. Move that binding away first."
+        )
+    elif existing_target_binding:
+        plan["warning"] = (
+            "Target persona already has an inactive binding row of this "
+            "provider; moving the source row in will leave two rows. Review "
+            "before --apply."
         )
 
     if not args.apply:
@@ -95,6 +151,26 @@ def main() -> None:
         .execute()
     )
 
+    detached_lead_ids: list[int] = []
+    for lead in affected_leads:
+        current_result = (
+            client.table("leads").select("metadata").eq("id", lead["id"]).maybe_single().execute()
+        )
+        current = current_result.data or {} if current_result else {}
+        new_metadata = {
+            **(current.get("metadata") or {}),
+            "channel_reassignment": {
+                "previous_binding_id": source_binding["id"],
+                "reason": f"binding_moved_to_{args.to_persona_slug}",
+                "at": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        supabase_client.update_lead(lead["id"], {
+            "channel_binding_id": None,
+            "metadata": new_metadata,
+        })
+        detached_lead_ids.append(lead["id"])
+
     supabase_client.insert_event(
         {
             "event_type": "whatsapp.binding_moved",
@@ -104,17 +180,22 @@ def main() -> None:
             "payload": {
                 "from_persona_slug": args.from_persona_slug,
                 "to_persona_slug": args.to_persona_slug,
-                "whatsapp_phone_number_id": source_binding.get("whatsapp_phone_number_id"),
+                "provider": source_binding.get("provider"),
+                "detached_lead_ids": detached_lead_ids,
             },
         },
         source="scripts.move_whatsapp_binding",
     )
+    # The source persona no longer has this channel; the target's routing
+    # still needs an explicit follow-up script (see the reminder above).
+    supabase_client.update_persona_routing(args.from_persona_slug, {"process_mode": "internal"})
     supabase_client.update_persona_routing(args.to_persona_slug, {"process_mode": "internal"})
 
     print(json.dumps({
         **plan,
         "ok": True,
         "applied": True,
+        "detached_lead_ids": detached_lead_ids,
         "updated_binding": result.data[0] if result.data else None,
     }, ensure_ascii=False, indent=2, default=str))
 

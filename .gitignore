@@ -105,6 +105,8 @@ dashboard/modes.json
 !.agents/skills/brain-agent-e2e/**
 !.agents/skills/brain-appointment-graph/
 !.agents/skills/brain-appointment-graph/**
+!.agents/skills/whatsapp-binding-reassignment/
+!.agents/skills/whatsapp-binding-reassignment/**
 !.agents/commands/
 !.agents/commands/*.md
 .mcp.json
