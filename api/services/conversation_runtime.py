@@ -2078,8 +2078,11 @@ def commit(
         }
     )
 
+    is_validation_lead = bool(
+        ((lead.get("metadata") or {}).get("validation") or {}).get("is_validation")
+    )
     buffer = None
-    if response.reply_text:
+    if response.reply_text and not is_validation_lead:
         # message_id ("ai:<inbound correlation_id>") is unique to this
         # outbound leg — reusing the inbound correlation_id here made the
         # outbound message row share it with the inbound row that triggered
@@ -2087,6 +2090,15 @@ def commit(
         # ...` (scoped only by binding, not direction) matched both rows and
         # tried to force the same external_message_id onto both, tripping
         # idx_messages_channel_external_unique. Confirmed live 2026-08-01.
+        #
+        # Validation leads (wa_validator_service, metadata.validation.
+        # is_validation) never reach this: they have no real WhatsApp
+        # recipient by design, and enqueue_outbound's _recipient_for_lead
+        # would 409 -- or worse, if ever given a fake-but-valid-shaped
+        # phone, risk a real send. Confirmed live 2026-08-08 (commit
+        # correctly 409'd on Aurora's validation lead). The reply text
+        # still flows through in `result` below; only the outbox write is
+        # skipped.
         envelope = whatsapp_outbox.enqueue_outbound(
             lead=lead,
             text=response.reply_text,

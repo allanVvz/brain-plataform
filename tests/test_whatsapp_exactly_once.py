@@ -502,6 +502,93 @@ def test_v3_commercial_note_drops_stale_field_from_a_different_branch(monkeypatc
     assert persisted["interesse_produto"] == "higienizacao-interna"
 
 
+def test_validation_lead_commit_never_reaches_the_real_whatsapp_outbox(monkeypatch):
+    """wa_validator sessions must never risk a real WhatsApp send.
+
+    Confirmed live 2026-08-08: running the WA Validator against Aurora in
+    n8n_agents mode produced a real, well-formed agent reply, but commit()
+    (called via n8n's "Persist once and enqueue send") 409'd on
+    whatsapp_outbox._recipient_for_lead, because the validator's synthetic
+    lead has no real phone/JID identity by design -- it's a decision-logic
+    test, not a live conversation. Giving that lead a fake-but-valid-shaped
+    phone number to dodge the 409 was explicitly rejected: a worker could
+    then queue a send to it, and in the worst case a fabricated number
+    could belong to a real person. The correct fix is for commit() to skip
+    the outbox entirely for validation leads (metadata.validation.
+    is_validation) while still returning the generated reply_text, which is
+    all the validator actually needs to grade the turn.
+    """
+    lead = {
+        "id": 7,
+        "persona_id": "persona-1",
+        "channel_binding_id": "binding-1",
+        "stage": "novo",
+        "metadata": {"validation": {"is_validation": True, "session_id": "sess-1"}},
+    }
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "get_lead_by_ref", lambda _ref: lead
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_workflow_binding_by_id",
+        lambda _id: {
+            "id": "binding-1",
+            "persona_id": "persona-1",
+            "active": True,
+            "metadata": {"decision_owner": "n8n_agents"},
+        },
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "get_persona", lambda _slug: {"id": "persona-1"}
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "claim_conversation_commit",
+        lambda **_kwargs: {"state": "claimed"},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "complete_conversation_commit",
+        lambda **kwargs: kwargs["result_payload"],
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_whatsapp_buffer_by_idempotency",
+        lambda _key: None,
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "update_lead", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "insert_agent_log", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "insert_event", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        conversation_runtime.whatsapp_outbox,
+        "enqueue_outbound",
+        lambda **_kwargs: pytest.fail(
+            "validation lead reached the real WhatsApp outbox"
+        ),
+    )
+
+    result = conversation_runtime.commit(
+        lead_ref=7,
+        context=_context(),
+        decision=_decision(),
+        response=_response(),
+        correlation_id="corr-validation",
+        phone_number_id=None,
+        channel_binding_id="binding-1",
+        inbound_buffer_id="buffer-in",
+        expected_decision_owner="n8n_agents",
+    )
+
+    assert result["reply_text"] == "Ola!"
+    assert result["outbound_buffer_id"] is None
+
+
 def test_concurrent_commit_reentry_pauses_the_lead(monkeypatch):
     violations = []
     monkeypatch.setattr(
