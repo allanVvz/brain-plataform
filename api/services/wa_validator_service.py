@@ -779,6 +779,17 @@ async def run_session_direct(session_id: str) -> dict:
                         "conversation": list(conversation), "status": "running"
                     }
                 try:
+                    # Confirmed live 2026-08-08: hardcoding "conversation_v1"
+                    # here got every Aurora n8n_agents step rejected by the
+                    # workflow's own "pipeline contract mismatch" guard --
+                    # the deployed workflow expects whatever the binding
+                    # itself declares, exactly like real dispatch
+                    # (workers.whatsapp_dispatch_worker) already resolves it.
+                    pipeline_contract = (
+                        binding_metadata.get("pipeline_contract") or "conversation_v3"
+                        if conversation_mode == "n8n_agents"
+                        else "conversation_v1"
+                    )
                     event = {
                             "persona_slug": persona_slug,
                             "lead_ref": lead_ref,
@@ -788,7 +799,7 @@ async def run_session_direct(session_id: str) -> dict:
                             "phone_number_id": None,
                             "channel_binding_id": channel_binding_id,
                             "message": text,
-                            "pipeline_contract": "conversation_v1",
+                            "pipeline_contract": pipeline_contract,
                             "decision_owner": conversation_mode,
                         }
                     if conversation_mode == "n8n_agents":
@@ -891,7 +902,11 @@ async def run_session_direct(session_id: str) -> dict:
                     "graph_checksum": script.get("meta", {}).get("graph_checksum"),
                     "conversation_mode": conversation_mode,
                     "classifier": "deterministic_v1",
-                    "pipeline_contract": "conversation_v1",
+                    "pipeline_contract": (
+                        binding_metadata.get("pipeline_contract") or "conversation_v3"
+                        if conversation_mode == "n8n_agents"
+                        else "conversation_v1"
+                    ),
                 },
             })
 

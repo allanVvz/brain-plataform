@@ -20,6 +20,7 @@ PUBLIC_EXACT_PATHS = {
     "/internal/conversations/decide",
     "/internal/conversations/commit",
     "/internal/conversations/fail-safe-handoff",
+    "/internal/conversations/technical-failure",
 }
 
 ADMIN_TOKEN_HEADER = "x-ai-brain-admin-token"

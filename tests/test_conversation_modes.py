@@ -724,6 +724,11 @@ def test_wa_validator_run_direct_n8n_sends_webhook_token_and_reports_empty_body(
 
     assert len(captured_calls) == 1
     assert captured_calls[0]["kwargs"]["secret"] == "test-token-123"
+    # Confirmed live 2026-08-08: hardcoding "conversation_v1" here got every
+    # step rejected by the workflow's own "pipeline contract mismatch"
+    # guard, since real dispatch (and the binding's own declared contract)
+    # uses "conversation_v3" for n8n_agents.
+    assert captured_calls[0]["payload"]["pipeline_contract"] == "conversation_v3"
 
     session = wa_validator_service.get_session(session_id)
     bot_turn = next(
