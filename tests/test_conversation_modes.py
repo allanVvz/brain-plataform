@@ -517,6 +517,11 @@ def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatc
     )
     monkeypatch.setattr(
         wa_validator_service.supabase_client,
+        "get_workflow_bindings",
+        lambda _persona_id: [],
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
         "insert_event",
         lambda *_args, **_kwargs: None,
     )
@@ -546,6 +551,36 @@ def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatc
     assert script["expected_dialogue"]["unit_price"] is not None
     assert "get_router" not in inspect.getsource(
         wa_validator_service.generate_script
+    )
+
+
+def test_wa_validator_conversation_mode_follows_active_binding_not_legacy_process_mode(
+    monkeypatch,
+):
+    """The validator must test the same engine real WhatsApp traffic uses.
+
+    Confirmed live 2026-08-08: Aurora's legacy persona.process_mode column
+    said "n8n", but the persona's actual active binding had already been
+    switched to decision_owner="deterministic" (the engine really serving
+    customers) without process_mode ever being updated -- the same class of
+    staleness routes.personas._mask_routing was fixed for. The validator
+    read only process_mode, so it POSTed every step to an n8n webhook
+    nobody maintains and failed 8/8 with a JSON decode error, while real
+    customers were being served correctly the whole time.
+    """
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_workflow_bindings",
+        lambda _persona_id: [
+            {"active": True, "metadata": {"decision_owner": "deterministic"}},
+        ],
+    )
+
+    assert (
+        wa_validator_service._resolve_conversation_mode(
+            "persona-1", {"process_mode": "n8n"}
+        )
+        == "deterministic"
     )
 
 

@@ -43,6 +43,37 @@ _sessions_lock = threading.Lock()
 # ── Bot registry ───────────────────────────────────────────────────────────────
 _BOT_REGISTRY: list[dict] = []
 
+_KNOWN_CONVERSATION_MODES = {"deterministic", "n8n_agents", "orquestrador"}
+
+
+def _resolve_conversation_mode(persona_id: str | None, routing: dict) -> str:
+    """The routing switch that actually governs live dispatch.
+
+    Confirmed live 2026-08-08: this previously read only the legacy
+    persona.process_mode column, so the validator tested a different engine
+    (n8n_agents) than the one actually handling real WhatsApp traffic
+    (deterministic, per the active binding's decision_owner) -- an Aurora
+    validation session failed every step because it POSTed to an n8n
+    webhook nobody maintains, while real customers were being served by the
+    deterministic graph_agent_runtime_v3 pipeline the whole time. Mirrors
+    routes.personas._mask_routing's resolution exactly, so the validator and
+    the settings UI never disagree about which engine is live.
+    """
+    process_mode = routing.get("process_mode") or "internal"
+    fallback = "n8n_agents" if process_mode == "n8n" else "deterministic"
+    if not persona_id:
+        return fallback
+    active_binding = next(
+        (
+            row
+            for row in supabase_client.get_workflow_bindings(persona_id)
+            if row.get("active")
+        ),
+        None,
+    )
+    decision_owner = ((active_binding or {}).get("metadata") or {}).get("decision_owner")
+    return decision_owner if decision_owner in _KNOWN_CONVERSATION_MODES else fallback
+
 
 def bots() -> list:
     """Return available bots: static registry + any active personas not yet listed."""
@@ -295,11 +326,7 @@ def generate_script(
         graph_checksum=graph_checksum,
     )
     routing = supabase_client.get_persona_routing(persona_slug) or {}
-    conversation_mode = (
-        "n8n_agents"
-        if routing.get("process_mode") == "n8n"
-        else "deterministic"
-    )
+    conversation_mode = _resolve_conversation_mode(persona_id, routing)
 
     session_id = str(uuid.uuid4())
     script = {
@@ -632,11 +659,7 @@ async def run_session_direct(session_id: str) -> dict:
     persona_slug = session.get("persona_slug", "")
     persona = supabase_client.get_persona(persona_slug) or {}
     routing = supabase_client.get_persona_routing(persona_slug) or {}
-    conversation_mode = (
-        "n8n_agents"
-        if routing.get("process_mode") == "n8n"
-        else "deterministic"
-    )
+    conversation_mode = _resolve_conversation_mode(persona.get("id"), routing)
     bindings = supabase_client.get_workflow_bindings(persona.get("id"))
     binding = next(
         (
