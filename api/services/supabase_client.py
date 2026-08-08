@@ -4009,6 +4009,46 @@ def get_conversation_ledger(persona_id: str, lead_ref: int) -> Optional[dict]:
     return ledger
 
 
+def get_wa_validator_session(session_id: str) -> Optional[dict]:
+    """Read a WA Validator session's data blob, or None if it doesn't exist."""
+    if not session_id:
+        return None
+    row = _one(
+        get_client().table("wa_validator_sessions").select("data")
+        .eq("id", session_id).maybe_single()
+    )
+    return row.get("data") if row else None
+
+
+def upsert_wa_validator_session(
+    session_id: str, data: dict, *, persona_slug: Optional[str] = None, flow_id: Optional[str] = None
+) -> dict:
+    """Write a WA Validator session's full data blob (create or replace)."""
+    from datetime import datetime, timezone
+    payload = {
+        "id": session_id, "data": data,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if persona_slug is not None:
+        payload["persona_slug"] = persona_slug
+    if flow_id is not None:
+        payload["flow_id"] = flow_id
+    rows = (
+        get_client().table("wa_validator_sessions")
+        .upsert(payload, on_conflict="id").execute().data or []
+    )
+    return rows[0]["data"] if rows else data
+
+
+def list_wa_validator_sessions(limit: int = 100) -> list[dict]:
+    """Return the most recent WA Validator sessions' data blobs."""
+    rows = _q(
+        get_client().table("wa_validator_sessions").select("data")
+        .order("created_at", desc=True).limit(limit)
+    )
+    return [row["data"] for row in rows if row.get("data")]
+
+
 def search_graph_rag_v3(
     *,
     persona_id: str,

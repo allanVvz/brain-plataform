@@ -38,9 +38,41 @@ _WA_ARTIFACTS = _ROOT_DIR / "test-artifacts" / "wa-validator"
 _WA_RUNNER_URL = (os.environ.get("WA_VALIDATOR_RUNNER_URL") or "").rstrip("/")
 _BRAIN_API_URL = os.environ.get("BRAIN_API_URL", "http://localhost:8080")
 
-# In-memory session store  {session_id: session_dict}
-_sessions: dict[str, dict] = {}
-_sessions_lock = threading.Lock()
+# WA Validator sessions live in Supabase, not a plain in-process dict.
+# Confirmed live 2026-08-08: production runs GUNICORN_WORKERS=2, so a
+# "generate script" request and the following "run" request had roughly a
+# coin-flip chance of landing on different worker processes -- the second
+# worker's in-memory dict never had the session the first one created,
+# producing "Sessão não encontrada" for a session that genuinely existed,
+# just in the other process's memory.
+
+
+def _session_get(session_id: str) -> Optional[dict]:
+    return supabase_client.get_wa_validator_session(session_id)
+
+
+def _session_create(
+    session_id: str, data: dict, *, persona_slug: Optional[str] = None, flow_id: Optional[str] = None
+) -> None:
+    supabase_client.upsert_wa_validator_session(session_id, data, persona_slug=persona_slug, flow_id=flow_id)
+
+
+def _session_update(session_id: str, **fields) -> dict:
+    """Read-modify-write merge patch.
+
+    Best-effort, not transactional -- acceptable for this ephemeral
+    test-tooling data, where each session_id has at most one active writer
+    in practice (a single validator run driving its own session).
+    """
+    current = supabase_client.get_wa_validator_session(session_id) or {}
+    current.update(fields)
+    current["updated_at"] = datetime.now(timezone.utc).isoformat()
+    supabase_client.upsert_wa_validator_session(session_id, current)
+    return current
+
+
+def _session_list() -> list[dict]:
+    return supabase_client.list_wa_validator_sessions()
 
 # ── Bot registry ───────────────────────────────────────────────────────────────
 _BOT_REGISTRY: list[dict] = []
@@ -419,19 +451,18 @@ def generate_script(
         "steps": script_data.get("steps", []),
     }
 
-    with _sessions_lock:
-        _sessions[session_id] = {
-            "id": session_id,
-            "persona_slug": persona_slug,
-            "flow_id": flow_id,
-            "status": "ready",
-            "script": script,
-            "output": None,
-            "insights": None,
-            "pid": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
+    _session_create(session_id, {
+        "id": session_id,
+        "persona_slug": persona_slug,
+        "flow_id": flow_id,
+        "status": "ready",
+        "script": script,
+        "output": None,
+        "insights": None,
+        "pid": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }, persona_slug=persona_slug, flow_id=flow_id)
 
     supabase_client.insert_event({
         "event_type": "wa_validator_script_generated",
@@ -447,8 +478,7 @@ def generate_script(
 
 
 def run_session(session_id: str) -> dict:
-    with _sessions_lock:
-        session = _sessions.get(session_id)
+    session = _session_get(session_id)
     if not session:
         raise ValueError(f"Sessão não encontrada: {session_id}")
     if session["status"] == "running":
@@ -462,10 +492,7 @@ def run_session(session_id: str) -> dict:
             timeout=15,
         )
         response.raise_for_status()
-        with _sessions_lock:
-            _sessions[session_id]["status"] = "starting"
-            _sessions[session_id]["runner"] = _WA_RUNNER_URL
-            _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _session_update(session_id, status="starting", runner=_WA_RUNNER_URL)
         return get_session(session_id)
 
     runtime_dir = _WA_RUNTIME / session_id
@@ -504,10 +531,7 @@ def run_session(session_id: str) -> dict:
                 encoding="utf-8",
                 errors="replace",
             )
-            with _sessions_lock:
-                _sessions[session_id]["pid"] = proc.pid
-                _sessions[session_id]["status"] = "running"
-                _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+            _session_update(session_id, pid=proc.pid, status="running")
 
             stdout_data, _ = proc.communicate()
 
@@ -525,14 +549,11 @@ def run_session(session_id: str) -> dict:
                 final_status = output.get("status", "done")
                 error_msg = output.get("error", "")
 
-            with _sessions_lock:
-                _sessions[session_id]["output"] = output
-                _sessions[session_id]["status"] = final_status
-                _sessions[session_id]["error"] = error_msg
-                _sessions[session_id]["log"] = stdout_data[-4000:] if stdout_data else ""
-                _sessions[session_id]["output_path"] = str(output_path)
-                _sessions[session_id]["artifact_dir"] = str(artifact_dir)
-                _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+            _session_update(
+                session_id, output=output, status=final_status, error=error_msg,
+                log=stdout_data[-4000:] if stdout_data else "",
+                output_path=str(output_path), artifact_dir=str(artifact_dir),
+            )
 
             supabase_client.insert_event({
                 "event_type": "wa_validator_session_done",
@@ -545,24 +566,18 @@ def run_session(session_id: str) -> dict:
             })
 
         except Exception as e:
-            with _sessions_lock:
-                _sessions[session_id]["status"] = "error"
-                _sessions[session_id]["error"] = str(e)
-                _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+            _session_update(session_id, status="error", error=str(e))
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
 
-    with _sessions_lock:
-        _sessions[session_id]["status"] = "starting"
-        _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _session_update(session_id, status="starting")
 
     return get_session(session_id)
 
 
 def get_session(session_id: str) -> dict:
-    with _sessions_lock:
-        session = _sessions.get(session_id)
+    session = _session_get(session_id)
     if not session:
         raise ValueError(f"Sessão não encontrada: {session_id}")
     if _WA_RUNNER_URL and session.get("runner"):
@@ -575,34 +590,23 @@ def get_session(session_id: str) -> dict:
             )
             response.raise_for_status()
             output = response.json()
-            with _sessions_lock:
-                _sessions[session_id]["output"] = output
-                _sessions[session_id]["status"] = output.get("status", "running")
-                _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+            session = _session_update(session_id, output=output, status=output.get("status", "running"))
         except Exception as exc:
-            with _sessions_lock:
-                _sessions[session_id]["runner_error"] = str(exc)
+            session = _session_update(session_id, runner_error=str(exc))
 
     output_path = _WA_RUNTIME / session_id / "output.json"
     if session["status"] in ("running", "starting") and output_path.exists():
         try:
             partial = json.loads(output_path.read_text(encoding="utf-8"))
-            with _sessions_lock:
-                _sessions[session_id]["output"] = partial
+            session = _session_update(session_id, output=partial)
         except Exception:
             pass
 
-    with _sessions_lock:
-        return dict(_sessions[session_id])
+    return session
 
 
 def list_sessions() -> list:
-    with _sessions_lock:
-        return [dict(s) for s in sorted(
-            _sessions.values(),
-            key=lambda x: x["created_at"],
-            reverse=True,
-        )]
+    return sorted(_session_list(), key=lambda x: x["created_at"], reverse=True)
 
 
 def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
@@ -696,9 +700,7 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
         "analyzer": "deterministic_v1",
     }
 
-    with _sessions_lock:
-        _sessions[session_id]["insights"] = insights
-        _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _session_update(session_id, insights=insights)
 
     supabase_client.insert_event({
         "event_type": "wa_validator_gaps_analyzed",
@@ -743,8 +745,7 @@ async def _wait_for_reply_delivered(
 
 async def run_session_direct(session_id: str) -> dict:
     """Execute through the selected mode using the conversation_v1 contract."""
-    with _sessions_lock:
-        session = _sessions.get(session_id)
+    session = _session_get(session_id)
     if not session:
         raise ValueError(f"Sessão não encontrada: {session_id}")
     if session["status"] == "running":
@@ -816,10 +817,7 @@ async def run_session_direct(session_id: str) -> dict:
         )
     steps = script.get("steps", [])
 
-    with _sessions_lock:
-        _sessions[session_id]["status"] = "running"
-        _sessions[session_id]["output"] = {"conversation": [], "status": "running"}
-        _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _session_update(session_id, status="running", output={"conversation": [], "status": "running"})
 
     conversation: list[dict] = []
 
@@ -877,10 +875,7 @@ async def run_session_direct(session_id: str) -> dict:
                     },
                 )
                 buffer_uuid = str(envelope.get("buffer_id") or "")
-                with _sessions_lock:
-                    _sessions[session_id]["output"] = {
-                        "conversation": list(conversation), "status": "running"
-                    }
+                _session_update(session_id, output={"conversation": list(conversation), "status": "running"})
                 try:
                     # Confirmed live 2026-08-08: hardcoding "conversation_v1"
                     # here got every Aurora n8n_agents step rejected by the
@@ -990,10 +985,7 @@ async def run_session_direct(session_id: str) -> dict:
                     }
 
                 conversation.append(turn)
-                with _sessions_lock:
-                    _sessions[session_id]["output"] = {
-                        "conversation": list(conversation), "status": "running"
-                    }
+                _session_update(session_id, output={"conversation": list(conversation), "status": "running"})
 
                 if i < len(steps) - 1:
                     await _wait_for_reply_delivered(
@@ -1001,10 +993,7 @@ async def run_session_direct(session_id: str) -> dict:
                     )
 
             final_output = {"conversation": conversation, "status": "done"}
-            with _sessions_lock:
-                _sessions[session_id]["status"] = "done"
-                _sessions[session_id]["output"] = final_output
-                _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+            _session_update(session_id, status="done", output=final_output)
 
             supabase_client.insert_event({
                 "event_type": "wa_validator_direct_done",
@@ -1025,10 +1014,7 @@ async def run_session_direct(session_id: str) -> dict:
             })
 
         except Exception as exc:
-            with _sessions_lock:
-                _sessions[session_id]["status"] = "error"
-                _sessions[session_id]["error"] = str(exc)
-                _sessions[session_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+            _session_update(session_id, status="error", error=str(exc))
 
     task = asyncio.create_task(_do_run())
     # CLI and container QA runs have no long-lived ASGI loop after the command

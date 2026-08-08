@@ -535,6 +535,7 @@ def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatc
         "latest_event",
         lambda _slug: {"payload": {"checksum": "graph-checksum"}},
     )
+    _install_fake_wa_validator_session_store(monkeypatch)
 
     result = wa_validator_service.generate_script(
         "baita-conveniencia",
@@ -584,6 +585,34 @@ def test_wa_validator_conversation_mode_follows_active_binding_not_legacy_proces
     )
 
 
+def _install_fake_wa_validator_session_store(monkeypatch) -> dict:
+    """In-memory stand-in for the Supabase-backed WA Validator session store.
+
+    Sessions moved out of a plain in-process dict into Supabase (2026-08-08,
+    fixing "Sessão não encontrada" under multiple gunicorn workers), so
+    tests that used to poke wa_validator_service._sessions directly now
+    monkeypatch the three supabase_client functions it calls through.
+    """
+    store: dict[str, dict] = {}
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "get_wa_validator_session",
+        lambda session_id: store.get(session_id),
+    )
+
+    def _upsert(session_id, data, persona_slug=None, flow_id=None):
+        store[session_id] = data
+        return data
+
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "upsert_wa_validator_session", _upsert,
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "list_wa_validator_sessions",
+        lambda limit=100: list(store.values()),
+    )
+    return store
+
+
 def test_wa_validator_analyze_gaps_scores_zero_when_every_reply_fails(monkeypatch):
     """A session where the bot never actually replies must not score 100%.
 
@@ -596,6 +625,7 @@ def test_wa_validator_analyze_gaps_scores_zero_when_every_reply_fails(monkeypatc
     monkeypatch.setattr(
         wa_validator_service.supabase_client, "insert_event", lambda *_a, **_k: None
     )
+    store = _install_fake_wa_validator_session_store(monkeypatch)
     session_id = "session-all-failed"
     conversation = []
     for i in range(3):
@@ -608,7 +638,7 @@ def test_wa_validator_analyze_gaps_scores_zero_when_every_reply_fails(monkeypatc
                 "error_detail": "Traceback (most recent call last): ...",
             }
         )
-    wa_validator_service._sessions[session_id] = {
+    store[session_id] = {
         "id": session_id,
         "persona_slug": "aurora",
         "flow_id": "compra_simples",
@@ -696,6 +726,7 @@ def test_wa_validator_run_direct_n8n_sends_webhook_token_and_reports_empty_body(
     monkeypatch.setattr(
         wa_validator_service.supabase_client, "get_messages", lambda *_a, **_k: []
     )
+    store = _install_fake_wa_validator_session_store(monkeypatch)
 
     captured_calls = []
 
@@ -708,7 +739,7 @@ def test_wa_validator_run_direct_n8n_sends_webhook_token_and_reports_empty_body(
     )
 
     session_id = "session-n8n-empty-body"
-    wa_validator_service._sessions[session_id] = {
+    store[session_id] = {
         "id": session_id,
         "persona_slug": "aurora",
         "flow_id": "sdr_qualificacao_carro",
@@ -862,9 +893,10 @@ def test_wa_validator_run_direct_names_the_validation_lead_by_flow_and_graph_ver
     monkeypatch.setattr(
         wa_validator_service.supabase_client, "get_messages", lambda *_a, **_k: []
     )
+    store = _install_fake_wa_validator_session_store(monkeypatch)
 
     session_id = "session-naming"
-    wa_validator_service._sessions[session_id] = {
+    store[session_id] = {
         "id": session_id,
         "persona_slug": "aurora",
         "flow_id": "sdr_qualificacao_carro",
