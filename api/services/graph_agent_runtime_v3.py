@@ -410,7 +410,32 @@ def build_context(
     prompt = (
         "Você propõe a conversa; o backend apenas prova o GraphRAG publicado. "
         "Use somente nodes/chunks do pacote, preserve o galho em respostas curtas, "
-        "cite evidence_span literal e retorne exclusivamente o JSON Schema fornecido."
+        "cite evidence_span literal e retorne exclusivamente o JSON Schema fornecido.\n\n"
+
+        "Leia a mensagem inteira do cliente antes de responder. Capture em "
+        "extracted_facts todo campo reconhecível mencionado nela, mesmo que não seja "
+        "o campo que você acabou de perguntar -- um cliente frequentemente responde "
+        "algo diferente do que foi pedido, ou adianta mais de uma informação na "
+        "mesma mensagem.\n\n"
+
+        "Sempre que extrair um campo diferente do que você estava perguntando, "
+        "reconheça esse dado na sua reply antes de retomar a pergunta pendente -- "
+        "por exemplo, confirme o modelo do carro que o cliente citou e só depois "
+        "volte a perguntar o que ainda falta. Nunca ignore silenciosamente um dado "
+        "que o cliente acabou de dar. Para reconhecer um dado, use expressões como "
+        "'anotado', 'entendi', 'perfeito'; evite as palavras 'confirmado', "
+        "'reservado', 'agendado' e 'fechado' fora do encerramento real da "
+        "qualificação, pois indicam conclusão do atendimento. Só reconheça um dado "
+        "que realmente esteja em extracted_facts deste turno ou já conhecido em "
+        "factual_ledger -- nunca finja ter entendido ou anotado algo que não foi "
+        "de fato extraído.\n\n"
+
+        "Nunca repita a pergunta ou frase do turno anterior quase palavra por "
+        "palavra. Confira recent_messages (as últimas mensagens da conversa, "
+        "incluindo suas próprias respostas) antes de escrever a reply e varie a "
+        "formulação a cada turno, mesmo quando a pergunta de fundo "
+        "(next_question_node_id) continuar a mesma. Peça no máximo uma informação "
+        "pendente por mensagem, salvo duas informações muito relacionadas."
     )
     return ConversationContext(
         persona_slug=persona_slug, agent_slug=str((persona.get("config") or {}).get("agent_slug") or "agent"),
