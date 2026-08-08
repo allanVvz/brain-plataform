@@ -1704,7 +1704,7 @@ export function MessagesLayout({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isConversationSidebarOpen, setIsConversationSidebarOpen] = useState(!focused);
   const [showLeadInfo, setShowLeadInfo] = useState(false);
-  const [isKnowledgeSidebarOpen, setIsKnowledgeSidebarOpen] = useState(true);
+  const [isKnowledgeSidebarOpen, setIsKnowledgeSidebarOpen] = useState(false);
   const [personaFilterId, setPersonaFilterId] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
