@@ -106,10 +106,6 @@ export default function WaValidatorPage() {
         setSelectedBotId(bs[0].id);
       }
     }).catch(() => {});
-    api.waFlows().then((f) => {
-      setFlows(f);
-      if (f.length > 0) setFlowId(f[0].id);
-    }).catch(() => {});
     api.waModels().then((ms) => {
       setModels(ms);
       if (ms.length > 0) { setModel(ms[0].id); setAnalyzeModel(ms[0].id); }
@@ -123,6 +119,18 @@ export default function WaValidatorPage() {
       }
     }).catch(() => {});
   }, []);
+
+  // Flows depend on the selected bot's persona business model (e.g. Aurora
+  // is an appointment persona with no products -- commerce flows like
+  // "compra_simples" produce a nonsensical, looping conversation for it).
+  // Refetch scoped to the bot and reset the selection whenever it changes.
+  useEffect(() => {
+    const bot = bots.find((b) => b.id === selectedBotId);
+    api.waFlows(bot?.persona_slug).then((f) => {
+      setFlows(f);
+      setFlowId(f.length > 0 ? f[0].id : "");
+    }).catch(() => {});
+  }, [selectedBotId, bots]);
 
   // Auto-scroll conversation
   useEffect(() => {

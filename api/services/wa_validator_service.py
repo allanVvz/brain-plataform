@@ -151,6 +151,25 @@ _FLOWS = {
     ),
 }
 
+# Which business_model(s) (persona_node.data.business_model, same field
+# services.conversation_runtime._business_model reads) a flow's scripted
+# messages actually make sense for. Confirmed live 2026-08-08: running
+# "compra_simples" (asks price/quantity of a "produto") against Aurora
+# (business_model="appointment", no product nodes at all) produced a
+# looping, self-contradicting conversation -- not a pipeline bug, a
+# nonsensical test. Flows absent here (or mapped to an empty set) are
+# treated as valid for any business model.
+_FLOW_BUSINESS_MODELS: dict[str, set[str]] = {
+    "compra_simples": {"sales"},
+    "duvida_frete": {"sales"},
+    "produto_especifico": {"sales"},
+    "produto_inexistente": {"sales"},
+    "produto_ambiguo": {"sales"},
+    "mensagem_duplicada": {"sales"},
+    "estagio_monotonic": {"sales"},
+    "sdr_qualificacao_carro": {"appointment"},
+}
+
 
 def _extract_json(text: str) -> dict:
     """Parse JSON from Claude response regardless of markdown fences or surrounding text."""
@@ -299,6 +318,13 @@ def generate_script(
     kb_ctx, graph_version, graph_checksum, graph = _build_graph_context(
         persona_slug
     )
+    business_model = conversation_runtime._business_model(graph)
+    flow_models = _FLOW_BUSINESS_MODELS.get(flow_id)
+    if flow_models and business_model not in flow_models:
+        raise ValueError(
+            f"Fluxo '{flow_id}' não é válido para uma persona "
+            f"'{business_model}' (requer {sorted(flow_models)})"
+        )
     agent_node = next(
         (
             node
@@ -934,5 +960,28 @@ async def run_session_direct(session_id: str) -> dict:
     return get_session(session_id)
 
 
-def flows() -> list:
-    return [{"id": k, "label": v.split(":")[0]} for k, v in _FLOWS.items()]
+def _persona_business_model(persona_slug: str) -> str | None:
+    """The persona's declared business_model, or None if it can't be resolved.
+
+    Reuses conversation_runtime._business_model -- the same field the
+    runtime itself gates appointment vs. sales behavior on -- rather than
+    re-deriving it here. None (not a default) lets callers fail open when
+    the graph isn't loadable, since this is a UX filter, not a security
+    boundary.
+    """
+    try:
+        _version, _checksum, graph = _published_graph(persona_slug)
+        return conversation_runtime._business_model(graph)
+    except Exception:
+        return None
+
+
+def flows(persona_slug: str | None = None) -> list:
+    business_model = _persona_business_model(persona_slug) if persona_slug else None
+    return [
+        {"id": k, "label": v.split(":")[0]}
+        for k, v in _FLOWS.items()
+        if business_model is None
+        or not _FLOW_BUSINESS_MODELS.get(k)
+        or business_model in _FLOW_BUSINESS_MODELS[k]
+    ]

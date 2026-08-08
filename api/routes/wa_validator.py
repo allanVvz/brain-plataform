@@ -35,8 +35,8 @@ def list_bots():
 
 
 @router.get("/flows")
-def list_flows():
-    return wa_validator_service.flows()
+def list_flows(persona_slug: str | None = None):
+    return wa_validator_service.flows(persona_slug)
 
 
 @router.get("/models")

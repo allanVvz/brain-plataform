@@ -1088,7 +1088,10 @@ export const api = {
 
   // WA Validator
   waBots: () => req<any[]>("/wa-validator/bots"),
-  waFlows: () => req<any[]>("/wa-validator/flows"),
+  waFlows: (personaSlug?: string) =>
+    req<any[]>(
+      `/wa-validator/flows${personaSlug ? `?persona_slug=${encodeURIComponent(personaSlug)}` : ""}`,
+    ),
   waModels: () => req<any[]>("/wa-validator/models"),
   waSessions: () => req<any[]>("/wa-validator/sessions"),
   waSession: (id: string) => req<any>(`/wa-validator/sessions/${id}`),

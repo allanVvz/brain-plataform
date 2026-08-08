@@ -737,3 +737,61 @@ def test_wa_validator_run_direct_n8n_sends_webhook_token_and_reports_empty_body(
     assert bot_turn["error"] is True
     assert "empty body" in bot_turn["error_detail"]
     assert "empty body" in bot_turn["text"] or "erro" in bot_turn["text"].lower()
+
+
+def _fake_graph(business_model: str):
+    from types import SimpleNamespace
+
+    persona_node = SimpleNamespace(
+        node_type="persona", data={"business_model": business_model}
+    )
+    return SimpleNamespace(nodes=[persona_node])
+
+
+def test_wa_validator_flows_excludes_commerce_flows_for_appointment_persona(
+    monkeypatch,
+):
+    """Confirmed live 2026-08-08: the flow dropdown offered "compra_simples"
+
+    for Aurora (business_model="appointment", no product nodes at all), and
+    running it produced a looping, self-contradicting conversation -- not a
+    pipeline bug, a nonsensical test. Flows must be scoped to what actually
+    makes sense for the target persona's business model.
+    """
+    monkeypatch.setattr(
+        wa_validator_service,
+        "_published_graph",
+        lambda _slug: (1, "checksum", _fake_graph("appointment")),
+    )
+
+    flow_ids = {f["id"] for f in wa_validator_service.flows("aurora")}
+
+    assert "compra_simples" not in flow_ids
+    assert "duvida_frete" not in flow_ids
+    assert "sdr_qualificacao_carro" in flow_ids
+    # Model-agnostic flows remain available for every persona.
+    assert "atendente_humano" in flow_ids
+
+
+def test_wa_validator_flows_unfiltered_without_persona_slug():
+    all_ids = {f["id"] for f in wa_validator_service.flows()}
+    assert "compra_simples" in all_ids
+    assert "sdr_qualificacao_carro" in all_ids
+
+
+def test_wa_validator_generate_script_rejects_flow_incompatible_with_persona(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_persona",
+        lambda _slug: {"id": "persona-1", "slug": "aurora", "name": "Aurora"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service,
+        "_build_graph_context",
+        lambda _slug: ("", 1, "checksum", _fake_graph("appointment")),
+    )
+
+    with pytest.raises(ValueError, match="não é válido"):
+        wa_validator_service.generate_script("aurora", "compra_simples", "Allan")
