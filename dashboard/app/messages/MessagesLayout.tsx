@@ -1812,7 +1812,17 @@ export function MessagesLayout({
     previousLastMessageIdRef.current = lastId;
     if (!changed || !lastId) return;
     if (isFirstLoad || stickToBottomRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: isFirstLoad ? "auto" : "smooth" });
+      // scrollIntoView on bottomRef bubbles to the nearest scrollable
+      // ancestor -- fine on the standalone /messages route (which reserves
+      // full viewport height for this container), but when embedded inside
+      // a taller page (e.g. the WA Validator's Validações tab) with no
+      // scrollable ancestor of its own, it scrolled the whole page instead
+      // of just this message list. Scroll the container itself directly so
+      // this component's behavior never depends on where it's mounted.
+      messageListRef.current?.scrollTo({
+        top: messageListRef.current.scrollHeight,
+        behavior: isFirstLoad ? "auto" : "smooth",
+      });
     }
   }, [messages]);
 

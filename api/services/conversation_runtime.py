@@ -2082,7 +2082,57 @@ def commit(
         ((lead.get("metadata") or {}).get("validation") or {}).get("is_validation")
     )
     buffer = None
-    if response.reply_text and not is_validation_lead:
+    if response.reply_text and is_validation_lead:
+        # Confirmed live 2026-08-08: whatsapp_outbox.enqueue_outbound's
+        # _recipient_for_lead 409s for a validation lead (no real WhatsApp
+        # recipient by design) -- correct, since giving it a fake-but-valid-
+        # shaped phone to dodge that check would risk a real worker send.
+        # But routing the reply through nothing at all meant the bot's turn
+        # never reached the `messages` table either, so the validation-
+        # leads conversation view showed only the customer's side.
+        # enqueue_whatsapp_envelope is the same primitive enqueue_outbound
+        # itself calls; call it directly with a buffer status outside
+        # claim_whatsapp_buffer's claimable set ('buffered', 'retry',
+        # 'pending_send' -- migration 065) so the row is inert to every
+        # dispatch worker while the message row still gets written.
+        envelope = supabase_client.enqueue_whatsapp_envelope(
+            buffer={
+                "persona_id": lead.get("persona_id"),
+                "lead_ref": lead_ref,
+                "channel_binding_id": channel_binding_id,
+                "direction": "outbound",
+                "payload": {"text": response.reply_text, "sender_type": "agent"},
+                "status": "sent",
+                "batch_key": f"{lead.get('persona_id')}:{lead_ref}",
+                "idempotency_key": message_id,
+                "correlation_id": message_id,
+            },
+            message={
+                "lead_id": lead_ref,
+                "role": "assistant",
+                "content": response.reply_text,
+                "direction": "outbound",
+                "status": "sent",
+                "channel": "whatsapp",
+                "sender_id": message_id,
+                "channel_binding_id": channel_binding_id,
+                "correlation_id": message_id,
+                "metadata": {
+                    "agent_slug": context.agent_slug,
+                    "role": response.role.value,
+                    "intent": decision.intent,
+                    "graph_version": context.graph_version,
+                    "graph_checksum": context.graph_checksum,
+                    "evidence_node_ids": decision.evidence_node_ids,
+                    "validation": True,
+                },
+            },
+        )
+        buffer = {
+            "id": envelope.get("buffer_id"),
+            "status": envelope.get("status"),
+        }
+    elif response.reply_text:
         # message_id ("ai:<inbound correlation_id>") is unique to this
         # outbound leg — reusing the inbound correlation_id here made the
         # outbound message row share it with the inbound row that triggered
@@ -2090,15 +2140,6 @@ def commit(
         # ...` (scoped only by binding, not direction) matched both rows and
         # tried to force the same external_message_id onto both, tripping
         # idx_messages_channel_external_unique. Confirmed live 2026-08-01.
-        #
-        # Validation leads (wa_validator_service, metadata.validation.
-        # is_validation) never reach this: they have no real WhatsApp
-        # recipient by design, and enqueue_outbound's _recipient_for_lead
-        # would 409 -- or worse, if ever given a fake-but-valid-shaped
-        # phone, risk a real send. Confirmed live 2026-08-08 (commit
-        # correctly 409'd on Aurora's validation lead). The reply text
-        # still flows through in `result` below; only the outbox write is
-        # skipped.
         envelope = whatsapp_outbox.enqueue_outbound(
             lead=lead,
             text=response.reply_text,
