@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from services import conversation_runtime, graph_json_v2_store, supabase_client
+from services import conversation_runtime, graph_json_v2_store, n8n_client, supabase_client
 
 _MODEL_DEFAULT = "none"
 AVAILABLE_MODELS = {
@@ -726,138 +726,154 @@ async def run_session_direct(session_id: str) -> dict:
         _log = _logging.getLogger("wa_validator_service.direct")
         try:
             token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
-            headers = {"X-Hub-Signature-256": ""} if not token else {}
-            async with httpx.AsyncClient(timeout=60) as client:
-                for i, step in enumerate(steps):
-                    text = step.get("text", "")
-                    wait_s = min(step.get("wait", 10), 3)
-                    ts_now = datetime.now(timezone.utc).isoformat()
-                    message_id = f"validator:{session_id}:{i}"
-                    correlation_id = f"validator:{session_id}:{i}"
-                    conversation.append({
-                        "role": "validator",
-                        "text": text,
-                        "ts": ts_now,
-                        "message_id": message_id,
-                    })
-                    # commit() claims the inbound message through the same
-                    # durable lead_buffer row the real inbound webhooks create
-                    # (claim_conversation_commit requires it to already exist),
-                    # so the validator must go through the same atomic
-                    # enqueue used in production rather than a bare message
-                    # insert.
-                    envelope = supabase_client.enqueue_whatsapp_envelope(
-                        buffer={
-                            "persona_id": persona.get("id"),
+            for i, step in enumerate(steps):
+                text = step.get("text", "")
+                wait_s = min(step.get("wait", 10), 3)
+                ts_now = datetime.now(timezone.utc).isoformat()
+                message_id = f"validator:{session_id}:{i}"
+                correlation_id = f"validator:{session_id}:{i}"
+                conversation.append({
+                    "role": "validator",
+                    "text": text,
+                    "ts": ts_now,
+                    "message_id": message_id,
+                })
+                # commit() claims the inbound message through the same
+                # durable lead_buffer row the real inbound webhooks create
+                # (claim_conversation_commit requires it to already exist),
+                # so the validator must go through the same atomic
+                # enqueue used in production rather than a bare message
+                # insert.
+                envelope = supabase_client.enqueue_whatsapp_envelope(
+                    buffer={
+                        "persona_id": persona.get("id"),
+                        "lead_ref": lead_ref,
+                        "channel_binding_id": channel_binding_id,
+                        "whatsapp_phone_number_id": None,
+                        "external_message_id": message_id,
+                        "direction": "inbound",
+                        "payload": {"text": text, "sender": "wa-validator"},
+                        "status": "buffered",
+                        "batch_key": f"{persona.get('id')}:{lead_ref}",
+                        "idempotency_key": f"inbound:wa-validator:{message_id}",
+                        "correlation_id": correlation_id,
+                    },
+                    message={
+                        "lead_id": lead_ref,
+                        "role": "user",
+                        "content": text,
+                        "direction": "inbound",
+                        "status": "buffered",
+                        "channel": "whatsapp",
+                        "sender_id": "wa-validator",
+                        "external_message_id": message_id,
+                        "channel_binding_id": channel_binding_id,
+                        "correlation_id": correlation_id,
+                        "metadata": {"provider": "wa-validator"},
+                        "created_at": ts_now,
+                    },
+                )
+                buffer_uuid = str(envelope.get("buffer_id") or "")
+                with _sessions_lock:
+                    _sessions[session_id]["output"] = {
+                        "conversation": list(conversation), "status": "running"
+                    }
+                try:
+                    event = {
+                            "persona_slug": persona_slug,
                             "lead_ref": lead_ref,
-                            "channel_binding_id": channel_binding_id,
-                            "whatsapp_phone_number_id": None,
+                            "buffer_id": buffer_uuid,
                             "external_message_id": message_id,
-                            "direction": "inbound",
-                            "payload": {"text": text, "sender": "wa-validator"},
-                            "status": "buffered",
-                            "batch_key": f"{persona.get('id')}:{lead_ref}",
-                            "idempotency_key": f"inbound:wa-validator:{message_id}",
                             "correlation_id": correlation_id,
-                        },
-                        message={
-                            "lead_id": lead_ref,
-                            "role": "user",
-                            "content": text,
-                            "direction": "inbound",
-                            "status": "buffered",
-                            "channel": "whatsapp",
-                            "sender_id": "wa-validator",
-                            "external_message_id": message_id,
+                            "phone_number_id": None,
                             "channel_binding_id": channel_binding_id,
-                            "correlation_id": correlation_id,
-                            "metadata": {"provider": "wa-validator"},
-                            "created_at": ts_now,
-                        },
-                    )
-                    buffer_uuid = str(envelope.get("buffer_id") or "")
-                    with _sessions_lock:
-                        _sessions[session_id]["output"] = {
-                            "conversation": list(conversation), "status": "running"
+                            "message": text,
+                            "pipeline_contract": "conversation_v1",
+                            "decision_owner": conversation_mode,
                         }
-                    try:
-                        event = {
-                                "persona_slug": persona_slug,
-                                "lead_ref": lead_ref,
-                                "buffer_id": buffer_uuid,
-                                "external_message_id": message_id,
-                                "correlation_id": correlation_id,
-                                "phone_number_id": None,
-                                "channel_binding_id": channel_binding_id,
-                                "message": text,
-                                "pipeline_contract": "conversation_v1",
-                                "decision_owner": conversation_mode,
-                            }
-                        if conversation_mode == "n8n_agents":
-                            resp = await client.post(
-                                workflow_url,
-                                json=event,
-                                headers=headers,
-                            )
-                            resp.raise_for_status()
-                            data = resp.json()
-                        else:
-                            data = conversation_runtime.execute_pipeline(
-                                persona_slug=persona_slug,
-                                lead_ref=int(lead_ref),
-                                message=text,
-                                message_id=message_id,
-                                correlation_id=correlation_id,
-                                phone_number_id=None,
-                                channel_binding_id=channel_binding_id,
-                                inbound_buffer_id=event["buffer_id"],
-                            )
-                        reply: str = data.get("reply_text") or ""
-                        turn: dict = {
-                            "role": "bot",
-                            "ts": datetime.now(timezone.utc).isoformat(),
-                            "agent": script.get("meta", {}).get("agent_slug"),
-                            "route": data.get("route"),
-                            "intent": data.get("intent"),
-                            "handoff": data.get("handoff"),
-                            "message_id": data.get("message_id"),
-                            "classifier": data.get("classifier"),
-                            "conversation_mode": conversation_mode,
-                            "pipeline_contract": data.get("pipeline_contract")
-                            or "conversation_v1",
-                            "evidence_node_ids": data.get("evidence_node_ids")
-                            or [],
-                            "graph_version": data.get("graph_version")
-                            or script.get("meta", {}).get("graph_version"),
-                            "graph_checksum": data.get("graph_checksum")
-                            or script.get("meta", {}).get("graph_checksum"),
-                        }
-                        if reply:
-                            turn["text"] = reply
-                        else:
-                            turn["text"] = "(sem resposta — agente não gerou reply)"
-                            turn["timeout"] = True
-                    except Exception as exc:
-                        tb = traceback.format_exc()
-                        _log.error(
-                            "Step %d %s pipeline failed:\n%s", i, conversation_mode, tb
+                    if conversation_mode == "n8n_agents":
+                        # Reuse the exact same client the real dispatch
+                        # worker uses (workers.whatsapp_dispatch_worker)
+                        # instead of a hand-rolled httpx call -- the
+                        # previous inline version built headers = {} even
+                        # when a token was configured, so it silently
+                        # never sent X-Webhook-Token at all.
+                        status, body = await asyncio.to_thread(
+                            n8n_client.send_to_webhook,
+                            workflow_url,
+                            event,
+                            secret=token or None,
+                            timeout=45.0,
+                            response_limit=65_536,
                         )
-                        turn = {
-                            "role": "bot",
-                            "text": f"(erro: {exc})",
-                            "ts": datetime.now(timezone.utc).isoformat(),
-                            "error": True,
-                            "error_detail": tb,
-                        }
+                        if status >= 400:
+                            raise RuntimeError(
+                                f"n8n webhook returned HTTP {status}: {body[:500]}"
+                            )
+                        if not body.strip():
+                            raise RuntimeError(
+                                f"n8n webhook returned HTTP {status} with an "
+                                "empty body -- the workflow likely isn't "
+                                "reaching its Respond to Webhook node"
+                            )
+                        data = json.loads(body)
+                    else:
+                        data = conversation_runtime.execute_pipeline(
+                            persona_slug=persona_slug,
+                            lead_ref=int(lead_ref),
+                            message=text,
+                            message_id=message_id,
+                            correlation_id=correlation_id,
+                            phone_number_id=None,
+                            channel_binding_id=channel_binding_id,
+                            inbound_buffer_id=event["buffer_id"],
+                        )
+                    reply: str = data.get("reply_text") or ""
+                    turn: dict = {
+                        "role": "bot",
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "agent": script.get("meta", {}).get("agent_slug"),
+                        "route": data.get("route"),
+                        "intent": data.get("intent"),
+                        "handoff": data.get("handoff"),
+                        "message_id": data.get("message_id"),
+                        "classifier": data.get("classifier"),
+                        "conversation_mode": conversation_mode,
+                        "pipeline_contract": data.get("pipeline_contract")
+                        or "conversation_v1",
+                        "evidence_node_ids": data.get("evidence_node_ids")
+                        or [],
+                        "graph_version": data.get("graph_version")
+                        or script.get("meta", {}).get("graph_version"),
+                        "graph_checksum": data.get("graph_checksum")
+                        or script.get("meta", {}).get("graph_checksum"),
+                    }
+                    if reply:
+                        turn["text"] = reply
+                    else:
+                        turn["text"] = "(sem resposta — agente não gerou reply)"
+                        turn["timeout"] = True
+                except Exception as exc:
+                    tb = traceback.format_exc()
+                    _log.error(
+                        "Step %d %s pipeline failed:\n%s", i, conversation_mode, tb
+                    )
+                    turn = {
+                        "role": "bot",
+                        "text": f"(erro: {exc})",
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "error": True,
+                        "error_detail": tb,
+                    }
 
-                    conversation.append(turn)
-                    with _sessions_lock:
-                        _sessions[session_id]["output"] = {
-                            "conversation": list(conversation), "status": "running"
-                        }
+                conversation.append(turn)
+                with _sessions_lock:
+                    _sessions[session_id]["output"] = {
+                        "conversation": list(conversation), "status": "running"
+                    }
 
-                    if i < len(steps) - 1:
-                        await asyncio.sleep(wait_s)
+                if i < len(steps) - 1:
+                    await asyncio.sleep(wait_s)
 
             final_output = {"conversation": conversation, "status": "done"}
             with _sessions_lock:

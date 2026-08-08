@@ -628,3 +628,107 @@ def test_wa_validator_analyze_gaps_scores_zero_when_every_reply_fails(monkeypatc
     assert insights["overall_score"] == 0
     assert any(gap["topic"] == "transport_or_reply" for gap in insights["gaps"])
     assert not insights["demonstrated"]
+
+
+def test_wa_validator_run_direct_n8n_sends_webhook_token_and_reports_empty_body(
+    monkeypatch,
+):
+    """Reproduces the live 2026-08-08 Aurora failure end to end, at the seam.
+
+    Two bugs, both confirmed live: (1) the inline header construction built
+    headers = {} whenever a token WAS configured, so X-Webhook-Token never
+    reached n8n; (2) even with the correct token, n8n answered HTTP 200 with
+    an empty body, and the old code's bare resp.json() turned that into an
+    opaque JSONDecodeError. This drives run_session_direct's n8n_agents
+    branch through a fake send_to_webhook and checks both are fixed: the
+    real webhook token is threaded through as `secret`, and an empty body
+    now raises a message that names the actual condition.
+    """
+    import asyncio as _asyncio
+
+    monkeypatch.setenv("AI_BRAIN_WEBHOOK_TOKEN", "test-token-123")
+    monkeypatch.setenv("WA_VALIDATOR_DIRECT_WAIT", "1")
+
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_persona",
+        lambda _slug: {"id": "persona-1", "slug": "aurora", "name": "Aurora"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_persona_routing",
+        lambda _slug: {"process_mode": "n8n"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_workflow_bindings",
+        lambda _persona_id: [
+            {
+                "active": True,
+                "metadata": {
+                    "decision_owner": "n8n_agents",
+                    "conversation_webhook_url": "http://n8n:5678/webhook/aurora/conversation",
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "ensure_lead_for_persona",
+        lambda **_kwargs: {"id": 999, "metadata": {}},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "update_lead", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_lead_by_ref",
+        lambda _ref: {"channel_binding_id": "binding-1"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "enqueue_whatsapp_envelope",
+        lambda **_kwargs: {"buffer_id": "buf-1"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "insert_event", lambda *_a, **_k: None
+    )
+
+    captured_calls = []
+
+    def fake_send_to_webhook(url, payload, **kwargs):
+        captured_calls.append({"url": url, "payload": payload, "kwargs": kwargs})
+        return 200, ""  # the exact failure mode confirmed live on the VPS
+
+    monkeypatch.setattr(
+        wa_validator_service.n8n_client, "send_to_webhook", fake_send_to_webhook
+    )
+
+    session_id = "session-n8n-empty-body"
+    wa_validator_service._sessions[session_id] = {
+        "id": session_id,
+        "persona_slug": "aurora",
+        "flow_id": "sdr_qualificacao_carro",
+        "status": "ready",
+        "script": {
+            "meta": {"agent_slug": "aurora", "graph_version": 10, "graph_checksum": "abc"},
+            "steps": [{"text": "Oi", "wait": 1}],
+        },
+        "output": None,
+        "insights": None,
+        "created_at": "2026-08-08T00:00:00+00:00",
+        "updated_at": "2026-08-08T00:00:00+00:00",
+    }
+
+    _asyncio.run(wa_validator_service.run_session_direct(session_id))
+
+    assert len(captured_calls) == 1
+    assert captured_calls[0]["kwargs"]["secret"] == "test-token-123"
+
+    session = wa_validator_service.get_session(session_id)
+    bot_turn = next(
+        turn for turn in session["output"]["conversation"] if turn["role"] == "bot"
+    )
+    assert bot_turn["error"] is True
+    assert "empty body" in bot_turn["error_detail"]
+    assert "empty body" in bot_turn["text"] or "erro" in bot_turn["text"].lower()
