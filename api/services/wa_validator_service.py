@@ -8,6 +8,7 @@ import asyncio
 import httpx
 import json
 import os
+import random
 import subprocess
 import threading
 import traceback
@@ -149,7 +150,33 @@ _FLOWS = {
         "objetivo e trilha presencial/remoto, nunca confirma preço ou "
         "horário, e encerra com handoff para a equipe humana."
     ),
+    "sdr_troca_servico": (
+        "SDR agêntico de agendamento (Aurora): cliente pede um serviço, muda "
+        "de ideia no meio da qualificação e pede um serviço diferente -- "
+        "valida que nome, veículo e ano já informados não são perguntados "
+        "de novo depois da troca de branch."
+    ),
 }
+
+# A fixed name (previously always "Allan") made every validator run
+# indistinguishable and never exercised the fact-extraction path for any
+# other name. One is picked per generate_script() call so consecutive runs
+# actually vary, covering both genders instead of skewing the sample.
+_CLIENT_NAMES = [
+    "Allan", "Bruno", "Carlos", "Diego", "Eduardo", "Fabio", "Gustavo",
+    "Marcos", "Rafael", "Thiago",
+    "Ana", "Beatriz", "Camila", "Fernanda", "Gabriela", "Helena", "Isabela",
+    "Juliana", "Larissa", "Patricia",
+]
+
+# Real Aurora service branches (confirmed live against the published graph
+# 2026-08-08) -- picking one at random per run, instead of always
+# "higienização interna", spreads coverage across the branches most likely
+# to expose per-branch field/owner mismatches like the one fixed today.
+_CAR_SERVICES = [
+    "higienização interna", "polimento", "vitrificação", "pintura",
+    "chapeação", "lavagem técnica detalhada", "polimento de vidros", "PPF",
+]
 
 # Which business_model(s) (persona_node.data.business_model, same field
 # services.conversation_runtime._business_model reads) a flow's scripted
@@ -168,6 +195,7 @@ _FLOW_BUSINESS_MODELS: dict[str, set[str]] = {
     "mensagem_duplicada": {"sales"},
     "estagio_monotonic": {"sales"},
     "sdr_qualificacao_carro": {"appointment"},
+    "sdr_troca_servico": {"appointment"},
 }
 
 
@@ -245,6 +273,8 @@ def _deterministic_script(
     common_expected = [f"graph:{graph_version}:{graph_checksum}"]
     if product_id:
         common_expected.insert(0, f"evidence:{product_id}")
+    client_name = random.choice(_CLIENT_NAMES)
+    service_a, service_b = random.sample(_CAR_SERVICES, 2)
     scenarios = {
         "compra_simples": [
             "Oi",
@@ -252,7 +282,7 @@ def _deterministic_script(
             "quero 2",
             "mude para 3",
             "qual o total?",
-            "Cliente QA",
+            client_name,
             "Rua QA, 100, Canoas",
             "Sim",
         ],
@@ -270,13 +300,23 @@ def _deterministic_script(
         "invalid_decision_schema": ["[QA_INVALID_DECISION_SCHEMA]"],
         "delivery_callback": [f"Quero 1 de {product_name}"],
         "sdr_qualificacao_carro": [
-            "Quero saber sobre a higienização interna do meu carro",
-            "Allan",
+            f"Quero saber sobre {service_a} do meu carro",
+            client_name,
             "Onix",
             "2020",
             "Quero manter o carro e cuidar bem dele",
             "Consigo levar até vocês",
             "Os bancos estão meio manchados",
+        ],
+        "sdr_troca_servico": [
+            f"Quero saber sobre {service_a} do meu carro",
+            client_name,
+            "Civic",
+            "2021",
+            f"Na verdade, prefiro fazer {service_b} em vez de {service_a}",
+            "Quero manter o carro e cuidar bem dele",
+            "Consigo levar até vocês",
+            "Prata",
         ],
     }
     messages = scenarios.get(flow_id)
