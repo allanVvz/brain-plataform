@@ -25,9 +25,9 @@ def test_aurora_markdown_contract_and_catalog():
         node for node in normalized.nodes
         if node.node_type in graph_markdown.FACTUAL_NODE_TYPES
     ]
-    assert len(normalized.nodes) == 54
-    assert len(normalized.edges) == 75
-    assert len(factual) == 52
+    assert len(normalized.nodes) == 58
+    assert len(normalized.edges) == 79
+    assert len(factual) == 56
     assert all((node.data or {}).get("markdown") for node in factual)
 
     faq_nodes = [node for node in factual if node.node_type == "faq"]
@@ -49,7 +49,7 @@ def test_aurora_markdown_contract_and_catalog():
         persona_id="aurora-id",
         persona_name="Aurora",
     )
-    assert catalog["graph"]["document_count"] == 52
+    assert catalog["graph"]["document_count"] == 56
     assert catalog["categories"][0]["key"] == "faqs"
     assert catalog["categories"][0]["count"] == 23
     assert catalog["embedded"]["faq_count"] == 23
