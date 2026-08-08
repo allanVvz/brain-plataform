@@ -96,7 +96,6 @@ export default function WaValidatorPage() {
   const globalPersona = useGlobalPersona();
   const [bots, setBots] = useState<any[]>([]);
   const [flows, setFlows] = useState<any[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
 
   // "SDR" is the only functional agent today -- it's what the codebase
@@ -116,13 +115,6 @@ export default function WaValidatorPage() {
 
   useEffect(() => {
     api.waBots().then(setBots).catch(() => {});
-    api.waSessions().then((ss) => {
-      setSessions(ss);
-      if (ss.length > 0) {
-        const live = ss.find((s: any) => s.status === "running" || s.status === "starting");
-        setActiveSession(live || ss[0]);
-      }
-    }).catch(() => {});
   }, []);
 
   // The bot/agent for a WA Validator run is whichever persona is selected
@@ -149,7 +141,6 @@ export default function WaValidatorPage() {
         try {
           const updated = await api.waSession(activeSession.id);
           setActiveSession(updated);
-          setSessions((prev) => prev.map((s) => s.id === updated.id ? updated : s));
           if (updated.status !== "running" && updated.status !== "starting") {
             clearInterval(pollRef.current!);
           }
@@ -184,7 +175,6 @@ export default function WaValidatorPage() {
         insights: null,
         created_at: new Date().toISOString(),
       };
-      setSessions((prev) => [newSession, ...prev]);
       setActiveSession(newSession);
     } catch (e: any) {
       setError(e.message);
@@ -268,26 +258,6 @@ export default function WaValidatorPage() {
               ))}
             </select>
           </div>
-
-          {sessions.length > 0 && (
-            <div className="space-y-1">
-              <label className="text-[10px] text-brain-muted uppercase tracking-wide">Sessão anterior</label>
-              <select
-                className="bg-brain-bg border border-brain-border text-sm text-white rounded px-2 py-1.5 min-w-[12rem]"
-                value={activeSession?.id || ""}
-                onChange={(e) => {
-                  const s = sessions.find((x) => x.id === e.target.value);
-                  if (s) setActiveSession(s);
-                }}
-              >
-                {sessions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.flow_id}{graphVersionLabel(s) ? ` · ${graphVersionLabel(s)}` : ""} · {s.status}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           <button
             onClick={handleGenerate}
