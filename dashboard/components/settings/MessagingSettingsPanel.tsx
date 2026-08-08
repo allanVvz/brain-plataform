@@ -137,8 +137,18 @@ export function MessagingSettingsPanel() {
       {subTab === "canal" && <CanalSubPanel personaSlug={personaSlug} />}
       {subTab === "agentes" && <AgentesSubPanel personaSlug={personaSlug} />}
       {subTab === "validacoes" && (
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-obs-surface">
-          <MessagesLayout validationMode />
+        <div className="space-y-5">
+          <div className="overflow-hidden rounded-2xl border border-white/10 bg-obs-surface p-4">
+            <ValidatorWorkspace />
+          </div>
+          <div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-obs-faint">
+              Conversas de validação registradas
+            </h3>
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-obs-surface">
+              <MessagesLayout validationMode />
+            </div>
+          </div>
         </div>
       )}
     </div>

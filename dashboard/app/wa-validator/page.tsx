@@ -8,7 +8,16 @@ import {
 
 // ── Types ──────────────────────────────────────────────────────
 
-type Turn = { role: string; text: string; ts: string; timeout?: boolean; agent?: string; latency_ms?: number };
+type Turn = {
+  role: string;
+  text: string;
+  ts: string;
+  timeout?: boolean;
+  error?: boolean;
+  error_detail?: string;
+  agent?: string;
+  latency_ms?: number;
+};
 type Gap = { topic: string; evidence: string; priority: "high" | "medium" | "low" };
 type Insights = {
   demonstrated: string[];
@@ -453,19 +462,40 @@ export default function WaValidatorPage() {
                 return (
                   <div key={i} className={`flex ${isBot ? "justify-start" : "justify-end"}`}>
                     <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm ${
-                      isBot
+                      turn.error
+                        ? "bg-red-500/10 border border-red-500/30 text-red-300"
+                        : isBot
                         ? "bg-brain-bg border border-brain-border text-white"
                         : "bg-brain-accent/20 border border-brain-accent/30 text-white"
-                    } ${turn.timeout ? "opacity-50 italic" : ""}`}>
+                    } ${turn.timeout && !turn.error ? "opacity-50 italic" : ""}`}>
                       <div className="text-[10px] mb-1 font-medium text-brain-muted flex items-center gap-1.5">
                         {isBot
                           ? <><Bot size={9} /> {turn.agent || selectedBot.bot_name}</>
                           : "Validador IA"}
+                        {turn.error && <span className="text-red-400">· erro</span>}
                         {turn.latency_ms && (
                           <span className="ml-auto text-[9px] opacity-60">{turn.latency_ms}ms</span>
                         )}
                       </div>
-                      {turn.timeout ? "(sem resposta)" : turn.text}
+                      {turn.error
+                        ? (
+                          <>
+                            {turn.text}
+                            {turn.error_detail && (
+                              <details className="mt-1">
+                                <summary className="text-[10px] text-red-400/70 cursor-pointer select-none">
+                                  Traceback
+                                </summary>
+                                <pre className="mt-1 text-[10px] whitespace-pre-wrap break-all max-h-40 overflow-y-auto text-red-300/80">
+                                  {turn.error_detail}
+                                </pre>
+                              </details>
+                            )}
+                          </>
+                        )
+                        : turn.timeout
+                        ? "(sem resposta)"
+                        : turn.text}
                     </div>
                   </div>
                 );

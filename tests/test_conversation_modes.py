@@ -547,3 +547,49 @@ def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatc
     assert "get_router" not in inspect.getsource(
         wa_validator_service.generate_script
     )
+
+
+def test_wa_validator_analyze_gaps_scores_zero_when_every_reply_fails(monkeypatch):
+    """A session where the bot never actually replies must not score 100%.
+
+    Confirmed live 2026-08-08: an Aurora session where all 8 steps failed
+    with "(erro: ...)" still scored 100% overall_score, because bot_turns
+    counted every role=="bot" entry -- including timed-out/errored ones --
+    as a successful response. Score must reflect the failures already
+    counted into `gaps`/`transport_or_reply`.
+    """
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "insert_event", lambda *_a, **_k: None
+    )
+    session_id = "session-all-failed"
+    conversation = []
+    for i in range(3):
+        conversation.append({"role": "validator", "text": f"msg {i}"})
+        conversation.append(
+            {
+                "role": "bot",
+                "text": "(erro: Expecting value: line 1 column 1 (char 0))",
+                "error": True,
+                "error_detail": "Traceback (most recent call last): ...",
+            }
+        )
+    wa_validator_service._sessions[session_id] = {
+        "id": session_id,
+        "persona_slug": "aurora",
+        "flow_id": "compra_simples",
+        "status": "done",
+        "script": {
+            "expected_knowledge": ["graph:10:sha256:abc"],
+            "meta": {"graph_version": 10, "graph_checksum": "sha256:abc"},
+        },
+        "output": {"conversation": conversation},
+        "insights": None,
+        "created_at": "2026-08-08T00:00:00+00:00",
+        "updated_at": "2026-08-08T00:00:00+00:00",
+    }
+
+    insights = wa_validator_service.analyze_gaps(session_id)
+
+    assert insights["overall_score"] == 0
+    assert any(gap["topic"] == "transport_or_reply" for gap in insights["gaps"])
+    assert not insights["demonstrated"]

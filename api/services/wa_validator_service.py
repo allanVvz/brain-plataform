@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import threading
+import traceback
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -530,7 +531,9 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
     failures = [
         turn
         for turn in bot_turns
-        if turn.get("timeout") or str(turn.get("text") or "").startswith("(erro:")
+        if turn.get("timeout")
+        or turn.get("error")
+        or str(turn.get("text") or "").startswith("(erro:")
     ]
     evidence_used = {
         str(node_id)
@@ -552,16 +555,22 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
                 })
         elif item.startswith("graph:"):
             expected_lineage = item.split(":", 1)[1]
-            actual_lineage = (
-                f"{script.get('meta', {}).get('graph_version')}:"
-                f"{script.get('meta', {}).get('graph_checksum')}"
-            )
-            if expected_lineage == actual_lineage:
+            successful_turns = [turn for turn in bot_turns if turn not in failures]
+            actual_lineages = {
+                f"{turn.get('graph_version')}:{turn.get('graph_checksum')}"
+                for turn in successful_turns
+                if turn.get("graph_version")
+            }
+            if actual_lineages == {expected_lineage}:
                 demonstrated.append(item)
             else:
                 gaps.append({
                     "topic": item,
-                    "evidence": "Versão/checksum divergentes.",
+                    "evidence": (
+                        "Nenhuma resposta bem-sucedida confirmou a versão do grafo."
+                        if not actual_lineages
+                        else f"Runtime reportou {sorted(actual_lineages)}, esperado {expected_lineage}."
+                    ),
                     "priority": "high",
                 })
     if failures:
@@ -570,7 +579,7 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
             "evidence": f"{len(failures)} turno(s) sem resposta válida.",
             "priority": "high",
         })
-    response_ratio = len(bot_turns) / max(
+    response_ratio = (len(bot_turns) - len(failures)) / max(
         1,
         len([turn for turn in conversation if turn.get("role") == "validator"]),
     )
@@ -806,17 +815,16 @@ async def run_session_direct(session_id: str) -> dict:
                             turn["text"] = "(sem resposta — agente não gerou reply)"
                             turn["timeout"] = True
                     except Exception as exc:
+                        tb = traceback.format_exc()
                         _log.error(
-                            "Step %d %s pipeline failed: %s",
-                            i,
-                            conversation_mode,
-                            exc,
+                            "Step %d %s pipeline failed:\n%s", i, conversation_mode, tb
                         )
                         turn = {
                             "role": "bot",
                             "text": f"(erro: {exc})",
                             "ts": datetime.now(timezone.utc).isoformat(),
-                            "timeout": True,
+                            "error": True,
+                            "error_detail": tb,
                         }
 
                     conversation.append(turn)
