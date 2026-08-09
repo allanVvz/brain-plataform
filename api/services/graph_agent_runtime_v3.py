@@ -844,8 +844,31 @@ def decide(
     # fabricates commercial copy and never requests handoff by itself.
     fallback_id = next((field.get("question_node_id") for field in contract.get("fields") or []
                         if field["key"] in proof.get("missing_fields") or []), None)
+    closing_text = ""
+    if not fallback_id:
+        # Confirmed live 2026-08-09: when the rejected proposal's own
+        # completion/handoff signal was the only problem (no field actually
+        # missing), fallback_id is None and compose_published_question(reply="",
+        # next_question_node_id=None, ...) returns an empty string -- and
+        # commit() only ever sends a non-empty reply_text, so the customer's
+        # message that completes qualification got silently no response at
+        # all. The branch's own published closing text (the same text a
+        # normal handoff turn would use) is exactly what belongs here
+        # instead of empty, and only applies when nothing is left to ask.
+        facts = (proof.get("ledger") or {}).get("facts") or {}
+        closing_rule = next(
+            (
+                rule for rule in contract.get("handoff_rules") or []
+                if rule.get("text")
+                and graph_proof_checker_v3.handoff_rule_matches(
+                    rule, facts=facts, qualification_complete=True,
+                )
+            ),
+            None,
+        )
+        closing_text = str((closing_rule or {}).get("text") or "")
     fallback = graph_proof_checker_v3.compose_published_question(
-        reply="", next_question_node_id=fallback_id, contract=contract
+        reply=closing_text, next_question_node_id=fallback_id, contract=contract
     )
     fallback_proof = {**proof, "repair_required": False, "fallback_used": True}
     return (

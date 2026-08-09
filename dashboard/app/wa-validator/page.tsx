@@ -92,7 +92,16 @@ function ScoreMeter({ score }: { score: number }) {
 // table). This component is config + status only: which agent/flow to
 // test, run it, and show what the run demonstrated.
 
-export default function WaValidatorPage() {
+export default function WaValidatorPage({
+  onRunComplete,
+}: {
+  /** Called after a run finishes (direct or WhatsApp), so a parent that
+   * renders this alongside something else showing the same leads (e.g.
+   * MessagingSettingsPanel's "Validações" tab) can refresh that sibling --
+   * this component has no way to know about it on its own. Optional: every
+   * other usage (the standalone /wa-validator page) simply omits it. */
+  onRunComplete?: () => void;
+} = {}) {
   const globalPersona = useGlobalPersona();
   const [bots, setBots] = useState<any[]>([]);
   const [flows, setFlows] = useState<any[]>([]);
@@ -148,6 +157,7 @@ export default function WaValidatorPage() {
           setActiveSession(updated);
           if (updated.status !== "running" && updated.status !== "starting") {
             clearInterval(pollRef.current!);
+            onRunComplete?.();
           }
         } catch {}
       }, 2000);

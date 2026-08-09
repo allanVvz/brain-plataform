@@ -906,6 +906,79 @@ def test_decide_add_action_grows_active_branch_node_ids_without_dropping_the_cur
     assert response.cart_state["active_branch_node_id"] == "branch:b"
 
 
+def test_decide_fallback_uses_the_published_closing_text_instead_of_silence(monkeypatch):
+    """Regression test for the silent-closing-turn bug found live 2026-08-09
+    (docs/reports/WA_VALIDATOR_E2E_REPORT_2026-08-09.md, item C).
+
+    When a proposal is rejected only over its own completion/handoff signal
+    (here: question_after_completion, because the model still proposed a
+    next_question_node_id even though nothing is missing), the fallback
+    path had no field left to fall back to (fallback_id=None) and
+    compose_published_question(reply="", next_question_node_id=None, ...)
+    returned an empty string. conversation_runtime.commit() only ever sends
+    a non-empty reply_text, so the customer's message that completed
+    qualification got silently no response at all. The branch's own
+    published handoff-rule text (qualification_complete condition) must be
+    used instead of empty in exactly this situation.
+    """
+    root = node(1, "persona:generic")
+    branch_a = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    q_a = node(4, "question:a", parent_type="faq", data={"question": "Qual é a metragem?"})
+    closing_rule = node(5, "rule:closing", parent_type="rule", data={"handoff_rule": {
+        "condition": "qualification_complete",
+        "text": "Perfeito! Anotei tudo, a equipe vai te chamar em breve.",
+    }})
+    branch_a["metadata"]["qualification"] = {"fields": [{
+        "key": "metragem", "question_node_id": "question:a", "required": True,
+        "accepted_statuses": ["known"], "value_schema": {"type": "number", "minimum": 0},
+    }]}
+    rows = [root, branch_a, q_a, closing_rule]
+    edges = [
+        edge(1, root, branch_a), edge(2, branch_a, q_a), edge(3, branch_a, closing_rule),
+    ]
+    document = graph_compiler_v3.compile_graph(persona=PERSONA, node_rows=rows, edge_rows=edges)
+    contract = document["branch_contracts"]["branch:a"]
+    assert contract.get("handoff_rules"), "fixture must compile a handoff rule to exercise this path"
+
+    pub = publication(document)
+    persona_row = {**PERSONA, "config": {}}
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: persona_row)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub
+    )
+
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], messages=[{
+            "role": "user", "texto": "20",
+        }], cart={"facts": {
+            "metragem": {"status": "known", "value": 20, "owner_node_id": "branch:a"},
+        }}, rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+        publication_id=pub["id"],
+        retrieval_trace={"retrieval_branch_node_id": "branch:a"},
+    )
+    # The model incorrectly still asks about "metragem" even though it is
+    # already known -- next_question_not_for_pending_field would normally
+    # fire, but here missing_fields is empty, so check() instead raises
+    # question_after_completion, landing in the fallback path with no field
+    # left to fall back to.
+    stale_proposal = {
+        "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": contract["branch_path_checksum"],
+        "branch_evidence_span": "", "extracted_facts": [], "claims": [],
+        "next_question_node_id": "question:a",
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "reply": "Só confirmando...", "qualification_complete": True, "handoff_requested": False,
+    }
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": stale_proposal},
+    )
+    assert decision.intent == "published_fallback"
+    assert response.reply_text == "Perfeito! Anotei tudo, a equipe vai te chamar em breve."
+
+
 def test_keep_without_an_active_branch_cannot_silently_establish_one():
     """Regression test for the phantom-branch switch-rejection bug (2026-08-08).
 

@@ -526,6 +526,11 @@ def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatc
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_active_graph_publication",
+        lambda _persona_id: None,
+    )
+    monkeypatch.setattr(
         wa_validator_service.graph_json_v2_store,
         "load_current",
         lambda _slug: (7, graph),
@@ -825,6 +830,11 @@ def test_wa_validator_generate_script_rejects_flow_incompatible_with_persona(
         wa_validator_service,
         "_build_graph_context",
         lambda _slug: ("", 1, "checksum", _fake_graph("appointment")),
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_active_graph_publication",
+        lambda _persona_id: None,
     )
 
     with pytest.raises(ValueError, match="não é válido"):

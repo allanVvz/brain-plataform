@@ -175,7 +175,7 @@ def _claim_policy(contract: dict[str, Any], claim_type: str) -> list[dict[str, A
     ]
 
 
-def _handoff_rule_matches(
+def handoff_rule_matches(
     rule: dict[str, Any], *, facts: dict[str, Any], qualification_complete: bool
 ) -> bool:
     condition = rule.get("condition")
@@ -446,7 +446,7 @@ def check(
 
     handoff_rules = contract.get("handoff_rules") or []
     handoff_required = any(
-        _handoff_rule_matches(
+        handoff_rule_matches(
             rule, facts=facts, qualification_complete=not missing
         ) for rule in handoff_rules
     )

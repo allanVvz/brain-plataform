@@ -82,6 +82,11 @@ export function MessagingSettingsPanel() {
   const persona = useGlobalPersona();
   const personaSlug = persona.slug;
   const [subTab, setSubTab] = useState<MessagingSubTab>("canal");
+  // Bumped after a WA Validator run finishes so the leads/conversations list
+  // below it (a sibling component with no other link to it) refetches --
+  // confirmed live 2026-08-09: without this, a just-created validation lead
+  // was invisible until a manual refresh click.
+  const [validationRunNonce, setValidationRunNonce] = useState(0);
 
   useEffect(() => {
     setSubTab(subTabFromLocation());
@@ -139,14 +144,14 @@ export function MessagingSettingsPanel() {
       {subTab === "validacoes" && (
         <div className="space-y-5">
           <div className="overflow-hidden rounded-2xl border border-white/10 bg-obs-surface p-4">
-            <ValidatorWorkspace />
+            <ValidatorWorkspace onRunComplete={() => setValidationRunNonce((n) => n + 1)} />
           </div>
           <div>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-obs-faint">
               Conversas de validação registradas
             </h3>
             <div className="overflow-hidden rounded-2xl border border-white/10 bg-obs-surface">
-              <MessagesLayout validationMode />
+              <MessagesLayout validationMode refreshSignal={validationRunNonce} />
             </div>
           </div>
         </div>

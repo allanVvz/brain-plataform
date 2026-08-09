@@ -1680,6 +1680,7 @@ export function MessagesLayout({
   canEdit = true,
   validationMode = false,
   heightClassName,
+  refreshSignal,
 }: {
   initialLeadId?: number | null;
   focused?: boolean;
@@ -1692,6 +1693,13 @@ export function MessagesLayout({
    * header now that titles live in the persistent portal header) and gets
    * its own default when portalSlug is set. */
   heightClassName?: string;
+  /** Bump this (e.g. a counter) to force a lead/conversation refetch from a
+   * parent that knows about state this component can't observe on its own
+   * -- e.g. the WA Validator's "Validações" tab, where a script run
+   * finishes in a sibling component with no other link between the two.
+   * Undefined (the default, every other caller) never refetches on its
+   * account, so this is a no-op everywhere else. */
+  refreshSignal?: number;
 }) {
   const pathname = usePathname();
   const portalMatch = portalSlug ? [pathname, portalSlug] : pathname.match(/^\/clientes\/([^/]+)/);
@@ -1782,6 +1790,15 @@ export function MessagesLayout({
   }, [isPortal, personaFilterId, portalSlug, validationScope]);
 
   useEffect(() => { loadLeads(); }, [loadLeads]);
+
+  useEffect(() => {
+    if (refreshSignal === undefined) return;
+    loadLeads();
+    // Only refreshSignal itself should retrigger this -- loadLeads already
+    // has its own identity-change effect above; including it here too
+    // would double-fetch on every filter/persona change as well.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshSignal]);
 
   // Tick para reavaliar attentionState (timeout do bot) sem refetch
   useEffect(() => {

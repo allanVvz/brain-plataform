@@ -465,6 +465,22 @@ def generate_script(
     kb_ctx, graph_version, graph_checksum, graph = _build_graph_context(
         persona_slug
     )
+    # Confirmed live 2026-08-09: for any persona actually running
+    # graph_agent_runtime_v3 (e.g. Aurora), every real turn reports the v3
+    # compiler's own publication version/checksum (graph_agent_runtime_v3.
+    # build_context() reads it from graph_publications, never from the
+    # legacy v2.1 store) -- an entirely separate counter from the v2.1
+    # store version above. Baking the v2.1 version into "expected
+    # knowledge" and the script label meant analyze_gaps() compared two
+    # counters that were never the same thing by design, always reporting
+    # a false "high" severity graph-lineage gap for these personas and
+    # dragging overall_score down over nothing. When an active v3
+    # publication exists, it -- not the v2.1 store -- is what a real turn
+    # will actually report, so it is the correct "expected" baseline.
+    v3_publication = supabase_client.get_active_graph_publication(persona_id)
+    if v3_publication:
+        graph_version = int(v3_publication["version"])
+        graph_checksum = str(v3_publication["checksum"])
     business_model = conversation_runtime._business_model(graph)
     flow_models = _FLOW_BUSINESS_MODELS.get(flow_id)
     if flow_models and business_model not in flow_models:
