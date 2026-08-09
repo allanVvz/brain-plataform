@@ -1682,6 +1682,58 @@ def _knowledge_context_envelope(
     }
 
 
+def _handoff_branch_reset_facts(
+    *,
+    handoff_required: bool,
+    handoff_level: str,
+    active_branch: str | None,
+    branch_contract: dict[str, Any],
+    branch_facts: dict[str, Any],
+    correlation_id: str,
+) -> list[dict[str, Any]]:
+    """One-time-incident branch facts to invalidate once a handoff completes.
+
+    Confirmed live 2026-08-09 (leads 116/118, Aurora `sdr_qualificacao_carro`):
+    `handoff_level` only encodes whether the lead's minimum registration
+    (name + service) is *known* (see its computation above, in `commit()`)
+    -- it says nothing about whether a handoff actually happened this turn.
+    That condition alone reaches "full" as early as the second turn of any
+    completely ordinary appointment conversation (the moment the customer's
+    name is captured, right after they already named the service in turn
+    one), long before any handoff is requested. Gating this reset on
+    `handoff_level == "full"` alone -- without also requiring
+    `handoff_required` -- fired the reset on that ordinary turn 2 and wiped
+    the just-selected "servico" fact back to invalid/null (the DB is the
+    proof: `conversation_facts` revision 2 for "servico", status "invalid",
+    value null, timestamped to the exact same commit as the "nome_cliente"
+    turn), even though no complaint/handoff was ever requested. That is the
+    direct mechanism behind the "asks which service 2-3 times" symptom: the
+    branch had already been correctly selected in turn one, then silently
+    un-resolved one turn later. Requiring `handoff_required` restores the
+    comment's actual, original intent -- reset one-time incident data (a
+    complaint's `relato`, for example) only when its handoff has genuinely
+    just completed, not merely whenever the lead happens to already have a
+    name and a service on file.
+    """
+    if not (handoff_required and handoff_level == "full" and active_branch):
+        return []
+    return [
+        {
+            "field_key": field["key"],
+            "owner_node_id": active_branch,
+            "status": "invalid",
+            "value": None,
+            "source_message_id": f"handoff-reset:{correlation_id}",
+            "evidence_span": "",
+            "confidence": 0.0,
+        }
+        for field in branch_contract.get("fields") or []
+        if field.get("owner_node_id") == active_branch
+        and isinstance(branch_facts.get(field.get("key")), dict)
+        and branch_facts[field["key"]].get("status") == "known"
+    ]
+
+
 def commit(
     *,
     lead_ref: int,
@@ -2227,36 +2279,19 @@ def commit(
 
     graph_turn = None
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
-        reset_facts: list[dict[str, Any]] = []
         active_branch = response.cart_state.get("active_branch_node_id")
-        if handoff_level == "full" and active_branch:
-            # A field owned by the active branch itself (as opposed to a
-            # shared, persona-wide owner like name/vehicle/service)
-            # represents one-time intake for THIS incident -- e.g. a
-            # complaint's relato. Left "known" forever, it would silently
-            # satisfy a brand new incident from the same returning lead
-            # the next time this branch is entered, skipping straight to
-            # handoff without ever asking what's wrong this time. Resetting
-            # it to a non-"known" status the moment its handoff completes
-            # makes pending_fields() treat it as unresolved again.
+        branch_contract: dict[str, Any] = {}
+        if response.handoff_required and handoff_level == "full" and active_branch:
             publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
             branch_contract = ((publication.get("document_json") or {}).get("branch_contracts") or {}).get(active_branch) or {}
-            branch_facts = response.cart_state.get("facts") or {}
-            reset_facts = [
-                {
-                    "field_key": field["key"],
-                    "owner_node_id": active_branch,
-                    "status": "invalid",
-                    "value": None,
-                    "source_message_id": f"handoff-reset:{correlation_id}",
-                    "evidence_span": "",
-                    "confidence": 0.0,
-                }
-                for field in branch_contract.get("fields") or []
-                if field.get("owner_node_id") == active_branch
-                and isinstance(branch_facts.get(field.get("key")), dict)
-                and branch_facts[field["key"]].get("status") == "known"
-            ]
+        reset_facts = _handoff_branch_reset_facts(
+            handoff_required=response.handoff_required,
+            handoff_level=handoff_level,
+            active_branch=active_branch,
+            branch_contract=branch_contract,
+            branch_facts=response.cart_state.get("facts") or {},
+            correlation_id=correlation_id,
+        )
         graph_turn = supabase_client.commit_graph_turn_v3(
             p_canonical_inbound_id=str(inbound_buffer_id),
             p_persona_id=str(lead.get("persona_id")),
@@ -2280,6 +2315,17 @@ def commit(
             p_final_decision=decision.model_dump(mode="json"),
             p_outbound_id=str((buffer or {}).get("id") or "") or None,
         )
+        # Durable record of every simultaneously-active branch, for personas
+        # that use branch_action "add" (multiple services per appointment).
+        # Empty for every other persona -- graph_agent_runtime_v3.decide()
+        # only ever grows active_branch_node_ids in response to a proposal
+        # actually validated as "add", so this is a no-op write for the
+        # single-service default.
+        active_branch_ids = response.cart_state.get("active_branch_node_ids") or []
+        ledger_id = (graph_turn or {}).get("ledger_id")
+        if active_branch_ids and ledger_id:
+            for branch_anchor_node_id in active_branch_ids:
+                supabase_client.add_ledger_branch(str(ledger_id), str(branch_anchor_node_id))
 
     supabase_client.insert_event(
         {

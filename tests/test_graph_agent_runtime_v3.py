@@ -11,7 +11,7 @@ API_ROOT = Path(__file__).resolve().parents[1] / "api"
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
-from schemas.conversation import ConversationContext, ConversationProposal, ExtractedFact
+from schemas.conversation import ConversationContext, ConversationProposal, ContextCard, ExtractedFact
 from services import graph_agent_runtime_v3, graph_compiler_v3, graph_proof_checker_v3
 
 
@@ -485,6 +485,35 @@ def test_required_field_count_flows_through_check_result():
     assert proof["required_field_count"] == 1
 
 
+def test_mmr_enforces_a_real_token_budget_not_just_a_card_count_cap():
+    """Regression test for the missing token-budget guardrail (2026-08-08
+    gap report): graph_agent_runtime_v3._mmr() only ever capped the RAG
+    chunk package by *count* (16), unlike the legacy context_cards.
+    resolve_cards(), which already enforces max_tokens=8000. Without a real
+    ceiling, any future addition to what gets retrieved per turn (e.g.
+    tone/flow-management skill content) could grow per-turn input size with
+    nothing to stop it. Each candidate below is ~2500 estimated tokens
+    (10,000 chars / 4); a 6000-token budget must keep the single best one
+    and refuse the rest, well short of the count cap of 16.
+    """
+    candidates = [
+        {"chunk_id": f"chunk:{i}", "source_node_id": f"node:{i}",
+         "hybrid_score": 1.0 - i * 0.01, "chunk_text": f"conteudo unico {i} " * 500}
+        for i in range(10)
+    ]
+    selected = graph_agent_runtime_v3._mmr(candidates, 16, max_tokens=6000)
+    assert 1 <= len(selected) < 10
+
+
+def test_mmr_always_keeps_at_least_one_result_even_over_budget():
+    """A single candidate larger than the whole budget must still be
+    returned -- an empty package is worse than one slightly over budget,
+    the same trade-off context_cards.resolve_cards() already makes."""
+    huge = {"chunk_id": "chunk:huge", "source_node_id": "node:huge",
+            "hybrid_score": 1.0, "chunk_text": "palavra " * 10000}
+    assert graph_agent_runtime_v3._mmr([huge], 16, max_tokens=10) == [huge]
+
+
 def test_fallback_retrieval_branch_never_leaves_a_greeting_without_context():
     """Regression test for the branch-less-turn crash (2026-08-08 report).
 
@@ -762,6 +791,119 @@ def test_drop_stale_branch_citations_is_a_noop_without_overlap():
         proposal, previous_branch_closure=set(), chunk_sources=chunk_sources,
     )
     assert also_unchanged is proposal
+
+
+def test_normalize_stale_next_question_after_branch_change_repoints_to_real_pending_field():
+    """Regression test for the silent-switch-failure gap reproduced live 2026-08-09.
+
+    Production evidence (lead_ref 117, today): customer says "na verdade,
+    prefiro fazer lavagem técnica detalhada em vez de pintura" -- an
+    explicit, otherwise-valid branch switch. The model's proposal still
+    carried a next_question_node_id left over from the branch it was
+    leaving (not one of the new branch's own fields at all), so
+    check_proposal() rejected the whole proposal with
+    next_question_not_for_pending_field -- discarding the switch itself and
+    the conversation never actually changed service, silently. This
+    generalizes _normalize_premature_servico_requestion (which only covers
+    the servico-specific case) to any stale question left over from before
+    a branch change.
+    """
+    contract_b = {"fields": [
+        {"key": "servico", "question_node_id": "faq:servico", "owner_node_id": "branch:b",
+         "accepted_statuses": ["known"]},
+        {"key": "presencial", "question_node_id": "faq:presencial", "owner_node_id": "aurora-persona",
+         "accepted_statuses": ["known"]},
+    ]}
+    proposal = ConversationProposal(
+        branch_action="switch", branch_anchor_node_id="branch:b", branch_path_checksum="checksum",
+        next_question_node_id="faq:cor",  # stale -- belongs to the branch being left, not branch:b
+    )
+    normalized = graph_agent_runtime_v3._normalize_stale_next_question_after_branch_change(
+        proposal, contract_b, {}
+    )
+    # servico is auto-derived known the instant branch:b is selected, so the
+    # real next pending field is "presencial", not the stale "faq:cor".
+    assert normalized.next_question_node_id == "faq:presencial"
+
+
+def test_normalize_stale_next_question_after_branch_change_is_a_noop_when_already_correct():
+    contract_b = {"fields": [
+        {"key": "servico", "question_node_id": "faq:servico", "owner_node_id": "branch:b",
+         "accepted_statuses": ["known"]},
+        {"key": "presencial", "question_node_id": "faq:presencial", "owner_node_id": "aurora-persona",
+         "accepted_statuses": ["known"]},
+    ]}
+    already_correct = ConversationProposal(
+        branch_action="switch", branch_anchor_node_id="branch:b", branch_path_checksum="checksum",
+        next_question_node_id="faq:presencial",
+    )
+    assert graph_agent_runtime_v3._normalize_stale_next_question_after_branch_change(
+        already_correct, contract_b, {}
+    ) is already_correct
+
+    # "keep" never changes branch, so it is out of scope for this normalizer.
+    keeping = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:b", branch_path_checksum="checksum",
+        next_question_node_id="faq:cor",
+    )
+    assert graph_agent_runtime_v3._normalize_stale_next_question_after_branch_change(
+        keeping, contract_b, {}
+    ) is keeping
+
+
+def test_decide_add_action_grows_active_branch_node_ids_without_dropping_the_current_one(monkeypatch):
+    """End-to-end regression for multi-service support (branch_action "add").
+
+    A customer asking for an additional service (e.g. "e também quero
+    quantidade") must keep the branch already in progress active *and* add
+    the new one -- unlike "switch", which replaces. This exercises the real
+    accumulation logic in decide()'s success path, not just check()'s
+    validation of the "add" action in isolation.
+    """
+    document = compiled_fixture()
+    persona_row = {**PERSONA, "config": {}}
+    pub = publication(document)
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: persona_row)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub
+    )
+
+    contract_b = document["branch_contracts"]["branch:b"]
+    question_card = ContextCard(
+        id="question:b", node_type="faq", slug="question-b", title="question:b",
+        rendered_content="Qual é a quantidade?", content_checksum="sha256:card",
+        revision=1, graph_version=1, graph_checksum=document["checksum"],
+        context_role="pending_field_question", position=0,
+    )
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], messages=[{
+            "role": "user", "texto": "e também quero informar a quantidade",
+        }], cart={"facts": {}}, rag_nodes=[], rag_paths=[],
+        context_cards=[question_card],
+        graph_contract=document["branch_contracts"]["branch:a"],
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+        publication_id=pub["id"],
+        retrieval_trace={"possible_switches": ["branch:b"], "retrieval_branch_node_id": "branch:b"},
+    )
+    add_proposal = {
+        "branch_action": "add", "branch_anchor_node_id": "branch:b",
+        "branch_path_checksum": contract_b["branch_path_checksum"],
+        "branch_evidence_span": "quantidade",
+        "extracted_facts": [], "claims": [],
+        "next_question_node_id": "question:b",
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "reply": "Certo, também anoto a quantidade.",
+        "qualification_complete": False, "handoff_requested": False,
+    }
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": add_proposal},
+    )
+    assert response.proof.get("valid"), response.proof.get("errors")
+    assert response.cart_state["active_branch_node_ids"] == ["branch:a", "branch:b"]
+    # Dialogue focus moves to the branch just added, but the list keeps both.
+    assert response.cart_state["active_branch_node_id"] == "branch:b"
 
 
 def test_keep_without_an_active_branch_cannot_silently_establish_one():

@@ -18,6 +18,11 @@ class GenerateScriptRequest(BaseModel):
     flow_id: str
     target_contact: str
     model: str = "none"
+    # "cold" (default, current behavior: fresh lead, nothing known yet),
+    # "known_name" (lead already has nome_cliente on file before the script
+    # runs -- tests that the agent never re-asks it), or "random" (picks
+    # between the two per generation, so repeated runs cover both).
+    initial_state: str | None = None
 
 
 class RunRequest(BaseModel):
@@ -65,6 +70,7 @@ def generate_script(body: GenerateScriptRequest):
             flow_id=body.flow_id,
             target_contact=body.target_contact,
             model=body.model,
+            initial_state=body.initial_state,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

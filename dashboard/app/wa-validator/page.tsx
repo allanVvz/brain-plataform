@@ -104,6 +104,11 @@ export default function WaValidatorPage() {
   // to call yet, so it stays disabled rather than silently doing nothing.
   const [agentKind, setAgentKind] = useState<"sdr" | "closer">("sdr");
   const [flowId, setFlowId] = useState("");
+  // "cold" (padrão de sempre: lead novo, nada conhecido), "known_name"
+  // (nome do cliente já é conhecido antes do script rodar -- prova que o
+  // agente não pergunta de novo) ou "random" (sorteia entre os dois a cada
+  // geração). Fluxos sem etapa de nome degradam para "cold" no backend.
+  const [initialState, setInitialState] = useState<"cold" | "known_name" | "random">("cold");
 
   const [generating, setGenerating] = useState(false);
   const [running, setRunning] = useState(false);
@@ -164,6 +169,7 @@ export default function WaValidatorPage() {
         flow_id: effectiveFlow,
         target_contact: selectedBot?.bot_name || globalPersona.slug,
         model: "none",
+        initial_state: initialState,
       });
       const newSession: Session = {
         id: result.session_id,
@@ -256,6 +262,20 @@ export default function WaValidatorPage() {
               {flows.map((f) => (
                 <option key={f.id} value={f.id}>{f.label}</option>
               ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[10px] text-brain-muted uppercase tracking-wide">Estado inicial</label>
+            <select
+              className="bg-brain-bg border border-brain-border text-sm text-white rounded px-2 py-1.5 min-w-[10rem]"
+              value={initialState}
+              onChange={(e) => setInitialState(e.target.value as "cold" | "known_name" | "random")}
+              title="Fluxos sem etapa de nome sempre rodam como 'Frio', mesmo com outra opção selecionada."
+            >
+              <option value="cold">Frio (padrão)</option>
+              <option value="known_name">Cliente já conhecido</option>
+              <option value="random">Aleatório</option>
             </select>
           </div>
 

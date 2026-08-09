@@ -124,6 +124,50 @@ def required_field_count(contract: dict[str, Any], facts: dict[str, Any]) -> int
     return len(_applicable_required_fields(contract, facts))
 
 
+def aggregate_missing_fields(
+    branch_contracts: dict[str, dict[str, Any]],
+    active_branch_anchors: list[str],
+    facts_by_key: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Union of pending fields across every simultaneously-active branch.
+
+    Supports N services per appointment (branch_action "add"): each active
+    branch keeps its OWN required fields, and a field owned by a specific
+    branch anchor (e.g. "servico") must be resolved separately per branch,
+    while a field owned by a shared node (e.g. "nome_cliente", owned by the
+    persona) naturally de-duplicates because every branch's contract
+    resolves it against the *same* owner's fact. `facts_by_key` holds every
+    *current* fact for the ledger grouped by field_key -- unlike the single-
+    branch flat `facts` dict (one fact per field_key, the shape every other
+    function here still uses and that this function does not change), more
+    than one branch being active can mean more than one current fact shares
+    a field_key (same key, different owner_node_id), which is exactly why
+    this needs its own facts shape rather than reusing the flat one.
+    """
+    def _fact_for_owner(key: str, owner_node_id: Any) -> dict[str, Any] | None:
+        return next(
+            (fact for fact in facts_by_key.get(key, []) if fact.get("owner_node_id") == owner_node_id),
+            None,
+        )
+
+    seen: set[tuple[str, str]] = set()
+    aggregated: list[dict[str, Any]] = []
+    for anchor in active_branch_anchors:
+        contract = branch_contracts.get(anchor) or {}
+        scoped_facts = {
+            field["key"]: fact
+            for field in contract.get("fields") or []
+            if (fact := _fact_for_owner(field["key"], field.get("owner_node_id"))) is not None
+        }
+        for field in pending_fields(contract, scoped_facts):
+            dedupe_key = (field["key"], str(field.get("owner_node_id") or anchor))
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            aggregated.append(field)
+    return aggregated
+
+
 def _claim_policy(contract: dict[str, Any], claim_type: str) -> list[dict[str, Any]]:
     return [
         policy for policy in contract.get("claims") or []
@@ -193,6 +237,7 @@ def check(
     branch_selection_allowed: bool,
     branch_switch_allowed: bool,
     package_chunk_sources: dict[str, str] | None = None,
+    active_branch_node_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     repair: list[dict[str, Any]] = []
@@ -235,6 +280,24 @@ def check(
     elif action == "switch":
         if not branch_switch_allowed or not active_branch_node_id or branch == active_branch_node_id:
             errors.append("branch_switch_not_authorized")
+        if not _literal_span(message, branch_span):
+            errors.append("branch_evidence_not_literal")
+    elif action == "add":
+        # A customer asking for an additional service without dropping the
+        # one already in progress (e.g. "quero higienização interna E
+        # polimento") -- unlike "switch", the previously active branch(es)
+        # stay active too. Requires the same authorization/evidence bar as
+        # "switch" (it is, after all, still an unsolicited branch-scope
+        # change) plus a check "switch" doesn't need: the branch must not
+        # already be one of the active ones, since re-adding an active
+        # branch is meaningless and would only invite duplicate-fact bugs.
+        active_set = set(active_branch_node_ids or ([active_branch_node_id] if active_branch_node_id else []))
+        if not active_set:
+            errors.append("add_without_active_branch")
+        elif branch in active_set:
+            errors.append("add_duplicate_branch")
+        elif not branch_switch_allowed:
+            errors.append("add_not_authorized")
         if not _literal_span(message, branch_span):
             errors.append("branch_evidence_not_literal")
     else:

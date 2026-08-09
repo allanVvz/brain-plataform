@@ -18,7 +18,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from services import conversation_runtime, graph_json_v2_store, n8n_client, supabase_client
+from services import (
+    conversation_runtime,
+    graph_agent_runtime_v3,
+    graph_json_v2_store,
+    n8n_client,
+    supabase_client,
+)
+
+# Flows that collect the customer's name as one of their scripted steps --
+# the only ones "known_name" initial state can meaningfully apply to (a
+# flow with no name-collection step has nothing to pre-seed or omit).
+_NAME_COLLECTING_FLOWS = {"sdr_qualificacao_carro", "sdr_troca_servico"}
 
 _MODEL_DEFAULT = "none"
 AVAILABLE_MODELS = {
@@ -299,6 +310,7 @@ def _deterministic_script(
     product: object | None,
     graph_version: int,
     graph_checksum: str,
+    omit_client_name: bool = False,
 ) -> dict:
     product_id = getattr(product, "id", None)
     product_data = getattr(product, "data", {}) or {}
@@ -375,7 +387,7 @@ def _deterministic_script(
         "delivery_callback": [f"Quero 1 de {product_name}"],
         "sdr_qualificacao_carro": [
             f"Quero saber sobre {service_a} do meu carro",
-            client_name,
+            *([] if omit_client_name else [client_name]),
             "Onix",
             "2020",
             "Quero manter o carro e cuidar bem dele",
@@ -384,7 +396,7 @@ def _deterministic_script(
         ],
         "sdr_troca_servico": [
             f"Quero saber sobre {service_a} do meu carro",
-            client_name,
+            *([] if omit_client_name else [client_name]),
             "Civic",
             "2021",
             f"Na verdade, prefiro fazer {service_b} em vez de {service_a}",
@@ -407,6 +419,10 @@ def _deterministic_script(
         ),
         "forbidden_terms": ["tock", "tock fatal"],
     }
+    if flow_id in _NAME_COLLECTING_FLOWS:
+        expected_dialogue["known_name"] = client_name
+        expected_dialogue["known_service"] = service_a
+        expected_dialogue["client_name_omitted"] = omit_client_name
     return {
         "flow_description": _FLOWS.get(flow_id, flow_id),
         "expected_knowledge": common_expected,
@@ -415,11 +431,28 @@ def _deterministic_script(
     }
 
 
+def _resolve_initial_state(requested: str | None, flow_id: str) -> str:
+    """Normalize the requested initial state to "cold" or "known_name".
+
+    "random" and anything not applicable to this flow (no name-collection
+    step) resolve to "cold" -- there is nothing to pre-seed or omit for a
+    flow that never asks for the name in the first place.
+    """
+    if flow_id not in _NAME_COLLECTING_FLOWS:
+        return "cold"
+    if requested == "random":
+        return random.choice(["cold", "known_name"])
+    if requested == "known_name":
+        return "known_name"
+    return "cold"
+
+
 def generate_script(
     persona_slug: str,
     flow_id: str,
     target_contact: str,
     model: str = _MODEL_DEFAULT,
+    initial_state: str | None = None,
 ) -> dict:
     persona = supabase_client.get_persona(persona_slug)
     if not persona:
@@ -439,6 +472,7 @@ def generate_script(
             f"Fluxo '{flow_id}' não é válido para uma persona "
             f"'{business_model}' (requer {sorted(flow_models)})"
         )
+    resolved_initial_state = _resolve_initial_state(initial_state, flow_id)
     agent_node = next(
         (
             node
@@ -464,6 +498,7 @@ def generate_script(
         product=primary_product,
         graph_version=graph_version,
         graph_checksum=graph_checksum,
+        omit_client_name=(resolved_initial_state == "known_name"),
     )
     routing = supabase_client.get_persona_routing(persona_slug) or {}
     conversation_mode = _resolve_conversation_mode(persona_id, routing)
@@ -483,6 +518,7 @@ def generate_script(
             "agent_slug": agent_slug,
             "graph_version": graph_version,
             "graph_checksum": graph_checksum,
+            "initial_state": resolved_initial_state,
         },
         "target": target_contact,
         "target_phone": target_phone or None,
@@ -784,6 +820,57 @@ async def _wait_for_reply_delivered(
         await asyncio.sleep(poll_interval_s)
 
 
+def _seed_known_name(*, persona: dict, lead_ref: int, client_name: str) -> None:
+    """Pre-seed nome_cliente as already-known before any script step runs.
+
+    Tests the exact bug class fixed 2026-08-09 (a resolved field being
+    re-asked/lost): a script generated with initial_state="known_name"
+    never sends the customer's name at all, so if the agent asks for it
+    anyway, that is a real regression, not scripted repetition. Reuses
+    commit_graph_turn_v3 -- the same RPC every real turn commits through --
+    instead of writing to conversation_ledgers/conversation_facts directly,
+    so the seeded lead's state is indistinguishable from one that reached
+    the same fact organically. Only meaningful for graph_agent_runtime_v3
+    personas (Aurora et al.); quietly no-ops for any other runtime, where
+    "known_name" behaves the same as "cold" for now.
+    """
+    if not client_name:
+        return
+    persona_id = str(persona.get("id") or "")
+    if not persona_id:
+        return
+    publication = supabase_client.get_active_graph_publication(persona_id)
+    if not publication:
+        return
+    document = publication.get("document_json") or {}
+    owner_node_id = next(
+        (
+            field.get("owner_node_id")
+            for contract in (document.get("branch_contracts") or {}).values()
+            for field in contract.get("fields") or []
+            if field.get("key") == "nome_cliente" and field.get("owner_node_id")
+        ),
+        None,
+    )
+    if not owner_node_id:
+        return
+    supabase_client.commit_graph_turn_v3(
+        p_canonical_inbound_id=f"validator-seed:{lead_ref}",
+        p_persona_id=persona_id, p_lead_ref=lead_ref,
+        p_publication_id=publication["id"], p_graph_checksum=publication["checksum"],
+        p_active_branch_node_id=None, p_asked_question_node_ids=[],
+        p_expected_revision=0,
+        p_facts=[{
+            "field_key": "nome_cliente", "owner_node_id": owner_node_id,
+            "status": "known", "value": client_name,
+            "source_message_id": f"validator-seed:{lead_ref}",
+            "evidence_span": "", "confidence": 1.0,
+        }],
+        p_retrieval_trace={}, p_model_proposal={}, p_proof_result={}, p_repair_result={},
+        p_final_decision={},
+    )
+
+
 async def run_session_direct(session_id: str) -> dict:
     """Execute through the selected mode using the conversation_v1 contract."""
     session = _session_get(session_id)
@@ -855,6 +942,12 @@ async def run_session_direct(session_id: str) -> dict:
         raise ValueError(
             f"Lead de validação para {persona_slug} não recebeu channel_binding_id "
             "automático; configure um workflow_binding ativo para a persona."
+        )
+    initial_state = script.get("meta", {}).get("initial_state", "cold")
+    if initial_state == "known_name":
+        _seed_known_name(
+            persona=persona, lead_ref=int(lead_ref),
+            client_name=str(script.get("expected_dialogue", {}).get("known_name") or ""),
         )
     steps = script.get("steps", [])
 

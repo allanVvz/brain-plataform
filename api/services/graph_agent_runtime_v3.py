@@ -90,6 +90,53 @@ def _normalize_premature_servico_requestion(
     return proposal.model_copy(update={"next_question_node_id": substitute})
 
 
+def _normalize_stale_next_question_after_branch_change(
+    proposal: ConversationProposal, contract: dict[str, Any], ledger_facts: dict[str, Any],
+) -> ConversationProposal:
+    """Repoint a next_question_node_id that doesn't fit the branch just selected.
+
+    Confirmed live 2026-08-09 (lead_ref 117, "prefiro fazer lavagem técnica
+    detalhada em vez de pintura"): right when the model proposes
+    branch_action "select"/"switch", it can still propose a
+    next_question_node_id that isn't one of the *new* branch's genuinely
+    pending fields (it can misjudge field order, or hang onto a question
+    from the branch it's leaving). check_proposal() correctly rejects that
+    as next_question_not_for_pending_field, but the rejection discards the
+    *entire* otherwise-correct proposal -- the branch change itself and
+    every fact extracted alongside it -- so the customer's request to
+    change service goes silently unfulfilled, the same failure mode
+    _drop_stale_branch_citations already fixed for citations and
+    _normalize_premature_servico_requestion already fixed for the
+    servico-specific case. This generalizes that fix to any field: repoint
+    to whatever field is genuinely still pending for the branch about to be
+    selected, using the same servico auto-derivation the runtime performs
+    after validity so the substitute reflects the branch change about to be
+    committed, not the branch being left.
+    """
+    if proposal.branch_action.value not in {"select", "switch"}:
+        return proposal
+    effective_facts = dict(ledger_facts)
+    servico_field = next((f for f in contract.get("fields") or [] if f.get("key") == "servico"), None)
+    if servico_field:
+        effective_facts["servico"] = {
+            "status": "known", "value": proposal.branch_anchor_node_id,
+            "owner_node_id": proposal.branch_anchor_node_id,
+        }
+    for fact in proposal.extracted_facts:
+        effective_facts[fact.field_key] = {
+            "status": fact.status.value if hasattr(fact.status, "value") else fact.status,
+            "value": fact.value, "owner_node_id": fact.owner_node_id,
+        }
+    pending = graph_proof_checker_v3.pending_fields(contract, effective_facts)
+    pending_question_ids = {field.get("question_node_id") for field in pending if field.get("question_node_id")}
+    if proposal.next_question_node_id in pending_question_ids:
+        return proposal
+    substitute = pending[0].get("question_node_id") if pending else None
+    if substitute == proposal.next_question_node_id:
+        return proposal
+    return proposal.model_copy(update={"next_question_node_id": substitute})
+
+
 def _drop_stale_branch_citations(
     proposal: ConversationProposal,
     *,
@@ -245,10 +292,31 @@ def _known_facts_payload(
     return payload
 
 
-def _mmr(candidates: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+def _estimated_tokens(text: str) -> int:
+    """Same rough chars/4 estimate context_cards.resolve_cards() already
+    uses for its own max_tokens budget -- good enough for a guardrail, not
+    meant to match a real tokenizer exactly."""
+    return max(1, len(text or "") // 4)
+
+
+# Confirmed live 2026-08-08 (WA Validator gap report): the v3 runtime's own
+# card/chunk assembly had no token-count budget at all, only a card-count
+# cap (_mmr(..., 16)) -- unlike the legacy context_cards.resolve_cards(),
+# which already enforces max_tokens=8000. Any future addition to what's
+# retrieved per turn (e.g. tone/flow-management skill content) could grow
+# per-turn input size unboundedly with nothing to stop it. This is a real,
+# enforced ceiling on the RAG chunk package specifically (context_cards are
+# capped separately downstream); it does not by itself guarantee the exact
+# total prompt size, but it makes "we didn't grow this" a checkable claim
+# instead of an assumption.
+RAG_CHUNK_TOKEN_BUDGET = 6000
+
+
+def _mmr(candidates: list[dict[str, Any]], limit: int, *, max_tokens: int = RAG_CHUNK_TOKEN_BUDGET) -> list[dict[str, Any]]:
     """Diversity reranking over the bounded result returned by Postgres."""
     selected: list[dict[str, Any]] = []
     remaining = list(candidates)
+    token_count = 0
 
     def terms(row: dict[str, Any]) -> set[str]:
         return {token for token in str(row.get("chunk_text") or "").casefold().split() if len(token) > 2}
@@ -270,6 +338,10 @@ def _mmr(candidates: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
                 best = candidate
         if best is None:
             break
+        estimated = _estimated_tokens(str(best[2].get("chunk_text") or ""))
+        if selected and token_count + estimated > max_tokens:
+            break
+        token_count += estimated
         selected.append(best[2])
         remaining.remove(best[2])
     return selected
@@ -389,6 +461,17 @@ def build_context(
     active_branch = str(ledger.get("active_branch_node_id") or "") or None
     if active_branch not in set(document.get("branch_anchors") or []):
         active_branch = None
+    # Only queried for a ledger that exists (a fresh conversation has no
+    # multi-service state yet, so there is nothing to fetch). Filtered to
+    # published anchors for the same reason active_branch is above -- a
+    # stale row from a since-rolled-back publication must never leak in.
+    active_branches = (
+        [
+            anchor for anchor in supabase_client.get_active_ledger_branches(str(ledger.get("id") or ""))
+            if anchor in set(document.get("branch_anchors") or [])
+        ]
+        if ledger.get("id") else []
+    )
     active_contract = (document.get("branch_contracts") or {}).get(active_branch) or {}
     declared = {field["key"]: field for field in active_contract.get("fields") or []}
     invalidated_fact_keys: list[str] = []
@@ -560,6 +643,7 @@ def build_context(
             "slug": document["node_by_id"][anchor]["slug"], "label": document["node_by_id"][anchor]["title"]
         } for anchor in document.get("branch_anchors") or []],
         active_branch_node_id=active_branch,
+        active_branch_node_ids=active_branches,
         active_path_checksum=((document.get("coordinates") or {}).get(active_branch) or {}).get("path_checksum"),
         branch_node_ids=contract.get("closure_node_ids") or [], graph_contract=contract,
         publication_id=publication["id"], runtime_version=RUNTIME_VERSION, retrieval_trace=trace,
@@ -598,6 +682,7 @@ def decide(
     contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
     proposal = _normalize_servico_owner(proposal, contract)
     proposal = _normalize_premature_servico_requestion(proposal, contract, context.cart.get("facts") or {})
+    proposal = _normalize_stale_next_question_after_branch_change(proposal, contract, context.cart.get("facts") or {})
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(
             row.get("source_node_id") or row.get("source_graph_node_id") or ""
@@ -643,13 +728,17 @@ def decide(
         },
         branch_switch_allowed=proposal.branch_anchor_node_id in set(context.retrieval_trace.get("possible_switches") or []),
         package_chunk_sources=chunk_sources,
+        active_branch_node_ids=context.active_branch_node_ids or (
+            [context.active_branch_node_id] if context.active_branch_node_id else []
+        ),
     )
-    # An explicit switch is only a Phase-A decision on the first pass. Force
-    # one directed Phase-B retrieval for the selected branch before any reply
-    # or fact can be committed, even if an anchor snippet happened to suffice.
+    # An explicit switch/add is only a Phase-A decision on the first pass.
+    # Force one directed Phase-B retrieval for the selected branch before
+    # any reply or fact can be committed, even if an anchor snippet
+    # happened to suffice.
     if (
         int(observation.get("repair_attempt") or 0) == 0
-        and proposal.branch_action.value in {"select", "switch"}
+        and proposal.branch_action.value in {"select", "switch", "add"}
         and proposal.branch_anchor_node_id
         != context.retrieval_trace.get("retrieval_branch_node_id")
         and not [error for error in proof["errors"] if "outside_package" not in error]
@@ -720,8 +809,19 @@ def decide(
             }
             facts["servico"] = servico_fact
             accepted_facts.append(servico_fact)
+        # Only "add" ever grows this list -- "select"/"switch"/"keep" leave
+        # it exactly as context handed it in (empty for every persona that
+        # never proposes "add", i.e. every appointment persona except a
+        # published one that declares the "mais_servicos" convention), so
+        # single-service personas are provably unaffected. This is
+        # accumulate-only for now: nothing yet marks an added branch
+        # "completed" once its own fields resolve.
+        active_branch_ids = list(context.active_branch_node_ids)
+        if proposal.branch_action.value == "add" and proposal.branch_anchor_node_id not in active_branch_ids:
+            active_branch_ids.append(proposal.branch_anchor_node_id)
         state = {**context.cart, "facts": facts,
                  "active_branch_node_id": proposal.branch_anchor_node_id,
+                 "active_branch_node_ids": active_branch_ids,
                  "asked_question_node_ids": list(dict.fromkeys([
                      *(context.cart.get("asked_question_node_ids") or []),
                      *([proposal.next_question_node_id] if proposal.next_question_node_id else []),

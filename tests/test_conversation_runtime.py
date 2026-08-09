@@ -258,3 +258,53 @@ def test_build_system_prompt_adds_the_price_rule_only_when_the_graph_asks(monkey
     prompt = conversation_runtime.build_system_prompt(guarded)
     assert "Nunca informe preco" in prompt
     assert "parcelamento ou desconto" in prompt
+
+
+def test_handoff_branch_reset_facts_requires_an_actual_handoff():
+    """Regression test for the servico-wipe bug reproduced live 2026-08-09.
+
+    Production evidence (leads 116 and 118, Aurora `sdr_qualificacao_carro`,
+    today): `handoff_level` only encodes whether name+service are *known*,
+    which becomes "full" as early as turn 2 of any ordinary appointment
+    conversation -- the moment the customer's name is captured, right after
+    they already named the service in turn one. The DB showed "servico"
+    superseded to status="invalid"/value=null at that exact turn, with no
+    handoff ever requested or authorized, which is why the agent then
+    re-asked "qual serviço você procura" 2-3 times before recovering. The
+    reset must require `handoff_required` -- a handoff actually completing
+    this turn -- not merely the lead already having a name and a service on
+    file.
+    """
+    branch_contract = {"fields": [
+        {"key": "servico", "owner_node_id": "branch:a"},
+        {"key": "relato", "owner_node_id": "branch:a"},
+    ]}
+    branch_facts = {
+        "servico": {"status": "known", "value": "Higienização interna"},
+        "relato": {"status": "known", "value": "Cheiro forte"},
+    }
+
+    # Ordinary turn: name+service are both known ("full"), but no handoff
+    # was requested this turn -- must NOT reset anything.
+    assert conversation_runtime._handoff_branch_reset_facts(
+        handoff_required=False, handoff_level="full", active_branch="branch:a",
+        branch_contract=branch_contract, branch_facts=branch_facts,
+        correlation_id="corr-1",
+    ) == []
+
+    # A genuine handoff completing (handoff_required=True) with full
+    # registration IS the documented case this reset exists for.
+    reset = conversation_runtime._handoff_branch_reset_facts(
+        handoff_required=True, handoff_level="full", active_branch="branch:a",
+        branch_contract=branch_contract, branch_facts=branch_facts,
+        correlation_id="corr-2",
+    )
+    assert {fact["field_key"] for fact in reset} == {"servico", "relato"}
+    assert all(fact["status"] == "invalid" and fact["value"] is None for fact in reset)
+
+    # A partial handoff (name or service still missing) never resets either.
+    assert conversation_runtime._handoff_branch_reset_facts(
+        handoff_required=True, handoff_level="partial", active_branch="branch:a",
+        branch_contract=branch_contract, branch_facts=branch_facts,
+        correlation_id="corr-3",
+    ) == []

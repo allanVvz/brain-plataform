@@ -68,6 +68,7 @@ class BranchAction(StrEnum):
     KEEP = "keep"
     SELECT = "select"
     SWITCH = "switch"
+    ADD = "add"
 
 
 class ExtractedFact(StrictModel):
@@ -118,6 +119,7 @@ class ConversationContext(StrictModel):
     system_prompt: str = ""
     available_services: list[dict[str, str]] = Field(default_factory=list)
     active_branch_node_id: str | None = None
+    active_branch_node_ids: list[str] = Field(default_factory=list)
     active_path_checksum: str | None = None
     branch_node_ids: list[str] = Field(default_factory=list)
     graph_contract: dict[str, Any] = Field(default_factory=dict)

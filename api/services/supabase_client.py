@@ -4021,6 +4021,69 @@ def get_conversation_ledger(persona_id: str, lead_ref: int) -> Optional[dict]:
     return ledger
 
 
+def get_conversation_facts_by_key(ledger_id: str) -> dict:
+    """Every current fact for a ledger, grouped by field_key.
+
+    Unlike get_conversation_ledger()'s flat `facts` dict (one fact per
+    field_key -- correct only when at most one branch is ever active),
+    supporting more than one simultaneously-active branch (branch_action
+    "add") means more than one current fact can share a field_key with a
+    different owner_node_id (e.g. two branches each with their own current
+    "servico"). Grouping by key instead of collapsing to one preserves all
+    of them, for graph_proof_checker_v3.aggregate_missing_fields().
+    """
+    if not ledger_id:
+        return {}
+    rows = _q(
+        get_client().table("conversation_facts").select("*")
+        .eq("ledger_id", ledger_id).eq("is_current", True).limit(1000)
+    )
+    grouped: dict = {}
+    for row in rows:
+        grouped.setdefault(str(row["field_key"]), []).append({
+            **row, "value": row.get("value_json"), "fact_id": row.get("id"),
+        })
+    return grouped
+
+
+def get_active_ledger_branches(ledger_id: str) -> list:
+    if not ledger_id:
+        return []
+    try:
+        rows = _q(
+            get_client().table("conversation_ledger_branches").select("branch_anchor_node_id")
+            .eq("ledger_id", ledger_id).eq("state", "active").limit(100)
+        )
+    except Exception:
+        # migration 105 may not be applied yet on a deployment where this
+        # code shipped ahead of it -- degrade to "no additional active
+        # branches" (today's single-service behavior) instead of breaking
+        # every single conversation turn over an optional, additive table.
+        return []
+    return [str(row["branch_anchor_node_id"]) for row in rows]
+
+
+def add_ledger_branch(ledger_id: str, branch_anchor_node_id: str) -> None:
+    """Record an additional simultaneously-active branch for a ledger.
+
+    Idempotent (upsert on the (ledger_id, branch_anchor_node_id) unique
+    constraint from migration 105) so a retried/duplicated commit never
+    raises -- it just leaves the row as 'active', same as the first call.
+    Same migration-not-applied-yet tolerance as get_active_ledger_branches:
+    this is an audit-trail write, never required for the current turn's own
+    correctness, so a failure here must not fail the whole commit.
+    """
+    if not ledger_id or not branch_anchor_node_id:
+        return
+    try:
+        get_client().table("conversation_ledger_branches").upsert(
+            {"ledger_id": ledger_id, "branch_anchor_node_id": branch_anchor_node_id, "state": "active"},
+            on_conflict="ledger_id,branch_anchor_node_id",
+        ).execute()
+    except Exception:
+        pass
+
+
 def get_wa_validator_session(session_id: str) -> Optional[dict]:
     """Read a WA Validator session's data blob, or None if it doesn't exist."""
     if not session_id:
