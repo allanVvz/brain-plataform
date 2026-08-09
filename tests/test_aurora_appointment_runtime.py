@@ -23,6 +23,7 @@ from services.deterministic_sdr import catalog_from_graph
 # keep their original provenance instead of being relabelled.
 AURORA_SOURCES = {
     "briefing_atendimento_conversacional_aurora_2026_08_07",
+    "briefing_atendimento_conversacional_aurora_2026_08_09",
     "user_authorized_demo_briefing_2026_07_29",
 }
 

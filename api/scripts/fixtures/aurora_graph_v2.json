@@ -1633,6 +1633,14 @@
       "metadata": {}
     },
     {
+      "id": "aurora-e-briefing-flow-management",
+      "source": "aurora-briefing",
+      "target": "aurora-flow-management",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
       "id": "aurora-e-services-atendimento-humano",
       "source": "aurora-services",
       "target": "aurora-service-atendimento-humano",
