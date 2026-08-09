@@ -124,6 +124,9 @@ class ConversationContext(StrictModel):
     publication_id: str | None = None
     runtime_version: str = "conversation_v2"
     retrieval_trace: dict[str, Any] = Field(default_factory=dict)
+    known_facts: list[dict[str, Any]] = Field(default_factory=list)
+    time_since_last_client_message: str | None = None
+    pending_reconfirmation: bool = False
 
 
 class ConversationDecision(StrictModel):

@@ -189,6 +189,16 @@ _FLOWS = {
         "valida que nome, veículo e ano já informados não são perguntados "
         "de novo depois da troca de branch."
     ),
+    "sdr_reclamacao_recorrente": (
+        "Cliente recorrente (Aurora): fase 1 é um agendamento completo "
+        "(nome, veículo, ano, objetivo, presencial/remoto, condição) que "
+        "resolve até o handoff; as mensagens dessa fase são então "
+        "retroagidas algumas horas. Fase 2, horas depois, é uma reclamação "
+        "sem repetir o nome -- valida que o nome/veículo não são "
+        "perguntados de novo, que a pergunta da reclamação referencia o "
+        "serviço já conhecido, e que a resposta não soa como continuação "
+        "direta da fase 1."
+    ),
 }
 
 # A fixed name (previously always "Allan") made every validator run
@@ -229,6 +239,7 @@ _FLOW_BUSINESS_MODELS: dict[str, set[str]] = {
     "estagio_monotonic": {"sales"},
     "sdr_qualificacao_carro": {"appointment"},
     "sdr_troca_servico": {"appointment"},
+    "sdr_reclamacao_recorrente": {"appointment"},
 }
 
 
@@ -308,6 +319,36 @@ def _deterministic_script(
         common_expected.insert(0, f"evidence:{product_id}")
     client_name = random.choice(_CLIENT_NAMES)
     service_a, service_b = random.sample(_CAR_SERVICES, 2)
+    if flow_id == "sdr_reclamacao_recorrente":
+        # Two-phase scenario: phase 1 is a normal booking that resolves to
+        # completion (name + vehicle + service all known); a backdate step
+        # then shifts those messages a few hours into the past before
+        # phase 2 -- a complaint that never repeats the name -- runs. See
+        # run_session_direct's handling of the "backdate_hours" step kind.
+        return {
+            "flow_description": _FLOWS.get(flow_id, flow_id),
+            "expected_knowledge": common_expected,
+            "steps": [
+                {"text": f"Quero saber sobre {service_a} do meu carro", "wait": 10},
+                {"text": client_name, "wait": 10},
+                {"text": "Onix", "wait": 10},
+                {"text": "2020", "wait": 10},
+                {"text": "Quero manter o carro e cuidar bem dele", "wait": 10},
+                {"text": "Consigo levar até vocês", "wait": 10},
+                {"text": "Os bancos estão meio manchados", "wait": 10},
+                {"backdate_hours": 5},
+                {"text": "Estou com um problema com o serviço que fiz aí", "wait": 10},
+            ],
+            "expected_dialogue": {
+                "product_name": product_name,
+                "unit_price": unit_price,
+                "final_quantity": None,
+                "final_total": None,
+                "forbidden_terms": ["tock", "tock fatal"],
+                "known_service": service_a,
+                "known_name": client_name,
+            },
+        }
     scenarios = {
         "compra_simples": [
             "Oi",
@@ -827,6 +868,17 @@ async def run_session_direct(session_id: str) -> dict:
         try:
             token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
             for i, step in enumerate(steps):
+                if "backdate_hours" in step:
+                    hours = float(step["backdate_hours"])
+                    shifted = supabase_client.backdate_lead_messages(int(lead_ref), hours)
+                    conversation.append({
+                        "role": "system",
+                        "text": f"[backdated {shifted} message(s) by {hours}h]",
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "message_id": f"validator:{session_id}:{i}:backdate",
+                    })
+                    _session_update(session_id, output={"conversation": list(conversation), "status": "running"})
+                    continue
                 text = step.get("text", "")
                 configured_wait = float(step.get("wait", 10) or 10)
                 ts_now = datetime.now(timezone.utc).isoformat()

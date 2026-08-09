@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from services import supabase_client
+from services import graph_agent_runtime_v3, supabase_client
 
 logger = logging.getLogger("agents_service")
 
@@ -195,14 +195,29 @@ def _resolve_persona_id(persona_slug_or_id: str) -> Optional[str]:
 
 def pause_lead(lead_ref: int) -> bool:
     try:
-        supabase_client.update_lead(lead_ref, {"ai_paused": True})
+        supabase_client.update_lead(lead_ref, {"handoff_level": "full"})
         return True
     except Exception as exc:
         logger.warning("pause_lead failed: %s", exc)
         return False
 
 
-def _cleared_conversation_state_metadata(lead_ref: int) -> Optional[dict]:
+def acknowledge_partial_handoff(lead_ref: int) -> bool:
+    """Clear a 'partial' handoff flag once a human has reviewed it.
+
+    Unlike resume_lead, a partial handoff never stopped the AI or parked
+    lead_buffer rows as waiting_human, so there's nothing to reset or
+    requeue here — just clear the flag.
+    """
+    try:
+        supabase_client.update_lead(lead_ref, {"handoff_level": "none"})
+        return True
+    except Exception as exc:
+        logger.warning("acknowledge_partial_handoff failed: %s", exc)
+        return False
+
+
+def _cleared_conversation_state_metadata(lead: dict) -> Optional[dict]:
     """Clear a lead's sticky "handoff" flag so /process actually retries.
 
     conversation_runtime persists the deterministic engines' working state
@@ -210,13 +225,14 @@ def _cleared_conversation_state_metadata(lead_ref: int) -> Optional[dict]:
     Baita leads — same fallback conversation_runtime._build_context uses).
     Both DeterministicAppointment and DeterministicSDR short-circuit with an
     empty reply the moment that state's own "conversation_state" field is
-    "handoff", regardless of ai_paused. Left untouched, resuming a lead just
-    makes it silently re-pause on the next inbound message instead of trying
-    to answer. Only the sticky flag and the stale clarification counter are
-    reset here — collected fields (appointment_request, items, etc.) must
-    survive the resume.
+    "handoff", regardless of handoff_level. Left untouched, resuming a lead
+    just makes it silently re-pause on the next inbound message instead of
+    trying to answer. Only the sticky flag and the stale clarification
+    counter are reset here — collected fields (appointment_request, items,
+    etc.) must survive the resume. This is the legacy engines' format only
+    — v3's equivalent sticky state lives in conversation_ledgers and is
+    handled separately by _reset_v3_ledger_if_applicable.
     """
-    lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     metadata = dict(lead.get("metadata") or {})
     for key in ("conversation_state", "vitoria_state"):
         cart_state = metadata.get(key)
@@ -229,16 +245,55 @@ def _cleared_conversation_state_metadata(lead_ref: int) -> Optional[dict]:
     return None
 
 
-def resume_lead(lead_ref: int) -> bool:
-    update_payload: dict = {"ai_paused": False}
+def _reset_v3_ledger_if_applicable(lead_ref: int, lead: dict) -> None:
+    """Clear the v3 branch anchor so a resumed lead re-classifies fresh.
+
+    conversation_facts (name, vehicle model, etc.) are left untouched --
+    only conversation_ledgers.active_branch_node_id and
+    asked_question_node_ids are cleared. Without this, a branch whose
+    handoff_rule keeps matching (e.g. qualification_complete stays true
+    because the facts are still there) would re-authorize handoff on the
+    very next inbound message, immediately re-pausing the lead right after
+    "Reativar IA".
+    """
+    persona_id = lead.get("persona_id")
+    if not persona_id:
+        return
     try:
-        cleared_metadata = _cleared_conversation_state_metadata(lead_ref)
-        if cleared_metadata is not None:
-            update_payload["metadata"] = cleared_metadata
+        binding = supabase_client.get_workflow_binding_by_id(lead.get("channel_binding_id"))
+        if not graph_agent_runtime_v3.binding_uses_v3(binding):
+            return
+        supabase_client.reset_conversation_ledger_branch_v3(
+            persona_id=persona_id, lead_ref=lead_ref
+        )
+    except Exception as exc:
+        logger.warning("resume_lead v3 ledger reset failed: %s", exc)
+
+
+def resume_lead(lead_ref: int) -> bool:
+    update_payload: dict = {"handoff_level": "none"}
+    lead: Optional[dict] = None
+    try:
+        lead = supabase_client.get_lead_by_ref(lead_ref)
     except Exception as exc:
         # Best-effort: a lookup failure must not block the resume itself,
         # it just means the sticky flag (if any) won't be cleared this time.
-        logger.warning("resume_lead conversation-state lookup failed: %s", exc)
+        logger.warning("resume_lead lead lookup failed: %s", exc)
+    if lead:
+        try:
+            metadata = _cleared_conversation_state_metadata(lead)
+            if metadata is None:
+                metadata = dict(lead.get("metadata") or {})
+            # A resumed lead may still be leaning on facts collected before
+            # this pause (name, vehicle, service) that could be stale by
+            # now -- the next reply must confirm them instead of silently
+            # assuming they still hold. Consumed and cleared by
+            # graph_agent_runtime_v3.build_context on the next turn.
+            metadata["pending_reconfirmation"] = True
+            update_payload["metadata"] = metadata
+        except Exception as exc:
+            logger.warning("resume_lead conversation-state clearing failed: %s", exc)
+        _reset_v3_ledger_if_applicable(lead_ref, lead)
     try:
         supabase_client.update_lead(lead_ref, update_payload)
     except Exception as exc:
@@ -249,7 +304,7 @@ def resume_lead(lead_ref: int) -> bool:
         if requeued:
             logger.info("resume_lead requeued %d waiting_human message(s)", requeued)
     except Exception as exc:
-        # ai_paused is already cleared; a requeue failure must not be
+        # handoff_level is already cleared; a requeue failure must not be
         # reported as a failed resume, just logged for follow-up.
         logger.warning("resume_lead requeue failed: %s", exc)
     return True

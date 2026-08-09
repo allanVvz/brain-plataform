@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import ValidationError
@@ -172,6 +173,76 @@ def _source_message_id(messages: list[dict[str, Any]]) -> str:
         if str(message.get("role") or "") == "user" or str(message.get("sender_type") or "") == "lead":
             return str(message.get("message_id") or message.get("external_message_id") or "")
     return ""
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _format_time_gap(delta_seconds: float) -> str:
+    if delta_seconds < 60:
+        return "poucos instantes atrás"
+    if delta_seconds < 3600:
+        minutes = int(delta_seconds // 60)
+        return f"{minutes} minuto{'s' if minutes != 1 else ''} atrás"
+    if delta_seconds < 86400:
+        hours = int(delta_seconds // 3600)
+        return f"{hours} hora{'s' if hours != 1 else ''} atrás"
+    days = int(delta_seconds // 86400)
+    return f"há {days} dia{'s' if days != 1 else ''}"
+
+
+def _time_since_last_client_message(
+    messages: list[dict[str, Any]], current_message_id: str | None
+) -> str | None:
+    """Human-readable gap since the client's previous message, computed in
+    Python (never left for the model to work out from raw ISO timestamps --
+    models are unreliable at date arithmetic).
+    """
+    for message in reversed(messages):
+        is_client = (
+            str(message.get("role") or "") == "user"
+            or str(message.get("sender_type") or "") == "lead"
+        )
+        message_id = str(message.get("message_id") or message.get("external_message_id") or "")
+        if not is_client or (current_message_id and message_id == str(current_message_id)):
+            continue
+        sent_at = _parse_timestamp(message.get("created_at"))
+        if not sent_at:
+            return None
+        delta = (datetime.now(timezone.utc) - sent_at).total_seconds()
+        return _format_time_gap(max(0.0, delta))
+    return None
+
+
+def _known_facts_payload(
+    facts: dict[str, Any], current_message_id: str | None
+) -> list[dict[str, Any]]:
+    """Every resolved fact (not just the active branch's own fields),
+    tagged with whether it was confirmed in this exact turn ("esta_conversa")
+    or is being carried over from an earlier one ("anterior") -- so the
+    model can reference known context from other branches/sessions (e.g. a
+    previously known service when the current branch is a complaint) while
+    knowing which facts it should confirm rather than silently assume.
+    """
+    payload = []
+    for key, fact in (facts or {}).items():
+        if not isinstance(fact, dict) or fact.get("status") != "known":
+            continue
+        source_id = str(fact.get("source_message_id") or "")
+        origem = (
+            "esta_conversa"
+            if current_message_id and source_id == str(current_message_id)
+            else "anterior"
+        )
+        payload.append({"chave": key, "valor": fact.get("value"), "origem": origem})
+    return payload
 
 
 def _mmr(candidates: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
@@ -444,7 +515,36 @@ def build_context(
         "formulação a cada turno, mesmo quando a pergunta de fundo "
         "(next_question_node_id) continuar a mesma. Peça no máximo uma "
         "informação pendente por mensagem, salvo duas informações muito "
-        "relacionadas."
+        "relacionadas.\n\n"
+
+        "handoff_requested só pode ser true quando TODOS os campos "
+        "obrigatórios do galho atual já estão em factual_ledger (nenhum "
+        "campo pendente restante) -- nunca proponha handoff assim que colher "
+        "só o primeiro campo (por exemplo, o nome) se o galho ainda exigir "
+        "outros campos depois dele (por exemplo, o relato de uma "
+        "reclamação). Depois de colher um campo, a próxima ação é sempre "
+        "perguntar o próximo campo pendente do galho -- nunca encerrar o "
+        "turno oferecendo encaminhamento antes disso.\n\n"
+
+        "tempo_desde_ultima_mensagem indica quanto tempo se passou desde a "
+        "última mensagem do cliente. Se for mais de ~1 hora, trate a nova "
+        "mensagem como o início de uma conversa nova, não como continuação "
+        "direta -- não assuma que o assunto ou a urgência de antes ainda "
+        "valem, especialmente se o assunto mudou (ex.: uma reclamação depois "
+        "de um agendamento já concluído).\n\n"
+
+        "fatos_conhecidos lista tudo que já se sabe sobre esse cliente, cada "
+        "um com origem 'esta_conversa' (extraído agora) ou 'anterior' "
+        "(já registrado de antes). Você pode usar um fato 'anterior' para "
+        "personalizar a conversa (ex.: perguntar se uma reclamação tem a ver "
+        "com o serviço que ele já fez), mas sempre confirme esse fato com o "
+        "cliente antes de seguir em frente com base nele -- nunca assuma "
+        "silenciosamente que uma informação antiga ainda vale (o veículo "
+        "pode ter mudado, o interesse pode ser outro). Isso vale ainda mais "
+        "quando reconfirmacao_pendente for true (a IA acabou de ser "
+        "reativada por um humano): a primeira resposta deve confirmar "
+        "explicitamente os dados relevantes já conhecidos antes de "
+        "prosseguir."
     )
     return ConversationContext(
         persona_slug=persona_slug, agent_slug=str((persona.get("config") or {}).get("agent_slug") or "agent"),
@@ -463,6 +563,9 @@ def build_context(
         active_path_checksum=((document.get("coordinates") or {}).get(active_branch) or {}).get("path_checksum"),
         branch_node_ids=contract.get("closure_node_ids") or [], graph_contract=contract,
         publication_id=publication["id"], runtime_version=RUNTIME_VERSION, retrieval_trace=trace,
+        known_facts=_known_facts_payload(ledger.get("facts") or {}, message_id),
+        time_since_last_client_message=_time_since_last_client_message(messages, message_id),
+        pending_reconfirmation=bool((lead.get("metadata") or {}).get("pending_reconfirmation")),
     )
 
 

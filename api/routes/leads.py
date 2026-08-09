@@ -1107,3 +1107,26 @@ def resume_ai(lead_ref: int, request: Request):
         source="leads.resume_ai",
     )
     return {"ok": True, "lead_ref": lead_ref, "ai_paused": False}
+
+
+@router.post("/{lead_ref}/acknowledge-handoff")
+def acknowledge_handoff(lead_ref: int, request: Request):
+    """Clear a 'partial' handoff flag once a human has reviewed it.
+
+    Unlike /resume-ai, a partial handoff never stopped the AI -- there's
+    nothing to requeue, just the flag to clear.
+    """
+    lead = supabase_client.get_lead_by_ref(lead_ref)
+    if lead and lead.get("persona_id"):
+        auth_service.assert_persona_access(request, persona_id=lead.get("persona_id"))
+    ok = agents_service.acknowledge_partial_handoff(lead_ref)
+    if not ok:
+        raise HTTPException(500, "Falha ao confirmar handoff")
+    event_emitter.emit(
+        "lead.handoff_acknowledged",
+        entity_type="lead",
+        entity_id=str(lead_ref),
+        payload={"by": "manual"},
+        source="leads.acknowledge_handoff",
+    )
+    return {"ok": True, "lead_ref": lead_ref, "handoff_level": "none"}

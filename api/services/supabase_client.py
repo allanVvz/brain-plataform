@@ -858,6 +858,18 @@ def _sort_messages_for_chat(rows: list) -> list:
     return sorted(rows, key=key)
 
 
+def backdate_lead_messages(lead_ref: int, hours: float) -> int:
+    """Test-only: shift a lead's messages.created_at backward by N hours.
+
+    Used by the WA Validator to simulate a genuine time gap between a
+    scripted phase and a later one (see migration 104).
+    """
+    result = get_client().rpc(
+        "backdate_lead_messages", {"p_lead_ref": lead_ref, "p_hours": hours}
+    ).execute()
+    return int(getattr(result, "data", 0) or 0)
+
+
 def _normalize_message_row(row: dict) -> dict:
     normalized = dict(row or {})
     if "texto" not in normalized and normalized.get("content") is not None:
@@ -4112,6 +4124,17 @@ def commit_graph_turn_v3(**payload: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def reset_conversation_ledger_branch_v3(*, persona_id: str, lead_ref: int) -> dict:
+    result = get_client().rpc(
+        "reset_conversation_ledger_branch_v3",
+        {"p_persona_id": persona_id, "p_lead_ref": lead_ref},
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
 def find_knowledge_rag_entry_by_slug(
     *,
     persona_id: str,
@@ -4712,9 +4735,13 @@ def set_lead_buffer_waiting_human(lead_ref: int) -> None:
     )
 
 
-def handoff_whatsapp_lead(lead_ref: int) -> None:
-    """Atomically pause AI and quarantine queued work for a human operator."""
-    _execute_with_retry(get_client().rpc("handoff_whatsapp_lead", {"p_lead_ref": lead_ref}))
+def handoff_whatsapp_lead(lead_ref: int, *, level: str = "full") -> None:
+    """Atomically set handoff_level and (for level='full') quarantine queued work."""
+    _execute_with_retry(
+        get_client().rpc(
+            "handoff_whatsapp_lead", {"p_lead_ref": lead_ref, "p_level": level}
+        )
+    )
 
 
 def requeue_waiting_human_whatsapp_buffer(lead_ref: int) -> int:
@@ -4735,8 +4762,13 @@ def handoff_whatsapp_lead_state(
     *,
     metadata: dict,
     stage: str,
+    level: str = "full",
 ) -> None:
-    """Atomically persist the cart/stage and quarantine queued AI work."""
+    """Atomically persist the cart/stage and set handoff_level.
+
+    level='partial' keeps the lead's inbound lead_buffer rows claimable (the
+    AI keeps running); only level='full' quarantines them as waiting_human.
+    """
     _execute_with_retry(
         get_client().rpc(
             "handoff_whatsapp_lead_state",
@@ -4744,6 +4776,7 @@ def handoff_whatsapp_lead_state(
                 "p_lead_ref": lead_ref,
                 "p_metadata": metadata,
                 "p_stage": stage,
+                "p_level": level,
             },
         )
     )

@@ -238,6 +238,8 @@ export const api = {
   }) => req<any>(`/leads/${leadRef}`, { method: "PATCH", body: JSON.stringify(body) }),
   pauseAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/pause-ai`, { method: "POST" }),
   resumeAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/resume-ai`, { method: "POST" }),
+  acknowledgeHandoff: (leadRef: number) =>
+    req<{ ok: boolean; handoff_level: string }>(`/leads/${leadRef}/acknowledge-handoff`, { method: "POST" }),
   messages: (leadId: string) => req<any[]>(`/messages/${leadId}`),
   messagesByRef: (
     leadRef: number,
@@ -337,6 +339,11 @@ export const api = {
   portalResumeAi: (slug: string, leadRef: number) =>
     req<{ ok: boolean; ai_paused: boolean }>(
       `/portal/leads/${leadRef}/ai/resume?${personaQuery(slug)}`,
+      { method: "POST" },
+    ),
+  portalAcknowledgeHandoff: (slug: string, leadRef: number) =>
+    req<{ ok: boolean; handoff_level: string }>(
+      `/portal/leads/${leadRef}/ai/acknowledge?${personaQuery(slug)}`,
       { method: "POST" },
     ),
   portalSendMessage: (slug: string, body: { lead_id: number; client_message_id: string; text: string }) =>

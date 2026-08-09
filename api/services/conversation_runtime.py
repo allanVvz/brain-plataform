@@ -1926,12 +1926,15 @@ def commit(
             and fact.get("status") in {"known", "unknown", "declined"}
         )
         missing = list(response.proof.get("missing_fields") or [])
+        required_total = int(response.proof.get("required_field_count") or 0)
         qualified_stage = decision.lead_stage
         qualification = {
             "version": graph_agent_runtime_v3.RUNTIME_VERSION,
             "complete": not missing,
             "resolved_fields": resolved,
             "missing_fields": missing,
+            "required_field_count": required_total,
+            "resolved_required_count": max(0, required_total - len(missing)),
             "source_evidence_node_ids": list(decision.evidence_node_ids),
             "stage": qualified_stage,
             "stage_source": "graph_contract",
@@ -1967,6 +1970,17 @@ def commit(
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },
     }
+    # pending_reconfirmation (set by agents_service.resume_lead) only
+    # governs the one turn right after a manual resume -- consumed by
+    # build_context/the reply prompt this turn, then cleared here so it
+    # doesn't linger forever.
+    metadata.pop("pending_reconfirmation", None)
+    if response.handoff_required and decision.handoff_reason:
+        # Computed every handoff-authorizing turn but never persisted
+        # before -- the dashboard had no way to show *why* a lead needed
+        # attention (complaint vs. explicit human request vs. qualified
+        # sale), only that it did.
+        metadata["handoff_reason"] = decision.handoff_reason
     if (
         context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION
         and response.cart_state.get("business_model") != "appointment"
@@ -2051,6 +2065,27 @@ def commit(
         facts = response.cart_state.get("facts") or {}
         customer_name = (facts.get("nome_cliente") or {}).get("value")
         service_interest = (facts.get("servico") or {}).get("value")
+
+        def _is_known(fact: Any) -> bool:
+            return (
+                bool(fact)
+                and str(fact.get("status")) == "known"
+                and fact.get("value") not in (None, "")
+            )
+
+        # A handoff-authorizing turn only silences the AI outright (level=
+        # "full") once the lead's minimum registration -- name + service --
+        # is known, this turn or from an earlier session (facts persist for
+        # the lead's whole lifetime, see conversation_ledgers). Otherwise
+        # it's "partial": the lead is flagged for eventual human attention,
+        # but lead_buffer keeps flowing so the SDR can keep collecting what's
+        # missing instead of going silent on a customer who, say, wants to
+        # complain but hasn't given their name yet.
+        handoff_level = (
+            "full"
+            if (_is_known(facts.get("nome_cliente")) and _is_known(facts.get("servico")))
+            else "partial"
+        )
     else:
         customer_name = (
             appointment_request.get("nome_cliente")
@@ -2058,6 +2093,10 @@ def commit(
             else response.cart_state.get("customer_name")
         )
         service_interest = appointment_request.get("servico") or decision.product_slug
+        # The legacy engines' own handoff triggers (e.g. intent ==
+        # "confirm_order") already only fire once qualification is fully
+        # complete, so this always resolves to "full" -- unchanged behavior.
+        handoff_level = "full"
     if customer_name:
         lead_update["nome"] = str(customer_name).strip()
     if service_interest:
@@ -2067,6 +2106,7 @@ def commit(
             lead_ref,
             metadata=metadata,
             stage=qualified_stage,
+            level=handoff_level,
         )
         if customer_name or service_interest:
             supabase_client.update_lead(lead_ref, lead_update)
@@ -2187,6 +2227,36 @@ def commit(
 
     graph_turn = None
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+        reset_facts: list[dict[str, Any]] = []
+        active_branch = response.cart_state.get("active_branch_node_id")
+        if handoff_level == "full" and active_branch:
+            # A field owned by the active branch itself (as opposed to a
+            # shared, persona-wide owner like name/vehicle/service)
+            # represents one-time intake for THIS incident -- e.g. a
+            # complaint's relato. Left "known" forever, it would silently
+            # satisfy a brand new incident from the same returning lead
+            # the next time this branch is entered, skipping straight to
+            # handoff without ever asking what's wrong this time. Resetting
+            # it to a non-"known" status the moment its handoff completes
+            # makes pending_fields() treat it as unresolved again.
+            publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
+            branch_contract = ((publication.get("document_json") or {}).get("branch_contracts") or {}).get(active_branch) or {}
+            branch_facts = response.cart_state.get("facts") or {}
+            reset_facts = [
+                {
+                    "field_key": field["key"],
+                    "owner_node_id": active_branch,
+                    "status": "invalid",
+                    "value": None,
+                    "source_message_id": f"handoff-reset:{correlation_id}",
+                    "evidence_span": "",
+                    "confidence": 0.0,
+                }
+                for field in branch_contract.get("fields") or []
+                if field.get("owner_node_id") == active_branch
+                and isinstance(branch_facts.get(field.get("key")), dict)
+                and branch_facts[field["key"]].get("status") == "known"
+            ]
         graph_turn = supabase_client.commit_graph_turn_v3(
             p_canonical_inbound_id=str(inbound_buffer_id),
             p_persona_id=str(lead.get("persona_id")),
@@ -2196,7 +2266,10 @@ def commit(
             p_active_branch_node_id=response.cart_state.get("active_branch_node_id"),
             p_asked_question_node_ids=response.cart_state.get("asked_question_node_ids") or [],
             p_expected_revision=int(context.retrieval_trace.get("ledger_revision") or 0),
-            p_facts=(response.proof.get("accepted_facts") or []) if response.proof.get("valid") else [],
+            p_facts=[
+                *((response.proof.get("accepted_facts") or []) if response.proof.get("valid") else []),
+                *reset_facts,
+            ],
             p_retrieval_trace=context.retrieval_trace,
             p_model_proposal=(
                 response.proposal.model_dump(mode="json") if response.proposal

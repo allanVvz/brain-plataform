@@ -453,6 +453,38 @@ def test_qualification_complete_is_derived_not_validated_against_the_model():
     assert proof2["qualification_complete"] is False
 
 
+def test_required_field_count_matches_applicable_required_fields():
+    """required_field_count is the denominator for the v3 qualification
+    progress score (lead_qualification._v3_progress_score) -- it must count
+    every applicable required field regardless of resolution, staying
+    consistent with pending_fields() across partially- and fully-filled
+    facts (required_field_count == len(pending_fields) + resolved count).
+    """
+    document = compiled_fixture()
+    contract = document["branch_contracts"]["branch:a"]
+
+    empty_facts: dict = {}
+    assert graph_proof_checker_v3.required_field_count(contract, empty_facts) == 1
+    pending = graph_proof_checker_v3.pending_fields(contract, empty_facts)
+    assert len(pending) == 1
+
+    resolved_facts = {
+        "metragem": {"status": "known", "value": 20, "owner_node_id": "branch:a"},
+    }
+    assert graph_proof_checker_v3.required_field_count(contract, resolved_facts) == 1
+    assert graph_proof_checker_v3.pending_fields(contract, resolved_facts) == []
+
+
+def test_required_field_count_flows_through_check_result():
+    document = compiled_fixture()
+    value = proposal(document, branch_action="keep", branch_evidence_span="", extracted_facts=[{
+        "field_key": "metragem", "owner_node_id": "branch:a", "status": "known",
+        "value": 20, "source_message_id": "msg-1", "evidence_span": "20", "confidence": 1,
+    }], next_question_node_id=None, cited_node_ids=["branch:a"], cited_chunk_ids=[])
+    proof = check(document, value, active="branch:a", message="20")
+    assert proof["required_field_count"] == 1
+
+
 def test_fallback_retrieval_branch_never_leaves_a_greeting_without_context():
     """Regression test for the branch-less-turn crash (2026-08-08 report).
 

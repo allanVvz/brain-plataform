@@ -255,7 +255,7 @@ async def process(
         # responde via dashboard. Manual resume via /leads/{id}/resume-ai.
         if ctx.lead.ref:
             try:
-                supabase_client.update_lead(ctx.lead.ref, {"ai_paused": True})
+                supabase_client.update_lead(ctx.lead.ref, {"handoff_level": "full"})
             except Exception as exc:
                 logger.warning("auto-pause update_lead failed: %s", exc)
         try:

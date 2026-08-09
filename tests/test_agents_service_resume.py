@@ -6,7 +6,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "api"))
 
-from services import agents_service, supabase_client
+from services import agents_service, graph_agent_runtime_v3, supabase_client
+
+
+def test_pause_lead_writes_handoff_level_full(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        supabase_client, "update_lead",
+        lambda lead_ref, payload: calls.append((lead_ref, payload)),
+    )
+    assert agents_service.pause_lead(42) is True
+    assert calls == [(42, {"handoff_level": "full"})]
+
+
+def test_acknowledge_partial_handoff_writes_handoff_level_none(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        supabase_client, "update_lead",
+        lambda lead_ref, payload: calls.append((lead_ref, payload)),
+    )
+    assert agents_service.acknowledge_partial_handoff(42) is True
+    assert calls == [(42, {"handoff_level": "none"})]
 
 
 def test_resume_lead_requeues_waiting_human_messages(monkeypatch):
@@ -26,7 +46,11 @@ def test_resume_lead_requeues_waiting_human_messages(monkeypatch):
 
     assert agents_service.resume_lead(42) is True
     assert calls == [
-        ("update_lead", 42, {"ai_paused": False}),
+        (
+            "update_lead",
+            42,
+            {"handoff_level": "none", "metadata": {"pending_reconfirmation": True}},
+        ),
         ("requeue", 42),
     ]
 
@@ -44,8 +68,8 @@ def test_resume_lead_still_succeeds_if_requeue_fails(monkeypatch):
         supabase_client, "requeue_waiting_human_whatsapp_buffer", _boom
     )
 
-    # ai_paused was already cleared; a requeue failure must not surface as
-    # a failed resume, only get logged for follow-up.
+    # handoff_level was already cleared; a requeue failure must not surface
+    # as a failed resume, only get logged for follow-up.
     assert agents_service.resume_lead(42) is True
 
 
@@ -95,7 +119,7 @@ def test_resume_lead_clears_sticky_handoff_flag_in_conversation_state(monkeypatc
             "update_lead",
             42,
             {
-                "ai_paused": False,
+                "handoff_level": "none",
                 "metadata": {
                     "conversation_state": {
                         "conversation_state": "",
@@ -103,6 +127,7 @@ def test_resume_lead_clears_sticky_handoff_flag_in_conversation_state(monkeypatc
                         "appointment_request": {"nome_cliente": "Allan"},
                     },
                     "other_field": "kept",
+                    "pending_reconfirmation": True,
                 },
             },
         ),
@@ -132,9 +157,10 @@ def test_resume_lead_clears_sticky_handoff_flag_in_legacy_vitoria_state(monkeypa
     assert calls[0][2]["metadata"]["vitoria_state"]["conversation_state"] == ""
     assert calls[0][2]["metadata"]["vitoria_state"]["clarification_attempts"] == 0
     assert calls[0][2]["metadata"]["vitoria_state"]["items"] == [{"product_slug": "x"}]
+    assert calls[0][2]["metadata"]["pending_reconfirmation"] is True
 
 
-def test_resume_lead_leaves_metadata_untouched_when_not_handed_off(monkeypatch):
+def test_resume_lead_marks_pending_reconfirmation_when_not_handed_off(monkeypatch):
     lead = {"metadata": {"conversation_state": {"conversation_state": "collecting"}}}
     monkeypatch.setattr(supabase_client, "get_lead_by_ref", lambda lead_ref: lead)
     calls = []
@@ -147,7 +173,19 @@ def test_resume_lead_leaves_metadata_untouched_when_not_handed_off(monkeypatch):
     )
 
     assert agents_service.resume_lead(42) is True
-    assert calls == [("update_lead", 42, {"ai_paused": False})]
+    assert calls == [
+        (
+            "update_lead",
+            42,
+            {
+                "handoff_level": "none",
+                "metadata": {
+                    "conversation_state": {"conversation_state": "collecting"},
+                    "pending_reconfirmation": True,
+                },
+            },
+        ),
+    ]
 
 
 def test_resume_lead_tolerates_lead_lookup_failure(monkeypatch):
@@ -165,6 +203,70 @@ def test_resume_lead_tolerates_lead_lookup_failure(monkeypatch):
     )
 
     # A broken lookup must not block the resume — it only means the sticky
-    # flag (if any) won't be cleared this time.
+    # flag (if any) won't be cleared this time, and no v3 ledger reset is
+    # attempted (no lead to check the binding of).
     assert agents_service.resume_lead(42) is True
-    assert calls == [("update_lead", 42, {"ai_paused": False})]
+    assert calls == [("update_lead", 42, {"handoff_level": "none"})]
+
+
+def test_resume_lead_resets_v3_ledger_when_binding_uses_v3(monkeypatch):
+    lead = {"metadata": {}, "persona_id": "persona-1", "channel_binding_id": "binding-1"}
+    monkeypatch.setattr(supabase_client, "get_lead_by_ref", lambda lead_ref: lead)
+    monkeypatch.setattr(
+        supabase_client, "get_workflow_binding_by_id",
+        lambda binding_id: {"metadata": {"runtime_version": graph_agent_runtime_v3.RUNTIME_VERSION}},
+    )
+    reset_calls = []
+    monkeypatch.setattr(
+        supabase_client, "reset_conversation_ledger_branch_v3",
+        lambda *, persona_id, lead_ref: reset_calls.append((persona_id, lead_ref)),
+    )
+    monkeypatch.setattr(supabase_client, "update_lead", lambda lead_ref, payload: None)
+    monkeypatch.setattr(
+        supabase_client, "requeue_waiting_human_whatsapp_buffer", lambda lead_ref: 0
+    )
+
+    assert agents_service.resume_lead(42) is True
+    assert reset_calls == [("persona-1", 42)]
+
+
+def test_resume_lead_skips_v3_ledger_reset_for_non_v3_binding(monkeypatch):
+    lead = {"metadata": {}, "persona_id": "persona-1", "channel_binding_id": "binding-1"}
+    monkeypatch.setattr(supabase_client, "get_lead_by_ref", lambda lead_ref: lead)
+    monkeypatch.setattr(
+        supabase_client, "get_workflow_binding_by_id",
+        lambda binding_id: {"metadata": {}},
+    )
+    reset_calls = []
+    monkeypatch.setattr(
+        supabase_client, "reset_conversation_ledger_branch_v3",
+        lambda *, persona_id, lead_ref: reset_calls.append((persona_id, lead_ref)),
+    )
+    monkeypatch.setattr(supabase_client, "update_lead", lambda lead_ref, payload: None)
+    monkeypatch.setattr(
+        supabase_client, "requeue_waiting_human_whatsapp_buffer", lambda lead_ref: 0
+    )
+
+    assert agents_service.resume_lead(42) is True
+    assert reset_calls == []
+
+
+def test_resume_lead_tolerates_v3_ledger_reset_failure(monkeypatch):
+    lead = {"metadata": {}, "persona_id": "persona-1", "channel_binding_id": "binding-1"}
+    monkeypatch.setattr(supabase_client, "get_lead_by_ref", lambda lead_ref: lead)
+
+    def _boom(binding_id):
+        raise RuntimeError("binding lookup unavailable")
+
+    monkeypatch.setattr(supabase_client, "get_workflow_binding_by_id", _boom)
+    calls = []
+    monkeypatch.setattr(
+        supabase_client, "update_lead",
+        lambda lead_ref, payload: calls.append(("update_lead", lead_ref, payload)),
+    )
+    monkeypatch.setattr(
+        supabase_client, "requeue_waiting_human_whatsapp_buffer", lambda lead_ref: 0
+    )
+
+    assert agents_service.resume_lead(42) is True
+    assert calls and calls[0][0] == "update_lead"

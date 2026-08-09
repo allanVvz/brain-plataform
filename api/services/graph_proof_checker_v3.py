@@ -103,13 +103,25 @@ def _resolved_for_field_owner(field: dict[str, Any], fact: dict[str, Any] | None
     return field_resolved(field, fact) and bool(fact) and fact.get("owner_node_id") == field.get("owner_node_id")
 
 
-def pending_fields(contract: dict[str, Any], facts: dict[str, Any]) -> list[dict[str, Any]]:
+def _applicable_required_fields(contract: dict[str, Any], facts: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         field for field in contract.get("fields") or []
         if field.get("required", True)
         and _condition_matches(field.get("condition"), facts)
-        and not _resolved_for_field_owner(field, facts.get(field["key"]))
     ]
+
+
+def pending_fields(contract: dict[str, Any], facts: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        field for field in _applicable_required_fields(contract, facts)
+        if not _resolved_for_field_owner(field, facts.get(field["key"]))
+    ]
+
+
+def required_field_count(contract: dict[str, Any], facts: dict[str, Any]) -> int:
+    """Count of a branch's currently-applicable required fields (resolved or
+    not) -- the denominator for a 0-50% qualification progress score."""
+    return len(_applicable_required_fields(contract, facts))
 
 
 def _claim_policy(contract: dict[str, Any], claim_type: str) -> list[dict[str, Any]]:
@@ -391,6 +403,7 @@ def check(
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
         "next_question_node_id": question_id,
         "qualification_complete": not missing,
+        "required_field_count": required_field_count(contract, facts),
     }
 
 

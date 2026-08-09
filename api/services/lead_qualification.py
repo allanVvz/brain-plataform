@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from services import graph_agent_runtime_v3
+
 
 VERSION = "qualification_v1"
 MANUAL_TERMINAL_STAGES = {"fechado", "perdido"}
@@ -155,6 +157,57 @@ def calculate(
     return qualification, next_stage
 
 
+def _v3_progress_score(qualification: dict[str, Any]) -> int:
+    """0-50%, reaching exactly 50 the moment qualification_complete flips
+    true -- the same moment the graph's handoff_rule authorizes handoff.
+    """
+    if qualification.get("complete"):
+        return 50
+    total = int(qualification.get("required_field_count") or 0)
+    if total > 0:
+        resolved_count = int(qualification.get("resolved_required_count") or 0)
+    else:
+        # Leads persisted before this field was added never got
+        # required_field_count/resolved_required_count -- fall back to the
+        # coarser field-key counts that were always present so old leads
+        # still show a proportional score instead of reading 0 forever.
+        resolved_count = len(qualification.get("resolved_fields") or [])
+        total = resolved_count + len(qualification.get("missing_fields") or [])
+    if total <= 0:
+        return 0
+    return min(50, round(50 * resolved_count / total))
+
+
+def score_for_display(lead: dict[str, Any]) -> int:
+    """Single source of truth for the displayed qualification_score.
+
+    Manual pipeline stage always wins over any computed value:
+      - fechado          -> 100
+      - oportunidade     -> 75
+      - nao_qualificado  -> 0 (explicit manual disqualification)
+      - perdido          -> the score snapshotted the moment the lead was
+                             manually moved to "perdido" (a historical
+                             high-water mark, never recomputed)
+      - otherwise, v3 leads get the 0-50% branch-progress formula and
+        legacy leads keep their additive 0-100 score unchanged.
+    """
+    metadata = dict(lead.get("metadata") or {})
+    qualification = dict(metadata.get("qualification") or {})
+    stage = str(lead.get("stage") or "").strip().lower()
+    if stage == "fechado":
+        return 100
+    if stage == "oportunidade":
+        return 75
+    if stage == "nao_qualificado":
+        return 0
+    if stage == "perdido":
+        frozen = qualification.get("score_at_perdido")
+        return int(frozen) if frozen is not None else int(qualification.get("score") or 0)
+    if qualification.get("version") == graph_agent_runtime_v3.RUNTIME_VERSION:
+        return _v3_progress_score(qualification)
+    return int(qualification.get("score") or 0)
+
+
 def decorate_lead(lead: dict[str, Any]) -> dict[str, Any]:
     metadata = dict(lead.get("metadata") or {})
     qualification = dict(metadata.get("qualification") or {})
@@ -185,7 +238,7 @@ def decorate_lead(lead: dict[str, Any]) -> dict[str, Any]:
     return {
         **lead,
         "qualification": qualification,
-        "qualification_score": int(qualification.get("score") or 0),
+        "qualification_score": score_for_display(lead),
         "qualification_signals": qualification.get("signals") or [],
         "validation": {
             "is_validation": validation,

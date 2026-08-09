@@ -430,8 +430,16 @@ def update_lead(lead_id: int, body: LeadPatchBody, request: Request, persona_slu
     if body.stage and body.stage not in {item[0] for item in PIPELINE_STAGES}:
         raise HTTPException(400, "Etapa invalida.")
     metadata: dict[str, Any] | None = None
-    if body.notes is not None or body.tags is not None:
+    if body.stage == "perdido" and lead.get("stage") != "perdido":
+        # Freeze the score right before the lead goes cold -- a historical
+        # high-water mark of how far it got, not recomputed afterward and
+        # never overwritten by a later re-PATCH while already "perdido".
         metadata = dict(lead.get("metadata") or {})
+        qualification = dict(metadata.get("qualification") or {})
+        qualification["score_at_perdido"] = lead_qualification.score_for_display(lead)
+        metadata["qualification"] = qualification
+    if body.notes is not None or body.tags is not None:
+        metadata = dict(metadata if metadata is not None else (lead.get("metadata") or {}))
         portal = dict(metadata.get("portal") or {})
         if body.notes is not None:
             portal["notes"] = body.notes
@@ -475,6 +483,21 @@ def pause_ai(lead_id: int, request: Request, persona_slug: str = Query(...)):
 @router.post("/leads/{lead_id}/ai/resume")
 def resume_ai(lead_id: int, request: Request, persona_slug: str = Query(...)):
     return _set_ai(lead_id, request, persona_slug, False)
+
+
+@router.post("/leads/{lead_id}/ai/acknowledge")
+def acknowledge_handoff(lead_id: int, request: Request, persona_slug: str = Query(...)):
+    """Clear a 'partial' handoff flag once a human has reviewed it.
+
+    Unlike /ai/resume, a partial handoff never stopped the AI -- there's
+    nothing to requeue, just the flag to clear.
+    """
+    persona = _persona(persona_slug, request, "edit")
+    _lead(lead_id, persona["id"])
+    ok = agents_service.acknowledge_partial_handoff(lead_id)
+    if not ok:
+        raise HTTPException(500, "Falha ao confirmar handoff.")
+    return {"ok": True, "lead_id": lead_id, "handoff_level": "none"}
 
 
 @router.post("/leads/{lead_id}/handoff")

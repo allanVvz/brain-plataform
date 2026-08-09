@@ -18,6 +18,7 @@ interface Lead {
   stage: string | null;
   ai_enabled: boolean | null;
   ai_paused: boolean | null;
+  handoff_level?: "none" | "partial" | "full" | null;
   ultima_mensagem: string | null;
   last_update: string | null;
   updated_at: string | null;
@@ -2087,9 +2088,13 @@ export function MessagesLayout({
     setPausing(true);
     try {
       const current = leads.find((l) => l.id === selectedId);
-      if (current?.ai_paused) {
+      const level = current?.handoff_level ?? (current?.ai_paused ? "full" : "none");
+      if (level === "full") {
         if (isPortal) await api.portalResumeAi(portalSlug!, selectedId);
         else await api.resumeAi(selectedId);
+      } else if (level === "partial") {
+        if (isPortal) await api.portalAcknowledgeHandoff(portalSlug!, selectedId);
+        else await api.acknowledgeHandoff(selectedId);
       } else if (isPortal) await api.portalPauseAi(portalSlug!, selectedId);
       else await api.pauseAi(selectedId);
       await refreshSelectedLead(selectedId);
@@ -2099,6 +2104,11 @@ export function MessagesLayout({
       setPausing(false);
     }
   }, [selectedId, pausing, leads, refreshSelectedLead, isPortal, portalSlug]);
+
+  const selectedHandoffLevel: "none" | "partial" | "full" = useMemo(
+    () => selectedLead?.handoff_level ?? (selectedLead?.ai_paused ? "full" : "none"),
+    [selectedLead],
+  );
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -2349,15 +2359,35 @@ export function MessagesLayout({
                 type="button"
                 onClick={togglePause}
                 disabled={pausing}
-                title={selectedLead.ai_paused ? "IA pausada — clique para retomar" : "IA ativa — clique para pausar"}
+                title={
+                  selectedHandoffLevel === "full"
+                    ? "IA pausada — clique para retomar"
+                    : selectedHandoffLevel === "partial"
+                    ? `IA ainda respondendo — precisa de atenção${selectedLead.metadata?.handoff_reason ? ` (${selectedLead.metadata.handoff_reason})` : ""}. Clique para confirmar.`
+                    : "IA ativa — clique para pausar"
+                }
                 className={`text-[10px] font-medium px-2.5 py-1 rounded-full shrink-0 border transition disabled:opacity-50 ${
-                  selectedLead.ai_paused
+                  selectedHandoffLevel === "full"
+                    ? "border-red-400/60 bg-red-500/25 text-red-300 hover:bg-red-500/35"
+                    : selectedHandoffLevel === "partial"
                     ? "border-amber-400/60 bg-amber-500/25 text-amber-300 hover:bg-amber-500/35"
                     : "border-emerald-400/50 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
                 }`}
               >
-                <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle ${selectedLead.ai_paused ? "bg-amber-400" : "bg-emerald-400"}`} />
-                {selectedLead.ai_paused ? "IA pausada · humano" : "IA ativa"}
+                <span
+                  className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle ${
+                    selectedHandoffLevel === "full"
+                      ? "bg-red-400"
+                      : selectedHandoffLevel === "partial"
+                      ? "bg-amber-400"
+                      : "bg-emerald-400"
+                  }`}
+                />
+                {selectedHandoffLevel === "full"
+                  ? "IA pausada · humano"
+                  : selectedHandoffLevel === "partial"
+                  ? "Atenção · IA respondendo"
+                  : "IA ativa"}
               </button>
 
               {/* Toggle the right-hand knowledge sidebar. */}
@@ -2467,8 +2497,10 @@ export function MessagesLayout({
                 <div className="text-[11px] text-obs-faint min-w-0 truncate">
                   {sendError ? (
                     <span className="text-red-400">erro: {sendError}</span>
-                  ) : selectedLead.ai_paused ? (
+                  ) : selectedHandoffLevel === "full" ? (
                     <span className="text-amber-300/80">IA pausada — só você responde até retomar.</span>
+                  ) : selectedHandoffLevel === "partial" ? (
+                    <span className="text-amber-300/80">IA ainda respondendo — sinalizado para atenção humana.</span>
                   ) : (
                     <span>insere no banco · dispara webhook do agente</span>
                   )}
