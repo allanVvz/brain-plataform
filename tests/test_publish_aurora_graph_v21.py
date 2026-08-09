@@ -128,9 +128,14 @@ def test_non_sales_service_branches_are_reachable_with_authorized_handoff() -> N
     intent -- only sellable "product" nodes were branch anchors, and the
     only published handoff rule required qualification_complete (a sales
     concept). Both intents now publish as "service" branch anchors with
-    their own branch-scoped handoff rule (condition: null), so a request is
-    authorized as soon as the model recognizes the intent, without forcing
-    a car-detailing qualification.
+    their own branch-scoped handoff rule, gated on qualification_complete
+    just like the sales rule -- but each branch's own qualification is tiny
+    (name only, or name + a free-text complaint). An earlier version of this
+    rule used condition: null (always-authorized), which live-tested as a
+    real bug: it forced handoff_requested=True before the model had even
+    asked for the customer's name, which the model correctly didn't do yet
+    on turn one, and the proof checker rejected the turn
+    (handoff_required_by_rule).
     """
     graph = graph_markdown.canonicalize_graph(build_graph())
     document = _compile(graph)
@@ -142,7 +147,7 @@ def test_non_sales_service_branches_are_reachable_with_authorized_handoff() -> N
     assert [field["key"] for field in handoff_contract["fields"]] == ["nome_cliente"]
     assert all(field["question_node_id"] for field in handoff_contract["fields"])
     handoff_rules_by_id = {rule["node_id"]: rule for rule in handoff_contract["handoff_rules"]}
-    assert handoff_rules_by_id["aurora-rule-handoff-humano"]["condition"] is None
+    assert handoff_rules_by_id["aurora-rule-handoff-humano"]["condition"] == "qualification_complete"
 
     complaint_contract = document["branch_contracts"]["aurora-service-reclamacao"]
     assert {field["key"] for field in complaint_contract["fields"]} == {
@@ -154,13 +159,14 @@ def test_non_sales_service_branches_are_reachable_with_authorized_handoff() -> N
     )
     assert reclamacao_field["owner_node_id"] == "aurora-service-reclamacao"
     complaint_rules_by_id = {rule["node_id"]: rule for rule in complaint_contract["handoff_rules"]}
-    assert complaint_rules_by_id["aurora-rule-reclamacao"]["condition"] is None
+    assert complaint_rules_by_id["aurora-rule-reclamacao"]["condition"] == "qualification_complete"
 
 
 def test_branch_scoped_handoff_rules_do_not_leak_into_unrelated_branches() -> None:
-    """The two new handoff rules use condition: null -- always-authorized --
-    so leaking into another branch's contract would wrongly let the model
-    declare handoff_requested on, say, a normal car-wash qualification.
+    """The two new handoff rules are branch-scoped (not global_context), so
+    leaking into another branch's contract would wrongly let the model
+    declare handoff_requested there once ITS OWN qualification completes --
+    a car-wash sale finishing would falsely satisfy the complaint rule too.
     aurora-rule-operation must keep reaching every branch (it's the one
     genuinely global handoff rule, gating on qualification_complete)."""
     graph = graph_markdown.canonicalize_graph(build_graph())

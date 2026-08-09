@@ -276,7 +276,7 @@
         "papel_da_ia": "Reconhecer o pedido, colher o nome do cliente e avisar que vai encaminhar para a Equipe Aurora, sem insistir em qualificação de veículo ou serviço.",
         "handoff_rule": {
           "id": "aurora-handoff-humano",
-          "condition": null,
+          "condition": "qualification_complete",
           "text_key": "atendimento_humano",
           "scope": "branch"
         },
@@ -345,7 +345,7 @@
         "papel_da_ia": "Demonstrar empatia genuína pelo transtorno, colher o relato do que aconteceu e o nome do cliente, e avisar que a Equipe Aurora vai assumir a partir daí.",
         "handoff_rule": {
           "id": "aurora-handoff-reclamacao",
-          "condition": null,
+          "condition": "qualification_complete",
           "text_key": "reclamacao_recebida",
           "scope": "branch"
         },
