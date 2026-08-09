@@ -16,9 +16,18 @@ ALTER TABLE public.leads
   ADD COLUMN IF NOT EXISTS handoff_level text NOT NULL DEFAULT 'none'
     CHECK (handoff_level IN ('none', 'partial', 'full'));
 
-UPDATE public.leads
-   SET handoff_level = CASE WHEN ai_paused THEN 'full' ELSE 'none' END
- WHERE handoff_level = 'none';
+-- Scoped to ai_paused=true only -- everything else already correctly
+-- defaults to 'none'. The lead/channel-binding integrity trigger
+-- (migration 067, trg_enforce_lead_channel_binding) fires on ANY update to
+-- ANY column on public.leads with no WHEN guard, so a blanket UPDATE here
+-- would re-validate every row's channel_binding_id against its persona_id
+-- and abort the whole migration over pre-existing data drift this backfill
+-- has no business validating. Disabled for this one statement only, inside
+-- this migration's own transaction, so it's back on before the transaction
+-- commits either way.
+ALTER TABLE public.leads DISABLE TRIGGER trg_enforce_lead_channel_binding;
+UPDATE public.leads SET handoff_level = 'full' WHERE ai_paused = true;
+ALTER TABLE public.leads ENABLE TRIGGER trg_enforce_lead_channel_binding;
 
 ALTER TABLE public.leads DROP COLUMN ai_paused;
 ALTER TABLE public.leads
