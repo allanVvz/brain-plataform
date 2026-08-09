@@ -216,6 +216,34 @@ _AGENTIC_SAFETY_INSTRUCTIONS = (
 )
 
 
+# tone/rule nodes are concatenated into every turn's system prompt
+# unconditionally (no per-query relevance filtering, unlike the RAG card
+# budgets in context_cards.py/graph_agent_runtime_v3.py) -- this budget
+# stops that block from growing without bound as operators publish more
+# tone/rule nodes. ~4 chars/token, matching the estimator used elsewhere
+# in this codebase (context_cards.py token_count).
+TONE_RULE_TOKEN_BUDGET = 1500
+
+
+def _cap_blocks_by_token_budget(blocks: list[str], budget: int, *, label: str) -> str:
+    kept: list[str] = []
+    used_tokens = 0
+    dropped = 0
+    for block in blocks:
+        estimated = max(1, len(block) // 4)
+        if kept and used_tokens + estimated > budget:
+            dropped += 1
+            continue
+        kept.append(block)
+        used_tokens += estimated
+    if dropped:
+        logger.warning(
+            "build_system_prompt: dropped %d %s block(s) past %d-token budget",
+            dropped, label, budget,
+        )
+    return "\n\n".join(kept).strip()
+
+
 def build_system_prompt(graph: Any, cards: list[Any] | None = None) -> str:
     """Compose this persona's n8n agentic system prompt from its own graph.
 
@@ -236,29 +264,35 @@ def build_system_prompt(graph: Any, cards: list[Any] | None = None) -> str:
     if cards is not None:
         persona_name = "a empresa"
         summary = ""
-        tone_text = "\n\n".join(
-            str(card.rendered_content).strip()
-            for card in cards if card.node_type == "tone"
-        ).strip()
-        rule_text = "\n\n".join(
-            str(card.rendered_content).strip()
-            for card in cards if card.node_type == "rule"
-        ).strip()
+        tone_text = _cap_blocks_by_token_budget(
+            [str(card.rendered_content).strip() for card in cards if card.node_type == "tone"],
+            TONE_RULE_TOKEN_BUDGET, label="tone",
+        )
+        rule_text = _cap_blocks_by_token_budget(
+            [str(card.rendered_content).strip() for card in cards if card.node_type == "rule"],
+            TONE_RULE_TOKEN_BUDGET, label="rule",
+        )
         persona_card = next((card for card in cards if card.node_type == "persona"), None)
         if persona_card:
             persona_name = persona_card.title
             summary = persona_card.rendered_content
     else:
-        tone_text = "\n\n".join(
-            str(node.data.get("markdown") or node.data.get("summary") or "").strip()
-            for node in graph.nodes
-            if node.node_type == "tone" and ((node.data or {}).get("markdown") or (node.data or {}).get("summary"))
-        ).strip()
-        rule_text = "\n\n".join(
-            str(node.data.get("markdown") or node.data.get("summary") or "").strip()
-            for node in graph.nodes
-            if node.node_type == "rule" and ((node.data or {}).get("markdown") or (node.data or {}).get("summary"))
-        ).strip()
+        tone_text = _cap_blocks_by_token_budget(
+            [
+                str(node.data.get("markdown") or node.data.get("summary") or "").strip()
+                for node in graph.nodes
+                if node.node_type == "tone" and ((node.data or {}).get("markdown") or (node.data or {}).get("summary"))
+            ],
+            TONE_RULE_TOKEN_BUDGET, label="tone",
+        )
+        rule_text = _cap_blocks_by_token_budget(
+            [
+                str(node.data.get("markdown") or node.data.get("summary") or "").strip()
+                for node in graph.nodes
+                if node.node_type == "rule" and ((node.data or {}).get("markdown") or (node.data or {}).get("summary"))
+            ],
+            TONE_RULE_TOKEN_BUDGET, label="rule",
+        )
 
     lines = [
         f"Voce e o agente de atendimento (SDR) de {persona_name}.",
@@ -2239,6 +2273,8 @@ def commit(
                     "graph_version": context.graph_version,
                     "graph_checksum": context.graph_checksum,
                     "evidence_node_ids": decision.evidence_node_ids,
+                    "knowledge_context": knowledge_context,
+                    "token_usage": response.token_usage,
                     "validation": True,
                 },
             },
@@ -2270,6 +2306,7 @@ def commit(
                 "graph_checksum": context.graph_checksum,
                 "evidence_node_ids": decision.evidence_node_ids,
                 "knowledge_context": knowledge_context,
+                "token_usage": response.token_usage,
             },
         )
         buffer = {

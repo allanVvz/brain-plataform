@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -18,6 +19,8 @@ from schemas.conversation import (
 )
 from services import graph_compiler_v3, graph_proof_checker_v3, supabase_client
 
+
+logger = logging.getLogger("graph_agent_runtime_v3")
 
 RUNTIME_VERSION = "graph_agent_runtime_v3"
 
@@ -656,6 +659,16 @@ def build_context(
 def decide(
     context: ConversationContext, *, model_observation: dict[str, Any] | None
 ) -> tuple[ConversationDecision, AgentResponse]:
+    decision, response = _decide(context, model_observation=model_observation)
+    token_usage = (model_observation or {}).get("token_usage")
+    if token_usage:
+        response = response.model_copy(update={"token_usage": token_usage})
+    return decision, response
+
+
+def _decide(
+    context: ConversationContext, *, model_observation: dict[str, Any] | None
+) -> tuple[ConversationDecision, AgentResponse]:
     observation = model_observation or {}
     if observation.get("contract_probe") is True:
         return (
@@ -760,6 +773,11 @@ def decide(
         })
     repair_cards: list[dict[str, Any]] = []
     if proof["repair_required"] and int(observation.get("repair_attempt") or 0) < 1:
+        logger.warning(
+            "graph proof repair triggered persona=%s lead_stage=%s branch=%s errors=%s",
+            context.persona_slug, context.cart.get("_lead_stage"),
+            proposal.branch_anchor_node_id, proof.get("errors"),
+        )
         proof["repair_contract"] = contract
         rows = supabase_client.get_graph_rag_repair_chunks(
             publication_id=publication["id"], branch_node_id=proposal.branch_anchor_node_id,

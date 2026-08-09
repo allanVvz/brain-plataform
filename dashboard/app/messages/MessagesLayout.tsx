@@ -1187,6 +1187,40 @@ function KnowledgeDetail({
   );
 }
 
+const NODE_TYPE_LABELS: Record<string, string> = {
+  persona: "Persona",
+  brand: "Marca",
+  tone: "Tom de voz",
+  rule: "Regra",
+  product: "Produto",
+  offer: "Oferta",
+  faq: "Pergunta frequente",
+  copy: "Texto",
+  campaign: "Campanha",
+  product_group: "Grupo de produtos",
+  audience: "Público",
+  asset: "Arquivo",
+  briefing: "Briefing",
+};
+
+function humanizeNodeType(nodeType: string): string {
+  return NODE_TYPE_LABELS[nodeType] || nodeType.replace(/_/g, " ");
+}
+
+// Mirrors the relevance ordering context_cards.py uses server-side
+// (rule/tone weighted above brand/persona) so the default "essential" set
+// shown before "mostrar mais" isn't an arbitrary cutoff.
+const RELATED_TYPE_ORDER = ["rule", "tone", "brand", "persona"];
+const ESSENTIAL_RELATED_LIMIT = 4;
+
+function sortRelatedByEssentiality(cards: ContextCard[]): ContextCard[] {
+  return [...cards].sort((a, b) => {
+    const ai = RELATED_TYPE_ORDER.indexOf(a.node_type);
+    const bi = RELATED_TYPE_ORDER.indexOf(b.node_type);
+    return (ai === -1 ? RELATED_TYPE_ORDER.length : ai) - (bi === -1 ? RELATED_TYPE_ORDER.length : bi);
+  });
+}
+
 function ContextCardButton({
   card,
   decisive,
@@ -1207,7 +1241,7 @@ function ContextCardButton({
     >
       <div className="flex items-start gap-1.5">
         <span className="mt-0.5 rounded border border-obs-violet/30 px-1 py-0.5 text-[9px] font-semibold uppercase text-obs-violet">
-          {card.node_type}
+          {humanizeNodeType(card.node_type)}
         </span>
         <span className="min-w-0 flex-1 text-xs font-medium leading-snug text-obs-text">{card.title}</span>
         <ChevronRight size={11} className="mt-0.5 shrink-0 text-obs-faint" />
@@ -1400,7 +1434,9 @@ export function KnowledgeSidebar({
   if (ctx.used_cards !== undefined) {
     const used = [...(ctx.used_cards || [])].sort((a, b) => a.position - b.position);
     const decisive = new Set(ctx.decisive_node_ids || []);
-    const related = ctx.related_cards || [];
+    const related = sortRelatedByEssentiality(ctx.related_cards || []);
+    const essentialRelated = related.slice(0, ESSENTIAL_RELATED_LIMIT);
+    const extraRelated = related.slice(ESSENTIAL_RELATED_LIMIT);
     return (
       <div className="h-full overflow-y-auto p-3">
         <div className="mb-3 px-0.5">
@@ -1428,15 +1464,29 @@ export function KnowledgeSidebar({
           }) : <p className="text-[11px] text-obs-faint">Nenhum card confirmado para esta resposta.</p>}
         </KnowledgeSection>
 
-        <details className="mt-4 rounded-lg border border-obs-line bg-obs-surface/50 p-2.5">
-          <summary className="cursor-pointer text-[11px] font-medium text-obs-text">Ver relacionados · {related.length}</summary>
-          <p className="mt-1 text-[10px] text-obs-faint">Não usados nesta resposta.</p>
-          <div className="mt-2 space-y-1.5">
-            {related.map((card) => (
-              <ContextCardButton key={`related:${card.id}`} card={card} decisive={false} changed={false} onClick={() => setSelectedCard(card)} />
-            ))}
+        {related.length > 0 && (
+          <div className="mt-4 rounded-lg border border-obs-line bg-obs-surface/50 p-2.5">
+            <p className="text-[11px] font-medium text-obs-text">Relacionados · {related.length}</p>
+            <p className="mt-1 text-[10px] text-obs-faint">Não usados nesta resposta.</p>
+            <div className="mt-2 space-y-1.5">
+              {essentialRelated.map((card) => (
+                <ContextCardButton key={`related:${card.id}`} card={card} decisive={false} changed={false} onClick={() => setSelectedCard(card)} />
+              ))}
+            </div>
+            {extraRelated.length > 0 && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-[10px] font-medium text-obs-faint hover:text-obs-subtle">
+                  Mostrar mais {extraRelated.length}
+                </summary>
+                <div className="mt-2 space-y-1.5">
+                  {extraRelated.map((card) => (
+                    <ContextCardButton key={`related:${card.id}`} card={card} decisive={false} changed={false} onClick={() => setSelectedCard(card)} />
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
-        </details>
+        )}
 
         {selectedCard && (
           <ContextCardModal

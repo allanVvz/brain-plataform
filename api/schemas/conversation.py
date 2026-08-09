@@ -155,3 +155,8 @@ class AgentResponse(StrictModel):
     proposal: ConversationProposal | None = None
     proof: dict[str, Any] = Field(default_factory=dict)
     repair_context_cards: list[dict[str, Any]] = Field(default_factory=list)
+    # Billed usage reported by the reply-drafting model call (e.g. DeepSeek's
+    # OpenAI-compatible {prompt_tokens, completion_tokens, total_tokens}).
+    # Optional because not every route (deterministic fallbacks, HUMAN
+    # handoff) makes a paid model call.
+    token_usage: dict[str, Any] | None = None
