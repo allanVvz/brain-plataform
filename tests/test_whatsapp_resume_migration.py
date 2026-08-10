@@ -33,7 +33,8 @@ def test_resume_migration_does_not_delete_or_rewrite_conversation_history():
 
 
 def test_resume_requeue_stagger_preserves_uncommitted_inbound_filter():
-    """Migration 109 re-defines the same function to space out available_at.
+    """Migration 110 (fixing 109) re-defines the same function to space out
+    available_at.
 
     It must keep every safety property migration 092 established (same
     candidate filter, same lock mode, same idempotency-marker cleanup) —
@@ -43,7 +44,7 @@ def test_resume_requeue_stagger_preserves_uncommitted_inbound_filter():
         ROOT
         / "supabase"
         / "migrations"
-        / "109_stagger_requeue_on_resume.sql"
+        / "110_fix_stagger_requeue_for_update.sql"
     ).read_text(encoding="utf-8")
 
     assert "direction = 'inbound'" in migration
@@ -56,12 +57,34 @@ def test_resume_requeue_stagger_preserves_uncommitted_inbound_filter():
     assert "now() + ((candidates.rn - 1)" in migration
 
 
+def test_resume_requeue_stagger_does_not_combine_for_update_with_window_function():
+    """Regression test for the 109 bug (2026-08-10).
+
+    Postgres rejects "FOR UPDATE" in the same SELECT as a window function
+    ("FOR UPDATE is not allowed with window functions") -- 109 combined
+    row_number() OVER (...) and FOR UPDATE SKIP LOCKED in one CTE, so every
+    call to requeue_waiting_human_whatsapp_buffer raised and the backlog
+    never actually got requeued, even though resume_lead() reported success.
+    The locking CTE must not itself compute row_number().
+    """
+    migration = (
+        ROOT
+        / "supabase"
+        / "migrations"
+        / "110_fix_stagger_requeue_for_update.sql"
+    ).read_text(encoding="utf-8")
+
+    locked_cte = migration.split("locked AS (", 1)[1].split(")", 1)[0]
+    assert "FOR UPDATE SKIP LOCKED" in locked_cte
+    assert "row_number()" not in locked_cte
+
+
 def test_resume_requeue_stagger_does_not_delete_or_rewrite_conversation_history():
     migration = (
         ROOT
         / "supabase"
         / "migrations"
-        / "109_stagger_requeue_on_resume.sql"
+        / "110_fix_stagger_requeue_for_update.sql"
     ).read_text(encoding="utf-8").upper()
 
     assert "DELETE FROM" not in migration
