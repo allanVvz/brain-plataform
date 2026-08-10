@@ -128,7 +128,7 @@ def commit(
 ) -> dict:
     _authorize(x_webhook_token)
     try:
-        return conversation_runtime.commit(
+        result = conversation_runtime.commit(
             lead_ref=body.lead_ref,
             context=body.context,
             decision=body.decision,
@@ -139,6 +139,9 @@ def commit(
             inbound_buffer_id=body.inbound_buffer_id,
             expected_decision_owner="n8n_agents",
             n8n_execution_id=body.n8n_execution_id,
+        )
+        return conversation_runtime.dispatch_result_envelope(
+            result, correlation_id=body.correlation_id
         )
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc

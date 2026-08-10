@@ -220,7 +220,15 @@ class WhatsAppDispatchWorker(BaseWorker):
                 },
                 secret=token or None,
                 timeout=45.0,
-                response_limit=65_536,
+                # Defense-in-depth only -- the real fix is that /internal/
+                # conversations/commit now returns a small, trimmed envelope
+                # (see conversation_runtime.dispatch_result_envelope), so
+                # this limit should never be the thing standing between a
+                # successful commit and a readable response. Kept well above
+                # the trimmed envelope's realistic size, not raised to
+                # "big enough to swallow the old bug" (confirmed live
+                # 2026-08-10: the untrimmed response measured 80438 bytes).
+                response_limit=262_144,
             )
             if not 200 <= status < 300:
                 raise RuntimeError(f"n8n conversation returned HTTP {status}")

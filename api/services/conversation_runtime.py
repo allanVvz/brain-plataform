@@ -2582,6 +2582,51 @@ def commit(
     return result
 
 
+# Fields from commit()'s full result that the n8n webhook boundary actually
+# needs. commit()'s in-process return value stays untouched (execute_pipeline
+# and the stored dedup payload both still get knowledge_context/proof/
+# graph_turn/qualification for internal use) -- this only trims what crosses
+# the wire back through n8n's "Return canonical result" node, which echoes
+# whatever the commit HTTP call returned via `{{$json}}`. Confirmed live
+# 2026-08-10: that echo regularly exceeded 64KB (one real turn measured
+# 80438 bytes) because it carried the full graph_contract/RAG chunks/proof
+# ledger, got silently truncated by the dispatch worker's response_limit,
+# and the resulting invalid JSON was misread as a failed turn -- forcing a
+# false safety-violation handoff on an otherwise-successful commit.
+_DISPATCH_ENVELOPE_OPTIONAL_KEYS = (
+    "message_id",
+    "outbound_buffer_id",
+    "reply_text",
+    "route",
+    "stage",
+    "error",
+    "deduplicated",
+)
+
+
+def dispatch_result_envelope(
+    result: dict[str, Any], *, correlation_id: str
+) -> dict[str, Any]:
+    """Minimal, small, always-parseable contract for the n8n webhook caller.
+
+    Only what `whatsapp_dispatch_worker._dispatch_inbound` actually reads
+    (`ok`/`handoff`/`technical_failure`) plus enough identifiers and the
+    outbound reply text for observability -- never the graph/RAG/proof
+    payload that made the full result balloon past the response size limit.
+    """
+    envelope: dict[str, Any] = {
+        "ok": bool(result.get("ok", True)),
+        "handoff": bool(result.get("handoff")),
+        "technical_failure": bool(result.get("technical_failure")),
+        "correlation_id": correlation_id,
+    }
+    for key in _DISPATCH_ENVELOPE_OPTIONAL_KEYS:
+        value = result.get(key)
+        if value is not None:
+            envelope[key] = value
+    return envelope
+
+
 def execute_pipeline(
     *,
     persona_slug: str,

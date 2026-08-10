@@ -184,11 +184,88 @@ def test_internal_commit_declares_n8n_as_expected_owner(monkeypatch):
         inbound_buffer_id="buffer-in",
     )
 
-    assert conversations.commit(body, "internal-token") == {"ok": True}
+    assert conversations.commit(body, "internal-token") == {
+        "ok": True,
+        "handoff": False,
+        "technical_failure": False,
+        "correlation_id": "corr-route-owner",
+    }
     assert captured["expected_decision_owner"] == "n8n_agents"
     assert isinstance(captured["context"], ConversationContext)
     assert isinstance(captured["decision"], ConversationDecision)
     assert isinstance(captured["response"], AgentResponse)
+
+
+def test_commit_route_trims_large_knowledge_context_from_n8n_response(monkeypatch):
+    """Regression for the 2026-08-10 incident: commit()'s full result can
+    legitimately carry a graph_contract/RAG/proof payload well past 64KB
+    (one real Aurora turn measured 80438 bytes). n8n's "Return canonical
+    result" node echoes the /commit HTTP response verbatim, and the dispatch
+    worker's response_limit used to truncate it mid-JSON -- turning an
+    already-successful commit into a false "invalid result contract"
+    failure that force-repaused the lead. The route must return a small,
+    always-parseable envelope regardless of how large the internal result
+    grows.
+    """
+    monkeypatch.setenv("AI_BRAIN_WEBHOOK_TOKEN", "internal-token")
+    oversized_knowledge_context = {
+        "graph_contract": {"claims": [{"claim_type": f"claim-{i}", "text": "x" * 200} for i in range(400)]},
+        "rag_chunks": [{"chunk_id": f"chunk-{i}", "text": "y" * 200} for i in range(200)],
+    }
+    assert len(json.dumps(oversized_knowledge_context).encode()) > 65_536
+
+    full_result = {
+        "ok": True,
+        "handoff": False,
+        "technical_failure": False,
+        "message_id": "ai:corr-big",
+        "outbound_buffer_id": "outbox-big",
+        "reply_text": "Você consegue trazer o carro aqui para uma avaliação?",
+        "route": "SDR",
+        "stage": "novo",
+        "knowledge_context": oversized_knowledge_context,
+        "proof": {"valid": True, "ledger": oversized_knowledge_context},
+        "qualification": {"missing_fields": ["nome_cliente"]},
+        "graph_turn": {"ledger_id": "ledger-1"},
+    }
+    monkeypatch.setattr(conversation_runtime, "commit", lambda **_kwargs: full_result)
+
+    body = conversations.CommitRequest(
+        lead_ref=7,
+        context=_context(),
+        decision=_decision(),
+        response=_response(),
+        correlation_id="corr-big",
+        channel_binding_id="binding-1",
+        inbound_buffer_id="buffer-in",
+    )
+
+    envelope = conversations.commit(body, "internal-token")
+    serialized = json.dumps(envelope)
+
+    assert "knowledge_context" not in envelope
+    assert "proof" not in envelope
+    assert "qualification" not in envelope
+    assert "graph_turn" not in envelope
+    assert len(serialized.encode()) < 4_096
+    assert envelope == {
+        "ok": True,
+        "handoff": False,
+        "technical_failure": False,
+        "correlation_id": "corr-big",
+        "message_id": "ai:corr-big",
+        "outbound_buffer_id": "outbox-big",
+        "reply_text": "Você consegue trazer o carro aqui para uma avaliação?",
+        "route": "SDR",
+        "stage": "novo",
+    }
+
+    # The exact contract the dispatch worker validates before reading
+    # handoff/technical_failure -- proves the trimmed envelope still
+    # satisfies it after a real JSON round-trip (not just in-memory).
+    reparsed = json.loads(serialized)
+    assert isinstance(reparsed, dict)
+    assert any(key in reparsed for key in ("ok", "technical_failure", "handoff", "message_id"))
 
 
 def test_repeated_n8n_commit_returns_existing_outbox_without_new_decision(monkeypatch):
