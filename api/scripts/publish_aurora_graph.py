@@ -88,6 +88,7 @@ def build_graph() -> GraphJson:
                 # keeps its own branch as owner; every other field shares
                 # the persona node as owner across all branches.
                 "owner_node_id": node.id if field_key == "servico" else persona_node.id,
+                "scope": "branch" if field_key == "servico" else "persona",
                 "question_node_id": question_ids.get(field_key),
                 "required": True,
                 "accepted_statuses": (

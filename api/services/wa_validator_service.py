@@ -775,6 +775,50 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
         len([turn for turn in conversation if turn.get("role") == "validator"]),
     )
     evidence_ratio = len(demonstrated) / max(1, len(expected))
+
+    # Known-name/known-service assertion: if the script expected these facts
+    # to be pre-seeded (initial_state="known_name"), verify that no bot turn
+    # after the backdate step re-asks for them. This catches regressions like
+    # sdr_reclamacao_recorrente v44 where the agent forgot the customer's name.
+    expected_dialogue = script.get("expected_dialogue", {})
+    known_name = expected_dialogue.get("known_name")
+    known_service = expected_dialogue.get("known_service")
+    backdate_found = False
+    backdate_turn_idx = -1
+    for turn_idx, turn in enumerate(conversation):
+        if turn.get("role") == "system" and str(turn.get("message_id") or "").endswith(":backdate"):
+            backdate_found = True
+            backdate_turn_idx = turn_idx
+            break
+    if backdate_found and known_name:
+        # After backdate, scan bot turns for re-asking the name
+        for turn_idx, turn in enumerate(conversation):
+            if turn_idx <= backdate_turn_idx or turn.get("role") != "bot":
+                continue
+            # Check if this turn asks the qualification question for nome_cliente
+            # (detect by checking response text for question keywords)
+            text = (turn.get("text") or "").lower()
+            if any(phrase in text for phrase in ["nome", "chama", "qual seu nome", "como se chama"]):
+                gaps.append({
+                    "topic": "known_name_re_asked",
+                    "evidence": f"Turno {turn_idx}: bot re-perguntou o nome após backdate, mas era conhecido na fase 1",
+                    "priority": "high",
+                })
+    if backdate_found and known_service:
+        # After backdate, verify that reclamação/complaint turns reference the known service
+        for turn_idx, turn in enumerate(conversation):
+            if turn_idx <= backdate_turn_idx or turn.get("role") != "bot":
+                continue
+            text = (turn.get("text") or "").lower()
+            # If this is clearly a complaint context, it should reference the prior service
+            if "problema" in text or "reclamação" in text:
+                if known_service.lower() not in text:
+                    gaps.append({
+                        "topic": "known_service_not_referenced",
+                        "evidence": f"Turno {turn_idx}: resposta sobre reclamação não referencia serviço conhecido '{known_service}'",
+                        "priority": "medium",
+                    })
+
     score = round(max(0, min(100, (response_ratio * 50) + (evidence_ratio * 50))))
     insights = {
         **_EMPTY_INSIGHTS,

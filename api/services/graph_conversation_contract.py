@@ -24,6 +24,52 @@ PERMANENT_TYPES = {"persona", "brand", "briefing", "tone", "rule"}
 QUESTION_RELATIONS = {"answers", "answers_question", "references", "applies_to"}
 
 
+def resolve_field_owner_node_id(
+    field: dict[str, Any],
+    *,
+    branch_node: dict[str, Any] | None = None,
+    persona_node: dict[str, Any] | None = None,
+) -> str:
+    """Resolve owner_node_id for a field declaration based on its scope.
+
+    A field may declare `scope: "persona"` to indicate it is shared across all
+    branches (e.g., name, vehicle model, contact info). When scope is "persona",
+    the compiler assigns the persona node as owner; when scope is "branch" (or
+    omitted, the default), it uses the branch's own node ID.
+
+    This generalizes the pattern already applied to Aurora's product branches
+    (publish_aurora_graph.py:90) to all branch types and all personas,
+    with explicit declarative control via the `scope` field.
+
+    Args:
+        field: Field declaration dict, optionally containing `scope` and `owner_node_id`
+        branch_node: The branch anchor node dict (required if scope != "persona")
+        persona_node: The persona node dict (required if scope == "persona")
+
+    Returns:
+        Resolved owner_node_id (string)
+    """
+    # Explicit owner_node_id always wins
+    if field.get("owner_node_id"):
+        return str(field["owner_node_id"])
+
+    # Scope-driven resolution
+    scope = field.get("scope", "branch")
+    if scope == "persona" and persona_node:
+        return str(persona_node.get("id"))
+    if scope == "branch" and branch_node:
+        return str(branch_node.get("id"))
+
+    # Fallback: branch if available, else persona
+    if branch_node:
+        return str(branch_node.get("id"))
+    if persona_node:
+        return str(persona_node.get("id"))
+
+    # Ultimate fallback: empty string (compiler will flag as error)
+    return ""
+
+
 def _fold(value: Any) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
     text = "".join(char for char in text if not unicodedata.combining(char))

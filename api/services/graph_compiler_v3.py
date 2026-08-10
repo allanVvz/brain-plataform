@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from services import supabase_client
+from services import graph_conversation_contract, supabase_client
 
 
 COMPILER_VERSION = "graph-compiler-v3.2.1"
@@ -135,7 +135,12 @@ def _condition_valid(condition: Any, field_keys: set[str]) -> bool:
     })
 
 
-def _field_declarations(node: dict[str, Any]) -> list[dict[str, Any]]:
+def _field_declarations(
+    node: dict[str, Any],
+    *,
+    branch_node: dict[str, Any] | None = None,
+    persona_node: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     data = node.get("data") or {}
     qualification = data.get("qualification")
     sources: list[Any] = []
@@ -155,7 +160,11 @@ def _field_declarations(node: dict[str, Any]) -> list[dict[str, Any]]:
         result.append({
             **item,
             "key": key,
-            "owner_node_id": str(item.get("owner_node_id") or node["id"]),
+            "owner_node_id": str(
+                graph_conversation_contract.resolve_field_owner_node_id(
+                    item, branch_node=branch_node, persona_node=persona_node
+                ) or node["id"]
+            ),
             "question_node_id": str(item.get("question_node_id") or "") or None,
             "required": item.get("required", True) is True,
             "accepted_statuses": list(dict.fromkeys(str(value) for value in accepted)),
@@ -300,6 +309,8 @@ def compile_graph(
             queue.extend((child, _distance + 1) for child in children.get(current, []))
         return result
 
+    persona_node = next((n for n in nodes if n["node_type"] == "persona"), None)
+
     memberships: dict[str, dict[str, dict[str, Any]]] = {}
     contracts: dict[str, dict[str, Any]] = {}
     for anchor in anchors:
@@ -332,7 +343,9 @@ def compile_graph(
         fields_by_key: dict[str, dict[str, Any]] = {}
         for node_id in sorted(reasons):
             node = node_by_id[node_id]
-            for field in _field_declarations(node):
+            for field in _field_declarations(
+                node, branch_node=node_by_id[anchor], persona_node=persona_node
+            ):
                 prior = fields_by_key.get(field["key"])
                 if prior and prior != field:
                     errors.append(f"ambiguous_field_declaration:{anchor}:{field['key']}")
@@ -362,6 +375,10 @@ def compile_graph(
             question_id = field.get("question_node_id")
             if owner not in reasons:
                 errors.append(f"field_owner_unreachable:{anchor}:{field['key']}:{owner}")
+            if field.get("scope") == "persona" and persona_node is None:
+                errors.append(
+                    f"field_owner_persona_scope_no_persona_node:{anchor}:{field['key']}"
+                )
             if not set(field["accepted_statuses"]).issubset(FACT_STATUSES):
                 errors.append(f"invalid_accepted_statuses:{anchor}:{field['key']}")
             if field["overwrite_policy"] not in {"never", "explicit_correction", "higher_confidence", "always"}:
@@ -469,6 +486,39 @@ def compile_graph(
             "compiler_version": COMPILER_VERSION,
         }
         contracts[anchor] = contract
+
+    # Cross-branch field consistency check: same field key should have
+    # consistent owner_node_id across branches unless explicitly scoped to branch.
+    # This detects the class of bugs fixed 2026-08-10 (nome_cliente divergence).
+    all_fields_by_key: dict[str, dict[str, dict[str, Any]]] = {}
+    for anchor, contract in contracts.items():
+        for field in contract.get("fields") or []:
+            key = field["key"]
+            if key not in all_fields_by_key:
+                all_fields_by_key[key] = {}
+            all_fields_by_key[key][anchor] = field
+
+    for field_key, by_anchor in all_fields_by_key.items():
+        if len(by_anchor) <= 1:
+            continue
+        owners = {
+            anchor: str(field.get("owner_node_id") or "")
+            for anchor, field in by_anchor.items()
+        }
+        unique_owners = set(owners.values())
+        if len(unique_owners) > 1:
+            all_branch_scoped = all(
+                by_anchor[anchor].get("scope") == "branch"
+                for anchor in by_anchor
+            )
+            if not all_branch_scoped:
+                branches_with_owners = [
+                    f"{anchor}(owner={owners[anchor][:8]}..., scope={by_anchor[anchor].get('scope', 'branch')})"
+                    for anchor in sorted(by_anchor)
+                ]
+                errors.append(
+                    f"inconsistent_field_owner:{field_key}:{', '.join(branches_with_owners)}"
+                )
 
     if errors:
         raise GraphCompilationError(errors)

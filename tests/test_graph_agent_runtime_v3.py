@@ -585,24 +585,29 @@ def test_pending_fields_ignores_a_fact_owned_by_a_different_branch():
     assert graph_proof_checker_v3.pending_fields(contract, matching_fact) == []
 
 
-def test_persona_wide_field_duplicated_per_branch_is_wrongly_reasked_on_switch():
+def test_persona_wide_field_duplicated_per_branch_is_rejected_at_publish_time():
     """Regression test for docs/handoffs/AURORA_QUALIFICATION_REPEAT_QUESTION_HANDOFF_2026-08-08.md.
 
     test_pending_fields_ignores_a_fact_owned_by_a_different_branch above
     covers a field that is *legitimately* branch-specific (e.g. "servico"):
     it is correct for that fact to reset on a branch switch. This test
-    covers the opposite, currently-unhandled case: a field whose question
-    and expected answer never change across branches (e.g. "nome_cliente",
-    "can_visit_in_person" in the Aurora transcripts) but whose graph
-    content redeclares it on every branch node instead of once on the
-    shared persona node. _field_declarations() (graph_compiler_v3.py)
-    defaults owner_node_id to whichever node happens to declare the field,
-    so each branch's redundant copy gets a *different* owner_node_id even
-    though the field means the same thing everywhere. _resolved_for_field_owner
-    (added 2026-08-06 to stop real cross-branch leakage of fields like
-    "servico") then wipes this kind of field out on every branch switch too,
-    forcing the agent to re-ask a question the customer already answered --
-    this is the mechanism behind the repeated-question bug.
+    covers the opposite case: a field whose question and expected answer
+    never change across branches (e.g. "nome_cliente", "can_visit_in_person"
+    in the Aurora transcripts) but whose graph content redeclares it on
+    every branch node instead of once on the shared persona node.
+
+    Previously, _field_declarations() (graph_compiler_v3.py) silently
+    defaulted owner_node_id to whichever node happened to declare the
+    field, so each branch's redundant copy got a *different* owner_node_id
+    even though the field means the same thing everywhere;
+    _resolved_for_field_owner (added 2026-08-06 to stop real cross-branch
+    leakage of fields like "servico") then wiped this kind of field out on
+    every branch switch too, forcing the agent to re-ask a question the
+    customer already answered. As of the 2026-08-10 cross-branch
+    consistency check, compile_graph() now refuses to publish a graph
+    shaped like this at all -- the authoring mistake can no longer reach
+    runtime, since a field must either share one owner across branches or
+    explicitly declare scope="branch" to admit legitimate divergence.
     """
     root = node(1, "persona:generic")
     branch_a = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
@@ -624,19 +629,13 @@ def test_persona_wide_field_duplicated_per_branch_is_wrongly_reasked_on_switch()
         edge(1, root, branch_a), edge(2, root, branch_b),
         edge(3, branch_a, question_a), edge(4, branch_b, question_b),
     ]
-    document = graph_compiler_v3.compile_graph(persona=PERSONA, node_rows=rows, edge_rows=edges)
 
-    contract_a = document["branch_contracts"]["branch:a"]
-    contract_b = document["branch_contracts"]["branch:b"]
-    owner_a = next(f["owner_node_id"] for f in contract_a["fields"] if f["key"] == "nome_cliente")
-    owner_b = next(f["owner_node_id"] for f in contract_b["fields"] if f["key"] == "nome_cliente")
-    assert owner_a != owner_b  # the authoring mistake: same field, two owners
+    with pytest.raises(graph_compiler_v3.GraphCompilationError) as exc_info:
+        graph_compiler_v3.compile_graph(persona=PERSONA, node_rows=rows, edge_rows=edges)
 
-    facts_known_while_branch_a_was_active = {
-        "nome_cliente": {"status": "known", "value": "Allan", "owner_node_id": owner_a},
-    }
-    pending = graph_proof_checker_v3.pending_fields(contract_b, facts_known_while_branch_a_was_active)
-    assert [field["key"] for field in pending] == ["nome_cliente"]
+    errors = exc_info.value.errors
+    assert any("inconsistent_field_owner" in err and "nome_cliente" in err for err in errors), \
+        f"Expected inconsistent_field_owner error for nome_cliente, got: {errors}"
 
 
 def _servico_proposal(*, branch_anchor: str, servico_owner: str) -> ConversationProposal:
