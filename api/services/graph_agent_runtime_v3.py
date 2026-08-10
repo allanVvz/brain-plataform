@@ -412,6 +412,28 @@ def _candidate_branches(
     return sorted(candidates, key=lambda item: (-item["score"], item["branch_anchor_node_id"]))
 
 
+BRANCH_EVIDENCE_MIN_SCORE = 0.18
+
+
+def _evidenced_branch_candidates(
+    candidates: list[dict[str, Any]], *, limit: int = 8,
+) -> list[dict[str, Any]]:
+    """Candidates with real signal, for gating an unsolicited branch pick.
+
+    `_candidate_branches` always returns one entry per branch anchor, even
+    at score 0.0 -- it exists to rank/display candidates, not to gate
+    anything. `branch_selection_allowed` (graph_agent_runtime_v3._decide)
+    used to be keyed off the raw top-8 candidates with no score floor, so
+    the model could "select" any branch -- including one with zero real
+    evidence -- as long as it wasn't outside the top 8 of the full anchor
+    list. Confirmed live 2026-08-10: a bare name/greeting turn (no product
+    or complaint signal at all) got waved into Aurora's reclamação branch
+    this way. This applies the same evidence floor already used for
+    `possible_switches`, so both gates can never drift apart again.
+    """
+    return [item for item in candidates if item["score"] >= BRANCH_EVIDENCE_MIN_SCORE][:limit]
+
+
 def _fallback_retrieval_branch(
     *, active_branch: str | None, candidates: list[dict[str, Any]], branch_anchors: list[str],
 ) -> str | None:
@@ -545,7 +567,8 @@ def build_context(
     ]
     possible_switches = [
         item["branch_anchor_node_id"] for item in candidates
-        if item["branch_anchor_node_id"] != active_branch and item["score"] >= 0.18
+        if item["branch_anchor_node_id"] != active_branch
+        and item["score"] >= BRANCH_EVIDENCE_MIN_SCORE
     ]
     trace = {
         "runtime_version": RUNTIME_VERSION, "publication_id": publication["id"],
@@ -556,7 +579,8 @@ def build_context(
         "short_expected_answer": short_expected_answer,
         "global_branch_search_executed": not short_expected_answer,
         "retrieval_branch_node_id": retrieval_branch,
-        "branch_candidates": candidates[:8], "possible_switches": possible_switches,
+        "branch_candidates": _evidenced_branch_candidates(candidates),
+        "possible_switches": possible_switches,
         "required_structural_chunk_ids": [
             str(row.get("chunk_id") or row.get("id")) for row in required_structural
         ],

@@ -544,6 +544,36 @@ def test_fallback_retrieval_branch_never_leaves_a_greeting_without_context():
     ) is None
 
 
+def test_evidenced_branch_candidates_excludes_zero_signal_branches():
+    """Regression test for the phantom-reclamação-selection bug (2026-08-10).
+
+    Confirmed live: a bare name/greeting turn with zero complaint signal got
+    "select"-ed into Aurora's reclamação branch because branch_selection_allowed
+    was keyed off the raw top-8 candidates, which _candidate_branches always
+    populates with one entry per branch anchor regardless of score. Only
+    candidates clearing the same evidence floor as possible_switches
+    (BRANCH_EVIDENCE_MIN_SCORE) may authorize an unsolicited branch pick.
+    """
+    candidates = [
+        {"branch_anchor_node_id": "aurora-product-wash", "score": 0.62},
+        {"branch_anchor_node_id": "aurora-service-reclamacao", "score": 0.0},
+        {"branch_anchor_node_id": "aurora-product-polish", "score": 0.2},
+        {"branch_anchor_node_id": "aurora-product-ppf", "score": 0.05},
+    ]
+    evidenced = graph_agent_runtime_v3._evidenced_branch_candidates(candidates)
+    ids = {item["branch_anchor_node_id"] for item in evidenced}
+    assert ids == {"aurora-product-wash", "aurora-product-polish"}
+    assert "aurora-service-reclamacao" not in ids
+
+
+def test_evidenced_branch_candidates_respects_the_limit():
+    candidates = [
+        {"branch_anchor_node_id": f"branch:{i}", "score": 1.0} for i in range(10)
+    ]
+    assert len(graph_agent_runtime_v3._evidenced_branch_candidates(candidates)) == 8
+    assert len(graph_agent_runtime_v3._evidenced_branch_candidates(candidates, limit=3)) == 3
+
+
 def test_semantic_chunking_separates_question_answer_and_field_intent():
     node_value = {
         "id": "n", "title": "FAQ", "summary": "Resumo", "data": {
