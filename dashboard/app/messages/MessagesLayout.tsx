@@ -2211,7 +2211,7 @@ export function MessagesLayout({
 
       // VALIDAÇÃO CRÍTICA: Sincronizar estado antes de qualquer ação
       const validation = validateLeadResponse(current);
-      if (!validation.validated && validation.corrected) {
+      if (current && !validation.validated && validation.corrected) {
         console.warn(
           `[HANDOFF-VALIDATION] Lead ${selectedId} had state issues, correcting...`,
           validation.validationIssues
