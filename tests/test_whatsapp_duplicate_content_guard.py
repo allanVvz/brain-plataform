@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "api"))
@@ -92,26 +91,43 @@ def _patch_common(monkeypatch, *, binding, existing_idempotent=None,
     return calls
 
 
-def test_blocks_when_recent_identical_outbound_exists(monkeypatch):
+def test_suppresses_send_when_recent_identical_outbound_exists(monkeypatch):
+    """A content duplicate is not a binding-level safety anomaly.
+
+    It must not raise, must not pause the lead, and must not sweep sibling
+    buffer rows — it just skips the resend and reports it as a no-op success,
+    the same shape as the row-identity idempotency branch. Confirmed live
+    2026-08-10: a legitimate new turn that happened to generate the same
+    reply text as a recent one used to hit a hard 409 that (via
+    record_whatsapp_safety_violation) paused the whole lead and abandoned
+    every other buffered message for hours.
+    """
     binding = _binding()
     violation_calls: list[dict] = []
+    event_calls: list[dict] = []
     _patch_common(
         monkeypatch, binding=binding,
         duplicate_row={"id": "buffer-old", "status": "sent"},
         violation_calls=violation_calls,
     )
+    monkeypatch.setattr(
+        whatsapp_outbox.event_emitter,
+        "emit",
+        lambda *args, **kwargs: event_calls.append({"args": args, "kwargs": kwargs}),
+    )
 
-    with pytest.raises(HTTPException) as exc:
-        whatsapp_outbox.enqueue_outbound(
-            lead=_lead(), text="Allan", sender_type="human",
-            message_id="manual:1", correlation_id="corr-1",
-        )
+    result = whatsapp_outbox.enqueue_outbound(
+        lead=_lead(), text="Allan", sender_type="human",
+        message_id="manual:1", correlation_id="corr-1",
+    )
 
-    assert exc.value.status_code == 409
-    assert len(violation_calls) == 1
-    assert violation_calls[0]["binding_id"] == "binding-1"
-    assert violation_calls[0]["lead_ref"] == 7
-    assert violation_calls[0]["violation_key"] == "duplicate_content_suppressed:7:corr-1"
+    assert result["buffer_id"] == "buffer-old"
+    assert result["deduplicated"] is True
+    assert result["duplicate_suppressed"] is True
+    assert violation_calls == []
+    assert len(event_calls) == 1
+    assert event_calls[0]["args"][0] == "whatsapp.duplicate_content_suppressed"
+    assert event_calls[0]["kwargs"]["level"] == "warning"
 
 
 def test_allows_send_when_no_recent_duplicate(monkeypatch):

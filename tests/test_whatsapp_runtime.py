@@ -201,6 +201,88 @@ def test_decision_response_failure_reconciles_an_already_committed_turn(monkeypa
     assert events[0][1]["payload"]["outbound_id"] == "outbound-1"
 
 
+def test_decision_attempt_retries_before_escalating(monkeypatch):
+    """A single decision-attempt failure must not pause the lead outright.
+
+    The /context -> /decide -> /commit path is idempotent by message_id, so
+    it's safe to retry with backoff instead of immediately quarantining the
+    row. Confirmed live 2026-08-10: one decision failure (e.g. a duplicate-
+    content 409, or a transient n8n/DeepSeek hiccup) used to escalate on the
+    very first occurrence and sweep every other buffered inbound message for
+    the lead to waiting_human.
+    """
+    released: list[dict] = []
+    violations: list[dict] = []
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.release_whatsapp_buffer",
+        lambda *args, **kwargs: released.append({"args": args, **kwargs}),
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.record_whatsapp_safety_violation",
+        lambda **kwargs: violations.append(kwargs) or {},
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.complete_whatsapp_buffer",
+        lambda *_args, **_kwargs: pytest.fail("first decision failure was escalated, not retried"),
+    )
+
+    WhatsAppDispatchWorker()._retry_or_dead_letter(
+        {
+            "id": "inbound-1",
+            "direction": "inbound",
+            "channel_binding_id": "binding-1",
+            "lead_ref": 29,
+            "attempt_count": 1,
+            "max_attempts": 5,
+            "_attempt_started": "decision",
+        },
+        RuntimeError("n8n conversation returned HTTP 409"),
+    )
+
+    assert violations == []
+    assert released[0]["args"][:2] == ("inbound-1", "retry")
+
+
+def test_decision_attempt_escalates_with_partial_level_after_exhausting_retries(monkeypatch):
+    """Once retries are exhausted, escalate without pausing sibling rows.
+
+    level="partial" (migration 103) only quarantines this row to
+    waiting_human; it leaves every other buffered inbound row for the same
+    lead claimable, unlike the implicit level="full" this used to send.
+    """
+    waiting: list[tuple] = []
+    violations: list[dict] = []
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.record_whatsapp_safety_violation",
+        lambda **kwargs: violations.append(kwargs) or {},
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.complete_whatsapp_buffer",
+        lambda *args, **kwargs: waiting.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.release_whatsapp_buffer",
+        lambda *_args, **_kwargs: pytest.fail("exhausted decision attempt was retried again"),
+    )
+
+    WhatsAppDispatchWorker()._retry_or_dead_letter(
+        {
+            "id": "inbound-1",
+            "direction": "inbound",
+            "channel_binding_id": "binding-1",
+            "lead_ref": 29,
+            "attempt_count": 5,
+            "max_attempts": 5,
+            "_attempt_started": "decision",
+        },
+        RuntimeError("n8n conversation returned HTTP 409"),
+    )
+
+    assert violations[0]["level"] == "partial"
+    assert violations[0]["violation_key"] == "attempt-failed:decision:inbound-1"
+    assert waiting[0][0][:2] == ("inbound-1", "waiting_human")
+
+
 def test_binding_payload_never_serializes_secret_metadata():
     payload = integrations._public_binding({
         "id": "binding", "persona_id": "baita", "active": True,

@@ -473,13 +473,32 @@ class WhatsAppDispatchWorker(BaseWorker):
                     source="workers.whatsapp",
                 )
                 return
+        if attempt_kind == "decision" and attempts < maximum:
+            # The /context -> /decide -> /commit path is idempotent by
+            # message_id (whatsapp_outbox.enqueue_outbound's idempotency-key
+            # check), so a transient failure here is safe to retry — unlike
+            # a "provider" attempt below, no WhatsApp send may have gone out
+            # yet. Confirmed live 2026-08-10: a single decision failure
+            # (duplicate-content 409, or any n8n/DeepSeek hiccup) used to
+            # escalate immediately and sweep every other buffered inbound
+            # message for the lead to waiting_human, going silent on a whole
+            # backlog over one bad turn.
+            supabase_client.release_whatsapp_buffer(
+                row["id"], "retry", delay_seconds=_retry_delay(attempts), error=error
+            )
+            return
         if attempt_kind:
             if row.get("channel_binding_id"):
+                # level="partial" only quarantines this row to waiting_human;
+                # it leaves sibling inbound rows for the same lead claimable,
+                # instead of the implicit level="full" that used to pause
+                # the whole lead over one row's exhausted retries.
                 supabase_client.record_whatsapp_safety_violation(
                     binding_id=row["channel_binding_id"],
                     lead_ref=row.get("lead_ref"),
                     violation_key=f"attempt-failed:{attempt_kind}:{row['id']}",
                     reason=error,
+                    level="partial",
                 )
             supabase_client.complete_whatsapp_buffer(row["id"], "waiting_human", error=error)
             return

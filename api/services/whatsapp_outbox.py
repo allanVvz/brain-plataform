@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
-from services import supabase_client
+from services import event_emitter, supabase_client
 
 # Fallback when a binding does not set metadata.duplicate_guard_window_seconds.
 # Any workflow_bindings row can override or disable this per persona/channel
@@ -133,8 +133,8 @@ def resolve_lead_binding(lead: dict[str, Any]) -> dict[str, Any]:
 
 def _guard_against_duplicate_content(
     *, lead: dict[str, Any], binding: dict[str, Any], text: str, correlation_id: str,
-) -> None:
-    """Block a new outbound send whose text duplicates a recent one.
+) -> dict[str, Any] | None:
+    """Detect a new outbound send whose text duplicates a recent one.
 
     Row-identity idempotency (idempotency_key/correlation_id, checked by the
     caller before this runs) only catches a literal re-dispatch of the same
@@ -144,16 +144,24 @@ def _guard_against_duplicate_content(
     that sails through unblocked and doubles the number of WhatsApp sends
     for one conversational turn. This closes that gap, generically for any
     persona/binding: no persona, customer or content literal is referenced.
+
+    A content duplicate is not a binding-level safety anomaly, so callers
+    must not treat it as one: it must never pause the lead or sweep sibling
+    buffer rows (confirmed live 2026-08-10 — a legitimate new turn that
+    happened to generate the same reply text tripped this guard, which used
+    to call record_whatsapp_safety_violation and cascaded into hours of
+    silence for the whole backlog). The caller suppresses the resend
+    instead of raising.
     """
     metadata = binding.get("metadata") or {}
     if metadata.get("duplicate_guard_enabled") is False:
-        return
+        return None
     window_seconds = metadata.get("duplicate_guard_window_seconds")
     if not isinstance(window_seconds, (int, float)) or window_seconds <= 0:
         window_seconds = DEFAULT_DUPLICATE_GUARD_WINDOW_SECONDS
     normalized = supabase_client.normalize_whatsapp_text(text)
     if not normalized:
-        return
+        return None
     duplicate = supabase_client.find_recent_duplicate_whatsapp_outbound(
         lead_ref=lead["id"],
         channel_binding_id=binding["id"],
@@ -161,22 +169,22 @@ def _guard_against_duplicate_content(
         window_seconds=int(window_seconds),
     )
     if not duplicate:
-        return
-    supabase_client.record_whatsapp_safety_violation(
-        binding_id=binding["id"],
-        lead_ref=lead.get("id"),
-        violation_key=f"duplicate_content_suppressed:{lead.get('id')}:{correlation_id}",
-        reason=(
-            "Texto identico a um outbound recente "
-            f"(buffer {duplicate.get('id')}, status {duplicate.get('status')}) "
-            f"dentro de {int(window_seconds)}s."
-        ),
+        return None
+    event_emitter.emit(
+        "whatsapp.duplicate_content_suppressed",
+        entity_type="lead",
+        entity_id=str(lead.get("id") or ""),
+        persona_id=lead.get("persona_id"),
+        payload={
+            "correlation_id": correlation_id,
+            "duplicate_buffer_id": duplicate.get("id"),
+            "duplicate_status": duplicate.get("status"),
+            "window_seconds": int(window_seconds),
+        },
+        level="warning",
+        source="services.whatsapp_outbox",
     )
-    raise HTTPException(
-        409,
-        "Mensagem identica ja enviada recentemente para este lead; "
-        "confirme a entrega antes de reenviar.",
-    )
+    return duplicate
 
 
 def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
@@ -215,9 +223,18 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
             "deduplicated": True,
             "binding": binding,
         }
-    _guard_against_duplicate_content(
+    duplicate = _guard_against_duplicate_content(
         lead=lead, binding=binding, text=text, correlation_id=correlation_id,
     )
+    if duplicate:
+        return {
+            "buffer_id": duplicate["id"],
+            "message_id": message_id,
+            "status": duplicate.get("status") or "sent",
+            "deduplicated": True,
+            "duplicate_suppressed": True,
+            "binding": binding,
+        }
     scope_fields = {
         "message_origin": "campaign",
         "campaign_id": campaign_scope.get("campaign_id"),

@@ -4567,6 +4567,7 @@ def record_whatsapp_safety_violation(
     lead_ref: int | None,
     violation_key: str,
     reason: str,
+    level: str = "full",
 ) -> dict:
     result = get_client().rpc(
         "record_whatsapp_safety_violation",
@@ -4575,6 +4576,7 @@ def record_whatsapp_safety_violation(
             "p_lead_ref": lead_ref,
             "p_violation_key": violation_key,
             "p_reason": reason[:500],
+            "p_level": level,
         },
     ).execute()
     payload = getattr(result, "data", None)
