@@ -1,0 +1,26 @@
+# Read-only Postgres datasource for the LLM/agent observability dashboards.
+# Connects as grafana_reader (migration 107 grants SELECT-only on
+# agent_logs/system_events/n8n_executions/messages/leads -- nothing else,
+# no write access at all). Password comes from the GRAFANA_PG_PASSWORD env
+# var already required by the grafana service in docker-compose.yml.
+apiVersion: 1
+
+datasources:
+  - uid: brain-postgres-ro
+    name: Brain Postgres (read-only)
+    type: postgres
+    access: proxy
+    url: db:5432
+    database: $__env{POSTGRES_DB}
+    user: grafana_reader
+    isDefault: true
+    editable: false
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 5
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: $__env{GRAFANA_PG_PASSWORD}

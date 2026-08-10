@@ -197,7 +197,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: docker-compose.yml,infra/Caddyfile,infra/kong.yml,ops/vps
+          source: docker-compose.yml,infra/Caddyfile,infra/kong.yml,infra/grafana,ops/vps
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
 
@@ -213,7 +213,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: docker-compose.yml,infra/Caddyfile,infra/kong.yml,ops/vps
+          source: docker-compose.yml,infra/Caddyfile,infra/kong.yml,infra/grafana,ops/vps
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
 

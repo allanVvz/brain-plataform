@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import time
 import unicodedata
 from datetime import datetime, timezone
 from typing import Any
@@ -25,6 +26,7 @@ from services import (
     graph_conversation_contract,
     graph_json_v2_store,
     lead_qualification,
+    model_pricing,
     supabase_client,
     whatsapp_outbox,
 )
@@ -35,6 +37,64 @@ from services.deterministic_sdr import (
     catalog_from_graph,
 )
 from services.deterministic_appointment import DeterministicAppointment
+
+
+def emit_turn_event(
+    *,
+    agent_name: str,
+    trace_id: str | None,
+    lead_ref: int | str | None,
+    persona_id: str | None = None,
+    status: str = "success",
+    model_used: str | None = None,
+    token_input: int | None = None,
+    token_output: int | None = None,
+    latency_ms: int | None = None,
+    error_msg: str | None = None,
+    input_data: dict[str, Any] | None = None,
+    output_data: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Write one observability event (one agent_logs row) for one step of a
+    conversation turn -- context/decide/repair/commit/error, all sharing the
+    same trace_id (the turn's inbound_buffer_id) so a single SQL query can
+    reconstruct the whole turn. Best-effort: never raises, never blocks the
+    reply -- a lost observability row is acceptable, a broken reply is not.
+
+    Written with `metadata` shaped so trace_id/conversation_id/
+    n8n_execution_id/cost_usd/quality_score are picked up by the generated
+    columns added in migration 106, without needing a schema change here.
+    """
+    if not trace_id:
+        return
+    try:
+        supabase_client.insert_agent_log(
+            {
+                "lead_id": str(lead_ref) if lead_ref is not None else None,
+                "persona_id": persona_id,
+                "agent_type": agent_name,
+                "action": f"[{'ERROR' if status == 'error' else 'INFO'}] {agent_name}",
+                "decision": error_msg or "",
+                "input": input_data or {},
+                "output": output_data or {},
+                "latency_ms": latency_ms,
+                "model_used": model_used,
+                "token_input": token_input,
+                "token_output": token_output,
+                "metadata": {
+                    "level": "ERROR" if status == "error" else "INFO",
+                    "component": "conversation_runtime",
+                    "trace_id": trace_id,
+                    "conversation_id": lead_ref,
+                    **(metadata or {}),
+                },
+            }
+        )
+    except Exception:  # noqa: BLE001 — observability must never break the turn
+        logger.warning(
+            "emit_turn_event failed agent_name=%s trace_id=%s", agent_name, trace_id,
+            exc_info=True,
+        )
 
 
 STAGES = ("novo", "contatado", "engajado", "qualificado", "oportunidade")
@@ -543,7 +603,9 @@ def build_context(
     lead_ref: int,
     message: str,
     message_id: str | None = None,
+    trace_id: str | None = None,
 ) -> ConversationContext:
+    _turn_started_at = time.monotonic()
     lead_binding_probe = supabase_client.get_lead_by_ref(lead_ref) or {}
     binding_probe = supabase_client.get_workflow_binding_by_id(
         lead_binding_probe.get("channel_binding_id")
@@ -573,6 +635,7 @@ def build_context(
                         "graph_checksum": shadow.graph_checksum,
                         "retrieval_trace": shadow.retrieval_trace,
                         "outbound_suppressed": True,
+                        "trace_id": trace_id,
                     },
                 },
                 source="conversation_runtime.shadow",
@@ -584,14 +647,14 @@ def build_context(
                     "entity_type": "lead",
                     "entity_id": str(lead_ref),
                     "persona_id": lead_binding_probe.get("persona_id"),
-                    "payload": {"error": str(exc)[:1000], "outbound_suppressed": True},
+                    "payload": {"error": str(exc)[:1000], "outbound_suppressed": True, "trace_id": trace_id},
                 },
                 level="warning",
                 source="conversation_runtime.shadow",
             )
     if graph_agent_runtime_v3.binding_uses_v3(binding_probe):
         try:
-            return graph_agent_runtime_v3.build_context(
+            v3_context = graph_agent_runtime_v3.build_context(
                 persona_slug=persona_slug,
                 lead_ref=lead_ref,
                 message=message,
@@ -599,6 +662,24 @@ def build_context(
             )
         except RuntimeError as exc:
             raise PublishedGraphUnavailable(str(exc)) from exc
+        emit_turn_event(
+            agent_name="conversation.context_built",
+            trace_id=trace_id,
+            lead_ref=lead_ref,
+            persona_id=lead_binding_probe.get("persona_id"),
+            latency_ms=int((time.monotonic() - _turn_started_at) * 1000),
+            output_data={
+                "graph_version": v3_context.graph_version,
+                "graph_checksum": v3_context.graph_checksum,
+                "context_cards": [
+                    {"id": card.id, "node_type": card.node_type, "title": card.title}
+                    for card in v3_context.context_cards
+                ],
+                "runtime_version": v3_context.runtime_version,
+            },
+            metadata={"persona_slug": persona_slug, "message_id": message_id},
+        )
+        return v3_context
     version, checksum, graph = _current_graph(persona_slug)
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     persona = supabase_client.get_persona(persona_slug) or {}
@@ -767,6 +848,20 @@ def build_context(
         system_prompt = build_system_prompt(graph, cards)
     except Exception as exc:
         logger.warning("build_system_prompt from context cards failed: %s", exc)
+    emit_turn_event(
+        agent_name="conversation.context_built",
+        trace_id=trace_id,
+        lead_ref=lead_ref,
+        persona_id=persona.get("id"),
+        latency_ms=int((time.monotonic() - _turn_started_at) * 1000),
+        output_data={
+            "graph_version": version,
+            "graph_checksum": checksum,
+            "context_cards": [{"id": card.id, "node_type": card.node_type, "title": card.title} for card in cards],
+            "runtime_version": (binding_probe or {}).get("metadata", {}).get("runtime_version"),
+        },
+        metadata={"persona_slug": persona_slug, "message_id": message_id},
+    )
     return ConversationContext(
         persona_slug=persona_slug,
         agent_slug=agent_slug,
@@ -1371,6 +1466,43 @@ def decide(
     context: ConversationContext,
     *,
     model_observation: dict[str, Any] | None = None,
+    trace_id: str | None = None,
+    lead_ref: int | None = None,
+) -> tuple[ConversationDecision, AgentResponse]:
+    _started_at = time.monotonic()
+    decision, response = _decide_dispatch(context, model_observation=model_observation)
+    observation = model_observation or {}
+    is_repair = int(observation.get("repair_attempt") or 0) > 0
+    token_usage = observation.get("token_usage") or (response.token_usage or {})
+    emit_turn_event(
+        agent_name="conversation.repair_call" if is_repair else "conversation.decide_llm_call",
+        trace_id=trace_id,
+        lead_ref=lead_ref,
+        status="error" if response.reply_text is None and response.proof.get("errors") else "success",
+        model_used=token_usage.get("model"),
+        token_input=token_usage.get("prompt_tokens"),
+        token_output=token_usage.get("completion_tokens"),
+        latency_ms=token_usage.get("llm_latency_ms")
+        or int((time.monotonic() - _started_at) * 1000),
+        output_data={
+            "reply_text": response.reply_text,
+            "handoff_required": response.handoff_required,
+            "route": decision.route.value,
+            "intent": decision.intent,
+        },
+        metadata={
+            "proof_valid": response.proof.get("valid"),
+            "proof_errors": response.proof.get("errors"),
+            "repair_required": response.proof.get("repair_required"),
+        },
+    )
+    return decision, response
+
+
+def _decide_dispatch(
+    context: ConversationContext,
+    *,
+    model_observation: dict[str, Any] | None = None,
 ) -> tuple[ConversationDecision, AgentResponse]:
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
         return graph_agent_runtime_v3.decide(
@@ -1779,6 +1911,7 @@ def commit(
     channel_binding_id: str,
     inbound_buffer_id: str | None = None,
     expected_decision_owner: str | None = None,
+    n8n_execution_id: str | None = None,
 ) -> dict[str, Any]:
     if _reply_confirms_price_or_schedule(response.reply_text):
         if response.proposal is not None:
@@ -2275,6 +2408,8 @@ def commit(
                     "evidence_node_ids": decision.evidence_node_ids,
                     "knowledge_context": knowledge_context,
                     "token_usage": response.token_usage,
+                    "trace_id": inbound_buffer_id,
+                    "n8n_execution_id": n8n_execution_id,
                     "validation": True,
                 },
             },
@@ -2307,6 +2442,8 @@ def commit(
                 "evidence_node_ids": decision.evidence_node_ids,
                 "knowledge_context": knowledge_context,
                 "token_usage": response.token_usage,
+                "trace_id": inbound_buffer_id,
+                "n8n_execution_id": n8n_execution_id,
             },
         )
         buffer = {
@@ -2373,6 +2510,7 @@ def commit(
             "payload": {
                 "correlation_id": correlation_id,
                 "inbound_buffer_id": inbound_buffer_id,
+                "trace_id": inbound_buffer_id,
                 "decision": decision.model_dump(mode="json"),
                 "response_role": response.role.value,
                 "handoff": response.handoff_required,
@@ -2383,6 +2521,34 @@ def commit(
             },
         },
         source="conversation_runtime",
+    )
+    _turn_token_usage = response.token_usage or {}
+    _turn_cost_usd = model_pricing.estimate_cost_usd(
+        _turn_token_usage.get("model"),
+        prompt_tokens=_turn_token_usage.get("prompt_tokens"),
+        completion_tokens=_turn_token_usage.get("completion_tokens"),
+    )
+    emit_turn_event(
+        agent_name="conversation.commit",
+        trace_id=inbound_buffer_id,
+        lead_ref=lead_ref,
+        persona_id=persona.get("id"),
+        model_used=_turn_token_usage.get("model"),
+        token_input=_turn_token_usage.get("prompt_tokens"),
+        token_output=_turn_token_usage.get("completion_tokens"),
+        output_data={
+            "outbound_message_id": message_id if response.reply_text else None,
+            "handoff_required": response.handoff_required,
+            "handoff_reason": decision.handoff_reason,
+            "evidence_node_ids": decision.evidence_node_ids,
+        },
+        metadata={
+            "n8n_execution_id": n8n_execution_id,
+            "conversation_id": lead_ref,
+            "cost_usd": _turn_cost_usd,
+            "repair_calls": _turn_token_usage.get("repair_calls"),
+            "correlation_id": correlation_id,
+        },
     )
     result = {
         "ok": True,

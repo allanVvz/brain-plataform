@@ -33,6 +33,16 @@ if [[ "$evolution_enabled" =~ ^(1|true|yes)$ ]]; then
   fi
   chmod 0644 "$ROOT_DIR/.runtime/evolution/ca.pem"
 fi
+observability_enabled="$(
+  awk -F= '
+    /^[[:space:]]*OBSERVABILITY_ENABLED[[:space:]]*=/ {
+      value=tolower($2); gsub(/[[:space:]"\047]/, "", value); print value
+    }
+  ' "$ENV_FILE" | tail -n 1
+)"
+if [[ "$observability_enabled" =~ ^(1|true|yes)$ ]]; then
+  COMPOSE+=(--profile observability)
+fi
 
 previous=""
 if [[ -f "$STATE_DIR/current-tag" ]]; then
@@ -133,9 +143,24 @@ deploy_tag() {
       verify_local_images
     fi
   fi
+  if [[ "$observability_enabled" =~ ^(1|true|yes)$ ]]; then
+    if ! "${COMPOSE[@]}" pull grafana; then
+      [[ "$allow_local_images" == "true" ]] || return 1
+      verify_local_images
+    fi
+  fi
   # No sender may race the migration or the binding authority update.
   "${COMPOSE[@]}" stop workers
   "${COMPOSE[@]}" up -d db
+  # db-bootstrap only ran once on this VPS's first boot -- migrate's own
+  # `depends_on: db-bootstrap` is satisfied by that old exited container on
+  # every later deploy (the --no-deps below skips re-checking it), so a
+  # role added to its script later (e.g. grafana_reader) would otherwise
+  # never get created here. Its script is fully idempotent (IF NOT EXISTS/
+  # ALTER ROLE/GRANT all safe to repeat), so force-recreating it every
+  # deploy is free and keeps role/grant state actually in sync with what's
+  # declared in docker-compose.yml.
+  "${COMPOSE[@]}" up --no-deps --force-recreate db-bootstrap
   "${COMPOSE[@]}" up --no-deps --force-recreate migrate
   "${COMPOSE[@]}" up -d --remove-orphans rest storage kong api caddy
   wait_for_api
@@ -143,6 +168,9 @@ deploy_tag() {
   "${COMPOSE[@]}" up -d workers seed-admin
   if [[ "$evolution_enabled" =~ ^(1|true|yes)$ ]]; then
     "${COMPOSE[@]}" up -d evolution-redis evolution-api
+  fi
+  if [[ "$observability_enabled" =~ ^(1|true|yes)$ ]]; then
+    "${COMPOSE[@]}" up -d grafana
   fi
   wait_for_api
   if [[ "$evolution_enabled" =~ ^(1|true|yes)$ ]]; then

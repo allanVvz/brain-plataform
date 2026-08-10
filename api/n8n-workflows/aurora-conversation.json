@@ -47,7 +47,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({persona_slug: 'aurora', lead_ref: $('Validate Aurora binding').item.json.lead_ref, message: $('Validate Aurora binding').item.json.message, message_id: $('Validate Aurora binding').item.json.external_message_id})}}",
+        "body": "={{JSON.stringify({persona_slug: 'aurora', lead_ref: $('Validate Aurora binding').item.json.lead_ref, message: $('Validate Aurora binding').item.json.message, message_id: $('Validate Aurora binding').item.json.external_message_id, trace_id: $('Validate Aurora binding').item.json.buffer_id})}}",
         "options": {}
       },
       "id": "context",
@@ -76,7 +76,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({context: $('Load published graph context').item.json})}}",
+        "body": "={{JSON.stringify({context: $('Load published graph context').item.json, trace_id: $('Validate Aurora binding').item.json.buffer_id, lead_ref: $('Validate Aurora binding').item.json.lead_ref})}}",
         "options": {}
       },
       "id": "decision",
@@ -88,6 +88,19 @@
         300
       ],
       "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ...$json, llm_call_started_at: Date.now() } }];"
+      },
+      "id": "mark_llm_start",
+      "name": "Mark LLM call start",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        300
+      ]
     },
     {
       "parameters": {
@@ -122,7 +135,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const decide = $('Classify SDR Closer Human').item.json; const original = (decide.response && decide.response.reply_text) || ''; let candidate = null; let extractedFields = {}; let identifiedServiceSlug = null; try { const content = $json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content; if (content) { const parsed = JSON.parse(content); if (parsed && typeof parsed.reply_text === 'string') candidate = parsed.reply_text.trim(); if (parsed && parsed.extracted_fields && typeof parsed.extracted_fields === 'object') { extractedFields = parsed.extracted_fields; } if (parsed && typeof parsed.identified_service_slug === 'string') { identifiedServiceSlug = parsed.identified_service_slug; } } } catch (err) { candidate = null; } const finalText = candidate || original; const usage = $json.usage ? { model: 'deepseek-v4-flash', prompt_tokens: $json.usage.prompt_tokens, completion_tokens: $json.usage.completion_tokens, total_tokens: $json.usage.total_tokens } : null; return [{ json: { ...decide, response: { ...decide.response, reply_text: finalText, extracted_fields: extractedFields, identified_service_slug: identifiedServiceSlug, token_usage: usage } } }];"
+        "jsCode": "const decide = $('Classify SDR Closer Human').item.json; const original = (decide.response && decide.response.reply_text) || ''; let candidate = null; let extractedFields = {}; let identifiedServiceSlug = null; try { const content = $json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content; if (content) { const parsed = JSON.parse(content); if (parsed && typeof parsed.reply_text === 'string') candidate = parsed.reply_text.trim(); if (parsed && parsed.extracted_fields && typeof parsed.extracted_fields === 'object') { extractedFields = parsed.extracted_fields; } if (parsed && typeof parsed.identified_service_slug === 'string') { identifiedServiceSlug = parsed.identified_service_slug; } } } catch (err) { candidate = null; } const finalText = candidate || original; const startedAt = ($('Mark LLM call start').item.json || {}).llm_call_started_at; const llmLatencyMs = startedAt ? (Date.now() - startedAt) : null; const usage = $json.usage ? { model: 'deepseek-v4-flash', prompt_tokens: $json.usage.prompt_tokens, completion_tokens: $json.usage.completion_tokens, total_tokens: $json.usage.total_tokens, llm_latency_ms: llmLatencyMs } : null; return [{ json: { ...decide, response: { ...decide.response, reply_text: finalText, extracted_fields: extractedFields, identified_service_slug: identifiedServiceSlug, token_usage: usage } } }];"
       },
       "id": "merge_reply",
       "name": "Merge model reply safely",
@@ -149,7 +162,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({lead_ref: $('Validate Aurora binding').item.json.lead_ref, context: $('Load published graph context').item.json, decision: $json.decision, response: $json.response, correlation_id: $('Validate Aurora binding').item.json.correlation_id, phone_number_id: $('Validate Aurora binding').item.json.phone_number_id, channel_binding_id: $('Validate Aurora binding').item.json.channel_binding_id, inbound_buffer_id: $('Validate Aurora binding').item.json.buffer_id})}}",
+        "body": "={{JSON.stringify({lead_ref: $('Validate Aurora binding').item.json.lead_ref, context: $('Load published graph context').item.json, decision: $json.decision, response: $json.response, correlation_id: $('Validate Aurora binding').item.json.correlation_id, phone_number_id: $('Validate Aurora binding').item.json.phone_number_id, channel_binding_id: $('Validate Aurora binding').item.json.channel_binding_id, inbound_buffer_id: $('Validate Aurora binding').item.json.buffer_id, n8n_execution_id: $execution.id})}}",
         "options": {}
       },
       "id": "commit",
@@ -178,7 +191,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{JSON.stringify({lead_ref: $('Validate Aurora binding').item.json.lead_ref, reason: 'workflow_step_failed:' + $prevNode.name + ':' + JSON.stringify($json).slice(0, 300), correlation_id: $('Validate Aurora binding').item.json.correlation_id})}}",
+        "body": "={{JSON.stringify({lead_ref: $('Validate Aurora binding').item.json.lead_ref, reason: 'workflow_step_failed:' + $prevNode.name + ':' + JSON.stringify($json).slice(0, 300), correlation_id: $('Validate Aurora binding').item.json.correlation_id, trace_id: $('Validate Aurora binding').item.json.buffer_id})}}",
         "options": {}
       },
       "id": "failsafe",
@@ -250,7 +263,7 @@
       "main": [
         [
           {
-            "node": "Draft agentic reply",
+            "node": "Mark LLM call start",
             "type": "main",
             "index": 0
           }
@@ -258,6 +271,17 @@
         [
           {
             "node": "Fail safe human handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark LLM call start": {
+      "main": [
+        [
+          {
+            "node": "Draft agentic reply",
             "type": "main",
             "index": 0
           }

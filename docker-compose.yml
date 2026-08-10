@@ -69,6 +69,7 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB:-brain}
       EVOLUTION_DB_PASSWORD: ${EVOLUTION_DB_PASSWORD:-}
+      GRAFANA_PG_PASSWORD: ${GRAFANA_PG_PASSWORD:-}
     command:
       - sh
       - -ec
@@ -89,6 +90,14 @@ services:
           IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
             CREATE ROLE authenticator NOINHERIT LOGIN;
           END IF;
+          -- Always created (unlike evolution's role below) so migration
+          -- 107's GRANT statements never fail on a missing role just
+          -- because the observability profile isn't enabled on this
+          -- deploy -- it only gets LOGIN/a password conditionally, further
+          -- down, when GRAFANA_PG_PASSWORD is actually set.
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+            CREATE ROLE grafana_reader NOLOGIN;
+          END IF;
         END
         $$$$;
         ALTER ROLE authenticator WITH LOGIN PASSWORD :'postgres_password';
@@ -97,6 +106,16 @@ services:
         GRANT USAGE ON SCHEMA public, storage TO anon, authenticated, service_role;
         GRANT ALL ON SCHEMA public, storage TO service_role;
         SQL
+        if [ -n "$${GRAFANA_PG_PASSWORD}" ]; then
+          psql -v ON_ERROR_STOP=1 -v grafana_password="$${GRAFANA_PG_PASSWORD}" <<'SQL'
+        ALTER ROLE grafana_reader WITH LOGIN PASSWORD :'grafana_password';
+        DO $$$$
+        BEGIN
+          EXECUTE format('GRANT CONNECT ON DATABASE %I TO grafana_reader', current_database());
+        END
+        $$$$;
+        SQL
+        fi
         if [ -n "$${EVOLUTION_DB_PASSWORD}" ]; then
           psql -v ON_ERROR_STOP=1 -v evolution_password="$${EVOLUTION_DB_PASSWORD}" <<'SQL'
         DO $$$$
@@ -457,12 +476,63 @@ services:
     logging: *default-logging
     networks: [backend]
 
+  grafana:
+    image: grafana/grafana-oss:11.3.1
+    environment:
+      GF_SERVER_ROOT_URL: https://${GRAFANA_DOMAIN:-grafana.invalid}
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      # Soft default, not :?required -- this service sits behind the
+      # "observability" profile and must not break `docker compose config`
+      # (run unconditionally in CI) on a deploy that never enables it.
+      # Real requiredness is enforced by validate_env.py when
+      # OBSERVABILITY_ENABLED=true, the same split evolution-api uses below.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-observability-disabled}
+      # Internal ops tool only -- same exposure posture as n8n's own UI,
+      # which is also public-subdomain-with-login today. No self-signup,
+      # no anonymous viewing.
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Read-only role provisioned by migration 107 -- Grafana can only
+      # SELECT from agent_logs/system_events/n8n_executions/messages/leads,
+      # never write, even if the dashboard/query layer is compromised.
+      GRAFANA_PG_PASSWORD: ${GRAFANA_PG_PASSWORD:-}
+      POSTGRES_DB: ${POSTGRES_DB:-brain}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/etc/grafana/dashboards:ro
+    # First observability-only service in this compose file to get an
+    # explicit memory cap -- the VPS stays fixed at 8GB/2vCPU (see
+    # docs/VPS_PRODUCTION_RUNBOOK.md) and nothing else in the stack has
+    # headroom reserved for it.
+    mem_limit: 512m
+    depends_on:
+      db:
+        condition: service_healthy
+      # grafana_reader's SELECT grants only exist after migration 107 runs
+      # -- without this, a plain `docker compose --profile observability up
+      # -d` (bypassing ops/vps/deploy.sh's explicit ordering) could start
+      # Grafana against a schema/role that isn't ready yet.
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    profiles: ["observability"]
+    logging: *default-logging
+    networks: [backend]
+
   caddy:
     image: caddy:2.8-alpine
     environment:
       API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
       STORAGE_DOMAIN: ${STORAGE_DOMAIN:?set STORAGE_DOMAIN}
       N8N_DOMAIN: ${N8N_DOMAIN:?set N8N_DOMAIN}
+      GRAFANA_DOMAIN: ${GRAFANA_DOMAIN:-grafana.invalid}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
       # Only set on the prod stack's .env.compose. The shared Caddy here
       # also terminates TLS for the QA stack's api/kong, reached over the
@@ -500,6 +570,7 @@ volumes:
   caddy-data:
   caddy-config:
   n8n-data:
+  grafana-data:
   wa-validator-runtime:
   wa-validator-profile:
   wa-validator-artifacts:

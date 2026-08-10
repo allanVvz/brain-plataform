@@ -123,6 +123,28 @@ def main() -> int:
         )
         if env.get("EVOLUTION_API_IMAGE") != expected_digest:
             errors.append("EVOLUTION_API_IMAGE must use the validated 2.3.7 digest")
+    observability_enabled = env.get("OBSERVABILITY_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if observability_enabled:
+        for key in ("GRAFANA_DOMAIN", "GRAFANA_ADMIN_PASSWORD", "GRAFANA_PG_PASSWORD"):
+            if not env.get(key, ""):
+                errors.append(f"{key} is required when OBSERVABILITY_ENABLED=true")
+        for key in ("GRAFANA_ADMIN_PASSWORD", "GRAFANA_PG_PASSWORD"):
+            value = env.get(key, "")
+            if value and (len(value) < 32 or not re.fullmatch(r"[A-Za-z0-9_-]+", value)):
+                errors.append(
+                    f"{key} must be a URL-safe random value with at least 32 characters"
+                )
+        grafana_domain = env.get("GRAFANA_DOMAIN", "")
+        if grafana_domain and (
+            "://" in grafana_domain
+            or grafana_domain.endswith(".invalid")
+            or grafana_domain.startswith("localhost")
+        ):
+            errors.append("GRAFANA_DOMAIN must be a real hostname without scheme")
     try:
         if jwt_payload(env.get("ANON_KEY", ""), env.get("JWT_SECRET", "")).get("role") != "anon":
             errors.append("ANON_KEY must carry role=anon")

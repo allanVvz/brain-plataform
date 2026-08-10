@@ -367,7 +367,12 @@ def test_repeated_n8n_handoff_commit_is_persisted_once(monkeypatch):
     assert first["deduplicated"] is False
     assert duplicate["deduplicated"] is True
     assert duplicate["message_id"] is None
-    assert calls == {"lead": 1, "log": 1, "event": 1}
+    # log=2: the pre-existing "decision committed" agent_log write, plus the
+    # new observability event (emit_turn_event's "conversation.commit" row
+    # added for trace_id-linked LLM/agent observability) -- both still only
+    # fire once each for the real commit, never again on the dedup replay,
+    # which is what this test is actually guarding.
+    assert calls == {"lead": 1, "log": 2, "event": 1}
 
 
 def test_v3_commercial_note_drops_stale_field_from_a_different_branch(monkeypatch):

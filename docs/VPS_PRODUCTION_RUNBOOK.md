@@ -47,6 +47,12 @@ Edite `.env.compose` e defina:
 - `MIGRATE_IMAGE=ghcr.io/<owner>/<repo>/brain-migrate`;
 - chaves de provedores, se usadas.
 
+Opcional: observabilidade de LLM/agentes (dashboards Grafana lendo
+`agent_logs`/`system_events`/`n8n_executions` diretamente, sem infra nova
+além do proprio Grafana). Desligado por padrao — passo a passo completo
+(variaveis, DNS, verificacao) em
+[`OBSERVABILITY_GRAFANA_SETUP.md`](OBSERVABILITY_GRAFANA_SETUP.md).
+
 Valide antes de iniciar:
 
 ```bash

@@ -36,6 +36,11 @@ class ContextRequest(StrictModel):
     lead_ref: int
     message: str
     message_id: str | None = None
+    # Turn/trace id for observability -- the same lead_buffer.id already
+    # sent as inbound_buffer_id to /commit, forwarded here too so every
+    # step of a turn (context/decide/commit) logs under one shared id.
+    # Optional so a not-yet-updated n8n workflow doesn't hard-fail.
+    trace_id: str | None = None
 
     @field_validator("message")
     @classmethod
@@ -49,6 +54,11 @@ class ContextRequest(StrictModel):
 class DecisionRequest(StrictModel):
     context: ConversationContext
     model_observation: dict | None = None
+    trace_id: str | None = None
+    # ConversationContext carries no lead identity of its own (by design --
+    # /decide reasons only from context + model_observation) -- forwarded
+    # separately, purely for observability logging (lead_id column).
+    lead_ref: int | None = None
 
 
 class CommitRequest(StrictModel):
@@ -60,6 +70,7 @@ class CommitRequest(StrictModel):
     phone_number_id: str | None = None
     channel_binding_id: str
     inbound_buffer_id: str
+    n8n_execution_id: str | None = None
 
 
 class FailSafeHandoffRequest(StrictModel):
@@ -67,6 +78,7 @@ class FailSafeHandoffRequest(StrictModel):
     reason: str
     correlation_id: str
     diagnostic: dict[str, Any] = Field(default_factory=dict)
+    trace_id: str | None = None
 
 
 class TechnicalFailureRequest(StrictModel):
@@ -100,6 +112,8 @@ def decide(
     decision, response = conversation_runtime.decide(
         body.context,
         model_observation=body.model_observation,
+        trace_id=body.trace_id,
+        lead_ref=body.lead_ref,
     )
     return {
         "decision": decision.model_dump(mode="json"),
@@ -124,6 +138,7 @@ def commit(
             channel_binding_id=body.channel_binding_id,
             inbound_buffer_id=body.inbound_buffer_id,
             expected_decision_owner="n8n_agents",
+            n8n_execution_id=body.n8n_execution_id,
         )
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
@@ -151,6 +166,7 @@ def fail_safe_handoff(
                 "payload": {
                     "lead_ref": body.lead_ref,
                     "correlation_id": body.correlation_id,
+                    "trace_id": body.trace_id,
                     **body.diagnostic,
                 },
             },
@@ -163,10 +179,19 @@ def fail_safe_handoff(
             "entity_type": "lead",
             "entity_id": str(body.lead_ref),
             "persona_id": lead.get("persona_id"),
-            "payload": body.model_dump(),
+            "payload": {**body.model_dump(), "trace_id": body.trace_id},
         },
         level="error",
         source="routes.conversations",
+    )
+    conversation_runtime.emit_turn_event(
+        agent_name="conversation.error",
+        trace_id=body.trace_id,
+        lead_ref=body.lead_ref,
+        persona_id=lead.get("persona_id"),
+        status="error",
+        error_msg=body.reason[:1000],
+        metadata={"conversation_id": body.lead_ref, "step": "fail_safe_handoff"},
     )
     return {"ok": True, "handoff": True, "ai_paused": True}
 
@@ -190,10 +215,19 @@ def technical_failure(
             "entity_type": "lead",
             "entity_id": str(body.lead_ref),
             "persona_id": lead.get("persona_id"),
-            "payload": body.model_dump(),
+            "payload": {**body.model_dump(), "trace_id": body.buffer_id},
         },
         level="error",
         source="routes.conversations",
+    )
+    conversation_runtime.emit_turn_event(
+        agent_name="conversation.error",
+        trace_id=body.buffer_id,
+        lead_ref=body.lead_ref,
+        persona_id=lead.get("persona_id"),
+        status="error",
+        error_msg=body.reason[:1000],
+        metadata={"conversation_id": body.lead_ref, "step": "technical_failure"},
     )
     return {
         "ok": False,

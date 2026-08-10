@@ -1,0 +1,16 @@
+# Dashboards-as-code provider: loads every *.json in infra/grafana/dashboards
+# (mounted read-only into the container) instead of relying on manual
+# clicking, so dashboards ship through the same CI/CD path as everything
+# else in this repo.
+apiVersion: 1
+
+providers:
+  - name: Brain Observability
+    orgId: 1
+    folder: "Brain/Aurora"
+    type: file
+    disableDeletion: true
+    editable: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/dashboards

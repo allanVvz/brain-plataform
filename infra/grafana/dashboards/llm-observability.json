@@ -1,0 +1,183 @@
+{
+  "uid": "brain-llm-observability",
+  "title": "Brain/Aurora — Observabilidade de LLM",
+  "description": "Custo, latência, erros e repair loops por turno de conversa. Fonte: agent_logs (eventos por etapa, ligados por trace_id — ver migration 106/107).",
+  "tags": ["brain", "aurora", "llm", "observability"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "1m",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Custo por 100 mensagens (USD)",
+      "description": "cost_usd fica NULL até a tabela de preços em api/services/model_pricing.py ser confirmada com o preço real da DeepSeek — até lá este painel mostra vazio, de propósito, em vez de um número inventado.",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT (SUM(cost_usd) / NULLIF(COUNT(*), 0)) * 100 AS \"custo_por_100_msgs\" FROM agent_logs WHERE agent_type = 'conversation.commit' AND $__timeFilter(created_at)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Volume de mensagens (turnos committed)",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS turnos FROM agent_logs WHERE agent_type = 'conversation.commit' AND $__timeFilter(created_at)"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Taxa de erro",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0, "decimals": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT 100.0 * SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS taxa_erro_pct FROM agent_logs WHERE agent_type LIKE 'conversation.%' AND $__timeFilter(created_at)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Taxa de handoff para humano",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0, "decimals": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT 100.0 * SUM(CASE WHEN (output->>'handoff_required')::boolean THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS taxa_handoff_pct FROM agent_logs WHERE agent_type = 'conversation.commit' AND $__timeFilter(created_at)"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Latência de LLM (p50 / p95)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(created_at, '5m') AS time, percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms) AS p50, percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95 FROM agent_logs WHERE agent_type = 'conversation.decide_llm_call' AND latency_ms IS NOT NULL AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Tokens por modelo (entrada + saída)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(created_at, '1h') AS time, COALESCE(model_used, 'desconhecido') AS metric, SUM(COALESCE(token_input, 0) + COALESCE(token_output, 0)) AS value FROM agent_logs WHERE agent_type IN ('conversation.decide_llm_call', 'conversation.repair_call') AND $__timeFilter(created_at) GROUP BY 1, model_used ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Turnos com repair loop",
+      "description": "Turnos com mais de uma chamada de decide/LLM (conversation.decide_llm_call + conversation.repair_call) para o mesmo trace_id.",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 14 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS turnos_com_repair FROM (SELECT trace_id FROM agent_logs WHERE agent_type IN ('conversation.decide_llm_call', 'conversation.repair_call') AND trace_id IS NOT NULL AND $__timeFilter(created_at) GROUP BY trace_id HAVING COUNT(*) > 1) t"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Tokens de cache (hit vs miss)",
+      "description": "Preenchido só depois de confirmar o campo real de cache tokens na API da DeepSeek (Fase 1 condicional) -- até lá, sem dado, de propósito.",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 14 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0, "decimals": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT 100.0 * SUM((metadata->>'prompt_cache_hit_tokens')::numeric) / NULLIF(SUM((metadata->>'prompt_cache_hit_tokens')::numeric) + SUM((metadata->>'prompt_cache_miss_tokens')::numeric), 0) AS cache_hit_pct FROM agent_logs WHERE agent_type = 'conversation.decide_llm_call' AND $__timeFilter(created_at)"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Qualidade média da resposta",
+      "description": "Reservado -- score de qualidade em tráfego real é Fase 4, deliberadamente adiada. Sem dado até essa fase existir.",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 14 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0, "decimals": 2 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT AVG(quality_score) AS quality_media FROM agent_logs WHERE quality_score IS NOT NULL AND $__timeFilter(created_at)"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Custo por conversa (top 20 leads)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT lead_id, SUM(cost_usd) AS custo_total_usd, COUNT(*) AS mensagens FROM agent_logs WHERE agent_type = 'conversation.commit' AND $__timeFilter(created_at) GROUP BY lead_id ORDER BY custo_total_usd DESC NULLS LAST LIMIT 20"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Erros recentes",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "postgres", "uid": "brain-postgres-ro" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT created_at, lead_id, agent_type AS etapa, error_msg, trace_id FROM agent_logs WHERE status = 'error' AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50"
+        }
+      ]
+    }
+  ]
+}

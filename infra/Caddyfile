@@ -48,6 +48,22 @@
 	reverse_proxy n8n:5678
 }
 
+# Internal ops dashboard only -- same login-required, no-anonymous-access
+# posture as n8n's own UI above. Only reachable if the "observability"
+# Compose profile is enabled; otherwise this site block just has nothing
+# to proxy to and Caddy will 502 on it, which is fine (no DNS record means
+# no traffic reaches it either).
+{$GRAFANA_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		-Server
+	}
+	reverse_proxy grafana:3000
+}
+
 # QA stack (`brain-ai-qa` Compose project). Only active when API_DOMAIN_QA /
 # STORAGE_DOMAIN_QA are set in the prod .env.compose. Reaches the QA
 # project's api/kong over the shared `edge` network by their
