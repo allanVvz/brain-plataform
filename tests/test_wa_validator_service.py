@@ -353,6 +353,7 @@ def test_analyze_gaps_scores_semantic_turn_criteria(monkeypatch):
             "expected_knowledge": ["graph:1:sha256:x"],
         },
         "output": {
+            "technical_pass": True,
             "quality_pass": True,
             "conversation": [{
                 "role": "bot", "text": "Acknowledged.",
@@ -369,4 +370,41 @@ def test_analyze_gaps_scores_semantic_turn_criteria(monkeypatch):
 
     assert result["quality_pass"] is True
     assert result["overall_score"] == 100
+    assert result["analyzer"] == "semantic_graph_v1"
+
+
+def test_analyze_gaps_never_scores_incomplete_semantic_run_as_accepted(monkeypatch):
+    session = {
+        "id": "failed-semantic-session",
+        "persona_slug": "generic",
+        "script": {
+            "driver": {"mode": "semantic_graph_v1"},
+            "expected_knowledge": [],
+        },
+        "output": {
+            "technical_pass": False,
+            "quality_pass": False,
+            "conversation": [
+                {
+                    "role": "bot",
+                    "text": "Pergunta válida",
+                    "semantic_audit": {
+                        "criteria": {"first_missing_only": True},
+                        "failures": [],
+                    },
+                },
+                {"role": "bot", "text": "(erro: proof inválido)", "error": True},
+            ],
+        },
+    }
+    monkeypatch.setattr(wv, "get_session", lambda _session_id: session)
+    monkeypatch.setattr(wv, "_session_update", lambda *_args, **_kwargs: session)
+    monkeypatch.setattr(wv.supabase_client, "insert_event", lambda *_args, **_kwargs: None)
+
+    result = wv.analyze_gaps("failed-semantic-session")
+
+    assert result["quality_pass"] is False
+    assert result["technical_pass"] is False
+    assert result["overall_score"] == 0
+    assert result["conversational_quality_score"] < 100
     assert result["analyzer"] == "semantic_graph_v1"

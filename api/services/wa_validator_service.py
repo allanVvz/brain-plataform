@@ -867,6 +867,7 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
         total_criteria = 0
         for index, audit in semantic_turns:
             if not isinstance(audit, dict):
+                total_criteria += 1
                 semantic_gaps.append({
                     "topic": "missing_semantic_turn_audit",
                     "evidence": f"Turno {index + 1} não possui auditoria semântica.",
@@ -918,7 +919,7 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
                 "priority": "high",
             })
         technical_pass = bool(
-            not failures and output.get("technical_pass") is not False
+            not failures and output.get("technical_pass") is True
         )
         quality_pass = bool(
             bot_turns
@@ -926,7 +927,12 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
             and not semantic_gaps
             and output_quality_confirmed
         )
-        score = round(100 * passed_criteria / max(1, total_criteria))
+        conversational_score = round(100 * passed_criteria / max(1, total_criteria))
+        # A partial run can demonstrate useful individual criteria, but it is
+        # not acceptance evidence.  Keep the partial diagnostic score separate
+        # and make the prominent overall score a hard completion gate so the
+        # UI can never display 100 for a stopped/error session.
+        acceptance_score = conversational_score if quality_pass else 0
         insights = {
             **_EMPTY_INSIGHTS,
             "demonstrated": [
@@ -939,8 +945,8 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
                 ["Interromper no primeiro critério semântico reprovado e corrigir a origem no grafo/runtime."]
                 if semantic_gaps else []
             ),
-            "overall_score": score,
-            "conversational_quality_score": score,
+            "overall_score": acceptance_score,
+            "conversational_quality_score": conversational_score,
             "technical_pass": technical_pass,
             "quality_pass": quality_pass,
             "quality_scope": "semantic_graph_v1",
@@ -960,7 +966,7 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
                 "session_id": session_id,
                 "persona_slug": persona_slug,
                 "n_gaps": len(semantic_gaps),
-                "score": score,
+                "score": acceptance_score,
                 "quality_pass": quality_pass,
             },
         })
