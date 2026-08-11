@@ -127,7 +127,8 @@ jobs:
           sed -i "s|^AI_BRAIN_WEBHOOK_TOKEN=.*|AI_BRAIN_WEBHOOK_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(48))')|" .env.ci
           python infra/generate_keys.py --write .env.ci
           python ops/vps/validate_env.py .env.ci
-          IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci config > compose.rendered.yml
+          IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile edge config > compose.rendered.yml
+          grep -F 'API_DOMAIN_SECONDARY: api-alt.example.com' compose.rendered.yml
           if grep -Eqi 'change-me|local-dev|http://localhost' compose.rendered.yml; then
             echo 'Development value found in rendered production Compose' >&2
             exit 1
@@ -139,7 +140,7 @@ jobs:
           sed -i 's|^EVOLUTION_ENABLED=.*|EVOLUTION_ENABLED=true|' .env.ci
           sed -i 's|^AI_BRAIN_PUBLIC_API_URL=.*|AI_BRAIN_PUBLIC_API_URL=https://api.example.com|' .env.ci
           python ops/vps/validate_env.py .env.ci
-          IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile evolution config --quiet
+          IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile edge --profile evolution config --quiet
 
   publish:
     if: inputs.action != 'rollback'
