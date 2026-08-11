@@ -93,7 +93,7 @@ def _insert_lead(cur, persona_id: str, binding_id: str | None = None) -> int:
 
 def _enqueue(cur, *, persona_id, lead_ref, binding_id, direction="inbound",
              idempotency_key=None, available_at=None, correlation_id=None,
-             external_message_id=None):
+             external_message_id=None, age_seconds=5):
     idempotency_key = idempotency_key or f"test:{uuid.uuid4()}"
     correlation_id = correlation_id or idempotency_key
     buffer = {
@@ -126,7 +126,13 @@ def _enqueue(cur, *, persona_id, lead_ref, binding_id, direction="inbound",
         "select public.enqueue_whatsapp_envelope(%s::jsonb, %s::jsonb) as result",
         (json.dumps(buffer), json.dumps(message)),
     )
-    return cur.fetchone()["result"]
+    result = cur.fetchone()["result"]
+    if age_seconds:
+        cur.execute(
+            "update public.lead_buffer set created_at=now()-make_interval(secs => %s) where id=%s",
+            (age_seconds, result["buffer_id"]),
+        )
+    return result
 
 
 @pytest.fixture()
@@ -223,6 +229,48 @@ class TestClaimWhatsappBuffer:
 
         cur.execute("select * from public.claim_whatsapp_buffer(%s, 10, 60)", ("worker-2",))
         assert cur.fetchall() == []
+
+    def test_never_claims_agent_outbound_without_valid_proof(self, cur, scenario):
+        outbound_id = _enqueue(
+            cur, persona_id=scenario["persona_id"], lead_ref=scenario["lead_ref"],
+            binding_id=scenario["binding_id"], direction="outbound",
+        )["buffer_id"]
+        cur.execute(
+            "update public.lead_buffer set status='pending_send', "
+            "payload=jsonb_build_object('text','reply','sender_type','agent') where id=%s",
+            (outbound_id,),
+        )
+
+        cur.execute("select * from public.claim_whatsapp_buffer(%s, 10, 60)", ("worker-1",))
+        assert cur.fetchall() == []
+        cur.execute("select status,attempt_count from public.lead_buffer where id=%s", (outbound_id,))
+        row = cur.fetchone()
+        assert row["status"] == "pending_send"
+        assert row["attempt_count"] == 0
+
+    def test_transitive_four_second_burst_preserves_all_text_once(self, cur, scenario):
+        ids = []
+        for index, text in enumerate(("um", "dois", "tres")):
+            row = _enqueue(
+                cur, persona_id=scenario["persona_id"], lead_ref=scenario["lead_ref"],
+                binding_id=scenario["binding_id"], idempotency_key=f"burst:{uuid.uuid4()}",
+                age_seconds=0,
+            )
+            ids.append(row["buffer_id"])
+            cur.execute(
+                "update public.lead_buffer set created_at=now()-make_interval(secs => %s), "
+                "payload=jsonb_build_object('text',%s) where id=%s",
+                (12 - index * 3, text, row["buffer_id"]),
+            )
+
+        cur.execute("select * from public.claim_whatsapp_buffer(%s, 10, 60)", ("worker-1",))
+        claimed = cur.fetchall()
+        assert [str(row["id"]) for row in claimed] == [ids[-1]]
+        assert claimed[0]["payload"]["text"] == "um\ndois\ntres"
+        assert len(claimed[0]["payload"]["burst_messages"]) == 3
+        cur.execute("select id,status from public.lead_buffer where id=any(%s::uuid[]) order by created_at,id", (ids,))
+        rows = cur.fetchall()
+        assert [row["status"] for row in rows] == ["ignored", "ignored", "processing"]
 
 
 # ── mark_whatsapp_attempt ────────────────────────────────────────────────

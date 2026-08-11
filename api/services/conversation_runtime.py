@@ -121,6 +121,50 @@ class PublishedGraphUnavailable(RuntimeError):
     pass
 
 
+class ConversationCommitFailed(RuntimeError):
+    def __init__(self, *, failed_step: str, inbound_id: str | None,
+                 correlation_id: str | None = None, cause: Exception):
+        self.failed_step = failed_step
+        self.inbound_id = inbound_id
+        self.postgres_code = str(getattr(cause, "code", "") or "") or None
+        self.constraint = str(getattr(cause, "constraint_name", "") or "") or None
+        self.correlation_id = correlation_id
+        super().__init__(f"conversation commit failed at {failed_step}")
+
+    def canonical_result(self) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "technical_failure": True,
+            "failed_step": self.failed_step,
+            "postgres_code": self.postgres_code,
+            "constraint": self.constraint,
+            "canonical_inbound_id": self.inbound_id,
+            "inbound_id": self.inbound_id,
+            "correlation_id": self.correlation_id,
+            "commit_state": "failed",
+        }
+
+
+def _commit_graph_turn_and_outbox_or_raise(
+    *, inbound_id: str | None, correlation_id: str, **payload: Any,
+) -> dict:
+    try:
+        return supabase_client.commit_graph_turn_and_outbox_v3(**payload)
+    except Exception as exc:
+        logger.exception(
+            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v3 "
+            "inbound_id=%s correlation_id=%s",
+            inbound_id,
+            correlation_id,
+        )
+        raise ConversationCommitFailed(
+            failed_step="commit_graph_turn_and_outbox_v3",
+            inbound_id=inbound_id,
+            correlation_id=correlation_id,
+            cause=exc,
+        ) from exc
+
+
 class ModelDecisionError(RuntimeError):
     pass
 
@@ -2084,31 +2128,24 @@ def commit(
         else None
     )
     if existing_outbound:
-        graph_turn = None
         if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
-            graph_turn = supabase_client.commit_graph_turn_v3(
-                p_canonical_inbound_id=str(inbound_buffer_id),
-                p_persona_id=str(lead.get("persona_id")),
-                p_lead_ref=lead_ref,
-                p_publication_id=str(context.publication_id),
-                p_graph_checksum=context.graph_checksum,
-                p_active_branch_node_id=response.cart_state.get("active_branch_node_id"),
-                p_asked_question_node_ids=response.cart_state.get("asked_question_node_ids") or [],
-                p_expected_revision=int(context.retrieval_trace.get("ledger_revision") or 0),
-                # Fact proofs are independent from branch/reply validity.
-                # Discarding a correctly sourced persona fact because the
-                # model missed the branch makes the next turn re-ask it.
-                p_facts=response.proof.get("accepted_facts") or [],
-                p_retrieval_trace=context.retrieval_trace,
-                p_model_proposal=(
-                    response.proposal.model_dump(mode="json") if response.proposal
-                    else response.proof.get("model_proposal") or {}
-                ),
-                p_proof_result=response.proof,
-                p_repair_result={"fallback_used": bool(response.proof.get("fallback_used"))},
-                p_final_decision=decision.model_dump(mode="json"),
-                p_outbound_id=str(existing_outbound.get("id") or "") or None,
+            # Atomic v3 commits create the proof and inert outbound in one DB
+            # transaction. Reaching this branch means a second decision was
+            # attempted against an envelope created outside that boundary.
+            # Never manufacture a proof after seeing an outbox row.
+            supabase_client.record_whatsapp_safety_violation(
+                binding_id=channel_binding_id,
+                lead_ref=lead_ref,
+                violation_key=f"v3_preexisting_outbound:{inbound_buffer_id}",
+                reason="v3 commit encountered an outbound outside its atomic transaction",
             )
+            raise ConversationCommitFailed(
+                failed_step="preexisting_outbound_guard",
+                inbound_id=inbound_buffer_id,
+                correlation_id=correlation_id,
+                cause=RuntimeError("preexisting v3 outbound requires proof-based recovery"),
+            )
+        graph_turn = None
         result = {
             "ok": True,
             "message_id": message_id,
@@ -2323,17 +2360,17 @@ def commit(
         lead_update["nome"] = str(customer_name).strip()
     if service_interest:
         lead_update["interesse_produto"] = str(service_interest).strip()
-    if response.handoff_required:
-        supabase_client.handoff_whatsapp_lead_state(
-            lead_ref,
-            metadata=metadata,
-            stage=qualified_stage,
-            level=handoff_level,
-        )
-        if customer_name or service_interest:
+    # v3's authoritative state is committed atomically below before this lead
+    # projection is updated. Legacy engines keep their established ordering.
+    if context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION:
+        if response.handoff_required:
+            supabase_client.handoff_whatsapp_lead_state(
+                lead_ref, metadata=metadata, stage=qualified_stage, level=handoff_level,
+            )
+            if customer_name or service_interest:
+                supabase_client.update_lead(lead_ref, lead_update)
+        else:
             supabase_client.update_lead(lead_ref, lead_update)
-    else:
-        supabase_client.update_lead(lead_ref, lead_update)
 
     supabase_client.insert_agent_log(
         {
@@ -2367,6 +2404,7 @@ def commit(
         ((lead.get("metadata") or {}).get("validation") or {}).get("is_validation")
     )
     buffer = None
+    prepared_outbound: dict[str, Any] | None = None
     if response.reply_text and is_validation_lead:
         # Confirmed live 2026-08-08: whatsapp_outbox.enqueue_outbound's
         # _recipient_for_lead 409s for a validation lead (no real WhatsApp
@@ -2380,19 +2418,23 @@ def commit(
         # claim_whatsapp_buffer's claimable set ('buffered', 'retry',
         # 'pending_send' -- migration 065) so the row is inert to every
         # dispatch worker while the message row still gets written.
-        envelope = supabase_client.enqueue_whatsapp_envelope(
-            buffer={
+        prepared_outbound = {
+            "buffer": {
                 "persona_id": lead.get("persona_id"),
                 "lead_ref": lead_ref,
                 "channel_binding_id": channel_binding_id,
                 "direction": "outbound",
-                "payload": {"text": response.reply_text, "sender_type": "agent"},
-                "status": "sent",
+                "status": "awaiting_proof",
                 "batch_key": f"{lead.get('persona_id')}:{lead_ref}",
                 "idempotency_key": message_id,
                 "correlation_id": message_id,
+                "payload": {
+                    "text": response.reply_text,
+                    "sender_type": "agent",
+                    "validation": True,
+                },
             },
-            message={
+            "message": {
                 "lead_id": lead_ref,
                 "role": "assistant",
                 "content": response.reply_text,
@@ -2416,11 +2458,14 @@ def commit(
                     "validation": True,
                 },
             },
-        )
-        buffer = {
-            "id": envelope.get("buffer_id"),
-            "status": envelope.get("status"),
         }
+        if context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION:
+            envelope = supabase_client.enqueue_whatsapp_envelope(
+                buffer={**prepared_outbound["buffer"], "status": "sent"},
+                message=prepared_outbound["message"],
+            )
+            buffer = {"id": envelope.get("buffer_id"), "status": envelope.get("status")}
+            prepared_outbound = None
     elif response.reply_text:
         # message_id ("ai:<inbound correlation_id>") is unique to this
         # outbound leg — reusing the inbound correlation_id here made the
@@ -2429,14 +2474,7 @@ def commit(
         # ...` (scoped only by binding, not direction) matched both rows and
         # tried to force the same external_message_id onto both, tripping
         # idx_messages_channel_external_unique. Confirmed live 2026-08-01.
-        envelope = whatsapp_outbox.enqueue_outbound(
-            lead=lead,
-            text=response.reply_text,
-            sender_type="agent",
-            message_id=message_id,
-            correlation_id=message_id,
-            idempotency_key=message_id,
-            metadata={
+        outbound_metadata = {
                 "agent_slug": context.agent_slug,
                 "role": response.role.value,
                 "intent": decision.intent,
@@ -2447,12 +2485,21 @@ def commit(
                 "token_usage": response.token_usage,
                 "trace_id": inbound_buffer_id,
                 "n8n_execution_id": n8n_execution_id,
-            },
-        )
-        buffer = {
-            "id": envelope.get("buffer_id"),
-            "status": envelope.get("status"),
-        }
+            }
+        if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+            prepared_outbound = whatsapp_outbox.prepare_outbound_envelope(
+                lead=lead, text=response.reply_text, sender_type="agent",
+                message_id=message_id, correlation_id=message_id,
+                idempotency_key=message_id, initial_status="awaiting_proof",
+                metadata=outbound_metadata,
+            )
+        else:
+            envelope = whatsapp_outbox.enqueue_outbound(
+                lead=lead, text=response.reply_text, sender_type="agent",
+                message_id=message_id, correlation_id=message_id,
+                idempotency_key=message_id, metadata=outbound_metadata,
+            )
+            buffer = {"id": envelope.get("buffer_id"), "status": envelope.get("status")}
 
     graph_turn = None
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
@@ -2469,40 +2516,64 @@ def commit(
             branch_facts=response.cart_state.get("facts") or {},
             correlation_id=correlation_id,
         )
-        graph_turn = supabase_client.commit_graph_turn_v3(
-            p_canonical_inbound_id=str(inbound_buffer_id),
-            p_persona_id=str(lead.get("persona_id")),
-            p_lead_ref=lead_ref,
-            p_publication_id=str(context.publication_id),
-            p_graph_checksum=context.graph_checksum,
-            p_active_branch_node_id=response.cart_state.get("active_branch_node_id"),
-            p_asked_question_node_ids=response.cart_state.get("asked_question_node_ids") or [],
-            p_expected_revision=int(context.retrieval_trace.get("ledger_revision") or 0),
-            p_facts=[
+        turn_envelope = {
+            "canonical_inbound_id": str(inbound_buffer_id),
+            "binding_id": channel_binding_id,
+            "correlation_id": correlation_id,
+            "persona_id": str(lead.get("persona_id")),
+            "lead_ref": lead_ref,
+            "publication_id": str(context.publication_id),
+            "graph_checksum": context.graph_checksum,
+            "active_branch_node_id": response.cart_state.get("active_branch_node_id"),
+            "active_branch_node_ids": response.cart_state.get("active_branch_node_ids") or [],
+            "asked_question_node_ids": response.cart_state.get("asked_question_node_ids") or [],
+            "expected_revision": int(context.retrieval_trace.get("ledger_revision") or 0),
+            "facts": [
                 *(response.proof.get("accepted_facts") or []),
                 *reset_facts,
             ],
-            p_retrieval_trace=context.retrieval_trace,
-            p_model_proposal=(
+            "retrieval_trace": {
+                **context.retrieval_trace,
+                "token_usage": response.token_usage or {},
+            },
+            "model_proposal": (
                 response.proposal.model_dump(mode="json") if response.proposal
                 else response.proof.get("model_proposal") or {}
             ),
-            p_proof_result=response.proof,
-            p_repair_result={"fallback_used": bool(response.proof.get("fallback_used"))},
-            p_final_decision=decision.model_dump(mode="json"),
-            p_outbound_id=str((buffer or {}).get("id") or "") or None,
+            "proof_result": response.proof,
+            "repair_result": {"fallback_used": bool(response.proof.get("fallback_used"))},
+            "final_decision": decision.model_dump(mode="json"),
+        }
+        atomic_seed = {
+            "ok": True, "message_id": message_id if response.reply_text else None,
+            "deduplicated": False, "handoff": response.handoff_required,
+            "ai_paused": response.handoff_required, "route": decision.route.value,
+            "role": response.role.value, "intent": decision.intent,
+            "reply_text": response.reply_text, "graph_version": context.graph_version,
+            "graph_checksum": context.graph_checksum, "stage": qualified_stage,
+        }
+        atomic_commit = _commit_graph_turn_and_outbox_or_raise(
+            inbound_id=inbound_buffer_id, correlation_id=correlation_id,
+            turn=turn_envelope,
+            outbound_buffer=(prepared_outbound or {}).get("buffer"),
+            outbound_message=(prepared_outbound or {}).get("message"),
+            result_payload=atomic_seed,
         )
-        # Durable record of every simultaneously-active branch, for personas
-        # that use branch_action "add" (multiple services per appointment).
-        # Empty for every other persona -- graph_agent_runtime_v3.decide()
-        # only ever grows active_branch_node_ids in response to a proposal
-        # actually validated as "add", so this is a no-op write for the
-        # single-service default.
-        active_branch_ids = response.cart_state.get("active_branch_node_ids") or []
-        ledger_id = (graph_turn or {}).get("ledger_id")
-        if active_branch_ids and ledger_id:
-            for branch_anchor_node_id in active_branch_ids:
-                supabase_client.add_ledger_branch(str(ledger_id), str(branch_anchor_node_id))
+        graph_turn = atomic_commit.get("graph_turn") or {}
+        if atomic_commit.get("outbound_buffer_id"):
+            buffer = {
+                "id": atomic_commit["outbound_buffer_id"],
+                "status": atomic_commit.get("outbound_status"),
+            }
+        # Projection only: ledger/facts/proof/outbox above are already durable.
+        if response.handoff_required:
+            supabase_client.handoff_whatsapp_lead_state(
+                lead_ref, metadata=metadata, stage=qualified_stage, level=handoff_level,
+            )
+            if customer_name or service_interest:
+                supabase_client.update_lead(lead_ref, lead_update)
+        else:
+            supabase_client.update_lead(lead_ref, lead_update)
 
     supabase_client.insert_event(
         {
@@ -2530,6 +2601,7 @@ def commit(
         _turn_token_usage.get("model"),
         prompt_tokens=_turn_token_usage.get("prompt_tokens"),
         completion_tokens=_turn_token_usage.get("completion_tokens"),
+        cache_hit_tokens=int(_turn_token_usage.get("cache_hit_tokens") or 0),
     )
     emit_turn_event(
         agent_name="conversation.commit",
@@ -2550,6 +2622,12 @@ def commit(
             "conversation_id": lead_ref,
             "cost_usd": _turn_cost_usd,
             "repair_calls": _turn_token_usage.get("repair_calls"),
+            "model_calls": _turn_token_usage.get("model_calls"),
+            "cache_hit_tokens": _turn_token_usage.get("cache_hit_tokens"),
+            "cache_miss_tokens": _turn_token_usage.get("cache_miss_tokens"),
+            "prompt_estimated_tokens": _turn_token_usage.get("prompt_estimated_tokens"),
+            "prompt_budget_limit": _turn_token_usage.get("prompt_budget_limit"),
+            "prompt_budget_status": _turn_token_usage.get("prompt_budget_status"),
             "correlation_id": correlation_id,
         },
     )
@@ -2574,7 +2652,7 @@ def commit(
         "stage": qualified_stage,
         "graph_turn": graph_turn,
     }
-    if inbound_buffer_id:
+    if inbound_buffer_id and context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION:
         supabase_client.complete_conversation_commit(
             inbound_buffer_id=inbound_buffer_id,
             binding_id=channel_binding_id,

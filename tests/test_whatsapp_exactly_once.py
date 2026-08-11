@@ -512,8 +512,8 @@ def test_v3_commercial_note_drops_stale_field_from_a_different_branch(monkeypatc
     )
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
-        "commit_graph_turn_v3",
-        lambda **_kwargs: {"proof_id": "proof-1", "ledger_revision": 1},
+        "commit_graph_turn_and_outbox_v3",
+        lambda **_kwargs: {"graph_turn": {"proof_id": "proof-1", "ledger_revision": 1}},
     )
     monkeypatch.setattr(
         conversation_runtime.whatsapp_outbox,
@@ -655,8 +655,8 @@ def test_v3_commercial_note_includes_a_shared_field_owned_by_the_persona(monkeyp
     )
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
-        "commit_graph_turn_v3",
-        lambda **_kwargs: {"proof_id": "proof-1", "ledger_revision": 1},
+        "commit_graph_turn_and_outbox_v3",
+        lambda **_kwargs: {"graph_turn": {"proof_id": "proof-1", "ledger_revision": 1}},
     )
     monkeypatch.setattr(
         conversation_runtime.whatsapp_outbox,
@@ -814,19 +814,27 @@ def test_validation_lead_commit_persists_the_reply_without_a_real_send(monkeypat
     )
     captured_envelopes = []
 
-    def fake_enqueue_envelope(*, buffer, message):
-        captured_envelopes.append({"buffer": buffer, "message": message})
-        return {"buffer_id": "buffer-out-1", "status": buffer["status"]}
+    def fake_atomic_commit(*, turn, outbound_buffer, outbound_message, result_payload):
+        captured_envelopes.append({"buffer": outbound_buffer, "message": outbound_message})
+        return {
+            "graph_turn": {"proof_id": "proof-1", "ledger_revision": 1},
+            "outbound_buffer_id": "buffer-out-1",
+            "outbound_status": "sent",
+        }
 
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
-        "enqueue_whatsapp_envelope",
-        fake_enqueue_envelope,
+        "commit_graph_turn_and_outbox_v3",
+        fake_atomic_commit,
     )
 
     result = conversation_runtime.commit(
         lead_ref=7,
-        context=_context(),
+        context=_context().model_copy(update={
+            "runtime_version": conversation_runtime.graph_agent_runtime_v3.RUNTIME_VERSION,
+            "publication_id": "publication-1",
+            "retrieval_trace": {"ledger_revision": 0},
+        }),
         decision=_decision(),
         response=_response(),
         correlation_id="corr-validation",
@@ -840,7 +848,8 @@ def test_validation_lead_commit_persists_the_reply_without_a_real_send(monkeypat
     assert result["outbound_buffer_id"] == "buffer-out-1"
     assert len(captured_envelopes) == 1
     envelope = captured_envelopes[0]
-    assert envelope["buffer"]["status"] not in {"buffered", "retry", "pending_send"}
+    assert envelope["buffer"]["status"] == "awaiting_proof"
+    assert envelope["buffer"]["payload"]["validation"] is True
     assert envelope["message"]["role"] == "assistant"
     assert envelope["message"]["content"] == "Ola!"
     assert envelope["message"]["direction"] == "outbound"
@@ -877,8 +886,11 @@ def test_invalid_branch_proof_still_commits_individually_accepted_persona_fact(m
     monkeypatch.setattr(conversation_runtime.supabase_client, "insert_agent_log", lambda *_a, **_k: None)
     monkeypatch.setattr(conversation_runtime.supabase_client, "insert_event", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        conversation_runtime.whatsapp_outbox, "enqueue_outbound",
-        lambda **_kwargs: {"buffer_id": "outbound-1", "status": "pending_send"},
+        conversation_runtime.whatsapp_outbox, "prepare_outbound_envelope",
+        lambda **_kwargs: {
+            "buffer": {"status": "awaiting_proof"},
+            "message": {"content": "Ola!"},
+        },
     )
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
@@ -887,8 +899,12 @@ def test_invalid_branch_proof_still_commits_individually_accepted_persona_fact(m
     )
     captured = {}
     monkeypatch.setattr(
-        conversation_runtime.supabase_client, "commit_graph_turn_v3",
-        lambda **kwargs: captured.update(kwargs) or {"ledger_revision": 1},
+        conversation_runtime.supabase_client, "commit_graph_turn_and_outbox_v3",
+        lambda **kwargs: captured.update(kwargs) or {
+            "graph_turn": {"ledger_revision": 1},
+            "outbound_buffer_id": "outbound-1",
+            "outbound_status": "pending_send",
+        },
     )
     fact = {
         "field_key": "can_visit_in_person", "status": "known", "value": True,
@@ -915,7 +931,7 @@ def test_invalid_branch_proof_still_commits_individually_accepted_persona_fact(m
         expected_decision_owner="n8n_agents",
     )
 
-    assert captured["p_facts"] == [fact]
+    assert captured["turn"]["facts"] == [fact]
 
 
 def test_concurrent_commit_reentry_pauses_the_lead(monkeypatch):

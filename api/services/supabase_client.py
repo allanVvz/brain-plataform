@@ -4151,6 +4151,27 @@ def search_graph_rag_v3(
     return result.data or []
 
 
+def rank_graph_branches_v3(
+    *,
+    persona_id: str,
+    publication_id: str,
+    query: str,
+    query_embedding: list[float] | None,
+    limit: int = 8,
+) -> list[dict]:
+    result = get_client().rpc(
+        "graph_branch_rank_v3",
+        {
+            "p_persona_id": persona_id,
+            "p_publication_id": publication_id,
+            "p_query": query,
+            "p_query_embedding": query_embedding,
+            "p_limit": max(1, min(int(limit), 32)),
+        },
+    ).execute()
+    return result.data or []
+
+
 def get_graph_rag_repair_chunks(
     *, publication_id: str, branch_node_id: str, requirements: list[dict]
 ) -> list[dict]:
@@ -4181,6 +4202,35 @@ def get_graph_rag_repair_chunks(
 
 def commit_graph_turn_v3(**payload: Any) -> dict:
     result = get_client().rpc("commit_graph_turn_v3", payload).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def commit_graph_turn_and_outbox_v3(
+    *, turn: dict, outbound_buffer: dict | None,
+    outbound_message: dict | None, result_payload: dict,
+) -> dict:
+    result = get_client().rpc(
+        "commit_graph_turn_and_outbox_v3",
+        {
+            "p_turn": turn,
+            "p_outbound_buffer": outbound_buffer,
+            "p_outbound_message": outbound_message,
+            "p_result": result_payload,
+        },
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def audit_conversation_turn_v3(inbound_buffer_id: str) -> dict:
+    result = get_client().rpc(
+        "audit_conversation_turn_v3", {"p_inbound_id": inbound_buffer_id}
+    ).execute()
     value = getattr(result, "data", None)
     if isinstance(value, list):
         value = value[0] if value else {}
@@ -4622,6 +4672,32 @@ def complete_conversation_commit(
             "p_binding_id": binding_id,
             "p_lead_ref": lead_ref,
             "p_correlation_id": correlation_id,
+            "p_result": result_payload,
+        },
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def finalize_proven_conversation_turn(
+    *,
+    inbound_buffer_id: str,
+    binding_id: str,
+    lead_ref: int,
+    correlation_id: str,
+    outbound_id: str,
+    result_payload: dict,
+) -> dict:
+    result = get_client().rpc(
+        "finalize_proven_conversation_turn",
+        {
+            "p_inbound_buffer_id": inbound_buffer_id,
+            "p_binding_id": binding_id,
+            "p_lead_ref": lead_ref,
+            "p_correlation_id": correlation_id,
+            "p_outbound_id": outbound_id,
             "p_result": result_payload,
         },
     ).execute()
