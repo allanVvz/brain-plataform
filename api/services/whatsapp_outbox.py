@@ -186,9 +186,63 @@ def _observe_duplicate_content(
     return duplicate
 
 
+def prepare_outbound_envelope(
+    *, lead: dict[str, Any], text: str, sender_type: str,
+    message_id: str, correlation_id: str, idempotency_key: str | None = None,
+    initial_status: str = "pending_send", metadata: dict[str, Any] | None = None,
+    media: dict[str, Any] | None = None, template: dict[str, Any] | None = None,
+    campaign_scope: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate routing and build the canonical DB envelope without writing it."""
+    if initial_status not in {"pending_send", "awaiting_proof"}:
+        raise ValueError("invalid outbound initial status")
+    binding = resolve_lead_binding(lead)
+    _recipient_for_lead(lead)
+    lock_key = idempotency_key or correlation_id
+    _observe_duplicate_content(
+        lead=lead, binding=binding, text=text, correlation_id=correlation_id,
+    )
+    scope_fields = {
+        "message_origin": "campaign",
+        "campaign_id": campaign_scope.get("campaign_id"),
+        "campaign_revision": campaign_scope.get("campaign_revision"),
+        "campaign_recipient_id": campaign_scope.get("campaign_recipient_id"),
+        "policy_checksum": campaign_scope.get("policy_checksum"),
+    } if campaign_scope else {}
+    return {
+        "binding": binding,
+        "lock_key": lock_key,
+        "buffer": {
+            "persona_id": lead["persona_id"],
+            "lead_ref": lead["id"],
+            "channel_binding_id": binding["id"],
+            "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
+            "direction": "outbound",
+            "payload": {"text": text, "sender_type": sender_type, "media": media, "template": template},
+            "status": initial_status,
+            "batch_key": f"{lead['persona_id']}:{lead['id']}",
+            "idempotency_key": lock_key,
+            "correlation_id": correlation_id,
+            **scope_fields,
+            **({"campaign_step": campaign_scope.get("campaign_step")} if campaign_scope else {}),
+        },
+        "message": {
+            "lead_id": lead["id"],
+            "role": "human" if sender_type == "human" else "assistant",
+            "content": text, "direction": "outbound", "status": "pending",
+            "channel": "whatsapp", "sender_id": message_id,
+            "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
+            "channel_binding_id": binding["id"], "correlation_id": correlation_id,
+            "metadata": metadata or {}, "created_at": datetime.now(timezone.utc).isoformat(),
+            **scope_fields,
+        },
+    }
+
+
 def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
                      message_id: str, correlation_id: str,
                      idempotency_key: str | None = None,
+                     initial_status: str = "pending_send",
                      metadata: dict[str, Any] | None = None,
                      media: dict[str, Any] | None = None,
                      template: dict[str, Any] | None = None,
@@ -202,8 +256,13 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
     'campaign' so the dispatch worker and campaign audit views can attribute
     it back to a specific campaign send.
     """
-    binding = resolve_lead_binding(lead)
-    _recipient_for_lead(lead)
+    prepared = prepare_outbound_envelope(
+        lead=lead, text=text, sender_type=sender_type, message_id=message_id,
+        correlation_id=correlation_id, idempotency_key=idempotency_key,
+        initial_status=initial_status, metadata=metadata, media=media,
+        template=template, campaign_scope=campaign_scope,
+    )
+    binding = prepared["binding"]
     lock_key = idempotency_key or correlation_id
     existing = supabase_client.get_whatsapp_buffer_by_idempotency(lock_key)
     if existing:
@@ -222,56 +281,8 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
             "deduplicated": True,
             "binding": binding,
         }
-    # Text equality is a conversational quality signal, not an idempotency
-    # identity. Distinct canonical inbounds may legitimately receive equal
-    # copy; suppressing the latter leaves the customer without a response.
-    # The guard still emits diagnostics, while lock_key remains the only
-    # exactly-once boundary.
-    _observe_duplicate_content(
-        lead=lead, binding=binding, text=text, correlation_id=correlation_id,
-    )
-    scope_fields = {
-        "message_origin": "campaign",
-        "campaign_id": campaign_scope.get("campaign_id"),
-        "campaign_revision": campaign_scope.get("campaign_revision"),
-        "campaign_recipient_id": campaign_scope.get("campaign_recipient_id"),
-        "policy_checksum": campaign_scope.get("policy_checksum"),
-    } if campaign_scope else {}
     envelope = supabase_client.enqueue_whatsapp_envelope(
-        buffer={
-            "persona_id": lead["persona_id"],
-            "lead_ref": lead["id"],
-            "channel_binding_id": binding["id"],
-            "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
-            "direction": "outbound",
-            "payload": {
-                "text": text,
-                "sender_type": sender_type,
-                "media": media,
-                "template": template,
-            },
-            "status": "pending_send",
-            "batch_key": f"{lead['persona_id']}:{lead['id']}",
-            "idempotency_key": lock_key,
-            "correlation_id": correlation_id,
-            **scope_fields,
-            **({"campaign_step": campaign_scope.get("campaign_step")} if campaign_scope else {}),
-        },
-        message={
-            "lead_id": lead["id"],
-            "role": "human" if sender_type == "human" else "assistant",
-            "content": text,
-            "direction": "outbound",
-            "status": "pending",
-            "channel": "whatsapp",
-            "sender_id": message_id,
-            "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
-            "channel_binding_id": binding["id"],
-            "correlation_id": correlation_id,
-            "metadata": metadata or {},
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            **scope_fields,
-        },
+        buffer=prepared["buffer"], message=prepared["message"],
     )
     if envelope.get("deduplicated"):
         existing = supabase_client.get_whatsapp_buffer_by_idempotency(lock_key)

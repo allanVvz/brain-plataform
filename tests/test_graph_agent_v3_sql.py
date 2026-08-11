@@ -97,6 +97,110 @@ def scenario(cur):
     return persona_id, lead_ref, publication_id, checksum, chunk_id
 
 
+def transport_scenario(cur):
+    persona_id, lead_ref, publication_id, checksum, chunk_id = scenario(cur)
+    binding_id = str(uuid.uuid4())
+    cur.execute(
+        """
+        insert into public.workflow_bindings(
+          id,persona_id,workflow_name,channel,provider,connection_status,active,metadata
+        ) values(%s,%s,'Graph v3 test','whatsapp','meta_cloud','connected',true,
+          '{"decision_owner":"deterministic","transport_mode":"provider_direct","runtime_version":"graph_agent_runtime_v3"}'::jsonb)
+        """,
+        (binding_id, persona_id),
+    )
+    cur.execute("update public.leads set channel_binding_id=%s where id=%s", (binding_id, lead_ref))
+    correlation_id = f"corr:{uuid.uuid4()}"
+    inbound_buffer = {
+        "persona_id": persona_id,
+        "lead_ref": lead_ref,
+        "channel_binding_id": binding_id,
+        "direction": "inbound",
+        "payload": {"text": "hello"},
+        "status": "processing",
+        "batch_key": f"{persona_id}:{lead_ref}",
+        "idempotency_key": f"inbound:{correlation_id}",
+        "correlation_id": correlation_id,
+    }
+    inbound_message = {
+        "lead_id": lead_ref,
+        "role": "user",
+        "content": "hello",
+        "direction": "inbound",
+        "status": "buffered",
+        "channel": "whatsapp",
+        "sender_id": correlation_id,
+        "channel_binding_id": binding_id,
+        "correlation_id": correlation_id,
+    }
+    cur.execute(
+        "select public.enqueue_whatsapp_envelope(%s::jsonb,%s::jsonb) result",
+        (json.dumps(inbound_buffer), json.dumps(inbound_message)),
+    )
+    inbound_id = str(cur.fetchone()["result"]["buffer_id"])
+    cur.execute(
+        "select public.claim_conversation_commit(%s,%s,%s,%s) result",
+        (inbound_id, binding_id, lead_ref, correlation_id),
+    )
+    assert cur.fetchone()["result"]["state"] == "claimed"
+    return {
+        "persona_id": persona_id,
+        "lead_ref": lead_ref,
+        "publication_id": str(publication_id),
+        "checksum": checksum,
+        "chunk_id": str(chunk_id),
+        "binding_id": binding_id,
+        "correlation_id": correlation_id,
+        "inbound_id": inbound_id,
+    }
+
+
+def atomic_payload(data, *, expected_revision=0):
+    outbound_key = f"ai:{data['correlation_id']}"
+    turn = {
+        "canonical_inbound_id": data["inbound_id"],
+        "binding_id": data["binding_id"],
+        "correlation_id": data["correlation_id"],
+        "persona_id": data["persona_id"],
+        "lead_ref": data["lead_ref"],
+        "publication_id": data["publication_id"],
+        "graph_checksum": data["checksum"],
+        "active_branch_node_id": "branch:a",
+        "active_branch_node_ids": ["branch:a"],
+        "asked_question_node_ids": ["question:a"],
+        "expected_revision": expected_revision,
+        "facts": [],
+        "retrieval_trace": {"chunk_ids": [data["chunk_id"]]},
+        "model_proposal": {"reply": "ok"},
+        "proof_result": {"valid": True},
+        "repair_result": {},
+        "final_decision": {"intent": "test"},
+    }
+    outbound_buffer = {
+        "persona_id": data["persona_id"],
+        "lead_ref": data["lead_ref"],
+        "channel_binding_id": data["binding_id"],
+        "direction": "outbound",
+        "payload": {"text": "reply", "sender_type": "agent"},
+        "status": "awaiting_proof",
+        "batch_key": f"{data['persona_id']}:{data['lead_ref']}",
+        "idempotency_key": outbound_key,
+        "correlation_id": outbound_key,
+    }
+    outbound_message = {
+        "lead_id": data["lead_ref"],
+        "role": "assistant",
+        "content": "reply",
+        "direction": "outbound",
+        "status": "pending",
+        "channel": "whatsapp",
+        "sender_id": outbound_key,
+        "channel_binding_id": data["binding_id"],
+        "correlation_id": outbound_key,
+    }
+    return turn, outbound_buffer, outbound_message
+
+
 def test_atomic_activation_hybrid_search_and_exactly_once_proof(cur):
     persona_id, lead_ref, publication_id, checksum, chunk_id = scenario(cur)
     cur.execute("select public.activate_graph_publication_v3(%s) result", (publication_id,))
@@ -152,8 +256,108 @@ def test_atomic_activation_hybrid_search_and_exactly_once_proof(cur):
     assert second["proof_id"] == first["proof_id"]
     cur.execute("select count(*) count from public.conversation_turn_proofs where canonical_inbound_id='inbound:one'")
     assert cur.fetchone()["count"] == 1
+
+
+def test_fact_revision_advances_across_different_owners(cur):
+    persona_id, lead_ref, publication_id, checksum, _chunk_id = scenario(cur)
+
+    def commit(inbound: str, owner: str, expected_revision: int) -> dict:
+        fact = json.dumps([{
+            "field_key": "servico", "owner_node_id": owner,
+            "status": "known", "value": owner,
+            "source_message_id": inbound, "evidence_span": owner,
+            "confidence": 1,
+        }])
+        cur.execute(
+            """
+            select public.commit_graph_turn_v3(
+              %s,%s,%s,%s,%s,%s,array[]::text[],%s,%s::jsonb,
+              '{}'::jsonb,'{}'::jsonb,'{"valid":true}'::jsonb,
+              '{}'::jsonb,'{"intent":"service"}'::jsonb,null
+            ) result
+            """,
+            (inbound, persona_id, lead_ref, publication_id, checksum,
+             owner, expected_revision, fact),
+        )
+        return cur.fetchone()["result"]
+
+    first = commit("inbound:owner-a", "branch:owner-a", 0)
+    second = commit("inbound:owner-b", "branch:owner-b", first["ledger_revision"])
+    assert second["ledger_revision"] == first["ledger_revision"] + 1
+    cur.execute(
+        """
+        select owner_node_id,revision,is_current
+          from public.conversation_facts
+         where ledger_id=%s and field_key='servico'
+         order by revision
+        """,
+        (first["ledger_id"],),
+    )
+    rows = cur.fetchall()
+    assert [(row["owner_node_id"], row["revision"], row["is_current"]) for row in rows] == [
+        ("branch:owner-a", 1, True),
+        ("branch:owner-b", 2, True),
+    ]
     cur.execute("select count(*) count from public.conversation_facts where ledger_id=%s and is_current", (first["ledger_id"],))
-    assert cur.fetchone()["count"] == 1
+    assert cur.fetchone()["count"] == 2
+
+
+def test_atomic_turn_releases_only_after_valid_proof_and_retry_reads_completed(cur):
+    data = transport_scenario(cur)
+    turn, outbound_buffer, outbound_message = atomic_payload(data)
+    cur.execute(
+        "select public.commit_graph_turn_and_outbox_v3(%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb) result",
+        (json.dumps(turn), json.dumps(outbound_buffer), json.dumps(outbound_message), json.dumps({"ok": True})),
+    )
+    result = cur.fetchone()["result"]
+    assert result["state"] == "completed"
+    assert result["outbound_status"] == "pending_send"
+    outbound_id = result["outbound_buffer_id"]
+
+    cur.execute("select public.audit_conversation_turn_v3(%s) audit", (data["inbound_id"],))
+    audit = cur.fetchone()["audit"]
+    assert audit["inbound_count"] == 1
+    assert audit["decision_count"] == 1
+    assert audit["proof_count"] == 1
+    assert audit["valid_proof_count"] == 1
+    assert audit["outbound_count"] == 1
+    assert audit["outbound_status"] == "pending_send"
+    assert audit["outbound_released_after_proof"] is True
+    assert audit["commit_state"] == "completed"
+
+    cur.execute(
+        "select public.claim_conversation_commit(%s,%s,%s,%s) result",
+        (data["inbound_id"], data["binding_id"], data["lead_ref"], data["correlation_id"]),
+    )
+    retry = cur.fetchone()["result"]
+    assert retry["state"] == "completed"
+    assert retry["result"]["outbound_buffer_id"] == outbound_id
+
+    cur.execute("select * from public.claim_whatsapp_buffer('worker-proof',10,60)")
+    claimed = cur.fetchall()
+    assert [str(row["id"]) for row in claimed] == [str(outbound_id)]
+
+
+def test_ledger_failure_rolls_back_inert_outbound_and_message(cur):
+    data = transport_scenario(cur)
+    turn, outbound_buffer, outbound_message = atomic_payload(data, expected_revision=9)
+    cur.execute("savepoint before_failed_atomic_commit")
+    with pytest.raises(Exception, match="ledger revision conflict"):
+        cur.execute(
+            "select public.commit_graph_turn_and_outbox_v3(%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb)",
+            (json.dumps(turn), json.dumps(outbound_buffer), json.dumps(outbound_message), json.dumps({"ok": True})),
+        )
+    cur.execute("rollback to savepoint before_failed_atomic_commit")
+    cur.execute(
+        "select count(*) count from public.lead_buffer where idempotency_key=%s",
+        (outbound_buffer["idempotency_key"],),
+    )
+    assert cur.fetchone()["count"] == 0
+    cur.execute(
+        "select count(*) count from public.messages where channel_binding_id=%s and correlation_id=%s",
+        (data["binding_id"], outbound_message["correlation_id"]),
+    )
+    assert cur.fetchone()["count"] == 0
 
 
 def test_publication_payload_is_immutable(cur):

@@ -76,7 +76,8 @@ def test_model_request_is_built_in_code_and_http_body_is_simple():
     fail_safe = next(node for node in workflow["nodes"] if node["id"] == "failsafe")
 
     assert "context_cards" in request_node["parameters"]["jsCode"]
-    assert "rendered_content" in request_node["parameters"]["jsCode"]
+    assert "rendered_content" not in request_node["parameters"]["jsCode"]
+    assert "prompt_budget_exceeded" in request_node["parameters"]["jsCode"]
     assert deepseek_node["parameters"]["body"] == "={{JSON.stringify($json.request_body)}}"
     assert "buffer_id" in fail_safe["parameters"]["body"]
     assert "correlation_id" in fail_safe["parameters"]["body"]

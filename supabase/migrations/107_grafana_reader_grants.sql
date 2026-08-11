@@ -13,6 +13,18 @@
 -- point of this role is that a mistake or a compromised panel can't mutate
 -- production data.
 
+-- Disposable migration-test databases do not execute Compose's db-bootstrap
+-- service first. Create the same least-privilege NOLOGIN role here so the
+-- migration is self-contained; production bootstrap may later grant LOGIN and
+-- a password only when observability is explicitly enabled.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+    CREATE ROLE grafana_reader NOLOGIN;
+  END IF;
+END
+$$;
+
 GRANT USAGE ON SCHEMA public TO grafana_reader;
 
 GRANT SELECT ON

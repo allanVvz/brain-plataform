@@ -147,6 +147,8 @@ def commit(
         raise HTTPException(403, str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except conversation_runtime.ConversationCommitFailed as exc:
+        raise HTTPException(409, detail=exc.canonical_result()) from exc
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
 

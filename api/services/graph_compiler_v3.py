@@ -674,6 +674,14 @@ def _local_embeddings(texts: list[str], *, input_type: str) -> list[list[float]]
     return [_fit_embedding_dimension(vector) for vector in generated]
 
 
+def warm_embedding_model() -> bool:
+    """Initialize the configured local model once during application startup."""
+    if embedding_provider() != "local":
+        return False
+    _local_embeddings(["brain-ai-warmup"], input_type="query")
+    return True
+
+
 def generate_embeddings(
     texts: list[str],
     *,
