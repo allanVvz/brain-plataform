@@ -35,7 +35,8 @@ where filename in (
   '112_graph_turn_replay_and_branch_fact_atomicity.sql',
   '113_quiet_burst_supersession.sql',
   '114_context_batches_indexes_and_validator_cas.sql',
-  '115_internal_data_api_privileges.sql'
+  '115_internal_data_api_privileges.sql',
+  '116_reconcile_active_conversation_branches.sql'
 ) order by filename;
 
 select 'unsafe_table_grants' metric, count(*)::text value
@@ -78,8 +79,9 @@ begin
       '112_graph_turn_replay_and_branch_fact_atomicity.sql',
       '113_quiet_burst_supersession.sql',
       '114_context_batches_indexes_and_validator_cas.sql',
-      '115_internal_data_api_privileges.sql')) <> 4 then
-    raise exception 'release migrations 112-115 are incomplete';
+      '115_internal_data_api_privileges.sql',
+      '116_reconcile_active_conversation_branches.sql')) <> 5 then
+    raise exception 'release migrations 112-116 are incomplete';
   end if;
   if exists (
     select 1 from information_schema.role_table_grants
