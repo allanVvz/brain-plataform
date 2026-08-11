@@ -554,6 +554,27 @@ def test_fallback_retrieval_branch_never_leaves_a_greeting_without_context():
     ) is None
 
 
+def test_exact_graph_alias_retrieves_new_branch_before_model_call():
+    """An explicit switch must arrive with the selected branch proof package."""
+    deterministic = [{"branch_anchor_node_id": "branch:b", "score": 1.0}]
+
+    assert graph_agent_runtime_v3._retrieval_branch_for_turn(
+        active_branch="branch:a",
+        deterministic_candidates=deterministic,
+        candidates=deterministic,
+        branch_anchors=["branch:a", "branch:b"],
+    ) == "branch:b"
+
+
+def test_fuzzy_candidate_does_not_replace_active_retrieval_branch():
+    assert graph_agent_runtime_v3._retrieval_branch_for_turn(
+        active_branch="branch:a",
+        deterministic_candidates=[],
+        candidates=[{"branch_anchor_node_id": "branch:b", "score": 0.8}],
+        branch_anchors=["branch:a", "branch:b"],
+    ) == "branch:a"
+
+
 def test_evidenced_branch_candidates_excludes_zero_signal_branches():
     """Regression test for the phantom-reclamação-selection bug (2026-08-10).
 

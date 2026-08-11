@@ -695,6 +695,32 @@ def _fallback_retrieval_branch(
     return None
 
 
+def _retrieval_branch_for_turn(
+    *,
+    active_branch: str | None,
+    deterministic_candidates: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    branch_anchors: list[str],
+) -> str | None:
+    """Choose the package that can prove this turn's deterministic branch.
+
+    An exact, unambiguous graph title/alias is already an authoritative
+    select/switch decision.  Its branch package must therefore be retrieved
+    before the model call.  Falling back to the previous active branch here
+    forces a second repair pass and, when n8n does not execute that pass,
+    persists an invalid proof with no reply.  Fuzzy candidates still never
+    override the active branch; only the literal graph match receives this
+    precedence.
+    """
+    if len(deterministic_candidates) == 1:
+        return str(deterministic_candidates[0].get("branch_anchor_node_id") or "") or None
+    return _fallback_retrieval_branch(
+        active_branch=active_branch,
+        candidates=candidates,
+        branch_anchors=branch_anchors,
+    )
+
+
 def _publication_fact_is_compatible(
     document: dict[str, Any], active_contract: dict[str, Any],
     key: str, fact: dict[str, Any],
@@ -796,8 +822,10 @@ def build_context(
         persona_id=str(persona["id"]), publication=publication, message=message,
         embedding=embedding, active_path=active_path, missing=missing,
     ))
-    retrieval_branch = _fallback_retrieval_branch(
-        active_branch=active_branch, candidates=candidates,
+    retrieval_branch = _retrieval_branch_for_turn(
+        active_branch=active_branch,
+        deterministic_candidates=deterministic_candidates,
+        candidates=candidates,
         branch_anchors=document.get("branch_anchors") or [],
     )
     if not retrieval_branch:
