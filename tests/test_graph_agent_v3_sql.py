@@ -104,7 +104,7 @@ def transport_scenario(cur):
         """
         insert into public.workflow_bindings(
           id,persona_id,workflow_name,channel,provider,connection_status,active,metadata
-        ) values(%s,%s,'Graph v3 test','whatsapp','mock','connected',true,
+        ) values(%s,%s,'Graph v3 test','whatsapp','meta_cloud','connected',true,
           '{"decision_owner":"n8n_agents","runtime_version":"graph_agent_runtime_v3"}'::jsonb)
         """,
         (binding_id, persona_id),

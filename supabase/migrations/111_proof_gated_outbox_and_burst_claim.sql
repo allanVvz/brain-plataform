@@ -2,6 +2,14 @@
 -- graph proof exists. Also fixes fact revision allocation across owners and
 -- serializes/coalesces inbound bursts per lead without adding storage.
 
+-- Migration 103 expanded both handoff RPCs with a defaulted handoff level but
+-- left their old overloads installed. PostgreSQL cannot resolve legacy calls
+-- against an old exact signature plus a new defaulted signature. The expanded
+-- RPCs preserve the legacy call contract through their defaults, so remove only
+-- the superseded overloads (no data is affected).
+DROP FUNCTION IF EXISTS public.handoff_whatsapp_lead(bigint);
+DROP FUNCTION IF EXISTS public.handoff_whatsapp_lead_state(bigint, jsonb, text);
+
 ALTER TABLE public.lead_buffer
   DROP CONSTRAINT IF EXISTS lead_buffer_status_check;
 ALTER TABLE public.lead_buffer
