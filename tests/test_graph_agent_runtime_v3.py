@@ -434,6 +434,48 @@ def test_published_question_is_composed_not_required_in_model_reply():
     assert emitted == "Certo.\n\nQual é a metragem?"
 
 
+def test_active_service_branch_authorizes_boolean_service_availability():
+    document = compiled_fixture()
+    contract = document["branch_contracts"]["branch:a"]
+    contract["claims"] = [{
+        "claim_type": "availability",
+        "policy": {"mode": "informational"},
+        "evidence_node_ids": ["rule:operation"],
+    }]
+    contract["closure_node_ids"].append("rule:operation")
+    value = proposal(document, claims=[{
+        "claim_type": "availability",
+        "value": {"available": True},
+        "evidence_node_ids": ["branch:a"],
+        "evidence_chunk_ids": [],
+    }])
+
+    proof = check(document, value)
+
+    assert proof["valid"], proof["errors"]
+
+
+def test_service_branch_does_not_authorize_schedule_availability_payload():
+    document = compiled_fixture()
+    contract = document["branch_contracts"]["branch:a"]
+    contract["claims"] = [{
+        "claim_type": "availability",
+        "policy": {"mode": "informational"},
+        "evidence_node_ids": ["rule:operation"],
+    }]
+    contract["closure_node_ids"].append("rule:operation")
+    value = proposal(document, claims=[{
+        "claim_type": "availability",
+        "value": {"available": True, "date": "amanhã"},
+        "evidence_node_ids": ["branch:a"],
+        "evidence_chunk_ids": [],
+    }])
+
+    proof = check(document, value)
+
+    assert "claim_evidence_not_authorized:availability" in proof["errors"]
+
+
 def test_published_question_is_not_duplicated_when_model_personalizes_it():
     """Regression test for the duplicate-question-in-one-message gap (2026-08-08 report).
 

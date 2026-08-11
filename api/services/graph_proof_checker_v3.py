@@ -444,6 +444,22 @@ def check(
             str(value) for policy in policies
             for value in policy.get("evidence_node_ids") or []
         }
+        # ``availability`` is also how the proposal schema represents the
+        # harmless question "vocês fazem este serviço?". The active,
+        # published branch is authoritative evidence that the service is
+        # offered, but it must not authorize schedule/slot availability.
+        # Expand evidence only for the exact boolean service-existence claim;
+        # agenda remains governed by its published operational rule.
+        claim_value = claim.get("value")
+        branch_anchor = str(contract.get("branch_anchor_node_id") or "")
+        if (
+            claim_type == "availability"
+            and isinstance(claim_value, dict)
+            and claim_value.get("available") is True
+            and set(claim_value).issubset({"available"})
+            and branch_anchor
+        ):
+            authorized_nodes.add(branch_anchor)
         authorized_chunks = {
             str(value) for policy in policies
             for value in policy.get("evidence_chunk_ids") or []
