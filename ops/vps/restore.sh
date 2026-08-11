@@ -14,7 +14,8 @@ CONFIRM="${3:-}"
   echo "Target must be an isolated brain_restore_* database" >&2; exit 2;
 }
 BACKUP_DIR="$(realpath "$BACKUP_DIR")"
-[[ -d "$BACKUP_DIR" && -f "$BACKUP_DIR/postgres-data.dump" && -f "$BACKUP_DIR/SHA256SUMS" ]] || {
+[[ -d "$BACKUP_DIR" && -f "$BACKUP_DIR/postgres-data.dump" \
+   && -f "$BACKUP_DIR/postgres-schema.dump" && -f "$BACKUP_DIR/SHA256SUMS" ]] || {
   echo "Invalid data-only backup directory" >&2; exit 2;
 }
 (cd "$BACKUP_DIR" && sha256sum --check SHA256SUMS)
@@ -31,10 +32,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"${COMPOSE[@]}" run --rm -T \
-  -e PGDATABASE="$TARGET_DB" -e APPLY_SEED=0 migrate
 "${COMPOSE[@]}" exec -T db sh -c \
-  'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -U "$POSTGRES_USER" -d '"$TARGET_DB"' --data-only --no-owner --exit-on-error' \
+  'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -U "$POSTGRES_USER" -d '"$TARGET_DB"' --schema-only --no-owner --exit-on-error' \
+  < "$BACKUP_DIR/postgres-schema.dump"
+"${COMPOSE[@]}" exec -T db sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -U "$POSTGRES_USER" -d '"$TARGET_DB"' --data-only --disable-triggers --no-owner --exit-on-error' \
   < "$BACKUP_DIR/postgres-data.dump"
 "${COMPOSE[@]}" exec -T db sh -c \
   'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d '"$TARGET_DB"' -v ON_ERROR_STOP=1 -Atc "select count(*) from personas; select count(*) from messages;"'

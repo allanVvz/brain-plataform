@@ -17,6 +17,9 @@ COMPOSE=(docker compose --env-file "$ENV_FILE")
 "${COMPOSE[@]}" exec -T db sh -c \
   'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --data-only --format=custom' \
   > "$DEST/postgres-data.dump"
+"${COMPOSE[@]}" exec -T db sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --schema-only --format=custom' \
+  > "$DEST/postgres-schema.dump"
 "${COMPOSE[@]}" exec -T db pg_restore --list \
   < "$DEST/postgres-data.dump" > "$DEST/postgres-data.restore-list.txt"
 grep -q 'TABLE DATA' "$DEST/postgres-data.restore-list.txt"
