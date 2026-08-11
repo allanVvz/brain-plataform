@@ -44,8 +44,9 @@ def test_model_prompt_is_compact_and_budgeted_before_both_calls():
     assert "rendered_content" not in initial
     assert "prompt_budget_exceeded" in initial and "24000" in initial
     assert "prompt_budget_exceeded:repair" in repair and "24000" in repair
-    assert "TextEncoder" in initial and "TextEncoder" in repair
-    assert "length / 4" not in initial and "length / 4" not in repair
+    assert "Math.ceil(text.length / 4)" in initial
+    assert "Math.ceil(text.length / 4)" in repair
+    assert "TextEncoder" not in initial and "TextEncoder" not in repair
     assert "recent_messages" in initial
 
 
