@@ -192,7 +192,7 @@ def _idempotent_result(
         return None
     for row in supabase_client.list_system_events(
         entity_type="graph_document",
-        event_types=["graph_document_published"],
+        event_types=["graph_document_published", "graph_version_activated"],
         limit=500,
     ):
         payload = row.get("payload") or {}
@@ -237,6 +237,15 @@ def commit(
     """
     if graph.schema_version != "2.1":
         raise GraphValidationError(["commit requires schema_version 2.1"])
+    # Production deploys intentionally publish the same canonical source on
+    # every release. Once its idempotency key has an activation event, replay
+    # must be a read: re-importing and re-activating the same version rewrites
+    # every RAG row and can outlive PostgREST's request timeout. A committed but
+    # not yet activated attempt has no activation event and therefore still
+    # resumes through the projector below.
+    replay = _idempotent_result(persona_slug, brand_slug, idempotency_key)
+    if replay:
+        return replay
     graph = GraphJson.model_validate(graph.model_dump(mode="json"))
     graph = graph_conversation_contract.materialize_qualification_questions(graph)
     graph.graph_version = expected_version + 1

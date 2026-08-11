@@ -112,3 +112,68 @@ def test_idempotency_replay_skips_projection(monkeypatch):
         idempotency_key="same-request",
     )
     assert result == replay
+
+
+def test_commit_activation_replay_skips_projection(monkeypatch):
+    graph = _graph()
+    graph.schema_version = "2.1"
+    replay = {
+        "ok": True,
+        "idempotent_replay": True,
+        "version": 7,
+        "checksum": "same",
+        "projections": {"nodes_imported": 2},
+    }
+    monkeypatch.setattr(
+        graph_document_publisher, "_idempotent_result", lambda *args, **kwargs: replay
+    )
+    monkeypatch.setattr(
+        graph_document_publisher.graph_json_importer,
+        "import_graph_json",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not project")),
+    )
+
+    result = graph_document_publisher.commit(
+        graph=graph,
+        persona_slug="acme",
+        brand_slug=None,
+        source="test",
+        reason="test replay",
+        published_by="test",
+        expected_version=7,
+        idempotency_key="same-request",
+    )
+
+    assert result == replay
+
+
+def test_activation_event_is_a_valid_idempotency_replay(monkeypatch):
+    requested_event_types: list[str] = []
+
+    def _events(**kwargs):
+        requested_event_types.extend(kwargs["event_types"])
+        return [{
+            "id": "activation-1",
+            "event_type": "graph_version_activated",
+            "entity_id": "acme:default:v7",
+            "payload": {
+                "persona_slug": "acme",
+                "brand_slug": None,
+                "version": 7,
+                "checksum": "same",
+                "idempotency_key": "same-request",
+                "projections": {"nodes_imported": 2},
+            },
+        }]
+
+    monkeypatch.setattr(
+        graph_document_publisher.supabase_client, "list_system_events", _events
+    )
+
+    replay = graph_document_publisher._idempotent_result(
+        "acme", None, "same-request"
+    )
+
+    assert "graph_version_activated" in requested_event_types
+    assert replay and replay["idempotent_replay"] is True
+    assert replay["version"] == 7
