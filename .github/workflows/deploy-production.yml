@@ -262,6 +262,11 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          # The verified full backup currently takes about eight minutes by
+          # itself. appleboy defaults to a ten-minute remote command timeout,
+          # which can terminate a healthy rollout after migrations but before
+          # the worker and post-deploy audits are restored.
+          command_timeout: 30m
           envs: GHCR_USERNAME,GHCR_TOKEN,VPS_APP_DIR,DEPLOY_ACTION,REQUESTED_TAG
           script: |
             set -Eeuo pipefail
