@@ -189,9 +189,14 @@ def _evolution_webhook_target(
 def conversations(request: Request, persona_slug: str = Query(...)):
     persona = _persona(persona_slug, request)
     rows = supabase_client.get_conversations(hours=720, persona_id=persona["id"])
+    leads_by_ref = supabase_client.get_leads_by_refs([
+        int(row["lead_ref"])
+        for row in rows
+        if row.get("lead_ref") is not None
+    ])
     decorated = []
     for row in rows:
-        lead = supabase_client.get_lead_by_ref(int(row.get("lead_ref") or 0)) or {}
+        lead = leads_by_ref.get(int(row.get("lead_ref") or 0), {})
         extra = lead_qualification.decorate_lead(lead)
         if extra.get("validation", {}).get("is_validation"):
             continue

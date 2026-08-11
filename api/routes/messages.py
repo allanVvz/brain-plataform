@@ -132,13 +132,14 @@ def _decorate_conversations(
     validation_scope: str = "exclude",
 ) -> list[dict]:
     decorated: list[dict] = []
+    leads_by_ref = supabase_client.get_leads_by_refs([
+        int(row["lead_ref"])
+        for row in rows
+        if row.get("lead_ref") is not None
+    ])
     for row in rows:
         lead_ref = row.get("lead_ref")
-        lead = (
-            supabase_client.get_lead_by_ref(int(lead_ref))
-            if lead_ref is not None
-            else {}
-        ) or {}
+        lead = leads_by_ref.get(int(lead_ref), {}) if lead_ref is not None else {}
         extra = lead_qualification.decorate_lead(lead)
         is_validation = bool(extra.get("validation", {}).get("is_validation"))
         if validation_scope == "only" and not is_validation:
@@ -219,7 +220,10 @@ def get_conversations(
             sre_logger.error("messages.conversations", f"failed: {exc}", exc)
         except Exception:
             pass
-        return []
+        raise HTTPException(
+            status_code=500,
+            detail="Falha ao carregar conversas da persona selecionada.",
+        ) from exc
 
 
 @router.get("/by-ref/{lead_ref}")

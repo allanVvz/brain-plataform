@@ -1957,17 +1957,32 @@ export function MessagesLayout({
       return;
     }
     setLiveSync(true);
+    let pollCount = 0;
     const refresh = async () => {
       const id = selectedIdRef.current;
       if (!id) return;
       try {
-        const [msgRows, convRows] = await Promise.all([
-          isPortal ? api.portalConversationMessages(portalSlug!, id) : api.messagesByRef(id, 200, validationScope),
-          isPortal ? api.portalConversations(portalSlug!) : api.conversations(168, personaFilterId || undefined, validationScope),
-        ]);
+        const msgRows = await (
+          isPortal
+            ? api.portalConversationMessages(portalSlug!, id)
+            : api.messagesByRef(id, 200, validationScope)
+        );
         if (selectedIdRef.current !== id) return;
         setMessages(sortMessages(msgRows as Message[]));
-        setConversations(convRows as ConversationSummary[]);
+        // The selected thread needs a short poll, but the entire seven-day
+        // conversation index does not. Refreshing both every five seconds
+        // multiplied the expensive list endpoint (and its former lead N+1)
+        // without improving the open chat. Keep the index fresh at 30s.
+        pollCount += 1;
+        if (pollCount % 6 === 0) {
+          const convRows = await (
+            isPortal
+              ? api.portalConversations(portalSlug!)
+              : api.conversations(168, personaFilterId || undefined, validationScope)
+          );
+          if (selectedIdRef.current !== id) return;
+          setConversations(convRows as ConversationSummary[]);
+        }
         setMessagesError(null);
       } catch {
         setLiveSync(false);
