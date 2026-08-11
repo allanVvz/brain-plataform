@@ -372,6 +372,61 @@ def _required_structural_chunks(rows: list[dict[str, Any]]) -> list[dict[str, An
     return list(selected.values())
 
 
+def _required_retrieval_node_ids(
+    document: dict[str, Any],
+    branch_node_id: str,
+    contract: dict[str, Any],
+    missing_fields: list[str],
+) -> list[str]:
+    """Return the executable structural package for one turn.
+
+    The published branch contract already carries every question and handoff
+    rule verbatim.  The chunk package therefore needs the full active path,
+    the *next* graph-owned question (missing_fields[0]), and the handoff rule
+    nodes.  Loading a chunk for every later question duplicated the contract
+    and made every real appointment branch exceed the 12-chunk hard limit.
+    """
+    path = (
+        ((document.get("coordinates") or {}).get(branch_node_id) or {})
+        .get("path_node_ids") or []
+    )
+    next_field = missing_fields[0] if missing_fields else None
+    next_question = next(
+        (
+            field.get("question_node_id")
+            for field in contract.get("fields") or []
+            if field.get("key") == next_field
+        ),
+        None,
+    )
+    return list(dict.fromkeys([
+        *path,
+        *([next_question] if next_question else []),
+        *(contract.get("handoff_rule_node_ids") or []),
+    ]))
+
+
+def _repair_chunks(
+    rows: list[dict[str, Any]], requirements: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Keep exact requested chunks plus one structural chunk per node."""
+    requested_chunk_ids = {
+        str(item.get("id"))
+        for item in requirements
+        if item.get("kind") == "chunk" and item.get("id")
+    }
+    exact = {
+        str(row.get("chunk_id") or row.get("id")): row
+        for row in rows
+        if str(row.get("chunk_id") or row.get("id")) in requested_chunk_ids
+    }
+    structural = {
+        str(row.get("chunk_id") or row.get("id")): row
+        for row in _required_structural_chunks(rows)
+    }
+    return list({**structural, **exact}.values())
+
+
 def _card(publication: dict[str, Any], node: dict[str, Any], chunks: list[dict[str, Any]], position: int) -> ContextCard:
     text = "\n\n".join(str(chunk.get("chunk_text") or "") for chunk in chunks if chunk.get("chunk_text"))
     coordinate = ((publication.get("document_json") or {}).get("coordinates") or {}).get(node["id"]) or {}
@@ -659,11 +714,9 @@ def build_context(
         active_path_node_ids=((document.get("coordinates") or {}).get(retrieval_branch) or {}).get("path_node_ids") or [],
         missing_fields=missing, limit=48,
     )
-    required_nodes = list(dict.fromkeys([
-        *(((document.get("coordinates") or {}).get(retrieval_branch) or {}).get("path_node_ids") or []),
-        *(field.get("question_node_id") for field in contract.get("fields") or [] if field["key"] in missing),
-        *(contract.get("handoff_rule_node_ids") or []),
-    ]))
+    required_nodes = _required_retrieval_node_ids(
+        document, retrieval_branch, contract, missing,
+    )
     structural = supabase_client.get_graph_rag_repair_chunks(
         publication_id=publication["id"], branch_node_id=retrieval_branch,
         requirements=[{"kind": "node", "id": node_id} for node_id in required_nodes if node_id],
@@ -943,14 +996,12 @@ def _decide(
             publication_id=publication["id"], branch_node_id=proposal.branch_anchor_node_id,
             requirements=proof["repair_requirements"],
         )
-        unique_repair_chunks = {
-            str(row.get("chunk_id") or row.get("id")): row for row in rows
-        }
-        if len(unique_repair_chunks) > RAG_CHUNK_LIMIT:
+        repair_chunks = _repair_chunks(rows, proof["repair_requirements"])
+        if len(repair_chunks) > RAG_CHUNK_LIMIT:
             raise RuntimeError(
                 "required graph repair package exceeds the 12-chunk prompt limit"
             )
-        rows = list(unique_repair_chunks.values())
+        rows = repair_chunks
         sources: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             sources.setdefault(str(row.get("source_graph_node_id") or ""), []).append(row)

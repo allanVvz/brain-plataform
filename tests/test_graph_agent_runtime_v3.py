@@ -626,6 +626,56 @@ def test_recent_messages_and_chunks_are_projected_to_minimum_prompt_contract():
     assert chunk["metadata"] == {"provenance": {"source": "graph", "status": "validated"}}
 
 
+def test_retrieval_structural_package_uses_only_the_next_missing_question():
+    document = {
+        "coordinates": {"branch:a": {"path_node_ids": [f"path:{i}" for i in range(7)]}},
+    }
+    contract = {
+        "fields": [
+            {"key": f"field:{i}", "question_node_id": f"question:{i}"}
+            for i in range(8)
+        ],
+        "handoff_rule_node_ids": ["rule:1", "rule:2", "rule:3"],
+    }
+    required = graph_agent_runtime_v3._required_retrieval_node_ids(
+        document,
+        "branch:a",
+        contract,
+        [f"field:{i}" for i in range(8)],
+    )
+    assert required == [
+        *[f"path:{i}" for i in range(7)],
+        "question:0",
+        "rule:1",
+        "rule:2",
+        "rule:3",
+    ]
+    assert len(required) <= graph_agent_runtime_v3.RAG_CHUNK_LIMIT
+
+
+def test_repair_package_keeps_exact_chunks_and_one_chunk_per_required_node():
+    rows = [
+        {
+            "id": f"chunk:{source}:{kind}",
+            "source_graph_node_id": f"node:{source}",
+            "chunk_kind": kind,
+        }
+        for source in range(4)
+        for kind in ("content", "question", "aliases")
+    ]
+    required = graph_agent_runtime_v3._repair_chunks(
+        rows,
+        [
+            {"kind": "node", "id": "node:0"},
+            {"kind": "node", "id": "node:1"},
+            {"kind": "chunk", "id": "chunk:2:aliases"},
+        ],
+    )
+    ids = {row["id"] for row in required}
+    assert "chunk:2:aliases" in ids
+    assert len(required) == 5
+
+
 def test_semantic_chunking_separates_question_answer_and_field_intent():
     node_value = {
         "id": "n", "title": "FAQ", "summary": "Resumo", "data": {
