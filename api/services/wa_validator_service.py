@@ -1172,6 +1172,35 @@ async def _wait_for_reply_delivered(
     )
 
 
+async def _wait_for_turn_audit_v3(
+    inbound_buffer_id: str,
+    *,
+    max_wait_s: float,
+    poll_interval_s: float = 1.0,
+) -> dict:
+    """Wait until a quiet-burst turn has its canonical proof and commit.
+
+    The n8n webhook may acknowledge an inbound while the four-second quiet
+    burst window is still open. Treating that acknowledgement as the final
+    result made the validator audit the row before the worker committed its
+    decision/proof, producing a false ``decision_count=0`` failure even
+    though the canonical commit arrived seconds later.
+    """
+    deadline = time.monotonic() + max_wait_s
+    audit: dict = {}
+    while time.monotonic() < deadline:
+        audit = supabase_client.audit_conversation_turn_v3(inbound_buffer_id)
+        if (
+            int(audit.get("inbound_count") or 0) == 1
+            and int(audit.get("decision_count") or 0) == 1
+            and int(audit.get("proof_count") or 0) == 1
+            and audit.get("commit_state") == "completed"
+        ):
+            return audit
+        await asyncio.sleep(poll_interval_s)
+    return audit
+
+
 def _seed_known_name(*, persona: dict, lead_ref: int, client_name: str) -> None:
     """Pre-seed nome_cliente as already-known before any script step runs.
 
@@ -1655,6 +1684,29 @@ async def run_session_direct(session_id: str) -> dict:
                             channel_binding_id=channel_binding_id,
                             inbound_buffer_id=event["buffer_id"],
                         )
+                    turn_audit: dict | None = None
+                    if pipeline_contract == "conversation_v3":
+                        turn_audit = await _wait_for_turn_audit_v3(
+                            buffer_uuid,
+                            max_wait_s=max(configured_wait, 45.0),
+                        )
+                        # When n8n acknowledged during the quiet-burst
+                        # window, use the canonical committed result rather
+                        # than the early acknowledgement body for dialogue
+                        # and proof validation.
+                        committed_buffer = (
+                            supabase_client.get_whatsapp_buffer_by_idempotency(
+                                f"inbound:wa-validator:{message_id}"
+                            )
+                            or {}
+                        )
+                        committed_result = (
+                            ((committed_buffer.get("payload") or {}).get("conversation_commit") or {})
+                            .get("result")
+                        )
+                        if isinstance(committed_result, dict) and committed_result:
+                            data = committed_result
+
                     reply: str = data.get("reply_text") or ""
                     turn: dict = {
                         "role": "bot",
@@ -1681,7 +1733,7 @@ async def run_session_direct(session_id: str) -> dict:
                         turn["text"] = "(sem resposta — agente não gerou reply)"
                         turn["timeout"] = True
                     if pipeline_contract == "conversation_v3":
-                        audit = supabase_client.audit_conversation_turn_v3(buffer_uuid)
+                        audit = turn_audit or supabase_client.audit_conversation_turn_v3(buffer_uuid)
                         invariant_errors: list[str] = []
                         for key, expected in (
                             ("inbound_count", 1), ("decision_count", 1),

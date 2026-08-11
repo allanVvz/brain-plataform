@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +12,30 @@ if str(API_ROOT) not in sys.path:
 
 from services import wa_validator_service as wv
 from services import supabase_client
+
+
+def test_wait_for_turn_audit_v3_tolerates_early_n8n_ack(monkeypatch):
+    audits = iter([
+        {
+            "inbound_count": 1, "decision_count": 0, "proof_count": 0,
+            "commit_state": None,
+        },
+        {
+            "inbound_count": 1, "decision_count": 1, "proof_count": 1,
+            "commit_state": "completed",
+        },
+    ])
+    monkeypatch.setattr(
+        wv.supabase_client, "audit_conversation_turn_v3", lambda _buffer_id: next(audits),
+    )
+
+    result = asyncio.run(wv._wait_for_turn_audit_v3(
+        "buffer-1", max_wait_s=1, poll_interval_s=0,
+    ))
+
+    assert result["decision_count"] == 1
+    assert result["proof_count"] == 1
+    assert result["commit_state"] == "completed"
 
 
 def test_customer_profile_is_resolved_from_the_packaged_api_tree():
