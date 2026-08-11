@@ -536,6 +536,7 @@ services:
     image: caddy:2.8-alpine
     environment:
       API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
+      API_DOMAIN_SECONDARY: ${API_DOMAIN_SECONDARY:-api-alt.localhost}
       STORAGE_DOMAIN: ${STORAGE_DOMAIN:?set STORAGE_DOMAIN}
       N8N_DOMAIN: ${N8N_DOMAIN:?set N8N_DOMAIN}
       GRAFANA_DOMAIN: ${GRAFANA_DOMAIN:-grafana.invalid}
