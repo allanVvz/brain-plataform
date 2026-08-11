@@ -1176,6 +1176,35 @@ async def run_session_direct(session_id: str) -> dict:
                     else:
                         turn["text"] = "(sem resposta — agente não gerou reply)"
                         turn["timeout"] = True
+                    if pipeline_contract == "conversation_v3":
+                        audit = supabase_client.audit_conversation_turn_v3(buffer_uuid)
+                        invariant_errors: list[str] = []
+                        for key, expected in (
+                            ("inbound_count", 1), ("decision_count", 1),
+                            ("proof_count", 1), ("valid_proof_count", 1),
+                        ):
+                            if int(audit.get(key) or 0) != expected:
+                                invariant_errors.append(f"{key}={audit.get(key)}")
+                        if int(audit.get("outbound_count") or 0) > 1:
+                            invariant_errors.append(f"outbound_count={audit.get('outbound_count')}")
+                        if audit.get("outbound_released_after_proof") is not True:
+                            invariant_errors.append("outbound_released_before_proof")
+                        if audit.get("commit_state") != "completed":
+                            invariant_errors.append(f"commit_state={audit.get('commit_state')}")
+                        prompt_tokens = max(
+                            int(audit.get("prompt_tokens") or 0),
+                            int(audit.get("prompt_estimated_tokens") or 0),
+                        )
+                        if prompt_tokens > 24_000:
+                            invariant_errors.append(f"prompt_tokens={prompt_tokens}")
+                        if audit.get("deterministic_branch_match") and int(audit.get("model_calls") or 0) > 1:
+                            invariant_errors.append(f"model_calls={audit.get('model_calls')}")
+                        turn["turn_audit"] = audit
+                        if invariant_errors:
+                            raise RuntimeError(
+                                "WA Validator turn invariant failed: "
+                                + ", ".join(invariant_errors)
+                            )
                 except Exception as exc:
                     tb = traceback.format_exc()
                     _log.error(
