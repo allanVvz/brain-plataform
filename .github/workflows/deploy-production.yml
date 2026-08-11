@@ -1,7 +1,9 @@
 name: Deploy production VPS
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Check Frontend e Backend"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -25,12 +27,16 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "24"
+  TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
   validate:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
 
       - uses: actions/setup-python@v5
         with:
@@ -63,6 +69,9 @@ jobs:
             tests/test_whatsapp_exactly_once.py \
             tests/test_conversation_modes.py \
             tests/test_wa_validator_service.py \
+            tests/test_graph_agent_runtime_v3.py \
+            tests/test_graph_proof_checker_v3.py \
+            tests/test_messages_query_budgets.py \
             api/tests/test_deepseek_n8n_service.py
 
       - name: Run backend tests
@@ -74,25 +83,17 @@ jobs:
           SUPABASE_HTTP_TIMEOUT_SECONDS: "2"
           SUPABASE_OFFLINE: "true"
           KNOWLEDGE_TAXONOMY_OFFLINE: "true"
-        run: >-
-          python -m pytest -q
-          tests/test_production_env.py
-          tests/test_public_route_allowlist.py
-          tests/test_graph_json_validator.py
-          tests/test_approved_faq_publication_contract.py
-          tests/test_aurora_appointment_runtime.py
-          tests/test_seed_aurora_credentials.py
-          tests/test_conversation_runtime.py
-          tests/test_conversation_modes.py
-          tests/test_deterministic_sdr.py
-          tests/test_whatsapp_exactly_once.py
-          tests/test_whatsapp_migration_contract.py
-          tests/test_whatsapp_runtime.py
-          tests/test_agents_service_resume.py
-          tests/test_whatsapp_resume_migration.py
-          api/tests/test_graph_markdown_catalog.py
-          api/tests/test_lead_qualification.py
-          api/tests/test_client_portal.py
+        run: |
+          timeout --signal=TERM --kill-after=15s 300s python -m pytest tests \
+            --ignore=tests/e2e \
+            --ignore=tests/test_graph_agent_v3_sql.py \
+            --ignore=tests/test_whatsapp_sql_functions.py \
+            --ignore=tests/test_bra91_allanvvz_safe_crawler_snapshot.py \
+            --ignore=tests/test_qa_contract_routes.py \
+            --ignore=tests/test_sofia_primary_tree_publication.py \
+            --ignore=tests/test_sofia_session_context.py \
+            --ignore=tests/test_sofia_v2_patch_loop.py \
+            -q
 
       - uses: actions/setup-node@v4
         with:
@@ -105,7 +106,7 @@ jobs:
         env:
           API_INTERNAL_BASE_URL: https://api.example.com
           NEXT_PUBLIC_API_BASE_URL: /api-brain
-        run: npm ci && npm run build && npm test
+        run: npm ci && npm run build && npm test && npm run test:wa-validator-safe
 
       - name: Validate production Compose
         shell: bash
@@ -128,7 +129,7 @@ jobs:
           sed -i "s|^AI_BRAIN_WEBHOOK_TOKEN=.*|AI_BRAIN_WEBHOOK_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(48))')|" .env.ci
           python infra/generate_keys.py --write .env.ci
           python ops/vps/validate_env.py .env.ci
-          IMAGE_TAG=${GITHUB_SHA} docker compose --env-file .env.ci config > compose.rendered.yml
+          IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci config > compose.rendered.yml
           if grep -Eqi 'change-me|local-dev|http://localhost' compose.rendered.yml; then
             echo 'Development value found in rendered production Compose' >&2
             exit 1
@@ -140,10 +141,10 @@ jobs:
           sed -i 's|^EVOLUTION_ENABLED=.*|EVOLUTION_ENABLED=true|' .env.ci
           sed -i 's|^AI_BRAIN_PUBLIC_API_URL=.*|AI_BRAIN_PUBLIC_API_URL=https://api.example.com|' .env.ci
           python ops/vps/validate_env.py .env.ci
-          IMAGE_TAG=${GITHUB_SHA} docker compose --env-file .env.ci --profile evolution config --quiet
+          IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile evolution config --quiet
 
   publish:
-    if: github.event_name == 'push' || inputs.action != 'rollback'
+    if: github.event_name == 'workflow_run' || inputs.action != 'rollback'
     needs: validate
     runs-on: ubuntu-latest
     outputs:
@@ -151,11 +152,13 @@ jobs:
       repository: ${{ steps.meta.outputs.repository }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
 
       - id: meta
         shell: bash
         run: |
-          echo "image_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
           echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/login-action@v3
@@ -201,7 +204,7 @@ jobs:
       # so that case still deploys with main's current manifests.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ (inputs.action == 'rollback' && inputs.image_tag) || github.sha }}
+          ref: ${{ (inputs.action == 'rollback' && inputs.image_tag) || env.TARGET_SHA }}
 
       # The GitHub-hosted runner's outbound connection to the VPS
       # intermittently hits a bare TCP dial timeout (confirmed via VPS-side

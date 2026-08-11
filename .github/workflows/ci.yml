@@ -116,7 +116,7 @@ jobs:
 
       - name: Testar frontend
         working-directory: dashboard
-        run: npm test
+        run: npm test && npm run test:wa-validator-safe
 
       - name: Validar Compose com perfil Evolution
         shell: bash

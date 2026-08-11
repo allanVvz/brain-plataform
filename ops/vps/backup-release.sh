@@ -6,6 +6,7 @@ ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/brain-ai/releases}"
 LABEL="${1:-pre-aurora}"
 VERCEL_DEPLOYMENT_ID="${VERCEL_DEPLOYMENT_ID:-dpl_28HXRjZ42wv1zfjC8nrqqoYsdFZ6}"
+BACKUP_INCLUDE_UNTRACKED_SOURCE="${BACKUP_INCLUDE_UNTRACKED_SOURCE:-false}"
 
 [[ "$LABEL" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$ ]] || {
   echo "Invalid backup label: $LABEL" >&2
@@ -107,8 +108,15 @@ git status --short > "$DEST/source-status.txt"
 git diff --binary > "$DEST/source-working-tree.patch"
 git archive --format=tar.gz --output="$DEST/source-head.tar.gz" HEAD
 git ls-files --others --exclude-standard -z > "$DEST/untracked-files.list0"
-if [[ -s "$DEST/untracked-files.list0" ]]; then
+if [[ "$BACKUP_INCLUDE_UNTRACKED_SOURCE" =~ ^(1|true|yes)$ && -s "$DEST/untracked-files.list0" ]]; then
   tar --null -T "$DEST/untracked-files.list0" -czf "$DEST/source-untracked.tar.gz"
+elif [[ -s "$DEST/untracked-files.list0" ]]; then
+  cat > "$DEST/source-untracked-not-archived.txt" <<'EOF'
+Untracked source was inventoried but not archived. Production deploys use
+immutable GHCR images and synchronized manifests; the VPS worktree contains
+historical .releases/.rollbacks copies that recursively inflated every backup.
+Set BACKUP_INCLUDE_UNTRACKED_SOURCE=true only for a one-off forensic capture.
+EOF
 fi
 
 cp "$ENV_FILE" "$DEST/env.compose.root-only"
@@ -214,6 +222,7 @@ if [[ ! -s "$ROOT_DIR/.deploy/current-tag" ]]; then
   printf '%s\n' "$pre_release_tag" > "$ROOT_DIR/.deploy/current-tag"
 fi
 
+du -sb "$DEST" > "$DEST/BACKUP_SIZE_BYTES"
 find "$DEST" -type f ! -name SHA256SUMS -print0 \
   | sort -z \
   | xargs -0 sha256sum > "$DEST/SHA256SUMS"
