@@ -5,7 +5,7 @@ supabase==2.31.0
 httpx==0.28.1
 pydantic==2.13.4
 jsonschema==4.23.0
-fastembed==0.7.3
+fastembed==0.8.0
 python-dotenv==1.2.2
 anthropic==0.120.2
 openai==2.50.0
