@@ -390,15 +390,15 @@ def check(
     question_id = proposal.get("next_question_node_id")
     questions = contract.get("questions") or {}
     if missing:
+        expected_question_id = missing[0].get("question_node_id")
         question = questions.get(str(question_id or ""))
-        if not question or question.get("field_key") not in missing_keys:
+        if question_id != expected_question_id:
+            errors.append("next_question_not_first_missing_field")
+        elif not question or question.get("field_key") != missing[0].get("key"):
             errors.append("next_question_not_for_pending_field")
         else:
             if any(dependency in missing_keys for dependency in question.get("depends_on") or []):
                 errors.append("next_question_dependencies_unsatisfied")
-            if question_id not in package_node_ids:
-                errors.append(f"question_outside_package:{question_id}")
-                repair.append({"kind": "node", "id": question_id})
     elif question_id:
         errors.append("question_after_completion")
     # qualification_complete is 100% derivable from `missing` -- the same
@@ -516,11 +516,22 @@ def _question_already_asked(question: str, text: str) -> bool:
 def compose_published_question(
     *, reply: str, next_question_node_id: str | None, contract: dict[str, Any]
 ) -> str:
-    """Emit the published speech act without requiring verbatim model output."""
+    """Preserve acknowledgement/answer prose and emit exactly one graph question."""
     text = str(reply or "").strip()
     if not next_question_node_id:
         return text
     question = str(((contract.get("questions") or {}).get(next_question_node_id) or {}).get("text") or "").strip()
-    if not question or _question_already_asked(question, text):
+    if not question:
         return text
-    return f"{text}\n\n{question}".strip()
+    if _question_already_asked(question, text) and text.count("?") <= 1:
+        return text
+    # The model may have drafted a natural acknowledgement followed by a
+    # question for a different field. Routing/field order belongs to the
+    # graph, so retain declarative sentences but discard every interrogative
+    # sentence before appending the single authorized question.
+    sentences = re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
+    declarative = " ".join(
+        sentence.strip() for sentence in sentences
+        if sentence.strip() and "?" not in sentence
+    ).strip()
+    return f"{declarative}\n\n{question}".strip()

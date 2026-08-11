@@ -131,10 +131,12 @@ BEGIN
       UPDATE public.conversation_facts SET is_current = false, updated_at = now()
       WHERE id = v_previous;
     END IF;
+    -- The superseded row remains owner-scoped, but the revision sequence is
+    -- field-scoped. Two current owners may coexist; their immutable history
+    -- must still have a single monotonic (ledger, field_key, revision) order.
     SELECT coalesce(max(revision), 0) + 1 INTO v_next_revision
       FROM public.conversation_facts
-      WHERE ledger_id = v_ledger.id AND field_key = v_fact->>'field_key'
-        AND owner_node_id = v_fact->>'owner_node_id';
+      WHERE ledger_id = v_ledger.id AND field_key = v_fact->>'field_key';
     INSERT INTO public.conversation_facts(
       ledger_id, field_key, owner_node_id, status, value_json,
       source_message_id, evidence_span, confidence, revision, supersedes_fact_id

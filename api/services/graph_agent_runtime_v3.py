@@ -13,11 +13,13 @@ from pydantic import ValidationError
 
 from schemas.conversation import (
     AgentResponse,
+    BranchAction,
     ContextCard,
     ConversationContext,
     ConversationDecision,
     ConversationProposal,
     ConversationRoute,
+    ExtractedFact,
 )
 from services import graph_compiler_v3, graph_proof_checker_v3, supabase_client
 
@@ -481,6 +483,22 @@ def _normalized_phrase(value: Any) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
 
 
+def _literal_phrase_span(message: str, phrase: Any) -> str:
+    """Return the exact customer substring matching a normalized graph phrase."""
+    target = _normalized_phrase(phrase)
+    if not target:
+        return ""
+    target_tokens = target.split()
+    tokens = list(re.finditer(r"\w+", str(message or ""), flags=re.UNICODE))
+    normalized_tokens = [_normalized_phrase(match.group(0)) for match in tokens]
+    width = len(target_tokens)
+    for index in range(0, len(tokens) - width + 1):
+        if normalized_tokens[index : index + width] != target_tokens:
+            continue
+        return str(message)[tokens[index].start() : tokens[index + width - 1].end()]
+    return ""
+
+
 def _deterministic_branch_candidates(
     document: dict[str, Any], message: str,
 ) -> list[dict[str, Any]]:
@@ -496,24 +514,95 @@ def _deterministic_branch_candidates(
         phrases = [node.get("title"), node.get("slug"), *((node.get("data") or {}).get("aliases") or [])]
         matched = max(
             (
-                phrase for raw in phrases
+                (phrase, span) for raw in phrases
                 if (phrase := _normalized_phrase(raw)) and len(phrase) >= 3
                 and f" {phrase} " in normalized_message
+                and (span := _literal_phrase_span(message, raw))
             ),
-            key=len,
-            default="",
+            key=lambda item: len(item[0]),
+            default=("", ""),
         )
-        if matched:
+        if matched[0]:
             matches.append({
                 "branch_anchor_node_id": anchor,
                 "branch_path_checksum": ((document.get("coordinates") or {}).get(anchor) or {}).get("path_checksum"),
                 "title": node.get("title"),
                 "score": 1.0,
-                "snippet": matched,
+                "snippet": matched[1],
+                "branch_evidence_span": matched[1],
                 "evidence_chunk_ids": [],
                 "deterministic_alias_match": True,
             })
     return matches if len(matches) == 1 else []
+
+
+def _apply_authoritative_branch_resolution(
+    proposal: ConversationProposal,
+    context: ConversationContext,
+    document: dict[str, Any],
+) -> ConversationProposal:
+    """Make graph/backend state authoritative over model branch routing."""
+    resolved = context.retrieval_trace.get("deterministic_branch_resolution") or {}
+    active = str(context.active_branch_node_id or "") or None
+    resolved_anchor = str(resolved.get("branch_anchor_node_id") or "") or None
+    if resolved_anchor:
+        anchor = resolved_anchor
+        action = "keep" if active == anchor else "switch" if active else "select"
+        evidence_span = str(resolved.get("branch_evidence_span") or resolved.get("snippet") or "")
+    elif active:
+        proposed_anchor = str(proposal.branch_anchor_node_id or "")
+        if (
+            proposal.branch_action.value in {"switch", "add"}
+            and proposed_anchor in set(context.retrieval_trace.get("possible_switches") or [])
+            and proposal.branch_evidence_span
+        ):
+            return proposal
+        anchor = active
+        action = "keep"
+        evidence_span = ""
+    else:
+        return proposal
+
+    coordinate = ((document.get("coordinates") or {}).get(anchor) or {})
+    extracted = [fact for fact in proposal.extracted_facts if fact.field_key != "servico"]
+    if resolved_anchor:
+        branch_node = (document.get("node_by_id") or {}).get(anchor) or {}
+        extracted.append(ExtractedFact(
+            field_key="servico",
+            value=str(branch_node.get("slug") or branch_node.get("title") or anchor),
+            status="known",
+            source_message_id=_source_message_id(context.messages),
+            owner_node_id=anchor,
+            evidence_span=evidence_span,
+            confidence=1.0,
+        ))
+    return proposal.model_copy(update={
+        "branch_action": BranchAction(action),
+        "branch_anchor_node_id": anchor,
+        "branch_path_checksum": str(coordinate.get("path_checksum") or ""),
+        "branch_evidence_span": evidence_span,
+        "extracted_facts": extracted,
+    })
+
+
+def _normalize_next_question_to_first_missing(
+    proposal: ConversationProposal,
+    contract: dict[str, Any],
+    ledger_facts: dict[str, Any],
+) -> ConversationProposal:
+    """Resolve the next question from the first graph-owned missing field."""
+    effective_facts = dict(ledger_facts)
+    for fact in proposal.extracted_facts:
+        effective_facts[fact.field_key] = {
+            "status": fact.status.value if hasattr(fact.status, "value") else fact.status,
+            "value": fact.value,
+            "owner_node_id": fact.owner_node_id,
+        }
+    pending = graph_proof_checker_v3.pending_fields(contract, effective_facts)
+    expected = pending[0].get("question_node_id") if pending else None
+    if proposal.next_question_node_id == expected:
+        return proposal
+    return proposal.model_copy(update={"next_question_node_id": expected})
 
 
 def _project_recent_messages(messages: list[dict[str, Any]], limit: int = 6) -> list[dict[str, Any]]:
@@ -691,10 +780,17 @@ def build_context(
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(active_contract, ledger.get("facts") or {})]
     active_path = ((document.get("coordinates") or {}).get(active_branch) or {}).get("path_node_ids") or []
     embedding = graph_compiler_v3.query_embeddings([message])[0]
-    # A short answer while a field is expected never reopens global selection.
-    short_expected_answer = bool(active_branch and missing and len(message.split()) <= 8)
-    deterministic_candidates = (
-        [] if short_expected_answer else _deterministic_branch_candidates(document, message)
+    # A short answer while a field is expected must not trigger fuzzy global
+    # selection, but an exact published title/alias is authoritative even when
+    # it is short (for example, "prefiro <servico>"). Resolve the literal
+    # graph match first; only suppress semantic search when no exact match
+    # exists.
+    deterministic_candidates = _deterministic_branch_candidates(document, message)
+    short_expected_answer = bool(
+        active_branch
+        and missing
+        and len(message.split()) <= 8
+        and not deterministic_candidates
     )
     candidates = deterministic_candidates or ([] if short_expected_answer else _candidate_branches(
         persona_id=str(persona["id"]), publication=publication, message=message,
@@ -765,6 +861,9 @@ def build_context(
         "short_expected_answer": short_expected_answer,
         "global_branch_search_executed": not short_expected_answer,
         "deterministic_branch_match": bool(deterministic_candidates),
+        "deterministic_branch_resolution": (
+            deterministic_candidates[0] if len(deterministic_candidates) == 1 else None
+        ),
         "retrieval_branch_node_id": retrieval_branch,
         "branch_candidates": _evidenced_branch_candidates(candidates),
         "possible_switches": possible_switches,
@@ -905,10 +1004,14 @@ def _decide(
     if str(publication.get("id")) != str(context.publication_id) or publication.get("checksum") != context.graph_checksum:
         raise RuntimeError("GraphRAG publication changed during turn")
     document = publication.get("document_json") or {}
+    proposal = _apply_authoritative_branch_resolution(proposal, context, document)
     contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
     proposal = _normalize_servico_owner(proposal, contract)
     proposal = _normalize_premature_servico_requestion(proposal, contract, context.cart.get("facts") or {})
     proposal = _normalize_stale_next_question_after_branch_change(proposal, contract, context.cart.get("facts") or {})
+    proposal = _normalize_next_question_to_first_missing(
+        proposal, contract, context.cart.get("facts") or {},
+    )
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(
             row.get("source_node_id") or row.get("source_graph_node_id") or ""
@@ -1136,12 +1239,39 @@ def _decide(
         "repair_required": False,
         "fallback_used": True,
     }
+    fallback_facts = dict(context.cart.get("facts") or {})
+    for fact in proof.get("accepted_facts") or []:
+        fallback_facts[str(fact.get("field_key") or "")] = fact
+    proposal_errors = [str(error) for error in proof.get("errors") or []]
+    branch_safe = not any(
+        error.startswith((
+            "branch_", "keep_", "add_", "publication_",
+        ))
+        or error in {"branch_not_published", "branch_path_checksum_mismatch"}
+        for error in proposal_errors
+    )
+    fallback_branch = context.active_branch_node_id
+    if branch_safe and proposal.branch_action.value in {"select", "switch", "keep", "add"}:
+        fallback_branch = proposal.branch_anchor_node_id
+    fallback_active_branches = list(context.active_branch_node_ids)
+    if proposal.branch_action.value == "add" and branch_safe and proposal.branch_anchor_node_id not in fallback_active_branches:
+        fallback_active_branches.append(proposal.branch_anchor_node_id)
+    fallback_state = {
+        **context.cart,
+        "facts": fallback_facts,
+        "active_branch_node_id": fallback_branch,
+        "active_branch_node_ids": fallback_active_branches,
+        "asked_question_node_ids": list(dict.fromkeys([
+            *(context.cart.get("asked_question_node_ids") or []),
+            *([fallback_id] if fallback_id else []),
+        ])),
+    }
     return (
         ConversationDecision(classifier="graph_proof_checker_v3", intent="published_fallback",
                              route=ConversationRoute.SDR, confidence=0,
                              lead_stage=str(context.cart.get("_lead_stage") or "novo"),
                              evidence_node_ids=[fallback_id] if fallback_id else []),
         AgentResponse(reply_text=fallback or None, role=ConversationRoute.SDR,
-                      evidence_node_ids=[fallback_id] if fallback_id else [], cart_state=context.cart,
+                      evidence_node_ids=[fallback_id] if fallback_id else [], cart_state=fallback_state,
                       handoff_required=False, proposal=proposal, proof=fallback_proof),
     )

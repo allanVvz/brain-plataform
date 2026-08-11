@@ -394,6 +394,16 @@ def test_published_question_is_still_appended_for_a_genuinely_different_reply():
     assert emitted == "Perfeito, anotado!\n\nQual é a metragem?"
 
 
+def test_published_question_replaces_a_model_question_for_the_wrong_field():
+    document = compiled_fixture()
+    contract = document["branch_contracts"]["branch:a"]
+    emitted = graph_proof_checker_v3.compose_published_question(
+        reply="Entendi o dado informado. Qual é a quantidade?",
+        next_question_node_id="question:a", contract=contract,
+    )
+    assert emitted == "Entendi o dado informado.\n\nQual é a metragem?"
+
+
 def test_published_question_is_not_duplicated_when_its_only_content_word_is_swapped():
     """Regression test for a gap in the fix above, found live 2026-08-08.
 
@@ -591,6 +601,131 @@ def test_graph_title_or_alias_resolves_one_branch_without_model_repair():
     )
     assert [row["branch_anchor_node_id"] for row in matches] == ["branch:a"]
     assert matches[0]["deterministic_alias_match"] is True
+    assert matches[0]["branch_evidence_span"] == "service alpha"
+
+
+def test_short_explicit_service_phrase_remains_a_deterministic_switch_signal():
+    """Exact graph aliases take precedence over the short-answer fuzzy-search gate."""
+    document = {
+        "branch_anchors": ["branch:a", "branch:b"],
+        "node_by_id": {
+            "branch:a": {"title": "Service Alpha", "slug": "service-alpha", "data": {}},
+            "branch:b": {"title": "Service Beta", "slug": "service-beta", "data": {"aliases": ["beta"]}},
+        },
+        "coordinates": {
+            "branch:a": {"path_checksum": "checksum:a"},
+            "branch:b": {"path_checksum": "checksum:b"},
+        },
+    }
+
+    matches = graph_agent_runtime_v3._deterministic_branch_candidates(
+        document, "Prefiro Beta.",
+    )
+
+    assert len(matches) == 1
+    assert matches[0]["branch_anchor_node_id"] == "branch:b"
+    assert matches[0]["deterministic_alias_match"] is True
+    assert matches[0]["branch_evidence_span"] == "Beta"
+
+
+def test_deterministic_branch_resolution_overrides_model_routing_and_derives_service():
+    document = {
+        "node_by_id": {
+            "branch:a": {"title": "Service Alpha", "slug": "service-alpha"},
+            "branch:b": {"title": "Service Beta", "slug": "service-beta"},
+        },
+        "coordinates": {
+            "branch:a": {"path_checksum": "checksum:a"},
+            "branch:b": {"path_checksum": "checksum:b"},
+        },
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:x",
+        messages=[{"message_id": "msg-1", "role": "user", "content": "Quero Service Alpha"}],
+        cart={"facts": {}}, rag_nodes=[], rag_paths=[], graph_contract={},
+        active_branch_node_id=None, branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+        retrieval_trace={"deterministic_branch_resolution": {
+            "branch_anchor_node_id": "branch:a",
+            "branch_evidence_span": "Service Alpha",
+        }},
+    )
+    model = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:b",
+        branch_path_checksum="checksum:b", branch_evidence_span="",
+        extracted_facts=[], claims=[], next_question_node_id=None,
+        cited_node_ids=[], cited_chunk_ids=[], reply="Certo.",
+        qualification_complete=False, handoff_requested=False,
+    )
+
+    resolved = graph_agent_runtime_v3._apply_authoritative_branch_resolution(
+        model, context, document,
+    )
+
+    assert resolved.branch_action.value == "select"
+    assert resolved.branch_anchor_node_id == "branch:a"
+    assert resolved.branch_path_checksum == "checksum:a"
+    assert [(fact.field_key, fact.value, fact.owner_node_id) for fact in resolved.extracted_facts] == [
+        ("servico", "service-alpha", "branch:a"),
+    ]
+
+
+def test_active_branch_forces_keep_when_message_has_no_explicit_graph_alias():
+    document = {
+        "node_by_id": {"branch:a": {"title": "Service Alpha", "slug": "service-alpha"}},
+        "coordinates": {"branch:a": {"path_checksum": "checksum:a"}},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:x",
+        messages=[{"message_id": "msg-2", "role": "user", "content": "2020"}],
+        cart={"facts": {}}, rag_nodes=[], rag_paths=[], graph_contract={},
+        active_branch_node_id="branch:a", branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+        retrieval_trace={},
+    )
+    model = ConversationProposal(
+        branch_action="switch", branch_anchor_node_id="branch:b",
+        branch_path_checksum="checksum:b", branch_evidence_span="2020",
+        extracted_facts=[{
+            "field_key": "servico", "value": "wrong", "status": "known",
+            "source_message_id": "msg-2", "owner_node_id": "branch:b",
+            "evidence_span": "2020", "confidence": 1,
+        }],
+        claims=[], next_question_node_id=None, cited_node_ids=[], cited_chunk_ids=[],
+        reply="Certo.", qualification_complete=False, handoff_requested=False,
+    )
+
+    resolved = graph_agent_runtime_v3._apply_authoritative_branch_resolution(
+        model, context, document,
+    )
+
+    assert resolved.branch_action.value == "keep"
+    assert resolved.branch_anchor_node_id == "branch:a"
+    assert resolved.extracted_facts == []
+
+
+def test_next_question_is_reconciled_to_first_missing_graph_field():
+    contract = {
+        "fields": [
+            {"key": "first", "owner_node_id": "persona", "required": True,
+             "accepted_statuses": ["known"], "question_node_id": "q:first"},
+            {"key": "second", "owner_node_id": "persona", "required": True,
+             "accepted_statuses": ["known"], "question_node_id": "q:second"},
+        ]
+    }
+    model = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="checksum:a", branch_evidence_span="",
+        extracted_facts=[], claims=[], next_question_node_id="q:second",
+        cited_node_ids=[], cited_chunk_ids=[], reply="Qual é o segundo?",
+        qualification_complete=False, handoff_requested=False,
+    )
+
+    reconciled = graph_agent_runtime_v3._normalize_next_question_to_first_missing(
+        model, contract, {},
+    )
+
+    assert reconciled.next_question_node_id == "q:first"
 
 
 def test_ambiguous_alias_never_selects_a_branch_deterministically():
