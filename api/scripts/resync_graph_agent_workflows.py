@@ -20,16 +20,22 @@ sys.path.insert(0, str(API_ROOT))
 from services import deepseek_n8n_service, n8n_client, supabase_client
 
 
-def _active_binding(persona: dict[str, Any]) -> dict[str, Any]:
-    bindings = [
-        row for row in supabase_client.get_workflow_bindings(str(persona["id"]))
-        if row.get("active")
-    ]
-    if len(bindings) != 1:
+def _binding(persona: dict[str, Any], *, require_active: bool) -> dict[str, Any]:
+    bindings = supabase_client.get_workflow_bindings(str(persona["id"]))
+    active = [row for row in bindings if row.get("active")]
+    if require_active and len(active) != 1:
         raise RuntimeError(
-            f"expected one active binding for {persona['slug']}, found {len(bindings)}"
+            f"expected one active binding for {persona['slug']}, found {len(active)}"
         )
-    return bindings[0]
+    if active:
+        return active[0]
+    # A human-only persona may intentionally have no active transport while
+    # retaining an inactive audit workflow. Rendering that workflow needs only
+    # its integration config; it must not create or activate a binding.
+    return next(
+        (row for row in bindings if row.get("n8n_workflow_id")),
+        bindings[0] if bindings else {},
+    )
 
 
 def _resolved_config(
@@ -105,7 +111,7 @@ def run(slugs: list[str], *, active_personas: set[str]) -> list[dict[str, Any]]:
         connection = supabase_client.get_persona_integration_connection(
             str(persona["id"]), "deepseek"
         ) or {}
-        binding = _active_binding(persona)
+        binding = _binding(persona, require_active=active)
         config = _resolved_config(persona, connection, binding)
         prepared.append((persona, connection, binding, config, active))
 
