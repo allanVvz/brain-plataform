@@ -1,12 +1,12 @@
-"""Regression coverage for the outbound duplicate-content guard.
+"""Regression coverage for duplicate-content observability and idempotency.
 
 Row-identity idempotency (idempotency_key/correlation_id) only stops a
 literal re-dispatch of the same lead_buffer row. It does not stop an
 operator/agent typing the same answer again as a brand-new send when a
 prior send's delivery ACK never came back (the Evolution/Baileys gap
 documented in docs/architecture/WHATSAPP_N8N_RUNTIME.md section 4). These
-tests cover the guard that closes that second gap, generically for any
-persona/binding.
+tests prove that only canonical row identity suppresses a send; repeated copy
+is observable but remains a distinct outbound for a distinct inbound.
 """
 from __future__ import annotations
 
@@ -91,23 +91,16 @@ def _patch_common(monkeypatch, *, binding, existing_idempotent=None,
     return calls
 
 
-def test_suppresses_send_when_recent_identical_outbound_exists(monkeypatch):
-    """A content duplicate is not a binding-level safety anomaly.
-
-    It must not raise, must not pause the lead, and must not sweep sibling
-    buffer rows — it just skips the resend and reports it as a no-op success,
-    the same shape as the row-identity idempotency branch. Confirmed live
-    2026-08-10: a legitimate new turn that happened to generate the same
-    reply text as a recent one used to hit a hard 409 that (via
-    record_whatsapp_safety_violation) paused the whole lead and abandoned
-    every other buffered message for hours.
-    """
+def test_identical_content_for_a_distinct_inbound_is_enqueued(monkeypatch):
+    """A repeated text is logged, but a new canonical inbound still sends."""
     binding = _binding()
     violation_calls: list[dict] = []
     event_calls: list[dict] = []
+    envelope_calls: list[dict] = []
     _patch_common(
         monkeypatch, binding=binding,
         duplicate_row={"id": "buffer-old", "status": "sent"},
+        envelope_calls=envelope_calls,
         violation_calls=violation_calls,
     )
     monkeypatch.setattr(
@@ -121,9 +114,9 @@ def test_suppresses_send_when_recent_identical_outbound_exists(monkeypatch):
         message_id="manual:1", correlation_id="corr-1",
     )
 
-    assert result["buffer_id"] == "buffer-old"
-    assert result["deduplicated"] is True
-    assert result["duplicate_suppressed"] is True
+    assert result["buffer_id"] == "buffer-1"
+    assert result["deduplicated"] is False
+    assert len(envelope_calls) == 1
     assert violation_calls == []
     assert len(event_calls) == 1
     assert event_calls[0]["args"][0] == "whatsapp.duplicate_content_suppressed"

@@ -201,21 +201,13 @@ def test_decision_response_failure_reconciles_an_already_committed_turn(monkeypa
     assert events[0][1]["payload"]["outbound_id"] == "outbound-1"
 
 
-def test_decision_attempt_retries_before_escalating(monkeypatch):
-    """A single decision-attempt failure must not pause the lead outright.
-
-    The /context -> /decide -> /commit path is idempotent by message_id, so
-    it's safe to retry with backoff instead of immediately quarantining the
-    row. Confirmed live 2026-08-10: one decision failure (e.g. a duplicate-
-    content 409, or a transient n8n/DeepSeek hiccup) used to escalate on the
-    very first occurrence and sweep every other buffered inbound message for
-    the lead to waiting_human.
-    """
-    released: list[dict] = []
+def test_ambiguous_decision_attempt_never_retries(monkeypatch):
+    """After dispatch, timeout is ambiguous and cannot authorize replay."""
+    waiting: list[tuple] = []
     violations: list[dict] = []
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.supabase_client.release_whatsapp_buffer",
-        lambda *args, **kwargs: released.append({"args": args, **kwargs}),
+        lambda *_args, **_kwargs: pytest.fail("ambiguous decision was retried"),
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.supabase_client.record_whatsapp_safety_violation",
@@ -223,7 +215,7 @@ def test_decision_attempt_retries_before_escalating(monkeypatch):
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.supabase_client.complete_whatsapp_buffer",
-        lambda *_args, **_kwargs: pytest.fail("first decision failure was escalated, not retried"),
+        lambda *args, **kwargs: waiting.append((args, kwargs)),
     )
 
     WhatsAppDispatchWorker()._retry_or_dead_letter(
@@ -239,8 +231,54 @@ def test_decision_attempt_retries_before_escalating(monkeypatch):
         RuntimeError("n8n conversation returned HTTP 409"),
     )
 
-    assert violations == []
-    assert released[0]["args"][:2] == ("inbound-1", "retry")
+    assert violations[0]["level"] == "partial"
+    assert waiting[0][0][:2] == ("inbound-1", "waiting_human")
+
+
+def test_dispatch_cycle_parallelizes_leads_but_keeps_each_lead_fifo(monkeypatch):
+    rows = [
+        {"id": "a2", "lead_ref": 10, "batch_key": "p:10", "direction": "inbound", "created_at": "2"},
+        {"id": "b1", "lead_ref": 11, "batch_key": "p:11", "direction": "inbound", "created_at": "1"},
+        {"id": "a1", "lead_ref": 10, "batch_key": "p:10", "direction": "inbound", "created_at": "1"},
+    ]
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.supabase_client.claim_whatsapp_buffer",
+        lambda _worker_id: rows,
+    )
+    dispatched: list[str] = []
+    monkeypatch.setattr(
+        WhatsAppDispatchWorker, "_dispatch_inbound",
+        lambda _self, row: dispatched.append(row["id"]),
+    )
+    executor_calls: list[dict] = []
+
+    class FakeExecutor:
+        def __init__(self, **kwargs):
+            executor_calls.append(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def map(self, fn, groups):
+            materialized = list(groups)
+            executor_calls[0]["group_ids"] = [[row["id"] for row in group] for group in materialized]
+            return [fn(group) for group in materialized]
+
+    monkeypatch.setattr(
+        "workers.whatsapp_dispatch_worker.ThreadPoolExecutor", FakeExecutor,
+    )
+    worker = WhatsAppDispatchWorker()
+    worker.concurrency = 4
+
+    worker._run_cycle()
+
+    assert executor_calls[0]["max_workers"] == 2
+    assert ["a1", "a2"] in executor_calls[0]["group_ids"]
+    assert ["b1"] in executor_calls[0]["group_ids"]
+    assert dispatched.index("a1") < dispatched.index("a2")
 
 
 def test_decision_attempt_escalates_with_partial_level_after_exhausting_retries(monkeypatch):

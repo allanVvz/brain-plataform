@@ -184,24 +184,43 @@ def _question_text(node: dict[str, Any]) -> str:
     return str(content.get("question") or data.get("question") or node.get("title") or "").strip()
 
 
-def _topological_fields(fields: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+def _topological_fields(
+    fields: list[dict[str, Any]], *, preferred_order: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Order fields by dependencies, then by the graph-declared sequence."""
     by_key = {field["key"]: field for field in fields}
     incoming = {key: set(field.get("depends_on") or []) for key, field in by_key.items()}
+    preferred = {
+        str(key): index for index, key in enumerate(preferred_order or []) if key
+    }
+
+    def order_key(key: str) -> tuple[int, float, str]:
+        field = by_key[key]
+        return (
+            preferred.get(key, len(preferred)),
+            -float(field.get("priority") or 0),
+            key,
+        )
+
     errors = [
         f"field_dependency_missing:{key}:{dependency}"
         for key, dependencies in incoming.items() for dependency in dependencies
         if dependency not in by_key
     ]
-    queue = deque(sorted(key for key, dependencies in incoming.items() if not dependencies))
+    queue = deque(sorted(
+        (key for key, dependencies in incoming.items() if not dependencies),
+        key=order_key,
+    ))
     ordered: list[dict[str, Any]] = []
     while queue:
         key = queue.popleft()
         ordered.append(by_key[key])
-        for candidate in sorted(incoming):
+        for candidate in sorted(incoming, key=order_key):
             if key in incoming[candidate]:
                 incoming[candidate].remove(key)
                 if not incoming[candidate] and by_key[candidate] not in ordered and candidate not in queue:
                     queue.append(candidate)
+        queue = deque(sorted(queue, key=order_key))
     cyclic = sorted(key for key, dependencies in incoming.items() if dependencies)
     errors.extend(f"field_dependency_cycle:{key}" for key in cyclic)
     return ordered, errors
@@ -367,7 +386,19 @@ def compile_graph(
             elif question_id:
                 reasons.setdefault(question_id, "field_question")
 
-        ordered_fields, dependency_errors = _topological_fields(list(fields_by_key.values()))
+        raw_completion = node_by_id[anchor]["data"].get("completion")
+        raw_completion = raw_completion if isinstance(raw_completion, dict) else {}
+        persona_policy = (
+            ((persona_node or {}).get("data") or {}).get("appointment_policy") or {}
+        )
+        preferred_field_order = list(
+            raw_completion.get("required_fields")
+            or persona_policy.get("required_fields")
+            or []
+        )
+        ordered_fields, dependency_errors = _topological_fields(
+            list(fields_by_key.values()), preferred_order=preferred_field_order,
+        )
         errors.extend(f"{anchor}:{error}" for error in dependency_errors)
         field_keys = set(fields_by_key)
         for field in ordered_fields:
@@ -457,8 +488,7 @@ def compile_graph(
                         )
                 claims.append(claim)
 
-        completion = node_by_id[anchor]["data"].get("completion")
-        completion = completion if isinstance(completion, dict) else {"required_fields": [
+        completion = raw_completion or {"required_fields": [
             field["key"] for field in ordered_fields if field["required"]
         ]}
         closure_checksum = canonical_checksum(closure)

@@ -846,6 +846,78 @@ def test_validation_lead_commit_persists_the_reply_without_a_real_send(monkeypat
     assert envelope["message"]["direction"] == "outbound"
 
 
+def test_invalid_branch_proof_still_commits_individually_accepted_persona_fact(monkeypatch):
+    lead = {
+        "id": 7, "persona_id": "persona-1", "channel_binding_id": "binding-1",
+        "stage": "novo", "metadata": {},
+    }
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "get_lead_by_ref", lambda _ref: lead,
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_workflow_binding_by_id",
+        lambda _id: {
+            "id": "binding-1", "persona_id": "persona-1", "active": True,
+            "metadata": {"decision_owner": "n8n_agents"},
+        },
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "get_persona", lambda _slug: {"id": "persona-1"},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "claim_conversation_commit",
+        lambda **_kwargs: {"state": "claimed"},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "complete_conversation_commit",
+        lambda **kwargs: kwargs["result_payload"],
+    )
+    monkeypatch.setattr(conversation_runtime.supabase_client, "update_lead", lambda *_a, **_k: None)
+    monkeypatch.setattr(conversation_runtime.supabase_client, "insert_agent_log", lambda *_a, **_k: None)
+    monkeypatch.setattr(conversation_runtime.supabase_client, "insert_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        conversation_runtime.whatsapp_outbox, "enqueue_outbound",
+        lambda **_kwargs: {"buffer_id": "outbound-1", "status": "pending_send"},
+    )
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client,
+        "get_whatsapp_buffer_by_idempotency",
+        lambda _key: None,
+    )
+    captured = {}
+    monkeypatch.setattr(
+        conversation_runtime.supabase_client, "commit_graph_turn_v3",
+        lambda **kwargs: captured.update(kwargs) or {"ledger_revision": 1},
+    )
+    fact = {
+        "field_key": "can_visit_in_person", "status": "known", "value": True,
+        "owner_node_id": "persona:generic", "source_message_id": "msg-1",
+        "evidence_span": "Levo até vocês", "confidence": 0.95,
+    }
+    context = _context().model_copy(update={
+        "runtime_version": conversation_runtime.graph_agent_runtime_v3.RUNTIME_VERSION,
+        "publication_id": "publication-1",
+        "retrieval_trace": {"ledger_revision": 0},
+    })
+    response = _response().model_copy(update={
+        "proof": {
+            "valid": False, "errors": ["keep_without_active_branch"],
+            "accepted_facts": [fact],
+        },
+        "cart_state": {"facts": {}, "asked_question_node_ids": []},
+    })
+
+    conversation_runtime.commit(
+        lead_ref=7, context=context, decision=_decision(), response=response,
+        correlation_id="corr-fact", phone_number_id=None,
+        channel_binding_id="binding-1", inbound_buffer_id="buffer-in",
+        expected_decision_owner="n8n_agents",
+    )
+
+    assert captured["p_facts"] == [fact]
+
+
 def test_concurrent_commit_reentry_pauses_the_lead(monkeypatch):
     violations = []
     monkeypatch.setattr(

@@ -1072,3 +1072,96 @@ def test_keep_without_an_active_branch_cannot_silently_establish_one():
     )
     proof = check(document, value, active=None, message="Isabela")
     assert "keep_without_active_branch" in proof["errors"], proof["errors"]
+
+
+def test_discovery_keep_uses_model_reply_without_committing_fallback_branch(monkeypatch):
+    document = compiled_fixture()
+    pub = publication(document)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client,
+        "get_persona",
+        lambda _slug: {**PERSONA, "config": {}},
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client,
+        "get_active_graph_publication",
+        lambda _persona_id: pub,
+    )
+    contract = document["branch_contracts"]["branch:b"]
+    question = ContextCard(
+        id="question:b", node_type="faq", slug="question-b", title="question:b",
+        rendered_content="Qual é a quantidade?", content_checksum="sha256:card",
+        revision=1, graph_version=1, graph_checksum=document["checksum"],
+        context_role="pending_field_question", position=0,
+    )
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"],
+        messages=[{"role": "user", "texto": "Oi"}], cart={"facts": {}},
+        rag_nodes=[], rag_paths=[], context_cards=[question],
+        graph_contract=contract, active_branch_node_id=None,
+        active_branch_node_ids=[], branch_node_ids=[],
+        runtime_version="graph_agent_runtime_v3", publication_id=pub["id"],
+        retrieval_trace={
+            "retrieval_branch_node_id": "branch:b", "branch_candidates": [],
+            "possible_switches": [], "ledger_revision": 0,
+        },
+    )
+    value = {
+        "branch_action": "keep", "branch_anchor_node_id": "branch:b",
+        "branch_path_checksum": contract["branch_path_checksum"],
+        "branch_evidence_span": "", "extracted_facts": [], "claims": [],
+        "next_question_node_id": "question:b", "cited_node_ids": [],
+        "cited_chunk_ids": [],
+        "reply": "Oi! Para eu te ajudar direitinho, qual é a quantidade?",
+        "qualification_complete": False, "handoff_requested": False,
+    }
+
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": value},
+    )
+
+    assert response.proof["valid"] is True
+    assert response.proof["mode"] == "discovery"
+    assert response.cart_state["active_branch_node_id"] is None
+    assert response.reply_text.startswith("Oi!")
+    assert decision.intent == "collect_graph_fields"
+
+
+def test_publication_change_preserves_compatible_persona_fact_without_active_branch():
+    document = {
+        "nodes": [{"id": "persona:generic", "node_type": "persona"}],
+        "branch_contracts": {
+            "branch:a": {"fields": [{
+                "key": "nome_cliente", "scope": "persona",
+                "owner_node_id": "persona:generic", "accepted_statuses": ["known"],
+                "value_schema": {"type": "string", "minLength": 1},
+            }]},
+        },
+    }
+    fact = {
+        "field_key": "nome_cliente", "status": "known", "value": "Andressa",
+        "owner_node_id": "persona:generic",
+    }
+
+    assert graph_agent_runtime_v3._publication_fact_is_compatible(
+        document, {}, "nome_cliente", fact,
+    )
+
+
+def test_topological_fields_preserves_graph_required_field_order():
+    fields = [
+        {"key": "can_visit_in_person", "priority": 0.7, "depends_on": []},
+        {"key": "nome_cliente", "priority": 0.7, "depends_on": []},
+        {"key": "servico", "priority": 1.0, "depends_on": []},
+    ]
+
+    ordered, errors = graph_compiler_v3._topological_fields(
+        fields,
+        preferred_order=["nome_cliente", "servico", "can_visit_in_person"],
+    )
+
+    assert errors == []
+    assert [field["key"] for field in ordered] == [
+        "nome_cliente", "servico", "can_visit_in_person",
+    ]

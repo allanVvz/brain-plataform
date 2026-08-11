@@ -12,7 +12,7 @@ from services import event_emitter, supabase_client
 
 # Fallback when a binding does not set metadata.duplicate_guard_window_seconds.
 # Any workflow_bindings row can override or disable this per persona/channel
-# without a code change (see _guard_against_duplicate_content).
+# without a code change (see _observe_duplicate_content).
 DEFAULT_DUPLICATE_GUARD_WINDOW_SECONDS = 300
 
 
@@ -131,27 +131,26 @@ def resolve_lead_binding(lead: dict[str, Any]) -> dict[str, Any]:
     return binding
 
 
-def _guard_against_duplicate_content(
+def _observe_duplicate_content(
     *, lead: dict[str, Any], binding: dict[str, Any], text: str, correlation_id: str,
 ) -> dict[str, Any] | None:
-    """Detect a new outbound send whose text duplicates a recent one.
+    """Record repeated copy without turning content into message identity.
 
     Row-identity idempotency (idempotency_key/correlation_id, checked by the
     caller before this runs) only catches a literal re-dispatch of the same
     outbox row. It does not catch an operator or agent typing the same
     answer again as a brand-new send because delivery looked ambiguous
     (missing ACK from the provider) — that produces a second, distinct row
-    that sails through unblocked and doubles the number of WhatsApp sends
-    for one conversational turn. This closes that gap, generically for any
-    persona/binding: no persona, customer or content literal is referenced.
+    that sails through as a distinct turn. This observer records that quality
+    signal generically; canonical identity, not text, decides idempotency.
 
     A content duplicate is not a binding-level safety anomaly, so callers
     must not treat it as one: it must never pause the lead or sweep sibling
     buffer rows (confirmed live 2026-08-10 — a legitimate new turn that
     happened to generate the same reply text tripped this guard, which used
     to call record_whatsapp_safety_violation and cascaded into hours of
-    silence for the whole backlog). The caller suppresses the resend
-    instead of raising.
+    silence for the whole backlog). The caller still enqueues the distinct
+    outbound after emitting this warning.
     """
     metadata = binding.get("metadata") or {}
     if metadata.get("duplicate_guard_enabled") is False:
@@ -223,18 +222,14 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
             "deduplicated": True,
             "binding": binding,
         }
-    duplicate = _guard_against_duplicate_content(
+    # Text equality is a conversational quality signal, not an idempotency
+    # identity. Distinct canonical inbounds may legitimately receive equal
+    # copy; suppressing the latter leaves the customer without a response.
+    # The guard still emits diagnostics, while lock_key remains the only
+    # exactly-once boundary.
+    _observe_duplicate_content(
         lead=lead, binding=binding, text=text, correlation_id=correlation_id,
     )
-    if duplicate:
-        return {
-            "buffer_id": duplicate["id"],
-            "message_id": message_id,
-            "status": duplicate.get("status") or "sent",
-            "deduplicated": True,
-            "duplicate_suppressed": True,
-            "binding": binding,
-        }
     scope_fields = {
         "message_origin": "campaign",
         "campaign_id": campaign_scope.get("campaign_id"),

@@ -10,6 +10,8 @@ import json
 import os
 import re
 import socket
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from services import (
@@ -45,9 +47,35 @@ class WhatsAppDispatchWorker(BaseWorker):
     def __init__(self) -> None:
         super().__init__()
         self.worker_id = f"{socket.gethostname()}:{os.getpid()}"
+        self.concurrency = max(
+            1, int(os.environ.get("WHATSAPP_DISPATCH_CONCURRENCY", "4")),
+        )
 
     def _run_cycle(self) -> None:
         rows = supabase_client.claim_whatsapp_buffer(self.worker_id)
+        groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            group_key = str(
+                row.get("batch_key")
+                or (f"lead:{row['lead_ref']}" if row.get("lead_ref") is not None else row["id"])
+            )
+            groups[group_key].append(row)
+        ordered_groups = [
+            sorted(group, key=lambda row: (str(row.get("created_at") or ""), str(row["id"])))
+            for group in groups.values()
+        ]
+        if len(ordered_groups) <= 1 or self.concurrency == 1:
+            for group in ordered_groups:
+                self._dispatch_group(group)
+            return
+        with ThreadPoolExecutor(
+            max_workers=min(self.concurrency, len(ordered_groups)),
+            thread_name_prefix="whatsapp-dispatch",
+        ) as executor:
+            list(executor.map(self._dispatch_group, ordered_groups))
+
+    def _dispatch_group(self, rows: list[dict[str, Any]]) -> None:
+        """Keep one lead FIFO while allowing unrelated leads in parallel."""
         for row in rows:
             try:
                 if row.get("direction") == "inbound":
@@ -473,20 +501,6 @@ class WhatsAppDispatchWorker(BaseWorker):
                     source="workers.whatsapp",
                 )
                 return
-        if attempt_kind == "decision" and attempts < maximum:
-            # The /context -> /decide -> /commit path is idempotent by
-            # message_id (whatsapp_outbox.enqueue_outbound's idempotency-key
-            # check), so a transient failure here is safe to retry — unlike
-            # a "provider" attempt below, no WhatsApp send may have gone out
-            # yet. Confirmed live 2026-08-10: a single decision failure
-            # (duplicate-content 409, or any n8n/DeepSeek hiccup) used to
-            # escalate immediately and sweep every other buffered inbound
-            # message for the lead to waiting_human, going silent on a whole
-            # backlog over one bad turn.
-            supabase_client.release_whatsapp_buffer(
-                row["id"], "retry", delay_seconds=_retry_delay(attempts), error=error
-            )
-            return
         if attempt_kind:
             if row.get("channel_binding_id"):
                 # level="partial" only quarantines this row to waiting_human;

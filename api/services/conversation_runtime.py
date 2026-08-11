@@ -2095,7 +2095,10 @@ def commit(
                 p_active_branch_node_id=response.cart_state.get("active_branch_node_id"),
                 p_asked_question_node_ids=response.cart_state.get("asked_question_node_ids") or [],
                 p_expected_revision=int(context.retrieval_trace.get("ledger_revision") or 0),
-                p_facts=(response.proof.get("accepted_facts") or []) if response.proof.get("valid") else [],
+                # Fact proofs are independent from branch/reply validity.
+                # Discarding a correctly sourced persona fact because the
+                # model missed the branch makes the next turn re-ask it.
+                p_facts=response.proof.get("accepted_facts") or [],
                 p_retrieval_trace=context.retrieval_trace,
                 p_model_proposal=(
                     response.proposal.model_dump(mode="json") if response.proposal
@@ -2476,7 +2479,7 @@ def commit(
             p_asked_question_node_ids=response.cart_state.get("asked_question_node_ids") or [],
             p_expected_revision=int(context.retrieval_trace.get("ledger_revision") or 0),
             p_facts=[
-                *((response.proof.get("accepted_facts") or []) if response.proof.get("valid") else []),
+                *(response.proof.get("accepted_facts") or []),
                 *reset_facts,
             ],
             p_retrieval_trace=context.retrieval_trace,

@@ -460,6 +460,37 @@ def _fallback_retrieval_branch(
     return None
 
 
+def _publication_fact_is_compatible(
+    document: dict[str, Any], active_contract: dict[str, Any],
+    key: str, fact: dict[str, Any],
+) -> bool:
+    """Preserve persona-owned facts independently of an active branch."""
+    candidates = [
+        field for field in active_contract.get("fields") or []
+        if field.get("key") == key
+    ]
+    persona_node_id = next(
+        (
+            str(node.get("id")) for node in document.get("nodes") or []
+            if node.get("node_type") == "persona"
+        ),
+        "",
+    )
+    for contract in (document.get("branch_contracts") or {}).values():
+        candidates.extend(
+            field for field in contract.get("fields") or []
+            if field.get("key") == key
+            and (
+                field.get("scope") == "persona"
+                or str(field.get("owner_node_id") or "") == persona_node_id
+            )
+        )
+    return any(
+        graph_proof_checker_v3.fact_compatible(field, fact)
+        for field in candidates
+    )
+
+
 def build_context(
     *, persona_slug: str, lead_ref: int, message: str, message_id: str | None,
 ) -> ConversationContext:
@@ -498,14 +529,14 @@ def build_context(
         if ledger.get("id") else []
     )
     active_contract = (document.get("branch_contracts") or {}).get(active_branch) or {}
-    declared = {field["key"]: field for field in active_contract.get("fields") or []}
     invalidated_fact_keys: list[str] = []
     if publication_changed:
         previous_facts = ledger.get("facts") or {}
         ledger["facts"] = {
             key: value for key, value in previous_facts.items()
-            if key in declared
-            and graph_proof_checker_v3.fact_compatible(declared[key], value)
+            if _publication_fact_is_compatible(
+                document, active_contract, key, value,
+            )
         }
         invalidated_fact_keys = sorted(set(previous_facts) - set(ledger["facts"]))
         ledger["asked_question_node_ids"] = []
@@ -818,7 +849,22 @@ def _decide(
                                  proposal=proposal, proof=proof, repair_context_cards=repair_cards)
         return ConversationDecision(classifier="graph_proof_checker_v3", intent="repair_retrieval",
                                     route=ConversationRoute.SDR, confidence=0, lead_stage=str(context.cart.get("_lead_stage") or "novo")), response
-    if proof["valid"]:
+    discovery_only = (
+        not proof["valid"]
+        and context.active_branch_node_id is None
+        and proposal.branch_action.value == "keep"
+        and proof.get("errors") == ["keep_without_active_branch"]
+        and not context.retrieval_trace.get("branch_candidates")
+    )
+    if proof["valid"] or discovery_only:
+        if discovery_only:
+            proof = {
+                **proof,
+                "valid": True,
+                "errors": [],
+                "mode": "discovery",
+                "branch_committed": False,
+            }
         reply = graph_proof_checker_v3.compose_published_question(
             reply=proposal.reply, next_question_node_id=proposal.next_question_node_id, contract=contract
         )
@@ -828,7 +874,7 @@ def _decide(
             (field for field in contract.get("fields") or [] if field.get("key") == "servico"), None
         )
         branch_node = (document.get("node_by_id") or {}).get(proposal.branch_anchor_node_id) or {}
-        if servico_field and branch_node and (
+        if not discovery_only and servico_field and branch_node and (
             facts.get("servico", {}).get("owner_node_id") != proposal.branch_anchor_node_id
         ):
             # The branch anchor is already the structural source of truth
@@ -861,8 +907,12 @@ def _decide(
         active_branch_ids = list(context.active_branch_node_ids)
         if proposal.branch_action.value == "add" and proposal.branch_anchor_node_id not in active_branch_ids:
             active_branch_ids.append(proposal.branch_anchor_node_id)
+        committed_branch = (
+            context.active_branch_node_id
+            if discovery_only else proposal.branch_anchor_node_id
+        )
         state = {**context.cart, "facts": facts,
-                 "active_branch_node_id": proposal.branch_anchor_node_id,
+                 "active_branch_node_id": committed_branch,
                  "active_branch_node_ids": active_branch_ids,
                  "asked_question_node_ids": list(dict.fromkeys([
                      *(context.cart.get("asked_question_node_ids") or []),
