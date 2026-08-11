@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import json
+import hashlib
 from pathlib import Path
 
 
@@ -119,6 +120,24 @@ def test_exact_response_keeps_snapshot_and_marks_new_current_version(monkeypatch
     assert result["current_graph_version"] == 4
 
 
+def test_checksum_validation_accepts_legacy_raw_snapshot_hash():
+    rendered = "Linha 1\r\nLinha 2"
+    legacy = "sha256:" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+    ok, actual = context_cards._content_checksum_matches(legacy, rendered)
+    assert ok is True
+    assert actual.startswith("sha256:")
+
+
+def test_checksum_divergence_metric_is_bounded_per_snapshot(monkeypatch):
+    emitted: list[dict] = []
+    context_cards._DIVERGENCE_EMITTED_AT.clear()
+    monkeypatch.setattr(context_cards, "emit_metric", lambda *args, **kwargs: emitted.append(kwargs))
+    payload = {"response_message_id": "m-1", "node_id": "n-1", "expected": "x", "actual": "y"}
+    context_cards._emit_checksum_divergence_once(persona_id="p-1", lead_ref=1, payload=payload)
+    context_cards._emit_checksum_divergence_once(persona_id="p-1", lead_ref=1, payload=payload)
+    assert len(emitted) == 1
+
+
 def test_historical_reconstruction_never_promotes_inferred_related_cards(monkeypatch):
     historical = _graph()
     current = _graph()
@@ -150,6 +169,16 @@ def test_persona_graphs_never_cross_contaminate():
     )
     assert all("baita" not in card.rendered_content.lower() for card in aurora)
     assert all("aurora" not in card.rendered_content.lower() for card in baita)
+
+
+def test_runtime_legacy_json_string_checksum_is_accepted_without_divergence():
+    rendered = "Pintura\r\ncom proteção"
+    expected = context_cards.graph_compiler_v3.canonical_checksum(rendered)
+
+    matches, actual = context_cards._content_checksum_matches(expected, rendered)
+
+    assert matches is True
+    assert actual == context_cards.graph_compiler_v3.canonical_content_checksum(rendered)
 
 
 def test_real_baita_fixture_returns_product_faq_and_clean_prompt_cards():

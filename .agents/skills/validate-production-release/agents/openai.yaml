@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Production Release"
+  short_description: "Audit production release readiness safely"
+  default_prompt: "Use $validate-production-release to run a read-only production readiness audit."

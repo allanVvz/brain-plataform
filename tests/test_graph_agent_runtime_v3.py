@@ -260,6 +260,76 @@ def test_fact_correction_cannot_overwrite_silently():
     assert explicit["valid"], explicit["errors"]
 
 
+def test_exact_graph_switch_is_an_explicit_branch_fact_correction():
+    document = compiled_fixture()
+    contract = document["branch_contracts"]["branch:b"]
+    value = proposal(
+        document,
+        branch_action="switch",
+        branch_anchor_node_id="branch:b",
+        branch_path_checksum=contract["branch_path_checksum"],
+        branch_evidence_span="branch:b",
+        extracted_facts=[{
+            "field_key": "quantidade", "owner_node_id": "branch:b", "status": "known",
+            "value": 2, "source_message_id": "msg-1", "evidence_span": "branch:b",
+            "confidence": 1,
+        }],
+        next_question_node_id=None,
+        cited_node_ids=["branch:b"], cited_chunk_ids=[], qualification_complete=True,
+    )
+    ledger = {"graph_checksum": document["checksum"], "facts": {
+        "quantidade": {
+            "status": "known", "value": 1, "confidence": 1,
+            "owner_node_id": "branch:a",
+        }
+    }}
+    proof = check(document, value, ledger=ledger, active="branch:a", message="quero branch:b")
+    assert proof["valid"], proof["errors"]
+
+
+def test_graph_owned_greeting_is_short_and_model_free():
+    document = {
+        "nodes": [{
+            "id": "persona:generic", "node_type": "persona",
+            "data": {
+                "conversation_policy": {"intents": {"greeting": {"response": "Olá! Bem-vindo."}}},
+                "appointment_policy": {
+                    "required_fields": ["nome_cliente"],
+                    "field_questions": {"nome_cliente": "Como você se chama?"},
+                },
+            },
+        }]
+    }
+    greeting = graph_agent_runtime_v3._greeting_policy(document, contract={}, facts={})
+    assert graph_agent_runtime_v3._is_greeting("Olá") is True
+    assert graph_agent_runtime_v3._is_greeting("Olá, quero branch a") is False
+    assert greeting == {
+        "response": "Olá! Bem-vindo.", "question": "Como você se chama?",
+        "question_node_id": None, "asked_field_key": "nome_cliente",
+        "missing_fields": ["nome_cliente"],
+    }
+
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test", messages=[{"role": "user", "content": "Olá"}],
+        cart={"facts": {}, "asked_question_node_ids": []}, rag_nodes=[], rag_paths=[],
+        rag_chunks=[], context_cards=[], system_prompt="", available_services=[],
+        active_branch_node_id=None, active_branch_node_ids=[], active_path_checksum=None,
+        branch_node_ids=[], graph_contract={}, publication_id="publication-1",
+        runtime_version=graph_agent_runtime_v3.RUNTIME_VERSION,
+        retrieval_trace={
+            "deterministic_intent": "greeting",
+            "deterministic_reply": "Olá! Bem-vindo.\n\nComo você se chama?",
+            "asked_field_key": "nome_cliente", "missing_fields": ["nome_cliente"],
+            "ledger_revision": 0,
+        },
+    )
+    decision, response = graph_agent_runtime_v3.decide(context, model_observation=None)
+    assert decision.intent == "greeting"
+    assert response.reply_text.endswith("Como você se chama?")
+    assert response.token_usage["model_calls"] == 0
+
+
 def test_claims_and_handoff_need_published_policy():
     document = compiled_fixture()
     value = proposal(document, claims=[{
@@ -689,6 +759,63 @@ def test_deterministic_branch_resolution_overrides_model_routing_and_derives_ser
     assert [(fact.field_key, fact.value, fact.owner_node_id) for fact in resolved.extracted_facts] == [
         ("servico", "service-alpha", "branch:a"),
     ]
+
+
+def test_deterministic_additive_service_keeps_existing_branch_and_appends_new_one():
+    document = {
+        "node_by_id": {
+            "branch:a": {"title": "Service Alpha", "slug": "service-alpha"},
+            "branch:b": {"title": "Service Beta", "slug": "service-beta"},
+        },
+        "coordinates": {"branch:b": {"path_checksum": "checksum:b"}},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:x",
+        messages=[{"message_id": "msg-add", "role": "user",
+                   "content": "Também quero Service Beta"}],
+        cart={"facts": {}}, rag_nodes=[], rag_paths=[], graph_contract={},
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+        retrieval_trace={"deterministic_branch_resolution": {
+            "branch_anchor_node_id": "branch:b",
+            "branch_evidence_span": "Service Beta",
+        }},
+    )
+    model = ConversationProposal(
+        branch_action="switch", branch_anchor_node_id="branch:b",
+        branch_path_checksum="checksum:b", branch_evidence_span="Service Beta",
+        extracted_facts=[], claims=[], next_question_node_id=None,
+        cited_node_ids=[], cited_chunk_ids=[], reply="Perfeito.",
+        qualification_complete=False, handoff_requested=False,
+    )
+
+    resolved = graph_agent_runtime_v3._apply_authoritative_branch_resolution(
+        model, context, document,
+    )
+
+    assert resolved.branch_action.value == "add"
+    assert resolved.branch_anchor_node_id == "branch:b"
+    assert resolved.extracted_facts[0].owner_node_id == "branch:b"
+
+
+def test_contract_fact_scope_does_not_compare_service_from_another_owner():
+    contract = {"fields": [
+        {"key": "servico", "owner_node_id": "branch:paint"},
+        {"key": "name", "owner_node_id": "persona"},
+    ]}
+    grouped = {
+        "servico": [
+            {"field_key": "servico", "owner_node_id": "branch:interior", "value": "interior"},
+            {"field_key": "servico", "owner_node_id": "branch:paint", "value": "paint"},
+        ],
+        "name": [{"field_key": "name", "owner_node_id": "persona", "value": "Allan"}],
+    }
+
+    scoped = graph_agent_runtime_v3._facts_for_contract(contract, grouped)
+
+    assert scoped["servico"]["value"] == "paint"
+    assert scoped["name"]["value"] == "Allan"
 
 
 def test_active_branch_forces_keep_when_message_has_no_explicit_graph_alias():

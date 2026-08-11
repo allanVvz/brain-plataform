@@ -25,7 +25,7 @@ describe("explicit client portal API context", () => {
     expect(calls).toEqual([
       "/api-brain/portal/leads?persona_slug=aurora&limit=500",
       "/api-brain/portal/conversations?persona_slug=aurora",
-      "/api-brain/portal/conversations/42/messages?persona_slug=aurora",
+      "/api-brain/portal/conversations/42/messages?persona_slug=aurora&limit=50",
       "/api-brain/portal/knowledge/chat-context?persona_slug=aurora&lead_ref=42&limit=12&q=lavagem",
       "/api-brain/portal/pipeline?persona_slug=aurora",
     ]);

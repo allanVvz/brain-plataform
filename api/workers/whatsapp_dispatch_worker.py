@@ -12,6 +12,7 @@ import re
 import socket
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from typing import Any
 
 from services import (
@@ -38,6 +39,14 @@ def _retry_delay(attempt: int) -> int:
 # 2026-08-04: a customer replying "oi" (matching the bot's own earlier
 # greeting) got permanently handed off by this guard on every message.
 _ECHO_GUARD_MIN_LENGTH = 12
+
+
+def _queue_wait_ms(row: dict[str, Any]) -> int | None:
+    try:
+        created = datetime.fromisoformat(str(row.get("created_at") or "").replace("Z", "+00:00"))
+        return max(0, int((datetime.now(timezone.utc) - created).total_seconds() * 1000))
+    except (TypeError, ValueError):
+        return None
 
 
 class WhatsAppDispatchWorker(BaseWorker):
@@ -206,6 +215,15 @@ class WhatsAppDispatchWorker(BaseWorker):
                 channel_binding_id=row.get("channel_binding_id"),
                 inbound_buffer_id=row["id"],
             )
+            if result.get("burst_superseded"):
+                event_emitter.emit(
+                    "whatsapp.inbound_burst_superseded",
+                    entity_type="lead", entity_id=str(row.get("lead_ref") or ""),
+                    persona_id=row["persona_id"],
+                    payload={"correlation_id": row.get("correlation_id"), "buffer_id": row["id"]},
+                    source="workers.whatsapp",
+                )
+                return
             if not result.get("handoff"):
                 supabase_client.complete_whatsapp_buffer(row["id"], "sent")
             event_emitter.emit(
@@ -215,6 +233,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                 persona_id=row["persona_id"],
                 payload={
                     "correlation_id": row.get("correlation_id"),
+                    "queue_wait_ms": _queue_wait_ms(row),
                     "conversation_mode": "deterministic",
                     "pipeline_contract": binding_metadata.get("pipeline_contract") or "conversation_v1",
                     "classifier": result.get("classifier"),
@@ -286,6 +305,15 @@ class WhatsAppDispatchWorker(BaseWorker):
                     source="workers.whatsapp",
                 )
                 return
+            if n8n_result.get("burst_superseded"):
+                event_emitter.emit(
+                    "whatsapp.inbound_burst_superseded",
+                    entity_type="lead", entity_id=str(row.get("lead_ref") or ""),
+                    persona_id=row["persona_id"],
+                    payload={"correlation_id": row.get("correlation_id"), "buffer_id": row["id"]},
+                    source="workers.whatsapp",
+                )
+                return
             if not n8n_result.get("handoff"):
                 supabase_client.complete_whatsapp_buffer(row["id"], "sent")
             event_emitter.emit(
@@ -295,6 +323,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                 persona_id=row["persona_id"],
                 payload={
                     "correlation_id": row.get("correlation_id"),
+                    "queue_wait_ms": _queue_wait_ms(row),
                     "conversation_mode": "n8n_agents",
                     "pipeline_contract": binding_metadata.get("pipeline_contract") or "conversation_v3",
                     "handoff": bool(n8n_result.get("handoff")),

@@ -3,19 +3,19 @@
 Date: 2026-05-26  
 Issue: BRA-23  
 Owner role: QA Lead  
-Scope: validacao visual do `semantic_tree` no alvo mandatorio `http://192.168.0.182:3000/knowledge/graph?mode=semantic_tree&all_edges=1`.
+Scope: validacao visual do `semantic_tree` no alvo mandatorio `http://<QA_HOST>:3000/knowledge/graph?mode=semantic_tree&all_edges=1`.
 
 ## 1. QA Strategy
 
 - Objetivo: proteger os invariantes de grafo antes de PR/deploy, exigindo evidencia no alvo local solicitado pelo board.
 - Estrategia: usar evidencia em 2 camadas.
 1. Camada A (ja executada): validacao funcional em QA remoto (`brain-plataform-qa`) para provar comportamento de render e payload real.
-2. Camada B (obrigatoria para fechar BRA-23): validacao no host local `192.168.0.182:3000` com credencial/bypass valido.
+2. Camada B (obrigatoria para fechar BRA-23): validacao no host local `<QA_HOST>:3000` com credencial/bypass valido.
 - Decisao de gate: enquanto Camada B nao for executavel por bloqueio de acesso, BRA-23 permanece `BLOCKED`.
 
 ## 2. Required Test List
 
-1. `python tests/screenshot_graph_tree.py` contra `192.168.0.182:3000` autenticado.
+1. `python tests/screenshot_graph_tree.py` contra `<QA_HOST>:3000` autenticado.
 2. `pytest tests/test_qa_real_graph_insertion.py -q`
 3. `pytest tests/integration_knowledge_ui_hierarchy.py -q`
 4. Validacao manual em URL alvo com `mode=semantic_tree&all_edges=1` e evidencia de runId.
@@ -33,7 +33,7 @@ Scope: validacao visual do `semantic_tree` no alvo mandatorio `http://192.168.0.
 - [x] FAQ->Embed rule com cobertura automatizada em suites de integracao.
 - [x] Catalog ingest com invalid-case coverage (suite existente).
 - [x] Tree View e Graph View com comportamento coberto por teste + evidencia QA remota.
-- [ ] Tree View local target `192.168.0.182:3000` com evidencia autenticada (pendente por bloqueio de acesso).
+- [ ] Tree View local target `<QA_HOST>:3000` com evidencia autenticada (pendente por bloqueio de acesso).
 - [x] Release blockers explicitos.
 
 ## 5. Manual QA Checklist
@@ -79,5 +79,5 @@ Scope: validacao visual do `semantic_tree` no alvo mandatorio `http://192.168.0.
 - Bloqueador de primeira classe: autenticacao invalida no alvo local solicitado pelo board.
 - Evidencia: `test-artifacts/bra-23-local-target-blocker.md` e `test-artifacts/bra23-local-login-failure.png`.
 - Unblock owner: Frontend Agent + owner de ambiente/acesso.
-- Unblock action: fornecer credencial valida de QA para `192.168.0.182:3000` ou habilitar bypass QA, depois disparar revalidacao BRA-23.
+- Unblock action: fornecer credencial valida de QA para `<QA_HOST>:3000` ou habilitar bypass QA, depois disparar revalidacao BRA-23.
 - Handoff: apos desbloqueio e execucao da Camada B, encaminhar para PR & Deploy Agent; QA Lead nao aprova release diretamente.

@@ -20,6 +20,11 @@ api/logs-dev-restart.out.txt
 .env.compose
 dashboard/.env.local
 dashboard
+docs/*
+!docs/sdr/
+!docs/sdr/**
+!docs/qa/
+!docs/qa/**
 tests
 test-artifacts
 data
@@ -29,4 +34,14 @@ paperclip
 .codex
 Imagens
 *.log
+api/*.pdf
+api/*investigation*.py
+api/*report*.py
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/coverage*
+**/playwright-report
+**/test-results
 

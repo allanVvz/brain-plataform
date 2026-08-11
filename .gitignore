@@ -107,6 +107,8 @@ dashboard/modes.json
 !.agents/skills/brain-appointment-graph/**
 !.agents/skills/whatsapp-binding-reassignment/
 !.agents/skills/whatsapp-binding-reassignment/**
+!.agents/skills/validate-production-release/
+!.agents/skills/validate-production-release/**
 !.agents/commands/
 !.agents/commands/*.md
 .mcp.json
@@ -165,3 +167,4 @@ tests/integration_knowledge_curation_architecture.py
 
 .vercel
 .demo-baita-state.json
+.release/

@@ -1,31 +1,48 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 BACKUP_DIR="${1:-}"
-CONFIRM="${2:-}"
-[[ "$CONFIRM" == "--confirm-destructive-restore" ]] || { echo "usage: restore.sh <backup-dir> --confirm-destructive-restore" >&2; exit 2; }
+TARGET_DB="${2:-}"
+CONFIRM="${3:-}"
+[[ "$CONFIRM" == "--confirm-isolated-restore" ]] || {
+  echo "usage: restore.sh <backup-dir> <isolated-target-db> --confirm-isolated-restore" >&2
+  exit 2
+}
+[[ "$TARGET_DB" =~ ^brain_restore_[a-z0-9_]{1,40}$ ]] || {
+  echo "Target must be an isolated brain_restore_* database" >&2; exit 2;
+}
 BACKUP_DIR="$(realpath "$BACKUP_DIR")"
-[[ -d "$BACKUP_DIR" && -f "$BACKUP_DIR/postgres.dump" && -f "$BACKUP_DIR/SHA256SUMS" ]] || { echo "Invalid backup directory" >&2; exit 2; }
-(cd "$BACKUP_DIR" && sha256sum -c SHA256SUMS)
+[[ -d "$BACKUP_DIR" && -f "$BACKUP_DIR/postgres-data.dump" \
+   && -f "$BACKUP_DIR/postgres-schema.dump" && -f "$BACKUP_DIR/SHA256SUMS" ]] || {
+  echo "Invalid data-only backup directory" >&2; exit 2;
+}
+(cd "$BACKUP_DIR" && sha256sum --check SHA256SUMS)
 cd "$ROOT_DIR"
 COMPOSE=(docker compose --env-file "$ENV_FILE")
-"${COMPOSE[@]}" stop caddy api workers seed-admin kong rest storage
-"${COMPOSE[@]}" up -d db
-"${COMPOSE[@]}" create storage api workers
-cat "$BACKUP_DIR/postgres.dump" | "${COMPOSE[@]}" exec -T db sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner'
+active_db="$("${COMPOSE[@]}" exec -T db sh -c 'printf %s "$POSTGRES_DB"')"
+[[ "$TARGET_DB" != "$active_db" ]] || { echo "Refusing active database target" >&2; exit 2; }
 
-volume_name() {
-  docker volume ls --quiet --filter "label=com.docker.compose.project=brain-ai" --filter "label=com.docker.compose.volume=$1" | head -n 1
+"${COMPOSE[@]}" exec -T db sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" createdb -U "$POSTGRES_USER" '"$TARGET_DB"
+cleanup() {
+  "${COMPOSE[@]}" exec -T db sh -c \
+    'PGPASSWORD="$POSTGRES_PASSWORD" dropdb -U "$POSTGRES_USER" --if-exists '"$TARGET_DB" >/dev/null
 }
-for logical in storage-data local-storage vault-data; do
-  archive="$BACKUP_DIR/$logical.tar.gz"
-  [[ -f "$archive" ]] || { echo "Missing $archive" >&2; exit 1; }
-  volume="$(volume_name "$logical")"
-  [[ -n "$volume" ]] || { echo "Volume not found: $logical" >&2; exit 1; }
-  docker run --rm -v "$volume:/target" -v "$BACKUP_DIR:/backup:ro" alpine:3.20 \
-    sh -c "find /target -mindepth 1 -delete && tar -C /target -xzf /backup/$logical.tar.gz"
-done
-"${COMPOSE[@]}" up --no-deps --force-recreate migrate
-"${COMPOSE[@]}" up -d rest storage kong api workers seed-admin caddy
-echo "Restore complete. Run ops/vps/audit.sh and application acceptance tests."
+trap cleanup EXIT
+
+"${COMPOSE[@]}" exec -T db sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -U "$POSTGRES_USER" -d '"$TARGET_DB"' --schema-only --no-owner --exit-on-error' \
+  < "$BACKUP_DIR/postgres-schema.dump"
+"${COMPOSE[@]}" exec -T db sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -U "$POSTGRES_USER" -d '"$TARGET_DB"' --data-only --disable-triggers --no-owner --exit-on-error' \
+  < "$BACKUP_DIR/postgres-data.dump"
+"${COMPOSE[@]}" exec -T db sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d '"$TARGET_DB"' -v ON_ERROR_STOP=1 -Atc "select count(*) from personas; select count(*) from messages;"'
+
+marker_root="${RESTORE_MARKER_ROOT:-/var/backups/brain-ai/restore-tests}"
+mkdir -p "$marker_root"
+printf '%s backup=%s target=%s\n' "$(date -u +%FT%TZ)" "$BACKUP_DIR" "$TARGET_DB" \
+  > "$marker_root/LAST_SUCCESS"
+echo "Controlled restore verified; isolated database will be dropped."

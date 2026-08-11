@@ -1773,6 +1773,8 @@ export function MessagesLayout({
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [liveSync, setLiveSync] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -1800,6 +1802,8 @@ export function MessagesLayout({
   const loadLeadsRequestRef = useRef(0);
   const loadMessagesRequestRef = useRef(0);
   const loadKnowledgeRequestRef = useRef(0);
+  const messageAfterCursorRef = useRef<string | null>(null);
+  const messageBeforeCursorRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (isPortal) return;
@@ -1810,6 +1814,9 @@ export function MessagesLayout({
       selectedIdRef.current = null;
       setSelectedId((current) => (current !== null ? null : current));
       setMessages((current) => (current.length > 0 ? [] : current));
+      messageAfterCursorRef.current = null;
+      messageBeforeCursorRef.current = null;
+      setHasOlderMessages(false);
       setKnowledge((current) => (current !== null ? null : current));
       setSelectedResponseMessageId(null);
       setMessagesError(null);
@@ -1962,13 +1969,17 @@ export function MessagesLayout({
       const id = selectedIdRef.current;
       if (!id) return;
       try {
-        const msgRows = await (
+        const msgPage = await (
           isPortal
-            ? api.portalConversationMessages(portalSlug!, id)
-            : api.messagesByRef(id, 200, validationScope)
+            ? api.portalConversationMessages(portalSlug!, id, { after: messageAfterCursorRef.current })
+            : api.messagesByRef(id, 50, validationScope, { after: messageAfterCursorRef.current })
         );
         if (selectedIdRef.current !== id) return;
-        setMessages(sortMessages(msgRows as Message[]));
+        const page = msgPage as { items: Message[]; after_cursor: string | null };
+        messageAfterCursorRef.current = page.after_cursor || messageAfterCursorRef.current;
+        setMessages((current) => sortMessages(Array.from(new Map(
+          [...current, ...(page.items || [])].map((item) => [String(item.id), item]),
+        ).values())));
         // The selected thread needs a short poll, but the entire seven-day
         // conversation index does not. Refreshing both every five seconds
         // multiplied the expensive list endpoint (and its former lead N+1)
@@ -1988,10 +1999,15 @@ export function MessagesLayout({
         setLiveSync(false);
       }
     };
-    const interval = window.setInterval(refresh, 5000);
+    const visibleRefresh = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const interval = window.setInterval(visibleRefresh, 5000);
+    document.addEventListener("visibilitychange", visibleRefresh);
     return () => {
       setLiveSync(false);
       window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", visibleRefresh);
     };
   }, [isPortal, selectedId, personaFilterId, portalSlug, validationScope]);
 
@@ -2008,6 +2024,9 @@ export function MessagesLayout({
     setKnowledge((current) => (current !== null ? null : current));
     setSelectedResponseMessageId(null);
     previousLastMessageIdRef.current = null;
+    messageAfterCursorRef.current = null;
+    messageBeforeCursorRef.current = null;
+    setHasOlderMessages(false);
     stickToBottomRef.current = true;
     setDraft("");
     setSendError(null);
@@ -2086,10 +2105,15 @@ export function MessagesLayout({
 
     (isPortal
       ? api.portalConversationMessages(portalSlug!, selectedId)
-      : api.messagesByRef(selectedId, 200, validationScope))
-      .then((rows) => {
+      : api.messagesByRef(selectedId, 50, validationScope))
+      .then((response) => {
         if (cancelled || loadMessagesRequestRef.current !== requestId || selectedIdRef.current !== selectedId) return;
-        setMessages(sortMessages(rows as Message[]));
+        const page = response as { items: Message[]; before_cursor: string | null; after_cursor: string | null; has_more: boolean };
+        const rows = page.items || [];
+        messageAfterCursorRef.current = page.after_cursor;
+        messageBeforeCursorRef.current = page.before_cursor;
+        setHasOlderMessages(page.has_more);
+        setMessages(sortMessages(rows));
       })
       .catch((error) => {
         if (cancelled || loadMessagesRequestRef.current !== requestId || selectedIdRef.current !== selectedId) return;
@@ -2105,6 +2129,33 @@ export function MessagesLayout({
       cancelled = true;
     };
   }, [isPortal, portalSlug, selectedId, validationScope]);
+
+  const loadOlderMessages = useCallback(async () => {
+    const id = selectedIdRef.current;
+    const before = messageBeforeCursorRef.current;
+    if (!id || !before || loadingOlderMessages) return;
+    setLoadingOlderMessages(true);
+    const el = messageListRef.current;
+    const previousHeight = el?.scrollHeight || 0;
+    try {
+      const page = await (isPortal
+        ? api.portalConversationMessages(portalSlug!, id, { before })
+        : api.messagesByRef(id, 50, validationScope, { before }));
+      if (selectedIdRef.current !== id) return;
+      messageBeforeCursorRef.current = page.before_cursor;
+      setHasOlderMessages(page.has_more);
+      setMessages((current) => sortMessages(Array.from(new Map(
+        [...(page.items || []), ...current].map((item) => [String(item.id), item]),
+      ).values())));
+      requestAnimationFrame(() => {
+        if (el) el.scrollTop += el.scrollHeight - previousHeight;
+      });
+    } catch (error) {
+      setMessagesError(getErrorMessage(error, "Falha ao carregar mensagens anteriores."));
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }, [isPortal, loadingOlderMessages, portalSlug, validationScope]);
 
   useEffect(() => {
     if (!selectedId || !selectedLead) {
@@ -2198,11 +2249,16 @@ export function MessagesLayout({
       pendingSendRef.current = null;
       setDraft("");
       // Refresh messages + conversations imediato (não esperar próximo poll)
-      const [msgRows, convRows] = await Promise.all([
-        isPortal ? api.portalConversationMessages(portalSlug!, selectedId) : api.messagesByRef(selectedId, 200, validationScope),
+      const [msgPage, convRows] = await Promise.all([
+        isPortal ? api.portalConversationMessages(portalSlug!, selectedId) : api.messagesByRef(selectedId, 50, validationScope),
         isPortal ? api.portalConversations(portalSlug!) : api.conversations(168, personaFilterId || undefined, validationScope),
       ]);
-      setMessages(sortMessages(msgRows as Message[]));
+      const page = msgPage as { items: Message[]; before_cursor: string | null; after_cursor: string | null; has_more: boolean };
+      const msgRows = page.items || [];
+      messageAfterCursorRef.current = page.after_cursor;
+      messageBeforeCursorRef.current = page.before_cursor;
+      setHasOlderMessages(page.has_more);
+      setMessages(sortMessages(msgRows));
       setConversations(convRows as ConversationSummary[]);
     } catch (e: any) {
       setSendError(e?.message || "Falha ao enviar.");
@@ -2587,6 +2643,19 @@ export function MessagesLayout({
             <div className="flex flex-col items-center justify-center h-full gap-2">
               <MessageSquare size={20} className="text-obs-faint/30" />
               <p className="text-xs text-obs-faint">Nenhuma mensagem encontrada para este lead.</p>
+            </div>
+          )}
+
+          {selectedLead && !loadingMsgs && hasOlderMessages && (
+            <div className="flex justify-center pb-1">
+              <button
+                type="button"
+                onClick={loadOlderMessages}
+                disabled={loadingOlderMessages}
+                className="rounded-full border border-obs-violet/30 px-3 py-1 text-[11px] text-obs-violet transition hover:bg-obs-violet/10 disabled:opacity-50"
+              >
+                {loadingOlderMessages ? "Carregando..." : "Carregar mensagens anteriores"}
+              </button>
             </div>
           )}
 

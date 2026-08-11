@@ -28,6 +28,9 @@ x-backend-environment: &backend-environment
   AI_BRAIN_SECRETS_KEY: ${AI_BRAIN_SECRETS_KEY:-}
   AI_BRAIN_PUBLIC_API_URL: ${AI_BRAIN_PUBLIC_API_URL:-}
   API_INTERNAL_BASE_URL: ${API_INTERNAL_BASE_URL:-http://api:8080}
+  GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}
+  GUNICORN_MAX_REQUESTS: ${GUNICORN_MAX_REQUESTS:-1000}
+  GUNICORN_MAX_REQUESTS_JITTER: ${GUNICORN_MAX_REQUESTS_JITTER:-100}
   N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
   N8N_API_KEY: ${N8N_API_KEY:-}
   AI_BRAIN_COOKIE_SECURE: ${AI_BRAIN_COOKIE_SECURE:-true}
@@ -41,6 +44,7 @@ x-backend-environment: &backend-environment
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   WA_VALIDATOR_RUNNER_URL: ${WA_VALIDATOR_RUNNER_URL:-http://wa-validator:3010}
+  WA_VALIDATOR_RUN_ENABLED: ${WA_VALIDATOR_RUN_ENABLED:-false}
 
 services:
   db:
@@ -177,6 +181,7 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+    mem_limit: ${REST_MEMORY_LIMIT:-512m}
     logging: *default-logging
     networks: [backend]
 
@@ -209,6 +214,7 @@ services:
       retries: 30
       start_period: 20s
     restart: unless-stopped
+    mem_limit: ${STORAGE_MEMORY_LIMIT:-512m}
     logging: *default-logging
     networks: [backend]
 
@@ -253,6 +259,7 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    mem_limit: ${KONG_MEMORY_LIMIT:-512m}
     logging: *default-logging
     # `edge` lets the shared Caddy (prod stack) reverse-proxy into a QA
     # stack's kong even though each Compose project has its own private
@@ -266,8 +273,8 @@ services:
   api:
     image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
       args:
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     environment:
@@ -275,8 +282,6 @@ services:
     volumes:
       - local-storage:/data/local-storage
       - vault-data:/data/vault
-      # Persona knowledge remains in versioned Markdown and is read-only at runtime.
-      - ./docs:/docs:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -291,6 +296,7 @@ services:
       retries: 12
       start_period: 30s
     restart: unless-stopped
+    mem_limit: ${API_MEMORY_LIMIT:-1536m}
     logging: *default-logging
     networks:
       backend: {}
@@ -300,8 +306,8 @@ services:
   workers:
     image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
       args:
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     command: ["python", "-m", "workers.runner", "--all"]
@@ -310,7 +316,6 @@ services:
     volumes:
       - local-storage:/data/local-storage
       - vault-data:/data/vault
-      - ./docs:/docs:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -319,14 +324,15 @@ services:
     healthcheck:
       disable: true
     restart: unless-stopped
+    mem_limit: ${WORKERS_MEMORY_LIMIT:-1536m}
     logging: *default-logging
     networks: [backend]
 
   seed-admin:
     image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
       args:
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     command: ["python", "scripts/ensure_seed_admin.py"]

@@ -33,7 +33,9 @@ from services import (
 # Flows that collect the customer's name as one of their scripted steps --
 # the only ones "known_name" initial state can meaningfully apply to (a
 # flow with no name-collection step has nothing to pre-seed or omit).
-_NAME_COLLECTING_FLOWS = {"sdr_qualificacao_carro", "sdr_troca_servico"}
+_NAME_COLLECTING_FLOWS = {
+    "sdr_qualificacao_carro", "sdr_troca_servico", "sdr_multiplos_servicos",
+}
 
 _MODEL_DEFAULT = "none"
 AVAILABLE_MODELS = {
@@ -178,12 +180,42 @@ def bots(allowed_persona_ids: set[str] | None = None) -> list:
                     ),
                     "label": f"{agent_name} — {p.get('name', slug)}",
                     "persona_slug": slug,
+                    "persona_id": p.get("id"),
                     "description": p.get("description", ""),
                 })
                 registered.add(slug)
     except Exception as exc:
         raise RuntimeError("Não foi possível carregar as personas do WA Validator") from exc
     return result
+
+
+def bootstrap(persona_slug: str) -> dict:
+    """One consistent, non-secret validator snapshot for the selected persona."""
+    persona = supabase_client.get_persona(persona_slug) or {}
+    if not persona:
+        raise ValueError("Persona não encontrada")
+    persona_id = str(persona.get("id") or "")
+    routing = supabase_client.get_persona_routing(persona_slug) or {}
+    bindings = supabase_client.get_workflow_bindings(persona_id)
+    active_binding = next((row for row in bindings if row.get("active")), None) or {}
+    metadata = active_binding.get("metadata") or {}
+    return {
+        "persona": {"id": persona_id, "slug": persona_slug, "name": persona.get("name")},
+        "routing": {
+            "conversation_mode": _resolve_conversation_mode(persona_id, routing),
+            "process_mode": routing.get("process_mode"),
+        },
+        "binding": {
+            "id": active_binding.get("id"),
+            "provider": active_binding.get("provider"),
+            "connection_status": active_binding.get("connection_status"),
+            "decision_owner": metadata.get("decision_owner"),
+            "pipeline_contract": metadata.get("pipeline_contract"),
+        },
+        "bot": next((row for row in bots(None) if row.get("persona_slug") == persona_slug), None),
+        "flows": flows(persona_slug),
+        "sessions": [row for row in list_sessions() if row.get("persona_slug") == persona_slug][:25],
+    }
 
 
 _FLOWS = {
@@ -208,6 +240,10 @@ _FLOWS = {
     "sdr_troca_servico": (
         "Troca de ramo orientada pelo grafo: preserva facts compatíveis e "
         "recalcula somente os campos realmente faltantes."
+    ),
+    "sdr_multiplos_servicos": (
+        "Múltiplos serviços na mesma conversa: adiciona um segundo ramo sem "
+        "perder o primeiro e conclui somente quando o conjunto estiver completo."
     ),
 }
 
@@ -240,6 +276,7 @@ _FLOW_BUSINESS_MODELS: dict[str, set[str]] = {
     "estagio_monotonic": {"sales"},
     "sdr_qualificacao_carro": {"appointment"},
     "sdr_troca_servico": {"appointment"},
+    "sdr_multiplos_servicos": {"appointment"},
 }
 
 
@@ -392,7 +429,7 @@ def _semantic_appointment_script(
     driver_required_fields = [
         str(field.get("key") or "") for field in contract.get("fields") or []
     ]
-    if flow_id == "sdr_troca_servico" and len(branches) > 1:
+    if flow_id in {"sdr_troca_servico", "sdr_multiplos_servicos"} and len(branches) > 1:
         alternatives = [row for row in branches if row[0] != anchor]
         second_anchor, second_node, second_contract = random.choice(alternatives)
         second_identity = _branch_identity_field(second_contract, second_anchor)
@@ -422,15 +459,22 @@ def _semantic_appointment_script(
                 if str(field.get("key") or "") not in driver_required_fields
             )
             second_title = str(second_node.get("title") or second_node.get("slug") or second_anchor)
+            additive = flow_id == "sdr_multiplos_servicos"
             switch = {
                 "after_answered_fields": 2,
-                "text": f"Na verdade, prefiro {second_title}.",
+                "text": (
+                    f"Também quero {second_title}."
+                    if additive else f"Na verdade, prefiro {second_title}."
+                ),
                 "intended_facts": {
                     str(second_identity.get("key") or identity_key): str(
                         second_node.get("slug") or second_node.get("title") or second_anchor
                     )
                 },
                 "expected_branch_node_id": second_anchor,
+                "expected_active_branch_node_ids": (
+                    [anchor, second_anchor] if additive else [second_anchor]
+                ),
             }
     doubt = _graph_doubt(document, contract)
     if not doubt:
@@ -444,7 +488,10 @@ def _semantic_appointment_script(
         "required_fields": driver_required_fields,
         "questions": driver_questions,
         "branch_anchor_node_id": anchor,
-        "max_turns": len(contract.get("fields") or []) + 4,
+        "max_turns": sum(
+            len(item_contract.get("fields") or [])
+            for _item_anchor, _item_node, item_contract in branches[:2]
+        ) + 6,
         "expected_handoff": True,
         "switch": switch,
         "doubt": doubt,
@@ -620,7 +667,7 @@ def generate_script(
         None,
     )
     semantic_appointment_flow = flow_id in {
-        "sdr_qualificacao_carro", "sdr_troca_servico",
+        "sdr_qualificacao_carro", "sdr_troca_servico", "sdr_multiplos_servicos",
     }
     if business_model == "appointment" and semantic_appointment_flow and not v3_publication:
         raise ValueError(
@@ -701,11 +748,11 @@ def generate_script(
 
 
 def run_session(session_id: str) -> dict:
-    session = _session_get(session_id)
-    if not session:
-        raise ValueError(f"Sessão não encontrada: {session_id}")
-    if session["status"] == "running":
-        raise ValueError("Sessão já está em execução")
+    claimed = supabase_client.claim_wa_validator_session(session_id)
+    if not claimed.get("claimed"):
+        state = str(claimed.get("state") or "unknown")
+        raise ValueError(f"Sessão não pode ser reexecutada no estado {state}")
+    session = claimed.get("session") or _session_get(session_id) or {}
     if _WA_RUNNER_URL:
         token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
         response = httpx.post(
@@ -1159,12 +1206,16 @@ def _seed_known_name(*, persona: dict, lead_ref: int, client_name: str) -> None:
     )
     if not owner_node_id:
         return
+    ledger = supabase_client.get_conversation_ledger(persona_id, lead_ref) or {}
+    existing = (ledger.get("facts") or {}).get("nome_cliente") or {}
+    if existing.get("status") == "known" and str(existing.get("value") or "").strip():
+        return
     supabase_client.commit_graph_turn_v3(
         p_canonical_inbound_id=f"validator-seed:{lead_ref}",
         p_persona_id=persona_id, p_lead_ref=lead_ref,
         p_publication_id=publication["id"], p_graph_checksum=publication["checksum"],
         p_active_branch_node_id=None, p_asked_question_node_ids=[],
-        p_expected_revision=0,
+        p_expected_revision=int(ledger.get("revision") or 0),
         p_facts=[{
             "field_key": "nome_cliente", "owner_node_id": owner_node_id,
             "status": "known", "value": client_name,
@@ -1310,6 +1361,11 @@ def _semantic_turn_audit(
             or str(ledger_after.get("active_branch_node_id") or "")
             == str(customer_step.get("expected_branch_node_id"))
         ),
+        "expected_active_branches_persisted": (
+            not customer_step.get("expected_active_branch_node_ids")
+            or set(ledger_after.get("active_branch_node_ids") or [])
+            == set(customer_step.get("expected_active_branch_node_ids") or [])
+        ),
         "question_advanced": (
             not previous_question_node_id
             or previous_question_node_id != question_id
@@ -1342,11 +1398,11 @@ def _semantic_turn_audit(
 
 async def run_session_direct(session_id: str) -> dict:
     """Execute through the selected mode using the conversation_v1 contract."""
-    session = _session_get(session_id)
-    if not session:
-        raise ValueError(f"Sessão não encontrada: {session_id}")
-    if session["status"] == "running":
-        raise ValueError("Sessão já está em execução")
+    claimed = supabase_client.claim_wa_validator_session(session_id)
+    if not claimed.get("claimed"):
+        state = str(claimed.get("state") or "unknown")
+        raise ValueError(f"Sessão não pode ser reexecutada no estado {state}")
+    session = claimed.get("session") or _session_get(session_id) or {}
 
     script = session.get("script", {})
     persona_slug = session.get("persona_slug", "")

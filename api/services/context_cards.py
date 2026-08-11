@@ -6,11 +6,13 @@ import json
 import re
 import unicodedata
 from collections import deque
+from time import monotonic
 from typing import Any, Iterable
 
 from schemas.conversation import ContextCard
 from schemas.graph_json_v2 import DEFAULT_RELATION_WEIGHTS, GraphJson, Node
 from services import (
+    graph_compiler_v3,
     graph_conversation_contract,
     graph_json_v2_store,
     graph_markdown,
@@ -41,6 +43,8 @@ STOPWORDS = {
     "e", "em", "na", "nas", "no", "nos", "o", "os", "ou", "para",
     "por", "que", "um", "uma", "qual", "quais",
 }
+_DIVERGENCE_EMITTED_AT: dict[str, float] = {}
+_DIVERGENCE_TTL_SECONDS = 15 * 60
 NON_PROMPT_FIELDS = {
     "active", "aliases", "approved_at", "approved_by", "branch_path",
     "canonical_key", "content_hash", "created_at", "empty", "entities",
@@ -70,7 +74,47 @@ def _tokens(value: Any) -> set[str]:
 
 
 def _sha256(value: str) -> str:
-    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return graph_compiler_v3.canonical_content_checksum(value)
+
+
+def _content_checksum_matches(expected: str, rendered: str) -> tuple[bool, str]:
+    actual = _sha256(rendered)
+    normalized_expected = str(expected or "")
+    if normalized_expected and not normalized_expected.startswith("sha256:"):
+        normalized_expected = "sha256:" + normalized_expected
+    if normalized_expected == actual:
+        return True, actual
+    # Historical cards created before canonical newline/NFC hashing remain
+    # valid when their exact snapshot hash matches.
+    legacy_raw = "sha256:" + hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+    legacy_json_string = graph_compiler_v3.canonical_checksum(rendered)
+    return normalized_expected in {legacy_raw, legacy_json_string}, actual
+
+
+def _emit_checksum_divergence_once(
+    *, persona_id: str, lead_ref: int, payload: dict[str, Any],
+) -> None:
+    now = monotonic()
+    key = json.dumps(
+        {"persona_id": persona_id, "lead_ref": lead_ref, **payload},
+        sort_keys=True, ensure_ascii=False, default=str,
+    )
+    last = _DIVERGENCE_EMITTED_AT.get(key)
+    if last is not None and now - last < _DIVERGENCE_TTL_SECONDS:
+        return
+    if len(_DIVERGENCE_EMITTED_AT) >= 2048:
+        cutoff = now - _DIVERGENCE_TTL_SECONDS
+        retained = {
+            item: emitted_at for item, emitted_at in _DIVERGENCE_EMITTED_AT.items()
+            if emitted_at >= cutoff
+        }
+        _DIVERGENCE_EMITTED_AT.clear()
+        _DIVERGENCE_EMITTED_AT.update(retained)
+    _DIVERGENCE_EMITTED_AT[key] = now
+    emit_metric(
+        "knowledge_context.checksum_divergence",
+        persona_id=persona_id, lead_ref=lead_ref, payload=payload,
+    )
 
 
 def _rendered(node: Node) -> str:
@@ -607,20 +651,22 @@ def response_context(
             try:
                 card = ContextCard.model_validate(raw)
                 exact_cards.append(card)
-                if card.content_checksum != _sha256(card.rendered_content):
-                    emit_metric(
-                        "knowledge_context.checksum_divergence",
+                checksum_ok, actual_checksum = _content_checksum_matches(
+                    card.content_checksum, card.rendered_content,
+                )
+                if not checksum_ok:
+                    _emit_checksum_divergence_once(
                         persona_id=persona_id, lead_ref=lead_ref,
                         payload={
                             "response_message_id": _message_identity(selected),
                             "node_id": card.id,
                             "expected": card.content_checksum,
-                            "actual": _sha256(card.rendered_content),
+                            "actual": actual_checksum,
+                            "reason": "snapshot_content_mismatch",
                         },
                     )
             except Exception:
-                emit_metric(
-                    "knowledge_context.checksum_divergence",
+                _emit_checksum_divergence_once(
                     persona_id=persona_id, lead_ref=lead_ref,
                     payload={"response_message_id": _message_identity(selected), "reason": "invalid_card_snapshot"},
                 )

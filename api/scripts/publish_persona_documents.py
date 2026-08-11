@@ -14,7 +14,7 @@ for path in (API_DIR, ROOT_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from services import graph_document_publisher
+from services import graph_document_publisher, graph_json_v2_store
 from services.sdr_documents import compile_persona_documents
 
 
@@ -28,6 +28,8 @@ def main() -> None:
     )
     parser.add_argument("--tenant", default="qa")
     parser.add_argument("--published-by", default="documents-cli")
+    parser.add_argument("--expected-checksum")
+    parser.add_argument("--expected-version", type=int)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -42,7 +44,17 @@ def main() -> None:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    checksum = hashlib.sha256(encoded).hexdigest()
+    checksum = "sha256:" + hashlib.sha256(encoded).hexdigest()
+    if args.expected_checksum and checksum != args.expected_checksum:
+        raise SystemExit(
+            f"compiled checksum {checksum} does not match approved {args.expected_checksum}"
+        )
+    current = graph_json_v2_store.load_current(args.persona_slug)
+    next_version = int(current[0]) + 1 if current else 1
+    if args.expected_version is not None and next_version != args.expected_version:
+        raise SystemExit(
+            f"next version {next_version} does not match approved {args.expected_version}"
+        )
     summary = {
         "persona_slug": args.persona_slug,
         "checksum": checksum,
@@ -66,6 +78,8 @@ def main() -> None:
         published_by=args.published_by,
         idempotency_key=f"markdown:{args.persona_slug}:{checksum}",
     )
+    if args.expected_version is not None and int(result.get("version") or 0) != args.expected_version:
+        raise RuntimeError("publisher returned an unexpected version")
     print(json.dumps({**summary, **result}, ensure_ascii=False, default=str))
 
 

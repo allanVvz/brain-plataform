@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import unicodedata
+import difflib
 from datetime import datetime, timezone
 from typing import Any
 
@@ -436,7 +437,9 @@ def _card(publication: dict[str, Any], node: dict[str, Any], chunks: list[dict[s
         id=node["id"], projection_node_id=node.get("projection_node_id"),
         node_type=node["node_type"], slug=node["slug"], title=node["title"],
         rendered_content=text or node.get("summary") or node["title"],
-        editable_content=text, content_checksum=graph_compiler_v3.canonical_checksum(text),
+        editable_content=text, content_checksum=graph_compiler_v3.canonical_content_checksum(
+            text or node.get("summary") or node["title"]
+        ),
         revision=1, graph_version=int(publication["version"]),
         graph_checksum=publication["checksum"], context_role="branch_retrieval",
         position=position, selection_reason={"runtime": RUNTIME_VERSION},
@@ -481,6 +484,60 @@ def _normalized_phrase(value: Any) -> str:
     folded = unicodedata.normalize("NFKD", str(value or "").casefold())
     ascii_text = "".join(char for char in folded if not unicodedata.combining(char))
     return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
+
+
+_ADDITIVE_SERVICE_MARKER = re.compile(
+    r"\b(?:tamb[eé]m|al[eé]m(?:\s+de)?|junto(?:s|\s+com)?|adiciona(?:r|ndo)?|"
+    r"incluir|inclui(?:r|ndo)?|mais\s+um|also|too)\b",
+    re.IGNORECASE,
+)
+
+
+def _latest_user_message(context: ConversationContext) -> str:
+    return next(
+        (
+            str(row.get("content") or row.get("texto") or row.get("message") or "")
+            for row in reversed(context.messages)
+            if str(row.get("role") or "") == "user"
+            or str(row.get("sender_type") or "") == "lead"
+        ),
+        "",
+    )
+
+
+def _message_requests_additional_service(message: str) -> bool:
+    return bool(_ADDITIVE_SERVICE_MARKER.search(message or ""))
+
+
+def _facts_by_key(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        normalized = {
+            **row,
+            "value": row.get("value", row.get("value_json")),
+            "fact_id": row.get("fact_id", row.get("id")),
+        }
+        grouped.setdefault(str(row.get("field_key") or ""), []).append(normalized)
+    return grouped
+
+
+def _facts_for_contract(
+    contract: dict[str, Any], grouped: dict[str, list[dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    scoped: dict[str, dict[str, Any]] = {}
+    for field in contract.get("fields") or []:
+        key = str(field.get("key") or "")
+        owner = str(field.get("owner_node_id") or "")
+        match = next(
+            (
+                fact for fact in grouped.get(key, [])
+                if str(fact.get("owner_node_id") or "") == owner
+            ),
+            None,
+        )
+        if match is not None:
+            scoped[key] = match
+    return scoped
 
 
 def _literal_phrase_span(message: str, phrase: Any) -> str:
@@ -547,7 +604,15 @@ def _apply_authoritative_branch_resolution(
     resolved_anchor = str(resolved.get("branch_anchor_node_id") or "") or None
     if resolved_anchor:
         anchor = resolved_anchor
-        action = "keep" if active == anchor else "switch" if active else "select"
+        active_set = set(context.active_branch_node_ids)
+        if active:
+            active_set.add(active)
+        if anchor in active_set:
+            action = "keep"
+        elif active and _message_requests_additional_service(_latest_user_message(context)):
+            action = "add"
+        else:
+            action = "switch" if active else "select"
         evidence_span = str(resolved.get("branch_evidence_span") or resolved.get("snippet") or "")
     elif active:
         proposed_anchor = str(proposal.branch_anchor_node_id or "")
@@ -615,6 +680,22 @@ def _project_recent_messages(messages: list[dict[str, Any]], limit: int = 6) -> 
             "created_at": row.get("created_at"),
         })
     return projected
+
+
+def _repeats_recent_outbound(reply: str, messages: list[dict[str, Any]]) -> bool:
+    folded = _normalized_phrase(reply)
+    if not folded:
+        return False
+    recent = [
+        _normalized_phrase(row.get("content") or row.get("texto") or "")
+        for row in messages
+        if str(row.get("role") or "") == "assistant"
+        or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
+    ][-3:]
+    return any(
+        previous and difflib.SequenceMatcher(None, folded, previous, autojunk=False).ratio() >= 0.92
+        for previous in recent
+    )
 
 
 def _compact_prompt_chunk(row: dict[str, Any]) -> dict[str, Any]:
@@ -752,6 +833,65 @@ def _publication_fact_is_compatible(
     )
 
 
+_GREETING_FORMS = {
+    "oi", "ola", "oie", "opa", "bom dia", "boa tarde", "boa noite",
+    "e ai", "ei", "hello", "hey",
+}
+
+
+def _is_greeting(message: str) -> bool:
+    """Recognize only the linguistic intent; response copy remains graph-owned."""
+    normalized = _normalized_phrase(message)
+    return normalized in _GREETING_FORMS
+
+
+def _persona_node(document: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        (node for node in document.get("nodes") or [] if node.get("node_type") == "persona"),
+        {},
+    )
+
+
+def _greeting_policy(
+    document: dict[str, Any], *, contract: dict[str, Any], facts: dict[str, Any],
+) -> dict[str, Any] | None:
+    persona = _persona_node(document)
+    data = persona.get("data") or {}
+    policy = data.get("conversation_policy") or {}
+    response = str(
+        (((policy.get("intents") or {}).get("greeting") or {}).get("response")) or ""
+    ).strip()
+    if not response:
+        return None
+    pending = graph_proof_checker_v3.pending_fields(contract, facts) if contract else []
+    question_id = pending[0].get("question_node_id") if pending else None
+    question = str(
+        (((contract.get("questions") or {}).get(str(question_id or "")) or {}).get("text"))
+        or ""
+    ).strip()
+    field_key = pending[0].get("key") if pending else None
+    if not contract:
+        appointment = data.get("appointment_policy") or {}
+        required = [str(value) for value in appointment.get("required_fields") or [] if value]
+        questions = appointment.get("field_questions") or {}
+        field_key = next(
+            (
+                key for key in required
+                if not graph_proof_checker_v3.field_resolved({}, facts.get(key))
+            ),
+            None,
+        )
+        question = str(questions.get(field_key) or "").strip() if field_key else ""
+    return {
+        "response": response,
+        "question": question,
+        "question_node_id": question_id,
+        "asked_field_key": field_key,
+        "missing_fields": [field.get("key") for field in pending]
+        if pending else ([field_key] if field_key else []),
+    }
+
+
 def build_context(
     *, persona_slug: str, lead_ref: int, message: str, message_id: str | None,
 ) -> ConversationContext:
@@ -762,17 +902,29 @@ def build_context(
         raise LookupError("persona or lead not found")
     if str(lead.get("persona_id")) != str(persona.get("id")):
         raise PermissionError("lead does not belong to requested persona")
-    publication = supabase_client.get_active_graph_publication(str(persona["id"]))
+    context_batch_started = time.perf_counter()
+    try:
+        batch = supabase_client.get_graph_turn_context_batch_v3(
+            persona_id=str(persona["id"]), lead_ref=lead_ref, message_limit=8,
+        )
+    except Exception:
+        # Rolling-deploy compatibility while migration 114 is being applied.
+        batch = {}
+    context_batch_ms = round((time.perf_counter() - context_batch_started) * 1000, 3)
+    publication = batch.get("publication") or supabase_client.get_active_graph_publication(str(persona["id"]))
     if not publication:
         raise RuntimeError("active GraphRAG v3 publication not found")
     document = publication.get("document_json") or {}
-    messages = supabase_client.get_messages(str(lead_ref), limit=20) or []
+    messages = batch.get("messages") or supabase_client.get_messages(str(lead_ref), limit=8) or []
     if message and not any(str(row.get("message_id") or row.get("external_message_id") or "") == str(message_id or "") for row in messages):
         messages.append({"message_id": message_id, "sender_type": "lead", "role": "user", "texto": message})
-    ledger = supabase_client.get_conversation_ledger(str(persona["id"]), lead_ref) or {
+    ledger = batch.get("ledger") or None
+    if ledger:
+        ledger["facts_by_key"] = _facts_by_key(batch.get("facts") or [])
+    ledger = ledger or supabase_client.get_conversation_ledger(str(persona["id"]), lead_ref) or {
         "active_branch_node_id": None, "publication_id": publication["id"],
         "graph_checksum": publication["checksum"], "revision": 0,
-        "asked_question_node_ids": [], "facts": {},
+        "asked_question_node_ids": [], "facts": {}, "facts_by_key": {},
     }
     publication_changed = str(ledger.get("publication_id")) != str(publication["id"])
     active_branch = str(ledger.get("active_branch_node_id") or "") or None
@@ -782,14 +934,29 @@ def build_context(
     # multi-service state yet, so there is nothing to fetch). Filtered to
     # published anchors for the same reason active_branch is above -- a
     # stale row from a since-rolled-back publication must never leak in.
-    active_branches = (
+    batch_branches = [
+        str(row.get("branch_anchor_node_id") or "")
+        for row in batch.get("branches") or [] if row.get("state") == "active"
+    ]
+    persisted_active_branches = (
         [
-            anchor for anchor in supabase_client.get_active_ledger_branches(str(ledger.get("id") or ""))
+            anchor for anchor in (
+                batch_branches or supabase_client.get_active_ledger_branches(str(ledger.get("id") or ""))
+            )
             if anchor in set(document.get("branch_anchors") or [])
         ]
         if ledger.get("id") else []
     )
+    active_branches = list(dict.fromkeys([
+        *([active_branch] if active_branch else []),
+        *persisted_active_branches,
+    ]))
     active_contract = (document.get("branch_contracts") or {}).get(active_branch) or {}
+    facts_by_key = ledger.get("facts_by_key") or _facts_by_key(
+        list((ledger.get("facts") or {}).values())
+    )
+    ledger["facts_by_key"] = facts_by_key
+    ledger["facts"] = _facts_for_contract(active_contract, facts_by_key)
     invalidated_fact_keys: list[str] = []
     if publication_changed:
         previous_facts = ledger.get("facts") or {}
@@ -805,23 +972,74 @@ def build_context(
         ledger["graph_checksum"] = publication["checksum"]
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(active_contract, ledger.get("facts") or {})]
     active_path = ((document.get("coordinates") or {}).get(active_branch) or {}).get("path_node_ids") or []
-    embedding = graph_compiler_v3.query_embeddings([message])[0]
     # A short answer while a field is expected must not trigger fuzzy global
     # selection, but an exact published title/alias is authoritative even when
     # it is short (for example, "prefiro <servico>"). Resolve the literal
     # graph match first; only suppress semantic search when no exact match
     # exists.
     deterministic_candidates = _deterministic_branch_candidates(document, message)
+    greeting = _greeting_policy(
+        document, contract=active_contract, facts=ledger.get("facts") or {},
+    ) if _is_greeting(message) and not deterministic_candidates else None
+    if greeting:
+        persona_node = _persona_node(document)
+        reply = "\n\n".join(
+            part for part in (greeting["response"], greeting["question"]) if part
+        )
+        trace = {
+            "runtime_version": RUNTIME_VERSION,
+            "publication_id": publication["id"],
+            "publication_version": publication["version"],
+            "graph_checksum": publication["checksum"],
+            "ledger_revision": int(ledger.get("revision") or 0),
+            "publication_changed": publication_changed,
+            "invalidated_fact_keys": invalidated_fact_keys,
+            "deterministic_intent": "greeting",
+            "deterministic_reply": reply,
+            "asked_field_key": greeting.get("asked_field_key"),
+            "next_question_node_id": greeting.get("question_node_id"),
+            "missing_fields": greeting.get("missing_fields") or [],
+            "context_batch_ms": context_batch_ms,
+            "embedding_ms": 0, "branch_rank_ms": 0, "branch_package_ms": 0,
+            "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+        }
+        return ConversationContext(
+            persona_slug=persona_slug,
+            agent_slug=str((persona.get("config") or {}).get("agent_slug") or "agent"),
+            graph_version=int(publication["version"]), graph_checksum=publication["checksum"],
+            messages=_project_recent_messages(messages),
+            cart={**((lead.get("metadata") or {}).get("conversation_state") or {}),
+                  "facts": ledger.get("facts") or {},
+                  "facts_by_key": ledger.get("facts_by_key") or {},
+                  "active_branch_node_id": active_branch,
+                  "asked_question_node_ids": ledger.get("asked_question_node_ids") or [],
+                  "_ledger_revision": ledger.get("revision") or 0},
+            rag_nodes=[persona_node] if persona_node else [], rag_paths=[], rag_chunks=[],
+            context_cards=[], system_prompt="", available_services=[],
+            active_branch_node_id=active_branch, active_branch_node_ids=active_branches,
+            active_path_checksum=((document.get("coordinates") or {}).get(active_branch) or {}).get("path_checksum"),
+            branch_node_ids=active_contract.get("closure_node_ids") or [],
+            graph_contract=active_contract, publication_id=publication["id"],
+            runtime_version=RUNTIME_VERSION, retrieval_trace=trace,
+            known_facts=_known_facts_payload(ledger.get("facts") or {}, message_id),
+            time_since_last_client_message=_time_since_last_client_message(messages, message_id),
+            pending_reconfirmation=bool((lead.get("metadata") or {}).get("pending_reconfirmation")),
+        )
+    embedding_started = time.perf_counter()
+    embedding = None if deterministic_candidates else graph_compiler_v3.query_embeddings([message])[0]
+    embedding_ms = round((time.perf_counter() - embedding_started) * 1000, 3)
     short_expected_answer = bool(
         active_branch
         and missing
         and len(message.split()) <= 8
         and not deterministic_candidates
     )
+    branch_rank_started = time.perf_counter()
     candidates = deterministic_candidates or ([] if short_expected_answer else _candidate_branches(
         persona_id=str(persona["id"]), publication=publication, message=message,
         embedding=embedding, active_path=active_path, missing=missing,
     ))
+    branch_rank_ms = round((time.perf_counter() - branch_rank_started) * 1000, 3)
     retrieval_branch = _retrieval_branch_for_turn(
         active_branch=active_branch,
         deterministic_candidates=deterministic_candidates,
@@ -832,6 +1050,7 @@ def build_context(
         raise RuntimeError("GraphRAG publication has no resolvable branch")
     contract = (document.get("branch_contracts") or {}).get(retrieval_branch) or {}
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(contract, ledger.get("facts") or {})]
+    branch_package_started = time.perf_counter()
     rows = supabase_client.search_graph_rag_v3(
         persona_id=str(persona["id"]), publication_id=publication["id"],
         branch_node_id=retrieval_branch, query=message, query_embedding=embedding,
@@ -841,10 +1060,14 @@ def build_context(
     required_nodes = _required_retrieval_node_ids(
         document, retrieval_branch, contract, missing,
     )
-    structural = supabase_client.get_graph_rag_repair_chunks(
+    branch_package = supabase_client.get_graph_branch_package_v3(
         publication_id=publication["id"], branch_node_id=retrieval_branch,
-        requirements=[{"kind": "node", "id": node_id} for node_id in required_nodes if node_id],
+        chunk_ids=[str(row.get("chunk_id") or row.get("id")) for row in rows if row.get("chunk_id") or row.get("id")],
+        node_ids=[str(node_id) for node_id in required_nodes if node_id],
+        limit=RAG_CHUNK_LIMIT,
     )
+    structural = branch_package.get("chunks") or []
+    branch_package_ms = round((time.perf_counter() - branch_package_started) * 1000, 3)
     merged = {str(row.get("chunk_id") or row.get("id")): row for row in [*rows, *structural]}
     required_structural = _required_structural_chunks(structural)
     if len(required_structural) > RAG_CHUNK_LIMIT:
@@ -895,6 +1118,10 @@ def build_context(
         "retrieval_branch_node_id": retrieval_branch,
         "branch_candidates": _evidenced_branch_candidates(candidates),
         "possible_switches": possible_switches,
+        "context_batch_ms": context_batch_ms,
+        "embedding_ms": embedding_ms,
+        "branch_rank_ms": branch_rank_ms,
+        "branch_package_ms": branch_package_ms,
         "required_structural_chunk_ids": [
             str(row.get("chunk_id") or row.get("id")) for row in required_structural
         ],
@@ -975,6 +1202,7 @@ def build_context(
         graph_version=int(publication["version"]), graph_checksum=publication["checksum"],
         messages=_project_recent_messages(messages), cart={**((lead.get("metadata") or {}).get("conversation_state") or {}),
                                       "facts": ledger.get("facts") or {},
+                                      "facts_by_key": ledger.get("facts_by_key") or {},
                                       "active_branch_node_id": active_branch,
                                       "asked_question_node_ids": ledger.get("asked_question_node_ids") or [],
                                       "_ledger_revision": ledger.get("revision") or 0},
@@ -1010,6 +1238,42 @@ def _decide(
     context: ConversationContext, *, model_observation: dict[str, Any] | None
 ) -> tuple[ConversationDecision, AgentResponse]:
     observation = model_observation or {}
+    if context.retrieval_trace.get("deterministic_intent") == "greeting":
+        question_id = context.retrieval_trace.get("next_question_node_id")
+        asked = list(context.cart.get("asked_question_node_ids") or [])
+        if question_id and question_id not in asked:
+            asked.append(question_id)
+        state = {
+            **context.cart,
+            "asked_question_node_ids": asked,
+            "active_branch_node_id": context.active_branch_node_id,
+            "active_branch_node_ids": list(context.active_branch_node_ids),
+        }
+        proof = {
+            "valid": True,
+            "errors": [],
+            "mode": "deterministic_greeting",
+            "accepted_facts": [],
+            "missing_fields": context.retrieval_trace.get("missing_fields") or [],
+            "asked_field_key": context.retrieval_trace.get("asked_field_key"),
+            "model_calls": 0,
+        }
+        return (
+            ConversationDecision(
+                classifier="graph_intent_v3", intent="greeting",
+                route=ConversationRoute.SDR, confidence=1,
+                lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+                evidence_node_ids=[question_id] if question_id else [],
+            ),
+            AgentResponse(
+                reply_text=str(context.retrieval_trace.get("deterministic_reply") or "") or None,
+                role=ConversationRoute.SDR,
+                evidence_node_ids=[question_id] if question_id else [],
+                cart_state=state, handoff_required=False, proof=proof,
+                token_usage={"model_calls": 0, "repair_calls": 0, "prompt_tokens": 0,
+                             "completion_tokens": 0, "total_tokens": 0},
+            ),
+        )
     if observation.get("contract_probe") is True:
         return (
             ConversationDecision(classifier="graph_contract_probe_v3", intent="await_model_proposal",
@@ -1034,11 +1298,16 @@ def _decide(
     document = publication.get("document_json") or {}
     proposal = _apply_authoritative_branch_resolution(proposal, context, document)
     contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
+    grouped_facts = context.cart.get("facts_by_key") or {}
+    contract_facts = (
+        _facts_for_contract(contract, grouped_facts)
+        if grouped_facts else context.cart.get("facts") or {}
+    )
     proposal = _normalize_servico_owner(proposal, contract)
-    proposal = _normalize_premature_servico_requestion(proposal, contract, context.cart.get("facts") or {})
-    proposal = _normalize_stale_next_question_after_branch_change(proposal, contract, context.cart.get("facts") or {})
+    proposal = _normalize_premature_servico_requestion(proposal, contract, contract_facts)
+    proposal = _normalize_stale_next_question_after_branch_change(proposal, contract, contract_facts)
     proposal = _normalize_next_question_to_first_missing(
-        proposal, contract, context.cart.get("facts") or {},
+        proposal, contract, contract_facts,
     )
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(
@@ -1064,7 +1333,7 @@ def _decide(
         "active_branch_node_id": context.active_branch_node_id,
         "publication_id": context.publication_id, "graph_checksum": context.graph_checksum,
         "revision": context.retrieval_trace.get("ledger_revision", 0),
-        "facts": context.cart.get("facts") or {},
+        "facts": contract_facts,
         "asked_question_node_ids": context.cart.get("asked_question_node_ids") or [],
     }
     proof = graph_proof_checker_v3.check(
@@ -1160,63 +1429,101 @@ def _decide(
                 "mode": "discovery",
                 "branch_committed": False,
             }
-        reply = graph_proof_checker_v3.compose_published_question(
-            reply=proposal.reply, next_question_node_id=proposal.next_question_node_id, contract=contract
-        )
-        facts = dict(proof["ledger"]["facts"])
         accepted_facts = list(proof.get("accepted_facts") or [])
-        servico_field = next(
-            (field for field in contract.get("fields") or [] if field.get("key") == "servico"), None
-        )
-        branch_node = (document.get("node_by_id") or {}).get(proposal.branch_anchor_node_id) or {}
-        if not discovery_only and servico_field and branch_node and (
-            facts.get("servico", {}).get("owner_node_id") != proposal.branch_anchor_node_id
-        ):
-            # The branch anchor is already the structural source of truth
-            # for "which service" (proposal.branch_anchor_node_id).
-            # Deriving the servico fact from it here — instead of trusting
-            # a separately model-extracted fact — means the two can never
-            # disagree, and it's re-derived every turn the branch stays
-            # active, so it can never go stale the way a one-time
-            # extracted fact could. Only runs when the branch's own
-            # contract declares a "servico" field, so personas that don't
-            # use this convention are unaffected.
-            servico_fact = {
-                "field_key": "servico",
-                "status": "known",
-                "value": str(branch_node.get("slug") or branch_node.get("title") or proposal.branch_anchor_node_id),
-                "owner_node_id": proposal.branch_anchor_node_id,
-                "confidence": 1.0,
-                "evidence_span": None,
-                "source_message_id": _source_message_id(context.messages),
-            }
-            facts["servico"] = servico_fact
-            accepted_facts.append(servico_fact)
-        # Only "add" ever grows this list -- "select"/"switch"/"keep" leave
-        # it exactly as context handed it in (empty for every persona that
-        # never proposes "add", i.e. every appointment persona except a
-        # published one that declares the "mais_servicos" convention), so
-        # single-service personas are provably unaffected. This is
-        # accumulate-only for now: nothing yet marks an added branch
-        # "completed" once its own fields resolve.
-        active_branch_ids = list(context.active_branch_node_ids)
-        if proposal.branch_action.value == "add" and proposal.branch_anchor_node_id not in active_branch_ids:
-            active_branch_ids.append(proposal.branch_anchor_node_id)
+        next_grouped = {
+            str(key): list(values) for key, values in grouped_facts.items()
+        }
+        for fact in accepted_facts:
+            key = str(fact.get("field_key") or "")
+            owner = str(fact.get("owner_node_id") or "")
+            next_grouped[key] = [
+                current for current in next_grouped.get(key, [])
+                if str(current.get("owner_node_id") or "") != owner
+            ] + [fact]
+
+        active_branch_ids = list(dict.fromkeys([
+            *([context.active_branch_node_id] if context.active_branch_node_id else []),
+            *context.active_branch_node_ids,
+        ]))
+        if not discovery_only:
+            action = proposal.branch_action.value
+            anchor = proposal.branch_anchor_node_id
+            if action == "select":
+                active_branch_ids = [anchor]
+            elif action == "add" and anchor not in active_branch_ids:
+                active_branch_ids.append(anchor)
+            elif action == "switch":
+                active_branch_ids = [
+                    item for item in active_branch_ids
+                    if item != context.active_branch_node_id
+                ]
+                if anchor not in active_branch_ids:
+                    active_branch_ids.append(anchor)
         committed_branch = (
             context.active_branch_node_id
             if discovery_only else proposal.branch_anchor_node_id
         )
-        state = {**context.cart, "facts": facts,
+
+        aggregate_missing = graph_proof_checker_v3.aggregate_missing_fields(
+            document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
+        ) if active_branch_ids else []
+        next_question_id = next(
+            (field.get("question_node_id") for field in aggregate_missing if field.get("question_node_id")),
+            None,
+        )
+        question_contract = next(
+            (
+                candidate for candidate in (document.get("branch_contracts") or {}).values()
+                if next_question_id in (candidate.get("questions") or {})
+            ),
+            contract,
+        )
+        reply_seed = proposal.reply
+        if (
+            not accepted_facts
+            and next_question_id
+            and not context.retrieval_trace.get("deterministic_branch_resolution")
+            and len(_latest_user_message(context).split()) <= 3
+        ):
+            reply_seed = ""
+        reply = graph_proof_checker_v3.compose_published_question(
+            reply=reply_seed,
+            next_question_node_id=next_question_id,
+            contract=question_contract,
+        )
+        if _repeats_recent_outbound(reply, context.messages):
+            raise RuntimeError("semantic reply repetition blocked by recent outbound proof")
+
+        facts = _facts_for_contract(
+            (document.get("branch_contracts") or {}).get(committed_branch) or {},
+            next_grouped,
+        )
+        state = {**context.cart, "facts": facts, "facts_by_key": next_grouped,
                  "active_branch_node_id": committed_branch,
                  "active_branch_node_ids": active_branch_ids,
                  "asked_question_node_ids": list(dict.fromkeys([
-                     *(context.cart.get("asked_question_node_ids") or []),
-                     *([proposal.next_question_node_id] if proposal.next_question_node_id else []),
-                 ]))}
-        route = ConversationRoute.HUMAN if proposal.handoff_requested else ConversationRoute.SDR
-        # qualification_complete is derived from missing_fields (proof.py),
-        # not trusted from the model's own claim -- see the comment there.
-        qualification_complete = bool(proof.get("qualification_complete"))
+                      *(context.cart.get("asked_question_node_ids") or []),
+                      *([next_question_id] if next_question_id else []),
+                  ]))}
+        qualification_complete = not aggregate_missing and not discovery_only
+        route = (
+            ConversationRoute.HUMAN
+            if proposal.handoff_requested and qualification_complete
+            else ConversationRoute.SDR
+        )
+        proof = {
+            **proof,
+            "missing_fields": [field.get("key") for field in aggregate_missing],
+            "aggregate_missing_fields": aggregate_missing,
+            "next_question_node_id": next_question_id,
+            "asked_field_key": next(
+                (field.get("key") for field in aggregate_missing
+                 if field.get("question_node_id") == next_question_id),
+                None,
+            ),
+            "qualification_complete": qualification_complete,
+            "accepted_facts": accepted_facts,
+        }
         return (
             ConversationDecision(classifier="graph_proof_checker_v3",
                                  intent="qualification_complete" if qualification_complete else "collect_graph_fields",
@@ -1224,8 +1531,9 @@ def _decide(
                                  handoff_reason="graph_handoff_rule" if proposal.handoff_requested else None,
                                  evidence_node_ids=proposal.cited_node_ids),
             AgentResponse(reply_text=reply, role=route, evidence_node_ids=proposal.cited_node_ids,
-                          cart_state=state, handoff_required=proposal.handoff_requested,
-                          proposal=proposal, proof={**proof, "accepted_facts": accepted_facts}),
+                          cart_state=state,
+                          handoff_required=proposal.handoff_requested and qualification_complete,
+                          proposal=proposal, proof=proof),
         )
     # A technical failure emits only the next published question.  It never
     # fabricates commercial copy and never requests handoff by itself.
@@ -1273,7 +1581,7 @@ def _decide(
     proposal_errors = [str(error) for error in proof.get("errors") or []]
     branch_safe = not any(
         error.startswith((
-            "branch_", "keep_", "add_", "publication_",
+            "branch_", "keep_", "add_", "publication_", "fact_", "field_owner_",
         ))
         or error in {"branch_not_published", "branch_path_checksum_mismatch"}
         for error in proposal_errors

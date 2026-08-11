@@ -1,3 +1,5 @@
+import base64
+import json
 import logging
 from uuid import UUID
 
@@ -24,6 +26,54 @@ class SendMessageBody(BaseModel):
     texto: str
     sender_id: str | None = None
     nome: str | None = None
+
+
+def _decode_message_cursor(value: str | None) -> tuple[str | None, int | None]:
+    if not value:
+        return None, None
+    try:
+        padding = "=" * (-len(value) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(value + padding).decode("utf-8"))
+        return str(payload["created_at"]), int(payload["id"])
+    except Exception as exc:
+        raise HTTPException(400, detail="Cursor de mensagens inválido.") from exc
+
+
+def _encode_message_cursor(row: dict | None) -> str | None:
+    if not row or row.get("id") is None or not row.get("created_at"):
+        return None
+    raw = json.dumps(
+        {"created_at": row["created_at"], "id": row["id"]}, separators=(",", ":")
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _message_page(
+    lead_ref: int, *, limit: int, after: str | None, before: str | None,
+) -> dict:
+    if after and before:
+        raise HTTPException(400, detail="Use apenas um cursor: before ou after.")
+    after_created_at, after_id = _decode_message_cursor(after)
+    before_created_at, before_id = _decode_message_cursor(before)
+    rows = supabase_client.get_messages_page(
+        lead_ref,
+        limit=limit,
+        after_created_at=after_created_at,
+        after_id=after_id,
+        before_created_at=before_created_at,
+        before_id=before_id,
+    )
+    has_more = len(rows) > limit
+    if has_more:
+        rows = rows[:limit] if after else rows[-limit:]
+    return {
+        "items": rows,
+        "before_cursor": _encode_message_cursor(rows[0] if rows else None) or before,
+        "after_cursor": _encode_message_cursor(rows[-1] if rows else None) or after,
+        # Kept for one release so older dashboard bundles continue polling.
+        "next_cursor": _encode_message_cursor(rows[-1] if rows else None) or after,
+        "has_more": has_more,
+    }
 
 
 @router.post("/send")
@@ -230,7 +280,9 @@ def get_conversations(
 def get_messages_by_ref(
     lead_ref: int,
     request: Request,
-    limit: int = Query(200, le=500),
+    limit: int = Query(50, ge=1, le=100),
+    after: str | None = Query(None),
+    before: str | None = Query(None),
     persona_id: str | None = Query(None),
     persona_slug: str | None = Query(None),
     audience_id: str | None = Query(None),
@@ -266,13 +318,13 @@ def get_messages_by_ref(
             audience_id,
         )
     ):
-        return supabase_client.get_messages(str(lead_ref), limit=limit)
+        return _message_page(lead_ref, limit=limit, after=after, before=before)
     if lead and lead.get("persona_id"):
         auth_service.assert_persona_access(
             request,
             persona_id=lead.get("persona_id"),
         )
-    return supabase_client.get_messages(str(lead_ref), limit=limit)
+    return _message_page(lead_ref, limit=limit, after=after, before=before)
 
 
 @router.get("/{lead_id}")

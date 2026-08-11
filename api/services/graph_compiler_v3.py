@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import unicodedata
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,14 @@ class GraphCompilationError(ValueError):
 def canonical_checksum(value: Any) -> str:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def canonical_content_checksum(value: str) -> str:
+    """Hash rendered card text consistently across compiler and runtime."""
+    canonical = unicodedata.normalize(
+        "NFC", str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    )
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def embedding_provider() -> str:

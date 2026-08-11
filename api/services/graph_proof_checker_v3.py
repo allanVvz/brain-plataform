@@ -254,8 +254,11 @@ def check(
     if proposal.get("branch_path_checksum") != contract.get("branch_path_checksum"):
         errors.append("branch_path_checksum_mismatch")
     branch_span = proposal.get("branch_evidence_span")
+    active_set = set(active_branch_node_ids or ([active_branch_node_id] if active_branch_node_id else []))
+    if active_branch_node_id:
+        active_set.add(active_branch_node_id)
     if action == "keep":
-        if not active_branch_node_id:
+        if not active_set:
             # Confirmed live 2026-08-08: with no active branch yet, "keep"
             # never validated anything (unlike "select"/"switch", which
             # require branch_selection_allowed/branch_switch_allowed and a
@@ -270,7 +273,7 @@ def check(
             # to mean anything, same as "select"/"switch" require their own
             # authorization.
             errors.append("keep_without_active_branch")
-        elif branch != active_branch_node_id:
+        elif branch not in active_set:
             errors.append("keep_changed_branch")
     elif action == "select":
         if not branch_selection_allowed or active_branch_node_id:
@@ -291,7 +294,6 @@ def check(
         # change) plus a check "switch" doesn't need: the branch must not
         # already be one of the active ones, since re-adding an active
         # branch is meaningless and would only invite duplicate-fact bugs.
-        active_set = set(active_branch_node_ids or ([active_branch_node_id] if active_branch_node_id else []))
         if not active_set:
             errors.append("add_without_active_branch")
         elif branch in active_set:
@@ -367,7 +369,18 @@ def check(
             if policy == "never":
                 errors.append(f"fact_overwrite_forbidden:{key}")
             elif policy == "explicit_correction" and not _CORRECTION_MARKER.search(message or ""):
-                errors.append(f"fact_correction_not_explicit:{key}")
+                # An exact graph-authorized branch switch is itself explicit:
+                # the customer literally named one unique title/alias in this
+                # inbound. Requiring filler words such as "na verdade" made
+                # the branch change pass while its corresponding fact failed.
+                graph_explicit_switch = (
+                    action == "switch"
+                    and branch_switch_allowed
+                    and fact.get("owner_node_id") == branch
+                    and bool(_literal_span(message, fact.get("evidence_span")))
+                )
+                if not graph_explicit_switch:
+                    errors.append(f"fact_correction_not_explicit:{key}")
             elif policy == "higher_confidence" and float(fact.get("confidence") or 0) <= float(previous.get("confidence") or 0):
                 errors.append(f"fact_overwrite_confidence_too_low:{key}")
         for dependency in field.get("depends_on") or []:

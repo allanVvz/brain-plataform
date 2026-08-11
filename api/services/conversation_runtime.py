@@ -2552,6 +2552,7 @@ def commit(
             "reply_text": response.reply_text, "graph_version": context.graph_version,
             "graph_checksum": context.graph_checksum, "stage": qualified_stage,
         }
+        commit_started = time.monotonic()
         atomic_commit = _commit_graph_turn_and_outbox_or_raise(
             inbound_id=inbound_buffer_id, correlation_id=correlation_id,
             turn=turn_envelope,
@@ -2559,6 +2560,19 @@ def commit(
             outbound_message=(prepared_outbound or {}).get("message"),
             result_payload=atomic_seed,
         )
+        commit_ms = round((time.monotonic() - commit_started) * 1000, 3)
+        if atomic_commit.get("state") == "burst_superseded":
+            return {
+                "ok": True,
+                "burst_superseded": True,
+                "commit_state": "burst_superseded",
+                "canonical_inbound_id": inbound_buffer_id,
+                "correlation_id": correlation_id,
+                "reply_text": None,
+                "handoff": False,
+                "technical_failure": False,
+                "commit_ms": commit_ms,
+            }
         graph_turn = atomic_commit.get("graph_turn") or {}
         if atomic_commit.get("outbound_buffer_id"):
             buffer = {
@@ -2623,12 +2637,14 @@ def commit(
             "cost_usd": _turn_cost_usd,
             "repair_calls": _turn_token_usage.get("repair_calls"),
             "model_calls": _turn_token_usage.get("model_calls"),
+            "llm_ms": _turn_token_usage.get("llm_latency_ms"),
             "cache_hit_tokens": _turn_token_usage.get("cache_hit_tokens"),
             "cache_miss_tokens": _turn_token_usage.get("cache_miss_tokens"),
             "prompt_estimated_tokens": _turn_token_usage.get("prompt_estimated_tokens"),
             "prompt_budget_limit": _turn_token_usage.get("prompt_budget_limit"),
             "prompt_budget_status": _turn_token_usage.get("prompt_budget_status"),
             "correlation_id": correlation_id,
+            "commit_ms": locals().get("commit_ms"),
         },
     )
     result = {
@@ -2682,6 +2698,8 @@ _DISPATCH_ENVELOPE_OPTIONAL_KEYS = (
     "stage",
     "error",
     "deduplicated",
+    "burst_superseded",
+    "commit_state",
 )
 
 

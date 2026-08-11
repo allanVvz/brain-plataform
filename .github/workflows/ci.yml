@@ -11,10 +11,12 @@ jobs:
 
     steps:
       - name: Baixar codigo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
       - name: Configurar Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
           cache: "pip"
@@ -33,11 +35,17 @@ jobs:
       - name: Bloquear fatos de persona em codigo e workflow
         run: python scripts/check_persona_hardcodes.py
 
+      - name: Scan de segredos
+        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Validar migrations em Postgres descartavel
         run: >-
           python -m pytest -q
           tests/test_graph_agent_v3_sql.py
           tests/test_whatsapp_sql_functions.py
+          tests/test_production_privileges_sql.py
 
       - name: Validar template canonico e invariantes conversacionais
         run: |
@@ -97,7 +105,7 @@ jobs:
             -q
 
       - name: Configurar Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: "npm"
@@ -130,3 +138,28 @@ jobs:
           sed -i 's|^EVOLUTION_ENABLED=.*|EVOLUTION_ENABLED=true|' .env.evolution-ci
           sed -i 's|^AI_BRAIN_PUBLIC_API_URL=.*|AI_BRAIN_PUBLIC_API_URL=https://api.example.com|' .env.evolution-ci
           docker compose --env-file .env.evolution-ci --profile evolution config --quiet
+
+      - name: Auditar dependencias e gerar SBOM
+        run: |
+          python -m pip install pip-audit==2.9.0 cyclonedx-bom==7.1.0
+          python -m pip_audit -r api/requirements.txt
+          mkdir -p artifacts
+          cyclonedx-py requirements api/requirements.txt --output-file artifacts/api-sbom.json
+
+      - name: Build da imagem auditavel
+        run: docker build -f api/Dockerfile -t brain-api:ci .
+
+      - name: Scan da imagem
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: brain-api:ci
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Publicar SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: api-sbom
+          path: artifacts/api-sbom.json

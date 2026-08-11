@@ -311,6 +311,12 @@ def test_n8n_agentic_template_and_local_mode_are_distinct_contracts():
     assert source.index("build_context(") < source.index("decide(") < source.index("commit(")
     assert workflow["meta"]["template"] == "graph_agentic_v3"
     assert workflow["meta"]["binding"]["model_required"] is True
+    assert "Model required for turn" in {
+        node["name"] for node in workflow["nodes"]
+    }
+    gate = workflow["connections"]["Model required for turn"]["main"]
+    assert gate[0][0]["node"] == "Build graph grounded agent request"
+    assert gate[1][0]["node"] == "Align reply with qualification state"
     assert workflow["meta"]["binding"]["reply_source"] == "__REPLY_SOURCE__"
     assert workflow["meta"]["binding"]["model"] == "__MODEL__"
     assert workflow["meta"]["binding"]["endpoint"] == "__MODEL_ENDPOINT__"
@@ -525,6 +531,19 @@ def _install_fake_wa_validator_session_store(monkeypatch) -> dict:
     monkeypatch.setattr(
         wa_validator_service.supabase_client, "list_wa_validator_sessions",
         lambda limit=100: list(store.values()),
+    )
+    def _claim(session_id):
+        session = store.get(session_id)
+        if not session:
+            return {"claimed": False, "state": "missing"}
+        if session.get("status") != "ready":
+            return {"claimed": False, "state": session.get("status"), "session": session}
+        session = {**session, "status": "running"}
+        store[session_id] = session
+        return {"claimed": True, "state": "running", "session": session}
+
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "claim_wa_validator_session", _claim,
     )
     return store
 

@@ -342,16 +342,59 @@ def test_ledger_failure_rolls_back_inert_outbound_and_message(cur):
     data = transport_scenario(cur)
     turn, outbound_buffer, outbound_message = atomic_payload(data, expected_revision=9)
     cur.execute("savepoint before_failed_atomic_commit")
-    with pytest.raises(Exception, match="ledger revision conflict"):
+    with pytest.raises(Exception, match="conversation_ledger_revision_cas") as conflict:
         cur.execute(
             "select public.commit_graph_turn_and_outbox_v3(%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb)",
             (json.dumps(turn), json.dumps(outbound_buffer), json.dumps(outbound_message), json.dumps({"ok": True})),
         )
+    assert getattr(conflict.value, "pgcode", None) == "P0001"
     cur.execute("rollback to savepoint before_failed_atomic_commit")
     cur.execute(
         "select count(*) count from public.lead_buffer where idempotency_key=%s",
         (outbound_buffer["idempotency_key"],),
     )
+    assert cur.fetchone()["count"] == 0
+    cur.execute(
+        "select count(*) count from public.messages where channel_binding_id=%s and correlation_id=%s",
+        (data["binding_id"], outbound_message["correlation_id"]),
+    )
+    assert cur.fetchone()["count"] == 0
+
+
+def test_new_inbound_before_commit_supersedes_burst_without_proof_or_outbox(cur):
+    data = transport_scenario(cur)
+    turn, outbound_buffer, outbound_message = atomic_payload(data)
+    newer_correlation = f"corr:{uuid.uuid4()}"
+    cur.execute(
+        "select public.enqueue_whatsapp_envelope(%s::jsonb,%s::jsonb) result",
+        (json.dumps({
+            "persona_id": data["persona_id"], "lead_ref": data["lead_ref"],
+            "channel_binding_id": data["binding_id"], "direction": "inbound",
+            "payload": {"text": "second"}, "status": "buffered",
+            "batch_key": f"{data['persona_id']}:{data['lead_ref']}",
+            "idempotency_key": f"inbound:{newer_correlation}",
+            "correlation_id": newer_correlation,
+        }), json.dumps({
+            "lead_id": data["lead_ref"], "role": "user", "content": "second",
+            "direction": "inbound", "status": "buffered", "channel": "whatsapp",
+            "sender_id": newer_correlation, "channel_binding_id": data["binding_id"],
+            "correlation_id": newer_correlation,
+        })),
+    )
+    cur.fetchone()
+    cur.execute(
+        "select public.commit_graph_turn_and_outbox_v3(%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb) result",
+        (json.dumps(turn), json.dumps(outbound_buffer), json.dumps(outbound_message), json.dumps({"ok": True})),
+    )
+    result = cur.fetchone()["result"]
+    assert result["state"] == "burst_superseded"
+    cur.execute("select status,payload from public.lead_buffer where id=%s", (data["inbound_id"],))
+    inbound = cur.fetchone()
+    assert inbound["status"] == "buffered"
+    assert "conversation_commit" not in inbound["payload"]
+    cur.execute("select count(*) count from public.conversation_turn_proofs where canonical_inbound_id=%s", (data["inbound_id"],))
+    assert cur.fetchone()["count"] == 0
+    cur.execute("select count(*) count from public.lead_buffer where idempotency_key=%s", (outbound_buffer["idempotency_key"],))
     assert cur.fetchone()["count"] == 0
     cur.execute(
         "select count(*) count from public.messages where channel_binding_id=%s and correlation_id=%s",
