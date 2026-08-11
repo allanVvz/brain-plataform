@@ -18,7 +18,9 @@ Use `$brain-agent-e2e` to audit or repair a Brain agent through the dashboard, E
 5. Verify `context -> policy -> extraction -> reconcile -> aligned reply -> commit`.
 6. Verify `missing_fields[0]` maps to the published graph's `appointment_policy.field_questions` and no backend question fallback exists.
 7. Run focused tests, JSON validation, Python compilation and relevant broader tests.
-8. In `live-e2e`, send once per turn and prove destination delivery plus exactly one response.
-9. Report evidence, final AI states, qualification fields/stage and root cause/fix.
+8. Drive each next customer message from the agent's actual published question. Stop before sending if the question does not map to one graph field, repeats a current fact, or substantially repeats recent replies.
+9. For every turn, verify doubt-first response, all-fact extraction, contextual acknowledgement and `missing_fields[0]` alignment.
+10. In `live-e2e`, send once per turn and prove destination delivery plus exactly one response.
+11. Report `technical_pass` and `quality_pass` separately, plus evidence, final AI states, qualification fields/stage and root cause/fix.
 
 Do not deploy, synchronize a remote workflow, repeat ambiguous delivery, delete history, move leads or alter bindings unless separately authorized.

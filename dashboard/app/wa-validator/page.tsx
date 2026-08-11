@@ -16,6 +16,11 @@ type Insights = {
   recommendations: string[];
   overall_score: number;
   summary: string;
+  technical_score?: number;
+  conversational_quality_score?: number | null;
+  technical_pass?: boolean;
+  quality_pass?: boolean;
+  quality_scope?: string;
 };
 type Session = {
   id: string;
@@ -36,6 +41,7 @@ const STATUS_COLOR: Record<string, string> = {
   starting: "text-yellow-400",
   running: "text-yellow-400",
   done: "text-green-400",
+  failed: "text-red-400",
   interrupted: "text-orange-400",
   error: "text-red-400",
 };
@@ -128,7 +134,15 @@ export default function WaValidatorPage({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    api.waBots().then(setBots).catch(() => {});
+    api.waBots()
+      .then((rows) => {
+        setBots(rows);
+        setError("");
+      })
+      .catch((cause: any) => {
+        setBots([]);
+        setError(cause?.message || "Não foi possível carregar as personas do WA Validator.");
+      });
   }, []);
 
   // The bot/agent for a WA Validator run is whichever persona is selected
@@ -142,10 +156,21 @@ export default function WaValidatorPage({
   // "compra_simples" produce a nonsensical, looping conversation for it).
   useEffect(() => {
     if (!globalPersona.slug) { setFlows([]); setFlowId(""); return; }
-    api.waFlows(globalPersona.slug).then((f) => {
-      setFlows(f);
-      setFlowId(f.length > 0 ? f[0].id : "");
-    }).catch(() => {});
+    api.waFlows(globalPersona.slug)
+      .then((f) => {
+        setFlows(f);
+        setFlowId(f.length > 0 ? f[0].id : "");
+        if (f.length === 0) {
+          setError("A persona selecionada não possui fluxo compatível publicado.");
+        } else {
+          setError("");
+        }
+      })
+      .catch((cause: any) => {
+        setFlows([]);
+        setFlowId("");
+        setError(cause?.message || "Não foi possível carregar os fluxos da persona selecionada.");
+      });
   }, [globalPersona.slug]);
 
   // Poll active session while running
@@ -242,6 +267,10 @@ export default function WaValidatorPage({
   const insights = activeSession?.insights;
   const isRunning = activeSession?.status === "running" || activeSession?.status === "starting";
   const isDone = activeSession?.status === "done";
+  const isTerminal = Boolean(activeSession && ["done", "failed", "error"].includes(activeSession.status));
+  const semanticAudits = (activeSession?.output?.conversation || [])
+    .filter((turn: any) => turn?.role === "bot" && turn?.semantic_audit)
+    .map((turn: any, index: number) => ({ index, ...turn.semantic_audit }));
 
   return (
     <div className="space-y-3">
@@ -301,7 +330,7 @@ export default function WaValidatorPage({
             <div className="flex flex-wrap gap-2 ml-auto items-center">
               <button
                 onClick={handleRunDirect}
-                disabled={runningDirect || isRunning || isDone}
+                disabled={runningDirect || isRunning || isTerminal}
                 title="Testa o agente diretamente via API — não precisa do WhatsApp"
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-brain-accent/80 hover:bg-brain-accent text-white transition disabled:opacity-40"
               >
@@ -310,14 +339,14 @@ export default function WaValidatorPage({
               </button>
               <button
                 onClick={handleRunWA}
-                disabled={running || isRunning || isDone}
+                disabled={running || isRunning || isTerminal}
                 title="Requer o runner Playwright local e um perfil autenticado do WhatsApp Web"
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-green-700/60 hover:bg-green-700 text-white transition disabled:opacity-40"
               >
                 <Play size={12} />
                 {running ? "Enviando WA..." : "Executar via WhatsApp"}
               </button>
-              {isDone && !insights && (
+              {isTerminal && activeSession.output?.conversation?.length > 0 && !insights && (
                 <button
                   onClick={handleAnalyze}
                   disabled={analyzing}
@@ -365,6 +394,22 @@ export default function WaValidatorPage({
             <p className="text-xs text-brain-muted">{activeSession.script.flow_description}</p>
           )}
 
+          {activeSession.output && (
+            <div className="flex flex-wrap gap-1.5">
+              <Badge
+                label={activeSession.output.technical_pass === true ? "Transação aprovada" : "Transação não aprovada"}
+                color={activeSession.output.technical_pass === true ? "bg-green-500/15 text-green-300 border-green-500/30" : "bg-red-500/15 text-red-300 border-red-500/30"}
+              />
+              <Badge
+                label={activeSession.output.quality_pass === true ? "Diálogo aprovado" : activeSession.output.quality_pass === false ? "Diálogo reprovado" : "Diálogo não avaliado"}
+                color={activeSession.output.quality_pass === true ? "bg-green-500/15 text-green-300 border-green-500/30" : "bg-yellow-500/15 text-yellow-300 border-yellow-500/30"}
+              />
+              {activeSession.output.quality_scope && (
+                <Badge label={activeSession.output.quality_scope} color="bg-brain-bg text-brain-muted border-brain-border" />
+              )}
+            </div>
+          )}
+
           {expected.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {expected.map((e, i) => (
@@ -392,6 +437,30 @@ export default function WaValidatorPage({
             </div>
           )}
 
+          {semanticAudits.length > 0 && (
+            <details className="rounded-lg border border-brain-border bg-brain-bg/50 p-3">
+              <summary className="cursor-pointer text-xs font-medium text-white">
+                Critérios semânticos por turno ({semanticAudits.length})
+              </summary>
+              <div className="mt-3 space-y-2">
+                {semanticAudits.map((audit: any) => (
+                  <div key={audit.index} className="rounded border border-brain-border p-2">
+                    <p className="text-[11px] font-medium text-white">Turno {audit.index + 1}</p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {Object.entries(audit.criteria || {}).map(([name, passed]) => (
+                        <Badge
+                          key={name}
+                          label={`${passed ? "✓" : "✕"} ${name}`}
+                          color={passed ? "bg-green-500/10 text-green-300 border-green-500/20" : "bg-red-500/10 text-red-300 border-red-500/20"}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+
           {!isDone && !isRunning && expected.length === 0 && (
             <p className="text-xs text-brain-muted">
               Clique em «Executar Direto» para iniciar o teste — a conversa aparece abaixo, em
@@ -402,7 +471,9 @@ export default function WaValidatorPage({
           {insights && (
             <div className="pt-3 border-t border-brain-border space-y-3">
               <div>
-                <p className="text-[10px] text-brain-muted uppercase tracking-widest mb-2">Score Geral</p>
+                <p className="text-[10px] text-brain-muted uppercase tracking-widest mb-2">
+                  {insights.quality_scope === "technical_only" ? "Qualidade conversacional" : "Score conversacional"}
+                </p>
                 <ScoreMeter score={insights.overall_score ?? 0} />
                 <p className="text-xs text-brain-muted mt-2">{insights.summary ?? ""}</p>
               </div>

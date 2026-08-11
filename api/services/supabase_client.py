@@ -411,6 +411,23 @@ def get_lead_by_ref(lead_ref: int) -> Optional[dict]:
     return _one(get_client().table("leads").select("*").eq("id", lead_ref).maybe_single())
 
 
+def get_leads_by_refs(lead_refs: list[int], *, chunk_size: int = 100) -> dict[int, dict]:
+    """Fetch lead snapshots in bounded batches for conversation decoration.
+
+    Keeping each ``in`` list small avoids the oversized PostgREST URLs seen
+    in production while replacing one request per conversation with one or
+    two bounded requests.
+    """
+    refs = sorted({int(value) for value in lead_refs if value is not None})
+    rows: dict[int, dict] = {}
+    for index in range(0, len(refs), max(1, min(chunk_size, 100))):
+        chunk = refs[index:index + max(1, min(chunk_size, 100))]
+        for row in _q(get_client().table("leads").select("*").in_("id", chunk)):
+            if row.get("id") is not None:
+                rows[int(row["id"])] = row
+    return rows
+
+
 def get_audiences(persona_id: Optional[str] = None) -> list[dict]:
     q = get_client().table("audiences").select("*").order("is_system").order("name")
     if persona_id:
@@ -1965,18 +1982,37 @@ def list_product_nodes(
 
 def list_edges_for_nodes(node_ids: list[str], *, relation_types: Optional[list[str]] = None, limit: int = 5000) -> list[dict]:
     global _KG_TABLES_MISSING
-    ids = [node_id for node_id in (node_ids or []) if node_id]
+    ids = sorted({str(node_id) for node_id in (node_ids or []) if node_id})
     if _KG_TABLES_MISSING or not ids:
         return []
     client = get_client()
     try:
-        outgoing = client.table("knowledge_edges").select("*").in_("source_node_id", ids).limit(limit)
-        incoming = client.table("knowledge_edges").select("*").in_("target_node_id", ids).limit(limit)
-        if relation_types:
-            outgoing = outgoing.in_("relation_type", relation_types)
-            incoming = incoming.in_("relation_type", relation_types)
-        rows = (outgoing.execute().data or []) + (incoming.execute().data or [])
-        return [row for row in rows if not _edge_is_inactive(row)]
+        rows_by_id: dict[str, dict] = {}
+        # UUID-heavy PostgREST ``in`` filters become long URLs quickly. The
+        # unbounded version produced HTTP 414 in production. Bounded chunks
+        # preserve the existing contract without a schema change.
+        for index in range(0, len(ids), 75):
+            chunk = ids[index:index + 75]
+            for column in ("source_node_id", "target_node_id"):
+                query = (
+                    client.table("knowledge_edges")
+                    .select("*")
+                    .in_(column, chunk)
+                    .limit(limit)
+                )
+                if relation_types:
+                    query = query.in_("relation_type", relation_types)
+                for row in query.execute().data or []:
+                    identity = str(row.get("id") or (
+                        str(row.get("source_node_id"))
+                        + ":" + str(row.get("target_node_id"))
+                        + ":" + str(row.get("relation_type"))
+                    ))
+                    rows_by_id[identity] = row
+        return [
+            row for row in list(rows_by_id.values())[:limit]
+            if not _edge_is_inactive(row)
+        ]
     except Exception as exc:
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True
@@ -1989,7 +2025,14 @@ def list_knowledge_nodes_by_ids(node_ids: list[str]) -> list[dict]:
     if _KG_TABLES_MISSING or not ids:
         return []
     try:
-        return _q(get_client().table("knowledge_nodes").select("*").in_("id", ids).limit(len(ids)))
+        rows: list[dict] = []
+        for index in range(0, len(ids), 75):
+            chunk = ids[index:index + 75]
+            rows.extend(_q(
+                get_client().table("knowledge_nodes").select("*")
+                .in_("id", chunk).limit(len(chunk))
+            ))
+        return rows
     except Exception as exc:
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True
@@ -4018,6 +4061,14 @@ def get_conversation_ledger(persona_id: str, lead_ref: int) -> Optional[dict]:
         }
         for row in facts
     }
+    grouped: dict[str, list[dict]] = {}
+    for row in facts:
+        grouped.setdefault(str(row["field_key"]), []).append({
+            **row,
+            "value": row.get("value_json"),
+            "fact_id": row.get("id"),
+        })
+    ledger["facts_by_key"] = grouped
     return ledger
 
 
@@ -4235,6 +4286,15 @@ def audit_conversation_turn_v3(inbound_buffer_id: str) -> dict:
     if isinstance(value, list):
         value = value[0] if value else {}
     return value if isinstance(value, dict) else {}
+
+
+def get_conversation_turn_proof(canonical_inbound_id: str) -> Optional[dict]:
+    if not canonical_inbound_id:
+        return None
+    return _one(
+        get_client().table("conversation_turn_proofs").select("*")
+        .eq("canonical_inbound_id", canonical_inbound_id).maybe_single()
+    )
 
 
 def reset_conversation_ledger_branch_v3(*, persona_id: str, lead_ref: int) -> dict:

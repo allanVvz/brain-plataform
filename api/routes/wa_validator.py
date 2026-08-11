@@ -4,13 +4,21 @@
 import logging
 import traceback
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from services import wa_validator_service
+from services import auth_service, wa_validator_service
 
 logger = logging.getLogger("wa_validator")
 
 router = APIRouter(prefix="/wa-validator", tags=["wa-validator"])
+
+
+def _assert_session_access(request: Request, session_id: str) -> dict:
+    session = wa_validator_service.get_session(session_id)
+    auth_service.assert_persona_access(
+        request, persona_slug=str(session.get("persona_slug") or ""),
+    )
+    return session
 
 
 class GenerateScriptRequest(BaseModel):
@@ -35,12 +43,16 @@ class AnalyzeRequest(BaseModel):
 
 
 @router.get("/bots")
-def list_bots():
-    return wa_validator_service.bots()
+def list_bots(request: Request):
+    user = auth_service.current_user(request)
+    allowed = None if auth_service.is_admin(user) else set(auth_service.allowed_persona_ids(request))
+    return wa_validator_service.bots(allowed)
 
 
 @router.get("/flows")
-def list_flows(persona_slug: str | None = None):
+def list_flows(request: Request, persona_slug: str | None = None):
+    if persona_slug:
+        auth_service.assert_persona_access(request, persona_slug=persona_slug)
     return wa_validator_service.flows(persona_slug)
 
 
@@ -50,21 +62,35 @@ def list_models():
 
 
 @router.get("/sessions")
-def list_sessions():
-    return wa_validator_service.list_sessions()
+def list_sessions(request: Request):
+    sessions = wa_validator_service.list_sessions()
+    user = auth_service.current_user(request)
+    if auth_service.is_admin(user):
+        return sessions
+    visible: list[dict] = []
+    for session in sessions:
+        try:
+            auth_service.assert_persona_access(
+                request, persona_slug=str(session.get("persona_slug") or ""),
+            )
+        except HTTPException:
+            continue
+        visible.append(session)
+    return visible
 
 
 @router.get("/sessions/{session_id}")
-def get_session(session_id: str):
+def get_session(request: Request, session_id: str):
     try:
-        return wa_validator_service.get_session(session_id)
+        return _assert_session_access(request, session_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 
 @router.post("/generate-script")
-def generate_script(body: GenerateScriptRequest):
+def generate_script(request: Request, body: GenerateScriptRequest):
     try:
+        auth_service.assert_persona_access(request, persona_slug=body.persona_slug)
         return wa_validator_service.generate_script(
             persona_slug=body.persona_slug,
             flow_id=body.flow_id,
@@ -86,8 +112,9 @@ def generate_script(body: GenerateScriptRequest):
 
 
 @router.post("/run")
-def run_session(body: RunRequest):
+def run_session(request: Request, body: RunRequest):
     try:
+        _assert_session_access(request, body.session_id)
         return wa_validator_service.run_session(body.session_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -102,9 +129,10 @@ def run_session(body: RunRequest):
 
 
 @router.post("/run-direct")
-async def run_session_direct(body: RunRequest):
+async def run_session_direct(request: Request, body: RunRequest):
     """Drive validation through the selected conversation_v1 mode."""
     try:
+        _assert_session_access(request, body.session_id)
         return await wa_validator_service.run_session_direct(body.session_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -119,8 +147,9 @@ async def run_session_direct(body: RunRequest):
 
 
 @router.post("/analyze")
-def analyze_gaps(body: AnalyzeRequest):
+def analyze_gaps(request: Request, body: AnalyzeRequest):
     try:
+        _assert_session_access(request, body.session_id)
         return wa_validator_service.analyze_gaps(body.session_id, model=body.model)
     except ValueError as e:
         raise HTTPException(400, str(e))

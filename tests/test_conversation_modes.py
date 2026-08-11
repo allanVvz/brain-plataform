@@ -642,6 +642,11 @@ def test_wa_validator_run_direct_n8n_sends_webhook_token_and_reports_empty_body(
     monkeypatch.setattr(
         wa_validator_service.supabase_client, "get_messages", lambda *_a, **_k: []
     )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_conversation_ledger",
+        lambda *_a, **_k: None,
+    )
     store = _install_fake_wa_validator_session_store(monkeypatch)
 
     captured_calls = []
@@ -853,13 +858,16 @@ def test_wait_for_reply_delivered_returns_as_soon_as_a_new_message_lands(monkeyp
 
     def fake_get_messages(_lead_ref, limit=200):
         call_count["n"] += 1
-        # First two polls: no new message yet. Third poll: the reply landed.
-        return [{"id": i} for i in range(3 if call_count["n"] >= 3 else 2)]
+        # First two polls: no matching outbound. Third poll: the exact reply landed.
+        return ([{
+            "message_id": "ai:turn-1", "direction": "outbound", "content": "Resposta",
+        }] if call_count["n"] >= 3 else [])
 
     monkeypatch.setattr(wa_validator_service.supabase_client, "get_messages", fake_get_messages)
 
     _asyncio.run(wa_validator_service._wait_for_reply_delivered(
-        1, 2, max_wait_s=5.0, poll_interval_s=0.01,
+        1, outbound_message_id="ai:turn-1", expected_reply="Resposta",
+        max_wait_s=5.0, poll_interval_s=0.01,
     ))
     assert call_count["n"] == 3
 
@@ -870,8 +878,8 @@ def test_wait_for_reply_delivered_gives_up_after_max_wait(monkeypatch):
     monkeypatch.setattr(
         wa_validator_service.supabase_client, "get_messages", lambda *_a, **_k: [{"id": 1}]
     )
-    _asyncio.run(wa_validator_service._wait_for_reply_delivered(
-        1, 1, max_wait_s=0.05, poll_interval_s=0.01,
-    ))
-    # Reaching here without hanging is the assertion: it must give up, not
-    # block forever, when the reply never lands.
+    with pytest.raises(TimeoutError):
+        _asyncio.run(wa_validator_service._wait_for_reply_delivered(
+            1, outbound_message_id="ai:missing", expected_reply="Resposta",
+            max_wait_s=0.05, poll_interval_s=0.01,
+        ))

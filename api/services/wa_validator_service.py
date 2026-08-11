@@ -5,14 +5,17 @@ and analyses conversation gaps to feed back into KB Intake.
 """
 
 import asyncio
+import difflib
 import httpx
 import json
 import os
 import random
+import re
 import subprocess
 import threading
 import time
 import traceback
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +25,7 @@ from services import (
     conversation_runtime,
     graph_agent_runtime_v3,
     graph_json_v2_store,
+    graph_proof_checker_v3,
     n8n_client,
     supabase_client,
 )
@@ -48,6 +52,7 @@ _WA_PROFILE = Path(
 _WA_ARTIFACTS = _ROOT_DIR / "test-artifacts" / "wa-validator"
 _WA_RUNNER_URL = (os.environ.get("WA_VALIDATOR_RUNNER_URL") or "").rstrip("/")
 _BRAIN_API_URL = os.environ.get("BRAIN_API_URL", "http://localhost:8080")
+_CUSTOMER_PROFILES_PATH = _ROOT_DIR / "api" / "evaluation" / "wa_validator_customer_profiles.json"
 
 # WA Validator sessions live in Supabase, not a plain in-process dict.
 # Confirmed live 2026-08-08: production runs GUNICORN_WORKERS=2, so a
@@ -120,16 +125,22 @@ def _resolve_conversation_mode(persona_id: str | None, routing: dict) -> str:
     return decision_owner if decision_owner in _KNOWN_CONVERSATION_MODES else fallback
 
 
-def bots() -> list:
+def bots(allowed_persona_ids: set[str] | None = None) -> list:
     """Return available bots: static registry + any active personas not yet listed."""
-    result = list(_BOT_REGISTRY)
+    result = [
+        row for row in _BOT_REGISTRY
+        if allowed_persona_ids is None or str(row.get("persona_id") or "") in allowed_persona_ids
+    ]
     registered = {b["persona_slug"] for b in _BOT_REGISTRY}
     try:
         for p in supabase_client.get_personas():
+            if allowed_persona_ids is not None and str(p.get("id") or "") not in allowed_persona_ids:
+                continue
             slug = p.get("slug", "")
             if slug and slug not in registered:
                 agent_name = p.get("name", slug)
                 agent_slug = "agent"
+                agent_node = None
                 try:
                     current = graph_json_v2_store.load_current(slug)
                     graph = current[1] if current else None
@@ -169,8 +180,8 @@ def bots() -> list:
                     "description": p.get("description", ""),
                 })
                 registered.add(slug)
-    except Exception:
-        pass
+    except Exception as exc:
+        raise RuntimeError("Não foi possível carregar as personas do WA Validator") from exc
     return result
 
 
@@ -190,25 +201,12 @@ _FLOWS = {
     "invalid_decision_schema": "Saída fora do contrato gera handoff.",
     "delivery_callback": "Callbacks sent/delivered/read/failed são reconciliados.",
     "sdr_qualificacao_carro": (
-        "SDR agêntico de agendamento (Aurora): qualifica nome, veículo, ano, "
-        "objetivo e trilha presencial/remoto, nunca confirma preço ou "
-        "horário, e encerra com handoff para a equipe humana."
+        "Agendamento orientado pelo grafo: acompanha os campos publicados, "
+        "responde interrupções e conclui somente no handoff autorizado."
     ),
     "sdr_troca_servico": (
-        "SDR agêntico de agendamento (Aurora): cliente pede um serviço, muda "
-        "de ideia no meio da qualificação e pede um serviço diferente -- "
-        "valida que nome, veículo e ano já informados não são perguntados "
-        "de novo depois da troca de branch."
-    ),
-    "sdr_reclamacao_recorrente": (
-        "Cliente recorrente (Aurora): fase 1 é um agendamento completo "
-        "(nome, veículo, ano, objetivo, presencial/remoto, condição) que "
-        "resolve até o handoff; as mensagens dessa fase são então "
-        "retroagidas algumas horas. Fase 2, horas depois, é uma reclamação "
-        "sem repetir o nome -- valida que o nome/veículo não são "
-        "perguntados de novo, que a pergunta da reclamação referencia o "
-        "serviço já conhecido, e que a resposta não soa como continuação "
-        "direta da fase 1."
+        "Troca de ramo orientada pelo grafo: preserva facts compatíveis e "
+        "recalcula somente os campos realmente faltantes."
     ),
 }
 
@@ -221,15 +219,6 @@ _CLIENT_NAMES = [
     "Marcos", "Rafael", "Thiago",
     "Ana", "Beatriz", "Camila", "Fernanda", "Gabriela", "Helena", "Isabela",
     "Juliana", "Larissa", "Patricia",
-]
-
-# Real Aurora service branches (confirmed live against the published graph
-# 2026-08-08) -- picking one at random per run, instead of always
-# "higienização interna", spreads coverage across the branches most likely
-# to expose per-branch field/owner mismatches like the one fixed today.
-_CAR_SERVICES = [
-    "higienização interna", "polimento", "vitrificação", "pintura",
-    "chapeação", "lavagem técnica detalhada", "polimento de vidros", "PPF",
 ]
 
 # Which business_model(s) (persona_node.data.business_model, same field
@@ -250,7 +239,6 @@ _FLOW_BUSINESS_MODELS: dict[str, set[str]] = {
     "estagio_monotonic": {"sales"},
     "sdr_qualificacao_carro": {"appointment"},
     "sdr_troca_servico": {"appointment"},
-    "sdr_reclamacao_recorrente": {"appointment"},
 }
 
 
@@ -304,6 +292,181 @@ def _build_graph_context(persona_slug: str) -> tuple[str, int, str, object]:
     return "\n".join(lines), version, str(checksum), graph
 
 
+def _customer_profile(business_model: str) -> dict:
+    try:
+        payload = json.loads(_CUSTOMER_PROFILES_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Perfil de cliente do WA Validator inválido: {exc}") from exc
+    profile = payload.get(business_model)
+    if not isinstance(profile, dict):
+        raise ValueError(
+            f"WA Validator não possui perfil de cliente para business_model={business_model}"
+        )
+    return profile
+
+
+def _appointment_branch_candidates(document: dict) -> list[tuple[str, dict, dict]]:
+    candidates: list[tuple[str, dict, dict]] = []
+    for anchor in document.get("branch_anchors") or []:
+        contract = (document.get("branch_contracts") or {}).get(anchor) or {}
+        node = (document.get("node_by_id") or {}).get(anchor) or {}
+        if contract.get("fields") and node:
+            candidates.append((str(anchor), node, contract))
+    if not candidates:
+        raise ValueError("Publicação ativa não possui branch de qualificação testável")
+    max_fields = max(len(contract.get("fields") or []) for _, _, contract in candidates)
+    # Avoid selecting a tiny exception/handoff branch when full qualification
+    # branches exist, while staying generic for graphs with a single branch.
+    floor = max(1, max_fields - 2)
+    return [row for row in candidates if len(row[2].get("fields") or []) >= floor]
+
+
+def _branch_identity_field(contract: dict, anchor: str) -> dict | None:
+    return next(
+        (
+            field for field in contract.get("fields") or []
+            if str(field.get("owner_node_id") or "") == anchor
+        ),
+        None,
+    )
+
+
+def _graph_doubt(document: dict, contract: dict) -> dict | None:
+    qualification_questions = set((contract.get("questions") or {}).keys())
+    for node_id in contract.get("closure_node_ids") or []:
+        if node_id in qualification_questions:
+            continue
+        node = (document.get("node_by_id") or {}).get(node_id) or {}
+        if str(node.get("node_type") or "").lower() != "faq":
+            continue
+        data = node.get("data") or {}
+        question = str(data.get("question") or node.get("title") or "").strip()
+        if question:
+            return {"text": question, "expected_evidence_node_ids": [node_id]}
+    return None
+
+
+def _semantic_appointment_script(
+    *, publication: dict, flow_id: str, initial_state: str,
+) -> dict:
+    document = publication.get("document_json") or {}
+    branches = _appointment_branch_candidates(document)
+    anchor, branch_node, contract = random.choice(branches)
+    identity_field = _branch_identity_field(contract, anchor)
+    if not identity_field:
+        raise ValueError(
+            f"Branch {anchor} não declara um campo de identidade pertencente ao próprio branch"
+        )
+    profile = _customer_profile("appointment")
+    configured_answers = profile.get("answers") or {}
+    answers: dict[str, dict] = {}
+    missing_examples: list[str] = []
+    identity_key = str(identity_field.get("key") or "")
+    identity_value = str(branch_node.get("slug") or branch_node.get("title") or anchor)
+    for field in contract.get("fields") or []:
+        key = str(field.get("key") or "")
+        if not key or key == identity_key:
+            continue
+        answer = configured_answers.get(key)
+        if not isinstance(answer, dict) or not str(answer.get("text") or "").strip():
+            missing_examples.append(key)
+            continue
+        answers[key] = {
+            "text": str(answer["text"]),
+            "value": answer.get("value"),
+        }
+    if missing_examples:
+        raise ValueError(
+            "Perfil de cliente do WA Validator não cobre os campos publicados: "
+            + ", ".join(sorted(missing_examples))
+        )
+    branch_title = str(branch_node.get("title") or branch_node.get("slug") or anchor)
+    opening = {
+        "text": f"Olá! Tenho interesse em {branch_title}.",
+        "intended_facts": {identity_key: identity_value},
+        "expected_branch_node_id": anchor,
+    }
+    switch = None
+    driver_questions = dict(contract.get("questions") or {})
+    driver_required_fields = [
+        str(field.get("key") or "") for field in contract.get("fields") or []
+    ]
+    if flow_id == "sdr_troca_servico" and len(branches) > 1:
+        alternatives = [row for row in branches if row[0] != anchor]
+        second_anchor, second_node, second_contract = random.choice(alternatives)
+        second_identity = _branch_identity_field(second_contract, second_anchor)
+        if second_identity:
+            second_missing: list[str] = []
+            for field in second_contract.get("fields") or []:
+                key = str(field.get("key") or "")
+                if not key or key == str(second_identity.get("key") or ""):
+                    continue
+                answer = configured_answers.get(key)
+                if not isinstance(answer, dict) or not str(answer.get("text") or "").strip():
+                    second_missing.append(key)
+                    continue
+                answers.setdefault(key, {
+                    "text": str(answer["text"]),
+                    "value": answer.get("value"),
+                })
+            if second_missing:
+                raise ValueError(
+                    "Perfil de cliente do WA Validator não cobre os campos publicados: "
+                    + ", ".join(sorted(second_missing))
+                )
+            driver_questions.update(second_contract.get("questions") or {})
+            driver_required_fields.extend(
+                str(field.get("key") or "")
+                for field in second_contract.get("fields") or []
+                if str(field.get("key") or "") not in driver_required_fields
+            )
+            second_title = str(second_node.get("title") or second_node.get("slug") or second_anchor)
+            switch = {
+                "after_answered_fields": 2,
+                "text": f"Na verdade, prefiro {second_title}.",
+                "intended_facts": {
+                    str(second_identity.get("key") or identity_key): str(
+                        second_node.get("slug") or second_node.get("title") or second_anchor
+                    )
+                },
+                "expected_branch_node_id": second_anchor,
+            }
+    doubt = _graph_doubt(document, contract)
+    if not doubt:
+        raise ValueError(
+            f"Branch {anchor} não possui FAQ publicada para testar dúvida/interrupção"
+        )
+    driver = {
+        "mode": "semantic_graph_v1",
+        "opening": opening,
+        "answers": answers,
+        "required_fields": driver_required_fields,
+        "questions": driver_questions,
+        "branch_anchor_node_id": anchor,
+        "max_turns": len(contract.get("fields") or []) + 4,
+        "expected_handoff": True,
+        "switch": switch,
+        "doubt": doubt,
+        "initial_known_fields": (
+            ["nome_cliente"] if initial_state == "known_name" else []
+        ),
+    }
+    known_name = (configured_answers.get("nome_cliente") or {}).get("value")
+    return {
+        "flow_description": _FLOWS.get(flow_id, flow_id),
+        "expected_knowledge": [
+            f"graph:{publication.get('version')}:{publication.get('checksum')}"
+        ],
+        "steps": [opening],
+        "driver": driver,
+        "expected_dialogue": {
+            "known_name": known_name,
+            "known_service": identity_value,
+            "client_name_omitted": initial_state == "known_name",
+        },
+    }
+
+
 def _deterministic_script(
     flow_id: str,
     *,
@@ -330,37 +493,6 @@ def _deterministic_script(
     if product_id:
         common_expected.insert(0, f"evidence:{product_id}")
     client_name = random.choice(_CLIENT_NAMES)
-    service_a, service_b = random.sample(_CAR_SERVICES, 2)
-    if flow_id == "sdr_reclamacao_recorrente":
-        # Two-phase scenario: phase 1 is a normal booking that resolves to
-        # completion (name + vehicle + service all known); a backdate step
-        # then shifts those messages a few hours into the past before
-        # phase 2 -- a complaint that never repeats the name -- runs. See
-        # run_session_direct's handling of the "backdate_hours" step kind.
-        return {
-            "flow_description": _FLOWS.get(flow_id, flow_id),
-            "expected_knowledge": common_expected,
-            "steps": [
-                {"text": f"Quero saber sobre {service_a} do meu carro", "wait": 10},
-                {"text": client_name, "wait": 10},
-                {"text": "Onix", "wait": 10},
-                {"text": "2020", "wait": 10},
-                {"text": "Quero manter o carro e cuidar bem dele", "wait": 10},
-                {"text": "Consigo levar até vocês", "wait": 10},
-                {"text": "Os bancos estão meio manchados", "wait": 10},
-                {"backdate_hours": 5},
-                {"text": "Estou com um problema com o serviço que fiz aí", "wait": 10},
-            ],
-            "expected_dialogue": {
-                "product_name": product_name,
-                "unit_price": unit_price,
-                "final_quantity": None,
-                "final_total": None,
-                "forbidden_terms": ["tock", "tock fatal"],
-                "known_service": service_a,
-                "known_name": client_name,
-            },
-        }
     scenarios = {
         "compra_simples": [
             "Oi",
@@ -385,25 +517,6 @@ def _deterministic_script(
         "classifier_failure": ["[QA_CLASSIFIER_FAILURE]"],
         "invalid_decision_schema": ["[QA_INVALID_DECISION_SCHEMA]"],
         "delivery_callback": [f"Quero 1 de {product_name}"],
-        "sdr_qualificacao_carro": [
-            f"Quero saber sobre {service_a} do meu carro",
-            *([] if omit_client_name else [client_name]),
-            "Onix",
-            "2020",
-            "Quero manter o carro e cuidar bem dele",
-            "Consigo levar até vocês",
-            "Os bancos estão meio manchados",
-        ],
-        "sdr_troca_servico": [
-            f"Quero saber sobre {service_a} do meu carro",
-            *([] if omit_client_name else [client_name]),
-            "Civic",
-            "2021",
-            f"Na verdade, prefiro fazer {service_b} em vez de {service_a}",
-            "Quero manter o carro e cuidar bem dele",
-            "Consigo levar até vocês",
-            "Prata",
-        ],
     }
     messages = scenarios.get(flow_id)
     if not messages:
@@ -419,10 +532,6 @@ def _deterministic_script(
         ),
         "forbidden_terms": ["tock", "tock fatal"],
     }
-    if flow_id in _NAME_COLLECTING_FLOWS:
-        expected_dialogue["known_name"] = client_name
-        expected_dialogue["known_service"] = service_a
-        expected_dialogue["client_name_omitted"] = omit_client_name
     return {
         "flow_description": _FLOWS.get(flow_id, flow_id),
         "expected_knowledge": common_expected,
@@ -509,13 +618,28 @@ def generate_script(
         ),
         None,
     )
-    script_data = _deterministic_script(
-        flow_id,
-        product=primary_product,
-        graph_version=graph_version,
-        graph_checksum=graph_checksum,
-        omit_client_name=(resolved_initial_state == "known_name"),
-    )
+    semantic_appointment_flow = flow_id in {
+        "sdr_qualificacao_carro", "sdr_troca_servico",
+    }
+    if business_model == "appointment" and semantic_appointment_flow and not v3_publication:
+        raise ValueError(
+            "Fluxos de agendamento exigem publicação Graph v3 ativa; "
+            "o roteiro legacy com conteúdo fixo foi removido."
+        )
+    if business_model == "appointment" and v3_publication and semantic_appointment_flow:
+        script_data = _semantic_appointment_script(
+            publication=v3_publication,
+            flow_id=flow_id,
+            initial_state=resolved_initial_state,
+        )
+    else:
+        script_data = _deterministic_script(
+            flow_id,
+            product=primary_product,
+            graph_version=graph_version,
+            graph_checksum=graph_checksum,
+            omit_client_name=(resolved_initial_state == "known_name"),
+        )
     routing = supabase_client.get_persona_routing(persona_slug) or {}
     conversation_mode = _resolve_conversation_mode(persona_id, routing)
 
@@ -528,7 +652,11 @@ def generate_script(
             "session_id": session_id,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "model": "none",
-            "classifier": "deterministic_v1",
+            "classifier": (
+                "semantic_graph_v1"
+                if (script_data.get("driver") or {}).get("mode") == "semantic_graph_v1"
+                else "deterministic_v1"
+            ),
             "conversation_mode": conversation_mode,
             "pipeline_contract": "conversation_v1",
             "agent_slug": agent_slug,
@@ -542,6 +670,7 @@ def generate_script(
         "expected_knowledge": script_data.get("expected_knowledge", []),
         "expected_dialogue": script_data.get("expected_dialogue", {}),
         "steps": script_data.get("steps", []),
+        "driver": script_data.get("driver"),
     }
 
     _session_create(session_id, {
@@ -726,6 +855,115 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
         or turn.get("error")
         or str(turn.get("text") or "").startswith("(erro:")
     ]
+    semantic_mode = (script.get("driver") or {}).get("mode") == "semantic_graph_v1"
+    if semantic_mode:
+        semantic_turns = [
+            (index, turn.get("semantic_audit"))
+            for index, turn in enumerate(bot_turns)
+        ]
+        semantic_gaps: list[dict] = []
+        passed_criteria = 0
+        total_criteria = 0
+        for index, audit in semantic_turns:
+            if not isinstance(audit, dict):
+                semantic_gaps.append({
+                    "topic": "missing_semantic_turn_audit",
+                    "evidence": f"Turno {index + 1} não possui auditoria semântica.",
+                    "priority": "high",
+                })
+                continue
+            criteria = audit.get("criteria") or {}
+            total_criteria += len(criteria)
+            passed_criteria += sum(value is True for value in criteria.values())
+            for failure in audit.get("failures") or []:
+                semantic_gaps.append({
+                    "topic": str(failure),
+                    "evidence": f"Critério conversacional falhou no turno {index + 1}.",
+                    "priority": "high",
+                })
+        expected_lineages = {
+            item.split(":", 1)[1]
+            for item in expected
+            if str(item).startswith("graph:")
+        }
+        actual_lineages = {
+            f"{turn.get('graph_version')}:{turn.get('graph_checksum')}"
+            for turn in bot_turns
+            if turn.get("graph_version") and not turn.get("error")
+        }
+        lineage_pass = not expected_lineages or actual_lineages == expected_lineages
+        total_criteria += 1
+        passed_criteria += int(lineage_pass)
+        if not lineage_pass:
+            semantic_gaps.append({
+                "topic": "graph_lineage_mismatch",
+                "evidence": (
+                    f"Runtime reportou {sorted(actual_lineages)}; "
+                    f"esperado {sorted(expected_lineages)}."
+                ),
+                "priority": "high",
+            })
+        if failures:
+            semantic_gaps.append({
+                "topic": "transport_or_reply",
+                "evidence": f"{len(failures)} turno(s) sem resposta válida.",
+                "priority": "high",
+            })
+        output_quality_confirmed = output.get("quality_pass") is True
+        if not output_quality_confirmed:
+            semantic_gaps.append({
+                "topic": "semantic_run_not_completed",
+                "evidence": "O executor não concluiu todos os turnos com quality_pass=true.",
+                "priority": "high",
+            })
+        technical_pass = bool(
+            not failures and output.get("technical_pass") is not False
+        )
+        quality_pass = bool(
+            bot_turns
+            and technical_pass
+            and not semantic_gaps
+            and output_quality_confirmed
+        )
+        score = round(100 * passed_criteria / max(1, total_criteria))
+        insights = {
+            **_EMPTY_INSIGHTS,
+            "demonstrated": [
+                "technical_turn_invariants",
+                *(["graph_lineage"] if lineage_pass else []),
+                *(["dynamic_dialogue_quality"] if quality_pass else []),
+            ],
+            "gaps": semantic_gaps,
+            "recommendations": (
+                ["Interromper no primeiro critério semântico reprovado e corrigir a origem no grafo/runtime."]
+                if semantic_gaps else []
+            ),
+            "overall_score": score,
+            "conversational_quality_score": score,
+            "technical_pass": technical_pass,
+            "quality_pass": quality_pass,
+            "quality_scope": "semantic_graph_v1",
+            "summary": (
+                "Qualidade conversacional aprovada turno a turno."
+                if quality_pass
+                else f"Qualidade conversacional reprovada com {len(semantic_gaps)} gap(s)."
+            ),
+            "session_id": session_id,
+            "persona_slug": persona_slug,
+            "analyzer": "semantic_graph_v1",
+        }
+        _session_update(session_id, insights=insights)
+        supabase_client.insert_event({
+            "event_type": "wa_validator_gaps_analyzed",
+            "payload": {
+                "session_id": session_id,
+                "persona_slug": persona_slug,
+                "n_gaps": len(semantic_gaps),
+                "score": score,
+                "quality_pass": quality_pass,
+            },
+        })
+        return insights
     evidence_used = {
         str(node_id)
         for turn in bot_turns
@@ -776,50 +1014,18 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
     )
     evidence_ratio = len(demonstrated) / max(1, len(expected))
 
-    # Known-name/known-service assertion: if the script expected these facts
-    # to be pre-seeded (initial_state="known_name"), verify that no bot turn
-    # after the backdate step re-asks for them. This catches regressions like
-    # sdr_reclamacao_recorrente v44 where the agent forgot the customer's name.
-    expected_dialogue = script.get("expected_dialogue", {})
-    known_name = expected_dialogue.get("known_name")
-    known_service = expected_dialogue.get("known_service")
-    backdate_found = False
-    backdate_turn_idx = -1
-    for turn_idx, turn in enumerate(conversation):
-        if turn.get("role") == "system" and str(turn.get("message_id") or "").endswith(":backdate"):
-            backdate_found = True
-            backdate_turn_idx = turn_idx
-            break
-    if backdate_found and known_name:
-        # After backdate, scan bot turns for re-asking the name
-        for turn_idx, turn in enumerate(conversation):
-            if turn_idx <= backdate_turn_idx or turn.get("role") != "bot":
-                continue
-            # Check if this turn asks the qualification question for nome_cliente
-            # (detect by checking response text for question keywords)
-            text = (turn.get("text") or "").lower()
-            if any(phrase in text for phrase in ["nome", "chama", "qual seu nome", "como se chama"]):
-                gaps.append({
-                    "topic": "known_name_re_asked",
-                    "evidence": f"Turno {turn_idx}: bot re-perguntou o nome após backdate, mas era conhecido na fase 1",
-                    "priority": "high",
-                })
-    if backdate_found and known_service:
-        # After backdate, verify that reclamação/complaint turns reference the known service
-        for turn_idx, turn in enumerate(conversation):
-            if turn_idx <= backdate_turn_idx or turn.get("role") != "bot":
-                continue
-            text = (turn.get("text") or "").lower()
-            # If this is clearly a complaint context, it should reference the prior service
-            if "problema" in text or "reclamação" in text:
-                if known_service.lower() not in text:
-                    gaps.append({
-                        "topic": "known_service_not_referenced",
-                        "evidence": f"Turno {turn_idx}: resposta sobre reclamação não referencia serviço conhecido '{known_service}'",
-                        "priority": "medium",
-                    })
-
-    score = round(max(0, min(100, (response_ratio * 50) + (evidence_ratio * 50))))
+    technical_score = round(max(0, min(100, (response_ratio * 50) + (evidence_ratio * 50))))
+    gaps.append({
+        "topic": "conversational_quality_not_evaluated",
+        "evidence": (
+            "Este roteiro não foi dirigido pela pergunta real do agente; "
+            "o resultado prova apenas transporte, lineage e contagens técnicas."
+        ),
+        "priority": "high",
+    })
+    technical_pass = bool(
+        not failures and output.get("technical_pass") is not False
+    )
     insights = {
         **_EMPTY_INSIGHTS,
         "demonstrated": demonstrated,
@@ -827,10 +1033,15 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
         "recommendations": [
             "Corrigir somente a origem Markdown/Graph indicada pela evidência."
         ] if gaps else [],
-        "overall_score": score,
+        "overall_score": 0,
+        "technical_score": technical_score,
+        "conversational_quality_score": None,
+        "technical_pass": technical_pass,
+        "quality_pass": False,
+        "quality_scope": "technical_only",
         "summary": (
-            "Validação determinística concluída sem uso de modelo. "
-            f"{len(failures)} falha(s) de resposta e {len(gaps)} gap(s)."
+            "Validação técnica concluída; qualidade conversacional não avaliada. "
+            f"{len(failures)} falha(s) técnica(s) e {len(gaps)} gap(s)."
         ),
         "session_id": session_id,
         "persona_slug": persona_slug,
@@ -846,6 +1057,8 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
             "persona_slug": persona_slug,
             "n_gaps": len(insights.get("gaps", [])),
             "score": insights.get("overall_score"),
+            "technical_score": technical_score,
+            "quality_pass": False,
         },
     })
 
@@ -853,9 +1066,14 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
 
 
 async def _wait_for_reply_delivered(
-    lead_ref: int, messages_before: int, *, max_wait_s: float, poll_interval_s: float = 1.0,
-) -> None:
-    """Wait for the pipeline to actually persist a reply before the next scripted step.
+    lead_ref: int,
+    *,
+    outbound_message_id: str,
+    expected_reply: str,
+    max_wait_s: float,
+    poll_interval_s: float = 1.0,
+) -> dict:
+    """Return the exact persisted outbound produced by the audited inbound.
 
     Confirmed live 2026-08-08: scripted steps advanced on a fixed sleep
     (capped at 3s) regardless of how long the real pipeline took, so on a
@@ -872,12 +1090,32 @@ async def _wait_for_reply_delivered(
     of outrunning the pipeline. Generic: applies to every persona/flow the
     validator runs, not just Aurora.
     """
+    if not outbound_message_id:
+        raise RuntimeError("Turno não retornou a identidade canônica do outbound")
     deadline = time.monotonic() + max_wait_s
     while time.monotonic() < deadline:
         messages = supabase_client.get_messages(str(lead_ref), limit=200) or []
-        if len(messages) > messages_before:
-            return
+        for message in messages:
+            identity = str(
+                message.get("message_id")
+                or message.get("external_message_id")
+                or message.get("correlation_id")
+                or ""
+            )
+            if identity != outbound_message_id:
+                continue
+            if str(message.get("direction") or "").lower() != "outbound":
+                continue
+            persisted = str(message.get("content") or message.get("text") or "").strip()
+            if expected_reply.strip() and persisted != expected_reply.strip():
+                raise RuntimeError(
+                    "Outbound persistido não corresponde à resposta auditada do turno"
+                )
+            return message
         await asyncio.sleep(poll_interval_s)
+    raise TimeoutError(
+        f"Outbound {outbound_message_id} não foi persistido no destino dentro de {max_wait_s:.0f}s"
+    )
 
 
 def _seed_known_name(*, persona: dict, lead_ref: int, client_name: str) -> None:
@@ -931,6 +1169,170 @@ def _seed_known_name(*, persona: dict, lead_ref: int, client_name: str) -> None:
     )
 
 
+def _semantic_fold(value: object) -> str:
+    folded = unicodedata.normalize("NFKD", str(value or "").casefold())
+    ascii_text = "".join(char for char in folded if not unicodedata.combining(char))
+    return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
+
+
+def _semantic_similarity(left: object, right: object) -> float:
+    return difflib.SequenceMatcher(
+        None, _semantic_fold(left), _semantic_fold(right), autojunk=False,
+    ).ratio()
+
+
+def _fact_matches_expected(fact: dict | None, expected: object) -> bool:
+    if not fact or fact.get("status") != "known":
+        return False
+    actual = fact.get("value", fact.get("value_json"))
+    if isinstance(expected, bool):
+        return actual is expected
+    return _semantic_fold(actual) == _semantic_fold(expected)
+
+
+def _semantic_turn_audit(
+    *,
+    customer_step: dict,
+    turn: dict,
+    proof_record: dict,
+    ledger_before: dict,
+    ledger_after: dict,
+    contract: dict,
+    recent_replies: list[str],
+    previous_question_node_id: str | None,
+    expected_handoff: bool = False,
+) -> dict:
+    proof = proof_record.get("proof_result") or {}
+    decision = proof_record.get("final_decision") or {}
+    reply = str(turn.get("text") or "").strip()
+    intended = customer_step.get("intended_facts") or {}
+    accepted = {
+        str(fact.get("field_key") or ""): fact
+        for fact in proof.get("accepted_facts") or []
+    }
+    facts_after = ledger_after.get("facts") or {}
+    facts_by_key = ledger_after.get("facts_by_key") or {
+        key: [value] for key, value in facts_after.items()
+    }
+    missing = [str(value) for value in proof.get("missing_fields") or []]
+    question_id = str(proof.get("next_question_node_id") or "") or None
+    first_missing = missing[0] if missing else None
+    first_field = next(
+        (
+            field for field in contract.get("fields") or []
+            if str(field.get("key") or "") == first_missing
+        ),
+        None,
+    )
+    expected_question_id = str((first_field or {}).get("question_node_id") or "") or None
+    question = (contract.get("questions") or {}).get(question_id or "") or {}
+    question_text = str(question.get("text") or "").strip()
+    asked_field = str(question.get("field_key") or "") or None
+    accepted_all = all(
+        key in accepted
+        and _fact_matches_expected(accepted.get(key), value)
+        and any(
+            _fact_matches_expected(current, value)
+            and (
+                not accepted[key].get("owner_node_id")
+                or str(current.get("owner_node_id") or "")
+                == str(accepted[key].get("owner_node_id") or "")
+            )
+            for current in facts_by_key.get(key) or []
+        )
+        for key, value in intended.items()
+    )
+    declarative_parts = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", reply)
+        if sentence.strip() and "?" not in sentence
+    ]
+    expected_evidence = set(customer_step.get("expected_evidence_node_ids") or [])
+    actual_evidence = set(turn.get("evidence_node_ids") or []) | set(
+        decision.get("evidence_node_ids") or []
+    )
+    asked_owner = str(question.get("owner_node_id") or (first_field or {}).get("owner_node_id") or "")
+    asked_fact_already_known = any(
+        fact.get("status") == "known"
+        and (not asked_owner or str(fact.get("owner_node_id") or "") == asked_owner)
+        for fact in facts_by_key.get(asked_field or "") or []
+    )
+    first_question_offset = reply.find("?")
+    acknowledgement_before_question = any(
+        reply.find(part) < first_question_offset
+        for part in declarative_parts
+        if first_question_offset >= 0
+    )
+    qualification_complete = bool(proof.get("qualification_complete"))
+    handoff_observed = bool(
+        turn.get("handoff")
+        or proof.get("handoff_requested")
+        or decision.get("handoff_requested")
+        or str(turn.get("route") or "").upper() == "HUMAN"
+    )
+    criteria = {
+        "intent_identified": bool(decision.get("intent")),
+        "doubt_answered_first": (
+            not expected_evidence
+            or (
+                bool(expected_evidence & actual_evidence)
+                and bool(declarative_parts)
+                and (first_question_offset < 0 or acknowledgement_before_question)
+            )
+        ),
+        "all_intended_facts_extracted": accepted_all,
+        "received_content_acknowledged": not intended or bool(declarative_parts),
+        "first_missing_field_only": (
+            (not missing and question_id is None)
+            or (
+                question_id == expected_question_id
+                and bool(question_text)
+                and graph_proof_checker_v3._question_already_asked(question_text, reply)
+            )
+        ),
+        "known_fact_not_reasked": not asked_fact_already_known,
+        "reply_not_repeated": (
+            all(_semantic_similarity(previous, reply) < 0.92 for previous in recent_replies[-4:])
+        ),
+        "model_reconciled_without_fallback": (
+            proof.get("fallback_used") is not True
+            and not (proof.get("model_proposal_errors") or [])
+        ),
+        "expected_branch_persisted": (
+            not customer_step.get("expected_branch_node_id")
+            or str(ledger_after.get("active_branch_node_id") or "")
+            == str(customer_step.get("expected_branch_node_id"))
+        ),
+        "question_advanced": (
+            not previous_question_node_id
+            or previous_question_node_id != question_id
+            or not intended
+        ),
+        "handoff_only_after_completion": (
+            not handoff_observed or qualification_complete
+        ),
+        "expected_handoff_reached": (
+            not qualification_complete or not expected_handoff or handoff_observed
+        ),
+    }
+    failures = [name for name, passed in criteria.items() if not passed]
+    return {
+        "passed": not failures,
+        "criteria": criteria,
+        "failures": failures,
+        "asked_field": asked_field,
+        "next_question_node_id": question_id,
+        "first_missing_field": first_missing,
+        "missing_fields": missing,
+        "accepted_fact_keys": sorted(accepted),
+        "intended_fact_keys": sorted(str(key) for key in intended),
+        "previous_ledger_revision": ledger_before.get("revision"),
+        "ledger_revision": ledger_after.get("revision"),
+        "qualification_complete": qualification_complete,
+        "handoff_observed": handoff_observed,
+    }
+
+
 async def run_session_direct(session_id: str) -> dict:
     """Execute through the selected mode using the conversation_v1 contract."""
     session = _session_get(session_id)
@@ -964,6 +1366,18 @@ async def run_session_direct(session_id: str) -> dict:
     ).strip()
     if conversation_mode == "n8n_agents" and not workflow_url:
         raise ValueError("Workflow n8n_agents ativo não configurado")
+    driver = script.get("driver") or {}
+    semantic_mode = driver.get("mode") == "semantic_graph_v1"
+    pipeline_contract = (
+        str(binding_metadata.get("pipeline_contract") or "conversation_v3")
+        if conversation_mode == "n8n_agents"
+        else "conversation_v1"
+    )
+    if semantic_mode and pipeline_contract != "conversation_v3":
+        raise ValueError(
+            "Driver semântico exige pipeline_contract=conversation_v3 para "
+            "provar commit, proof e outbox por turno"
+        )
     flow_id = session.get("flow_id", "")
     graph_version = script.get("meta", {}).get("graph_version")
     # Flow name + graph version it was generated against (not just the
@@ -1009,7 +1423,25 @@ async def run_session_direct(session_id: str) -> dict:
             persona=persona, lead_ref=int(lead_ref),
             client_name=str(script.get("expected_dialogue", {}).get("known_name") or ""),
         )
-    steps = script.get("steps", [])
+    publication: dict = {}
+    graph_document: dict = {}
+    if semantic_mode:
+        publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
+        graph_document = publication.get("document_json") or {}
+        if not publication or not graph_document:
+            raise ValueError("Driver semântico exige publicação Graph v3 ativa")
+        expected_version = script.get("meta", {}).get("graph_version")
+        expected_checksum = str(script.get("meta", {}).get("graph_checksum") or "")
+        if expected_version is not None and int(publication.get("version") or 0) != int(expected_version):
+            raise ValueError("Publicação do grafo mudou depois da geração do roteiro")
+        if expected_checksum and str(publication.get("checksum") or "") != expected_checksum:
+            raise ValueError("Checksum do grafo mudou depois da geração do roteiro")
+        opening = driver.get("opening")
+        if not isinstance(opening, dict) or not str(opening.get("text") or "").strip():
+            raise ValueError("Driver semântico não possui abertura válida")
+        steps = [opening]
+    else:
+        steps = script.get("steps", [])
 
     _session_update(session_id, status="running", output={"conversation": [], "status": "running"})
 
@@ -1020,7 +1452,17 @@ async def run_session_direct(session_id: str) -> dict:
         _log = _logging.getLogger("wa_validator_service.direct")
         try:
             token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
-            for i, step in enumerate(steps):
+            step_queue = list(steps)
+            max_turns = int(driver.get("max_turns") or len(step_queue) or 1)
+            recent_replies: list[str] = []
+            previous_question_node_id: str | None = None
+            answered_fields: set[str] = set()
+            doubt_sent = False
+            switch_sent = False
+            semantic_complete = False
+            i = 0
+            while step_queue and i < max_turns:
+                step = step_queue.pop(0)
                 if "backdate_hours" in step:
                     hours = float(step["backdate_hours"])
                     shifted = supabase_client.backdate_lead_messages(int(lead_ref), hours)
@@ -1031,13 +1473,17 @@ async def run_session_direct(session_id: str) -> dict:
                         "message_id": f"validator:{session_id}:{i}:backdate",
                     })
                     _session_update(session_id, output={"conversation": list(conversation), "status": "running"})
+                    i += 1
                     continue
                 text = step.get("text", "")
                 configured_wait = float(step.get("wait", 10) or 10)
                 ts_now = datetime.now(timezone.utc).isoformat()
                 message_id = f"validator:{session_id}:{i}"
                 correlation_id = f"validator:{session_id}:{i}"
-                messages_before = len(supabase_client.get_messages(str(lead_ref), limit=200) or [])
+                ledger_before = (
+                    supabase_client.get_conversation_ledger(str(persona.get("id") or ""), int(lead_ref))
+                    or {"revision": 0, "facts": {}, "active_branch_node_id": None}
+                )
                 conversation.append({
                     "role": "validator",
                     "text": text,
@@ -1088,11 +1534,6 @@ async def run_session_direct(session_id: str) -> dict:
                     # the deployed workflow expects whatever the binding
                     # itself declares, exactly like real dispatch
                     # (workers.whatsapp_dispatch_worker) already resolves it.
-                    pipeline_contract = (
-                        binding_metadata.get("pipeline_contract") or "conversation_v3"
-                        if conversation_mode == "n8n_agents"
-                        else "conversation_v1"
-                    )
                     event = {
                             "persona_slug": persona_slug,
                             "lead_ref": lead_ref,
@@ -1221,12 +1662,176 @@ async def run_session_direct(session_id: str) -> dict:
                 conversation.append(turn)
                 _session_update(session_id, output={"conversation": list(conversation), "status": "running"})
 
-                if i < len(steps) - 1:
-                    await _wait_for_reply_delivered(
-                        int(lead_ref), messages_before, max_wait_s=max(configured_wait, 20.0),
+                if turn.get("error"):
+                    failure_output = {
+                        "conversation": conversation,
+                        "status": "error",
+                        "technical_pass": False,
+                        "quality_pass": False if semantic_mode else None,
+                        "failed_turn": i,
+                        "failure": "pipeline_error",
+                    }
+                    _session_update(
+                        session_id, status="error", output=failure_output,
+                        error=str(turn.get("text") or "pipeline_error"),
                     )
+                    return
 
-            final_output = {"conversation": conversation, "status": "done"}
+                await _wait_for_reply_delivered(
+                    int(lead_ref),
+                    outbound_message_id=str(turn.get("message_id") or ""),
+                    expected_reply=str(turn.get("text") or ""),
+                    max_wait_s=max(configured_wait, 20.0),
+                )
+
+                if semantic_mode:
+                    proof_record = supabase_client.get_conversation_turn_proof(buffer_uuid) or {}
+                    ledger_after = (
+                        supabase_client.get_conversation_ledger(
+                            str(persona.get("id") or ""), int(lead_ref),
+                        )
+                        or {}
+                    )
+                    active_anchor = str(
+                        ledger_after.get("active_branch_node_id")
+                        or step.get("expected_branch_node_id")
+                        or ""
+                    )
+                    contract = (
+                        (graph_document.get("branch_contracts") or {}).get(active_anchor)
+                        or {}
+                    )
+                    if not proof_record or not ledger_after or not contract:
+                        audit = {
+                            "passed": False,
+                            "criteria": {},
+                            "failures": ["missing_semantic_commit_evidence"],
+                            "qualification_complete": False,
+                        }
+                    else:
+                        audit = _semantic_turn_audit(
+                            customer_step=step,
+                            turn=turn,
+                            proof_record=proof_record,
+                            ledger_before=ledger_before,
+                            ledger_after=ledger_after,
+                            contract=contract,
+                            recent_replies=recent_replies,
+                            previous_question_node_id=previous_question_node_id,
+                            expected_handoff=bool(driver.get("expected_handoff")),
+                        )
+                    turn["semantic_audit"] = audit
+                    _session_update(
+                        session_id,
+                        output={
+                            "conversation": list(conversation),
+                            "status": "running",
+                            "technical_pass": True,
+                            "quality_pass": False,
+                        },
+                    )
+                    if not audit.get("passed"):
+                        failure = "semantic_turn_failed:" + ",".join(audit.get("failures") or [])
+                        failure_output = {
+                            "conversation": conversation,
+                            "status": "error",
+                            "technical_pass": True,
+                            "quality_pass": False,
+                            "failed_turn": i,
+                            "failure": failure,
+                        }
+                        _session_update(
+                            session_id, status="error", output=failure_output,
+                            error=failure,
+                        )
+                        supabase_client.insert_event({
+                            "event_type": "wa_validator_semantic_failed",
+                            "payload": {
+                                "session_id": session_id,
+                                "persona_slug": persona_slug,
+                                "turn": i,
+                                "failures": audit.get("failures") or [],
+                                "canonical_inbound_id": buffer_uuid,
+                            },
+                        })
+                        return
+
+                    recent_replies.append(str(turn.get("text") or ""))
+                    previous_question_node_id = audit.get("next_question_node_id")
+                    if audit.get("qualification_complete"):
+                        semantic_complete = True
+                        break
+
+                    if step.get("kind") == "field_answer":
+                        answered_fields.update(
+                            str(key) for key in (step.get("intended_facts") or {})
+                        )
+                    asked_field = str(audit.get("asked_field") or "")
+                    next_step: dict | None = None
+                    doubt = driver.get("doubt")
+                    switch = driver.get("switch")
+                    if isinstance(doubt, dict) and not doubt_sent:
+                        doubt_sent = True
+                        next_step = {
+                            **doubt,
+                            "kind": "doubt",
+                            "intended_facts": {},
+                            "expected_branch_node_id": active_anchor,
+                        }
+                    elif (
+                        isinstance(switch, dict)
+                        and not switch_sent
+                        and len(answered_fields) >= int(switch.get("after_answered_fields") or 0)
+                    ):
+                        switch_sent = True
+                        next_step = {**switch, "kind": "branch_switch"}
+                    else:
+                        answer = (driver.get("answers") or {}).get(asked_field)
+                        if isinstance(answer, dict) and str(answer.get("text") or "").strip():
+                            next_step = {
+                                "text": str(answer["text"]),
+                                "kind": "field_answer",
+                                "intended_facts": {asked_field: answer.get("value")},
+                                "expected_branch_node_id": active_anchor,
+                            }
+                    if not next_step:
+                        failure = f"script_question_mismatch:{asked_field or 'unknown'}"
+                        failure_output = {
+                            "conversation": conversation,
+                            "status": "error",
+                            "technical_pass": True,
+                            "quality_pass": False,
+                            "failed_turn": i,
+                            "failure": failure,
+                        }
+                        _session_update(
+                            session_id, status="error", output=failure_output,
+                            error=failure,
+                        )
+                        return
+                    step_queue.append(next_step)
+
+                i += 1
+
+            if semantic_mode and not semantic_complete:
+                failure = "semantic_driver_exhausted_before_qualification"
+                final_output = {
+                    "conversation": conversation,
+                    "status": "error",
+                    "technical_pass": True,
+                    "quality_pass": False,
+                    "failure": failure,
+                }
+                _session_update(session_id, status="error", output=final_output, error=failure)
+                return
+
+            final_output = {
+                "conversation": conversation,
+                "status": "done",
+                "technical_pass": True,
+                "quality_pass": True if semantic_mode else None,
+                "quality_scope": "semantic_graph_v1" if semantic_mode else "technical_only",
+            }
             _session_update(session_id, status="done", output=final_output)
 
             supabase_client.insert_event({
@@ -1238,17 +1843,25 @@ async def run_session_direct(session_id: str) -> dict:
                     "graph_version": script.get("meta", {}).get("graph_version"),
                     "graph_checksum": script.get("meta", {}).get("graph_checksum"),
                     "conversation_mode": conversation_mode,
-                    "classifier": "deterministic_v1",
-                    "pipeline_contract": (
-                        binding_metadata.get("pipeline_contract") or "conversation_v3"
-                        if conversation_mode == "n8n_agents"
-                        else "conversation_v1"
-                    ),
+                    "classifier": "semantic_graph_v1" if semantic_mode else "deterministic_v1",
+                    "quality_pass": True if semantic_mode else None,
+                    "pipeline_contract": pipeline_contract,
                 },
             })
 
         except Exception as exc:
-            _session_update(session_id, status="error", error=str(exc))
+            _session_update(
+                session_id,
+                status="error",
+                error=str(exc),
+                output={
+                    "conversation": conversation,
+                    "status": "error",
+                    "technical_pass": False,
+                    "quality_pass": False if semantic_mode else None,
+                    "failure": "validator_execution_error",
+                },
+            )
 
     task = asyncio.create_task(_do_run())
     # CLI and container QA runs have no long-lived ASGI loop after the command

@@ -15,17 +15,23 @@ Record:
 - latency for each transport leg and agent processing;
 - AI state before and after the turn;
 - graph version/checksum and qualification state when relevant.
+- actual customer intent or graph field asked by the agent;
+- every fact present in the customer message and whether each became current;
+- whether a doubt was answered before qualification resumed;
+- acknowledgement evidence and the exact `missing_fields[0]` question;
+- comparison with recent replies and current facts for repetition/re-asking;
+- independent technical and semantic verdicts for the turn.
 
 Delivery is proven only by the destination message. Provider `sent`/`delivered` remains supporting evidence.
 
 ## Report structure
 
-1. Outcome: pass, fail or safety stop.
+1. Outcome: pass, fail or safety stop, with `technical_pass` and `quality_pass` reported separately.
 2. Scope and environment without credentials.
 3. Final state of both agents.
 4. Pairing evidence and any asymmetric display names.
 5. Timeline with non-secret IDs and HTTP statuses.
-6. Qualification fields/stage and terminal handoff evidence.
+6. Turn-by-turn semantic criteria, qualification fields/stage and terminal handoff evidence.
 7. Console, page and API failures.
 8. Runtime log diagnosis.
 9. Duplicates, context drift or forbidden confirmations.

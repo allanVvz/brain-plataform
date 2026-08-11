@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { chromium } from "playwright";
+import { auditBrowserTurn, foldText } from "./wa-validator-driver.mjs";
 
 function args() {
   const values = {};
@@ -187,8 +188,24 @@ try {
     await result.click();
   }
 
-  for (let index = 0; index < (script.steps || []).length; index += 1) {
-    const step = script.steps[index];
+  const semanticDriver = script.driver?.mode === "semantic_graph_v1"
+    ? script.driver
+    : null;
+  const stepQueue = semanticDriver
+    ? [semanticDriver.opening]
+    : [...(script.steps || [])];
+  const knownFactKeys = new Set(semanticDriver?.initial_known_fields || []);
+  const answeredFields = new Set();
+  const recentBotReplies = [];
+  let doubtSent = false;
+  let switchSent = false;
+  let semanticComplete = false;
+  const maxTurns = semanticDriver
+    ? Number(semanticDriver.max_turns || 1)
+    : stepQueue.length;
+  let index = 0;
+  while (stepQueue.length > 0 && index < maxTurns) {
+    const step = stepQueue.shift();
     const composer = page
       .locator(
         "[contenteditable='true'][role='textbox'][aria-placeholder*='Digite'], [contenteditable='true'][role='textbox'][aria-placeholder*='Type'], [contenteditable='true'][aria-label*='Digite'], [contenteditable='true'][aria-label*='Type'], footer [contenteditable='true'][role='textbox'], footer [contenteditable='true']",
@@ -203,6 +220,10 @@ try {
       text: step.text,
       ts: new Date().toISOString(),
     });
+    for (const key of Object.keys(step.intended_facts || {})) {
+      knownFactKeys.add(key);
+      if (step.kind === "field_answer") answeredFields.add(key);
+    }
     const pendingOutbound = page
       .locator("[data-icon='msg-time'], [data-icon='msg-pending']")
       .last();
@@ -244,11 +265,13 @@ try {
       timedOut = true;
     }
 
+    let botReplyText = "";
     const incoming = page
       .locator(inboundMessageSelector)
       .last();
     if (await exists(incoming)) {
       const text = (await incoming.innerText()).trim();
+      botReplyText = text;
       const messageId = await incoming.getAttribute("data-id");
       if (
         !output.conversation.some(
@@ -284,8 +307,75 @@ try {
     if (timedOut) {
       break;
     }
+    if (semanticDriver) {
+      const browserAudit = auditBrowserTurn({
+        reply: botReplyText,
+        questions: semanticDriver.questions || {},
+        knownFactKeys,
+        requiredFields: semanticDriver.required_fields || [],
+        recentReplies: recentBotReplies,
+        step,
+      });
+      for (const [name, passed] of Object.entries(browserAudit.criteria)) {
+        output.assertions.push({
+          name: `turn_${index + 1}:${name}`,
+          passed,
+          question_node_id: browserAudit.matchedQuestion?.questionId,
+          field_key: browserAudit.matchedQuestion?.fieldKey,
+        });
+      }
+      if (!browserAudit.passed) {
+        throw new Error(
+          `__SEMANTIC_FAILED__:${browserAudit.failures.join(",")}`,
+        );
+      }
+      if (browserAudit.qualificationComplete) {
+        semanticComplete = true;
+        recentBotReplies.push(botReplyText);
+        break;
+      }
+      const matchedQuestion = browserAudit.matchedQuestion;
+      recentBotReplies.push(botReplyText);
+      let nextStep = null;
+      if (semanticDriver.doubt && !doubtSent) {
+        doubtSent = true;
+        nextStep = {
+          ...semanticDriver.doubt,
+          kind: "doubt",
+          intended_facts: {},
+        };
+      } else if (
+        semanticDriver.switch
+        && !switchSent
+        && answeredFields.size >= Number(
+          semanticDriver.switch.after_answered_fields || 0,
+        )
+      ) {
+        switchSent = true;
+        nextStep = { ...semanticDriver.switch, kind: "branch_switch" };
+      } else {
+        const answer = semanticDriver.answers?.[matchedQuestion.fieldKey];
+        if (answer?.text) {
+          nextStep = {
+            text: String(answer.text),
+            kind: "field_answer",
+            intended_facts: { [matchedQuestion.fieldKey]: answer.value },
+          };
+        }
+      }
+      if (!nextStep) {
+        throw new Error(
+          `__SEMANTIC_FAILED__:script_question_mismatch:${matchedQuestion.fieldKey}`,
+        );
+      }
+      stepQueue.push(nextStep);
+    }
+    index += 1;
   }
 
+  if (semanticDriver && !semanticComplete) {
+    throw new Error("__SEMANTIC_FAILED__:driver_exhausted_before_completion");
+  }
   output.status = "done";
   output.assertions.push({
     name: "graph_lineage_present",
@@ -294,16 +384,20 @@ try {
   output.assertions.push({
     name: "all_steps_sent",
     passed:
-      output.conversation.filter((turn) => turn.role === "validator").length ===
-      (script.steps || []).length,
+      semanticDriver
+        ? semanticComplete
+        : output.conversation.filter((turn) => turn.role === "validator").length ===
+          (script.steps || []).length,
   });
   const botTurns = output.conversation.filter(
     (turn) => turn.role === "bot" && !turn.timeout,
   );
   output.assertions.push({
     name: "one_reply_per_step",
-    passed: botTurns.length === (script.steps || []).length,
-    expected: (script.steps || []).length,
+    passed:
+      botTurns.length ===
+      output.conversation.filter((turn) => turn.role === "validator").length,
+    expected: output.conversation.filter((turn) => turn.role === "validator").length,
     actual: botTurns.length,
   });
   output.assertions.push({
@@ -352,6 +446,15 @@ try {
   output.status = output.assertions.every((item) => item.passed)
     ? "done"
     : "failed";
+  output.technical_pass = output.assertions
+    .filter((item) => ["one_reply_per_step", "no_reply_timeout"].includes(item.name))
+    .every((item) => item.passed);
+  output.quality_pass = semanticDriver
+    ? output.assertions.every((item) => item.passed)
+    : null;
+  output.quality_scope = semanticDriver
+    ? "browser_dynamic_dialogue"
+    : "technical_only";
   await writeOutput(options.output, output);
 } catch (error) {
   if (
@@ -365,8 +468,13 @@ try {
   ) {
     // The status and QR screenshot were already persisted above.
   } else {
-  output.status = "error";
-  output.error = error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  output.status = message.startsWith("__SEMANTIC_FAILED__") ? "failed" : "error";
+  output.quality_pass = message.startsWith("__SEMANTIC_FAILED__") ? false : null;
+  output.quality_scope = script.driver?.mode === "semantic_graph_v1"
+    ? "browser_dynamic_dialogue"
+    : "technical_only";
+  output.error = message.replace(/^__SEMANTIC_FAILED__:/, "");
   try {
     const screenshot = path.join(artifactDir, "error.png");
     await page.screenshot({ path: screenshot, fullPage: true });

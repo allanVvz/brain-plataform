@@ -1,0 +1,19 @@
+{
+  "appointment": {
+    "answers": {
+      "nome_cliente": {"text": "Beatriz", "value": "Beatriz"},
+      "objective": {
+        "text": "Quero continuar com o veículo e cuidar bem dele",
+        "value": "continuar com o veículo e cuidar bem dele"
+      },
+      "can_visit_in_person": {"text": "Sim, consigo levar até vocês", "value": true},
+      "modelo_veiculo": {"text": "Onix", "value": "Onix"},
+      "vehicle_year": {"text": "2020", "value": "2020"},
+      "condicao": {
+        "text": "Os bancos estão manchados e a pintura perdeu o brilho",
+        "value": "Os bancos estão manchados e a pintura perdeu o brilho"
+      },
+      "vehicle_color": {"text": "Prata", "value": "Prata"}
+    }
+  }
+}

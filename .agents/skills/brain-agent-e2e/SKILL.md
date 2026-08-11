@@ -16,7 +16,7 @@ Validate the real path `operator -> Evolution -> target persona -> agent -> Evol
 
 ## Establish the test contract
 
-1. Identify target persona/agent, transport persona, both conversations, fixed answers and expected terminal handoff.
+1. Identify target persona/agent, transport persona, both conversations, a graph-keyed customer fact profile and the expected terminal handoff. The profile is a pool of values, not an ordered list of messages.
 2. Confirm the pair with channel/binding, masked phone or technical IDs, recent messages and timestamps. Do not rely on equal display names; one channel can show different local lead names.
 3. Record initial AI state, lead reference, last message, binding/provider and graph version/checksum when available.
 4. Keep the transport-side agent paused for the whole run. Activate the target agent only after the transport side is confirmed paused.
@@ -37,15 +37,27 @@ Before the first mutation:
 
 For every turn:
 
-1. Read the latest target-agent question.
-2. Answer only the requested field. Do not volunteer price, date or time.
-3. Send exactly once from the paused transport-side conversation.
-4. Record the send timestamp and HTTP status.
-5. Prove exactly one transport outbound and one target inbound with IDs, directions and timestamps.
-6. Confirm the target AI state. If paused by a legitimate handoff, inspect logs before resuming.
-7. Wait up to 120 seconds for exactly one target outbound.
-8. Prove exactly one corresponding inbound on the transport side.
-9. Continue until required fields are persisted and the expected human handoff occurs.
+1. Read the latest target-agent question and identify the real requested field or customer intent from the published graph.
+2. If the customer message contains a doubt or interruption, require the agent to answer it before resuming qualification.
+3. Extract and verify every fact present in the customer message, not only the field the previous turn expected.
+4. Require a natural acknowledgement of the received content before the next graph question.
+5. Require exactly the question for `missing_fields[0]`; never answer a different scripted field just to keep the run moving.
+6. Stop before sending when the question cannot be mapped unambiguously to a published graph field.
+7. Stop when a persisted fact is asked again or the reply substantially repeats any recent agent reply.
+8. Send exactly once from the paused transport-side conversation. Do not volunteer price, date or time.
+9. Record the send timestamp and HTTP status.
+10. Prove exactly one transport outbound and one target inbound with IDs, directions and timestamps.
+11. Confirm the target AI state. If paused by a legitimate handoff, inspect logs before resuming.
+12. Wait up to 120 seconds for exactly one target outbound.
+13. Prove exactly one corresponding inbound on the transport side.
+14. Continue until required fields are persisted and the expected human handoff occurs.
+
+Keep two independent verdicts:
+
+- `technical_pass`: canonical inbound, one decision, one valid proof, at most one proof-gated outbound, atomic commit and token budget.
+- `quality_pass`: every semantic turn criterion above passed and qualification/handoff followed the persisted graph state.
+
+A run may have `technical_pass=true` and `quality_pass=false`. A fixed-sequence or browser-only run without ledger/fact/proof evidence is `technical_only` or `browser_dynamic_dialogue`; it is never conversational-quality evidence by itself.
 
 Do not automatically repeat a message with ambiguous delivery. A user-authorized resend is still forbidden once the destination copy or an agent response appears.
 
@@ -73,6 +85,9 @@ Stop all new sends immediately when any condition occurs:
 - more than one agent decision or outbound for one inbound;
 - transport-side agent responds automatically;
 - target response uses the wrong persona/service/history;
+- the driver cannot map the agent's actual question to one published graph field;
+- the agent repeats a recent response or asks a field whose fact is already current;
+- the agent ignores a doubt/interruption or asks the next field before answering it;
 - price, date or time is confirmed without the required human confirmation;
 - resume reprocesses an already handled message;
 - delivery remains ambiguous after the timeout.
@@ -95,7 +110,7 @@ If the conversation contains incompatible old history, use a clean or explicitly
 
 When code or workflow changes are part of the task:
 
-1. Reproduce locally with Docker Compose before the remote run.
+1. Reproduce in the approved controlled environment before the remote run. If the task explicitly forbids local Docker, use automated tests and a safe remote QA/direct-validator path instead.
 2. Validate the canonical n8n template and anti-hardcoded contract.
 3. Add regression coverage for canonical inbound idempotency, pause/resume, graph-version migration, field extraction and service changes.
 4. Run proportional backend tests and dashboard build/type checks.
