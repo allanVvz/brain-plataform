@@ -36,9 +36,12 @@ async def lifespan(app: FastAPI):
         logger.error(msg)
         raise RuntimeError(msg)
     logger.info("Backend env validation OK.")
-    from services import supabase_client
+    from services import graph_compiler_v3, supabase_client
     supabase_client.assert_client_portal_schema()
     logger.info("Client portal schema validation OK (migrations 061/062).")
+    if graph_compiler_v3.embedding_provider() == "local":
+        await asyncio.to_thread(graph_compiler_v3.warm_embedding_model)
+        logger.info("Local GraphRAG embedding model initialized and cached.")
     env = get_backend_env()
     tasks: list[asyncio.Task] = []
     if env["run_embedded_workers"]:

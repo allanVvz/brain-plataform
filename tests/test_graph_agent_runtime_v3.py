@@ -574,6 +574,58 @@ def test_evidenced_branch_candidates_respects_the_limit():
     assert len(graph_agent_runtime_v3._evidenced_branch_candidates(candidates, limit=3)) == 3
 
 
+def test_graph_title_or_alias_resolves_one_branch_without_model_repair():
+    document = {
+        "branch_anchors": ["branch:a", "branch:b"],
+        "node_by_id": {
+            "branch:a": {"title": "Service Alpha", "slug": "service-alpha", "data": {"aliases": ["alpha"]}},
+            "branch:b": {"title": "Service Beta", "slug": "service-beta", "data": {"aliases": ["beta"]}},
+        },
+        "coordinates": {
+            "branch:a": {"path_checksum": "checksum:a"},
+            "branch:b": {"path_checksum": "checksum:b"},
+        },
+    }
+    matches = graph_agent_runtime_v3._deterministic_branch_candidates(
+        document, "I want service alpha"
+    )
+    assert [row["branch_anchor_node_id"] for row in matches] == ["branch:a"]
+    assert matches[0]["deterministic_alias_match"] is True
+
+
+def test_ambiguous_alias_never_selects_a_branch_deterministically():
+    document = {
+        "branch_anchors": ["branch:a", "branch:b"],
+        "node_by_id": {
+            "branch:a": {"title": "Alpha", "slug": "alpha", "data": {}},
+            "branch:b": {"title": "Beta Alpha", "slug": "beta-alpha", "data": {"aliases": ["alpha"]}},
+        },
+        "coordinates": {},
+    }
+    assert graph_agent_runtime_v3._deterministic_branch_candidates(document, "alpha") == []
+
+
+def test_recent_messages_and_chunks_are_projected_to_minimum_prompt_contract():
+    messages = graph_agent_runtime_v3._project_recent_messages([
+        {
+            "id": 1, "role": "user", "content": "hello", "created_at": "now",
+            "metadata": {"secret": "must-not-leak"}, "proof": {"large": True},
+        }
+    ])
+    assert messages == [{
+        "message_id": 1, "role": "user", "content": "hello", "created_at": "now",
+    }]
+    chunk = graph_agent_runtime_v3._compact_prompt_chunk({
+        "id": "chunk-1", "source_graph_node_id": "node-1", "chunk_kind": "rule",
+        "chunk_text": "complete rule", "chunk_checksum": "checksum",
+        "path_checksum": "path", "metadata": {
+            "provenance": {"source": "graph", "status": "validated", "debug": "drop"},
+            "large_internal_payload": {"drop": True},
+        },
+    })
+    assert chunk["metadata"] == {"provenance": {"source": "graph", "status": "validated"}}
+
+
 def test_semantic_chunking_separates_question_answer_and_field_intent():
     node_value = {
         "id": "n", "title": "FAQ", "summary": "Resumo", "data": {

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any
 
@@ -313,6 +315,7 @@ def _estimated_tokens(text: str) -> int:
 # total prompt size, but it makes "we didn't grow this" a checkable claim
 # instead of an assumption.
 RAG_CHUNK_TOKEN_BUDGET = 6000
+RAG_CHUNK_LIMIT = 12
 
 
 def _mmr(candidates: list[dict[str, Any]], limit: int, *, max_tokens: int = RAG_CHUNK_TOKEN_BUDGET) -> list[dict[str, Any]]:
@@ -393,23 +396,101 @@ def _candidate_branches(
     embedding: list[float], active_path: list[str], missing: list[str],
 ) -> list[dict[str, Any]]:
     document = publication.get("document_json") or {}
+    ranked = supabase_client.rank_graph_branches_v3(
+        persona_id=persona_id,
+        publication_id=publication["id"],
+        query=message,
+        query_embedding=embedding,
+        limit=8,
+    )
+    by_anchor = {str(row.get("branch_anchor_node_id")): row for row in ranked}
     candidates: list[dict[str, Any]] = []
     for anchor in document.get("branch_anchors") or []:
-        rows = supabase_client.search_graph_rag_v3(
-            persona_id=persona_id, publication_id=publication["id"],
-            branch_node_id=anchor, query=message, query_embedding=embedding,
-            active_path_node_ids=active_path, missing_fields=missing, limit=3,
-        )
-        score = max([float(row.get("hybrid_score") or 0) for row in rows] or [0.0])
+        rank = by_anchor.get(str(anchor)) or {}
+        score = float(rank.get("score") or 0)
         node = (document.get("node_by_id") or {}).get(anchor) or {}
         candidates.append({
             "branch_anchor_node_id": anchor,
             "branch_path_checksum": ((document.get("coordinates") or {}).get(anchor) or {}).get("path_checksum"),
             "title": node.get("title"), "aliases": (node.get("data") or {}).get("aliases") or [],
             "score": round(score, 6),
-            "evidence_chunks": rows,
+            "snippet": str(rank.get("snippet") or "")[:240],
+            "evidence_chunk_ids": [str(rank["chunk_id"])] if rank.get("chunk_id") else [],
         })
     return sorted(candidates, key=lambda item: (-item["score"], item["branch_anchor_node_id"]))
+
+
+def _normalized_phrase(value: Any) -> str:
+    folded = unicodedata.normalize("NFKD", str(value or "").casefold())
+    ascii_text = "".join(char for char in folded if not unicodedata.combining(char))
+    return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
+
+
+def _deterministic_branch_candidates(
+    document: dict[str, Any], message: str,
+) -> list[dict[str, Any]]:
+    """Resolve graph-owned titles/aliases before semantic retrieval.
+
+    This is generic graph data, not commercial copy in backend code. An
+    unambiguous phrase opens the branch directly and avoids an LLM repair call.
+    """
+    normalized_message = f" {_normalized_phrase(message)} "
+    matches: list[dict[str, Any]] = []
+    for anchor in document.get("branch_anchors") or []:
+        node = (document.get("node_by_id") or {}).get(anchor) or {}
+        phrases = [node.get("title"), node.get("slug"), *((node.get("data") or {}).get("aliases") or [])]
+        matched = max(
+            (
+                phrase for raw in phrases
+                if (phrase := _normalized_phrase(raw)) and len(phrase) >= 3
+                and f" {phrase} " in normalized_message
+            ),
+            key=len,
+            default="",
+        )
+        if matched:
+            matches.append({
+                "branch_anchor_node_id": anchor,
+                "branch_path_checksum": ((document.get("coordinates") or {}).get(anchor) or {}).get("path_checksum"),
+                "title": node.get("title"),
+                "score": 1.0,
+                "snippet": matched,
+                "evidence_chunk_ids": [],
+                "deterministic_alias_match": True,
+            })
+    return matches if len(matches) == 1 else []
+
+
+def _project_recent_messages(messages: list[dict[str, Any]], limit: int = 6) -> list[dict[str, Any]]:
+    projected: list[dict[str, Any]] = []
+    for row in messages[-limit:]:
+        projected.append({
+            "message_id": row.get("message_id") or row.get("id") or row.get("external_message_id"),
+            "role": row.get("role") or ("user" if row.get("direction") == "inbound" else "assistant"),
+            "content": row.get("content") or row.get("texto") or row.get("text") or "",
+            "created_at": row.get("created_at"),
+        })
+    return projected
+
+
+def _compact_prompt_chunk(row: dict[str, Any]) -> dict[str, Any]:
+    metadata = row.get("metadata") or {}
+    provenance = metadata.get("provenance") or {}
+    return {
+        "chunk_id": row.get("chunk_id") or row.get("id"),
+        "source_node_id": row.get("source_node_id") or row.get("source_graph_node_id"),
+        "chunk_kind": row.get("chunk_kind"),
+        "chunk_text": row.get("chunk_text"),
+        "chunk_checksum": row.get("chunk_checksum"),
+        "path_checksum": row.get("path_checksum"),
+        "metadata": {
+            "provenance": {
+                key: provenance.get(key)
+                for key in ("source", "status", "source_url")
+                if provenance.get(key) not in (None, "")
+            }
+        },
+    }
 
 
 BRANCH_EVIDENCE_MIN_SCORE = 0.18
@@ -431,7 +512,17 @@ def _evidenced_branch_candidates(
     this way. This applies the same evidence floor already used for
     `possible_switches`, so both gates can never drift apart again.
     """
-    return [item for item in candidates if item["score"] >= BRANCH_EVIDENCE_MIN_SCORE][:limit]
+    return [
+        {
+            "branch_anchor_node_id": item["branch_anchor_node_id"],
+            "title": item.get("title"),
+            "score": item["score"],
+            "branch_path_checksum": item.get("branch_path_checksum"),
+            "snippet": str(item.get("snippet") or "")[:240],
+        }
+        for item in candidates
+        if item["score"] >= BRANCH_EVIDENCE_MIN_SCORE
+    ][:limit]
 
 
 def _fallback_retrieval_branch(
@@ -547,10 +638,13 @@ def build_context(
     embedding = graph_compiler_v3.query_embeddings([message])[0]
     # A short answer while a field is expected never reopens global selection.
     short_expected_answer = bool(active_branch and missing and len(message.split()) <= 8)
-    candidates = [] if short_expected_answer else _candidate_branches(
+    deterministic_candidates = (
+        [] if short_expected_answer else _deterministic_branch_candidates(document, message)
+    )
+    candidates = deterministic_candidates or ([] if short_expected_answer else _candidate_branches(
         persona_id=str(persona["id"]), publication=publication, message=message,
         embedding=embedding, active_path=active_path, missing=missing,
-    )
+    ))
     retrieval_branch = _fallback_retrieval_branch(
         active_branch=active_branch, candidates=candidates,
         branch_anchors=document.get("branch_anchors") or [],
@@ -575,18 +669,26 @@ def build_context(
         requirements=[{"kind": "node", "id": node_id} for node_id in required_nodes if node_id],
     )
     merged = {str(row.get("chunk_id") or row.get("id")): row for row in [*rows, *structural]}
-    selected = _mmr(list(merged.values()), 16)
     required_structural = _required_structural_chunks(structural)
-    # Phase-A evidence is isolated from the Phase-B branch package and is
-    # available only for a proposed select/switch proof.
-    candidate_chunks = {
-        str(row.get("chunk_id") or row.get("id")): row
-        for candidate in candidates[:5] for row in candidate.get("evidence_chunks") or []
+    if len(required_structural) > RAG_CHUNK_LIMIT:
+        raise RuntimeError(
+            "required structural graph chunks exceed the 12-chunk prompt limit"
+        )
+    structural_ids = {
+        str(row.get("chunk_id") or row.get("id")) for row in required_structural
     }
+    selected = _mmr(
+        [
+            row for key, row in merged.items()
+            if key not in structural_ids
+        ],
+        RAG_CHUNK_LIMIT - len(required_structural),
+    )
+    # Phase-A candidates are represented only by their compact snippets in the
+    # retrieval trace. Full content enters the prompt solely from phase B.
     package = list({
-        **candidate_chunks,
-        **{str(row.get("chunk_id") or row.get("id")): row for row in selected},
         **{str(row.get("chunk_id") or row.get("id")): row for row in required_structural},
+        **{str(row.get("chunk_id") or row.get("id")): row for row in selected},
     }.values())
     by_source: dict[str, list[dict[str, Any]]] = {}
     for row in package:
@@ -609,6 +711,7 @@ def build_context(
         "invalidated_fact_keys": invalidated_fact_keys,
         "short_expected_answer": short_expected_answer,
         "global_branch_search_executed": not short_expected_answer,
+        "deterministic_branch_match": bool(deterministic_candidates),
         "retrieval_branch_node_id": retrieval_branch,
         "branch_candidates": _evidenced_branch_candidates(candidates),
         "possible_switches": possible_switches,
@@ -690,13 +793,15 @@ def build_context(
     return ConversationContext(
         persona_slug=persona_slug, agent_slug=str((persona.get("config") or {}).get("agent_slug") or "agent"),
         graph_version=int(publication["version"]), graph_checksum=publication["checksum"],
-        messages=messages[-20:], cart={**((lead.get("metadata") or {}).get("conversation_state") or {}),
+        messages=_project_recent_messages(messages), cart={**((lead.get("metadata") or {}).get("conversation_state") or {}),
                                       "facts": ledger.get("facts") or {},
                                       "active_branch_node_id": active_branch,
                                       "asked_question_node_ids": ledger.get("asked_question_node_ids") or [],
                                       "_ledger_revision": ledger.get("revision") or 0},
         rag_nodes=[document["node_by_id"][node_id] for node_id in by_source if node_id in document["node_by_id"]],
-        rag_paths=[card.path for card in cards], rag_chunks=package, context_cards=cards,
+        rag_paths=[card.path for card in cards],
+        rag_chunks=[_compact_prompt_chunk(row) for row in package],
+        context_cards=cards,
         system_prompt=prompt, available_services=[{
             "slug": document["node_by_id"][anchor]["slug"], "label": document["node_by_id"][anchor]["title"]
         } for anchor in document.get("branch_anchors") or []],
@@ -781,7 +886,7 @@ def _decide(
     proof = graph_proof_checker_v3.check(
         publication=publication, contract=contract, ledger=ledger,
         proposal=proposal.model_dump(mode="json"), message=next(
-            (str(row.get("texto") or row.get("message") or "") for row in reversed(context.messages)
+            (str(row.get("content") or row.get("texto") or row.get("message") or "") for row in reversed(context.messages)
              if str(row.get("role") or "") == "user" or str(row.get("sender_type") or "") == "lead"), ""
         ), source_message_id=_source_message_id(context.messages),
         package_node_ids={card.id for card in context.context_cards} | {
@@ -838,6 +943,14 @@ def _decide(
             publication_id=publication["id"], branch_node_id=proposal.branch_anchor_node_id,
             requirements=proof["repair_requirements"],
         )
+        unique_repair_chunks = {
+            str(row.get("chunk_id") or row.get("id")): row for row in rows
+        }
+        if len(unique_repair_chunks) > RAG_CHUNK_LIMIT:
+            raise RuntimeError(
+                "required graph repair package exceeds the 12-chunk prompt limit"
+            )
+        rows = list(unique_repair_chunks.values())
         sources: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             sources.setdefault(str(row.get("source_graph_node_id") or ""), []).append(row)
@@ -962,7 +1075,16 @@ def _decide(
     fallback = graph_proof_checker_v3.compose_published_question(
         reply=closing_text, next_question_node_id=fallback_id, contract=contract
     )
-    fallback_proof = {**proof, "repair_required": False, "fallback_used": True}
+    deterministic_fallback_valid = bool(fallback_id or closing_text)
+    fallback_proof = {
+        **proof,
+        "valid": deterministic_fallback_valid,
+        "errors": [] if deterministic_fallback_valid else proof.get("errors") or [],
+        "model_proposal_errors": proof.get("errors") or [],
+        "mode": "published_fallback",
+        "repair_required": False,
+        "fallback_used": True,
+    }
     return (
         ConversationDecision(classifier="graph_proof_checker_v3", intent="published_fallback",
                              route=ConversationRoute.SDR, confidence=0,
