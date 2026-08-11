@@ -13,6 +13,12 @@ from services import wa_validator_service as wv
 from services import supabase_client
 
 
+def test_customer_profile_is_resolved_from_the_packaged_api_tree():
+    assert wv._CUSTOMER_PROFILES_PATH == API_ROOT / "evaluation" / "wa_validator_customer_profiles.json"
+    assert wv._CUSTOMER_PROFILES_PATH.is_file()
+    assert wv._customer_profile("appointment")["answers"]["nome_cliente"]["value"]
+
+
 def test_bots_keeps_authorized_persona_when_graph_label_lookup_fails(monkeypatch):
     monkeypatch.setattr(wv.supabase_client, "get_personas", lambda: [
         {"id": "allowed-id", "slug": "allowed", "name": "Allowed"},
