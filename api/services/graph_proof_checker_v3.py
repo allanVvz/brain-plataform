@@ -514,16 +514,33 @@ def _question_already_asked(question: str, text: str) -> bool:
     q_folded = _fold(question)
     if not q_folded:
         return False
+    # Compare each interrogative sentence, never the whole reply. Summing
+    # every matching character run across an acknowledgement plus an
+    # unrelated question made ordinary Portuguese glue words look like a
+    # match (for example, the graph expected the objective while the model
+    # repeated "como voce se chama?"). SequenceMatcher.ratio keeps order
+    # and penalizes those scattered coincidences, while still recognizing a
+    # personalized noun substitution such as "cor do veiculo" ->
+    # "cor do seu Onix".
+    candidates = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(text or ""))
+        if "?" in sentence
+    ]
     content_tokens = {token for token in q_folded.split() if len(token) >= 4}
-    if content_tokens:
-        text_tokens = set(_fold(text).split())
-        if len(content_tokens & text_tokens) / len(content_tokens) >= 0.7:
+    for candidate in candidates:
+        candidate_folded = _fold(candidate)
+        candidate_tokens = set(candidate_folded.split())
+        if (
+            len(content_tokens) >= 2
+            and len(content_tokens & candidate_tokens) / len(content_tokens) >= 0.7
+        ):
             return True
-    matched_chars = sum(
-        block.size for block in
-        difflib.SequenceMatcher(None, q_folded, _fold(text), autojunk=False).get_matching_blocks()
-    )
-    return matched_chars / len(q_folded) >= 0.6
+        if difflib.SequenceMatcher(
+            None, q_folded, candidate_folded, autojunk=False,
+        ).ratio() >= 0.68:
+            return True
+    return False
 
 
 def compose_published_question(

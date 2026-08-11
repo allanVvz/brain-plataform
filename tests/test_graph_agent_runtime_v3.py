@@ -501,6 +501,46 @@ def test_published_question_still_appends_for_a_similarly_worded_different_quest
     assert emitted == "Perfeito! Anotado.\n\nQual é a cor do veículo?"
 
 
+def test_published_question_replaces_repeated_name_question_after_name_was_captured():
+    contract = {
+        "questions": {
+            "q:objective": {
+                "text": (
+                    "Você pretende vender o carro em breve ou vai continuar com ele "
+                    "e quer investir em cuidado e proteção?"
+                ),
+                "field_key": "objective",
+            }
+        }
+    }
+    emitted = graph_proof_checker_v3.compose_published_question(
+        reply="Antes de tudo, como você se chama?",
+        next_question_node_id="q:objective",
+        contract=contract,
+    )
+    assert emitted == contract["questions"]["q:objective"]["text"]
+
+
+def test_published_question_replaces_objective_question_when_visit_is_next():
+    contract = {
+        "questions": {
+            "q:visit": {
+                "text": "Você consegue trazer o carro até nossa unidade?",
+                "field_key": "can_visit_in_person",
+            }
+        }
+    }
+    emitted = graph_proof_checker_v3.compose_published_question(
+        reply=(
+            "Perfeito. Você pretende vender o carro em breve ou vai continuar com ele "
+            "e quer investir em cuidado e proteção?"
+        ),
+        next_question_node_id="q:visit",
+        contract=contract,
+    )
+    assert emitted == "Perfeito.\n\nVocê consegue trazer o carro até nossa unidade?"
+
+
 def test_qualification_complete_is_derived_not_validated_against_the_model():
     """Regression test for the qualification_completion_mismatch gap (2026-08-08 report).
 
