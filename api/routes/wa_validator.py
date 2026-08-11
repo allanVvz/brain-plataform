@@ -2,6 +2,7 @@
 """WA Validator API routes."""
 
 import logging
+import os
 import traceback
 
 from fastapi import APIRouter, HTTPException, Request
@@ -11,6 +12,14 @@ from services import auth_service, wa_validator_service
 logger = logging.getLogger("wa_validator")
 
 router = APIRouter(prefix="/wa-validator", tags=["wa-validator"])
+
+
+def _assert_runs_enabled() -> None:
+    enabled = os.environ.get("WA_VALIDATOR_RUN_ENABLED", "").strip().lower() in {
+        "1", "true", "yes",
+    }
+    if os.environ.get("ENVIRONMENT", "development").lower() == "production" and not enabled:
+        raise HTTPException(503, "WA Validator runs are temporarily disabled in production.")
 
 
 def _assert_session_access(request: Request, session_id: str) -> dict:
@@ -47,6 +56,15 @@ def list_bots(request: Request):
     user = auth_service.current_user(request)
     allowed = None if auth_service.is_admin(user) else set(auth_service.allowed_persona_ids(request))
     return wa_validator_service.bots(allowed)
+
+
+@router.get("/bootstrap")
+def bootstrap(request: Request, persona_slug: str):
+    auth_service.assert_persona_access(request, persona_slug=persona_slug)
+    try:
+        return wa_validator_service.bootstrap(persona_slug)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.get("/flows")
@@ -100,6 +118,8 @@ def generate_script(request: Request, body: GenerateScriptRequest):
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         tb = traceback.format_exc()
         logger.error("generate_script failed (model=%r)\n%s", body.model, tb)
@@ -114,10 +134,13 @@ def generate_script(request: Request, body: GenerateScriptRequest):
 @router.post("/run")
 def run_session(request: Request, body: RunRequest):
     try:
+        _assert_runs_enabled()
         _assert_session_access(request, body.session_id)
         return wa_validator_service.run_session(body.session_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         tb = traceback.format_exc()
         logger.error("run_session failed\n%s", tb)
@@ -132,10 +155,13 @@ def run_session(request: Request, body: RunRequest):
 async def run_session_direct(request: Request, body: RunRequest):
     """Drive validation through the selected conversation_v1 mode."""
     try:
+        _assert_runs_enabled()
         _assert_session_access(request, body.session_id)
         return await wa_validator_service.run_session_direct(body.session_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         tb = traceback.format_exc()
         logger.error("run_session_direct failed\n%s", tb)

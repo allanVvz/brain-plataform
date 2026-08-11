@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule Brain AI daily data-only backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+Unit=brain-ai-backup.service
+
+[Install]
+WantedBy=timers.target

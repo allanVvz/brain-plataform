@@ -1,4 +1,4 @@
-﻿# BRA-19 Blocker Triage Addendum (Board Comment 2026-05-26)
+# BRA-19 Blocker Triage Addendum (Board Comment 2026-05-26)
 
 Date: 2026-05-26
 Issue: BRA-19
@@ -17,7 +17,7 @@ BRA-19 remains blocked until all evidence classes below exist:
 2. Negative cases executed.
 3. Automated test passing.
 4. Visual/API validation at:
-   - http://192.168.0.182:3000/knowledge/graph?mode=semantic_tree&all_edges=1
+   - http://<QA_HOST>:3000/knowledge/graph?mode=semantic_tree&all_edges=1
 
 ## Mapping to Existing Child Issues
 

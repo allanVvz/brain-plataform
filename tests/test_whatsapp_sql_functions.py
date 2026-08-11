@@ -267,10 +267,12 @@ class TestClaimWhatsappBuffer:
         claimed = cur.fetchall()
         assert [str(row["id"]) for row in claimed] == [ids[-1]]
         assert claimed[0]["payload"]["text"] == "um\ndois\ntres"
-        assert len(claimed[0]["payload"]["burst_messages"]) == 3
+        assert len(claimed[0]["payload"]["evidence_messages"]) == 3
         cur.execute("select id,status from public.lead_buffer where id=any(%s::uuid[]) order by created_at,id", (ids,))
         rows = cur.fetchall()
-        assert [row["status"] for row in rows] == ["ignored", "ignored", "processing"]
+        # Earlier members remain durable/actionable evidence until the final
+        # graph proof and outbox commit coalesce them atomically.
+        assert [row["status"] for row in rows] == ["buffered", "buffered", "processing"]
 
 
 # ── mark_whatsapp_attempt ────────────────────────────────────────────────

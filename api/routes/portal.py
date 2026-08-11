@@ -254,12 +254,22 @@ def client_pages(request: Request):
 
 
 @router.get("/conversations/{lead_id}/messages")
-def conversation_messages(lead_id: int, request: Request, persona_slug: str = Query(...)):
+def conversation_messages(
+    lead_id: int,
+    request: Request,
+    persona_slug: str = Query(...),
+    limit: int = Query(50, ge=1, le=100),
+    after: str | None = Query(None),
+    before: str | None = Query(None),
+):
     persona = _persona(persona_slug, request)
     lead = _lead(lead_id, persona["id"])
     if lead_qualification.is_validation_lead(lead):
         raise HTTPException(404, "Conversa nao encontrada.")
-    return supabase_client.get_messages(str(lead_id), limit=500)
+    # Reuse the authenticated message cursor contract; portal authorization
+    # has already proved that this lead belongs to the requested persona.
+    from routes.messages import _message_page
+    return _message_page(lead_id, limit=limit, after=after, before=before)
 
 
 @router.get("/knowledge/chat-context")
@@ -280,7 +290,9 @@ def knowledge_chat_context(
         user_text=q,
         limit=limit,
     )
-    messages = supabase_client.get_messages(str(lead_ref), limit=500)
+    # Context cards only need the latest conversational window. Full proof
+    # history is fetched explicitly through the paginated messages endpoint.
+    messages = supabase_client.get_messages(str(lead_ref), limit=50)
     try:
         projection_nodes, _projection_edges = supabase_client.list_all_knowledge_graph(
             persona_id=str(persona["id"]),

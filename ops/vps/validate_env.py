@@ -42,8 +42,8 @@ def main() -> int:
     env = read_env(path)
     required = [
         "POSTGRES_PASSWORD", "JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY",
-        "AI_BRAIN_AUTH_SECRET", "AI_BRAIN_WEBHOOK_TOKEN", "API_DOMAIN", "STORAGE_DOMAIN", "ACME_EMAIL",
-        "SUPABASE_PUBLIC_URL", "ALLOWED_ORIGINS",
+        "AI_BRAIN_AUTH_SECRET", "AI_BRAIN_WEBHOOK_TOKEN", "API_DOMAIN", "API_DOMAIN_SECONDARY", "STORAGE_DOMAIN", "ACME_EMAIL",
+        "SUPABASE_PUBLIC_URL", "ALLOWED_ORIGINS", "API_INTERNAL_BASE_URL",
     ]
     errors = [f"{key} is missing" for key in required if not env.get(key)]
     for key in required:
@@ -71,10 +71,15 @@ def main() -> int:
         errors.append("POSTGRES_PASSWORD, AI_BRAIN_AUTH_SECRET and AI_BRAIN_WEBHOOK_TOKEN must be distinct")
     if len(env.get("JWT_SECRET", "")) < 32:
         errors.append("JWT_SECRET must have at least 32 characters")
-    for key in ("API_DOMAIN", "STORAGE_DOMAIN"):
+    for key in ("API_DOMAIN", "API_DOMAIN_SECONDARY", "STORAGE_DOMAIN"):
         value = env.get(key, "")
         if "://" in value or value.endswith(".invalid") or value.startswith("localhost"):
             errors.append(f"{key} must be a real hostname without scheme")
+    if env.get("API_DOMAIN") == env.get("API_DOMAIN_SECONDARY"):
+        errors.append("API_DOMAIN and API_DOMAIN_SECONDARY must be distinct")
+    internal_api = env.get("API_INTERNAL_BASE_URL", "")
+    if not re.fullmatch(r"https://[^/]+", internal_api):
+        errors.append("API_INTERNAL_BASE_URL must be an explicit HTTPS origin without a path")
     expected_storage = f"https://{env.get('STORAGE_DOMAIN', '')}"
     if env.get("SUPABASE_PUBLIC_URL", "").rstrip("/") != expected_storage:
         errors.append(f"SUPABASE_PUBLIC_URL must equal {expected_storage}")

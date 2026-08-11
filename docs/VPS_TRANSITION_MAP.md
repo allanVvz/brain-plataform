@@ -5,7 +5,7 @@
 - Dashboard: projeto Vercel `brain-plataform`, root `dashboard`.
 - Backend e banco: stack self-hosted prevista em `docker-compose.yml`.
 - Dominios definidos: `api.vzforeal.com` e `n8n.vzforeal.com`.
-- VPS informada: `179.197.233.12`.
+- VPS informada: `<VPS_HOST>`.
 - n8n: ainda nao faz parte do Compose principal e deve permanecer isolado na primeira fase.
 - SSH: host responde, mas a chave autorizada ainda nao esta disponivel nesta maquina.
 
@@ -49,7 +49,7 @@
 
 ## Bloqueios atuais
 
-- Falta chave SSH autorizada para `root@179.197.233.12`.
+- Falta chave SSH autorizada para `root@<VPS_HOST>`.
 - Falta confirmar se a VPS ja possui dados/containers que nao podem ser alterados.
 - Falta acesso DNS para criar os registros.
 - Falta decidir se `storage.vzforeal.com` sera o subdominio publico de Storage.

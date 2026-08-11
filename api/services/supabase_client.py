@@ -832,6 +832,26 @@ def get_messages(lead_id: str, limit: int = 30) -> list:
     return []
 
 
+def get_messages_page(
+    lead_ref: int, *, limit: int = 50,
+    after_created_at: str | None = None, after_id: int | None = None,
+    before_created_at: str | None = None, before_id: int | None = None,
+) -> list:
+    result = get_client().rpc(
+        "messages_page",
+        {
+            "p_lead_id": lead_ref,
+            "p_limit": max(1, min(int(limit), 100)) + 1,
+            "p_after_created_at": after_created_at,
+            "p_after_id": after_id,
+            "p_before_created_at": before_created_at,
+            "p_before_id": before_id,
+        },
+    ).execute()
+    rows = [_normalize_message_row(row) for row in (result.data or [])]
+    return _sort_messages_for_chat(rows)
+
+
 def _sort_messages_for_chat(rows: list) -> list:
     """Return chat messages in human-readable order.
 
@@ -4030,6 +4050,45 @@ def get_active_graph_publication(persona_id: str) -> Optional[dict]:
     )
 
 
+def get_graph_turn_context_batch_v3(
+    *, persona_id: str, lead_ref: int, message_limit: int = 8,
+) -> dict:
+    """Fetch publication, ledger, facts, branches and recent messages once."""
+    result = get_client().rpc(
+        "graph_turn_context_batch_v3",
+        {
+            "p_persona_id": persona_id,
+            "p_lead_ref": lead_ref,
+            "p_message_limit": max(1, min(int(message_limit), 20)),
+        },
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def get_graph_branch_package_v3(
+    *, publication_id: str, branch_node_id: str,
+    chunk_ids: list[str] | None = None, node_ids: list[str] | None = None,
+    limit: int = 12,
+) -> dict:
+    result = get_client().rpc(
+        "graph_branch_package_v3",
+        {
+            "p_publication_id": publication_id,
+            "p_branch_node_id": branch_node_id,
+            "p_chunk_ids": chunk_ids or [],
+            "p_node_ids": node_ids or [],
+            "p_limit": max(1, min(int(limit), 12)),
+        },
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
 def get_graph_branch_contract(publication_id: str, branch_node_id: str) -> Optional[dict]:
     if not publication_id or not branch_node_id:
         return None
@@ -4069,6 +4128,7 @@ def get_conversation_ledger(persona_id: str, lead_ref: int) -> Optional[dict]:
             "fact_id": row.get("id"),
         })
     ledger["facts_by_key"] = grouped
+    ledger["active_branch_node_ids"] = get_active_ledger_branches(str(ledger["id"]))
     return ledger
 
 
@@ -4173,6 +4233,17 @@ def list_wa_validator_sessions(limit: int = 100) -> list[dict]:
         .order("created_at", desc=True).limit(limit)
     )
     return [row["data"] for row in rows if row.get("data")]
+
+
+def claim_wa_validator_session(session_id: str) -> dict:
+    """Atomically transition one validator session from ready to running."""
+    result = get_client().rpc(
+        "claim_wa_validator_session", {"p_session_id": session_id}
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
 
 
 def search_graph_rag_v3(
@@ -4657,7 +4728,18 @@ def claim_whatsapp_buffer(worker_id: str, limit: int = 20, lease_seconds: int = 
     result = get_client().rpc("claim_whatsapp_buffer", {
         "p_worker": worker_id, "p_limit": limit, "p_lease_seconds": lease_seconds,
     }).execute()
-    return result.data or []
+    rows = result.data or []
+    # Migration 113 preserves the SQL SETOF lead_buffer contract while
+    # exposing the burst identity as convenient top-level worker fields.
+    for row in rows:
+        payload = row.get("payload") or {}
+        for key in (
+            "canonical_id", "burst_member_ids", "evidence_messages", "burst_version",
+        ):
+            if key in payload:
+                row[key] = payload[key]
+        row.setdefault("canonical_id", row.get("id"))
+    return rows
 
 
 def mark_whatsapp_attempt(buffer_id: str, worker_id: str, kind: str) -> bool:

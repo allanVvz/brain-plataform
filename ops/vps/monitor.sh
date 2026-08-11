@@ -28,7 +28,6 @@ disk_used="$(df -P "$ROOT_DIR" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
 (( disk_used < 85 )) || { echo "CRITICAL: disk usage is ${disk_used}%"; failed=1; }
 memory_used="$(free | awk '/Mem:/ {printf("%.0f", $3/$2*100)}')"
 (( memory_used < 90 )) || { echo "WARNING: memory usage is ${memory_used}%"; failed=1; }
-latest="$(find "$BACKUP_ROOT" -mindepth 2 -maxdepth 2 -name postgres.dump -mmin -1560 -print -quit 2>/dev/null || true)"
+latest="$(find "$BACKUP_ROOT" -mindepth 2 -maxdepth 2 -name postgres-data.dump -mmin -1560 -print -quit 2>/dev/null || true)"
 [[ -n "$latest" ]] || { echo "CRITICAL: no successful database backup in the last 26 hours"; failed=1; }
 exit "$failed"
-

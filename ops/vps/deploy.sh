@@ -164,7 +164,8 @@ deploy_tag() {
   "${COMPOSE[@]}" up --no-deps --force-recreate migrate
   "${COMPOSE[@]}" up -d --remove-orphans rest storage kong api caddy
   wait_for_api
-  configure_whatsapp_bindings "$allow_local_images"
+  # Binding ownership/routing is operational content. Code deploys never
+  # mutate persona bindings; use the reviewed reassignment procedure instead.
   "${COMPOSE[@]}" up -d workers seed-admin
   if [[ "$evolution_enabled" =~ ^(1|true|yes)$ ]]; then
     "${COMPOSE[@]}" up -d evolution-redis evolution-api

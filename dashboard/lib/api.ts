@@ -243,10 +243,13 @@ export const api = {
   messages: (leadId: string) => req<any[]>(`/messages/${leadId}`),
   messagesByRef: (
     leadRef: number,
-    limit = 200,
+    limit = 50,
     validationScope: "exclude" | "only" | "all" = "exclude",
+    cursors: { after?: string | null; before?: string | null } = {},
   ) =>
-    req<any[]>(`/messages/by-ref/${leadRef}?limit=${limit}&validation_scope=${validationScope}`),
+    req<{ items: any[]; before_cursor: string | null; after_cursor: string | null; next_cursor: string | null; has_more: boolean }>(
+      `/messages/by-ref/${leadRef}?limit=${limit}&validation_scope=${validationScope}${cursors.after ? `&after=${encodeURIComponent(cursors.after)}` : ""}${cursors.before ? `&before=${encodeURIComponent(cursors.before)}` : ""}`,
+    ),
   messagesByRefScoped: (leadRef: number, opts: {
     limit?: number;
     personaId?: string;
@@ -254,15 +257,19 @@ export const api = {
     audienceId?: string;
     audienceSlug?: string;
     validationScope?: "exclude" | "only" | "all";
+    after?: string;
+    before?: string;
   }) => {
     const params = new URLSearchParams();
-    params.set("limit", String(opts.limit ?? 200));
+    params.set("limit", String(opts.limit ?? 50));
     if (opts.personaId) params.set("persona_id", opts.personaId);
     if (opts.personaSlug) params.set("persona_slug", opts.personaSlug);
     if (opts.audienceId) params.set("audience_id", opts.audienceId);
     if (opts.audienceSlug) params.set("audience_slug", opts.audienceSlug);
+    if (opts.after) params.set("after", opts.after);
+    if (opts.before) params.set("before", opts.before);
     params.set("validation_scope", opts.validationScope ?? "exclude");
-    return req<any[]>(`/messages/by-ref/${leadRef}?${params.toString()}`);
+    return req<{ items: any[]; next_cursor: string | null; has_more: boolean }>(`/messages/by-ref/${leadRef}?${params.toString()}`);
   },
   recentMessages: (hours = 24, personaId?: string) =>
     req<any[]>(`/messages?hours=${hours}${personaId ? `&persona_id=${personaId}` : ""}`),
@@ -311,8 +318,14 @@ export const api = {
     ),
   portalConversations: (slug: string) =>
     req<any[]>(`/portal/conversations?${personaQuery(slug)}`),
-  portalConversationMessages: (slug: string, leadRef: number) =>
-    req<any[]>(`/portal/conversations/${leadRef}/messages?${personaQuery(slug)}`),
+  portalConversationMessages: (
+    slug: string,
+    leadRef: number,
+    cursors: { after?: string | null; before?: string | null } = {},
+  ) =>
+    req<{ items: any[]; before_cursor: string | null; after_cursor: string | null; has_more: boolean }>(
+      `/portal/conversations/${leadRef}/messages?${personaQuery(slug)}&limit=50${cursors.after ? `&after=${encodeURIComponent(cursors.after)}` : ""}${cursors.before ? `&before=${encodeURIComponent(cursors.before)}` : ""}`,
+    ),
   portalKnowledgeChatContext: (slug: string, leadRef: number, q?: string, limit = 12, responseMessageId?: string) => {
     const params = new URLSearchParams();
     params.set("persona_slug", slug);
@@ -1095,6 +1108,8 @@ export const api = {
 
   // WA Validator
   waBots: () => req<any[]>("/wa-validator/bots"),
+  waBootstrap: (personaSlug: string) =>
+    req<any>(`/wa-validator/bootstrap?persona_slug=${encodeURIComponent(personaSlug)}`),
   waFlows: (personaSlug?: string) =>
     req<any[]>(
       `/wa-validator/flows${personaSlug ? `?persona_slug=${encodeURIComponent(personaSlug)}` : ""}`,

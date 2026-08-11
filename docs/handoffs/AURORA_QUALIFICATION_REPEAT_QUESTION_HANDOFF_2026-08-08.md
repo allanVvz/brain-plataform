@@ -134,7 +134,7 @@ Também não descartado: talvez o ledger esteja correto e atualizado, mas a etap
 1. **Reproduzir com instrumentação completa.** Rodar `sdr_qualificacao_carro` contra Aurora via SSH (comando abaixo) e, para cada turno, salvar `n8n_client.get_execution(execution_id)["data"]["resultData"]["runData"]` completo (não só o output de `Persist once and enqueue send`) — precisamos ver o output de `Build graph grounded agent request`, `Bound conversation model` e `Reconcile fields with graph policy` em cada turno pra saber o que o LLM recebeu como "campos pendentes" ANTES de gerar a pergunta.
 
    ```bash
-   ssh -i ~/.ssh/id_ed25519_srv1846215 root@179.197.233.12
+   ssh -i ~/.ssh/id_ed25519_srv1846215 root@<VPS_HOST>
    cd /opt/brain-ai
    docker compose --env-file .env.compose exec -T -e WA_VALIDATOR_DIRECT_WAIT=1 api python - << 'PYEOF'
    import asyncio, json
@@ -229,7 +229,7 @@ Isso explica todos os sintomas:
 
 ### O que NÃO foi possível fazer nesta sessão (bloqueado por acesso)
 
-- SSH para `root@179.197.233.12` — bloqueado pelo classificador de auto mode (rede/produção). Não tentado contornar.
+- SSH para `root@<VPS_HOST>` — bloqueado pelo classificador de auto mode (rede/produção). Não tentado contornar.
 - Consulta ao Supabase real do brain-plataform — os 3 projetos Supabase MCP conectados (`allanVvz's Project`, `ai-brain-qa`, `north-portal`) **não são o banco do brain-plataform** (schema de `north-portal` não tem `personas`/`graph_nodes` etc., é outro produto). Não foi possível confirmar se o grafo publicado da Aurora de fato redeclara `nome_cliente`/`can_visit_in_person` por branch em vez de uma vez no node persona — essa é a única confirmação que falta para fechar a causa raiz com certeza.
 - Não foi aplicada nenhuma correção de produção. Duas rotas possíveis, nenhuma tentada:
   1. **Conteúdo do grafo** (provável fix real): mover `nome_cliente`/`can_visit_in_person`/outros campos universais para o `qualification.fields` do node persona da Aurora, removendo a redeclaração em cada node de branch/serviço. Isso não exige nenhuma mudança de código — `_field_declarations()` já dá `owner_node_id` consistente (= persona.id) para campos declarados uma vez no persona, porque o persona node está no closure/ancestor path de toda branch.

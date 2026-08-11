@@ -7,13 +7,9 @@ the credential is never re-entered, re-encrypted, or exposed as plaintext
 anywhere.
 
 Re-parenting persona_id alone is NOT enough: every persona-scoped routing
-field (decision_owner, conversation_webhook_url, n8n_workflow_id) still
-points at the source persona's config until you run set_binding_deterministic
-or set_binding_n8n_webhook afterward -- confirmed live 2026-08-04 (a moved
-Baita binding kept executing Baita's n8n workflow under VZ Lupas). This
-script also can't atomically fix that for you: choosing the right target
-routing (clone from an existing binding? attach to a new n8n workflow? fall
-back to deterministic?) is a decision, not something to guess.
+field (decision_owner, conversation_webhook_url, n8n_workflow_id) must move
+with it. This script therefore requires an explicit routing strategy and
+updates binding ownership, routing and affected leads in one database RPC.
 
 Every lead still pointing at the moved binding (channel_binding_id) is
 reparented to belong to a persona it no longer matches -- every outbound
@@ -33,7 +29,8 @@ Dry-run by default; pass --apply to actually write.
 Usage (on the VPS, inside the api container):
   docker compose --env-file .env.compose exec -T api \
     python scripts/move_whatsapp_binding.py \
-    --from-persona-slug aurora --to-persona-slug tock-fatal --apply
+    --from-persona-slug source-persona --to-persona-slug target-persona \
+    --routing deterministic --apply
 
 If the source persona has more than one active WhatsApp binding, pass
 --provider {meta_cloud|evolution_baileys} to disambiguate.
@@ -53,6 +50,12 @@ for path in (API_DIR, ROOT_DIR):
         sys.path.insert(0, str(path))
 
 from services import supabase_client
+
+_STALE_ROUTING_KEYS = (
+    "conversation_webhook_url", "n8n_outbound_webhook_url", "model",
+    "model_endpoint", "runtime_version", "reply_source", "provider_version",
+    "workflow_version",
+)
 
 
 def _active_whatsapp_binding(persona_id: str, provider: str | None) -> dict | None:
@@ -77,6 +80,16 @@ def main() -> None:
     parser.add_argument("--to-persona-slug", required=True)
     parser.add_argument("--provider", choices=["meta_cloud", "evolution_baileys"], default=None)
     parser.add_argument("--workflow-name", default=None, help="Optional rename; keeps the original if omitted.")
+    parser.add_argument(
+        "--routing",
+        required=True,
+        choices=["deterministic", "clone"],
+        help="Choose the target routing explicitly; never retain source-persona routing.",
+    )
+    parser.add_argument(
+        "--routing-binding-id",
+        help="Target persona binding whose complete routing is cloned when --routing=clone.",
+    )
     parser.add_argument("--apply", action="store_true", help="Without this flag, only prints the plan.")
     args = parser.parse_args()
 
@@ -90,6 +103,35 @@ def main() -> None:
     source_binding = _active_whatsapp_binding(source_persona["id"], args.provider)
     if not source_binding:
         raise SystemExit(f"no active WhatsApp binding found for {args.from_persona_slug}")
+
+    old_metadata = dict(source_binding.get("metadata") or {})
+    routing_update: dict = {}
+    if args.routing == "deterministic":
+        target_metadata = {
+            **old_metadata,
+            "decision_owner": "deterministic",
+            "conversation_mode": "deterministic",
+            "transport_mode": "provider_direct",
+            "pipeline_contract": "conversation_v1",
+        }
+        for key in _STALE_ROUTING_KEYS:
+            target_metadata.pop(key, None)
+        routing_update = {"metadata": target_metadata, "n8n_workflow_id": None}
+    else:
+        if not args.routing_binding_id:
+            raise SystemExit("--routing-binding-id is required when --routing=clone")
+        reference = supabase_client.get_workflow_binding_by_id(args.routing_binding_id) or {}
+        if str(reference.get("persona_id") or "") != str(target_persona["id"]):
+            raise SystemExit("routing reference binding must already belong to the target persona")
+        if reference.get("channel") != "whatsapp":
+            raise SystemExit("routing reference binding must be a WhatsApp binding")
+        reference_metadata = dict(reference.get("metadata") or {})
+        if not reference_metadata.get("decision_owner"):
+            raise SystemExit("routing reference binding has no decision_owner")
+        routing_update = {
+            "metadata": reference_metadata,
+            "n8n_workflow_id": reference.get("n8n_workflow_id"),
+        }
 
     existing_target_binding = next(
         (
@@ -113,12 +155,9 @@ def main() -> None:
         "to_persona_slug": args.to_persona_slug,
         "target_already_has_binding_of_same_provider": bool(existing_target_binding),
         "leads_to_detach": [lead["id"] for lead in affected_leads],
-        "reminder": (
-            "persona-scoped routing (decision_owner/n8n_workflow_id/"
-            "conversation_webhook_url) is NOT touched by this script -- run "
-            "set_binding_deterministic.py or set_binding_n8n_webhook.py next, "
-            "or clone routing from another binding as documented in the skill"
-        ),
+        "routing": args.routing,
+        "routing_binding_id": args.routing_binding_id,
+        "target_decision_owner": (routing_update.get("metadata") or {}).get("decision_owner"),
     }
     if existing_target_binding and existing_target_binding.get("active"):
         plan["warning"] = (
@@ -140,6 +179,7 @@ def main() -> None:
     client = supabase_client.get_client()
     update_fields: dict = {
         "persona_id": target_persona["id"],
+        **routing_update,
     }
     if args.workflow_name:
         update_fields["workflow_name"] = args.workflow_name

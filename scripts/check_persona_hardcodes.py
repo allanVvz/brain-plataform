@@ -22,7 +22,24 @@ FORBIDDEN_MARKERS = {
     "_run_baita_safe",
     "Simple Vector Store",
     "Tock Vitoria Crm Low",
+    "https://api.vzforeal.com",
 }
+
+RUNTIME_ROOTS = (
+    ROOT / "api" / "routes",
+    ROOT / "api" / "services",
+    ROOT / "api" / "core",
+    ROOT / "api" / "workers",
+    ROOT / "api" / "scripts",
+    ROOT / "api" / "n8n-workflows",
+    ROOT / "dashboard" / "app",
+    ROOT / "dashboard" / "components",
+    ROOT / "dashboard" / "lib",
+    ROOT / "dashboard" / "scripts",
+    ROOT / ".github",
+    ROOT / "ops",
+)
+RUNTIME_SUFFIXES = {".py", ".json", ".js", ".mjs", ".ts", ".tsx", ".sh", ".yml", ".yaml"}
 
 
 def frontmatter(path: Path) -> dict:
@@ -54,13 +71,17 @@ def main() -> None:
             errors.append(f"legacy hardcoded file still exists: {path.relative_to(ROOT)}")
 
     commercial_facts = facts()
-    source_files = [
+    source_files = sorted({
         path
-        for path in (ROOT / "api").rglob("*.py")
-        if ".venv" not in path.parts and "__pycache__" not in path.parts
-    ]
-    workflow_files = list((ROOT / "api" / "n8n-workflows").glob("*.json"))
-    for path in source_files + workflow_files:
+        for root in RUNTIME_ROOTS
+        if root.exists()
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in RUNTIME_SUFFIXES
+        and not {"e2e", "__tests__", "fixtures", "__pycache__"}.intersection(path.parts)
+    })
+    source_files.extend([ROOT / "docker-compose.yml", ROOT / "dashboard" / "next.config.js"])
+    workflow_files = [path for path in source_files if path.suffix == ".json"]
+    for path in source_files:
         text = path.read_text(encoding="utf-8")
         for marker in FORBIDDEN_MARKERS:
             if marker in text:

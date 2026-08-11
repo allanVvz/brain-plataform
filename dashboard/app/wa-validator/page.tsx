@@ -134,15 +134,7 @@ export default function WaValidatorPage({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    api.waBots()
-      .then((rows) => {
-        setBots(rows);
-        setError("");
-      })
-      .catch((cause: any) => {
-        setBots([]);
-        setError(cause?.message || "Não foi possível carregar as personas do WA Validator.");
-      });
+    setBots([]);
   }, []);
 
   // The bot/agent for a WA Validator run is whichever persona is selected
@@ -156,8 +148,13 @@ export default function WaValidatorPage({
   // "compra_simples" produce a nonsensical, looping conversation for it).
   useEffect(() => {
     if (!globalPersona.slug) { setFlows([]); setFlowId(""); return; }
-    api.waFlows(globalPersona.slug)
-      .then((f) => {
+    let active = true;
+    setActiveSession(null);
+    api.waBootstrap(globalPersona.slug)
+      .then((snapshot) => {
+        if (!active) return;
+        const f = snapshot.flows || [];
+        setBots(snapshot.bot ? [snapshot.bot] : []);
         setFlows(f);
         setFlowId(f.length > 0 ? f[0].id : "");
         if (f.length === 0) {
@@ -167,10 +164,12 @@ export default function WaValidatorPage({
         }
       })
       .catch((cause: any) => {
+        if (!active) return;
         setFlows([]);
         setFlowId("");
         setError(cause?.message || "Não foi possível carregar os fluxos da persona selecionada.");
       });
+    return () => { active = false; };
   }, [globalPersona.slug]);
 
   // Poll active session while running

@@ -28,6 +28,13 @@
           "data_desejada",
           "janela_horario"
         ],
+        "conversation_policy": {
+          "intents": {
+            "greeting": {
+              "response": "Olá! Que bom falar com você."
+            }
+          }
+        },
         "appointment_policy": {
           "responsible_team": "Equipe Aurora (Guilherme e Danielle)",
           "provider": "manual",

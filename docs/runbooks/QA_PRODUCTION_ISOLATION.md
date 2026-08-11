@@ -67,7 +67,7 @@ WhatsApp automatizado de ponta a ponta — so dashboard, API, grafo e banco).
 
 ### Passos manuais — estado em 2026-08-06
 
-Feito (via SSH direto na VPS, `root@179.197.233.12`, e `gh` no repo):
+Feito (via SSH direto na VPS, `root@<VPS_HOST>`, e `gh` no repo):
 
 - `/opt/brain-ai-qa` criado com `docker-compose.yml`, `infra/kong.yml`,
   `infra/generate_keys.py` e `ops/vps/*` sincronizados a partir da branch
@@ -101,7 +101,7 @@ Feito (via SSH direto na VPS, `root@179.197.233.12`, e `gh` no repo):
 Ainda pendente (bloqueado por acesso que nao tenho):
 
 1. **DNS**: `api-qa.vzforeal.com` e `storage-qa.vzforeal.com` -> IP da VPS
-   (`179.197.233.12`). Sem isso, mesmo com o Caddy configurado, o ACME nunca
+   (`<VPS_HOST>`). Sem isso, mesmo com o Caddy configurado, o ACME nunca
    emite certificado para esses hosts.
 2. **Push de `main`/`qa` para `origin`**: as mudancas de compose/Caddyfile
    deste runbook (rede `edge`, blocos `API_DOMAIN_QA`/`STORAGE_DOMAIN_QA`)
@@ -137,7 +137,7 @@ Os apelidos `-plum` e `-navy` sao sufixos aleatorios que a Vercel atribui por pr
 - A variavel `API_INTERNAL_BASE_URL` configurada no projeto Vercel `brain-plataform` (Production) aponta para `https://lpapi.vzforeal.com` — dominio que nao aparece em nenhum doc do repo.
 - Validacao (2026-08-03):
   - `https://lpapi.vzforeal.com/health` -> `200 OK` (`{"status":"ok","service":"api",...}`). E o backend real, ativo.
-  - `https://api.vzforeal.com/health` -> falha no handshake TLS. DNS resolve para o mesmo IP (`179.197.233.12`) do `lpapi.vzforeal.com`, mas o Caddy nao serve certificado/site block para esse host.
+  - `https://api.vzforeal.com/health` -> falha no handshake TLS. DNS resolve para o mesmo IP (`<VPS_HOST>`) do `lpapi.vzforeal.com`, mas o Caddy nao serve certificado/site block para esse host.
   - Confirmado via SSH na VPS (`/opt/brain-ai/.env.compose`): `API_DOMAIN=lpapi.vzforeal.com`. O Caddy (`infra/Caddyfile`, bloco `{$API_DOMAIN}`) so emite certificado ACME e faz proxy para o host configurado ali — por isso `api.vzforeal.com` fica sem TLS valido.
   - `ALLOWED_ORIGINS` na VPS inclui `brain-plataform.vercel.app`, `brain-plataform-plum.vercel.app` e a preview `git-main`, mas nao inclui `north-portal-navy.vercel.app` (reforca que sao produtos diferentes).
 
@@ -201,15 +201,15 @@ Run appleboy/scp-action@v1.0.0
 Error: can't connect without a private SSH key or password
 ```
 
-Diagnostico: o secret `VPS_SSH_KEY` esta vazio ou com conteudo invalido. Investigando as chaves autorizadas na VPS (`~/.ssh/authorized_keys` do `root`), existe uma chave com comentario `brain-deploy` — feita de proposito para CI/CD — cujo par privado e `C:\Users\allan\.ssh\id_ed25519` nesta maquina local. Confirmado por teste real de SSH que essa chave autentica na VPS.
+Diagnostico: o secret `VPS_SSH_KEY` esta vazio ou com conteudo invalido. Investigando as chaves autorizadas na VPS (`~/.ssh/authorized_keys` do `root`), existe uma chave com comentario `brain-deploy` — feita de proposito para CI/CD — cujo par privado e `<local-deploy-key>` nesta maquina local. Confirmado por teste real de SSH que essa chave autentica na VPS.
 
-**Pendente (acao do dono do produto no GitHub, fora deste repo):** copiar o conteudo de `C:\Users\allan\.ssh\id_ed25519` para o secret `VPS_SSH_KEY` em Settings → Secrets and variables → Actions. Ate isso ser feito, deploys automaticos por push em `main` podem falhar na etapa de sincronizacao e precisar de re-run manual no GitHub Actions (o segundo run, sem nenhuma mudanca de secret, funcionou — sugerindo intermitencia, nao apenas ausencia total do secret).
+**Pendente (acao do dono do produto no GitHub, fora deste repo):** copiar o conteudo de `<local-deploy-key>` para o secret `VPS_SSH_KEY` em Settings → Secrets and variables → Actions. Ate isso ser feito, deploys automaticos por push em `main` podem falhar na etapa de sincronizacao e precisar de re-run manual no GitHub Actions (o segundo run, sem nenhuma mudanca de secret, funcionou — sugerindo intermitencia, nao apenas ausencia total do secret).
 
 O deploy desta release acabou concluido pelo proprio pipeline numa nova tentativa (sem intervencao manual no backend); nao foi necessario aplicar o workaround manual (scp + `ops/vps/deploy.sh` direto) que havia sido preparado como contingencia.
 
 ### Achado pendente: redirecionamento de login ignora tipo de conta
 
-`dashboard/lib/session-routing.ts`, funcao `resolveSessionDestination`: para contas que nao sao `client`, um `next=` na URL de login e seguido sem validacao (`return target && target !== "/login" ? target : fallback`), diferente do que acontece para conta `client` (que passa por `authorizedClientTarget`). Isso fez uma conta admin (`allanulisses@hotmail.com`, `role=admin`, `account_type=internal` — configuracao correta) cair no portal do cliente apos logar, porque havia acessado uma URL `/clientes/...` antes e ficou com esse `next` pendente. Nao e bug de permissao/dado; e o login "lembrando" o destino anterior sem checar se faz sentido para o tipo de conta. Fix proposto e ainda nao aplicado (aguardando decisao do dono do produto).
+`dashboard/lib/session-routing.ts`, funcao `resolveSessionDestination`: para contas que nao sao `client`, um `next=` na URL de login e seguido sem validacao (`return target && target !== "/login" ? target : fallback`), diferente do que acontece para conta `client` (que passa por `authorizedClientTarget`). Isso fez uma conta admin (`<admin-email>`, `role=admin`, `account_type=internal` — configuracao correta) cair no portal do cliente apos logar, porque havia acessado uma URL `/clientes/...` antes e ficou com esse `next` pendente. Nao e bug de permissao/dado; e o login "lembrando" o destino anterior sem checar se faz sentido para o tipo de conta. Fix proposto e ainda nao aplicado (aguardando decisao do dono do produto).
 
 ## Promocao
 

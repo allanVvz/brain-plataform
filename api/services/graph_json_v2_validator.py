@@ -106,6 +106,18 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
     if persona is None:
         return
     data = _node_data(persona)
+    conversation_policy = data.get("conversation_policy")
+    if conversation_policy is not None:
+        greeting = (
+            ((conversation_policy.get("intents") or {}).get("greeting") or {})
+            if isinstance(conversation_policy, dict) else {}
+        )
+        if greeting:
+            response = str(greeting.get("response") or "").strip()
+            if not response:
+                errors.append("conversation_policy.intents.greeting.response must be non-empty")
+            elif "?" in response:
+                errors.append("conversation_policy greeting response must not embed qualification questions")
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     business_model = str(
         data.get("business_model") or metadata.get("business_model") or ""

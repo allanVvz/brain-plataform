@@ -1,0 +1,10 @@
+[Unit]
+Description=Brain AI daily data-only backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/brain-ai
+ExecStart=/usr/bin/bash /opt/brain-ai/ops/vps/backup.sh
+User=root

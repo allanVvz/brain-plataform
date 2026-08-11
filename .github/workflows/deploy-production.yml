@@ -1,10 +1,6 @@
 name: Deploy production VPS
 
 on:
-  workflow_run:
-    workflows: ["Check Frontend e Backend"]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       action:
@@ -27,18 +23,17 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "24"
-  TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+  TARGET_SHA: ${{ github.sha }}
 
 jobs:
   validate:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ env.TARGET_SHA }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -60,6 +55,7 @@ jobs:
           python -m pytest -q
           tests/test_graph_agent_v3_sql.py
           tests/test_whatsapp_sql_functions.py
+          tests/test_production_privileges_sql.py
 
       - name: Validate canonical n8n template and safe WA validator
         run: |
@@ -95,7 +91,7 @@ jobs:
             --ignore=tests/test_sofia_v2_patch_loop.py \
             -q
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -114,11 +110,13 @@ jobs:
           cp .env.compose.example .env.ci
           sed -i 's|^ENVIRONMENT=.*|ENVIRONMENT=production|' .env.ci
           sed -i 's|^API_DOMAIN=.*|API_DOMAIN=api.example.com|' .env.ci
+          sed -i 's|^API_DOMAIN_SECONDARY=.*|API_DOMAIN_SECONDARY=api-alt.example.com|' .env.ci
           sed -i 's|^STORAGE_DOMAIN=.*|STORAGE_DOMAIN=storage.example.com|' .env.ci
           sed -i 's|^N8N_DOMAIN=.*|N8N_DOMAIN=n8n.example.com|' .env.ci
           sed -i 's|^ACME_EMAIL=.*|ACME_EMAIL=ops@example.com|' .env.ci
           sed -i 's|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://storage.example.com|' .env.ci
           sed -i 's|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=https://dashboard.example.com|' .env.ci
+          sed -i 's|^API_INTERNAL_BASE_URL=.*|API_INTERNAL_BASE_URL=https://api.example.com|' .env.ci
           sed -i 's|^AI_BRAIN_COOKIE_SECURE=.*|AI_BRAIN_COOKIE_SECURE=true|' .env.ci
           sed -i 's|^N8N_PROTOCOL=.*|N8N_PROTOCOL=https|' .env.ci
           sed -i 's|^N8N_EDITOR_BASE_URL=.*|N8N_EDITOR_BASE_URL=https://n8n.example.com|' .env.ci
@@ -144,14 +142,16 @@ jobs:
           IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile evolution config --quiet
 
   publish:
-    if: github.event_name == 'workflow_run' || inputs.action != 'rollback'
+    if: inputs.action != 'rollback'
     needs: validate
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.meta.outputs.image_tag }}
       repository: ${{ steps.meta.outputs.repository }}
+      api_digest: ${{ steps.build_api.outputs.digest }}
+      migrate_digest: ${{ steps.build_migrate.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ env.TARGET_SHA }}
 
@@ -161,18 +161,19 @@ jobs:
           echo "image_tag=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
           echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Publish API and worker image
-        uses: docker/build-push-action@v6
+        id: build_api
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
-          context: ./api
+          context: .
           file: ./api/Dockerfile
           push: true
           tags: ghcr.io/${{ steps.meta.outputs.repository }}/brain-api:${{ steps.meta.outputs.image_tag }}
@@ -180,7 +181,8 @@ jobs:
           cache-to: type=gha,mode=max,scope=api
 
       - name: Publish migration runner image
-        uses: docker/build-push-action@v6
+        id: build_migrate
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ./infra/migrate.Dockerfile
@@ -202,9 +204,17 @@ jobs:
       # on the VPS itself (ops/vps/rollback.sh reads .deploy/previous-tag)
       # — this workflow has no way to know it ahead of the checkout step,
       # so that case still deploys with main's current manifests.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ (inputs.action == 'rollback' && inputs.image_tag) || env.TARGET_SHA }}
+
+      - name: Build checksummed release artifact
+        if: inputs.action != 'rollback'
+        shell: bash
+        env:
+          API_IMAGE_DIGEST: ${{ needs.publish.outputs.api_digest }}
+          MIGRATE_IMAGE_DIGEST: ${{ needs.publish.outputs.migrate_digest }}
+        run: bash ops/release/build-artifact.sh "$TARGET_SHA"
 
       # The GitHub-hosted runner's outbound connection to the VPS
       # intermittently hits a bare TCP dial timeout (confirmed via VPS-side
@@ -214,32 +224,33 @@ jobs:
       # either end. Retrying is safe here specifically because the failure
       # is at the TCP handshake, before any remote command runs, so a retry
       # never risks re-running a partially-completed step.
-      - name: Synchronize deployment manifests
+      - name: Synchronize release artifact
+        if: inputs.action != 'rollback'
         id: scp_attempt_1
         continue-on-error: true
-        uses: appleboy/scp-action@v1.0.0
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: docker-compose.yml,infra/Caddyfile,infra/kong.yml,infra/grafana,ops/vps
+          source: ops/vps/install-release-artifact.sh,.release/brain-release-${{ env.TARGET_SHA }}.tar.gz,.release/brain-release-${{ env.TARGET_SHA }}.tar.gz.sha256
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
 
-      - name: Wait before retrying manifest sync
-        if: steps.scp_attempt_1.outcome == 'failure'
+      - name: Wait before retrying artifact sync
+        if: inputs.action != 'rollback' && steps.scp_attempt_1.outcome == 'failure'
         run: sleep 20
 
-      - name: Synchronize deployment manifests (retry)
-        if: steps.scp_attempt_1.outcome == 'failure'
-        uses: appleboy/scp-action@v1.0.0
+      - name: Synchronize release artifact (retry)
+        if: inputs.action != 'rollback' && steps.scp_attempt_1.outcome == 'failure'
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: docker-compose.yml,infra/Caddyfile,infra/kong.yml,infra/grafana,ops/vps
+          source: ops/vps/install-release-artifact.sh,.release/brain-release-${{ env.TARGET_SHA }}.tar.gz,.release/brain-release-${{ env.TARGET_SHA }}.tar.gz.sha256
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
 
@@ -253,13 +264,13 @@ jobs:
       # itself starts showing the same bare "dial tcp ...: i/o timeout" at
       # its very first connection attempt.
       - name: Deploy immutable images over SSH
-        uses: appleboy/ssh-action@v1.2.2
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
-          REQUESTED_TAG: ${{ inputs.image_tag || needs.publish.outputs.image_tag }}
+          REQUESTED_TAG: ${{ inputs.action == 'rollback' && inputs.image_tag || needs.publish.outputs.image_tag }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -275,31 +286,18 @@ jobs:
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-            content_status=0
             if [ "$DEPLOY_ACTION" = "rollback" ]; then
               bash ops/vps/rollback.sh "$REQUESTED_TAG"
             else
-              bash ops/vps/backup-release.sh "pre-knowledge-crm-${REQUESTED_TAG:0:12}"
+              bash ops/vps/install-release-artifact.sh \
+                ".release/brain-release-${REQUESTED_TAG}.tar.gz" "$REQUESTED_TAG"
+              bash ops/vps/backup.sh
               bash ops/vps/deploy.sh "$REQUESTED_TAG"
-              docker compose --env-file .env.compose exec -T api \
-                python scripts/publish_aurora_graph.py
-              docker compose --env-file .env.compose exec -T api \
-                python scripts/publish_persona_documents.py vz-lupas
-              docker compose --env-file .env.compose exec -T api \
-                python scripts/backfill_lead_qualification.py --apply
-              docker compose --env-file .env.compose exec -T api \
-                python scripts/resync_graph_agent_workflows.py \
-                  aurora vz-lupas --active-persona aurora
+              bash ops/vps/release-checkpoint.sh "${REQUESTED_TAG:0:12}"
               # Content-contract validation is a separate concern from "did
               # the deploy succeed" — captured here instead of letting it
               # abort the script, so audit.sh (the real health check)
               # always runs next regardless, and a content-authoring gap
               # can never silently skip it again.
-              docker compose --env-file .env.compose exec -T api \
-                python scripts/validate_knowledge_crm_release.py || content_status=$?
             fi
             bash ops/vps/audit.sh
-            if [ "$content_status" -ne 0 ]; then
-              echo "::warning::Content release-contract validation failed (exit ${content_status}); deploy and audit above are healthy independent of this." >&2
-              exit "$content_status"
-            fi
