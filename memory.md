@@ -104,3 +104,17 @@ Updated: 2026-08-11
    sem handoff e nenhum envio real.
 7. Manter binding pausado e retenção em dry-run. Cleanup e resume continuam fora
    do escopo autorizado.
+
+### Gate de bootstrap após o release `36fa5e1`
+
+- O preflight de aceite confirmou binding Aurora ativo e `safety_paused`, owner
+  `n8n_agents`, contrato `conversation_v3` e retenção desabilitada.
+- O gate parou antes de criar sessões porque bootstrap levou `2.885 s`.
+- Cinco medições posteriores ficaram entre `2.380 s` e `3.925 s`.
+- Perfil por etapa: persona/routing/binding/sessões levaram dezenas de ms; a
+  leitura do Graph JSON v2 no storage levou `2.295–2.795 s` sozinha.
+- Correção local pendente usa no bootstrap a publicação Graph v3 ativa, que é a
+  autoridade do runtime e foi medida em `676 ms`; mantém fallback v2 somente
+  para persona sem publicação v3.
+- Contrato HTTP não muda. Testes de publicação ativa, fallback e runtime:
+  `47 passed`. Nenhuma nova sessão foi criada por esse gate reprovado.

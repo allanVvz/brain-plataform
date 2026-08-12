@@ -206,17 +206,53 @@ def bootstrap(persona_slug: str) -> dict:
     bindings = supabase_client.get_workflow_bindings(persona_id)
     active_binding = next((row for row in bindings if row.get("active")), None) or {}
     metadata = active_binding.get("metadata") or {}
-    _version, _checksum, graph = _published_graph(persona_slug)
-    agent_node = next(
+    # The active v3 publication is the runtime authority and is already scoped
+    # to this persona.  Reading the legacy Graph JSON v2 object from Storage on
+    # every bootstrap was measured at 2.3-2.8s by itself in production, while
+    # every other scoped query together took only tens of milliseconds.  Use
+    # the compiled publication's persona node when available; retain the v2
+    # fallback for personas that have not published v3 yet.
+    publication = supabase_client.get_active_graph_publication(persona_id) or {}
+    document = publication.get("document_json") or {}
+    published_persona_node = next(
         (
-            node for node in graph.nodes
-            if (node.data or {}).get("metadata", {}).get("agent_slug")
+            node for node in (document.get("node_by_id") or {}).values()
+            if str(node.get("node_type") or "").lower() == "persona"
         ),
         None,
     )
-    agent_metadata = (agent_node.data or {}).get("metadata", {}) if agent_node else {}
-    agent_name = agent_node.label if agent_node else persona.get("name", persona_slug)
-    business_model = conversation_runtime._business_model(graph)
+    if published_persona_node:
+        agent_data = published_persona_node.get("data") or {}
+        agent_metadata = agent_data.get("metadata") or {}
+        agent_name = str(
+            published_persona_node.get("title")
+            or persona.get("name")
+            or persona_slug
+        )
+        business_model = str(agent_data.get("business_model") or "").strip() or None
+    else:
+        _version, _checksum, graph = _published_graph(persona_slug)
+        agent_node = next(
+            (
+                node for node in graph.nodes
+                if str(getattr(node, "node_type", "") or "").lower() == "persona"
+            ),
+            None,
+        )
+        agent_data = (agent_node.data or {}) if agent_node else {}
+        agent_metadata = agent_data.get("metadata") or {}
+        agent_name = (
+            agent_node.label if agent_node else persona.get("name", persona_slug)
+        )
+        business_model = conversation_runtime._business_model(graph)
+    persona_config = persona.get("config") or {}
+    resolved_agent_slug = str(
+        agent_metadata.get("agent_slug")
+        or agent_data.get("agent_slug")
+        or persona_config.get("agent_slug")
+        or ((persona_config.get("agent") or {}).get("slug") if isinstance(persona_config.get("agent"), dict) else "")
+        or "agent"
+    )
     compatible_flows = _flows_for_business_model(business_model)
     return {
         "persona": {"id": persona_id, "slug": persona_slug, "name": persona.get("name")},
@@ -236,7 +272,7 @@ def bootstrap(persona_slug: str) -> dict:
         "bot": {
             "id": persona_slug,
             "bot_name": agent_name,
-            "agent_slug": str(agent_metadata.get("agent_slug") or "agent"),
+            "agent_slug": resolved_agent_slug,
             "whatsapp_phone": agent_metadata.get("whatsapp_phone"),
             "label": f"{agent_name} — {persona.get('name', persona_slug)}",
             "persona_slug": persona_slug,

@@ -190,12 +190,7 @@ def test_direct_run_is_queued_instead_of_executed_in_the_api(monkeypatch):
     }
 
 
-def test_bootstrap_loads_one_graph_and_database_scopes_sessions(monkeypatch):
-    graph = SimpleNamespace(nodes=[SimpleNamespace(
-        node_type="persona",
-        label="Generic Agent",
-        data={"business_model": "appointment", "metadata": {"agent_slug": "generic-agent"}},
-    )])
+def test_bootstrap_uses_active_publication_and_database_scopes_sessions(monkeypatch):
     calls = []
     monkeypatch.setattr(wv.supabase_client, "get_persona", lambda _slug: {
         "id": "persona-1", "slug": "generic", "name": "Generic",
@@ -207,7 +202,23 @@ def test_bootstrap_loads_one_graph_and_database_scopes_sessions(monkeypatch):
         "active": True, "provider": "meta_cloud", "connection_status": "connected",
         "metadata": {"decision_owner": "n8n_agents"},
     }])
-    monkeypatch.setattr(wv, "_published_graph", lambda _slug: (4, "sha256:graph", graph))
+    monkeypatch.setattr(wv.supabase_client, "get_active_graph_publication", lambda _pid: {
+        "version": 4,
+        "checksum": "sha256:graph",
+        "document_json": {"node_by_id": {"persona:generic": {
+            "id": "persona:generic",
+            "node_type": "persona",
+            "title": "Generic Agent",
+            "data": {
+                "business_model": "appointment",
+                "metadata": {"agent_slug": "generic-agent"},
+            },
+        }}},
+    })
+    monkeypatch.setattr(
+        wv, "_published_graph",
+        lambda _slug: (_ for _ in ()).throw(AssertionError("legacy graph must not load")),
+    )
 
     def _sessions(**kwargs):
         calls.append(kwargs)
@@ -221,6 +232,30 @@ def test_bootstrap_loads_one_graph_and_database_scopes_sessions(monkeypatch):
     assert result["bot"]["agent_slug"] == "generic-agent"
     assert result["sessions"] == [{"id": "session-recent", "created_at": "2026-08-11T20:00:00Z"}]
     assert calls == [{"persona_slug": "generic", "since_hours": 12, "limit": 25}]
+
+
+def test_bootstrap_falls_back_to_v2_when_no_active_publication(monkeypatch):
+    graph = SimpleNamespace(nodes=[SimpleNamespace(
+        node_type="persona",
+        label="Legacy Agent",
+        data={"business_model": "sales", "metadata": {"agent_slug": "legacy-agent"}},
+    )])
+    monkeypatch.setattr(wv.supabase_client, "get_persona", lambda _slug: {
+        "id": "persona-legacy", "slug": "legacy", "name": "Legacy",
+    })
+    monkeypatch.setattr(
+        wv.supabase_client, "get_persona_routing", lambda _slug: {"process_mode": "internal"},
+    )
+    monkeypatch.setattr(wv.supabase_client, "get_workflow_bindings", lambda _pid: [])
+    monkeypatch.setattr(wv.supabase_client, "get_active_graph_publication", lambda _pid: None)
+    monkeypatch.setattr(wv, "_published_graph", lambda _slug: (1, "sha256:legacy", graph))
+    monkeypatch.setattr(wv, "list_sessions", lambda **_kwargs: [])
+
+    result = wv.bootstrap("legacy")
+
+    assert result["bot"]["bot_name"] == "Legacy Agent"
+    assert result["bot"]["agent_slug"] == "legacy-agent"
+    assert "compra_simples" in {flow["id"] for flow in result["flows"]}
 
 
 def _persona_node(business_model: str):
