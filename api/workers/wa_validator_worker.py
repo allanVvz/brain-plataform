@@ -18,7 +18,7 @@ class WaValidatorWorker(BaseWorker):
     def __init__(self) -> None:
         super().__init__()
         self.worker_id = f"{socket.gethostname()}:{os.getpid()}:wa-validator"
-        self._last_retention = 0.0
+        self._last_retention: float | None = None
 
     def _run_cycle(self) -> None:
         claimed = supabase_client.claim_next_wa_validator_session(self.worker_id)
@@ -36,7 +36,7 @@ class WaValidatorWorker(BaseWorker):
                 raise
 
         now = time.monotonic()
-        if now - self._last_retention < 3600:
+        if self._last_retention is not None and now - self._last_retention < 3600:
             return
         self._last_retention = now
         enabled = os.environ.get(
