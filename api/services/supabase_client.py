@@ -4119,9 +4119,17 @@ def get_graph_branch_contract(publication_id: str, branch_node_id: str) -> Optio
 def get_conversation_ledger(persona_id: str, lead_ref: int) -> Optional[dict]:
     if not persona_id or not lead_ref:
         return None
+    journey = _one(
+        get_client().table("conversation_journeys").select("id")
+        .eq("persona_id", persona_id).eq("lead_ref", lead_ref)
+        .eq("is_current", True).maybe_single()
+    )
+    if not journey:
+        return None
     ledger = _one(
         get_client().table("conversation_ledgers").select("*")
-        .eq("persona_id", persona_id).eq("lead_ref", lead_ref).maybe_single()
+        .eq("persona_id", persona_id).eq("lead_ref", lead_ref)
+        .eq("journey_id", journey["id"]).maybe_single()
     )
     if not ledger:
         return None
@@ -4434,6 +4442,54 @@ def reset_conversation_ledger_branch_v3(*, persona_id: str, lead_ref: int) -> di
     result = get_client().rpc(
         "reset_conversation_ledger_branch_v3",
         {"p_persona_id": persona_id, "p_lead_ref": lead_ref},
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def record_purchase_completed(**payload: Any) -> dict:
+    result = get_client().rpc("record_purchase_completed_v1", payload).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def transition_sales_conversion_status(**payload: Any) -> dict:
+    result = get_client().rpc(
+        "transition_sales_conversion_status_v1", payload
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def mark_conversation_journey_qualification(**payload: Any) -> dict:
+    result = get_client().rpc(
+        "mark_conversation_journey_qualification_v1", payload
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def list_inactivity_recovery_candidates(*, enabled_from: str, cutoff: str, limit: int = 100) -> list[dict]:
+    return _q(
+        get_client().table("lead_buffer").select("id,persona_id,lead_ref,created_at")
+        .eq("direction", "inbound").eq("status", "buffered")
+        .gte("created_at", enabled_from).lte("created_at", cutoff)
+        .is_("payload->conversation_commit", "null")
+        .order("created_at").limit(limit)
+    )
+
+
+def claim_inactivity_recovery_candidate(*, inbound_id: str) -> dict:
+    result = get_client().rpc(
+        "claim_inactivity_recovery_candidate_v1", {"p_inbound_id": inbound_id}
     ).execute()
     value = getattr(result, "data", None)
     if isinstance(value, list):

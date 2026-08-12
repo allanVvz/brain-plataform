@@ -2584,6 +2584,19 @@ def commit(
                 "commit_ms": commit_ms,
             }
         graph_turn = atomic_commit.get("graph_turn") or {}
+        if not (response.proof.get("missing_fields") or []):
+            # Journey lifecycle is a separate projection from the fact ledger.
+            # Only a deterministic graph proof may assert explicit confirmation;
+            # qualification completeness by itself merely awaits confirmation.
+            supabase_client.mark_conversation_journey_qualification(
+                p_persona_id=str(lead.get("persona_id")),
+                p_lead_ref=lead_ref,
+                p_confirmed=bool(response.proof.get("explicit_confirmation")),
+                p_handed_off=bool(
+                    response.proof.get("explicit_confirmation")
+                    and response.handoff_required and handoff_level == "full"
+                ),
+            )
         if atomic_commit.get("outbound_buffer_id"):
             buffer = {
                 "id": atomic_commit["outbound_buffer_id"],

@@ -292,7 +292,9 @@ def test_graph_owned_greeting_is_short_and_model_free():
         "nodes": [{
             "id": "persona:generic", "node_type": "persona",
             "data": {
-                "conversation_policy": {"intents": {"greeting": {"response": "Olá! Bem-vindo."}}},
+                "conversation_policy": {"intents": {"greeting": {
+                    "responses": ["Olá! Bem-vindo."], "always_acknowledge": True,
+                }}},
                 "appointment_policy": {
                     "required_fields": ["nome_cliente"],
                     "field_questions": {"nome_cliente": "Como você se chama?"},
@@ -302,7 +304,7 @@ def test_graph_owned_greeting_is_short_and_model_free():
     }
     greeting = graph_agent_runtime_v3._greeting_policy(document, contract={}, facts={})
     assert graph_agent_runtime_v3._is_greeting("Olá") is True
-    assert graph_agent_runtime_v3._is_greeting("Olá, quero branch a") is False
+    assert graph_agent_runtime_v3._is_greeting("Olá, quero branch a") is True
     assert greeting == {
         "response": "Olá! Bem-vindo.", "question": "Como você se chama?",
         "question_node_id": None, "asked_field_key": "nome_cliente",
@@ -837,7 +839,7 @@ def test_repeated_question_is_allowed_only_while_its_field_remains_pending():
         next_question_node_id="q:name",
         aggregate_missing=[{"key": "name", "question_node_id": "q:name"}],
         asked_question_node_ids=asked,
-    ) is True
+    ) is False
     assert graph_agent_runtime_v3._repeated_pending_question_is_allowed(
         next_question_node_id="q:name",
         aggregate_missing=[{"key": "objective", "question_node_id": "q:objective"}],

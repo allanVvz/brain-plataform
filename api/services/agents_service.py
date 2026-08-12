@@ -245,31 +245,6 @@ def _cleared_conversation_state_metadata(lead: dict) -> Optional[dict]:
     return None
 
 
-def _reset_v3_ledger_if_applicable(lead_ref: int, lead: dict) -> None:
-    """Clear the v3 branch anchor so a resumed lead re-classifies fresh.
-
-    conversation_facts (name, vehicle model, etc.) are left untouched --
-    only conversation_ledgers.active_branch_node_id and
-    asked_question_node_ids are cleared. Without this, a branch whose
-    handoff_rule keeps matching (e.g. qualification_complete stays true
-    because the facts are still there) would re-authorize handoff on the
-    very next inbound message, immediately re-pausing the lead right after
-    "Reativar IA".
-    """
-    persona_id = lead.get("persona_id")
-    if not persona_id:
-        return
-    try:
-        binding = supabase_client.get_workflow_binding_by_id(lead.get("channel_binding_id"))
-        if not graph_agent_runtime_v3.binding_uses_v3(binding):
-            return
-        supabase_client.reset_conversation_ledger_branch_v3(
-            persona_id=persona_id, lead_ref=lead_ref
-        )
-    except Exception as exc:
-        logger.warning("resume_lead v3 ledger reset failed: %s", exc)
-
-
 def resume_lead(lead_ref: int) -> bool:
     update_payload: dict = {"handoff_level": "none"}
     lead: Optional[dict] = None
@@ -293,7 +268,8 @@ def resume_lead(lead_ref: int) -> bool:
             update_payload["metadata"] = metadata
         except Exception as exc:
             logger.warning("resume_lead conversation-state clearing failed: %s", exc)
-        _reset_v3_ledger_if_applicable(lead_ref, lead)
+        # Preserve the v3 ledger. Resume is not a new journey and therefore
+        # must not erase its authoritative branch or asked-question history.
     try:
         supabase_client.update_lead(lead_ref, update_payload)
     except Exception as exc:

@@ -31,8 +31,32 @@
         "conversation_policy": {
           "intents": {
             "greeting": {
-              "response": "Olá! Que bom falar com você."
+              "responses": ["Olá! Que bom falar com você."],
+              "always_acknowledge": true
             }
+          },
+          "inactivity_recovery": {
+            "enabled": true,
+            "enabled_from": "2026-08-12T00:00:00Z",
+            "after_seconds": 300
+          },
+          "question_repetition": {
+            "max_attempts": 1,
+            "restart_requires": ["qualification_confirmed", "purchase_completed"]
+          },
+          "qualification": {
+            "summary_template": "Confira os dados informados: {informed_fields}.",
+            "confirmation_question": "Esses dados estão corretos?",
+            "correction_prompt": "Diga qual informação precisa ser corrigida.",
+            "completion_message": "Obrigada. Sua solicitação foi registrada e a equipe continuará o atendimento.",
+            "incomplete_handoff_template": "Informado: {informed_fields}. Não informado: {missing_fields}."
+          },
+          "direct_booking": {
+            "intent_aliases": ["agendar", "marcar horário", "reservar horário"],
+            "no_data_instruction": "Envie juntos os dados solicitados para o agendamento.",
+            "known_data_confirmation": "Confira os dados já informados: {informed_fields}. Estão corretos?",
+            "confirmed_acknowledgement": "Obrigada. Sua solicitação foi registrada.",
+            "silent_handoff": true
           }
         },
         "appointment_policy": {
@@ -78,6 +102,17 @@
             "vehicle_color": "Qual é a cor do veículo?",
             "condicao": "O que mais te incomoda no carro hoje?",
             "reclamacao_relato": "Sinto muito por isso. Pode me contar rapidamente o que aconteceu, por favor?"
+          },
+          "field_labels": {
+            "nome_cliente": "nome",
+            "servico": "serviço",
+            "objective": "objetivo",
+            "can_visit_in_person": "disponibilidade para avaliação presencial",
+            "modelo_veiculo": "modelo do veículo",
+            "vehicle_year": "ano do veículo",
+            "vehicle_color": "cor do veículo",
+            "condicao": "condição do veículo",
+            "reclamacao_relato": "relato"
           },
           "texts": {
             "cabecalho_servicos": "Serviços da Aurora:",

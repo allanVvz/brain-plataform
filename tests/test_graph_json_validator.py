@@ -71,6 +71,46 @@ def test_validate_graph_json_accepts_valid_graph():
     assert errors == []
 
 
+def test_validate_graph_json_rejects_incomplete_graph_owned_conversation_policy():
+    payload = _valid_graph().model_dump()
+    payload["nodes"][0]["data"] = {
+        "business_model": "appointment",
+        "appointment_policy": {
+            "required_fields": ["name"],
+            "field_questions": {"name": "What is your name?"},
+            "field_labels": {},
+        },
+        "conversation_policy": {
+            "intents": {"greeting": {"responses": ["Hello"], "always_acknowledge": True}},
+            "qualification": {
+                "summary_template": "Summary: {informed_fields}",
+                "confirmation_question": "Is this correct?",
+                "correction_prompt": "What should be corrected?",
+                "completion_message": "Thank you.",
+                "incomplete_handoff_template": "",
+            },
+            "direct_booking": {
+                "intent_aliases": [],
+                "no_data_instruction": "",
+                "known_data_confirmation": "Known: {informed_fields}",
+                "confirmed_acknowledgement": "Thank you.",
+                "silent_handoff": False,
+            },
+            "question_repetition": {"max_attempts": 2},
+        },
+    }
+    graph = GraphJson.model_validate(payload)
+
+    valid, errors = validate_graph_json(graph)
+
+    assert valid is False
+    assert "appointment_policy.field_labels missing non-empty label for required field name" in errors
+    assert "conversation_policy.qualification.incomplete_handoff_template must be non-empty" in errors
+    assert "conversation_policy.direct_booking.intent_aliases must be non-empty" in errors
+    assert "conversation_policy.direct_booking.silent_handoff must be true" in errors
+    assert "conversation_policy.question_repetition.max_attempts must equal 1" in errors
+
+
 def test_validate_graph_json_accepts_product_group_faq_when_product_absent():
     payload = _valid_graph().model_dump()
     payload["nodes"] = [node for node in payload["nodes"] if node["id"] not in {"n7", "n8"}]

@@ -108,16 +108,53 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
     data = _node_data(persona)
     conversation_policy = data.get("conversation_policy")
     if conversation_policy is not None:
+        if not isinstance(conversation_policy, dict):
+            errors.append("conversation_policy must be an object")
+            conversation_policy = {}
         greeting = (
             ((conversation_policy.get("intents") or {}).get("greeting") or {})
             if isinstance(conversation_policy, dict) else {}
         )
         if greeting:
-            response = str(greeting.get("response") or "").strip()
-            if not response:
-                errors.append("conversation_policy.intents.greeting.response must be non-empty")
-            elif "?" in response:
-                errors.append("conversation_policy greeting response must not embed qualification questions")
+            responses = greeting.get("responses")
+            if not isinstance(responses, list) or not responses or any(
+                not isinstance(value, str) or not value.strip() for value in responses
+            ):
+                errors.append("conversation_policy.intents.greeting.responses must contain non-empty texts")
+            elif any("?" in value for value in responses):
+                errors.append("conversation_policy greeting responses must not embed qualification questions")
+            if greeting.get("always_acknowledge") is not True:
+                errors.append("conversation_policy.intents.greeting.always_acknowledge must be true")
+
+        recovery = conversation_policy.get("inactivity_recovery") or {}
+        if recovery and recovery.get("enabled") is not False:
+            if not str(recovery.get("enabled_from") or "").strip():
+                errors.append("conversation_policy.inactivity_recovery.enabled_from is required")
+            if not isinstance(recovery.get("after_seconds"), int) or recovery["after_seconds"] <= 0:
+                errors.append("conversation_policy.inactivity_recovery.after_seconds must be positive")
+
+        qualification_policy = conversation_policy.get("qualification") or {}
+        for key in (
+            "summary_template", "confirmation_question", "correction_prompt",
+            "completion_message", "incomplete_handoff_template",
+        ):
+            if qualification_policy and not str(qualification_policy.get(key) or "").strip():
+                errors.append(f"conversation_policy.qualification.{key} must be non-empty")
+
+        direct_booking = conversation_policy.get("direct_booking") or {}
+        if direct_booking:
+            aliases = direct_booking.get("intent_aliases")
+            if not isinstance(aliases, list) or not any(str(value).strip() for value in aliases):
+                errors.append("conversation_policy.direct_booking.intent_aliases must be non-empty")
+            for key in ("no_data_instruction", "known_data_confirmation", "confirmed_acknowledgement"):
+                if not str(direct_booking.get(key) or "").strip():
+                    errors.append(f"conversation_policy.direct_booking.{key} must be non-empty")
+            if direct_booking.get("silent_handoff") is not True:
+                errors.append("conversation_policy.direct_booking.silent_handoff must be true")
+
+        repetition = conversation_policy.get("question_repetition") or {}
+        if repetition and repetition.get("max_attempts") != 1:
+            errors.append("conversation_policy.question_repetition.max_attempts must equal 1")
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     business_model = str(
         data.get("business_model") or metadata.get("business_model") or ""
@@ -131,6 +168,7 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
 
     required = raw_policy.get("required_fields")
     questions = raw_policy.get("field_questions")
+    labels = raw_policy.get("field_labels")
     question_node_ids = raw_policy.get("field_question_node_ids")
     if not isinstance(required, list) or not required:
         errors.append("appointment_policy.required_fields must be a non-empty list")
@@ -182,6 +220,12 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
             errors.append(
                 f"appointment_policy.field_questions missing non-empty question for required field {field}"
             )
+        if isinstance(conversation_policy, dict) and conversation_policy.get("qualification"):
+            label = labels.get(field) if isinstance(labels, dict) else None
+            if not isinstance(label, str) or not label.strip():
+                errors.append(
+                    f"appointment_policy.field_labels missing non-empty label for required field {field}"
+                )
 
     # Once a graph uses executable qualification FAQs, every required field
     # must resolve to one matching FAQ node.  Legacy v2.0 documents remain

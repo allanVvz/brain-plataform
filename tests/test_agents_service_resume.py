@@ -209,7 +209,7 @@ def test_resume_lead_tolerates_lead_lookup_failure(monkeypatch):
     assert calls == [("update_lead", 42, {"handoff_level": "none"})]
 
 
-def test_resume_lead_resets_v3_ledger_when_binding_uses_v3(monkeypatch):
+def test_resume_lead_preserves_v3_ledger_and_asked_questions(monkeypatch):
     lead = {"metadata": {}, "persona_id": "persona-1", "channel_binding_id": "binding-1"}
     monkeypatch.setattr(supabase_client, "get_lead_by_ref", lambda lead_ref: lead)
     monkeypatch.setattr(
@@ -227,7 +227,7 @@ def test_resume_lead_resets_v3_ledger_when_binding_uses_v3(monkeypatch):
     )
 
     assert agents_service.resume_lead(42) is True
-    assert reset_calls == [("persona-1", 42)]
+    assert reset_calls == []
 
 
 def test_resume_lead_skips_v3_ledger_reset_for_non_v3_binding(monkeypatch):

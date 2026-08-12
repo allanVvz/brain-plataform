@@ -21,6 +21,9 @@ PUBLIC_EXACT_PATHS = {
     "/internal/conversations/commit",
     "/internal/conversations/fail-safe-handoff",
     "/internal/conversations/technical-failure",
+    # Integration-authenticated equivalent of the operator conversion route.
+    # The handler performs constant-time X-Webhook-Token validation.
+    "/internal/agents/leads/{lead_ref}/purchase-completed",
 }
 
 ADMIN_TOKEN_HEADER = "x-ai-brain-admin-token"
@@ -45,6 +48,10 @@ def is_public_path(path: str) -> bool:
         return True
     if path in PUBLIC_EXACT_PATHS:
         return True
+    if path.startswith("/internal/agents/leads/") and path.endswith("/purchase-completed"):
+        return path.removeprefix("/internal/agents/leads/").removesuffix(
+            "/purchase-completed"
+        ).strip("/").isdigit()
     # Only the public site contract is anonymous. Nested admin endpoints under
     # the same prefix must still pass through session/persona authorization.
     if path.startswith("/api/menu/"):

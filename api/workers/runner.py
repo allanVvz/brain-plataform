@@ -9,6 +9,7 @@ from workers.kb_sync_worker import KbSyncWorker
 from workers.n8n_mirror_worker import N8nMirrorWorker
 from workers.whatsapp_dispatch_worker import WhatsAppDispatchWorker
 from workers.wa_validator_worker import WaValidatorWorker
+from workers.inactivity_recovery_worker import InactivityRecoveryWorker
 
 
 WORKERS = {
@@ -18,6 +19,7 @@ WORKERS = {
     "kb_sync": KbSyncWorker,
     "whatsapp_dispatch": WhatsAppDispatchWorker,
     "wa_validator": WaValidatorWorker,
+    "inactivity_recovery": InactivityRecoveryWorker,
 }
 
 

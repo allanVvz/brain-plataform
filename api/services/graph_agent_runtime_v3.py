@@ -28,7 +28,7 @@ from services import graph_compiler_v3, graph_proof_checker_v3, supabase_client
 logger = logging.getLogger("graph_agent_runtime_v3")
 
 RUNTIME_VERSION = "graph_agent_runtime_v3"
-MAX_PENDING_QUESTION_ATTEMPTS = 2
+MAX_PENDING_QUESTION_ATTEMPTS = 1
 
 
 def _normalize_servico_owner(
@@ -1091,7 +1091,10 @@ _GREETING_FORMS = {
 def _is_greeting(message: str) -> bool:
     """Recognize only the linguistic intent; response copy remains graph-owned."""
     normalized = _normalized_phrase(message)
-    return normalized in _GREETING_FORMS
+    return any(
+        normalized == form or normalized.startswith(f"{form} ")
+        for form in _GREETING_FORMS
+    )
 
 
 def _persona_node(document: dict[str, Any]) -> dict[str, Any]:
@@ -1107,8 +1110,11 @@ def _greeting_policy(
     persona = _persona_node(document)
     data = persona.get("data") or {}
     policy = data.get("conversation_policy") or {}
+    greeting = ((policy.get("intents") or {}).get("greeting") or {})
+    responses = greeting.get("responses")
     response = str(
-        (((policy.get("intents") or {}).get("greeting") or {}).get("response")) or ""
+        (responses[0] if isinstance(responses, list) and responses else None)
+        or greeting.get("response") or ""
     ).strip()
     if not response:
         return None
@@ -1236,6 +1242,9 @@ def build_context(
         [] if pending_field_answer
         else _deterministic_branch_candidates(document, message)
     )
+    greeting_prefix = _greeting_policy(
+        document, contract=active_contract, facts=ledger.get("facts") or {},
+    ) if _is_greeting(message) else None
     greeting = _greeting_policy(
         document, contract=active_contract, facts=ledger.get("facts") or {},
     ) if _is_greeting(message) and not deterministic_candidates else None
@@ -1378,6 +1387,9 @@ def build_context(
         "deterministic_branch_match": bool(deterministic_candidates),
         "deterministic_branch_resolution": (
             deterministic_candidates[0] if len(deterministic_candidates) == 1 else None
+        ),
+        "greeting_response": (
+            greeting_prefix.get("response") if greeting_prefix and deterministic_candidates else None
         ),
         "retrieval_branch_node_id": retrieval_branch,
         "branch_candidates": _evidenced_branch_candidates(candidates),
@@ -1777,6 +1789,11 @@ def _decide(
             next_question_node_id=next_question_id,
             contract=question_contract,
         )
+        greeting_response = str(context.retrieval_trace.get("greeting_response") or "").strip()
+        if greeting_response and not _normalized_phrase(reply).startswith(
+            _normalized_phrase(greeting_response)
+        ):
+            reply = "\n\n".join(part for part in (greeting_response, reply) if part)
         if unanswered_fact and not next_question_id:
             reply = " ".join(
                 sentence.strip()
