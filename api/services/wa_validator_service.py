@@ -1372,7 +1372,15 @@ def _fact_matches_expected(fact: dict | None, expected: object) -> bool:
         return False
     actual = fact.get("value", fact.get("value_json"))
     if isinstance(expected, bool):
-        return actual is expected
+        if isinstance(actual, bool):
+            return actual is expected
+        folded = _semantic_fold(actual)
+        normalized = (
+            True if folded in {"1", "sim", "true", "yes"}
+            else False if folded in {"0", "nao", "false", "no"}
+            else None
+        )
+        return normalized is expected
     return _semantic_fold(actual) == _semantic_fold(expected)
 
 
@@ -1385,7 +1393,8 @@ def _accepted_fact_matches_intent(
     span, status and value schema.  Validator examples describe customer
     intent, not a required normalized storage representation, so a model may
     validly store ``bancos manchados...`` for the literal ``Os bancos estão
-    manchados...``.  Booleans and numbers remain exact.
+    manchados...``. Canonical boolean strings are equivalent to JSON booleans;
+    numbers remain exact.
     """
     if _fact_matches_expected(fact, expected):
         return True

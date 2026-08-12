@@ -638,6 +638,21 @@ def test_semantic_turn_audit_accepts_graph_proved_string_normalization():
     assert audit["criteria"]["all_intended_facts_extracted"] is True
 
 
+def test_validator_matches_canonical_boolean_strings_without_inverting_intent():
+    assert wv._fact_matches_expected(
+        {"status": "known", "value": "sim"}, True,
+    ) is True
+    assert wv._fact_matches_expected(
+        {"status": "known", "value": "não"}, False,
+    ) is True
+    assert wv._fact_matches_expected(
+        {"status": "known", "value": "sim"}, False,
+    ) is False
+    assert wv._fact_matches_expected(
+        {"status": "known", "value": "talvez"}, True,
+    ) is False
+
+
 def test_semantic_turn_audit_allows_focus_change_inside_preserved_active_set():
     inputs = _semantic_audit_inputs()
     inputs["customer_step"]["expected_branch_node_id"] = "branch:two"

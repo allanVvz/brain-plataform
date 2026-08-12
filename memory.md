@@ -166,3 +166,24 @@ Updated: 2026-08-12
   skips; após extrair a condição para teste direto, 105 testes focados aprovados,
   além de `py_compile` e `git diff --check`.
 - Health: 110/110 HTTP 200, máximo 103.452 ms, p95 5.396 ms; nenhum envio real.
+
+### Quarto aceite após o release `2a103c5`
+
+- Release `2a103c561dfecfec88833d0397b6feeb18da2da2` publicado com API e worker
+  saudáveis no mesmo image; sem migration e sem limpeza.
+- Sessão `a06d93a6-780c-4a97-9597-815cb286f1e2`, lead 158: a dúvida que antes
+  causava HTTP 500 passou com decisão, proof válido, commit completo e outbound
+  inerte; a pergunta de nome foi repetida legitimamente porque o campo ainda
+  estava pendente.
+- Pintura + PPF permaneceram ativos. `nome_cliente`, `objective` e
+  `can_visit_in_person` foram persistidos, e a conversa avançou até
+  `modelo_veiculo`.
+- Novo falso negativo isolado no auditor: o perfil esperava booleano `true`,
+  enquanto o proof e o ledger armazenaram a normalização válida `"sim"`.
+  Runtime, facts e avanço estavam corretos.
+- Correção local equipara somente strings booleanas canônicas a booleanos
+  (`sim/true/yes/1`, `não/false/no/0`), preservando direção e rejeitando valores
+  ambíguos. Suíte completa: 644 passed, zero skips; focados: 106 passed.
+- Dry-run de retenção permaneceu `safe=true`; nenhuma remoção. Bootstrap
+  236.584 ms. Health 58/58 HTTP 200, máximo 108.018 ms, p95 26.488 ms. Nenhum
+  WhatsApp real; lead 158 colocado em handoff full ao encerrar.
