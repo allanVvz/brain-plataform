@@ -135,3 +135,16 @@ Updated: 2026-08-12
 - Correção local aceita fallback somente quando o proof é válido, não há campo
   pendente/pergunta e a qualificação já está completa. Fallback em turno
   incompleto continua reprovando.
+
+### Segundo aceite após o release `53bc082`
+
+- Sessão `aa5c2966-c6fc-45cc-b3d4-5704b8da5153`, lead 156, manteve Pintura +
+  PPF e passou tecnicamente até perguntar corretamente `vehicle_color`, campo
+  específico de Pintura ainda pendente.
+- O auditor marcou `first_missing_field_only=false` porque validou a pergunta
+  apenas contra o contrato PPF em foco; o proof e a pergunta estavam corretos.
+- Health: 97/97 HTTP 200, máximo 132.287 ms, p95 43.297 ms; bootstrap 213.636 ms.
+  Cada inbound teve uma decisão/proof válido/outbound inerte e commit completo.
+- Correção local agrega fields/questions de todos os ramos ativos para auditar o
+  primeiro campo pendente, preservando owner e pergunta publicados. Não aceita
+  campo/pergunta fora desses contratos.

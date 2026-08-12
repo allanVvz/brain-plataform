@@ -472,6 +472,48 @@ def test_semantic_turn_audit_accepts_published_completion_fallback():
     assert audit["handoff_observed"] is False
 
 
+def test_active_validator_contract_includes_pending_field_from_non_focus_branch():
+    document = {
+        "branch_contracts": {
+            "branch:paint": {
+                "fields": [{
+                    "key": "vehicle_color",
+                    "owner_node_id": "branch:paint",
+                    "question_node_id": "q:color",
+                }],
+                "questions": {
+                    "q:color": {
+                        "field_key": "vehicle_color",
+                        "text": "Qual e a cor do veiculo?",
+                    },
+                },
+            },
+            "branch:ppf": {
+                "fields": [{
+                    "key": "servico",
+                    "owner_node_id": "branch:ppf",
+                    "question_node_id": "q:service",
+                }],
+                "questions": {
+                    "q:service": {
+                        "field_key": "servico",
+                        "text": "Qual servico?",
+                    },
+                },
+            },
+        },
+    }
+
+    contract = wv._active_validator_contract(
+        document, ["branch:ppf", "branch:paint"],
+    )
+
+    assert {field["key"] for field in contract["fields"]} == {
+        "servico", "vehicle_color",
+    }
+    assert contract["questions"]["q:color"]["field_key"] == "vehicle_color"
+
+
 def test_semantic_turn_audit_rejects_question_for_a_persisted_fact():
     inputs = _semantic_audit_inputs()
     inputs["ledger_after"]["facts"]["nome_cliente"] = {

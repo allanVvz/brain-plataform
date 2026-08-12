@@ -1398,6 +1398,28 @@ def _accepted_fact_matches_intent(
     )
 
 
+def _active_validator_contract(
+    graph_document: dict, active_branch_node_ids: list[str],
+) -> dict:
+    """Project the published field/question contract for every active branch."""
+    fields: list[dict] = []
+    seen_fields: set[tuple[str, str]] = set()
+    questions: dict[str, dict] = {}
+    for anchor in dict.fromkeys(str(value) for value in active_branch_node_ids if value):
+        branch = (graph_document.get("branch_contracts") or {}).get(anchor) or {}
+        questions.update(branch.get("questions") or {})
+        for field in branch.get("fields") or []:
+            identity = (
+                str(field.get("key") or ""),
+                str(field.get("owner_node_id") or ""),
+            )
+            if identity in seen_fields:
+                continue
+            seen_fields.add(identity)
+            fields.append(field)
+    return {"fields": fields, "questions": questions}
+
+
 def _semantic_turn_audit(
     *,
     customer_step: dict,
@@ -2007,9 +2029,16 @@ async def run_session_direct(
                         or step.get("expected_branch_node_id")
                         or ""
                     )
-                    contract = (
-                        (graph_document.get("branch_contracts") or {}).get(active_anchor)
-                        or {}
+                    active_anchors = list(dict.fromkeys([
+                        active_anchor,
+                        *[
+                            str(value) for value in
+                            (ledger_after.get("active_branch_node_ids") or [])
+                            if value
+                        ],
+                    ]))
+                    contract = _active_validator_contract(
+                        graph_document, active_anchors,
                     )
                     if not proof_record or not ledger_after or not contract:
                         audit = {
