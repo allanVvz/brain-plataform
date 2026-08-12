@@ -115,22 +115,112 @@ def test_semantic_script_known_name_is_state_not_a_scripted_message():
     )
 
 
-def test_semantic_script_requires_graph_owned_doubt_coverage():
+def test_semantic_script_uses_branch_as_service_existence_doubt_evidence():
     publication = _semantic_publication()
     publication["document_json"]["branch_contracts"]["branch:one"]["closure_node_ids"] = [
         "branch:one", "q:service", "q:name", "q:objective",
     ]
 
-    try:
-        wv._semantic_appointment_script(
-            publication=publication,
-            flow_id="sdr_qualificacao_carro",
-            initial_state="cold",
-        )
-    except ValueError as exc:
-        assert "FAQ publicada" in str(exc)
-    else:
-        raise AssertionError("semantic script accepted a branch without doubt coverage")
+    script = wv._semantic_appointment_script(
+        publication=publication,
+        flow_id="sdr_qualificacao_carro",
+        initial_state="cold",
+    )
+    assert script["driver"]["doubt"]["expected_evidence_node_ids"] == ["branch:one"]
+    assert script["driver"]["expected_handoff"] is False
+
+
+def test_published_service_existence_faq_accepts_faq_or_active_branch_evidence():
+    publication = _semantic_publication()
+    document = publication["document_json"]
+    document["node_by_id"]["faq:service-exists"] = {
+        "id": "faq:service-exists", "node_type": "faq", "title": "Vocês fazem Service One?",
+        "data": {"question": "Vocês fazem Service One?"},
+    }
+    document["branch_contracts"]["branch:one"]["closure_node_ids"] = [
+        "branch:one", "q:service", "q:name", "q:objective", "faq:service-exists",
+    ]
+
+    script = wv._semantic_appointment_script(
+        publication=publication,
+        flow_id="sdr_qualificacao_carro",
+        initial_state="cold",
+    )
+
+    assert script["driver"]["doubt"]["expected_evidence_node_ids"] == [
+        "faq:service-exists", "branch:one",
+    ]
+
+
+def test_schedule_faq_never_accepts_service_branch_as_schedule_evidence():
+    publication = _semantic_publication()
+    document = publication["document_json"]
+    document["node_by_id"]["faq:schedule"] = {
+        "id": "faq:schedule", "node_type": "faq", "title": "Vocês fazem Service One amanhã?",
+        "data": {"question": "Vocês fazem Service One amanhã?"},
+    }
+    document["branch_contracts"]["branch:one"]["closure_node_ids"] = [
+        "branch:one", "q:service", "q:name", "q:objective", "faq:schedule",
+    ]
+
+    script = wv._semantic_appointment_script(
+        publication=publication,
+        flow_id="sdr_qualificacao_carro",
+        initial_state="cold",
+    )
+
+    assert script["driver"]["doubt"]["expected_evidence_node_ids"] == ["faq:schedule"]
+
+
+def test_direct_run_is_queued_instead_of_executed_in_the_api(monkeypatch):
+    monkeypatch.setattr(
+        wv.supabase_client,
+        "enqueue_wa_validator_session",
+        lambda session_id, mode: {
+            "queued": True,
+            "state": "queued",
+            "session": {"id": session_id, "status": "queued", "queue_mode": mode},
+        },
+    )
+
+    result = wv.enqueue_session_direct("session-1")
+
+    assert result == {
+        "id": "session-1", "status": "queued", "queue_mode": "direct",
+    }
+
+
+def test_bootstrap_loads_one_graph_and_database_scopes_sessions(monkeypatch):
+    graph = SimpleNamespace(nodes=[SimpleNamespace(
+        node_type="persona",
+        label="Generic Agent",
+        data={"business_model": "appointment", "metadata": {"agent_slug": "generic-agent"}},
+    )])
+    calls = []
+    monkeypatch.setattr(wv.supabase_client, "get_persona", lambda _slug: {
+        "id": "persona-1", "slug": "generic", "name": "Generic",
+    })
+    monkeypatch.setattr(wv.supabase_client, "get_persona_routing", lambda _pid: {
+        "process_mode": "n8n",
+    })
+    monkeypatch.setattr(wv.supabase_client, "get_workflow_bindings", lambda _pid: [{
+        "active": True, "provider": "meta_cloud", "connection_status": "connected",
+        "metadata": {"decision_owner": "n8n_agents"},
+    }])
+    monkeypatch.setattr(wv, "_published_graph", lambda _slug: (4, "sha256:graph", graph))
+
+    def _sessions(**kwargs):
+        calls.append(kwargs)
+        return [{"id": "session-recent", "created_at": "2026-08-11T20:00:00Z"}]
+
+    monkeypatch.setattr(wv, "list_sessions", _sessions)
+
+    result = wv.bootstrap("generic")
+
+    assert result["routing"]["conversation_mode"] == "n8n_agents"
+    assert result["bot"]["agent_slug"] == "generic-agent"
+    assert result["sessions"] == [{"id": "session-recent", "created_at": "2026-08-11T20:00:00Z"}]
+    assert calls == [{"persona_slug": "generic", "since_hours": 12, "limit": 25}]
 
 
 def _persona_node(business_model: str):

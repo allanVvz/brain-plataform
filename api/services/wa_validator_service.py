@@ -90,8 +90,12 @@ def _session_update(session_id: str, **fields) -> dict:
     return current
 
 
-def _session_list() -> list[dict]:
-    return supabase_client.list_wa_validator_sessions()
+def _session_list(
+    *, persona_slug: str | None = None, since_hours: int | None = None, limit: int = 100,
+) -> list[dict]:
+    return supabase_client.list_wa_validator_sessions(
+        limit=limit, persona_slug=persona_slug, since_hours=since_hours,
+    )
 
 # ── Bot registry ───────────────────────────────────────────────────────────────
 _BOT_REGISTRY: list[dict] = []
@@ -99,14 +103,16 @@ _BOT_REGISTRY: list[dict] = []
 _KNOWN_CONVERSATION_MODES = {"deterministic", "n8n_agents", "orquestrador"}
 
 
-def _resolve_conversation_mode(persona_id: str | None, routing: dict) -> str:
+def _resolve_conversation_mode(
+    persona_id: str | None, routing: dict, active_binding: dict | None = None,
+) -> str:
     """The routing switch that actually governs live dispatch.
 
     Confirmed live 2026-08-08: this previously read only the legacy
     persona.process_mode column, so the validator tested a different engine
     (n8n_agents) than the one actually handling real WhatsApp traffic
-    (deterministic, per the active binding's decision_owner) -- an Aurora
-    validation session failed every step because it POSTed to an n8n
+    (deterministic, per the active binding's decision_owner). A validation
+    session can otherwise fail every step because it POSTs to an n8n
     webhook nobody maintains, while real customers were being served by the
     deterministic graph_agent_runtime_v3 pipeline the whole time. Mirrors
     routes.personas._mask_routing's resolution exactly, so the validator and
@@ -116,14 +122,15 @@ def _resolve_conversation_mode(persona_id: str | None, routing: dict) -> str:
     fallback = "n8n_agents" if process_mode == "n8n" else "deterministic"
     if not persona_id:
         return fallback
-    active_binding = next(
-        (
-            row
-            for row in supabase_client.get_workflow_bindings(persona_id)
-            if row.get("active")
-        ),
-        None,
-    )
+    if active_binding is None:
+        active_binding = next(
+            (
+                row
+                for row in supabase_client.get_workflow_bindings(persona_id)
+                if row.get("active")
+            ),
+            None,
+        )
     decision_owner = ((active_binding or {}).get("metadata") or {}).get("decision_owner")
     return decision_owner if decision_owner in _KNOWN_CONVERSATION_MODES else fallback
 
@@ -199,10 +206,24 @@ def bootstrap(persona_slug: str) -> dict:
     bindings = supabase_client.get_workflow_bindings(persona_id)
     active_binding = next((row for row in bindings if row.get("active")), None) or {}
     metadata = active_binding.get("metadata") or {}
+    _version, _checksum, graph = _published_graph(persona_slug)
+    agent_node = next(
+        (
+            node for node in graph.nodes
+            if (node.data or {}).get("metadata", {}).get("agent_slug")
+        ),
+        None,
+    )
+    agent_metadata = (agent_node.data or {}).get("metadata", {}) if agent_node else {}
+    agent_name = agent_node.label if agent_node else persona.get("name", persona_slug)
+    business_model = conversation_runtime._business_model(graph)
+    compatible_flows = _flows_for_business_model(business_model)
     return {
         "persona": {"id": persona_id, "slug": persona_slug, "name": persona.get("name")},
         "routing": {
-            "conversation_mode": _resolve_conversation_mode(persona_id, routing),
+            "conversation_mode": _resolve_conversation_mode(
+                persona_id, routing, active_binding,
+            ),
             "process_mode": routing.get("process_mode"),
         },
         "binding": {
@@ -212,9 +233,20 @@ def bootstrap(persona_slug: str) -> dict:
             "decision_owner": metadata.get("decision_owner"),
             "pipeline_contract": metadata.get("pipeline_contract"),
         },
-        "bot": next((row for row in bots(None) if row.get("persona_slug") == persona_slug), None),
-        "flows": flows(persona_slug),
-        "sessions": [row for row in list_sessions() if row.get("persona_slug") == persona_slug][:25],
+        "bot": {
+            "id": persona_slug,
+            "bot_name": agent_name,
+            "agent_slug": str(agent_metadata.get("agent_slug") or "agent"),
+            "whatsapp_phone": agent_metadata.get("whatsapp_phone"),
+            "label": f"{agent_name} — {persona.get('name', persona_slug)}",
+            "persona_slug": persona_slug,
+            "persona_id": persona_id,
+            "description": persona.get("description", ""),
+        },
+        "flows": compatible_flows,
+        "sessions": list_sessions(
+            persona_slug=persona_slug, since_hours=12, limit=25,
+        ),
     }
 
 
@@ -261,8 +293,8 @@ _CLIENT_NAMES = [
 # Which business_model(s) (persona_node.data.business_model, same field
 # services.conversation_runtime._business_model reads) a flow's scripted
 # messages actually make sense for. Confirmed live 2026-08-08: running
-# "compra_simples" (asks price/quantity of a "produto") against Aurora
-# (business_model="appointment", no product nodes at all) produced a
+# "compra_simples" (asks price/quantity of a "produto") against an
+# appointment persona with no product nodes produced a
 # looping, self-contradicting conversation -- not a pipeline bug, a
 # nonsensical test. Flows absent here (or mapped to an empty set) are
 # treated as valid for any business model.
@@ -369,8 +401,15 @@ def _branch_identity_field(contract: dict, anchor: str) -> dict | None:
     )
 
 
-def _graph_doubt(document: dict, contract: dict) -> dict | None:
+def _graph_doubt(
+    document: dict, contract: dict, branch_anchor_node_id: str | None = None,
+) -> dict | None:
     qualification_questions = set((contract.get("questions") or {}).keys())
+    anchor = str(
+        branch_anchor_node_id or contract.get("branch_anchor_node_id") or ""
+    )
+    branch = (document.get("node_by_id") or {}).get(anchor) or {}
+    title = str(branch.get("title") or branch.get("slug") or "").strip()
     for node_id in contract.get("closure_node_ids") or []:
         if node_id in qualification_questions:
             continue
@@ -380,7 +419,24 @@ def _graph_doubt(document: dict, contract: dict) -> dict | None:
         data = node.get("data") or {}
         question = str(data.get("question") or node.get("title") or "").strip()
         if question:
-            return {"text": question, "expected_evidence_node_ids": [node_id]}
+            expected = [node_id]
+            normalized_question = _semantic_fold(question)
+            normalized_title = _semantic_fold(title)
+            existence_verbs = (" fazem ", " oferecem ", " realizam ", " trabalham com ")
+            operational_terms = (" horario ", " agenda ", " data ", " dia ", " amanha ")
+            padded = f" {normalized_question} "
+            if (
+                anchor and normalized_title and normalized_title in normalized_question
+                and any(verb in padded for verb in existence_verbs)
+                and not any(term in padded for term in operational_terms)
+            ):
+                expected.append(anchor)
+            return {"text": question, "expected_evidence_node_ids": expected}
+    if anchor and title:
+        return {
+            "text": f"Vocês oferecem {title}?",
+            "expected_evidence_node_ids": [anchor],
+        }
     return None
 
 
@@ -476,7 +532,7 @@ def _semantic_appointment_script(
                     [anchor, second_anchor] if additive else [second_anchor]
                 ),
             }
-    doubt = _graph_doubt(document, contract)
+    doubt = _graph_doubt(document, contract, anchor)
     if not doubt:
         raise ValueError(
             f"Branch {anchor} não possui FAQ publicada para testar dúvida/interrupção"
@@ -492,7 +548,7 @@ def _semantic_appointment_script(
             len(item_contract.get("fields") or [])
             for _item_anchor, _item_node, item_contract in branches[:2]
         ) + 6,
-        "expected_handoff": True,
+        "expected_handoff": False,
         "switch": switch,
         "doubt": doubt,
         "initial_known_fields": (
@@ -578,7 +634,7 @@ def _deterministic_script(
             if unit_price is not None and flow_id == "compra_simples"
             else None
         ),
-        "forbidden_terms": ["tock", "tock fatal"],
+        "forbidden_terms": [],
     }
     return {
         "flow_description": _FLOWS.get(flow_id, flow_id),
@@ -623,7 +679,7 @@ def generate_script(
         persona_slug
     )
     # Confirmed live 2026-08-09: for any persona actually running
-    # graph_agent_runtime_v3 (e.g. Aurora), every real turn reports the v3
+    # graph_agent_runtime_v3, every real turn reports the v3
     # compiler's own publication version/checksum (graph_agent_runtime_v3.
     # build_context() reads it from graph_publications, never from the
     # legacy v2.1 store) -- an entirely separate counter from the v2.1
@@ -875,8 +931,15 @@ def get_session(session_id: str) -> dict:
     return session
 
 
-def list_sessions() -> list:
-    return sorted(_session_list(), key=lambda x: x["created_at"], reverse=True)
+def list_sessions(
+    *, persona_slug: str | None = None, since_hours: int | None = None, limit: int = 100,
+) -> list:
+    return sorted(
+        _session_list(
+            persona_slug=persona_slug, since_hours=since_hours, limit=limit,
+        ),
+        key=lambda x: x["created_at"], reverse=True,
+    )
 
 
 def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
@@ -1142,7 +1205,7 @@ async def _wait_for_reply_delivered(
     to land (up to max_wait_s) makes the validator behave like a real
     customer -- one message, wait for the reply, then the next -- instead
     of outrunning the pipeline. Generic: applies to every persona/flow the
-    validator runs, not just Aurora.
+    validator runs, regardless of persona.
     """
     if not outbound_message_id:
         raise RuntimeError("Turno não retornou a identidade canônica do outbound")
@@ -1212,7 +1275,7 @@ def _seed_known_name(*, persona: dict, lead_ref: int, client_name: str) -> None:
     instead of writing to conversation_ledgers/conversation_facts directly,
     so the seeded lead's state is indistinguishable from one that reached
     the same fact organically. Only meaningful for graph_agent_runtime_v3
-    personas (Aurora et al.); quietly no-ops for any other runtime, where
+    personas; quietly no-ops for any other runtime, where
     "known_name" behaves the same as "cold" for now.
     """
     if not client_name:
@@ -1425,13 +1488,42 @@ def _semantic_turn_audit(
     }
 
 
-async def run_session_direct(session_id: str) -> dict:
+def enqueue_session_direct(session_id: str) -> dict:
+    """Queue a direct run without executing conversation work in the API."""
+    queued = supabase_client.enqueue_wa_validator_session(session_id, "direct")
+    if not queued.get("queued"):
+        state = str(queued.get("state") or "unknown")
+        raise ValueError(f"Sessão não pode ser enfileirada no estado {state}")
+    return queued.get("session") or get_session(session_id)
+
+
+def cleanup_expired_artifacts(*, hours: int = 12, dry_run: bool = True) -> dict:
+    return supabase_client.cleanup_wa_validator_artifacts(
+        hours=hours, dry_run=dry_run,
+    )
+
+
+def mark_session_execution_error(session_id: str, exc: Exception) -> dict:
+    return _session_update(
+        session_id,
+        status="error",
+        error=str(exc),
+        output={"status": "error", "failure": "validator_worker_error"},
+    )
+
+
+async def run_session_direct(
+    session_id: str, *, claimed_session: dict | None = None,
+) -> dict:
     """Execute through the selected mode using the conversation_v1 contract."""
-    claimed = supabase_client.claim_wa_validator_session(session_id)
-    if not claimed.get("claimed"):
-        state = str(claimed.get("state") or "unknown")
-        raise ValueError(f"Sessão não pode ser reexecutada no estado {state}")
-    session = claimed.get("session") or _session_get(session_id) or {}
+    if claimed_session is None:
+        claimed = supabase_client.claim_wa_validator_session(session_id)
+        if not claimed.get("claimed"):
+            state = str(claimed.get("state") or "unknown")
+            raise ValueError(f"Sessão não pode ser reexecutada no estado {state}")
+        session = claimed.get("session") or _session_get(session_id) or {}
+    else:
+        session = claimed_session
 
     script = session.get("script", {})
     persona_slug = session.get("persona_slug", "")
@@ -1621,7 +1713,7 @@ async def run_session_direct(session_id: str) -> dict:
                 _session_update(session_id, output={"conversation": list(conversation), "status": "running"})
                 try:
                     # Confirmed live 2026-08-08: hardcoding "conversation_v1"
-                    # here got every Aurora n8n_agents step rejected by the
+                    # here got n8n_agents steps rejected by the
                     # workflow's own "pipeline contract mismatch" guard --
                     # the deployed workflow expects whatever the binding
                     # itself declares, exactly like real dispatch
@@ -1656,7 +1748,7 @@ async def run_session_direct(session_id: str) -> dict:
                             # worker only wants a short log preview, but this
                             # caller parses the WHOLE body as JSON. Confirmed
                             # live 2026-08-08: reusing the worker's 65_536
-                            # preview limit here truncated real Aurora
+                            # preview limit here truncated real
                             # replies mid-string, turning a working turn into
                             # a bogus JSONDecodeError. Large enough that no
                             # realistic conversation turn is ever cut off.
@@ -1982,7 +2074,9 @@ async def run_session_direct(session_id: str) -> dict:
     # CLI and container QA runs have no long-lived ASGI loop after the command
     # returns. Opt in to awaiting the deterministic scenario there, while the
     # API route retains its non-blocking behaviour by default.
-    if os.environ.get("WA_VALIDATOR_DIRECT_WAIT", "").strip().lower() in {"1", "true", "yes"}:
+    if claimed_session is not None or os.environ.get(
+        "WA_VALIDATOR_DIRECT_WAIT", ""
+    ).strip().lower() in {"1", "true", "yes"}:
         await task
     return get_session(session_id)
 
@@ -2005,6 +2099,10 @@ def _persona_business_model(persona_slug: str) -> str | None:
 
 def flows(persona_slug: str | None = None) -> list:
     business_model = _persona_business_model(persona_slug) if persona_slug else None
+    return _flows_for_business_model(business_model)
+
+
+def _flows_for_business_model(business_model: str | None) -> list:
     return [
         {"id": k, "label": v.split(":")[0]}
         for k, v in _FLOWS.items()

@@ -21,19 +21,22 @@ export class ApiError extends Error {
   readonly path: string;
   readonly detail: string;
   readonly kind: ApiErrorKind;
+  readonly requestId: string;
 
-  constructor(args: { status: number; path: string; detail?: string; kind: ApiErrorKind }) {
+  constructor(args: { status: number; path: string; detail?: string; kind: ApiErrorKind; requestId?: string }) {
     const offline = args.kind === "network" || args.kind === "unavailable";
+    const requestSuffix = args.requestId ? `; request_id ${args.requestId}` : "";
     super(
       offline
-        ? API_OFFLINE_ERROR
-        : `${args.status} ${args.path}${args.detail ? ` - ${args.detail}` : ""}`,
+        ? `${API_OFFLINE_ERROR} Endpoint: ${args.path}; HTTP ${args.status || "network"}${requestSuffix}.`
+        : `${args.status} ${args.path}${args.detail ? ` - ${args.detail}` : ""}${requestSuffix}`,
     );
     this.name = "ApiError";
     this.status = args.status;
     this.path = args.path;
     this.detail = args.detail || "";
     this.kind = args.kind;
+    this.requestId = args.requestId || "";
   }
 }
 
@@ -66,42 +69,77 @@ async function responseDetail(res: Response): Promise<string> {
   }
 }
 
-async function assertResponse(path: string, res: Response): Promise<void> {
+function newRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function assertResponse(path: string, res: Response, requestId: string): Promise<void> {
   if (res.ok) return;
   throw new ApiError({
     status: res.status,
     path,
     detail: await responseDetail(res),
     kind: errorKind(res.status),
+    requestId: res.headers.get("x-request-id") || res.headers.get("x-vercel-id") || requestId,
   });
 }
 
-async function req<T>(path: string, opts?: RequestInit): Promise<T> {
+type ReqOptions = RequestInit & { retryUnavailable?: boolean };
+
+async function req<T>(path: string, opts?: ReqOptions): Promise<T> {
   assertApiConfigured();
+  const { retryUnavailable = false, ...fetchOptions } = opts || {};
+  const requestId = newRequestId();
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Request-ID": requestId,
+    ...(fetchOptions.headers || {}),
+  };
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {
-      headers: { "Content-Type": "application/json" },
       credentials: "include",
-      ...opts,
+      ...fetchOptions,
+      headers,
     });
   } catch {
-    throw new ApiError({ status: 0, path, kind: "network" });
+    throw new ApiError({ status: 0, path, kind: "network", requestId });
   }
 
-  await assertResponse(path, res);
+  if (retryUnavailable && [502, 503, 504].includes(res.status)) {
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        credentials: "include",
+        ...fetchOptions,
+        headers,
+      });
+    } catch {
+      throw new ApiError({ status: 0, path, kind: "network", requestId });
+    }
+  }
+
+  await assertResponse(path, res, requestId);
   return res.json();
 }
 
 async function reqForm<T>(path: string, form: FormData): Promise<T> {
   assertApiConfigured();
+  const requestId = newRequestId();
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, { method: "POST", body: form, credentials: "include" });
+    res = await fetch(`${BASE}${path}`, {
+      method: "POST",
+      body: form,
+      credentials: "include",
+      headers: { "X-Request-ID": requestId },
+    });
   } catch {
-    throw new ApiError({ status: 0, path, kind: "network" });
+    throw new ApiError({ status: 0, path, kind: "network", requestId });
   }
-  await assertResponse(path, res);
+  await assertResponse(path, res, requestId);
   return res.json();
 }
 
@@ -139,8 +177,9 @@ export const api = {
     offset = 0,
     personaId?: string,
     validationScope: "exclude" | "only" | "all" = "exclude",
+    hours?: number,
   ) =>
-    req<any[]>(`/leads?limit=${limit}&offset=${offset}&validation_scope=${validationScope}${personaId ? `&persona_id=${personaId}` : ""}`),
+    req<any[]>(`/leads?limit=${limit}&offset=${offset}&validation_scope=${validationScope}${personaId ? `&persona_id=${personaId}` : ""}${hours ? `&hours=${hours}` : ""}`),
   leadsScoped: (opts: {
     limit?: number;
     offset?: number;
@@ -1109,7 +1148,9 @@ export const api = {
   // WA Validator
   waBots: () => req<any[]>("/wa-validator/bots"),
   waBootstrap: (personaSlug: string) =>
-    req<any>(`/wa-validator/bootstrap?persona_slug=${encodeURIComponent(personaSlug)}`),
+    req<any>(`/wa-validator/bootstrap?persona_slug=${encodeURIComponent(personaSlug)}`, {
+      retryUnavailable: true,
+    }),
   waFlows: (personaSlug?: string) =>
     req<any[]>(
       `/wa-validator/flows${personaSlug ? `?persona_slug=${encodeURIComponent(personaSlug)}` : ""}`,

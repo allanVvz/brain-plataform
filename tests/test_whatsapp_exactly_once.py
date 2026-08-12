@@ -760,6 +760,7 @@ def test_validation_lead_commit_persists_the_reply_without_a_real_send(monkeypat
     """
     lead = {
         "id": 7,
+        "lead_id": "validator_sess1",
         "persona_id": "persona-1",
         "channel_binding_id": "binding-1",
         "stage": "novo",

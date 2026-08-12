@@ -50,6 +50,14 @@ def test_model_prompt_is_compact_and_budgeted_before_both_calls():
     assert "recent_messages" in initial
 
 
+def test_model_prompt_receives_complete_multi_service_memory_contract():
+    initial = _node("Build graph grounded agent request")["parameters"]["jsCode"]
+    assert "['keep','select','switch','add']" in initial
+    assert "active_branch_node_ids: context.active_branch_node_ids" in initial
+    assert "facts_by_key: context.cart && context.cart.facts_by_key" in initial
+    assert "known_facts: context.known_facts" in initial
+
+
 def test_completed_commit_uses_the_status_key_consumed_by_the_claim_rpc():
     assert "jsonb_build_object('status','completed'" in SQL
     assert "payload->'conversation_commit'->>'status'" in SQL

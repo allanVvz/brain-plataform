@@ -20,7 +20,9 @@ describe("API error taxonomy", () => {
       kind: "forbidden",
       detail: "Acesso negado.",
     });
-    expect(error.message).toBe("403 /health/score - Acesso negado.");
+    expect(error.message).toContain("403 /health/score - Acesso negado.");
+    expect(error.message).toContain("request_id");
+    expect(error.requestId).not.toBe("");
     expect(error.message).not.toBe(API_OFFLINE_ERROR);
   });
 
@@ -28,7 +30,8 @@ describe("API error taxonomy", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status })));
     const error = await api.health().catch((caught) => caught);
     expect(error).toMatchObject({ status, kind: "unavailable" });
-    expect(error.message).toBe(API_OFFLINE_ERROR);
+    expect(error.message).toContain(API_OFFLINE_ERROR);
+    expect(error.message).toContain(`/health/score; HTTP ${status}`);
   });
 
   it("classifies a failed fetch as a network outage", async () => {
@@ -37,6 +40,23 @@ describe("API error taxonomy", () => {
     }));
     const error = await api.health().catch((caught) => caught);
     expect(error).toMatchObject({ status: 0, kind: "network" });
-    expect(error.message).toBe(API_OFFLINE_ERROR);
+    expect(error.message).toContain(API_OFFLINE_ERROR);
+    expect(error.message).toContain("/health/score; HTTP network");
+  });
+
+  it("retries bootstrap once on a transient gateway response and preserves request id", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("", { status: 503 }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ detail: "still unavailable" }),
+        { status: 503, headers: { "x-request-id": "req-2" } },
+      ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await api.waBootstrap("generic").catch((caught) => caught);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(error).toMatchObject({ status: 503, requestId: "req-2" });
+    expect(error.message).toContain("request_id req-2");
   });
 });

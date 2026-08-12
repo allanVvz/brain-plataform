@@ -38,6 +38,7 @@ type Session = {
 
 const STATUS_COLOR: Record<string, string> = {
   ready: "text-brain-muted",
+  queued: "text-yellow-400",
   starting: "text-yellow-400",
   running: "text-yellow-400",
   done: "text-green-400",
@@ -143,9 +144,8 @@ export default function WaValidatorPage({
   // MessagingSettingsPanel.tsx) -- not a separate selector duplicating it.
   const selectedBot = bots.find((b) => b.persona_slug === globalPersona.slug) || null;
 
-  // Flows depend on the selected persona's business model (e.g. Aurora is
-  // an appointment persona with no products -- commerce flows like
-  // "compra_simples" produce a nonsensical, looping conversation for it).
+  // Flows depend on the selected persona's business model; commerce flows
+  // are not meaningful for an appointment-only persona.
   useEffect(() => {
     if (!globalPersona.slug) { setFlows([]); setFlowId(""); return; }
     let active = true;
@@ -174,12 +174,12 @@ export default function WaValidatorPage({
 
   // Poll active session while running
   useEffect(() => {
-    if (activeSession && (activeSession.status === "running" || activeSession.status === "starting")) {
+    if (activeSession && (["queued", "running", "starting"].includes(activeSession.status))) {
       pollRef.current = setInterval(async () => {
         try {
           const updated = await api.waSession(activeSession.id);
           setActiveSession(updated);
-          if (updated.status !== "running" && updated.status !== "starting") {
+          if (!["queued", "running", "starting"].includes(updated.status)) {
             clearInterval(pollRef.current!);
             onRunComplete?.();
           }
@@ -264,7 +264,9 @@ export default function WaValidatorPage({
 
   const expected: string[] = activeSession?.script?.expected_knowledge || [];
   const insights = activeSession?.insights;
-  const isRunning = activeSession?.status === "running" || activeSession?.status === "starting";
+  const isRunning = Boolean(
+    activeSession && ["queued", "running", "starting"].includes(activeSession.status),
+  );
   const isDone = activeSession?.status === "done";
   const isTerminal = Boolean(activeSession && ["done", "failed", "error"].includes(activeSession.status));
   const semanticAudits = (activeSession?.output?.conversation || [])

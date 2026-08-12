@@ -3,7 +3,7 @@ import re
 import time
 import unicodedata
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import httpx
 from supabase import create_client, Client, ClientOptions
 from typing import Any, Optional
@@ -330,13 +330,21 @@ def ensure_lead_for_persona(
     return None
 
 
-def get_leads(persona_slug: Optional[str] = None, limit: int = 100, offset: int = 0) -> list:
+def get_leads(
+    persona_slug: Optional[str] = None, limit: int = 100, offset: int = 0,
+    since_hours: int | None = None,
+) -> list:
     try:
-        q = get_client().table("leads").select("*").order("updated_at", desc=True).range(offset, offset + limit - 1)
+        q = get_client().table("leads").select("*")
         if persona_slug:
             persona_id = _resolve_persona_id(persona_slug) or persona_slug
             q = q.eq("persona_id", persona_id)
-        return _q(q)
+        if since_hours is not None:
+            q = q.gte(
+                "created_at",
+                (datetime.now(timezone.utc) - timedelta(hours=max(1, int(since_hours)))).isoformat(),
+            )
+        return _q(q.order("updated_at", desc=True).range(offset, offset + limit - 1))
     except Exception as exc:
         try:
             from services import sre_logger
@@ -346,7 +354,10 @@ def get_leads(persona_slug: Optional[str] = None, limit: int = 100, offset: int 
         return []
 
 
-def get_leads_for_persona_ids(persona_ids: list[str], limit: int = 100, offset: int = 0) -> list:
+def get_leads_for_persona_ids(
+    persona_ids: list[str], limit: int = 100, offset: int = 0,
+    since_hours: int | None = None,
+) -> list:
     ids = [pid for pid in persona_ids if pid]
     if not ids:
         return []
@@ -356,10 +367,13 @@ def get_leads_for_persona_ids(persona_ids: list[str], limit: int = 100, offset: 
             .table("leads")
             .select("*")
             .in_("persona_id", ids)
-            .order("updated_at", desc=True)
-            .range(offset, offset + limit - 1)
         )
-        return _q(q)
+        if since_hours is not None:
+            q = q.gte(
+                "created_at",
+                (datetime.now(timezone.utc) - timedelta(hours=max(1, int(since_hours)))).isoformat(),
+            )
+        return _q(q.order("updated_at", desc=True).range(offset, offset + limit - 1))
     except Exception as exc:
         try:
             from services import sre_logger
@@ -758,20 +772,23 @@ def get_leads_for_audience_scope(
     audience_slug: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
+    since_hours: int | None = None,
 ) -> list[dict]:
     lead_refs = get_lead_refs_for_audience_scope(persona_id=persona_id, audience_id=audience_id, audience_slug=audience_slug)
     if not lead_refs:
         return []
-    page_refs = lead_refs[offset: offset + limit]
-    if not page_refs:
-        return []
-    rows = _q(
-        get_client()
-        .table("leads")
-        .select("*")
-        .in_("id", page_refs)
-        .order("updated_at", desc=True)
+    query = (
+        get_client().table("leads").select("*")
+        .in_("id", lead_refs).order("updated_at", desc=True)
     )
+    if since_hours is not None:
+        query = query.gte(
+            "created_at",
+            (datetime.now(timezone.utc) - timedelta(hours=max(1, int(since_hours)))).isoformat(),
+        )
+    query = query.range(offset, offset + limit - 1)
+    rows = _q(query)
+    page_refs = [int(row["id"]) for row in rows if row.get("id") is not None]
     memberships_map = {lead_id: get_lead_memberships(lead_id) for lead_id in page_refs}
     return [{**row, "memberships": memberships_map.get(row.get("id"), [])} for row in rows]
 
@@ -1956,7 +1973,7 @@ def list_product_collection_nodes(
         )
         if persona_id:
             q = q.eq("persona_id", persona_id)
-        return _q(q)
+        return _q(q.order("updated_at", desc=True).range(offset, offset + limit - 1))
     except Exception as exc:
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True
@@ -4226,12 +4243,22 @@ def upsert_wa_validator_session(
     return rows[0]["data"] if rows else data
 
 
-def list_wa_validator_sessions(limit: int = 100) -> list[dict]:
-    """Return the most recent WA Validator sessions' data blobs."""
-    rows = _q(
-        get_client().table("wa_validator_sessions").select("data")
-        .order("created_at", desc=True).limit(limit)
-    )
+def list_wa_validator_sessions(
+    limit: int = 100,
+    *,
+    persona_slug: str | None = None,
+    since_hours: int | None = None,
+) -> list[dict]:
+    """Return a bounded, database-filtered WA Validator session window."""
+    from datetime import datetime, timedelta, timezone
+
+    query = get_client().table("wa_validator_sessions").select("data")
+    if persona_slug:
+        query = query.eq("persona_slug", persona_slug)
+    if since_hours is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max(1, int(since_hours)))
+        query = query.gte("created_at", cutoff.isoformat())
+    rows = _q(query.order("created_at", desc=True).limit(max(1, min(int(limit), 100))))
     return [row["data"] for row in rows if row.get("data")]
 
 
@@ -4239,6 +4266,41 @@ def claim_wa_validator_session(session_id: str) -> dict:
     """Atomically transition one validator session from ready to running."""
     result = get_client().rpc(
         "claim_wa_validator_session", {"p_session_id": session_id}
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def enqueue_wa_validator_session(session_id: str, mode: str) -> dict:
+    """Atomically enqueue a ready validator session for the worker process."""
+    result = get_client().rpc(
+        "enqueue_wa_validator_session",
+        {"p_session_id": session_id, "p_mode": mode},
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def claim_next_wa_validator_session(worker_id: str) -> dict:
+    """Lease the oldest queued validator session, if one is available."""
+    result = get_client().rpc(
+        "claim_next_wa_validator_session", {"p_worker_id": worker_id}
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def cleanup_wa_validator_artifacts(*, hours: int = 12, dry_run: bool = True) -> dict:
+    """Inventory or transactionally remove expired canonical validator data."""
+    result = get_client().rpc(
+        "cleanup_wa_validator_artifacts",
+        {"p_before": f"{max(1, int(hours))} hours", "p_dry_run": bool(dry_run)},
     ).execute()
     value = getattr(result, "data", None)
     if isinstance(value, list):

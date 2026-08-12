@@ -451,7 +451,13 @@ def check(
         # Expand evidence only for the exact boolean service-existence claim;
         # agenda remains governed by its published operational rule.
         claim_value = claim.get("value")
+        # Production publications key branch_contracts by anchor but older
+        # documents do not duplicate that key inside the contract value. The
+        # proof call already carries authoritative active-branch state, so use
+        # the proposal branch only when that state proves it is active.
         branch_anchor = str(contract.get("branch_anchor_node_id") or "")
+        if not branch_anchor and branch in active_set:
+            branch_anchor = branch
         if (
             claim_type == "availability"
             and isinstance(claim_value, dict)

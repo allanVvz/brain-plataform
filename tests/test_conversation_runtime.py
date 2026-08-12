@@ -308,3 +308,33 @@ def test_handoff_branch_reset_facts_requires_an_actual_handoff():
         branch_contract=branch_contract, branch_facts=branch_facts,
         correlation_id="corr-3",
     ) == []
+
+
+def test_only_canonical_validator_lead_can_bypass_paused_transport_gate():
+    canonical = {
+        "lead_id": "validator_1234abcd",
+        "metadata": {"validation": {
+            "is_validation": True,
+            "session_id": "1234abcd-0000-0000-0000-000000000000",
+        }},
+    }
+    assert conversation_runtime._is_canonical_validation_lead(canonical)
+
+    missing_session = {
+        **canonical,
+        "metadata": {"validation": {"is_validation": True}},
+    }
+    wrong_identity = {**canonical, "lead_id": "5511999999999"}
+    ordinary = {"lead_id": "lead-1", "metadata": {}}
+    assert not conversation_runtime._is_canonical_validation_lead(missing_session)
+    assert not conversation_runtime._is_canonical_validation_lead(wrong_identity)
+    assert not conversation_runtime._is_canonical_validation_lead(ordinary)
+
+
+def test_paused_binding_bypass_and_inert_outbound_share_same_canonical_guard():
+    import inspect
+
+    source = inspect.getsource(conversation_runtime.commit)
+    assert "is_validation_lead = _is_canonical_validation_lead(lead)" in source
+    assert ") and not is_validation_lead:" in source
+    assert "if response.reply_text and is_validation_lead:" in source

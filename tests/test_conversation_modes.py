@@ -530,7 +530,7 @@ def _install_fake_wa_validator_session_store(monkeypatch) -> dict:
     )
     monkeypatch.setattr(
         wa_validator_service.supabase_client, "list_wa_validator_sessions",
-        lambda limit=100: list(store.values()),
+        lambda limit=100, **_filters: list(store.values()),
     )
     def _claim(session_id):
         session = store.get(session_id)

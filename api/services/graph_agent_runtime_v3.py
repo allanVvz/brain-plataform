@@ -103,8 +103,7 @@ def _normalize_stale_next_question_after_branch_change(
 ) -> ConversationProposal:
     """Repoint a next_question_node_id that doesn't fit the branch just selected.
 
-    Confirmed live 2026-08-09 (lead_ref 117, "prefiro fazer lavagem técnica
-    detalhada em vez de pintura"): right when the model proposes
+    Confirmed live 2026-08-09: right when the model proposes
     branch_action "select"/"switch", it can still propose a
     next_question_node_id that isn't one of the *new* branch's genuinely
     pending fields (it can misjudge field order, or hang onto a question
@@ -287,16 +286,23 @@ def _known_facts_payload(
     knowing which facts it should confirm rather than silently assume.
     """
     payload = []
-    for key, fact in (facts or {}).items():
-        if not isinstance(fact, dict) or fact.get("status") != "known":
-            continue
-        source_id = str(fact.get("source_message_id") or "")
-        origem = (
-            "esta_conversa"
-            if current_message_id and source_id == str(current_message_id)
-            else "anterior"
-        )
-        payload.append({"chave": key, "valor": fact.get("value"), "origem": origem})
+    for key, stored in (facts or {}).items():
+        values = stored if isinstance(stored, list) else [stored]
+        for fact in values:
+            if not isinstance(fact, dict) or fact.get("status") != "known":
+                continue
+            source_id = str(fact.get("source_message_id") or "")
+            origem = (
+                "esta_conversa"
+                if current_message_id and source_id == str(current_message_id)
+                else "anterior"
+            )
+            payload.append({
+                "chave": key,
+                "valor": fact.get("value", fact.get("value_json")),
+                "owner_node_id": fact.get("owner_node_id"),
+                "origem": origem,
+            })
     return payload
 
 
@@ -670,6 +676,97 @@ def _normalize_next_question_to_first_missing(
     return proposal.model_copy(update={"next_question_node_id": expected})
 
 
+def _coerce_direct_field_value(message: str, schema: dict[str, Any]) -> Any:
+    """Conservatively coerce a literal reply for one graph-declared field."""
+    literal = str(message or "").strip()
+    if not literal:
+        return None
+    candidates = schema.get("anyOf") or [schema]
+    for candidate in candidates:
+        expected = candidate.get("type")
+        value: Any = None
+        if expected == "string" or not expected:
+            value = literal
+            enum = candidate.get("enum") or []
+            if enum:
+                folded = _normalized_phrase(literal)
+                value = next(
+                    (item for item in enum if _normalized_phrase(item) == folded),
+                    None,
+                )
+        elif expected in {"integer", "number"} and re.fullmatch(
+            r"[-+]?\d+(?:[.,]\d+)?", literal,
+        ):
+            parsed = float(literal.replace(",", "."))
+            value = int(parsed) if expected == "integer" and parsed.is_integer() else parsed
+        elif expected == "boolean":
+            folded = _normalized_phrase(literal)
+            if folded in {"sim", "yes", "verdadeiro"}:
+                value = True
+            elif folded in {"nao", "no", "falso"}:
+                value = False
+        if value is not None and graph_proof_checker_v3._schema_error(candidate, value) is None:
+            return value
+    return None
+
+
+def _looks_like_customer_question(message: str) -> bool:
+    normalized = _normalized_phrase(message)
+    if "?" in str(message or ""):
+        return True
+    question_prefixes = (
+        "como ", "quando ", "onde ", "qual ", "quais ", "quanto ",
+        "por que ", "porque ", "posso ", "podem ", "poderia ",
+        "voces oferecem ", "voces fazem ", "voces tem ", "tem como ",
+        "gostaria de saber ", "queria saber ", "sera que ",
+    )
+    return normalized.startswith(question_prefixes)
+
+
+def _reconcile_direct_answer_to_pending_field(
+    proposal: ConversationProposal,
+    context: ConversationContext,
+    contract: dict[str, Any],
+    ledger_facts: dict[str, Any],
+) -> ConversationProposal:
+    """Persist a valid literal answer to the last published graph question.
+
+    The model remains useful for extraction, but omission cannot make the
+    runtime loop when the database proves exactly which field was asked.
+    """
+    if proposal.branch_action.value != "keep" or proposal.claims:
+        return proposal
+    message = _latest_user_message(context).strip()
+    if not message or _looks_like_customer_question(message):
+        return proposal
+    pending = graph_proof_checker_v3.pending_fields(contract, ledger_facts)
+    if not pending:
+        return proposal
+    field = pending[0]
+    question_id = str(field.get("question_node_id") or "")
+    asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
+    if not question_id or not asked or asked[-1] != question_id:
+        return proposal
+    key = str(field.get("key") or "")
+    if not key or any(fact.field_key == key for fact in proposal.extracted_facts):
+        return proposal
+    value = _coerce_direct_field_value(message, field.get("value_schema") or {})
+    if value is None:
+        return proposal
+    fact = ExtractedFact(
+        field_key=key,
+        value=value,
+        status="known",
+        source_message_id=_source_message_id(context.messages),
+        owner_node_id=str(field.get("owner_node_id") or ""),
+        evidence_span=message,
+        confidence=1.0,
+    )
+    return proposal.model_copy(update={
+        "extracted_facts": [*proposal.extracted_facts, fact],
+    })
+
+
 def _project_recent_messages(messages: list[dict[str, Any]], limit: int = 6) -> list[dict[str, Any]]:
     projected: list[dict[str, Any]] = []
     for row in messages[-limit:]:
@@ -733,7 +830,7 @@ def _evidenced_branch_candidates(
     the model could "select" any branch -- including one with zero real
     evidence -- as long as it wasn't outside the top 8 of the full anchor
     list. Confirmed live 2026-08-10: a bare name/greeting turn (no product
-    or complaint signal at all) got waved into Aurora's reclamação branch
+    or complaint signal at all) got waved into an unrelated complaint branch
     this way. This applies the same evidence floor already used for
     `possible_switches`, so both gates can never drift apart again.
     """
@@ -1021,7 +1118,9 @@ def build_context(
             branch_node_ids=active_contract.get("closure_node_ids") or [],
             graph_contract=active_contract, publication_id=publication["id"],
             runtime_version=RUNTIME_VERSION, retrieval_trace=trace,
-            known_facts=_known_facts_payload(ledger.get("facts") or {}, message_id),
+            known_facts=_known_facts_payload(
+                ledger.get("facts_by_key") or ledger.get("facts") or {}, message_id,
+            ),
             time_since_last_client_message=_time_since_last_client_message(messages, message_id),
             pending_reconfirmation=bool((lead.get("metadata") or {}).get("pending_reconfirmation")),
         )
@@ -1218,7 +1317,9 @@ def build_context(
         active_path_checksum=((document.get("coordinates") or {}).get(active_branch) or {}).get("path_checksum"),
         branch_node_ids=contract.get("closure_node_ids") or [], graph_contract=contract,
         publication_id=publication["id"], runtime_version=RUNTIME_VERSION, retrieval_trace=trace,
-        known_facts=_known_facts_payload(ledger.get("facts") or {}, message_id),
+        known_facts=_known_facts_payload(
+            ledger.get("facts_by_key") or ledger.get("facts") or {}, message_id,
+        ),
         time_since_last_client_message=_time_since_last_client_message(messages, message_id),
         pending_reconfirmation=bool((lead.get("metadata") or {}).get("pending_reconfirmation")),
     )
@@ -1304,6 +1405,9 @@ def _decide(
         if grouped_facts else context.cart.get("facts") or {}
     )
     proposal = _normalize_servico_owner(proposal, contract)
+    proposal = _reconcile_direct_answer_to_pending_field(
+        proposal, context, contract, contract_facts,
+    )
     proposal = _normalize_premature_servico_requestion(proposal, contract, contract_facts)
     proposal = _normalize_stale_next_question_after_branch_change(proposal, contract, contract_facts)
     proposal = _normalize_next_question_to_first_missing(

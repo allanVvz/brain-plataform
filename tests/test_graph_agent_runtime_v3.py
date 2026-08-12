@@ -455,6 +455,28 @@ def test_active_service_branch_authorizes_boolean_service_availability():
     assert proof["valid"], proof["errors"]
 
 
+def test_active_service_branch_authorizes_existence_when_contract_omits_anchor_field():
+    document = compiled_fixture()
+    contract = document["branch_contracts"]["branch:a"]
+    contract.pop("branch_anchor_node_id", None)
+    contract["claims"] = [{
+        "claim_type": "availability",
+        "policy": {"mode": "informational"},
+        "evidence_node_ids": ["rule:operation"],
+    }]
+    contract["closure_node_ids"].append("rule:operation")
+    value = proposal(document, branch_action="keep", branch_evidence_span="", claims=[{
+        "claim_type": "availability",
+        "value": {"available": True},
+        "evidence_node_ids": ["branch:a"],
+        "evidence_chunk_ids": [],
+    }])
+
+    proof = check(document, value, active="branch:a")
+
+    assert proof["valid"], proof["errors"]
+
+
 def test_service_branch_does_not_authorize_schedule_availability_payload():
     document = compiled_fixture()
     contract = document["branch_contracts"]["branch:a"]
@@ -1614,6 +1636,125 @@ def test_publication_change_preserves_compatible_persona_fact_without_active_bra
     assert graph_agent_runtime_v3._publication_fact_is_compatible(
         document, {}, "nome_cliente", fact,
     )
+
+
+def test_direct_literal_answer_is_reconciled_to_last_published_missing_field():
+    contract = {
+        "fields": [{
+            "key": "objective",
+            "owner_node_id": "branch:a",
+            "required": True,
+            "accepted_statuses": ["known"],
+            "value_schema": {"type": "string", "minLength": 3},
+            "question_node_id": "q:objective",
+        }],
+        "questions": {
+            "q:objective": {
+                "field_key": "objective",
+                "owner_node_id": "branch:a",
+                "text": "Qual é o seu objetivo?",
+            },
+        },
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{
+            "role": "user", "content": "Quero continuar com o veículo e cuidar bem dele",
+            "message_id": "msg-objective",
+        }],
+        cart={"facts": {}, "asked_question_node_ids": ["q:objective"]},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposed = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="sha256:path", extracted_facts=[], claims=[],
+        next_question_node_id="q:objective", cited_node_ids=[], cited_chunk_ids=[],
+        reply="Entendi.", qualification_complete=False, handoff_requested=False,
+    )
+
+    reconciled = graph_agent_runtime_v3._reconcile_direct_answer_to_pending_field(
+        proposed, context, contract, {},
+    )
+
+    assert len(reconciled.extracted_facts) == 1
+    fact = reconciled.extracted_facts[0]
+    assert fact.field_key == "objective"
+    assert fact.value == "Quero continuar com o veículo e cuidar bem dele"
+    assert fact.source_message_id == "msg-objective"
+
+
+def test_direct_reconciliation_does_not_turn_a_supported_doubt_into_a_fact():
+    contract = {
+        "fields": [{
+            "key": "objective", "owner_node_id": "branch:a", "required": True,
+            "accepted_statuses": ["known"],
+            "value_schema": {"type": "string", "minLength": 3},
+            "question_node_id": "q:objective",
+        }],
+        "questions": {"q:objective": {"field_key": "objective", "text": "Objetivo?"}},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"role": "user", "content": "Vocês oferecem este serviço", "message_id": "msg-doubt"}],
+        cart={"facts": {}, "asked_question_node_ids": ["q:objective"]},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposed = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="sha256:path", extracted_facts=[],
+        claims=[{
+            "claim_type": "availability", "value": {"available": True},
+            "evidence_node_ids": ["branch:a"], "evidence_chunk_ids": [],
+        }],
+        next_question_node_id="q:objective", cited_node_ids=["branch:a"],
+        cited_chunk_ids=[], reply="Sim.", qualification_complete=False,
+        handoff_requested=False,
+    )
+
+    reconciled = graph_agent_runtime_v3._reconcile_direct_answer_to_pending_field(
+        proposed, context, contract, {},
+    )
+
+    assert reconciled.extracted_facts == []
+
+
+def test_direct_reconciliation_rejects_question_without_question_mark():
+    contract = {
+        "fields": [{
+            "key": "objective", "owner_node_id": "branch:a", "required": True,
+            "accepted_statuses": ["known"],
+            "value_schema": {"type": "string", "minLength": 3},
+            "question_node_id": "q:objective",
+        }],
+        "questions": {"q:objective": {"field_key": "objective", "text": "Objetivo?"}},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{
+            "role": "user", "content": "Vocês oferecem este serviço",
+            "message_id": "msg-question",
+        }],
+        cart={"facts": {}, "asked_question_node_ids": ["q:objective"]},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposed = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="sha256:path", extracted_facts=[], claims=[],
+        next_question_node_id="q:objective", cited_node_ids=[], cited_chunk_ids=[],
+        reply="Sim.", qualification_complete=False, handoff_requested=False,
+    )
+
+    reconciled = graph_agent_runtime_v3._reconcile_direct_answer_to_pending_field(
+        proposed, context, contract, {},
+    )
+
+    assert reconciled.extracted_facts == []
 
 
 def test_topological_fields_preserves_graph_required_field_order():

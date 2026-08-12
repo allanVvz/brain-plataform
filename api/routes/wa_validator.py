@@ -152,12 +152,12 @@ def run_session(request: Request, body: RunRequest):
 
 
 @router.post("/run-direct")
-async def run_session_direct(request: Request, body: RunRequest):
-    """Drive validation through the selected conversation_v1 mode."""
+def run_session_direct(request: Request, body: RunRequest):
+    """Queue validation for the dedicated worker process."""
     try:
         _assert_runs_enabled()
         _assert_session_access(request, body.session_id)
-        return await wa_validator_service.run_session_direct(body.session_id)
+        return wa_validator_service.enqueue_session_direct(body.session_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except HTTPException:
@@ -170,6 +170,16 @@ async def run_session_direct(request: Request, body: RunRequest):
             "message": str(e),
             "traceback": tb,
         })
+
+
+@router.get("/retention")
+def validator_retention(request: Request, hours: int = 12):
+    """Admin-only, read-only inventory of canonical synthetic retention."""
+    if not auth_service.is_admin(auth_service.current_user(request)):
+        raise HTTPException(403, "Apenas administradores podem executar retenção.")
+    if hours < 1 or hours > 168:
+        raise HTTPException(400, "hours deve estar entre 1 e 168")
+    return wa_validator_service.cleanup_expired_artifacts(hours=hours, dry_run=True)
 
 
 @router.post("/analyze")

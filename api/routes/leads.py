@@ -112,6 +112,7 @@ def list_leads(
     audience_id: str | None = Query(None),
     audience_slug: str | None = Query(None),
     validation_scope: str = Query("exclude", pattern="^(exclude|only|all)$"),
+    hours: int | None = Query(None, ge=1, le=720),
 ):
     """Lista leads visiveis na persona ativa.
 
@@ -142,6 +143,7 @@ def list_leads(
                     audience_slug=audience_slug,
                     limit=limit,
                     offset=offset,
+                    since_hours=hours if validation_scope == "only" else None,
                 ) or []
                 return lead_qualification.filter_validation_scope(rows, validation_scope)
             except Exception:
@@ -153,12 +155,14 @@ def list_leads(
                 auth_service.allowed_persona_ids(request),
                 limit=limit,
                 offset=offset,
+                since_hours=hours if validation_scope == "only" else None,
             ) or []
             return lead_qualification.filter_validation_scope(rows, validation_scope)
         rows = supabase_client.get_leads(
             persona_slug=persona_id or persona_slug,
             limit=limit,
             offset=offset,
+            since_hours=hours if validation_scope == "only" else None,
         ) or []
         return lead_qualification.filter_validation_scope(rows, validation_scope)
     except HTTPException:

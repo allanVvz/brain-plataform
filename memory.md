@@ -1,144 +1,239 @@
 # Brain Platform Memory
 
-Updated: 2026-06-29
+Updated: 2026-08-11
 
-## Current Direction
+## Handoff atual — WA Validator, memória operacional e múltiplos serviços
 
-- The repository is being moved to a local-first/self-hosted stack.
-- Supabase Cloud, Cloud Run and other SaaS runtime dependencies should not be required for local operation.
-- The database is local Postgres in Docker (`brain-db`) exposed on `localhost:54322`.
-- A local Supabase-compatible gateway remains as a compatibility layer, using Nginx + PostgREST on `localhost:54321`; it is not Supabase Cloud.
-- Dashboard runs on `localhost:3000`; API runs on `localhost:8000`.
-- Public site outputs are unified under `personas.config.public_site` plus the
-  `public_site_formats` registry. The current public payload is still
-  `/api/menu/{persona_slug}`, now extended with a top-level `site` object.
+### Limites operacionais autorizados
 
-## Authentication And Privacy
+- Toda continuação operacional ocorre exclusivamente em produção.
+- Não subir Docker local.
+- Usar somente o Validator direto/interno; nunca enviar WhatsApp real.
+- Transporte e IAs devem permanecer pausados quando necessários para o teste.
+- Começar por auditoria read-only e dry-run.
+- Em 2026-08-11 o usuário autorizou explicitamente deploy coordenado, migration
+  117 e os testes WA Validator diretos em produção.
+- Limpeza de retenção continua não autorizada e deve permanecer em dry-run.
 
-- Login is handled by local `app_users` and signed HTTP-only session cookies.
-- Persona access is controlled through `user_persona_access`.
-- Non-admin users must only see personas assigned to them.
-- Admin users can see all personas.
-- Sofia/KB intake sessions now store `user_id`; another user cannot read or mutate a session they do not own.
-- OpenAI and Anthropic credentials are user-managed integrations stored encrypted in `user_integration_connections`.
-- Model calls use the logged-in user's OpenAI/Anthropic credential first, with server env vars only as fallback.
-- API keys must never be exposed through `NEXT_PUBLIC_*` or browser payloads.
+### Objetivo
 
-## Public Site Output
+1. Escopar bootstrap por persona, 25 sessões e janela móvel de 12h.
+2. Filtrar leads/conversas sintéticos no banco para as últimas 12h.
+3. Fazer `POST /wa-validator/run-direct` apenas enfileirar; o processo
+   `workers` executa a conversa longa usando `wa_validator_sessions`, sem tabela
+   nova.
+4. Preservar endpoint, status HTTP e request ID nos erros; repetir somente o GET
+   de bootstrap, uma vez, em `502/503/504`.
+5. Enviar ao workflow `active_branch_node_ids`, `facts_by_key` e `known_facts`,
+   aceitando `branch_action=add`.
+6. Reconciliar resposta literal ao último `missing_fields[0]` apenas quando ela
+   satisfaz o schema e não é dúvida ou troca/adição de serviço.
+7. Preservar fatos compartilhados uma vez e fatos de serviço por proprietário;
+   `switch` substitui e `add` mantém ambos os ramos.
+8. Permitir que o ramo ativo prove somente existência do serviço, nunca
+   agenda, data ou horário.
+9. Encerrar em `qualification_complete=true`, sem handoff ou pergunta extra.
+10. Inventariar e remover, de forma transacional, somente artefatos sintéticos
+    canônicos anteriores a 12h e com todos os outbounds comprovadamente inertes.
 
-- Every campaign/product/FAQ/copy/asset memory can feed a public site output.
-- The backend contract is `/api/menu/{persona_slug}` with legacy
-  `persona.collections[]` preserved and new `site` metadata added.
-- Per-persona site config lives in `personas.config.public_site`:
-  `site_slug`, `site_name`, `format_key`, `default_collection_slug`,
-  `whatsapp_phone`, `whatsapp_message_template`.
-- Fixed site formats live in `public_site_formats`; initial keys are `cardapio`,
-  `landing_page` and `catalogo_roupas`.
-- `whatsapp_phone` is public CTA data for `wa.me`; it must not be confused with
-  Meta `whatsapp_phone_number_id` used by n8n/Business routing.
-- `personas.catalog_url` remains the external published URL pointer.
+### Implementação local concluída, ainda não publicada
 
-## Local Validation Results
+- `api/services/wa_validator_service.py`
+  - bootstrap carrega uma persona/binding/routing/grafo e consulta no banco no
+    máximo 25 sessões da persona nas últimas 12h;
+  - execução direta é enfileirada e o worker recebe a sessão já claimada;
+  - qualificação completa termina sem exigir handoff;
+  - dúvida literal de existência aceita FAQ ou ramo ativo como evidência; termos
+    de agenda/data/horário continuam exigindo evidência operacional específica;
+  - removidos termos de marca/persona do comportamento genérico.
+- `api/services/graph_proof_checker_v3.py`
+  - hotfix de existência usa o branch ativo autoritativo quando publicações
+    antigas não duplicam `branch_anchor_node_id` dentro do contrato;
+  - o payload booleano exato `{available: true}` pode provar existência;
+    payload com data/horário não é autorizado pelo ramo.
+- `api/services/graph_agent_runtime_v3.py`
+  - fatos conhecidos incluem todos os proprietários/ramos;
+  - resposta direta válida vira fato do primeiro campo pendente;
+  - perguntas com ou sem `?`, claims e mudanças de branch não viram fato;
+  - próxima pergunta continua autoritativa em `missing_fields[0]`.
+- `api/services/conversation_runtime.py`
+  - binding safety-paused só pode processar um lead de validação quando todos os
+    marcadores canônicos existem (`is_validation`, `session_id` e
+    `lead_id=validator_*`);
+  - o mesmo guard seleciona o caminho de outbound inerte, permitindo testar com
+    transporte real pausado sem abrir bypass para leads comuns.
+- `api/n8n-workflows/persona-conversation-template.json`
+  - schema aceita `add` e envia ramos ativos, fatos agrupados e fatos conhecidos.
+- `api/services/supabase_client.py`, `api/routes/leads.py`
+  - filtros temporais são aplicados no banco antes de paginação;
+  - sessões suportam filtro por persona/janela;
+  - wrappers para enqueue, claim e retenção.
+- `api/routes/wa_validator.py`
+  - `run-direct` é síncrono e apenas enfileira;
+  - GET `/wa-validator/retention` é admin e sempre `dry_run=True`; não existe
+    parâmetro HTTP que permita aplicar limpeza.
+- `api/workers/wa_validator_worker.py`, `api/workers/runner.py`
+  - worker dedicado reclama fila com processamento fora da API;
+  - retenção roda em dry-run por padrão; apply exige
+    `WA_VALIDATOR_RETENTION_ENABLED=true` e continua sujeito a autorização.
+- `supabase/migrations/117_wa_validator_queue_and_retention.sql`
+  - fila em `wa_validator_sessions`, `FOR UPDATE SKIP LOCKED`, sem tabela nova;
+  - advisory lock e uma transação para inventário/limpeza;
+  - preserva qualquer sessão/lead recente ou em `queued/starting/running`;
+  - resolve IDs com `nullif`, incluindo metadado canônico e compatibilidade;
+  - aborta toda a transação se houver identidade real, destinatário, ID externo,
+    lock ou outbound em estado processável;
+  - registra exatamente um evento agregado após apply.
+- Dashboard
+  - reconhece `queued`, usa janela de 12h na aba de validação;
+  - todo erro recebe request ID gerado no cliente ou retornado pelo servidor;
+  - bootstrap repete uma vez apenas em `502/503/504`; POST nunca repete.
+- `docker-compose.yml`
+  - worker recebe os gates do Validator e retenção, ambos `false` por padrão.
 
-Created validation users:
+Arquivos novos:
 
-- `privacy-a@brain.local` with access only to `baita-conveniencia`.
-- `privacy-b@brain.local` with access only to `tock-fatal`.
+- `api/workers/wa_validator_worker.py`
+- `supabase/migrations/117_wa_validator_queue_and_retention.sql`
+- `tests/test_wa_validator_queue_retention_contract.py`
+- `tests/test_wa_validator_worker.py`
 
-Validated:
+### Verificação local sem Docker
 
-- A sees only `baita-conveniencia`.
-- B sees only `tock-fatal`.
-- A requesting `tock-fatal` returns 403.
-- B requesting `baita-conveniencia` returns 403.
-- A can load graph data for `baita-conveniencia`.
-- A cannot load graph data for `tock-fatal`.
-- Non-admin access to global pipeline/log endpoints returns 403 where appropriate.
-- Sofia session created by A returns 200 for A and 403 for B.
-- Per-user model config was tested with fake-shaped credentials and then removed.
+- `py_compile` dos módulos alterados: passou.
+- Testes backend focados finais: `153 passed`.
+- Matriz backend ampla equivalente ao deploy: `589 passed, 2 skipped`.
+- Testes dashboard completos: `93 passed` em 23 arquivos.
+- `npx tsc --noEmit`: passou.
+- `npm run build` com `API_INTERNAL_BASE_URL=https://api.invalid`: passou; 38
+  páginas estáticas geradas.
+- Parse YAML do Compose: passou.
+- `git diff --check`: passou; somente avisos esperados de CRLF do Windows.
+- Busca anti-hardcode nos arquivos alterados: nenhum nome de cliente, marca,
+  produto ou serviço específico influencia o runtime/template.
+- Docker não foi iniciado.
 
-## Current Stack Commands
+### Auditoria read-only de produção
 
-- Start local stack: `docker compose up -d --build`
-- Check stack: `docker compose ps`
-- API health: `GET http://localhost:8000/health/ready`
-- Dashboard login: `http://localhost:3000/login`
+Ambiente:
 
-## Known Fragilities
+- Dashboard: `https://brain-plataform-plum.vercel.app`.
+- API: `https://api.vzforeal.com`.
+- VPS: `/opt/brain-ai`.
+- Release em execução: imagem/tag
+  `da44d4902278f9f8e136893d5800000efc53efe5` para API e workers.
+- Última migration aplicada: `116_reconcile_active_conversation_branches.sql`.
+- A migration 117 e o código local ainda não estão publicados.
 
-- The worktree contains a broad local-first refactor and is not a small isolated patch.
-- Runtime artifacts in `.codex-run/` are local logs/PIDs and should not be committed.
-- The local schema has shown historical drift, for example references to `messages.Lead_Stage`.
-- Some global operational tables still exist by design; route-level filtering/admin gates are required when returning them.
-- Fake-shaped provider credentials can pass local shape validation; real provider validation would require live network/API calls.
+O script read-only `ops/vps/validate-production-release.sh` passou em:
 
-## Recent Verification
+- source SHA, release directory e checksums;
+- containers/health;
+- grants, RLS e Data API;
+- zero CAS conflicts em 15m;
+- zero buffers críticos e zero outbounds em 15m;
+- zero divergência de checksum e zero publicação ativa sem checksum;
+- backup de `2026-08-11T22:35:20Z` e evidência de restore controlado de
+  `2026-08-11T20:48:46Z` com 4.694 registros.
 
-- Python syntax checks passed for modified backend modules.
-- `npm run build` passed for the dashboard.
-- Docker stack was rebuilt and was running after validation:
-  - `brain-api`
-  - `brain-dashboard`
-  - `brain-db`
-  - `brain-postgrest`
-  - `brain-supabase-gateway`
+Recursos observados: API ~688.5 MiB/1.5 GiB, workers ~422.2 MiB/1.5 GiB e
+filesystem raiz em 78%.
 
-## Graph JSON v2 Integration Slice - 2026-06-28
+Health público após as correções locais, sem execução do Validator:
 
-- Integrated the first local-first slice from `origin/study-branch-state-audit-20260628` into `study-merge-local-first-sofia-qa`.
-- Added Graph JSON v2 schema, canonical validator, local draft/version store, importer, `/graph-documents/*` routes, dashboard API clients and `dashboard/lib/graph-json-v2.ts`.
-- Security corrections applied during integration:
-  - Reads use `auth_service.assert_persona_access(... persona_slug=...)`.
-  - Writes require admin or `user_persona_access.can_edit=true`.
-  - Request `persona_slug` must match `graph_json.persona_slug`.
-  - Published payload is revalidated before event persistence and v1 materialization.
-- Current implementation is intentionally parallel to v1: published v2 docs are stored as `system_events`; draft/apply-patch versions are local files under `data/graph_documents`; v1 `knowledge_nodes/knowledge_edges` remain the serving fallback.
-- Validation run:
-  - `PYTHONDONTWRITEBYTECODE=1 api/.venv/Scripts/python.exe -m py_compile ...` passed for the new/changed backend files.
-  - `PYTHONDONTWRITEBYTECODE=1 api/.venv/Scripts/python.exe -m pytest tests/test_graph_json_v2_integration.py -q` passed: 6 tests.
-  - `npm run build` in `dashboard/` passed.
-- Remaining integration risk: the full Sofia/CRIAR Graph JSON v2 loop from `study-branch-state-audit-20260628` still has large overlaps in `kb_intake_service.py`, `assets.py`, `knowledge.py`, `graph.py`, migrations 039-046, product import, QA contract routes, and dashboard graph/capture UI. Bring these in by feature slices, not as one merge.
+- API `/health`: 10/10 HTTP 200, 0.152–0.368s.
+- Proxy `/api-brain/health`: 10/10 HTTP 200, 0.167–0.535s.
+- O gate de health durante uma conversa completa e bootstrap `<2s` não pode ser
+  avaliado antes do release autorizado.
 
-## Sofia Graph Tab Integration - 2026-06-28
+### Estado de transporte/IA — bloqueio atual
 
-- Integrated Sofia side panel into `/knowledge/graph` from `origin/study-branch-state-audit-20260628`.
-- Graph tab uses Graph JSON v2 as the UI contract; v1 tables remain backend-derived/legacy indexes, not the Graph UI fallback.
-- Added local-first `/sofia/graph-command` backend route with session/plan_json response, persona access guard, visual patch commands, confirm and undo support.
-- Dashboard API now has compatibility methods used by the restored Graph UI: `getGraphDocument`, `publishGraphDocument`, `sofiaGraphCommand`.
-- Validation run:
-  - `api/.venv/Scripts/python.exe -m pytest tests/test_graph_json_v2_integration.py -q` passed: 9 tests.
-  - `py_compile` for `sofia_graph.py`, `graph_documents.py`, `main.py` passed.
-  - `npm run build` in `dashboard/` passed.
-  - `docker compose up -d --build` rebuilt/restarted `brain-api`.
-  - Real API checks with login cookie passed:
-    - `GET /health/ready` -> 200.
-    - `POST /auth/login` with local admin -> 200.
-    - `GET /graph-documents/current?persona_slug=baita-conveniencia` -> 200.
-    - `POST /sofia/graph-command` -> 200 with visual patch + `plan_json`.
-  - Real dashboard route `GET http://localhost:3000/knowledge/graph` after login -> 200.
-- Remaining limitation: Sofia Graph route is deterministic/local-first and does not yet pull the full `qa_contract.py` + `sofia_orchestrator.py` LLM/tool orchestration from the audit branch.
+Bindings ativos observados em produção:
 
-## Sofia Graph Audit Branch Full Incorporation - 2026-06-28
+- `aurora`: Meta Cloud, `connected`, `safety_paused=false`,
+  `decision_owner=n8n_agents`, `pipeline_contract=conversation_v3`.
+- `tock-fatal`: Evolution, `connecting`, `safety_paused=false`,
+  `decision_owner=deterministic`, `pipeline_contract=conversation_v1`.
 
-- Merged the remaining `origin/study-branch-state-audit-20260628` surface into `study-merge-local-first-sofia-qa`.
-- Replaced the temporary local-first `api/routes/sofia_graph.py` route with the audit branch `api/routes/qa_contract.py` contract mounted at both `/sofia/graph-command` and `/api/sofia/graph-command`.
-- Integrated the Sofia graph orchestration stack used by the Graph tab: `sofia_orchestrator`, `sofia_tools`, `sofia_faq_tool`, FAQ generation panel, graph render state QA route, product import views, taxonomy helpers, and the related QA/migration/docs package.
-- Security correction found during validation: the merged `graph_documents` route had regressed to `current_user()` only. It now enforces persona view access on reads, edit access on mutations, and rejects `persona_slug` mismatch between request body and Graph JSON v2 payload.
-- Validation run:
-  - Python syntax checks passed for `api/main.py`, `qa_contract.py`, `graph_documents.py`, Sofia services, Graph JSON v2 store/importer/validator and Supabase client.
-  - Focused backend tests passed in stable groups:
-    - Graph JSON v2 integration: 7 passed.
-    - Graph documents/importer/validator: 21 passed.
-    - Graph JSON + route mapping group: 29 passed.
-    - Sofia QA/orchestrator/FAQ group: 51 passed.
-  - A single combined pytest invocation over all focused files still hit the 180s timeout without output, while the same files passed split by group.
-  - `npm run build` in `dashboard/` passed.
-  - `npm test` in `dashboard/` passed: 12 files, 50 tests. It requires non-sandbox execution on Windows because Vitest/Vite hit `spawn EPERM` inside the sandbox.
-  - `npm audit --omit=dev` found 0 production vulnerabilities.
-  - `docker compose up -d --build` rebuilt and started `brain-api`; `GET /health` returned 200 and `GET /knowledge/graph` on dashboard returned 200.
-  - Real authenticated API validation passed with local admin session:
-    - `POST /sofia/graph-command` for `vz-lupas` returned 200 with `plan_json.graph_json.schema_version = "2.0"`.
-    - `POST /graph-documents/apply-patch` returned 200.
-    - `POST /graph-documents/publish` returned 200 with `reindex_ok=true`, `nodes_imported=2`, `edges_imported=1`.
-    - `GET /graph-documents/current?persona_slug=vz-lupas` returned version 1 with Graph JSON v2 payload.
-- Remaining plan: no large branch slice remains unmerged from `study-branch-state-audit-20260628` in this worktree. What remains is hardening: resolve the combined pytest timeout, decide whether QA docs/artifacts/tmp screenshots should stay versioned, and run browser-level interaction on the Sofia panel after the next UI pass.
+Logo, o transporte não está pausado globalmente. Pausar binding ou IA é mutação
+e não foi autorizado; nenhuma sessão de aceite pode começar enquanto o gate de
+segurança aplicável não for explicitamente revisado/autorizado.
+
+Nos leads sintéticos auditados: 82 totais (81 Aurora, 1 VZ), 81 com
+`ai_paused=true`; um lead recente Aurora (`lead_ref=146`) estava sem pause.
+
+### Sessão recente que confirmou o hotfix incompleto publicado
+
+Foi encontrada uma sessão criada em produção por outro processo, não por esta
+sessão de Codex:
+
+- session `586ab54e-32e5-4676-ba81-5696ffc072dc`, lead `146`;
+- criada `2026-08-11T22:38:38Z`, fluxo `sdr_qualificacao_carro`, status `error`;
+- falha: `doubt_answered_first,model_reconciled_without_fallback`;
+- dúvida: existência do serviço; o modelo citou o branch ativo, mas o proof
+  publicado rejeitou `claim_evidence_not_authorized:availability` porque o
+  contrato publicado não duplicava `branch_anchor_node_id`;
+- quatro buffers (dois inbound, dois outbound), sem destinatário; IDs inbound
+  sintéticos e outbound sem ID externo; nenhum WhatsApp real;
+- o patch local agora cobre exatamente a forma do contrato observada e possui
+  testes que impedem usar branch como prova de agenda/data/horário.
+
+### Dry-run manual de retenção
+
+Inventário atual:
+
+- 68 sessões: 46 `done`, 8 `error`, 13 `ready`, 1 `running`;
+- 10 recentes e 57 antigas terminais candidatas;
+- 7 leads sintéticos recentes e 75 antigos;
+- dry-run refinado anterior: 57 sessões, 74 leads, 283 mensagens, 755 buffers,
+  58 ledgers, 303 fatos e 350 proofs candidatos;
+- zero destinatário/ID externo real detectado entre os candidatos.
+
+Sessão stale preservada obrigatoriamente:
+
+- `d122ada2-4a90-4e4d-8791-7eda317f691b`, lead `133`, Aurora;
+- criada `2026-08-10T17:58:40Z`, ainda `running`;
+- `handoff_level=full`, um inbound `dead_letter`, nenhum outbound;
+- migration 117 local agora preserva sessão e lead não terminais mesmo antigos.
+
+Nenhuma limpeza foi aplicada.
+
+### Veredito antes do rollout autorizado
+
+- Código local: testes e build aprovados.
+- Produção: release autorizado, ainda aguardando execução do rollout.
+- Nenhuma das três sessões finais foi executada por esta sessão.
+- Motivos do stop:
+  1. produção ainda está na migration 116 e no runtime inline antigo;
+  2. transporte ativo não está safety-paused;
+  3. há uma sessão stale `running` que requer decisão operacional explícita;
+  4. deploy, migration, pause/resume, limpeza e testes finais não foram autorizados.
+
+### Próximas etapas, cada uma com autorização explícita própria
+
+1. Revisar o diff local e este handoff.
+2. Autorizar deploy coordenado de backend/workers/dashboard/template, mantendo
+   `WA_VALIDATOR_RUN_ENABLED=false` e retenção em dry-run.
+3. Auditar a versão publicada e decidir/autorizar o pause de transporte/IA
+   necessário antes de qualquer sessão.
+4. Autorizar separadamente a migration 117, sem aplicar limpeza.
+5. Executar o endpoint read-only de retenção e comparar IDs/contagens com o
+   inventário manual.
+6. Fazer backup e obter autorização separada antes de qualquer cleanup.
+7. Autorizar exatamente três sessões diretas/internas: qualificação simples,
+   troca de serviço e adição de segundo serviço.
+8. Por inbound, provar uma decisão, um proof e no máximo um outbound inerte;
+   registrar facts, ramos, primeiro missing field, pergunta, tokens, checksum e
+   ausência de destinatário real.
+9. Aceitar somente com zero 5xx, API health aquecido `<500ms` durante os testes,
+   bootstrap `<2s`, zero repetição, três qualificações completas e nenhum
+   handoff exigido pelo Validator para terminar.
+
+### Comandos seguros para retomada
+
+- Health: `curl.exe -sS https://api.vzforeal.com/health`
+- Ready: `curl.exe -sS https://api.vzforeal.com/health/ready`
+- Release audit read-only:
+  `ssh root@api.vzforeal.com "cd /opt/brain-ai && bash ops/vps/validate-production-release.sh"`
+- Não executar `.codex-run/run_safe_prod_validator.py` antes dos gates: ele
+  cria sessão, lead, mensagens e proofs em produção.

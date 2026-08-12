@@ -1833,8 +1833,8 @@ export function MessagesLayout({
     setLoadError(null);
     try {
       const [leadRows, convRows] = await Promise.all([
-        isPortal ? api.portalLeads(portalSlug!, 200) : api.leads(200, 0, personaFilterId || undefined, validationScope),
-        isPortal ? api.portalConversations(portalSlug!) : api.conversations(168, personaFilterId || undefined, validationScope),
+        isPortal ? api.portalLeads(portalSlug!, 200) : api.leads(200, 0, personaFilterId || undefined, validationScope, validationMode ? 12 : undefined),
+        isPortal ? api.portalConversations(portalSlug!) : api.conversations(validationMode ? 12 : 168, personaFilterId || undefined, validationScope),
       ]);
       if (loadLeadsRequestRef.current !== requestId) return;
 
@@ -1989,7 +1989,7 @@ export function MessagesLayout({
           const convRows = await (
             isPortal
               ? api.portalConversations(portalSlug!)
-              : api.conversations(168, personaFilterId || undefined, validationScope)
+              : api.conversations(validationMode ? 12 : 168, personaFilterId || undefined, validationScope)
           );
           if (selectedIdRef.current !== id) return;
           setConversations(convRows as ConversationSummary[]);
@@ -2251,7 +2251,7 @@ export function MessagesLayout({
       // Refresh messages + conversations imediato (não esperar próximo poll)
       const [msgPage, convRows] = await Promise.all([
         isPortal ? api.portalConversationMessages(portalSlug!, selectedId) : api.messagesByRef(selectedId, 50, validationScope),
-        isPortal ? api.portalConversations(portalSlug!) : api.conversations(168, personaFilterId || undefined, validationScope),
+        isPortal ? api.portalConversations(portalSlug!) : api.conversations(validationMode ? 12 : 168, personaFilterId || undefined, validationScope),
       ]);
       const page = msgPage as { items: Message[]; before_cursor: string | null; after_cursor: string | null; has_more: boolean };
       const msgRows = page.items || [];

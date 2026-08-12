@@ -1892,6 +1892,18 @@ def _knowledge_context_envelope(
     }
 
 
+def _is_canonical_validation_lead(lead: dict[str, Any]) -> bool:
+    """Require all canonical markers before bypassing real transport gates."""
+    metadata = lead.get("metadata") or {}
+    validation = metadata.get("validation") or {}
+    return bool(
+        isinstance(validation, dict)
+        and validation.get("is_validation") is True
+        and str(validation.get("session_id") or "").strip()
+        and str(lead.get("lead_id") or "").startswith("validator_")
+    )
+
+
 def _handoff_branch_reset_facts(
     *,
     handoff_required: bool,
@@ -2068,6 +2080,7 @@ def commit(
     if not binding.get("active"):
         raise RuntimeError("channel binding is inactive")
     binding_metadata = binding.get("metadata") or {}
+    is_validation_lead = _is_canonical_validation_lead(lead)
     if (
         expected_decision_owner
         and binding_metadata.get("decision_owner") != expected_decision_owner
@@ -2078,7 +2091,7 @@ def commit(
     if (
         binding_metadata.get("safety_paused")
         or binding.get("connection_status") == "safety_paused"
-    ):
+    ) and not is_validation_lead:
         raise RuntimeError("channel binding is safety paused")
     channel_binding_id = persisted_binding_id
     phone_number_id = binding.get("whatsapp_phone_number_id")
@@ -2400,9 +2413,6 @@ def commit(
         }
     )
 
-    is_validation_lead = bool(
-        ((lead.get("metadata") or {}).get("validation") or {}).get("is_validation")
-    )
     buffer = None
     prepared_outbound: dict[str, Any] | None = None
     if response.reply_text and is_validation_lead:
