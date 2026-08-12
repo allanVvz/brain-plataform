@@ -1631,6 +1631,91 @@ def enqueue_session_direct(session_id: str) -> dict:
     return queued.get("session") or get_session(session_id)
 
 
+def _next_semantic_driver_step(
+    *,
+    driver: dict,
+    state: dict,
+    asked_field: str,
+    answered_fields: set[str],
+    active_anchor: str,
+    expected_active_branches: list[str],
+) -> dict | None:
+    """Select the next synthetic customer turn for a semantic validation.
+
+    ``deferred_answer`` is an opt-in Validator probe. It deliberately leaves
+    one asked field unanswered, then supplies it as an unsolicited fact after
+    the runtime advances. Normal generated scripts do not set it, so this
+    exercises the production policy without changing real conversations or
+    the standard validation flows.
+    """
+    doubt = driver.get("doubt")
+    if isinstance(doubt, dict) and not state.get("doubt_sent"):
+        state["doubt_sent"] = True
+        return {
+            **doubt,
+            "kind": "doubt",
+            "intended_facts": {},
+            "expected_branch_node_id": active_anchor,
+        }
+
+    switch = driver.get("switch")
+    if (
+        isinstance(switch, dict)
+        and not state.get("switch_sent")
+        and len(answered_fields) >= int(switch.get("after_answered_fields") or 0)
+    ):
+        state["switch_sent"] = True
+        return {**switch, "kind": "branch_switch"}
+
+    deferred = driver.get("deferred_answer")
+    if isinstance(deferred, dict):
+        deferred_field = str(deferred.get("field") or "")
+        defer_text = str(deferred.get("defer_text") or "").strip()
+        if (
+            deferred_field
+            and asked_field == deferred_field
+            and defer_text
+            and not state.get("deferred_sent")
+        ):
+            state["deferred_sent"] = True
+            return {
+                "text": defer_text,
+                "kind": "field_deferred",
+                "intended_facts": {},
+                "expected_branch_node_id": active_anchor,
+                "expected_active_branch_node_ids": list(expected_active_branches),
+            }
+
+        later_text = str(deferred.get("later_text") or "").strip()
+        if (
+            state.get("deferred_sent")
+            and not state.get("loose_later_sent")
+            and deferred_field
+            and asked_field
+            and asked_field != deferred_field
+            and later_text
+        ):
+            state["loose_later_sent"] = True
+            return {
+                "text": later_text,
+                "kind": "loose_field_answer",
+                "intended_facts": {deferred_field: deferred.get("later_value")},
+                "expected_branch_node_id": active_anchor,
+                "expected_active_branch_node_ids": list(expected_active_branches),
+            }
+
+    answer = (driver.get("answers") or {}).get(asked_field)
+    if isinstance(answer, dict) and str(answer.get("text") or "").strip():
+        return {
+            "text": str(answer["text"]),
+            "kind": "field_answer",
+            "intended_facts": {asked_field: answer.get("value")},
+            "expected_branch_node_id": active_anchor,
+            "expected_active_branch_node_ids": list(expected_active_branches),
+        }
+    return None
+
+
 def cleanup_expired_artifacts(*, hours: int = 12, dry_run: bool = True) -> dict:
     return supabase_client.cleanup_wa_validator_artifacts(
         hours=hours, dry_run=dry_run,
@@ -1775,8 +1860,12 @@ async def run_session_direct(
             recent_replies: list[str] = []
             previous_question_node_id: str | None = None
             answered_fields: set[str] = set()
-            doubt_sent = False
-            switch_sent = False
+            driver_state = {
+                "doubt_sent": False,
+                "switch_sent": False,
+                "deferred_sent": False,
+                "loose_later_sent": False,
+            }
             expected_active_branches: list[str] = []
             semantic_complete = False
             i = 0
@@ -2128,41 +2217,19 @@ async def run_session_direct(
                         semantic_complete = True
                         break
 
-                    if step.get("kind") == "field_answer":
+                    if step.get("kind") in {"field_answer", "loose_field_answer"}:
                         answered_fields.update(
                             str(key) for key in (step.get("intended_facts") or {})
                         )
                     asked_field = str(audit.get("asked_field") or "")
-                    next_step: dict | None = None
-                    doubt = driver.get("doubt")
-                    switch = driver.get("switch")
-                    if isinstance(doubt, dict) and not doubt_sent:
-                        doubt_sent = True
-                        next_step = {
-                            **doubt,
-                            "kind": "doubt",
-                            "intended_facts": {},
-                            "expected_branch_node_id": active_anchor,
-                        }
-                    elif (
-                        isinstance(switch, dict)
-                        and not switch_sent
-                        and len(answered_fields) >= int(switch.get("after_answered_fields") or 0)
-                    ):
-                        switch_sent = True
-                        next_step = {**switch, "kind": "branch_switch"}
-                    else:
-                        answer = (driver.get("answers") or {}).get(asked_field)
-                        if isinstance(answer, dict) and str(answer.get("text") or "").strip():
-                            next_step = {
-                                "text": str(answer["text"]),
-                                "kind": "field_answer",
-                                "intended_facts": {asked_field: answer.get("value")},
-                                "expected_branch_node_id": active_anchor,
-                                "expected_active_branch_node_ids": list(
-                                    expected_active_branches
-                                ),
-                            }
+                    next_step = _next_semantic_driver_step(
+                        driver=driver,
+                        state=driver_state,
+                        asked_field=asked_field,
+                        answered_fields=answered_fields,
+                        active_anchor=active_anchor,
+                        expected_active_branches=expected_active_branches,
+                    )
                     if not next_step:
                         failure = f"script_question_mismatch:{asked_field or 'unknown'}"
                         failure_output = {

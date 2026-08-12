@@ -894,6 +894,55 @@ def test_wa_validator_flows_unfiltered_without_persona_slug():
     assert "sdr_qualificacao_carro" in all_ids
 
 
+def test_semantic_driver_can_defer_then_answer_field_spontaneously():
+    driver = {
+        "answers": {
+            "nome_cliente": {"text": "Meu nome é Beatriz.", "value": "Beatriz"},
+            "objective": {"text": "Quero conservar o carro.", "value": "conservar"},
+        },
+        "deferred_answer": {
+            "field": "nome_cliente",
+            "defer_text": "Prefiro não responder isso agora.",
+            "later_text": "Ah, e meu nome é Beatriz.",
+            "later_value": "Beatriz",
+        },
+    }
+    state = {}
+
+    deferred = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="nome_cliente",
+        answered_fields=set(),
+        active_anchor="paint",
+        expected_active_branches=["paint"],
+    )
+    assert deferred["kind"] == "field_deferred"
+    assert deferred["intended_facts"] == {}
+
+    loose = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="objective",
+        answered_fields=set(),
+        active_anchor="paint",
+        expected_active_branches=["paint"],
+    )
+    assert loose["kind"] == "loose_field_answer"
+    assert loose["intended_facts"] == {"nome_cliente": "Beatriz"}
+
+    next_answer = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="objective",
+        answered_fields={"nome_cliente"},
+        active_anchor="paint",
+        expected_active_branches=["paint"],
+    )
+    assert next_answer["kind"] == "field_answer"
+    assert next_answer["intended_facts"] == {"objective": "conservar"}
+
+
 def test_wa_validator_generate_script_rejects_flow_incompatible_with_persona(
     monkeypatch,
 ):
