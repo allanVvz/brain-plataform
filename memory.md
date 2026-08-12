@@ -116,3 +116,22 @@ Updated: 2026-08-12
 5. Confirmar zero 5xx, health abaixo de 500 ms, bootstrap abaixo de 2 s,
    qualificação completa sem handoff e nenhum outbound real.
 6. Manter binding pausado e retenção em dry-run. Não limpar dados.
+
+### Aceite produtivo após o release `907d5ed`
+
+- Auditoria read-only passou; API e worker no mesmo SHA, saudáveis, zero grants
+  inseguros, zero conflito CAS/buffer crítico/outbound recente e backup válido.
+- Sessão de adição `2826d664-d3a1-438e-a9b0-341daba4dd2a`, lead 155.
+- Runtime concluiu corretamente: Pintura + PPF ativos, fatos compartilhados
+  únicos, condição capturada apesar da palavra “pintura”, missing fields vazio e
+  `qualification_complete=true`, sem handoff.
+- Nove inbounds tiveram exatamente uma decisão, um proof válido, um outbound
+  inerte e commit completo. Lead ficou em handoff full após o teste.
+- Health: 86/86 HTTP 200, máximo 224.065 ms, p95 45.592 ms. Bootstrap 321.156 ms.
+- Nenhum destinatário/ID externo real e nenhum WhatsApp enviado.
+- Único falso negativo restante: a resposta determinística publicada de
+  conclusão usa `fallback_used=true`; o auditor antigo a classificou como falha
+  de reconciliação e marcou `quality_pass=false`, embora `technical_pass=true`.
+- Correção local aceita fallback somente quando o proof é válido, não há campo
+  pendente/pergunta e a qualificação já está completa. Fallback em turno
+  incompleto continua reprovando.

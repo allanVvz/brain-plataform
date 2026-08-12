@@ -440,6 +440,38 @@ def test_semantic_turn_audit_rejects_repeated_reply_and_fallback():
     assert "model_reconciled_without_fallback" in audit["failures"]
 
 
+def test_semantic_turn_audit_accepts_published_completion_fallback():
+    inputs = _semantic_audit_inputs()
+    inputs["proof_record"]["proof_result"].update({
+        "valid": True,
+        "accepted_facts": [{
+            "field_key": "nome_cliente", "status": "known",
+            "value": "Beatriz", "owner_node_id": "persona:one",
+        }],
+        "missing_fields": [],
+        "next_question_node_id": None,
+        "qualification_complete": True,
+        "fallback_used": True,
+        "model_proposal_errors": ["question_after_completion"],
+    })
+    inputs["customer_step"] = {
+        "text": "Beatriz",
+        "intended_facts": {"nome_cliente": "Beatriz"},
+        "expected_branch_node_id": "branch:one",
+    }
+    inputs["ledger_after"]["facts"]["nome_cliente"] = {
+        "status": "known", "value": "Beatriz", "owner_node_id": "persona:one",
+    }
+    inputs["turn"]["text"] = "Perfeito, anotei tudo por aqui."
+    inputs["expected_handoff"] = False
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is True
+    assert audit["qualification_complete"] is True
+    assert audit["handoff_observed"] is False
+
+
 def test_semantic_turn_audit_rejects_question_for_a_persisted_fact():
     inputs = _semantic_audit_inputs()
     inputs["ledger_after"]["facts"]["nome_cliente"] = {

@@ -1512,8 +1512,19 @@ def _semantic_turn_audit(
             all(_semantic_similarity(previous, reply) < 0.92 for previous in recent_replies[-4:])
         ),
         "model_reconciled_without_fallback": (
-            proof.get("fallback_used") is not True
-            and not (proof.get("model_proposal_errors") or [])
+            # A valid, complete proof intentionally resolves to the published
+            # deterministic completion reply. That is not a model-repair
+            # failure and must terminate the Validator immediately.
+            (
+                qualification_complete
+                and not missing
+                and question_id is None
+                and proof.get("valid") is not False
+            )
+            or (
+                proof.get("fallback_used") is not True
+                and not (proof.get("model_proposal_errors") or [])
+            )
         ),
         "expected_branch_persisted": (
             not customer_step.get("expected_branch_node_id")
