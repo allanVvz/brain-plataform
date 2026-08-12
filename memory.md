@@ -98,6 +98,11 @@ Updated: 2026-08-12
   opt-in por DSN/flags explícitos; dependência ausente falha quando habilitada.
 - Validação local sem Docker: 638 testes coletados; `638 passed`, zero skips,
   três warnings conhecidos. Runtime/arquitetura focados: 80 passed.
+- O primeiro CI do SHA `6d70c38` parou antes do deploy porque os 41 testes SQL
+  explicitamente selecionados ficaram sem o antigo Postgres descartável. A
+  correção mantém a suíte local sem Docker e permite apenas ao runner remoto,
+  sob `CI=true`, provisionar seu banco isolado; indisponibilidade falha, não
+  produz skip. Produção permaneceu no release anterior durante esse bloqueio.
 
 ### Próximos passos autorizados
 
