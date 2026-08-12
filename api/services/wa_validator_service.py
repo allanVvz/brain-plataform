@@ -2074,7 +2074,11 @@ async def run_session_direct(
                             int(audit.get("prompt_tokens") or 0),
                             int(audit.get("prompt_estimated_tokens") or 0),
                         )
-                        if prompt_tokens > 24_000:
+                        # Token usage is aggregated across proposal and repair
+                        # calls. Keep the 24k ceiling per model call instead of
+                        # rejecting a valid repaired turn on its summed usage.
+                        model_calls = max(1, int(audit.get("model_calls") or 0))
+                        if prompt_tokens > 24_000 * model_calls:
                             invariant_errors.append(f"prompt_tokens={prompt_tokens}")
                         if audit.get("deterministic_branch_match") and int(audit.get("model_calls") or 0) > 1:
                             invariant_errors.append(f"model_calls={audit.get('model_calls')}")
