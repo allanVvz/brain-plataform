@@ -4,186 +4,103 @@ Updated: 2026-08-12
 
 ## Handoff atual — WA Validator em produção
 
-### Limites e autorizações
+### Limites vigentes
 
 - Operação exclusivamente em produção. Não executar Docker local.
-- Testar conversas somente pelo WA Validator direto/interno, nunca por
+- Conversas de teste somente pelo WA Validator direto/interno; nunca usar
   WhatsApp real.
-- Manter transporte, binding Aurora e IAs pausados durante toda a validação.
-- Implementação, push, deploy e testes diretos desta correção foram autorizados.
-- A migration 117 já foi autorizada e aplicada. Nenhuma migration nova é
-  necessária para a correção atual.
-- Limpeza de retenção não foi autorizada e permanece apenas em dry-run.
-- Não retomar binding ou IA sem autorização explícita posterior.
+- Binding/transporte Aurora e IAs permanecem pausados. Não retomar sem nova
+  autorização explícita.
+- Retenção permanece somente em dry-run. Nenhuma limpeza foi autorizada ou
+  executada.
+- Não há migration pendente desta correção; a última aplicada continua sendo
+  `117_wa_validator_queue_and_retention.sql`.
 
-### Produção antes do próximo push
+### Produção atual
 
-- Branch `main`; release publicado
-  `989f16bb362a17c578e93621ee9501d9d45ef23a`.
-- API: `https://api.vzforeal.com`; VPS: `/opt/brain-ai`.
-- Última migration aplicada: `117_wa_validator_queue_and_retention.sql`.
+- Código de API e worker publicado no image imutável
+  `44755c3384c93d28ae9be1532de0a6f755d71b2c`.
+- API: `https://api.vzforeal.com`; diretório operacional: `/opt/brain-ai`.
+- Persona Aurora: `96e0d69f-9abd-406a-bbb9-3e7977f24ec8`.
+- Binding Aurora: `6386bc58-ade9-44c4-9211-0f59f23ffca5`, ativo apenas como
+  configuração, `connection_status=safety_paused`, `metadata.safety_paused=true`,
+  owner `n8n_agents`, contrato `conversation_v3`.
 - `WA_VALIDATOR_RUN_ENABLED=false` e
   `WA_VALIDATOR_RETENTION_ENABLED=false`.
-- Persona Aurora: `96e0d69f-9abd-406a-bbb9-3e7977f24ec8`.
-- Binding Aurora: `6386bc58-ade9-44c4-9211-0f59f23ffca5`, ativo e
-  `connection_status=safety_paused`; owner `n8n_agents`, contrato
-  `conversation_v3`.
-- Workflow n8n: `k5JWkvpQyb8EB3Vw`, ativo; checksum do template
-  `sha256:bf0c5a10bd2dd4652235f393cd317bb952108f5b3236e9d58466b044336921ad`.
+- Workflow n8n: `k5JWkvpQyb8EB3Vw`.
 - Graph Aurora publicado: versão 51, checksum
   `sha256:532a0379dd0f3ef500222170bc7bf45f78e2a866619d6b2e27dbd6f1b868b35a`.
 
-### Implementação já publicada
+### Implementação concluída
 
-- Bootstrap escopado por persona, 25 sessões no máximo e janela móvel de 12h;
-  usa publicação Graph v3 ativa com fallback v2.
-- `POST /wa-validator/run-direct` enfileira em `wa_validator_sessions`; o worker
-  processa a conversa longa fora do event loop da API.
-- Leads/conversas sintéticos são filtrados no banco para 12h.
+- Bootstrap escopado por persona, últimas 12 horas e no máximo 25 sessões;
+  reutiliza persona/routing/binding e carrega apenas o grafo necessário.
+- `POST /wa-validator/run-direct` apenas enfileira; o worker executa a conversa
+  fora do event loop da API. A UI reconhece `queued`, `running` e terminais.
+- Leituras sintéticas são filtradas no banco por escopo canônico e janela de
+  12 horas.
 - Erros do cliente preservam endpoint, status HTTP e request ID; apenas GET de
-  bootstrap repete uma vez em `502/503/504`.
-- Workflow aceita `branch_action=add` e recebe memória completa:
-  `active_branch_node_ids`, `facts_by_key` e `known_facts`.
-- Runtime reconcilia resposta literal ao primeiro campo pendente, preserva fatos
-  compartilhados e separa fatos específicos por serviço.
-- `switch` substitui serviço e `add` preserva múltiplos ramos ativos.
-- Existência de serviço pode ser provada pelo ramo; agenda/data/horário não.
-- Validator encerra em qualificação completa sem exigir handoff.
-- Outbound de lead validador canônico é persistido de forma inerte, sem
-  destinatário ou ID externo, e cada inbound admite uma decisão/proof/outbound.
-- Auditor aceita normalização string respaldada pelo proof e distingue o ramo
-  em foco do conjunto completo de ramos ativos.
-- Repetir a mesma pergunta é permitido enquanto o campo continuar pendente. Se
-  o campo foi respondido/persistido e a pergunta se repete, a validação falha.
+  bootstrap repete uma vez em `502/503/504`; POST nunca é repetido.
+- Workflow aceita `branch_action=add` e recebe `active_branch_node_ids`,
+  `facts_by_key` e `known_facts`.
+- O runtime reconcilia resposta literal ao primeiro campo pendente, incorpora
+  todos os fatos antes de recalcular a pergunta, preserva fatos compartilhados
+  e separa fatos específicos por serviço.
+- `switch` substitui o serviço; `add` mantém os dois ramos. Menção incidental a
+  serviço dentro da resposta de outro campo não muda o foco.
+- Dúvida é respondida antes da retomada da qualificação. Existência do serviço
+  pode ser provada pelo ramo publicado; agenda, data e horário não podem.
+- Pergunta repetida é aceita somente quando o mesmo question node ainda
+  corresponde a um campo pendente. Perguntar campo já conhecido continua
+  reprovando.
+- O Validator encerra assim que o proof indica qualificação completa, sem
+  exigir handoff e sem avançar para agendamento.
+- Auditoria agrega contratos de todos os ramos ativos, aceita normalizações
+  string provadas e equivalência booleana canônica sem inverter o valor.
+- Outbound de Validator é persistido de forma inerte: sem destinatário e sem
+  ID externo real.
+- `AGENTS.md` proíbe Docker local para esta operação e exige auditoria/dry-run
+  em produção. A suíte padrão não possui testes skipados nem inicia Docker.
 
-### Evidência produtiva concluída
+### Evidência de testes e release
 
-- Dry-run de retenção: `safe=true`; 57 sessões, 74 leads, 283 mensagens, 755
-  buffers, 350 proofs e 58 ledgers candidatos; zero IDs inseguros. Nada removido.
-- Bootstrap após otimização: 143.856–244.074 ms.
+- Suíte local sem Docker: `644 passed`, zero skips, três warnings conhecidos.
+- Testes focados finais: `106 passed`; `py_compile` e `git diff --check` passam.
+- CI do SHA `44755c3`: backend, frontend, migrações descartáveis, template,
+  contratos, SBOM e scan da imagem aprovados.
+- Deploy oficial `31569885034` concluído com sucesso; API e worker usam o mesmo
+  image SHA.
+- Dry-run final de retenção: `dry_run=true`, `safe=true`, corte móvel de 12h;
+  nenhuma remoção foi executada.
+
+### Cobertura produtiva do Validator
+
 - Pintura: sessão `5f27a06c-70c6-4cbd-a76f-e6855b1975e4`, lead 151,
-  `technical_pass=true`, `quality_pass=true`, 9 turnos, qualificação completa.
+  `technical_pass=true`, `quality_pass=true`, qualificação completa.
 - Troca Pintura → PPF: sessão `9f9a7ffe-e01a-4656-915d-516209ad8dfa`, lead 152.
-  A troca foi concluída corretamente: somente PPF ativo, `servico=ppf`, fatos
-  compartilhados preservados e pergunta ainda pendente repetida. O usuário
-  confirmou que essa troca é sucesso; o teste antigo é que parou indevidamente.
-- Adição inicial: sessão `2d6b0b6c-c634-48b1-bd4d-92677de5da71`, lead 153. O
-  turno “PPF também, além da pintura” passou e preservou Pintura + PPF.
-- Nenhuma dessas sessões enviou WhatsApp real. Health permaneceu HTTP 200; no
-  aceite Pintura/troca, máximo 171.562 ms e p95 49.243 ms.
+  A troca foi concluída corretamente; somente PPF permaneceu ativo e os fatos
+  compartilhados foram preservados. O usuário confirmou o comportamento como
+  sucesso; a interrupção era do teste antigo.
+- Adição Pintura + PPF final: sessão
+  `6d9d742c-eb71-4889-9303-699fe39e10a9`, lead 159, estado `done`,
+  `technical_pass=true`, `quality_pass=true`.
+- Na sessão final, a dúvida “Vocês fazem pintura?” foi respondida e a pergunta
+  de nome foi repetida legitimamente porque o campo ainda estava pendente.
+- Pintura e PPF permaneceram ativos. Fatos compartilhados foram capturados uma
+  vez; `missing_fields=[]`; `qualification_complete=true`; handoff semântico
+  não foi exigido. O lead sintético foi colocado em handoff full após o teste.
+- Exatamente 9 inbounds, 9 decisões, 9 proofs válidos, 9 commits completos e 9
+  outbounds inertes: um conjunto por inbound, zero destinatários e zero IDs
+  externos de provider.
+- Bootstrap final: 190.352 ms. Durante a conversa: 87/87 health HTTP 200, zero
+  falhas, máximo 41.828 ms e p95 15.499 ms. Checagem posterior: HTTP 200 em
+  3.310 ms.
+- Nenhum WhatsApp real foi enviado e não houve limpeza de dados.
 
-### Bloqueio restante identificado na adição
+### Estado de encerramento
 
-- Última tentativa: sessão `3e592745-28ce-457c-a14b-397d71e27567`, lead 154.
-- O add passou e o ledger manteve Pintura + PPF. A falha ocorreu mais tarde ao
-  responder `condicao`: “Os bancos estão manchados e a pintura perdeu o brilho”.
-- O matcher literal interpretou “pintura” como comando de foco, carregou o
-  pacote Pintura em vez do PPF e gerou proof inválido por
-  `cited_chunk_outside_package`.
-- Health durante a tentativa: 90/90 HTTP 200, máximo 99.602 ms, p95 35.820 ms.
-- O inbound permaneceu `waiting_human`, portanto inerte; nenhum envio real.
-
-### Correção pronta no working tree
-
-- `graph_agent_runtime_v3` agora suprime resolução de ramo quando a mensagem é
-  resposta direta à última pergunta publicada de um campo não-serviço.
-- Uma menção incidental a serviço dentro do valor não muda o foco. Marcadores
-  explícitos como “na verdade, prefiro…” e “também quero…” continuam permitindo
-  switch/add.
-- O proof checker não foi afrouxado; o runtime mantém o pacote correto antes da
-  decisão.
-- `AGENTS.md` agora proíbe Docker local e define auditoria/dry-run/Validator
-  interno em produção.
-- A suíte padrão não produz skips nem inicia dependências: módulos SQL/live são
-  opt-in por DSN/flags explícitos; dependência ausente falha quando habilitada.
-- Validação local sem Docker: 638 testes coletados; `638 passed`, zero skips,
-  três warnings conhecidos. Runtime/arquitetura focados: 80 passed.
-- O primeiro CI do SHA `6d70c38` parou antes do deploy porque os 41 testes SQL
-  explicitamente selecionados ficaram sem o antigo Postgres descartável. A
-  correção mantém a suíte local sem Docker e permite apenas ao runner remoto,
-  sob `CI=true`, provisionar seu banco isolado; indisponibilidade falha, não
-  produz skip. Produção permaneceu no release anterior durante esse bloqueio.
-
-### Próximos passos autorizados
-
-1. Compilar/checar diff e anti-hardcode; commit e push único.
-2. Acompanhar workflow oficial e confirmar SHA/health/binding pausado.
-3. Executar uma nova sessão direta de adição Pintura + PPF, parando no primeiro
-   erro.
-4. Provar por inbound: uma decisão, um proof válido, no máximo um outbound
-   inerte, commit completo, facts/owners, ramos ativos, primeiro missing field,
-   pergunta, tokens e checksum do grafo.
-5. Confirmar zero 5xx, health abaixo de 500 ms, bootstrap abaixo de 2 s,
-   qualificação completa sem handoff e nenhum outbound real.
-6. Manter binding pausado e retenção em dry-run. Não limpar dados.
-
-### Aceite produtivo após o release `907d5ed`
-
-- Auditoria read-only passou; API e worker no mesmo SHA, saudáveis, zero grants
-  inseguros, zero conflito CAS/buffer crítico/outbound recente e backup válido.
-- Sessão de adição `2826d664-d3a1-438e-a9b0-341daba4dd2a`, lead 155.
-- Runtime concluiu corretamente: Pintura + PPF ativos, fatos compartilhados
-  únicos, condição capturada apesar da palavra “pintura”, missing fields vazio e
-  `qualification_complete=true`, sem handoff.
-- Nove inbounds tiveram exatamente uma decisão, um proof válido, um outbound
-  inerte e commit completo. Lead ficou em handoff full após o teste.
-- Health: 86/86 HTTP 200, máximo 224.065 ms, p95 45.592 ms. Bootstrap 321.156 ms.
-- Nenhum destinatário/ID externo real e nenhum WhatsApp enviado.
-- Único falso negativo restante: a resposta determinística publicada de
-  conclusão usa `fallback_used=true`; o auditor antigo a classificou como falha
-  de reconciliação e marcou `quality_pass=false`, embora `technical_pass=true`.
-- Correção local aceita fallback somente quando o proof é válido, não há campo
-  pendente/pergunta e a qualificação já está completa. Fallback em turno
-  incompleto continua reprovando.
-
-### Segundo aceite após o release `53bc082`
-
-- Sessão `aa5c2966-c6fc-45cc-b3d4-5704b8da5153`, lead 156, manteve Pintura +
-  PPF e passou tecnicamente até perguntar corretamente `vehicle_color`, campo
-  específico de Pintura ainda pendente.
-- O auditor marcou `first_missing_field_only=false` porque validou a pergunta
-  apenas contra o contrato PPF em foco; o proof e a pergunta estavam corretos.
-- Health: 97/97 HTTP 200, máximo 132.287 ms, p95 43.297 ms; bootstrap 213.636 ms.
-  Cada inbound teve uma decisão/proof válido/outbound inerte e commit completo.
-- Correção local agrega fields/questions de todos os ramos ativos para auditar o
-  primeiro campo pendente, preservando owner e pergunta publicados. Não aceita
-  campo/pergunta fora desses contratos.
-
-### Terceiro aceite após o release `5a4f42e`
-
-- Sessão `b9f63b60-409f-4fd4-a8fb-b298d3b35277`, lead 157, parou no segundo
-  inbound; o primeiro turno passou com proof/commit/outbound inerte.
-- Auditoria mostrou execução n8n 1109 concluída pelo ramo de quarentena após
-  `/internal/conversations/decide` retornar HTTP 500. Traceback:
-  `semantic reply repetition blocked by recent outbound proof`.
-- A dúvida “Vocês fazem pintura?” retomaria a pergunta de nome ainda pendente;
-  o bloqueio contradizia a regra do usuário de que repetir a mesma pergunta é
-  válido enquanto o campo continuar pendente.
-- Correção local permite similaridade quando o mesmo `next_question_node_id`
-  continua sendo o primeiro campo agregado pendente e já havia sido perguntado.
-  Repetição sem campo pendente ou após o campo ser conhecido continua bloqueada.
-- Verificação local sem Docker: suíte completa com 642 testes aprovados e zero
-  skips; após extrair a condição para teste direto, 105 testes focados aprovados,
-  além de `py_compile` e `git diff --check`.
-- Health: 110/110 HTTP 200, máximo 103.452 ms, p95 5.396 ms; nenhum envio real.
-
-### Quarto aceite após o release `2a103c5`
-
-- Release `2a103c561dfecfec88833d0397b6feeb18da2da2` publicado com API e worker
-  saudáveis no mesmo image; sem migration e sem limpeza.
-- Sessão `a06d93a6-780c-4a97-9597-815cb286f1e2`, lead 158: a dúvida que antes
-  causava HTTP 500 passou com decisão, proof válido, commit completo e outbound
-  inerte; a pergunta de nome foi repetida legitimamente porque o campo ainda
-  estava pendente.
-- Pintura + PPF permaneceram ativos. `nome_cliente`, `objective` e
-  `can_visit_in_person` foram persistidos, e a conversa avançou até
-  `modelo_veiculo`.
-- Novo falso negativo isolado no auditor: o perfil esperava booleano `true`,
-  enquanto o proof e o ledger armazenaram a normalização válida `"sim"`.
-  Runtime, facts e avanço estavam corretos.
-- Correção local equipara somente strings booleanas canônicas a booleanos
-  (`sim/true/yes/1`, `não/false/no/0`), preservando direção e rejeitando valores
-  ambíguos. Suíte completa: 644 passed, zero skips; focados: 106 passed.
-- Dry-run de retenção permaneceu `safe=true`; nenhuma remoção. Bootstrap
-  236.584 ms. Health 58/58 HTTP 200, máximo 108.018 ms, p95 26.488 ms. Nenhum
-  WhatsApp real; lead 158 colocado em handoff full ao encerrar.
+- Os critérios funcionais de Pintura, troca para PPF e adição de PPF foram
+  atendidos com o Validator interno.
+- Binding/transporte e IAs continuam pausados; retenção continua desativada.
+- Qualquer retomada de IA/transporte ou aplicação da limpeza exige revisão e
+  autorização explícitas separadas.
