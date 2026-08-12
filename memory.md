@@ -136,3 +136,21 @@ Updated: 2026-08-11
   schema, overwrite e dependências continuam sendo validados.
 - Testes focados de runtime/proof/Validator: `127 passed`.
 - Nenhum destinatário ou ID externo de outbound real; nenhum WhatsApp enviado.
+
+### Aceite após o release `91fc29b`
+
+- Pintura concluiu: sessão `5f27a06c-70c6-4cbd-a76f-e6855b1975e4`, lead 151,
+  `technical_pass=true`, `quality_pass=true`, 9 turnos, qualificação completa.
+- Troca parou: sessão `9f9a7ffe-e01a-4656-915d-516209ad8dfa`, lead 152,
+  `technical_pass=true`, falha exclusiva do auditor `question_advanced` no turno
+  da troca. O cenário de adição não foi criado.
+- Estado produtivo da troca estava correto: ramo ativo final somente
+  `aurora-product-ppf`; `servico=ppf`; fatos compartilhados `nome_cliente` e
+  `objective` preservados; pergunta pendente continuou `can_visit_in_person`.
+- Causa: o auditor exigia mudar a pergunta após qualquer fato, embora uma troca
+  de serviço não responda à pergunta compartilhada já pendente.
+- Correção local pendente exige avanço apenas quando o fato pretendido responde
+  ao campo da pergunta anterior. Pergunta realmente respondida e repetida ainda
+  reprova. Testes focados do critério: `6 passed`.
+- Health nos dois cenários: 143/143 HTTP 200, máximo `171.562 ms`, p95
+  `49.243 ms`. Nenhum WhatsApp real; leads colocados em handoff full.

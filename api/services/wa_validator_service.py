@@ -1412,6 +1412,10 @@ def _semantic_turn_audit(
     )
     expected_question_id = str((first_field or {}).get("question_node_id") or "") or None
     question = (contract.get("questions") or {}).get(question_id or "") or {}
+    previous_question = (
+        (contract.get("questions") or {}).get(previous_question_node_id or "") or {}
+    )
+    previous_asked_field = str(previous_question.get("field_key") or "") or None
     question_text = str(question.get("text") or "").strip()
     asked_field = str(question.get("field_key") or "") or None
     accepted_all = all(
@@ -1497,7 +1501,12 @@ def _semantic_turn_audit(
         "question_advanced": (
             not previous_question_node_id
             or previous_question_node_id != question_id
-            or not intended
+            # A service switch/add can legitimately leave the outstanding
+            # shared-field question unchanged: the customer changed the
+            # branch but still has not answered that question.  Require
+            # advancement only when this turn intended to answer the field
+            # that was actually asked previously.
+            or previous_asked_field not in intended
         ),
         "handoff_only_after_completion": (
             not handoff_observed or qualification_complete

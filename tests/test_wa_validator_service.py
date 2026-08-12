@@ -465,6 +465,70 @@ def test_semantic_turn_audit_requires_doubt_answer_before_next_question():
     assert "doubt_answered_first" in audit["failures"]
 
 
+def test_semantic_turn_audit_allows_pending_shared_question_after_service_switch():
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"] = {
+        "text": "Na verdade, prefiro Service Two.",
+        "kind": "branch_switch",
+        "intended_facts": {"servico": "service-two"},
+        "expected_branch_node_id": "branch:two",
+        "expected_active_branch_node_ids": ["branch:two"],
+    }
+    inputs["previous_question_node_id"] = "q:name"
+    inputs["turn"]["text"] = "Certo, Service Two. Qual seu nome?"
+    inputs["proof_record"]["proof_result"]["accepted_facts"] = [{
+        "field_key": "servico", "status": "known", "value": "service-two",
+        "owner_node_id": "branch:two",
+    }]
+    inputs["ledger_after"].update({
+        "active_branch_node_id": "branch:two",
+        "active_branch_node_ids": ["branch:two"],
+        "facts": {
+            "servico": {
+                "status": "known", "value": "service-two",
+                "owner_node_id": "branch:two",
+            },
+        },
+        "facts_by_key": {
+            "servico": [{
+                "status": "known", "value": "service-two",
+                "owner_node_id": "branch:two",
+            }],
+        },
+    })
+    inputs["contract"]["fields"][0] = {
+        **inputs["contract"]["fields"][0],
+        "owner_node_id": "branch:two",
+    }
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["question_advanced"] is True
+
+
+def test_semantic_turn_audit_still_rejects_same_question_after_answering_its_field():
+    inputs = _semantic_audit_inputs()
+    inputs["previous_question_node_id"] = "q:name"
+    inputs["customer_step"] = {
+        "text": "Beatriz",
+        "kind": "field_answer",
+        "intended_facts": {"nome_cliente": "Beatriz"},
+        "expected_branch_node_id": "branch:one",
+    }
+    inputs["turn"]["text"] = "Obrigada, Beatriz. Qual seu nome?"
+    inputs["proof_record"]["proof_result"]["accepted_facts"] = [{
+        "field_key": "nome_cliente", "status": "known", "value": "Beatriz",
+        "owner_node_id": "persona:one",
+    }]
+    inputs["ledger_after"]["facts"]["nome_cliente"] = {
+        "status": "known", "value": "Beatriz", "owner_node_id": "persona:one",
+    }
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["question_advanced"] is False
+
+
 def test_analyze_gaps_never_promotes_legacy_sequence_to_quality_evidence(monkeypatch):
     session = {
         "id": "legacy-session",
