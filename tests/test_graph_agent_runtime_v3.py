@@ -823,6 +823,43 @@ def test_short_explicit_service_phrase_remains_a_deterministic_switch_signal():
     assert matches[0]["branch_evidence_span"] == "Beta"
 
 
+def test_pending_condition_answer_does_not_change_branch_from_service_word():
+    contract = {
+        "fields": [
+            {
+                "key": "condicao",
+                "question_node_id": "question:condition",
+            },
+        ],
+    }
+
+    assert graph_agent_runtime_v3._is_direct_answer_to_pending_non_service_field(
+        message="Os bancos estao manchados e a pintura perdeu o brilho",
+        contract=contract,
+        missing_fields=["condicao"],
+        asked_question_node_ids=["question:condition"],
+    ) is True
+
+
+def test_explicit_service_change_is_not_hidden_by_pending_field_guard():
+    contract = {
+        "fields": [
+            {
+                "key": "condicao",
+                "question_node_id": "question:condition",
+            },
+        ],
+    }
+
+    for message in ("Na verdade, prefiro PPF", "Tambem quero PPF"):
+        assert graph_agent_runtime_v3._is_direct_answer_to_pending_non_service_field(
+            message=message,
+            contract=contract,
+            missing_fields=["condicao"],
+            asked_question_node_ids=["question:condition"],
+        ) is False
+
+
 def test_deterministic_branch_resolution_overrides_model_routing_and_derives_service():
     document = {
         "node_by_id": {

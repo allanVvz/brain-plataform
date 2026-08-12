@@ -82,13 +82,10 @@ def _find_node_id_by_source_item(nodes: list[dict], source_item_id: str, expecte
 
 @pytest.mark.integration
 def test_qa_contract_real_graph_insertion() -> None:
-    if _env("QA_REAL_GRAPH_INSERTION_TEST") != "1":
-        pytest.skip("Set QA_REAL_GRAPH_INSERTION_TEST=1 to run QA live insertion test.")
-
-    base = _env("API_BASE", "http://localhost:8000")
+    base = _env("API_BASE")
     token = _env("AI_BRAIN_ADMIN_TEST_TOKEN")
-    if not token:
-        pytest.skip("Set AI_BRAIN_ADMIN_TEST_TOKEN to run QA live insertion test.")
+    assert base, "API_BASE is required for the explicitly enabled QA test"
+    assert token, "AI_BRAIN_ADMIN_TEST_TOKEN is required for the explicitly enabled QA test"
 
     run_token = uuid.uuid4().hex[:10]
     title_product = f"QA Graph Product {run_token}"

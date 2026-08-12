@@ -1,31 +1,34 @@
 ﻿# AGENTS.md - Brain AI
 
-## Stack local Docker
+## Operacao de producao sem Docker local
 
-A operacao corrente do projeto e local-first e auditavel via Docker Compose.
-
-### Servicos principais
-- `db`: Postgres local.
-- `storage`: storage API local.
-- `rest`: PostgREST local.
-- `kong`: gateway local em `:8000`.
-- `migrate`: bootstrap + migrations.
-- `api`: FastAPI backend em `:8080`.
-- `workers`: processo separado para jobs.
-- `studio`: admin opcional em `:3030`.
+A operacao corrente e exclusivamente em producao. Nao subir, inspecionar ou
+usar uma stack Docker local para implementar, auditar ou testar este projeto.
 
 ### Regras rigidas
-- `docker compose --env-file .env.compose up -d --build` e o comando base para subir a stack.
-- `ENVIRONMENT=qa` no container `api` habilita o shared admin token para auditoria local.
-- `API_INTERNAL_BASE_URL=http://localhost:8080` e `NEXT_PUBLIC_API_BASE_URL=/api-brain` sao os defaults do dashboard.
-- A rota operacional e `.env.compose` + Docker Compose.
-- O dashboard nunca deve apontar diretamente para backend legado; use `/api-brain`.
+- Nunca executar `docker`, `docker compose` ou equivalentes na maquina local.
+- Nao apontar testes ou o dashboard para backends locais ou legados.
+- O dashboard deve usar `/api-brain`; em producao,
+  `NEXT_PUBLIC_API_BASE_URL=/api-brain` e `API_INTERNAL_BASE_URL` aponta para o
+  backend final aprovado.
+- Comecar qualquer operacao produtiva por auditoria read-only e dry-run.
+- Deploy, migration e limpeza exigem suas etapas explicitas de
+  revisao/autorizacao. Uma autorizacao nao implica as outras.
+- Mudancas de conversa devem ser testadas somente pelo WA Validator
+  direto/interno, sem WhatsApp real.
+- Manter transporte e IAs pausados durante auditoria, deploy e validacao; so
+  retomar mediante autorizacao explicita posterior.
+- Retencao e limpeza permanecem em dry-run ate autorizacao especifica. Nunca
+  inferir permissao para apagar dados a partir de uma autorizacao de deploy.
 
 ### Auditoria
-1. `docker compose --env-file .env.compose ps`
-2. `docker compose --env-file .env.compose logs -f db api workers`
-3. `curl http://localhost:8080/health`
-4. `curl http://localhost:8080/api/menu/baita-conveniencia`
+1. Confirmar SHA, release, health/readiness e estado pausado via endpoints e
+   scripts oficiais de producao.
+2. Executar dry-run da operacao solicitada e registrar contagens/IDs tecnicos
+   nao secretos.
+3. Revisar o resultado antes de qualquer mutacao produtiva adicional.
+4. Para conversas, executar sessoes sinteticas diretas e comprovar proof,
+   ledger, exactly-once e ausencia de outbound real.
 
 ## Regras de negocio - Grafos
 

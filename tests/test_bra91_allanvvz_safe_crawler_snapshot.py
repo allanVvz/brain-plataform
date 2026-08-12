@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import Any
 from urllib import error, parse, request
 
-import pytest
-
 from api.scripts.crawl_brand_catalog import crawl
 
 
@@ -18,7 +16,6 @@ API_BASE = os.environ.get("AI_BRAIN_BASE_URL") or os.environ.get("API_BASE") or 
 TOKEN = os.environ.get("AI_BRAIN_ADMIN_TEST_TOKEN") or "qa-baita-admin-c3f2c9f6c87842d3a59b9e1c0a8b5d77"
 PERSONA_SLUG = "allanvvz"
 EXPECTED_COLLECTIONS = ("plantaris", "radar", "juliet")
-RUN_LIVE_E2E = (os.environ.get("RUN_BRA91_LIVE_E2E") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _utc_token() -> str:
@@ -63,7 +60,6 @@ def _product_url(base_url: str, handle: str) -> str:
     return f"{base_url.rstrip('/')}/products/{handle.strip('/')}"
 
 
-@pytest.mark.skipif(not RUN_LIVE_E2E, reason="set RUN_BRA91_LIVE_E2E=true with a live API and crawler network")
 def test_bra91_allanvvz_graph_snapshot_and_real_vzlupas_crawler_are_safe() -> None:
     token = _utc_token()
     artifact_path = ARTIFACT_DIR / f"bra91-allanvvz-safe-crawler-snapshot-{token}.json"

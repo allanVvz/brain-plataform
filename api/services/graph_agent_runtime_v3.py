@@ -498,6 +498,12 @@ _ADDITIVE_SERVICE_MARKER = re.compile(
     re.IGNORECASE,
 )
 
+_SERVICE_CHANGE_MARKER = re.compile(
+    r"\b(?:na\s+verdade|corrig\w*|retific\w*|prefir\w*|troca\w*|mud\w*|"
+    r"em\s+vez|ao\s+inv[eé]s|quero\s+agora|vamos\s+de)\b",
+    re.IGNORECASE,
+)
+
 
 def _latest_user_message(context: ConversationContext) -> str:
     return next(
@@ -513,6 +519,53 @@ def _latest_user_message(context: ConversationContext) -> str:
 
 def _message_requests_additional_service(message: str) -> bool:
     return bool(_ADDITIVE_SERVICE_MARKER.search(message or ""))
+
+
+def _message_explicitly_changes_service(message: str) -> bool:
+    return bool(
+        _message_requests_additional_service(message)
+        or _SERVICE_CHANGE_MARKER.search(message or "")
+    )
+
+
+def _is_direct_answer_to_pending_non_service_field(
+    *,
+    message: str,
+    contract: dict[str, Any],
+    missing_fields: list[str],
+    asked_question_node_ids: list[str],
+) -> bool:
+    """Keep service words inside a field answer from changing branch focus.
+
+    A customer can describe a vehicle condition with phrases such as
+    "the paint lost its shine" while the focused service is another active
+    branch.  That is evidence for the pending field, not a service-selection
+    command.  Explicit add/switch language remains authoritative.
+    """
+    if (
+        not missing_fields
+        or not asked_question_node_ids
+        or _looks_like_customer_question(message)
+        or _message_explicitly_changes_service(message)
+    ):
+        return False
+    first_missing = str(missing_fields[0] or "")
+    if not first_missing or first_missing == "servico":
+        return False
+    field = next(
+        (
+            row for row in contract.get("fields") or []
+            if str(row.get("key") or "") == first_missing
+        ),
+        None,
+    )
+    if not field:
+        return False
+    expected_question = str(field.get("question_node_id") or "")
+    return bool(
+        expected_question
+        and str(asked_question_node_ids[-1] or "") == expected_question
+    )
 
 
 def _facts_by_key(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -1092,12 +1145,20 @@ def build_context(
         ledger["graph_checksum"] = publication["checksum"]
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(active_contract, ledger.get("facts") or {})]
     active_path = ((document.get("coordinates") or {}).get(active_branch) or {}).get("path_node_ids") or []
-    # A short answer while a field is expected must not trigger fuzzy global
-    # selection, but an exact published title/alias is authoritative even when
-    # it is short (for example, "prefiro <servico>"). Resolve the literal
-    # graph match first; only suppress semantic search when no exact match
-    # exists.
-    deterministic_candidates = _deterministic_branch_candidates(document, message)
+    # A direct answer to the last published non-service question can contain a
+    # service title as part of the value (for example, a vehicle condition).
+    # Do not reinterpret that title as branch routing unless the customer uses
+    # explicit add/switch language.
+    pending_field_answer = _is_direct_answer_to_pending_non_service_field(
+        message=message,
+        contract=active_contract,
+        missing_fields=missing,
+        asked_question_node_ids=ledger.get("asked_question_node_ids") or [],
+    )
+    deterministic_candidates = (
+        [] if pending_field_answer
+        else _deterministic_branch_candidates(document, message)
+    )
     greeting = _greeting_policy(
         document, contract=active_contract, facts=ledger.get("facts") or {},
     ) if _is_greeting(message) and not deterministic_candidates else None
@@ -1156,8 +1217,11 @@ def build_context(
         and len(message.split()) <= 8
         and not deterministic_candidates
     )
+    suppress_global_branch_search = bool(
+        pending_field_answer or short_expected_answer
+    )
     branch_rank_started = time.perf_counter()
-    candidates = deterministic_candidates or ([] if short_expected_answer else _candidate_branches(
+    candidates = deterministic_candidates or ([] if suppress_global_branch_search else _candidate_branches(
         persona_id=str(persona["id"]), publication=publication, message=message,
         embedding=embedding, active_path=active_path, missing=missing,
     ))
@@ -1232,7 +1296,8 @@ def build_context(
         "publication_changed": publication_changed,
         "invalidated_fact_keys": invalidated_fact_keys,
         "short_expected_answer": short_expected_answer,
-        "global_branch_search_executed": not short_expected_answer,
+        "pending_field_branch_resolution_suppressed": pending_field_answer,
+        "global_branch_search_executed": not suppress_global_branch_search,
         "deterministic_branch_match": bool(deterministic_candidates),
         "deterministic_branch_resolution": (
             deterministic_candidates[0] if len(deterministic_candidates) == 1 else None

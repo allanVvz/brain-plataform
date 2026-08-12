@@ -1,45 +1,38 @@
-"""E2E simples do cardapio contra o backend RODANDO.
+"""E2E opt-in do cardapio contra um backend remoto informado explicitamente.
 
-Diferente dos testes unitarios (hermeticos, sempre verdes), este bate no
-backend de verdade em `AI_BRAIN_BASE_URL` (default http://localhost:8080, a
-porta do servico `api` no docker-compose) e valida o contrato publico do
-cardapio em `GET /api/menu/{persona}`.
-
-Se o backend nao estiver no ar, o teste FAZ SKIP (nao falha) — assim ele so
-roda quando voce sobe a stack. Para rodar:
-
-    # suba o backend (docker compose --env-file .env.compose up -d --build)
-    # depois:
-    python -m pytest -q tests/e2e_baita_cardapio_menu.py
+O modulo nao e coletado pela suite padrao. Para habilita-lo, informe
+`RUN_MENU_LIVE_E2E=1` e `AI_BRAIN_BASE_URL`; indisponibilidade e contrato
+invalido falham o teste em vez de produzir skip. Nunca inicia Docker local.
 
 Variaveis de ambiente:
-    AI_BRAIN_BASE_URL   base do backend (default http://localhost:8080)
+    AI_BRAIN_BASE_URL   base remota do backend
     CARDAPIO_PERSONA    persona/slug do cardapio (default baita-conveniencia)
 """
 from __future__ import annotations
 
 import os
 
-import pytest
 import requests
 
 BASE_URL = (
     os.environ.get("AI_BRAIN_BASE_URL")
     or os.environ.get("API_BASE")
-    or "http://localhost:8080"
 ).rstrip("/")
 PERSONA = os.environ.get("CARDAPIO_PERSONA", "baita-conveniencia")
 TIMEOUT = float(os.environ.get("AI_BRAIN_HTTP_TIMEOUT", "15"))
 
 
 def _require_backend() -> None:
-    """Skip (don't fail) when the backend isn't reachable — this is an e2e."""
+    """Fail with endpoint context when the enabled backend is unavailable."""
+    assert BASE_URL, "AI_BRAIN_BASE_URL is required for the explicitly enabled live test"
     try:
         resp = requests.get(f"{BASE_URL}/health", timeout=TIMEOUT)
     except requests.RequestException as exc:
-        pytest.skip(f"backend offline em {BASE_URL} ({exc}); suba a stack antes de rodar o e2e")
+        raise AssertionError(f"backend offline em {BASE_URL}: {exc}") from exc
     if resp.status_code != 200:
-        pytest.skip(f"/health respondeu {resp.status_code} em {BASE_URL}; backend nao esta saudavel")
+        raise AssertionError(
+            f"GET {BASE_URL}/health respondeu HTTP {resp.status_code}: {resp.text[:500]}"
+        )
 
 
 def _get_menu() -> dict:
