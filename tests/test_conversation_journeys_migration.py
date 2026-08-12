@@ -39,6 +39,8 @@ def test_conversion_history_is_non_destructive_and_idempotent():
     transition = SQL[SQL.index("transition_sales_conversion_status_v1"):]
     assert "DELETE FROM public.sales_conversions" not in transition
     assert "DELETE FROM public.conversation_journeys" not in transition
+    assert "ALTER TABLE public.conversation_journeys ENABLE ROW LEVEL SECURITY" in SQL
+    assert "ALTER TABLE public.sales_conversions ENABLE ROW LEVEL SECURITY" in SQL
 
 
 def test_recovery_is_locking_non_proactive_and_pause_safe():

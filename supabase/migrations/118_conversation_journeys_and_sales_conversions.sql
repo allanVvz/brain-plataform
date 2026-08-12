@@ -190,6 +190,9 @@ CREATE TABLE IF NOT EXISTS public.sales_conversions (
 CREATE INDEX IF NOT EXISTS idx_sales_conversions_journey
   ON public.sales_conversions(journey_id,occurred_at DESC);
 
+ALTER TABLE public.conversation_journeys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_conversions ENABLE ROW LEVEL SECURITY;
+
 CREATE OR REPLACE FUNCTION public.ensure_current_conversation_journey_v1(
   p_persona_id uuid,p_lead_ref bigint,p_publication_id uuid,p_graph_checksum text,
   p_opening_reason text DEFAULT 'initial'
