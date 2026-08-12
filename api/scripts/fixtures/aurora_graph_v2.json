@@ -31,7 +31,9 @@
         "conversation_policy": {
           "intents": {
             "greeting": {
-              "responses": ["Olá! Que bom falar com você."],
+              "responses": [
+                "Olá! Que bom falar com você."
+              ],
               "always_acknowledge": true
             }
           },
@@ -42,7 +44,10 @@
           },
           "question_repetition": {
             "max_attempts": 1,
-            "restart_requires": ["qualification_confirmed", "purchase_completed"]
+            "restart_requires": [
+              "qualification_confirmed",
+              "purchase_completed"
+            ]
           },
           "qualification": {
             "summary_template": "Confira os dados informados: {informed_fields}.",
@@ -52,11 +57,20 @@
             "incomplete_handoff_template": "Informado: {informed_fields}. Não informado: {missing_fields}."
           },
           "direct_booking": {
-            "intent_aliases": ["agendar", "marcar horário", "reservar horário"],
+            "intent_aliases": [
+              "agendar",
+              "marcar horário",
+              "reservar horário"
+            ],
             "no_data_instruction": "Envie juntos os dados solicitados para o agendamento.",
             "known_data_confirmation": "Confira os dados já informados: {informed_fields}. Estão corretos?",
             "confirmed_acknowledgement": "Obrigada. Sua solicitação foi registrada.",
             "silent_handoff": true
+          },
+          "doubt_handling": {
+            "answer_before_qualification": "Responda primeiro com a resposta factual aprovada da FAQ publicada.",
+            "continue_with_first_missing_field": "Depois da resposta, faça exatamente a pergunta publicada para missing_fields[0].",
+            "deferred_response": "O atendente vai te passar esse detalhe assim que concluirmos estas perguntas."
           }
         },
         "appointment_policy": {
@@ -325,9 +339,14 @@
               "key": "nome_cliente",
               "owner_node_id": "aurora-persona",
               "required": true,
-              "accepted_statuses": ["known"],
-              "value_schema": {"type": "string", "minLength": 1},
-              "priority": 1.0,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "priority": 1,
               "overwrite_policy": "explicit_correction"
             }
           ]
@@ -385,18 +404,28 @@
               "key": "nome_cliente",
               "owner_node_id": "aurora-persona",
               "required": true,
-              "accepted_statuses": ["known"],
-              "value_schema": {"type": "string", "minLength": 1},
-              "priority": 1.0,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "priority": 1,
               "overwrite_policy": "explicit_correction"
             },
             {
               "key": "reclamacao_relato",
               "owner_node_id": "aurora-service-reclamacao",
               "required": true,
-              "accepted_statuses": ["known"],
-              "value_schema": {"type": "string", "minLength": 1},
-              "priority": 1.0,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "priority": 1,
               "overwrite_policy": "explicit_correction"
             }
           ]
@@ -484,7 +513,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "A avaliação presencial tem custo?",
-        "answer": "Não. A avaliação presencial é importante porque cada carro tem um nível diferente de desgaste — ela é rápida e sem custo. Qual dia fica melhor para você?",
+        "answer": "Não. A avaliação presencial é importante porque cada carro tem um nível diferente de desgaste — ela é rápida e sem custo.",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -498,7 +527,29 @@
         "source_node_id": "aurora-product-evaluation",
         "source_node_type": "product",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-evaluation"
+            ],
+            "source_node_id": "aurora-product-evaluation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-evaluation",
+              "aurora-copy-evaluation"
+            ]
+          }
+        ]
       }
     },
     {
@@ -575,7 +626,29 @@
         "source_node_id": "aurora-product-wash",
         "source_node_type": "product",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-wash-includes"
+            ],
+            "source_node_id": "aurora-product-wash",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-wash",
+              "aurora-copy-wash"
+            ]
+          }
+        ]
       }
     },
     {
@@ -652,7 +725,29 @@
         "source_node_id": "aurora-product-interior",
         "source_node_type": "product",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-interior-includes"
+            ],
+            "source_node_id": "aurora-product-interior",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-interior",
+              "aurora-copy-interior"
+            ]
+          }
+        ]
       }
     },
     {
@@ -729,7 +824,29 @@
         "source_node_id": "aurora-product-polish",
         "source_node_type": "product",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-includes"
+            ],
+            "source_node_id": "aurora-product-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish",
+              "aurora-copy-polish"
+            ]
+          }
+        ]
       }
     },
     {
@@ -792,7 +909,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Como funciona a vitrificação?",
-        "answer": "O processo é o mesmo do polimento, com foco na correção de riscos, e a última etapa é a aplicação do vitrificador, que atua como uma camada de proteção química. Você escolhe a durabilidade do produto que quer aplicar. Qual é o modelo e a cor do seu carro?",
+        "answer": "O processo é o mesmo do polimento, com foco na correção de riscos, e a última etapa é a aplicação do vitrificador, que atua como uma camada de proteção química. Você escolhe a durabilidade do produto que quer aplicar.",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -806,7 +923,29 @@
         "source_node_id": "aurora-product-vitrification",
         "source_node_type": "product",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-vitrification"
+            ],
+            "source_node_id": "aurora-product-vitrification",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-vitrification",
+              "aurora-copy-vitrification"
+            ]
+          }
+        ]
       }
     },
     {
@@ -833,7 +972,29 @@
         "source_node_id": "aurora-product-vitrification",
         "source_node_type": "product",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-vitrification-difference"
+            ],
+            "source_node_id": "aurora-product-vitrification",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-vitrification",
+              "aurora-copy-vitrification"
+            ]
+          }
+        ]
       }
     },
     {
@@ -896,7 +1057,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Onde o PPF é aplicado?",
-        "answer": "Geralmente nas áreas mais expostas ou sensíveis, como quinas de porta, conchas de maçaneta e soleiras. Há também o kit frontal para parachoque, capô e retrovisores, que podem ser atingidos por pedras na estrada. Na parte interna, é recomendado para áreas de tela e black piano, que podem riscar com o toque e a limpeza. Qual área te preocupa mais?",
+        "answer": "Geralmente nas áreas mais expostas ou sensíveis, como quinas de porta, conchas de maçaneta e soleiras. Há também o kit frontal para parachoque, capô e retrovisores, que podem ser atingidos por pedras na estrada. Na parte interna, é recomendado para áreas de tela e black piano, que podem riscar com o toque e a limpeza.",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -910,7 +1071,29 @@
         "source_node_id": "aurora-product-ppf",
         "source_node_type": "product",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-ppf"
+            ],
+            "source_node_id": "aurora-product-ppf",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-ppf",
+              "aurora-copy-ppf"
+            ]
+          }
+        ]
       }
     },
     {
@@ -973,7 +1156,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Vocês fazem polimento de vidros?",
-        "answer": "Fazemos, sim — o polimento de vidros faz parte dos serviços da Aurora. Qual é o modelo do seu carro?",
+        "answer": "Fazemos, sim — o polimento de vidros faz parte dos serviços da Aurora.",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -987,7 +1170,29 @@
         "source_node_id": "aurora-product-glass-polish",
         "source_node_type": "product",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-glass-polish"
+            ],
+            "source_node_id": "aurora-product-glass-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-glass-polish",
+              "aurora-copy-glass-polish"
+            ]
+          }
+        ]
       }
     },
     {
@@ -1051,7 +1256,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Vocês fazem chapeação?",
-        "answer": "Fazemos, sim. Sobre o processo em si, quem te explica em detalhe é a Equipe Aurora — vou registrar suas informações e chamar o time. Pode me passar o modelo, o ano e a cor do carro?",
+        "answer": "Fazemos, sim. Sobre o processo em si, quem te explica em detalhe é a Equipe Aurora — vou registrar suas informações e chamar o time.",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -1066,7 +1271,29 @@
         "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1,
-        "handoff_required": true
+        "handoff_required": true,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-bodywork"
+            ],
+            "source_node_id": "aurora-product-bodywork",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-bodywork",
+              "aurora-copy-bodywork"
+            ]
+          }
+        ]
       }
     },
     {
@@ -1130,7 +1357,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Vocês fazem pintura?",
-        "answer": "Fazemos, sim. Sobre o processo em si, quem te explica em detalhe é a Equipe Aurora — vou registrar suas informações e chamar o time. Pode me passar o modelo, o ano e a cor do carro?",
+        "answer": "Fazemos, sim. Sobre o processo em si, quem te explica em detalhe é a Equipe Aurora — vou registrar suas informações e chamar o time.",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -1145,7 +1372,29 @@
         "source_node_type": "product",
         "markdown_document": true,
         "question_count": 1,
-        "handoff_required": true
+        "handoff_required": true,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-paint"
+            ],
+            "source_node_id": "aurora-product-paint",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-paint",
+              "aurora-copy-paint"
+            ]
+          }
+        ]
       }
     },
     {
@@ -1158,7 +1407,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Quais são as formas de pagamento?",
-        "answer": "Aceitamos Pix, dinheiro e cartão — até 4x sem juros ou até 10x com acréscimo. Para serviços acima de R$ 2.000,00 é necessário um sinal de 10% do valor para reservar a agenda. Posso te ajudar com mais alguma coisa?",
+        "answer": "Aceitamos Pix, dinheiro e cartão — até 4x sem juros ou até 10x com acréscimo. Para serviços acima de R$ 2.000,00 é necessário um sinal de 10% do valor para reservar a agenda.",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -1168,7 +1417,25 @@
         "source_node_id": "aurora-rule-operation",
         "source_node_type": "rule",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "price",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-payment"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
       }
     },
     {
@@ -1191,7 +1458,25 @@
         "source_node_id": "aurora-rule-operation",
         "source_node_type": "rule",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "schedule",
+            "policy": {
+              "mode": "human_confirmation_required"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-reschedule"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
       }
     },
     {
@@ -1214,7 +1499,25 @@
         "source_node_id": "aurora-rule-operation",
         "source_node_type": "rule",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "schedule",
+            "policy": {
+              "mode": "human_confirmation_required"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-confirmation"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
       }
     },
     {
@@ -1237,7 +1540,25 @@
         "source_node_id": "aurora-rule-operation",
         "source_node_type": "rule",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "price",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-deposit"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
       }
     },
     {
@@ -1260,7 +1581,25 @@
         "source_node_id": "aurora-rule-operation",
         "source_node_type": "rule",
         "markdown_document": true,
-        "question_count": 1
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-why-objective"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
       }
     },
     {
@@ -1323,7 +1662,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Quais serviços vocês oferecem?",
-        "answer": "A Aurora faz lavagem técnica detalhada, higienização interna, polimento, vitrificação, PPF, polimento de vidros, chapeação e pintura. Qual deles te interessa?",
+        "answer": "A Aurora faz lavagem técnica detalhada, higienização interna, polimento, vitrificação, PPF, polimento de vidros, chapeação e pintura.",
         "source_node_id": "aurora-services",
         "source_node_type": "product_group",
         "markdown_document": true,
@@ -1337,6 +1676,26 @@
           "aurora-campaign",
           "aurora-audience",
           "aurora-services"
+        ],
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-services"
+            ],
+            "source_node_id": "aurora-services",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services"
+            ]
+          }
         ]
       }
     },
@@ -1350,7 +1709,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Do que o PPF protege?",
-        "answer": "O PPF é uma película de proteção física que protege contra pequenos impactos, pedras e também marcas de chuva ácida e fezes de pássaros. Onde você gostaria de aplicar?",
+        "answer": "O PPF é uma película de proteção física que protege contra pequenos impactos, pedras e também marcas de chuva ácida e fezes de pássaros.",
         "source_node_id": "aurora-product-ppf",
         "source_node_type": "product",
         "markdown_document": true,
@@ -1364,6 +1723,28 @@
           "aurora-services",
           "aurora-product-ppf",
           "aurora-copy-ppf"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-ppf-protection"
+            ],
+            "source_node_id": "aurora-product-ppf",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-ppf",
+              "aurora-copy-ppf"
+            ]
+          }
         ]
       }
     },
@@ -1377,7 +1758,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Quanto custa o serviço?",
-        "answer": "O orçamento é personalizado conforme o tamanho, as condições do veículo e o seu objetivo — por isso quem fecha o valor é a Equipe Aurora. Eu coleto as informações e já chamo o time. Você consegue trazer o carro para uma avaliação rápida e sem custo?",
+        "answer": "O orçamento é personalizado conforme o tamanho, as condições do veículo e o seu objetivo — por isso quem fecha o valor é a Equipe Aurora. Eu coleto as informações e já chamo o time.",
         "source_node_id": "aurora-rule-price-human-only",
         "source_node_type": "rule",
         "markdown_document": true,
@@ -1388,6 +1769,24 @@
           "aurora-brand",
           "aurora-briefing",
           "aurora-rule-price-human-only"
+        ],
+        "claims": [
+          {
+            "claim_type": "price",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-price"
+            ],
+            "source_node_id": "aurora-rule-price-human-only",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-price-human-only"
+            ]
+          }
         ]
       }
     },
@@ -1401,7 +1800,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Qual é o horário de atendimento?",
-        "answer": "Os dias e horários quem confirma é a Equipe Aurora — vou verificar e já te retorno com as opções. Enquanto isso, você consegue trazer o carro para uma avaliação rápida e sem custo?",
+        "answer": "Os dias e horários quem confirma é a Equipe Aurora — vou verificar e já te retorno com as opções.",
         "source_node_id": "aurora-rule-lacunas",
         "source_node_type": "rule",
         "markdown_document": true,
@@ -1412,6 +1811,24 @@
           "aurora-brand",
           "aurora-briefing",
           "aurora-rule-lacunas"
+        ],
+        "claims": [
+          {
+            "claim_type": "schedule",
+            "policy": {
+              "mode": "human_confirmation_required"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-hours-confirm"
+            ],
+            "source_node_id": "aurora-rule-lacunas",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-lacunas"
+            ]
+          }
         ]
       }
     },
@@ -1425,7 +1842,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Quanto tempo leva o serviço?",
-        "answer": "O prazo depende do veículo e do serviço, e quem confirma é a Equipe Aurora. Vou registrar suas informações e chamar o time. Qual é o modelo e o ano do seu carro?",
+        "answer": "O prazo depende do veículo e do serviço, e quem confirma é a Equipe Aurora. Vou registrar suas informações e chamar o time.",
         "source_node_id": "aurora-rule-lacunas",
         "source_node_type": "rule",
         "markdown_document": true,
@@ -1436,6 +1853,24 @@
           "aurora-brand",
           "aurora-briefing",
           "aurora-rule-lacunas"
+        ],
+        "claims": [
+          {
+            "claim_type": "duration",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-duration"
+            ],
+            "source_node_id": "aurora-rule-lacunas",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-lacunas"
+            ]
+          }
         ]
       }
     },
@@ -1449,7 +1884,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Quantos carros vocês atendem por dia?",
-        "answer": "Atendemos até 5 clientes por dia. Você já tem uma data em mente?",
+        "answer": "Atendemos até 5 clientes por dia.",
         "source_node_id": "aurora-rule-lacunas",
         "source_node_type": "rule",
         "markdown_document": true,
@@ -1459,6 +1894,24 @@
           "aurora-brand",
           "aurora-briefing",
           "aurora-rule-lacunas"
+        ],
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-capacity"
+            ],
+            "source_node_id": "aurora-rule-lacunas",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-lacunas"
+            ]
+          }
         ]
       }
     },
@@ -1472,7 +1925,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Por que vocês pedem avaliação presencial?",
-        "answer": "Porque cada carro tem um nível diferente de desgaste, e ver o veículo é o que permite indicar o processo certo. A avaliação é rápida e sem custo. Seria possível vir em qual dia?",
+        "answer": "Porque cada carro tem um nível diferente de desgaste, e ver o veículo é o que permite indicar o processo certo. A avaliação é rápida e sem custo.",
         "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
         "markdown_document": true,
@@ -1482,6 +1935,24 @@
           "aurora-brand",
           "aurora-briefing",
           "aurora-rule-atendimento"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-in-person"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
         ]
       }
     },
@@ -1495,7 +1966,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "E se eu não conseguir levar o carro aí?",
-        "answer": "Sem problema — nesse caso consigo te orientar à distância. Me diz o modelo e o ano do carro, a cor, se você costuma rodar em estrada de chão ou carregar algo que suja e, se possível, me manda fotos das áreas que mais te incomodam. Pode ser?",
+        "answer": "Sem problema — nesse caso consigo te orientar à distância. Me diz o modelo e o ano do carro, a cor, se você costuma rodar em estrada de chão ou carregar algo que suja e, se possível, me manda fotos das áreas que mais te incomodam.",
         "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
         "markdown_document": true,
@@ -1505,6 +1976,24 @@
           "aurora-brand",
           "aurora-briefing",
           "aurora-rule-atendimento"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-remote"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
         ]
       }
     },

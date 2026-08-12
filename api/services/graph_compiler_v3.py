@@ -338,6 +338,12 @@ def compile_graph(
         return result
 
     persona_node = next((n for n in nodes if n["node_type"] == "persona"), None)
+    embedded_faq_ids = {
+        edge["source"]
+        for edge in edges
+        if node_by_id.get(edge["source"], {}).get("node_type") == "faq"
+        and node_by_id.get(edge["target"], {}).get("node_type") == "embedded"
+    }
 
     memberships: dict[str, dict[str, dict[str, Any]]] = {}
     contracts: dict[str, dict[str, Any]] = {}
@@ -496,6 +502,30 @@ def compile_graph(
                             f"commercial_claim_evidence_outside_scope:{anchor}:{node_id}:{evidence_node_id}"
                         )
                 claims.append(claim)
+
+        for node_id in closure:
+            node = node_by_id[node_id]
+            data = node.get("data") or {}
+            metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+            if node.get("node_type") != "faq" or node_id not in embedded_faq_ids or (
+                metadata.get("role") or data.get("role")
+            ) == "qualification_question":
+                continue
+            if not str(data.get("answer") or "").strip():
+                continue
+            raw_claims = data.get("claims")
+            if not isinstance(raw_claims, list) or not raw_claims:
+                errors.append(f"factual_faq_without_claim:{anchor}:{node_id}")
+                continue
+            for raw in raw_claims:
+                if not isinstance(raw, dict):
+                    errors.append(f"factual_faq_invalid_claim:{anchor}:{node_id}")
+                    continue
+                if not raw.get("policy"):
+                    errors.append(f"factual_faq_claim_without_policy:{anchor}:{node_id}")
+                evidence = [str(value) for value in raw.get("evidence_node_ids") or []]
+                if evidence != [node_id]:
+                    errors.append(f"factual_faq_claim_without_self_evidence:{anchor}:{node_id}")
 
         completion = raw_completion or {"required_fields": [
             field["key"] for field in ordered_fields if field["required"]

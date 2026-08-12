@@ -1041,12 +1041,14 @@ def test_no_published_node_states_a_service_price_duration_or_business_hours():
         assert not re.search(r"\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}", text), node.id
         assert "segunda a sexta" not in text.lower(), f"{node.id} states business hours"
 
-    claim_types = {
-        claim.get("claim_type")
+    claim_owners = {
+        (node.node_type, claim.get("claim_type"))
         for node in graph.nodes
         for claim in (node.data or {}).get("claims") or []
     }
-    assert not claim_types & {"price", "duration"}
+    assert not ({("product", "price"), ("product", "duration")} & claim_owners)
+    assert ("faq", "price") in claim_owners
+    assert ("faq", "duration") in claim_owners
 
 
 def test_every_handoff_target_is_a_globally_reachable_handoff_rule():

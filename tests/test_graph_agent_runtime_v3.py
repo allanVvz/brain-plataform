@@ -196,6 +196,24 @@ def test_compiler_rejects_question_owned_by_another_branch():
             ],
         )
 
+
+def test_compiler_rejects_factual_faq_without_self_authorized_claim():
+    root = node(1, "persona:generic")
+    branch = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    faq = node(3, "faq:detail", parent_type="faq", data={
+        "question": "O que inclui?", "answer": "Inclui o processo aprovado.",
+    })
+    embedded = node(4, "embedded:generic", parent_type="embedded")
+    with pytest.raises(graph_compiler_v3.GraphCompilationError, match="factual_faq_without_claim"):
+        graph_compiler_v3.compile_graph(
+            persona=PERSONA,
+            node_rows=[root, branch, faq, embedded],
+            edge_rows=[
+                edge(1, root, branch), edge(2, branch, faq),
+                edge(3, faq, embedded, relation="publishes_to"),
+            ],
+        )
+
 @pytest.mark.parametrize("status", ["unknown", "declined", "needs_confirmation"])
 def test_semantic_fact_statuses_are_contract_owned(status):
     document = compiled_fixture(accepted=["known", status])
@@ -1870,6 +1888,170 @@ def test_direct_reconciliation_does_not_turn_a_supported_doubt_into_a_fact():
     )
 
     assert reconciled.extracted_facts == []
+
+
+def test_doubt_resolution_uses_only_self_authorized_faq_in_active_package():
+    faq = {
+        "id": "faq:detail", "node_type": "faq", "status": "validated",
+        "data": {
+            "answer": "Inclui a etapa aprovada. Qual Ã© o seu nome?",
+            "claims": [{
+                "claim_type": "service_detail", "policy": {"mode": "informational"},
+                "evidence_node_ids": ["faq:detail"],
+            }],
+        },
+    }
+    persona_node = {
+            "id": "persona:generic", "node_type": "persona", "data": {
+                "conversation_policy": {"doubt_handling": {
+                    "answer_before_qualification": "Responda primeiro.",
+                    "continue_with_first_missing_field": "Continue com missing_fields[0].",
+                    "deferred_response": "O atendente vai passar o detalhe depois das perguntas.",
+                }},
+            },
+        }
+    document = {"nodes": [persona_node, faq], "node_by_id": {
+        "persona:generic": persona_node,
+        "faq:detail": faq,
+    }}
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"role": "user", "content": "O que inclui?", "message_id": "msg-doubt"}],
+        cart={}, rag_nodes=[faq], rag_paths=[], graph_contract={},
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposed = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="sha256:path", extracted_facts=[],
+        claims=[{"claim_type": "other", "value": {},
+                 "evidence_node_ids": ["faq:detail"], "evidence_chunk_ids": ["chunk:detail"]}],
+        next_question_node_id="q:name", cited_node_ids=["faq:detail"],
+        cited_chunk_ids=["chunk:detail"], reply="Texto do modelo.",
+        qualification_complete=False, handoff_requested=False,
+    )
+
+    resolution = graph_agent_runtime_v3._doubt_resolution(
+        context=context, document=document, proposal=proposed,
+        contract={"closure_node_ids": ["branch:a", "faq:detail"]},
+        chunk_sources={"chunk:detail": "faq:detail"},
+        package_node_ids={"branch:a", "faq:detail"},
+    )
+
+    assert resolution["doubt_resolution"] == "answered"
+    assert resolution["text"] == "Inclui a etapa aprovada."
+    assert resolution["faq_node_id"] == "faq:detail"
+    assert resolution["doubt_chunk_ids"] == ["chunk:detail"]
+
+
+def test_doubt_resolution_defers_from_graph_when_no_authorized_faq_exists():
+    persona_node = {
+        "id": "persona:generic", "node_type": "persona", "data": {
+            "conversation_policy": {"doubt_handling": {
+                "answer_before_qualification": "Responda primeiro.",
+                "continue_with_first_missing_field": "Continue com missing_fields[0].",
+                "deferred_response": "O atendente vai passar o detalhe depois das perguntas.",
+            }},
+        },
+    }
+    document = {"nodes": [persona_node], "node_by_id": {"persona:generic": persona_node}}
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"role": "user", "content": "Tem garantia?", "message_id": "msg-doubt"}],
+        cart={}, rag_nodes=[], rag_paths=[], graph_contract={},
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposed = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="sha256:path", extracted_facts=[], claims=[],
+        next_question_node_id="q:name", cited_node_ids=[], cited_chunk_ids=[],
+        reply="", qualification_complete=False, handoff_requested=False,
+    )
+
+    resolution = graph_agent_runtime_v3._doubt_resolution(
+        context=context, document=document, proposal=proposed,
+        contract={"closure_node_ids": ["branch:a"]}, chunk_sources={},
+        package_node_ids={"branch:a"},
+    )
+
+    assert resolution["doubt_resolution"] == "deferred"
+    assert resolution["text"].startswith("O atendente vai passar")
+
+
+def test_decide_reconciles_faq_answer_before_exact_next_question_without_fallback(monkeypatch):
+    root = node(1, "persona:generic", parent_type="persona", data={
+        "conversation_policy": {"doubt_handling": {
+            "answer_before_qualification": "Responda primeiro.",
+            "continue_with_first_missing_field": "Continue com missing_fields[0].",
+            "deferred_response": "O atendente vai passar o detalhe depois das perguntas.",
+        }},
+    })
+    branch = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    question = node(3, "q:name", parent_type="faq", data={"question": "Como vocÃª se chama?"})
+    faq = node(4, "faq:detail", parent_type="faq", data={
+        "question": "O que inclui?", "answer": "Inclui a etapa aprovada.",
+        "claims": [{
+            "claim_type": "service_detail", "policy": {"mode": "informational"},
+            "evidence_node_ids": ["faq:detail"],
+        }],
+    })
+    branch["metadata"]["qualification"] = {"fields": [{
+        "key": "name", "owner_node_id": "branch:a", "question_node_id": "q:name",
+        "required": True, "accepted_statuses": ["known"],
+        "value_schema": {"type": "string", "minLength": 1},
+    }]}
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA, node_rows=[root, branch, question, faq],
+        edge_rows=[edge(1, root, branch), edge(2, branch, question), edge(3, branch, faq)],
+    )
+    contract = document["branch_contracts"]["branch:a"]
+    pub = publication(document)
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: PERSONA)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub,
+    )
+    cards = [
+        ContextCard(
+            id=node_id, node_type="faq", slug=node_id.replace(":", "-"), title=node_id,
+            rendered_content="published", content_checksum=f"sha256:{node_id}", revision=1,
+            graph_version=1, graph_checksum=document["checksum"], context_role="branch_retrieval",
+            position=index,
+        )
+        for index, node_id in enumerate(("q:name", "faq:detail"))
+    ]
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"],
+        messages=[{"role": "user", "content": "O que inclui?", "message_id": "msg-1"}],
+        cart={"facts": {}, "facts_by_key": {}}, rag_nodes=[], rag_paths=[],
+        rag_chunks=[{"chunk_id": "chunk:detail", "source_node_id": "faq:detail"}],
+        context_cards=cards, graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        publication_id=pub["id"], retrieval_trace={"retrieval_branch_node_id": "branch:a"},
+    )
+    proposed = proposal(document,
+        branch_action="keep", branch_evidence_span="",
+        claims=[{"claim_type": "other", "value": {},
+                 "evidence_node_ids": ["faq:detail"], "evidence_chunk_ids": ["chunk:detail"]}],
+        next_question_node_id="q:name", cited_node_ids=["faq:detail"],
+        cited_chunk_ids=["chunk:detail"], reply="Resposta inventada do modelo.",
+    )
+
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": proposed},
+    )
+
+    assert decision.intent == "collect_graph_fields"
+    assert response.reply_text == "Inclui a etapa aprovada.\n\nComo vocÃª se chama?"
+    assert response.reply_text.count("?") == 1
+    assert response.proof["customer_doubt_detected"] is True
+    assert response.proof["doubt_resolution"] == "answered"
+    assert response.proof["faq_node_id"] == "faq:detail"
+    assert response.proof["next_question_node_id"] == "q:name"
+    assert response.proof["asked_field_key"] == "name"
+    assert "claim_not_authorized:other" in response.proof["model_proposal_errors"]
+    assert response.proof["fallback_used"] is False
 
 
 def test_direct_reconciliation_rejects_question_without_question_mark():

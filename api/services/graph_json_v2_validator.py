@@ -44,6 +44,9 @@ PROTECTED_PERSONA_CHILDREN: set[str] = {"gallery"}
 
 
 FAQ_APPROVED_STATUSES: set[str] = {"approved", "validated", "embedded", "active", "ativo"}
+ALLOWED_CLAIM_TYPES = {
+    "price", "availability", "schedule", "stock", "duration", "service_detail", "other",
+}
 
 V21_KNOWLEDGE_TYPES = {
     "persona", "brand", "briefing", "campaign", "audience", "product_group",
@@ -162,6 +165,20 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
     raw_policy = data.get("appointment_policy")
     if business_model != "appointment" and not isinstance(raw_policy, dict):
         return
+    doubt_handling = (
+        conversation_policy.get("doubt_handling")
+        if isinstance(conversation_policy, dict) else None
+    )
+    if not isinstance(doubt_handling, dict):
+        errors.append("appointment persona requires conversation_policy.doubt_handling")
+    else:
+        for key in (
+            "answer_before_qualification",
+            "continue_with_first_missing_field",
+            "deferred_response",
+        ):
+            if not str(doubt_handling.get(key) or "").strip():
+                errors.append(f"conversation_policy.doubt_handling.{key} must be non-empty")
     if not isinstance(raw_policy, dict):
         errors.append("appointment persona requires data.appointment_policy")
         return
@@ -254,6 +271,52 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
                 errors.append(
                     f"qualification question node {node_id} does not declare field {field}"
                 )
+
+
+def _validate_v21_factual_faq_claims(graph: "GraphJson", errors: list[str]) -> None:
+    persona = next((node for node in graph.nodes if node.node_type == "persona"), None)
+    persona_data = _node_data(persona) if persona is not None else {}
+    if str(persona_data.get("business_model") or "").strip().lower() != "appointment":
+        return
+    nodes_by_id = {node.id: node for node in graph.nodes}
+    published_faq_ids = {
+        edge.source
+        for edge in graph.edges
+        if getattr(nodes_by_id.get(edge.source), "node_type", None) == "faq"
+        and getattr(nodes_by_id.get(edge.target), "node_type", None) == "embedded"
+        and getattr(edge, "relation_type", None) == "publishes_to"
+    }
+    for node in graph.nodes:
+        if node.node_type != "faq" or node.id not in published_faq_ids:
+            continue
+        data = _node_data(node)
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        if str(metadata.get("role") or data.get("role") or "") == "qualification_question":
+            continue
+        if not str(data.get("answer") or "").strip():
+            errors.append(f"approved factual FAQ {node.id} must include data.answer")
+        claims = data.get("claims")
+        if not isinstance(claims, list) or not claims:
+            errors.append(f"approved factual FAQ {node.id} must declare claims")
+            continue
+        for claim in claims:
+            if not isinstance(claim, dict):
+                errors.append(f"approved factual FAQ {node.id} has invalid claim")
+                continue
+            claim_type = str(claim.get("claim_type") or "")
+            if claim_type not in ALLOWED_CLAIM_TYPES:
+                errors.append(f"approved factual FAQ {node.id} has invalid claim type {claim_type}")
+            if not isinstance(claim.get("policy"), dict) or not claim.get("policy"):
+                errors.append(f"approved factual FAQ {node.id} claim {claim_type} requires policy")
+            evidence = [str(value) for value in claim.get("evidence_node_ids") or []]
+            if evidence != [node.id]:
+                errors.append(f"approved factual FAQ {node.id} claim {claim_type} must cite only itself")
+        branch_path = [str(value) for value in data.get("branch_path") or []]
+        source_node_id = str(data.get("source_node_id") or "")
+        if not branch_path or str(node.parent_id or "") not in branch_path:
+            errors.append(f"approved factual FAQ {node.id} must include its complete branch path")
+        if source_node_id and source_node_id not in branch_path:
+            errors.append(f"approved factual FAQ {node.id} source must belong to branch path")
 
 
 def _is_primary(edge: "object") -> bool:
@@ -372,6 +435,7 @@ def _validate_v21(graph: "GraphJson") -> tuple[bool, list[str]]:
                 errors.append(f"node {node.id} contains path does not reach persona")
 
     _validate_appointment_policy(graph.nodes, errors)
+    _validate_v21_factual_faq_claims(graph, errors)
     return (not errors, errors)
 
 
@@ -537,6 +601,15 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
             errors.append(f"asset node {node.id} must have a secondary asset -> gallery edge")
 
     embedded_edges_by_faq: dict[str, list[object]] = {}
+    persona = next((node for node in graph.nodes if node.node_type == "persona"), None)
+    persona_data = _node_data(persona) if persona is not None else {}
+    persona_metadata = (
+        persona_data.get("metadata")
+        if isinstance(persona_data.get("metadata"), dict) else {}
+    )
+    appointment_graph = str(
+        persona_data.get("business_model") or persona_metadata.get("business_model") or ""
+    ).strip().lower() == "appointment"
     for edge in graph.edges:
         source = nodes_by_id.get(edge.source)
         target = nodes_by_id.get(edge.target)
@@ -555,6 +628,36 @@ def validate_graph_json(graph: "GraphJson") -> tuple[bool, list[str]]:
             errors.append(f"approved FAQ {node.id} must have exactly one FAQ -> Embedded edge")
         if _status_of(node) not in FAQ_APPROVED_STATUSES and links:
             errors.append(f"pending FAQ cannot connect to embedded: {node.id}")
+        if not appointment_graph or _status_of(node) not in FAQ_APPROVED_STATUSES or len(links) != 1:
+            continue
+        data = _node_data(node)
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        if str(metadata.get("role") or data.get("role") or "") == "qualification_question":
+            continue
+        if not str(data.get("answer") or "").strip():
+            errors.append(f"approved factual FAQ {node.id} must include data.answer")
+        claims = data.get("claims")
+        if not isinstance(claims, list) or not claims:
+            errors.append(f"approved factual FAQ {node.id} must declare claims")
+            continue
+        for claim in claims:
+            if not isinstance(claim, dict):
+                errors.append(f"approved factual FAQ {node.id} has invalid claim")
+                continue
+            claim_type = str(claim.get("claim_type") or "")
+            if claim_type not in ALLOWED_CLAIM_TYPES:
+                errors.append(f"approved factual FAQ {node.id} has invalid claim type {claim_type}")
+            if not isinstance(claim.get("policy"), dict) or not claim.get("policy"):
+                errors.append(f"approved factual FAQ {node.id} claim {claim_type} requires policy")
+            evidence = [str(value) for value in claim.get("evidence_node_ids") or []]
+            if evidence != [node.id]:
+                errors.append(f"approved factual FAQ {node.id} claim {claim_type} must cite only itself")
+        branch_path = [str(value) for value in data.get("branch_path") or []]
+        source_node_id = str(data.get("source_node_id") or "")
+        if not branch_path or str(node.parent_id or "") not in branch_path:
+            errors.append(f"approved factual FAQ {node.id} must include its complete branch path")
+        if source_node_id and source_node_id not in branch_path:
+            errors.append(f"approved factual FAQ {node.id} source must belong to branch path")
 
     _validate_appointment_policy(graph.nodes, errors)
     return (not errors, errors)

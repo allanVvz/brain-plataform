@@ -13,6 +13,7 @@ for path in (API_DIR, ROOT):
 
 from schemas.graph_json_v2 import GraphJson
 from services.graph_json_v2_validator import validate_graph_json
+from scripts.publish_aurora_graph import build_graph as build_aurora_graph
 
 
 def _valid_graph() -> GraphJson:
@@ -109,6 +110,51 @@ def test_validate_graph_json_rejects_incomplete_graph_owned_conversation_policy(
     assert "conversation_policy.direct_booking.intent_aliases must be non-empty" in errors
     assert "conversation_policy.direct_booking.silent_handoff must be true" in errors
     assert "conversation_policy.question_repetition.max_attempts must equal 1" in errors
+    assert "appointment persona requires conversation_policy.doubt_handling" in errors
+
+
+def test_appointment_publication_requires_self_authorized_factual_faq_claim():
+    graph = build_aurora_graph()
+    faq = next(node for node in graph.nodes if node.id == "aurora-faq-wash-includes")
+    faq.data = {**faq.data, "claims": []}
+
+    valid, errors = validate_graph_json(graph)
+
+    assert valid is False
+    assert "approved factual FAQ aurora-faq-wash-includes must declare claims" in errors
+
+
+def test_appointment_publication_rejects_faq_evidence_from_another_branch():
+    graph = build_aurora_graph()
+    faq = next(node for node in graph.nodes if node.id == "aurora-faq-wash-includes")
+    faq.data = {**faq.data, "claims": [{
+        "claim_type": "service_detail",
+        "policy": {"mode": "informational"},
+        "evidence_node_ids": ["aurora-faq-polish-includes"],
+    }]}
+
+    valid, errors = validate_graph_json(graph)
+
+    assert valid is False
+    assert (
+        "approved factual FAQ aurora-faq-wash-includes claim service_detail must cite only itself"
+        in errors
+    )
+
+
+def test_qualification_faq_does_not_require_an_answer_claim():
+    graph = build_aurora_graph()
+    qualification_ids = next(
+        node for node in graph.nodes if node.node_type == "persona"
+    ).data["appointment_policy"]["field_question_node_ids"]
+    qualification_faq = next(
+        node for node in graph.nodes if node.id == qualification_ids["nome_cliente"]
+    )
+    assert not (qualification_faq.data or {}).get("claims")
+
+    valid, errors = validate_graph_json(graph)
+
+    assert valid is True, errors
 
 
 def test_validate_graph_json_accepts_product_group_faq_when_product_absent():

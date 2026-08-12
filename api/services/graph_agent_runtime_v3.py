@@ -777,6 +777,88 @@ def _looks_like_customer_question(message: str) -> bool:
     return normalized.startswith(question_prefixes)
 
 
+def _factual_answer_only(value: Any) -> str:
+    """Remove qualification questions embedded in legacy FAQ answers."""
+    return " ".join(
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(value or ""))
+        if sentence.strip() and "?" not in sentence
+    ).strip()
+
+
+def _doubt_resolution(
+    *, context: ConversationContext, document: dict[str, Any],
+    proposal: ConversationProposal, contract: dict[str, Any],
+    chunk_sources: dict[str, str], package_node_ids: set[str],
+) -> dict[str, Any] | None:
+    message = _latest_user_message(context)
+    closure = set(contract.get("closure_node_ids") or [])
+    cited = [*proposal.cited_node_ids]
+    cited.extend(
+        chunk_sources.get(chunk_id, "") for chunk_id in proposal.cited_chunk_ids
+    )
+    factual_faqs: list[dict[str, Any]] = []
+    for node_id in dict.fromkeys(value for value in cited if value):
+        node = (document.get("node_by_id") or {}).get(node_id) or {}
+        data = node.get("data") or {}
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        claims = data.get("claims")
+        if (
+            node.get("node_type") == "faq"
+            and node_id in closure
+            and node_id in package_node_ids
+            and (metadata.get("role") or data.get("role")) != "qualification_question"
+            and str(data.get("answer") or "").strip()
+            and isinstance(claims, list)
+            and any(
+                isinstance(claim, dict)
+                and claim.get("policy")
+                and [str(value) for value in claim.get("evidence_node_ids") or []] == [node_id]
+                for claim in claims
+            )
+        ):
+            factual_faqs.append(node)
+    detected = bool(
+        _looks_like_customer_question(message)
+        or proposal.claims
+        or factual_faqs
+    )
+    if not detected:
+        return None
+    persona = _persona_node(document)
+    conversation_policy = ((persona.get("data") or {}).get("conversation_policy") or {})
+    doubt_policy = conversation_policy.get("doubt_handling")
+    if not isinstance(doubt_policy, dict):
+        raise RuntimeError("published appointment graph missing conversation_policy.doubt_handling")
+    if factual_faqs:
+        faq = factual_faqs[0]
+        answer = _factual_answer_only((faq.get("data") or {}).get("answer"))
+        if answer:
+            used_chunks = [
+                chunk_id for chunk_id, source_id in chunk_sources.items()
+                if source_id == faq.get("id")
+            ]
+            return {
+                "customer_doubt_detected": True,
+                "doubt_resolution": "answered",
+                "text": answer,
+                "faq_node_id": faq.get("id"),
+                "doubt_node_ids": [faq.get("id")],
+                "doubt_chunk_ids": used_chunks,
+            }
+    deferred = str(doubt_policy.get("deferred_response") or "").strip()
+    if not deferred:
+        raise RuntimeError("published appointment graph missing doubt deferral text")
+    return {
+        "customer_doubt_detected": True,
+        "doubt_resolution": "deferred",
+        "text": deferred,
+        "faq_node_id": None,
+        "doubt_node_ids": [],
+        "doubt_chunk_ids": [],
+    }
+
+
 def _reconcile_direct_answer_to_pending_field(
     proposal: ConversationProposal,
     context: ConversationContext,
@@ -1645,6 +1727,39 @@ def _decide(
             [context.active_branch_node_id] if context.active_branch_node_id else []
         ),
     )
+    package_node_ids = {card.id for card in context.context_cards} | {
+        str(value) for value in observation.get("repair_context_node_ids") or [] if value
+    }
+    doubt = _doubt_resolution(
+        context=context,
+        document=document,
+        proposal=proposal,
+        contract=contract,
+        chunk_sources=chunk_sources,
+        package_node_ids=package_node_ids,
+    )
+    if doubt:
+        original_errors = [str(error) for error in proof.get("errors") or []]
+        non_claim_errors = [
+            error for error in original_errors
+            if not error.startswith((
+                "claim_not_authorized:",
+                "claim_without_evidence:",
+                "claim_node_evidence_outside_package:",
+                "claim_chunk_evidence_outside_package:",
+                "claim_evidence_not_authorized:",
+            ))
+        ]
+        if not non_claim_errors:
+            proof.update({
+                "valid": True,
+                "errors": [],
+                "repair_required": False,
+                "repair_requirements": [],
+                "model_proposal_errors": original_errors,
+                "fallback_used": False,
+                **doubt,
+            })
     # An explicit switch/add is only a Phase-A decision on the first pass.
     # Force one directed Phase-B retrieval for the selected branch before
     # any reply or fact can be committed, even if an anchor snippet
@@ -1776,10 +1891,11 @@ def _decide(
             ),
             contract,
         )
-        reply_seed = proposal.reply
+        reply_seed = str((doubt or {}).get("text") or proposal.reply)
         if (
             not accepted_facts
             and next_question_id
+            and not doubt
             and not context.retrieval_trace.get("deterministic_branch_resolution")
             and len(_latest_user_message(context).split()) <= 3
         ):
@@ -1840,14 +1956,20 @@ def _decide(
             ),
             "qualification_complete": qualification_complete,
             "accepted_facts": accepted_facts,
+            "fallback_used": False,
+            **(doubt or {}),
         }
+        evidence_node_ids = list(dict.fromkeys([
+            *proposal.cited_node_ids,
+            *((doubt or {}).get("doubt_node_ids") or []),
+        ]))
         return (
             ConversationDecision(classifier="graph_proof_checker_v3",
                                  intent="qualification_complete" if qualification_complete else "collect_graph_fields",
                                  route=route, confidence=1, lead_stage="qualificado" if qualification_complete else "engajado",
                                  handoff_reason="graph_handoff_rule" if proposal.handoff_requested else None,
-                                 evidence_node_ids=proposal.cited_node_ids),
-            AgentResponse(reply_text=reply, role=route, evidence_node_ids=proposal.cited_node_ids,
+                                 evidence_node_ids=evidence_node_ids),
+            AgentResponse(reply_text=reply, role=route, evidence_node_ids=evidence_node_ids,
                           cart_state=state,
                           handoff_required=proposal.handoff_requested and qualification_complete,
                           proposal=proposal, proof=proof),
