@@ -154,3 +154,19 @@ Updated: 2026-08-11
   reprova. Testes focados do critério: `6 passed`.
 - Health nos dois cenários: 143/143 HTTP 200, máximo `171.562 ms`, p95
   `49.243 ms`. Nenhum WhatsApp real; leads colocados em handoff full.
+
+### Adição após o release `3bc6fb6`
+
+- Sessão `2d6b0b6c-c634-48b1-bd4d-92677de5da71`, lead 153.
+- O turno de adição passou: resposta confirmou PPF também, além de Pintura; uma
+  decisão, um proof válido, um outbound inerte e commit completo.
+- Estado final preservado: `active_branch_node_ids` contém Pintura e PPF; fatos
+  compartilhados permanecem únicos; `servico` possui um fato por owner.
+- A sessão parou mais tarde ao responder `condicao`, por dois falsos negativos:
+  o valor foi normalizado validamente e o foco mudou para Pintura porque a frase
+  continha “pintura”, mas o conjunto ativo permaneceu com os dois serviços.
+- Correção local pendente compara o fato aceito/provado com o persistido, permite
+  normalização string respaldada por trecho literal e distingue foco do conjunto
+  de ramos ativos; expectativas do conjunto são propagadas aos turnos seguintes.
+- Testes focados de Validator/conversation mode: `51 passed`.
+- Health: 77/77 HTTP 200, máximo `494.255 ms`, p95 `80.373 ms`; nenhum envio real.

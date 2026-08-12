@@ -1376,6 +1376,28 @@ def _fact_matches_expected(fact: dict | None, expected: object) -> bool:
     return _semantic_fold(actual) == _semantic_fold(expected)
 
 
+def _accepted_fact_matches_intent(
+    fact: dict | None, expected: object, customer_text: str,
+) -> bool:
+    """Accept graph-proved string normalization without weakening lineage.
+
+    The proof checker already enforces declared field/owner, literal evidence
+    span, status and value schema.  Validator examples describe customer
+    intent, not a required normalized storage representation, so a model may
+    validly store ``bancos manchados...`` for the literal ``Os bancos estão
+    manchados...``.  Booleans and numbers remain exact.
+    """
+    if _fact_matches_expected(fact, expected):
+        return True
+    if not fact or fact.get("status") != "known" or not isinstance(expected, str):
+        return False
+    evidence_span = str(fact.get("evidence_span") or "").strip()
+    return bool(
+        evidence_span
+        and _semantic_fold(evidence_span) in _semantic_fold(customer_text)
+    )
+
+
 def _semantic_turn_audit(
     *,
     customer_step: dict,
@@ -1420,9 +1442,14 @@ def _semantic_turn_audit(
     asked_field = str(question.get("field_key") or "") or None
     accepted_all = all(
         key in accepted
-        and _fact_matches_expected(accepted.get(key), value)
+        and _accepted_fact_matches_intent(
+            accepted.get(key), value, str(customer_step.get("text") or ""),
+        )
         and any(
-            _fact_matches_expected(current, value)
+            _fact_matches_expected(
+                current,
+                accepted[key].get("value", accepted[key].get("value_json")),
+            )
             and (
                 not accepted[key].get("owner_node_id")
                 or str(current.get("owner_node_id") or "")
@@ -1490,8 +1517,15 @@ def _semantic_turn_audit(
         ),
         "expected_branch_persisted": (
             not customer_step.get("expected_branch_node_id")
-            or str(ledger_after.get("active_branch_node_id") or "")
-            == str(customer_step.get("expected_branch_node_id"))
+            or (
+                str(ledger_after.get("active_branch_node_id") or "")
+                == str(customer_step.get("expected_branch_node_id"))
+            )
+            or (
+                len(ledger_after.get("active_branch_node_ids") or []) > 1
+                and str(customer_step.get("expected_branch_node_id"))
+                in set(ledger_after.get("active_branch_node_ids") or [])
+            )
         ),
         "expected_active_branches_persisted": (
             not customer_step.get("expected_active_branch_node_ids")
@@ -1688,6 +1722,7 @@ async def run_session_direct(
             answered_fields: set[str] = set()
             doubt_sent = False
             switch_sent = False
+            expected_active_branches: list[str] = []
             semantic_complete = False
             i = 0
             while step_queue and i < max_turns:
@@ -2022,6 +2057,11 @@ async def run_session_direct(
 
                     recent_replies.append(str(turn.get("text") or ""))
                     previous_question_node_id = audit.get("next_question_node_id")
+                    if step.get("expected_active_branch_node_ids"):
+                        expected_active_branches = [
+                            str(value)
+                            for value in step.get("expected_active_branch_node_ids") or []
+                        ]
                     if audit.get("qualification_complete"):
                         semantic_complete = True
                         break
@@ -2057,6 +2097,9 @@ async def run_session_direct(
                                 "kind": "field_answer",
                                 "intended_facts": {asked_field: answer.get("value")},
                                 "expected_branch_node_id": active_anchor,
+                                "expected_active_branch_node_ids": list(
+                                    expected_active_branches
+                                ),
                             }
                     if not next_step:
                         failure = f"script_question_mismatch:{asked_field or 'unknown'}"

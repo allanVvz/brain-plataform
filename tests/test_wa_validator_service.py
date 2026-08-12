@@ -529,6 +529,45 @@ def test_semantic_turn_audit_still_rejects_same_question_after_answering_its_fie
     assert audit["criteria"]["question_advanced"] is False
 
 
+def test_semantic_turn_audit_accepts_graph_proved_string_normalization():
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"] = {
+        "text": "Os bancos estão manchados e a pintura perdeu o brilho",
+        "kind": "field_answer",
+        "intended_facts": {
+            "objective": "Os bancos estão manchados e a pintura perdeu o brilho",
+        },
+        "expected_branch_node_id": "branch:one",
+    }
+    accepted = inputs["proof_record"]["proof_result"]["accepted_facts"][0]
+    accepted.update({
+        "value": "bancos manchados e pintura sem brilho",
+        "evidence_span": "Os bancos estão manchados e a pintura perdeu o brilho",
+    })
+    inputs["ledger_after"]["facts"]["objective"].update({
+        "value": "bancos manchados e pintura sem brilho",
+    })
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["all_intended_facts_extracted"] is True
+
+
+def test_semantic_turn_audit_allows_focus_change_inside_preserved_active_set():
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"]["expected_branch_node_id"] = "branch:two"
+    inputs["customer_step"]["expected_active_branch_node_ids"] = [
+        "branch:one", "branch:two",
+    ]
+    inputs["ledger_after"]["active_branch_node_id"] = "branch:one"
+    inputs["ledger_after"]["active_branch_node_ids"] = ["branch:one", "branch:two"]
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["expected_branch_persisted"] is True
+    assert audit["criteria"]["expected_active_branches_persisted"] is True
+
+
 def test_analyze_gaps_never_promotes_legacy_sequence_to_quality_evidence(monkeypatch):
     session = {
         "id": "legacy-session",
