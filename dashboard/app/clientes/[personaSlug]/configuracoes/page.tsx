@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Bot, ChevronDown, KeyRound, QrCode, Smartphone } from "lucide-react";
+import { ChevronDown, KeyRound, QrCode, Smartphone } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { isChannelConnected, usePortal } from "../PortalContext";
@@ -9,8 +9,6 @@ import { isChannelConnected, usePortal } from "../PortalContext";
 export default function ClientSettingsPage() {
   const { personaSlug, capabilities, user } = usePortal();
   const [channel, setChannel] = useState<any>(null);
-  const [automationMode, setAutomationMode] = useState<"ai_with_handoff" | "human_only" | null>(null);
-  const [automationBusy, setAutomationBusy] = useState(false);
   const [qr, setQr] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -28,27 +26,7 @@ export default function ClientSettingsPage() {
     loadChannel().catch((reason: any) => {
       setError(reason?.message || "Falha ao carregar o canal.");
     });
-    api.personaAutomation(personaSlug)
-      .then((result) => setAutomationMode(result.mode))
-      .catch(() => setAutomationMode(null));
   }, [personaSlug]);
-
-  async function toggleAutomation() {
-    if (automationBusy || !automationMode) return;
-    const next = automationMode === "human_only" ? "ai_with_handoff" : "human_only";
-    setAutomationBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      await api.updatePersonaAutomation(personaSlug, next);
-      setAutomationMode(next);
-      setMessage(next === "human_only" ? "IA desligada para esta persona." : "IA ligada para esta persona.");
-    } catch (reason: any) {
-      setError(reason?.message || "Não foi possível atualizar o estado da IA.");
-    } finally {
-      setAutomationBusy(false);
-    }
-  }
 
   async function requestEvolutionQr() {
     setBusy(true);
@@ -110,42 +88,6 @@ export default function ClientSettingsPage() {
           {message}
         </div>
       )}
-
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-700">
-              <Bot size={20} />
-            </span>
-            <div>
-              <h2 className="font-semibold">Estado da IA</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Quando desligada, toda mensagem recebida fica aguardando um atendente humano.
-              </p>
-            </div>
-          </div>
-          {capabilities.manage ? (
-            <button
-              type="button"
-              onClick={toggleAutomation}
-              disabled={automationBusy || automationMode === null}
-              title={automationMode === "human_only" ? "IA desligada — clique para ligar" : "IA ligada — clique para desligar"}
-              className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition disabled:opacity-50 ${
-                automationMode === "human_only"
-                  ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                  : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-              }`}
-            >
-              <span className={`h-2 w-2 rounded-full ${automationMode === "human_only" ? "bg-amber-500" : "bg-emerald-500"}`} />
-              {automationMode === null ? "Carregando…" : automationMode === "human_only" ? "IA desligada" : "IA ligada"}
-            </button>
-          ) : (
-            <span className="text-xs text-slate-500">
-              {automationMode === "human_only" ? "IA desligada" : "IA ligada"}
-            </span>
-          )}
-        </div>
-      </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-start gap-3">

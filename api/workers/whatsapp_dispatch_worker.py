@@ -150,11 +150,10 @@ class WhatsAppDispatchWorker(BaseWorker):
                     source="workers.whatsapp",
                 )
                 return
-        automation_mode = (
-            (((persona.get("config") or {}).get("portal") or {}).get("automation_mode"))
-            or "ai_with_handoff"
-        )
-        if (lead or {}).get("ai_paused") or automation_mode == "human_only":
+        # Per-lead handoff is the only pause authority. A former persona-wide
+        # ``automation_mode`` gate could leave the eyebrow toggle showing
+        # "IA ativa" while silently parking every inbound in waiting_human.
+        if (lead or {}).get("ai_paused"):
             supabase_client.complete_whatsapp_buffer(row["id"], "waiting_human")
             event_emitter.emit(
                 "whatsapp.inbound_waiting_human",
@@ -164,7 +163,6 @@ class WhatsAppDispatchWorker(BaseWorker):
                 payload={
                     "correlation_id": row.get("correlation_id"),
                     "ai_paused": bool((lead or {}).get("ai_paused")),
-                    "automation_mode": automation_mode,
                 },
                 source="workers.whatsapp",
             )

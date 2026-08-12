@@ -718,37 +718,9 @@ def test_portal_update_lead_merges_commercial_note_into_appointment_request(monk
     assert result["metadata"]["commercial_note"]["servico"] == "chapeacao"
 
 
-def test_portal_get_automation_defaults_to_ai_with_handoff(monkeypatch):
-    request = request_for(
-        {"id": "u1", "role": "user", "account_type": "client"},
-        [{
-            "persona_id": "p1", "persona_slug": "baita-conveniencia",
-            "can_view": True, "can_edit": True, "can_manage": True,
-        }],
-    )
-    monkeypatch.setattr(
-        portal.supabase_client, "get_persona",
-        lambda _slug: {"id": "p1", "slug": "baita-conveniencia", "config": {}},
-    )
-    assert portal.get_automation("baita-conveniencia", request) == {"mode": "ai_with_handoff"}
-
-
-def test_portal_get_automation_reflects_human_only(monkeypatch):
-    request = request_for(
-        {"id": "u1", "role": "user", "account_type": "client"},
-        [{
-            "persona_id": "p1", "persona_slug": "baita-conveniencia",
-            "can_view": True, "can_edit": True, "can_manage": True,
-        }],
-    )
-    monkeypatch.setattr(
-        portal.supabase_client, "get_persona",
-        lambda _slug: {
-            "id": "p1", "slug": "baita-conveniencia",
-            "config": {"portal": {"automation_mode": "human_only"}},
-        },
-    )
-    assert portal.get_automation("baita-conveniencia", request) == {"mode": "human_only"}
+def test_portal_has_no_persona_wide_automation_control():
+    paths = {route.path for route in portal.router.routes}
+    assert not any(path.endswith("/automation") for path in paths)
 
 
 def test_portal_update_lead_still_supports_interesse_produto(monkeypatch):

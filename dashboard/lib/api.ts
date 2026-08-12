@@ -442,13 +442,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ...body, persona_slug: slug }),
     }),
-  personaAutomation: (slug: string) =>
-    req<{ mode: "ai_with_handoff" | "human_only" }>(`/portal/personas/${encodeURIComponent(slug)}/automation`),
-  updatePersonaAutomation: (slug: string, mode: "ai_with_handoff" | "human_only") =>
-    req<{ ok: boolean; mode: string }>(`/portal/personas/${encodeURIComponent(slug)}/automation`, {
-      method: "PATCH",
-      body: JSON.stringify({ mode }),
-    }),
   whatsappChannel: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp`),
   whatsappMetaBinding: (slug: string) =>
     req<any>(`/integrations/meta/whatsapp/personas/${encodeURIComponent(slug)}`),

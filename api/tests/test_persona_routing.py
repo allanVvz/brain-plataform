@@ -6,9 +6,8 @@ only ever read `personas.process_mode` (a legacy column), never the
 WhatsApp dispatch. decision_owner had been changed directly on a binding
 (as production hotfixes did repeatedly) without process_mode ever being
 touched — so the settings UI showed a stale engine while automation
-silently ran something else. Also covers the newly-added automation_mode
-(persona.config.portal.automation_mode) and the "orquestrador" placeholder
-engine, both discovered missing during the same investigation.
+silently ran something else. Also covers the "orquestrador" placeholder
+engine discovered during the same investigation.
 """
 from __future__ import annotations
 
@@ -78,22 +77,14 @@ def test_mask_routing_ignores_inactive_bindings(monkeypatch):
     assert masked["conversation_mode"] == "deterministic"
 
 
-def test_mask_routing_exposes_automation_mode_from_persona_config(monkeypatch):
+def test_mask_routing_ignores_legacy_persona_wide_automation_mode(monkeypatch):
     from routes import personas
 
     monkeypatch.setattr(personas.supabase_client, "get_workflow_bindings", lambda _id: [])
     masked = personas._mask_routing(
         _routing_row(config={"portal": {"automation_mode": "human_only"}}),
     )
-    assert masked["automation_mode"] == "human_only"
-
-
-def test_mask_routing_defaults_automation_mode_to_ai_with_handoff(monkeypatch):
-    from routes import personas
-
-    monkeypatch.setattr(personas.supabase_client, "get_workflow_bindings", lambda _id: [])
-    masked = personas._mask_routing(_routing_row(config={}))
-    assert masked["automation_mode"] == "ai_with_handoff"
+    assert "automation_mode" not in masked
 
 
 def test_update_routing_accepts_orquestrador_without_requiring_deepseek(monkeypatch):
@@ -306,52 +297,13 @@ def test_update_routing_still_rejects_n8n_agents_with_no_credential_at_all(monke
         assert exc.status_code == 409
 
 
-def test_update_routing_writes_automation_mode_to_persona_portal_config(monkeypatch):
+def test_update_routing_has_no_persona_wide_automation_field():
+    from pydantic import ValidationError
     from routes import personas
 
-    routing = _routing_row(config={"portal": {"other": "kept"}})
-    saved_config = {}
-
-    class _FakeUpdateChain:
-        def eq(self, *_a, **_k):
-            return self
-
-        def execute(self):
-            return SimpleNamespace(data=[{}])
-
-    class _FakeTable:
-        def update(self, payload):
-            saved_config.update(payload.get("config") or {})
-            return _FakeUpdateChain()
-
-    class _FakeClient:
-        def table(self, _name):
-            return _FakeTable()
-
-    monkeypatch.setattr(personas.auth_service, "is_admin", lambda _user: True)
-    monkeypatch.setattr(personas.supabase_client, "get_persona_routing", lambda _slug: routing)
-    monkeypatch.setattr(personas.supabase_client, "get_persona", lambda _slug: {**routing, "config": routing["config"]})
-    monkeypatch.setattr(personas.supabase_client, "get_client", lambda: _FakeClient())
-    monkeypatch.setattr(personas.supabase_client, "get_workflow_bindings", lambda _id: [])
-    monkeypatch.setattr(personas.supabase_client, "insert_event", lambda *a, **k: None)
-
-    body = personas.RoutingUpdate(automation_mode="human_only")
-    personas.update_routing("aurora", body, _admin_request())
-
-    assert saved_config["portal"]["automation_mode"] == "human_only"
-    assert saved_config["portal"]["other"] == "kept"
-
-
-def test_update_routing_rejects_invalid_automation_mode(monkeypatch):
-    from fastapi import HTTPException
-    from routes import personas
-
-    monkeypatch.setattr(personas.auth_service, "is_admin", lambda _user: True)
-    monkeypatch.setattr(personas.supabase_client, "get_persona_routing", lambda _slug: _routing_row())
-
-    body = personas.RoutingUpdate(automation_mode="sometimes")
+    assert "automation_mode" not in personas.RoutingUpdate.model_fields
     try:
-        personas.update_routing("aurora", body, _admin_request())
-        raise AssertionError("expected HTTPException")
-    except HTTPException as exc:
-        assert exc.status_code == 400
+        personas.RoutingUpdate(automation_mode="human_only")
+        raise AssertionError("legacy automation_mode must be rejected")
+    except ValidationError:
+        pass

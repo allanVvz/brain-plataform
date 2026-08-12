@@ -22,11 +22,9 @@ import { useGlobalPersona } from "@/lib/useGlobalPersona";
 type Provider = "meta_cloud" | "evolution_baileys";
 type MessagingSubTab = "canal" | "agentes" | "validacoes";
 type ConversationMode = "deterministic" | "n8n_agents" | "orquestrador";
-type AutomationMode = "ai_with_handoff" | "human_only";
 
 type RoutingConfig = {
   conversation_mode: ConversationMode;
-  automation_mode?: AutomationMode;
   migration_applied?: boolean;
   model_required?: boolean;
   field_extractor?: string | null;
@@ -502,59 +500,10 @@ function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
     }
   }
 
-  async function toggleAutomation() {
-    if (!personaSlug || routingBusy || !routing) return;
-    const next: AutomationMode = routing.automation_mode === "human_only" ? "ai_with_handoff" : "human_only";
-    setRoutingBusy(true);
-    setRoutingMessage("");
-    setRoutingError("");
-    try {
-      const updated = await api.updatePersonaRouting(personaSlug, { automation_mode: next });
-      setRouting(updated);
-      setRoutingMessage(next === "human_only" ? "IA desligada para esta persona." : "IA ligada para esta persona.");
-    } catch (error: any) {
-      setRoutingError(error?.message || "Falha ao atualizar o estado da IA.");
-    } finally {
-      setRoutingBusy(false);
-    }
-  }
-
-  const aiOff = routing?.automation_mode === "human_only";
   const needsAgent = routing?.conversation_mode === "n8n_agents" || routing?.conversation_mode === "orquestrador";
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-white/10 bg-obs-surface p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-obs-violet/25 bg-obs-violet/10 text-obs-violet">
-              <Bot size={16} />
-            </span>
-            <div>
-              <h3 className="text-sm font-semibold text-obs-text">Estado da IA</h3>
-              <p className="mt-1 text-xs leading-5 text-obs-subtle">
-                Liga/desliga a automação para toda a persona — quando desligada, toda
-                mensagem que chega fica aguardando um humano, mesmo com o motor configurado.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={toggleAutomation}
-            disabled={routingBusy || !routing}
-            title={aiOff ? "IA desligada — clique para ligar" : "IA ligada — clique para desligar"}
-            className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
-              aiOff
-                ? "border-amber-400/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20"
-                : "border-emerald-400/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
-            }`}
-          >
-            <span className={`h-1.5 w-1.5 rounded-full ${aiOff ? "bg-amber-400" : "bg-emerald-400"}`} />
-            {aiOff ? "IA desligada" : "IA ligada"}
-          </button>
-        </div>
-      </section>
-
       <section className="rounded-2xl border border-white/10 bg-obs-surface p-4">
         <div className="flex items-start gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-obs-violet/25 bg-obs-violet/10 text-obs-violet">

@@ -55,10 +55,6 @@ class LeadPatchBody(BaseModel):
     commercial_note: dict[str, str] | None = None
 
 
-class AutomationBody(BaseModel):
-    mode: str
-
-
 class WhatsAppProviderBody(BaseModel):
     provider: str
     confirmed: bool = False
@@ -680,26 +676,6 @@ def pipeline(request: Request, persona_slug: str = Query(...)):
         },
         "business_model": portal_config.get("business_model") or "sales",
     }
-
-
-@router.get("/personas/{slug}/automation")
-def get_automation(slug: str, request: Request):
-    persona = _persona(slug, request, "view")
-    mode = ((persona.get("config") or {}).get("portal") or {}).get("automation_mode") or "ai_with_handoff"
-    return {"mode": mode}
-
-
-@router.patch("/personas/{slug}/automation")
-def automation(slug: str, body: AutomationBody, request: Request):
-    persona = _persona(slug, request, "manage")
-    if body.mode not in {"ai_with_handoff", "human_only"}:
-        raise HTTPException(400, "Modo invalido.")
-    config = dict(persona.get("config") or {})
-    portal = dict(config.get("portal") or {})
-    portal["automation_mode"] = body.mode
-    config["portal"] = portal
-    rows = supabase_client.get_client().table("personas").update({"config": config}).eq("id", persona["id"]).execute().data or []
-    return {"ok": True, "mode": body.mode, "persona": rows[0] if rows else None}
 
 
 @router.get("/personas/{slug}/channels/whatsapp")

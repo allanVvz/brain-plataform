@@ -6,7 +6,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from schemas.persona import PersonaCreate, PersonaUpdate
 from services import public_site
@@ -17,9 +17,10 @@ logger = logging.getLogger("personas")
 
 
 class RoutingUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     process_mode: str | None = None
     conversation_mode: str | None = None
-    automation_mode: str | None = None
     outbound_webhook_url: str | None = None
     outbound_webhook_secret: str | None = None
     inbound_webhook_token: str | None = None
@@ -69,15 +70,11 @@ def _mask_routing(routing: dict) -> dict:
         if live_decision_owner in _KNOWN_CONVERSATION_MODES
         else ("n8n_agents" if process_mode == "n8n" else "deterministic")
     )
-    automation_mode = (
-        (routing.get("config") or {}).get("portal") or {}
-    ).get("automation_mode") or "ai_with_handoff"
     return {
         "slug": routing.get("slug"),
         "id": routing.get("id"),
         "process_mode": process_mode,
         "conversation_mode": conversation_mode,
-        "automation_mode": automation_mode,
         "pipeline_contract": live_metadata.get("pipeline_contract") or "conversation_v1",
         "classifier": live_metadata.get("runtime_version") or (
             "deterministic_v1" if conversation_mode == "deterministic" else None
@@ -261,11 +258,7 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
     if body.rotate_inbound_token:
         rotated_token = secrets.token_urlsafe(32)
         payload["inbound_webhook_token"] = rotated_token
-    if (
-        not payload
-        and requested_conversation_mode is None
-        and body.automation_mode is None
-    ):
+    if not payload and requested_conversation_mode is None:
         return _mask_routing(current)
     if requested_conversation_mode is not None:
         conversation_mode = requested_conversation_mode
@@ -433,31 +426,6 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
         )
     elif payload:
         supabase_client.update_persona_routing(slug, payload)
-    if body.automation_mode is not None:
-        if body.automation_mode not in {"ai_with_handoff", "human_only"}:
-            raise HTTPException(400, "automation_mode must be 'ai_with_handoff' or 'human_only'")
-        persona_row = supabase_client.get_persona(slug) or {}
-        persona_config = dict(persona_row.get("config") or {})
-        portal_config = dict(persona_config.get("portal") or {})
-        portal_config["automation_mode"] = body.automation_mode
-        persona_config["portal"] = portal_config
-        supabase_client.get_client().table("personas").update(
-            {"config": persona_config}
-        ).eq("slug", slug).execute()
-        supabase_client.insert_event(
-            {
-                "event_type": (
-                    "whatsapp.automation_enabled"
-                    if body.automation_mode == "ai_with_handoff"
-                    else "whatsapp.automation_disabled"
-                ),
-                "entity_type": "persona",
-                "entity_id": str(current.get("id") or slug),
-                "persona_id": current.get("id"),
-                "payload": {"reason": "settings_ui", "automation_mode": body.automation_mode},
-            },
-            source="routes.personas",
-        )
     final = supabase_client.get_persona_routing(slug) or current
     response = _mask_routing(final)
     if rotated_token:

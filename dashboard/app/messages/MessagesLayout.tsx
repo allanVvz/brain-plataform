@@ -1,11 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
 import { api } from "@/lib/api";
-import {
-  validateLeadResponse,
-  setupHandoffMonitor,
-  exportValidationLogs,
-} from "@/lib/handoff-validation";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { MessageSquare, User, Clock, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, PanelRightClose, PanelRightOpen, ArrowLeft, ChevronLeft, ChevronRight, Tag } from "lucide-react";
@@ -1838,20 +1833,7 @@ export function MessagesLayout({
       ]);
       if (loadLeadsRequestRef.current !== requestId) return;
 
-      // VALIDAÇÃO CRÍTICA: Validar e corrigir estado de handoff para cada lead
-      const validatedLeads = (leadRows as Lead[]).map((lead) => {
-        const validation = validateLeadResponse(lead);
-        if (!validation.validated && validation.corrected) {
-          console.warn(
-            `[HANDOFF-VALIDATION] Lead ${lead.id} loaded with handoff state issues:`,
-            validation.validationIssues
-          );
-          return validation.corrected;
-        }
-        return lead;
-      });
-
-      setLeads(validatedLeads);
+      setLeads(leadRows as Lead[]);
       setConversations(convRows as ConversationSummary[]);
     } catch (error) {
       if (loadLeadsRequestRef.current !== requestId) return;
@@ -1881,40 +1863,6 @@ export function MessagesLayout({
     const id = setInterval(() => setNow(Date.now()), 30 * 1000);
     return () => clearInterval(id);
   }, []);
-
-  // MONITOR CONTÍNUO: Validar handoff state a cada 30 segundos
-  useEffect(() => {
-    const monitorHandoffState = () => {
-      leads.forEach((lead) => {
-        const validation = validateLeadResponse(lead);
-        if (!validation.validated) {
-          console.error(
-            `[HANDOFF-VALIDATION] Handoff state violation detected for lead ${lead.id}:`,
-            validation.validationIssues
-          );
-
-          // Se o lead está selecionado, corrigir imediatamente
-          if (lead.id === selectedId && validation.corrected) {
-            setLeads((prev) =>
-              prev.map((l) => (l.id === lead.id ? validation.corrected! : l))
-            );
-          }
-        }
-      });
-
-      // Exportar logs periodicamente (a cada 5 minutos)
-      if (Math.random() < 0.1) {
-        // 10% de chance a cada tick
-        const logs = exportValidationLogs();
-        if (logs.violations.length > 0) {
-          console.warn("[HANDOFF-VALIDATION] Recent violations:", logs.violations);
-        }
-      }
-    };
-
-    const interval = setInterval(monitorHandoffState, 30000);
-    return () => clearInterval(interval);
-  }, [leads, selectedId]);
 
   // Index conversations por lead_ref para lookup O(1) no sidebar
   const convByRef = useMemo(() => {
@@ -2279,17 +2227,6 @@ export function MessagesLayout({
     setPausing(true);
     try {
       const current = leads.find((l) => l.id === selectedId);
-
-      // VALIDAÇÃO CRÍTICA: Sincronizar estado antes de qualquer ação
-      const validation = validateLeadResponse(current);
-      if (current && !validation.validated && validation.corrected) {
-        console.warn(
-          `[HANDOFF-VALIDATION] Lead ${selectedId} had state issues, correcting...`,
-          validation.validationIssues
-        );
-        Object.assign(current, validation.corrected);
-      }
-
       const level = current?.handoff_level ?? (current?.ai_paused ? "full" : "none");
       if (level === "full") {
         if (isPortal) await api.portalResumeAi(portalSlug!, selectedId);

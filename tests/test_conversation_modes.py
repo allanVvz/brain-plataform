@@ -65,6 +65,9 @@ def test_deterministic_worker_uses_canonical_pipeline_without_n8n(monkeypatch):
             "id": "persona-1",
             "slug": "baita-conveniencia",
             "process_mode": "internal",
+            # Legacy persona-wide pause data must not override the lead's
+            # eyebrow toggle state.
+            "config": {"portal": {"automation_mode": "human_only"}},
         },
     )
     monkeypatch.setattr(
