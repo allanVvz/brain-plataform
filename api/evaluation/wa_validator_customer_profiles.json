@@ -10,8 +10,8 @@
       "modelo_veiculo": {"text": "Onix", "value": "Onix"},
       "vehicle_year": {"text": "2020", "value": "2020"},
       "condicao": {
-        "text": "Os bancos estão manchados e a pintura perdeu o brilho",
-        "value": "Os bancos estão manchados e a pintura perdeu o brilho"
+        "text": "Há marcas de uso e sujeira acumulada no veículo",
+        "value": "Há marcas de uso e sujeira acumulada no veículo"
       },
       "vehicle_color": {"text": "Prata", "value": "Prata"}
     }
