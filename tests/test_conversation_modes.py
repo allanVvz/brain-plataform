@@ -650,10 +650,16 @@ def test_wa_validator_run_direct_n8n_sends_webhook_token_and_reports_empty_body(
         "get_lead_by_ref",
         lambda _ref: {"channel_binding_id": "binding-1"},
     )
+    captured_envelopes = []
+
+    def fake_enqueue(**kwargs):
+        captured_envelopes.append(kwargs)
+        return {"buffer_id": "buf-1"}
+
     monkeypatch.setattr(
         wa_validator_service.supabase_client,
         "enqueue_whatsapp_envelope",
-        lambda **_kwargs: {"buffer_id": "buf-1"},
+        fake_enqueue,
     )
     monkeypatch.setattr(
         wa_validator_service.supabase_client, "insert_event", lambda *_a, **_k: None
@@ -697,6 +703,7 @@ def test_wa_validator_run_direct_n8n_sends_webhook_token_and_reports_empty_body(
     _asyncio.run(wa_validator_service.run_session_direct(session_id))
 
     assert len(captured_calls) == 1
+    assert captured_envelopes[0]["buffer"]["status"] == "waiting_human"
     assert captured_calls[0]["kwargs"]["secret"] == "test-token-123"
     # Confirmed live 2026-08-08: hardcoding "conversation_v1" here got every
     # step rejected by the workflow's own "pipeline contract mismatch"
@@ -711,6 +718,140 @@ def test_wa_validator_run_direct_n8n_sends_webhook_token_and_reports_empty_body(
     assert bot_turn["error"] is True
     assert "empty body" in bot_turn["error_detail"]
     assert "empty body" in bot_turn["text"] or "erro" in bot_turn["text"].lower()
+
+
+def test_wa_validator_direct_terminalizes_inert_inbound_only_after_v3_proof(
+    monkeypatch,
+):
+    """Direct validation must never leave an inbound eligible for dispatch.
+
+    The direct driver invokes n8n itself.  A ``buffered`` synthetic inbound
+    can be claimed by the WhatsApp worker and remains visible to the next
+    quiet-burst commit, which production exposed as ``burst_superseded``.
+    Start inert and mark it terminal only after the v3 exactly-once audit.
+    """
+    import asyncio as _asyncio
+    import json as _json
+
+    monkeypatch.setenv("AI_BRAIN_WEBHOOK_TOKEN", "test-token-123")
+    monkeypatch.setenv("WA_VALIDATOR_DIRECT_WAIT", "1")
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_persona",
+        lambda _slug: {"id": "persona-1", "slug": "aurora", "name": "Aurora"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_persona_routing",
+        lambda _slug: {"process_mode": "n8n"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_workflow_bindings",
+        lambda _persona_id: [{
+            "active": True,
+            "metadata": {
+                "decision_owner": "n8n_agents",
+                "pipeline_contract": "conversation_v3",
+                "conversation_webhook_url": "http://n8n:5678/webhook/aurora/conversation",
+            },
+        }],
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "ensure_lead_for_persona",
+        lambda **_kwargs: {"id": 999, "metadata": {}},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "update_lead", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_lead_by_ref",
+        lambda _ref: {"channel_binding_id": "binding-1"},
+    )
+    captured_envelopes = []
+
+    def fake_enqueue(**kwargs):
+        captured_envelopes.append(kwargs)
+        return {"buffer_id": "buf-1"}
+
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "enqueue_whatsapp_envelope", fake_enqueue,
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_whatsapp_buffer_by_idempotency",
+        lambda _key: {},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_conversation_ledger",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client, "insert_event", lambda *_a, **_k: None,
+    )
+    terminalized = []
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "complete_whatsapp_buffer",
+        lambda buffer_id, status, **_kwargs: terminalized.append((buffer_id, status)),
+    )
+
+    async def fake_wait_for_audit(*_args, **_kwargs):
+        return {
+            "inbound_count": 1,
+            "decision_count": 1,
+            "proof_count": 1,
+            "valid_proof_count": 1,
+            "outbound_count": 1,
+            "outbound_released_after_proof": True,
+            "commit_state": "completed",
+            "prompt_tokens": 100,
+            "model_calls": 1,
+        }
+
+    async def fake_wait_for_reply(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        wa_validator_service, "_wait_for_turn_audit_v3", fake_wait_for_audit,
+    )
+    monkeypatch.setattr(
+        wa_validator_service, "_wait_for_reply_delivered", fake_wait_for_reply,
+    )
+    monkeypatch.setattr(
+        wa_validator_service.n8n_client,
+        "send_to_webhook",
+        lambda *_a, **_k: (200, _json.dumps({
+            "reply_text": "Oi!",
+            "message_id": "out-1",
+            "pipeline_contract": "conversation_v3",
+        })),
+    )
+    store = _install_fake_wa_validator_session_store(monkeypatch)
+    session_id = "session-n8n-inert-inbound"
+    store[session_id] = {
+        "id": session_id,
+        "persona_slug": "aurora",
+        "flow_id": "technical",
+        "status": "ready",
+        "script": {
+            "meta": {"agent_slug": "aurora", "graph_version": 10, "graph_checksum": "abc"},
+            "steps": [{"text": "Oi", "wait": 1}],
+        },
+        "output": None,
+        "insights": None,
+        "created_at": "2026-08-11T00:00:00+00:00",
+        "updated_at": "2026-08-11T00:00:00+00:00",
+    }
+
+    _asyncio.run(wa_validator_service.run_session_direct(session_id))
+
+    assert captured_envelopes[0]["buffer"]["status"] == "waiting_human"
+    assert terminalized == [("buf-1", "sent")]
+    assert wa_validator_service.get_session(session_id)["status"] == "done"
 
 
 def _fake_graph(business_model: str):

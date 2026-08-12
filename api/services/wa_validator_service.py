@@ -1677,9 +1677,16 @@ async def run_session_direct(
                 # commit() claims the inbound message through the same
                 # durable lead_buffer row the real inbound webhooks create
                 # (claim_conversation_commit requires it to already exist),
-                # so the validator must go through the same atomic
-                # enqueue used in production rather than a bare message
-                # insert.
+                # so the validator must go through the same atomic enqueue
+                # used in production rather than a bare message insert.
+                #
+                # A direct validation turn is invoked synchronously below;
+                # it must therefore be inert to the transport worker.  If it
+                # starts as ``buffered``, dispatch can claim it concurrently
+                # and the next validator turn also sees it as an unconsumed
+                # burst sibling, producing ``burst_superseded``.  Keep the
+                # canonical evidence row in a non-dispatchable state until
+                # the v3 audit proves the commit, then terminalize it below.
                 envelope = supabase_client.enqueue_whatsapp_envelope(
                     buffer={
                         "persona_id": persona.get("id"),
@@ -1689,7 +1696,7 @@ async def run_session_direct(
                         "external_message_id": message_id,
                         "direction": "inbound",
                         "payload": {"text": text, "sender": "wa-validator"},
-                        "status": "buffered",
+                        "status": "waiting_human",
                         "batch_key": f"{persona.get('id')}:{lead_ref}",
                         "idempotency_key": f"inbound:wa-validator:{message_id}",
                         "correlation_id": correlation_id,
@@ -1853,6 +1860,11 @@ async def run_session_direct(
                                 "WA Validator turn invariant failed: "
                                 + ", ".join(invariant_errors)
                             )
+                        # The direct/internal driver, not the WhatsApp
+                        # dispatch worker, consumed this canonical inbound.
+                        # Only mark it terminal after the decision, proof and
+                        # outbox invariants above all passed.
+                        supabase_client.complete_whatsapp_buffer(buffer_uuid, "sent")
                 except Exception as exc:
                     tb = traceback.format_exc()
                     _log.error(
