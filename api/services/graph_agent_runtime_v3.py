@@ -28,6 +28,7 @@ from services import graph_compiler_v3, graph_proof_checker_v3, supabase_client
 logger = logging.getLogger("graph_agent_runtime_v3")
 
 RUNTIME_VERSION = "graph_agent_runtime_v3"
+MAX_PENDING_QUESTION_ATTEMPTS = 2
 
 
 def _normalize_servico_owner(
@@ -91,7 +92,7 @@ def _normalize_premature_servico_requestion(
         return proposal
     if (ledger_facts.get("servico") or {}).get("status") != "known":
         return proposal
-    pending = graph_proof_checker_v3.pending_fields(contract, ledger_facts)
+    pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
     substitute = next((field.get("question_node_id") for field in pending if field.get("question_node_id")), None)
     if not substitute or substitute == proposal.next_question_node_id:
         return proposal
@@ -134,7 +135,7 @@ def _normalize_stale_next_question_after_branch_change(
             "status": fact.status.value if hasattr(fact.status, "value") else fact.status,
             "value": fact.value, "owner_node_id": fact.owner_node_id,
         }
-    pending = graph_proof_checker_v3.pending_fields(contract, effective_facts)
+    pending = graph_proof_checker_v3.askable_pending_fields(contract, effective_facts)
     pending_question_ids = {field.get("question_node_id") for field in pending if field.get("question_node_id")}
     if proposal.next_question_node_id in pending_question_ids:
         return proposal
@@ -186,7 +187,7 @@ def _invalid_proposal_fallback(
 ) -> tuple[ConversationDecision, AgentResponse]:
     contract = context.graph_contract or {}
     facts = context.cart.get("facts") or {}
-    pending = graph_proof_checker_v3.pending_fields(contract, facts)
+    pending = graph_proof_checker_v3.askable_pending_fields(contract, facts)
     question_id = next(
         (field.get("question_node_id") for field in pending if field.get("question_node_id")),
         None,
@@ -722,7 +723,7 @@ def _normalize_next_question_to_first_missing(
             "value": fact.value,
             "owner_node_id": fact.owner_node_id,
         }
-    pending = graph_proof_checker_v3.pending_fields(contract, effective_facts)
+    pending = graph_proof_checker_v3.askable_pending_fields(contract, effective_facts)
     expected = pending[0].get("question_node_id") if pending else None
     if proposal.next_question_node_id == expected:
         return proposal
@@ -792,7 +793,7 @@ def _reconcile_direct_answer_to_pending_field(
     message = _latest_user_message(context).strip()
     if not message or _looks_like_customer_question(message):
         return proposal
-    pending = graph_proof_checker_v3.pending_fields(contract, ledger_facts)
+    pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
     if not pending:
         return proposal
     field = pending[0]
@@ -818,6 +819,62 @@ def _reconcile_direct_answer_to_pending_field(
     return proposal.model_copy(update={
         "extracted_facts": [*proposal.extracted_facts, fact],
     })
+
+
+def _unanswered_fact_after_question_limit(
+    *,
+    context: ConversationContext,
+    contract: dict[str, Any],
+    ledger_facts: dict[str, Any],
+    proposal: ConversationProposal,
+) -> dict[str, Any] | None:
+    """Mark an unanswered field unknown after two published attempts."""
+    pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
+    if not pending:
+        return None
+    field = pending[0]
+    key = str(field.get("key") or "")
+    owner = str(field.get("owner_node_id") or "")
+    question_id = str(field.get("question_node_id") or "")
+    if not key or not owner or not question_id:
+        return None
+    accepted_statuses = set(field.get("accepted_statuses") or ["known"])
+    if any(
+        fact.field_key == key
+        and fact.owner_node_id == owner
+        and str(fact.status.value if hasattr(fact.status, "value") else fact.status)
+        in accepted_statuses
+        for fact in proposal.extracted_facts
+    ):
+        return None
+    asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
+    question_text = str(
+        ((contract.get("questions") or {}).get(question_id) or {}).get("text") or ""
+    ).strip()
+    observed_attempts = sum(
+        1
+        for row in context.messages
+        if (
+            str(row.get("role") or "") == "assistant"
+            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
+        )
+        and question_text
+        and graph_proof_checker_v3._question_already_asked(
+            question_text,
+            str(row.get("content") or row.get("texto") or row.get("text") or ""),
+        )
+    )
+    if max(asked.count(question_id), observed_attempts) < MAX_PENDING_QUESTION_ATTEMPTS:
+        return None
+    return {
+        "field_key": key,
+        "owner_node_id": owner,
+        "status": "unknown",
+        "value": None,
+        "source_message_id": _source_message_id(context.messages),
+        "evidence_span": "",
+        "confidence": 1.0,
+    }
 
 
 def _normalize_fact_source_message_ids(
@@ -881,7 +938,8 @@ def _repeated_pending_question_is_allowed(
     if not next_question_node_id:
         return False
     return (
-        next_question_node_id in set(asked_question_node_ids)
+        0 < asked_question_node_ids.count(next_question_node_id)
+        < MAX_PENDING_QUESTION_ATTEMPTS
         and any(
             field.get("question_node_id") == next_question_node_id
             for field in aggregate_missing
@@ -1055,12 +1113,13 @@ def _greeting_policy(
     if not response:
         return None
     pending = graph_proof_checker_v3.pending_fields(contract, facts) if contract else []
-    question_id = pending[0].get("question_node_id") if pending else None
+    askable = graph_proof_checker_v3.askable_pending_fields(contract, facts) if contract else []
+    question_id = askable[0].get("question_node_id") if askable else None
     question = str(
         (((contract.get("questions") or {}).get(str(question_id or "")) or {}).get("text"))
         or ""
     ).strip()
-    field_key = pending[0].get("key") if pending else None
+    field_key = askable[0].get("key") if askable else None
     if not contract:
         appointment = data.get("appointment_policy") or {}
         required = [str(value) for value in appointment.get("required_fields") or [] if value]
@@ -1364,8 +1423,13 @@ def build_context(
         "ou já conhecido em factual_ledger -- nunca finja ter entendido algo que "
         "não foi de fato extraído.\n\n"
 
-        "Nunca repita a pergunta ou frase do turno anterior quase palavra por "
-        "palavra, e nunca repita a mesma construção de frase turno após turno. "
+        "Uma pergunta publicada pode aparecer no máximo duas vezes enquanto "
+        "o campo estiver pendente. Depois disso o backend marca o campo como "
+        "unknown e segue para o próximo; não tente perguntá-lo novamente. Se o "
+        "cliente fornecer esse dado espontaneamente mais tarde, extraia-o "
+        "normalmente como known para substituir unknown. Fora dessa única "
+        "repetição autorizada, nunca repita a pergunta ou frase do turno anterior "
+        "quase palavra por palavra, nem a mesma construção turno após turno. "
         "Confira recent_messages (as últimas mensagens da conversa, incluindo "
         "suas próprias respostas) antes de escrever a reply e varie a "
         "formulação a cada turno, mesmo quando a pergunta de fundo "
@@ -1641,6 +1705,14 @@ def _decide(
                 "branch_committed": False,
             }
         accepted_facts = list(proof.get("accepted_facts") or [])
+        unanswered_fact = _unanswered_fact_after_question_limit(
+            context=context,
+            contract=contract,
+            ledger_facts=contract_facts,
+            proposal=proposal,
+        )
+        if unanswered_fact:
+            accepted_facts.append(unanswered_fact)
         next_grouped = {
             str(key): list(values) for key, values in grouped_facts.items()
         }
@@ -1678,8 +1750,11 @@ def _decide(
         aggregate_missing = graph_proof_checker_v3.aggregate_missing_fields(
             document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
         ) if active_branch_ids else []
+        aggregate_askable = graph_proof_checker_v3.aggregate_askable_fields(
+            document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
+        ) if active_branch_ids else []
         next_question_id = next(
-            (field.get("question_node_id") for field in aggregate_missing if field.get("question_node_id")),
+            (field.get("question_node_id") for field in aggregate_askable if field.get("question_node_id")),
             None,
         )
         question_contract = next(
@@ -1702,6 +1777,12 @@ def _decide(
             next_question_node_id=next_question_id,
             contract=question_contract,
         )
+        if unanswered_fact and not next_question_id:
+            reply = " ".join(
+                sentence.strip()
+                for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", reply_seed)
+                if sentence.strip() and "?" not in sentence
+            ).strip()
         repeated_pending_question = _repeated_pending_question_is_allowed(
             next_question_node_id=next_question_id,
             aggregate_missing=aggregate_missing,
@@ -1720,10 +1801,10 @@ def _decide(
         state = {**context.cart, "facts": facts, "facts_by_key": next_grouped,
                  "active_branch_node_id": committed_branch,
                  "active_branch_node_ids": active_branch_ids,
-                 "asked_question_node_ids": list(dict.fromkeys([
+                 "asked_question_node_ids": [
                       *(context.cart.get("asked_question_node_ids") or []),
                       *([next_question_id] if next_question_id else []),
-                  ]))}
+                  ]}
         qualification_complete = not aggregate_missing and not discovery_only
         route = (
             ConversationRoute.HUMAN
@@ -1816,10 +1897,10 @@ def _decide(
         "facts": fallback_facts,
         "active_branch_node_id": fallback_branch,
         "active_branch_node_ids": fallback_active_branches,
-        "asked_question_node_ids": list(dict.fromkeys([
+        "asked_question_node_ids": [
             *(context.cart.get("asked_question_node_ids") or []),
             *([fallback_id] if fallback_id else []),
-        ])),
+        ],
     }
     return (
         ConversationDecision(classifier="graph_proof_checker_v3", intent="published_fallback",

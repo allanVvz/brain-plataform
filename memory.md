@@ -104,3 +104,27 @@ Updated: 2026-08-12
 - Binding/transporte e IAs continuam pausados; retenção continua desativada.
 - Qualquer retomada de IA/transporte ou aplicação da limpeza exige revisão e
   autorização explícitas separadas.
+
+### Alteração seguinte pronta para release
+
+- Nova regra solicitada: o mesmo question node pode ser publicado no máximo
+  duas vezes enquanto o campo estiver pendente. Na interação seguinte sem
+  resposta válida, o backend persiste esse owner/campo como `status=unknown`
+  (não respondido), mantém o campo em `missing_fields` e passa ao próximo campo
+  perguntável sem inventar valor.
+- `unknown` não conclui qualificação e não pode ser perguntado novamente. Uma
+  informação espontânea posterior pode substituir `unknown` por `known` sem
+  exigir marcador artificial de correção, desde que passe owner, evidência
+  literal e schema publicados.
+- A contagem usa o histórico persistido de question node e confirma mensagens
+  recentes para compatibilidade com ledgers antigos que deduplicavam a lista.
+- CI foi tornado sensível ao escopo: backend roda uma única suíte; frontend,
+  Compose, SBOM/dependency audit e scan de imagem só rodam quando seus arquivos
+  relevantes mudam. Commit apenas documental não instala dependências nem
+  constrói imagem.
+- CD não reinstala dependências nem repete testes/frontend: exige CI bem-sucedido
+  para o mesmo SHA, repete apenas contratos sem dependências e preserva Compose,
+  build imutável, backup e auditoria de produção.
+- Verificação local sem Docker: 647 testes aprovados, zero skips; 125 focados
+  aprovados após o ajuste final; sintaxe Python/YAML, anti-hardcode e diff check
+  aprovados. Ainda não publicado neste ponto do handoff.

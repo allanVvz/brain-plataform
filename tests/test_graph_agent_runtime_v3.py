@@ -844,6 +844,52 @@ def test_repeated_question_is_allowed_only_while_its_field_remains_pending():
         asked_question_node_ids=asked,
     ) is False
 
+    assert graph_agent_runtime_v3._repeated_pending_question_is_allowed(
+        next_question_node_id="q:name",
+        aggregate_missing=[{"key": "name", "question_node_id": "q:name"}],
+        asked_question_node_ids=["q:name", "q:name"],
+    ) is False
+
+
+def test_third_pending_question_attempt_marks_field_unknown():
+    contract = {
+        "fields": [{
+            "key": "name", "owner_node_id": "persona:one", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:name",
+        }],
+        "questions": {"q:name": {"field_key": "name", "text": "Qual seu nome?"}},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[
+            {"role": "assistant", "content": "Qual seu nome?"},
+            {"role": "user", "content": "Quero saber mais"},
+            {"role": "assistant", "content": "Qual seu nome?"},
+            {"role": "user", "content": "Pode continuar"},
+        ],
+        cart={"facts": {}, "asked_question_node_ids": ["q:name", "q:name"]},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="checksum:a", extracted_facts=[], claims=[],
+        next_question_node_id="q:name", cited_node_ids=[], cited_chunk_ids=[],
+        reply="Qual seu nome?", qualification_complete=False,
+        handoff_requested=False,
+    )
+
+    fact = graph_agent_runtime_v3._unanswered_fact_after_question_limit(
+        context=context, contract=contract, ledger_facts={}, proposal=proposal,
+    )
+
+    assert fact == {
+        "field_key": "name", "owner_node_id": "persona:one",
+        "status": "unknown", "value": None, "source_message_id": "",
+        "evidence_span": "", "confidence": 1.0,
+    }
+
 
 def test_pending_condition_answer_does_not_change_branch_from_service_word():
     contract = {

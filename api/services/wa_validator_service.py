@@ -1459,10 +1459,17 @@ def _semantic_turn_audit(
     first_field = next(
         (
             field for field in contract.get("fields") or []
-            if str(field.get("key") or "") == first_missing
+            if str(field.get("key") or "") in missing
+            and not any(
+                fact.get("status") == "unknown"
+                and str(fact.get("owner_node_id") or "")
+                == str(field.get("owner_node_id") or "")
+                for fact in facts_by_key.get(str(field.get("key") or "")) or []
+            )
         ),
         None,
     )
+    first_askable = str((first_field or {}).get("key") or "") or None
     expected_question_id = str((first_field or {}).get("question_node_id") or "") or None
     question = (contract.get("questions") or {}).get(question_id or "") or {}
     previous_question = (
@@ -1542,7 +1549,7 @@ def _semantic_turn_audit(
         "reply_not_repeated": (
             all(_semantic_similarity(previous, reply) < 0.92 for previous in recent_replies[-4:])
             or (
-                bool(first_missing)
+                bool(first_askable)
                 and bool(question_id)
                 and question_id == previous_question_node_id
                 and question_id == expected_question_id

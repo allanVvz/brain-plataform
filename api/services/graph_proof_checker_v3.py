@@ -118,6 +118,20 @@ def pending_fields(contract: dict[str, Any], facts: dict[str, Any]) -> list[dict
     ]
 
 
+def askable_pending_fields(
+    contract: dict[str, Any], facts: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Pending fields that have not exhausted their published-question limit."""
+    return [
+        field for field in pending_fields(contract, facts)
+        if not (
+            (fact := facts.get(field["key"]))
+            and fact.get("owner_node_id") == field.get("owner_node_id")
+            and fact.get("status") == "unknown"
+        )
+    ]
+
+
 def required_field_count(contract: dict[str, Any], facts: dict[str, Any]) -> int:
     """Count of a branch's currently-applicable required fields (resolved or
     not) -- the denominator for a 0-50% qualification progress score."""
@@ -166,6 +180,25 @@ def aggregate_missing_fields(
             seen.add(dedupe_key)
             aggregated.append(field)
     return aggregated
+
+
+def aggregate_askable_fields(
+    branch_contracts: dict[str, dict[str, Any]],
+    active_branch_anchors: list[str],
+    facts_by_key: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Aggregate pending fields excluding owners explicitly marked unknown."""
+    return [
+        field
+        for field in aggregate_missing_fields(
+            branch_contracts, active_branch_anchors, facts_by_key,
+        )
+        if not any(
+            fact.get("owner_node_id") == field.get("owner_node_id")
+            and fact.get("status") == "unknown"
+            for fact in facts_by_key.get(str(field.get("key") or ""), [])
+        )
+    ]
 
 
 def _claim_policy(contract: dict[str, Any], claim_type: str) -> list[dict[str, Any]]:
@@ -368,7 +401,11 @@ def check(
             policy = field.get("overwrite_policy") or "explicit_correction"
             if policy == "never":
                 errors.append(f"fact_overwrite_forbidden:{key}")
-            elif policy == "explicit_correction" and not _CORRECTION_MARKER.search(message or ""):
+            elif (
+                policy == "explicit_correction"
+                and previous.get("status") != "unknown"
+                and not _CORRECTION_MARKER.search(message or "")
+            ):
                 # An exact graph-authorized branch switch is itself explicit:
                 # the customer literally named one unique title/alias in this
                 # inbound. Requiring filler words such as "na verdade" made
@@ -402,16 +439,19 @@ def check(
     missing_keys = [field["key"] for field in missing]
     question_id = proposal.get("next_question_node_id")
     questions = contract.get("questions") or {}
-    if missing:
-        expected_question_id = missing[0].get("question_node_id")
+    askable = askable_pending_fields(contract, facts)
+    if askable:
+        expected_question_id = askable[0].get("question_node_id")
         question = questions.get(str(question_id or ""))
         if question_id != expected_question_id:
             errors.append("next_question_not_first_missing_field")
-        elif not question or question.get("field_key") != missing[0].get("key"):
+        elif not question or question.get("field_key") != askable[0].get("key"):
             errors.append("next_question_not_for_pending_field")
         else:
             if any(dependency in missing_keys for dependency in question.get("depends_on") or []):
                 errors.append("next_question_dependencies_unsatisfied")
+    elif missing and question_id:
+        errors.append("question_after_all_pending_fields_deferred")
     elif question_id:
         errors.append("question_after_completion")
     # qualification_complete is 100% derivable from `missing` -- the same

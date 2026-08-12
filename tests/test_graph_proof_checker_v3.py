@@ -92,6 +92,71 @@ def test_aggregate_missing_fields_with_a_single_active_branch_matches_pending_fi
     assert [field["key"] for field in aggregated] == [field["key"] for field in single]
 
 
+def test_unknown_field_stays_missing_but_is_not_asked_again():
+    contract = {"fields": [
+        {"key": "name", "owner_node_id": "persona", "required": True,
+         "accepted_statuses": ["known"], "question_node_id": "q:name"},
+        {"key": "objective", "owner_node_id": "persona", "required": True,
+         "accepted_statuses": ["known"], "question_node_id": "q:objective"},
+    ]}
+    facts = {
+        "name": {"status": "unknown", "value": None, "owner_node_id": "persona"},
+    }
+
+    assert [field["key"] for field in graph_proof_checker_v3.pending_fields(
+        contract, facts,
+    )] == ["name", "objective"]
+    assert [field["key"] for field in graph_proof_checker_v3.askable_pending_fields(
+        contract, facts,
+    )] == ["objective"]
+
+
+def test_loose_later_answer_can_replace_unknown_without_correction_marker():
+    contract = {
+        "branch_path_checksum": "checksum:a",
+        "closure_node_ids": ["branch:a", "q:name"],
+        "fields": [{
+            "key": "name", "owner_node_id": "persona", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:name",
+            "value_schema": {"type": "string", "minLength": 1},
+            "overwrite_policy": "explicit_correction",
+        }],
+        "questions": {"q:name": {"field_key": "name", "text": "Qual seu nome?"}},
+    }
+    proof = graph_proof_checker_v3.check(
+        publication={
+            "status": "active", "checksum": "sha256:x",
+            "document_json": {"branch_anchors": ["branch:a"]},
+        },
+        contract=contract,
+        ledger={
+            "graph_checksum": "sha256:x",
+            "facts": {"name": {
+                "status": "unknown", "value": None, "owner_node_id": "persona",
+            }},
+        },
+        proposal={
+            "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+            "branch_path_checksum": "checksum:a", "branch_evidence_span": "",
+            "extracted_facts": [{
+                "field_key": "name", "owner_node_id": "persona", "status": "known",
+                "value": "Beatriz", "source_message_id": "msg-1",
+                "evidence_span": "Beatriz", "confidence": 1,
+            }],
+            "claims": [], "next_question_node_id": None,
+            "cited_node_ids": [], "cited_chunk_ids": [], "reply": "Prazer!",
+            "qualification_complete": True, "handoff_requested": False,
+        },
+        message="Meu nome é Beatriz", source_message_id="msg-1",
+        package_node_ids={"branch:a"}, package_chunk_ids=set(),
+        active_branch_node_id="branch:a", branch_selection_allowed=False,
+        branch_switch_allowed=False,
+    )
+
+    assert proof["valid"] is True, proof["errors"]
+    assert proof["accepted_facts"][0]["value"] == "Beatriz"
+
+
 def _base_check_kwargs(**overrides):
     document = {"branch_anchors": ["branch:a", "branch:b"]}
     publication = {"status": "active", "checksum": "sha256:x", "document_json": document}
