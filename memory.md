@@ -118,3 +118,21 @@ Updated: 2026-08-11
   para persona sem publicação v3.
 - Contrato HTTP não muda. Testes de publicação ativa, fallback e runtime:
   `47 passed`. Nenhuma nova sessão foi criada por esse gate reprovado.
+
+### Primeiro aceite após o release `e17c032`
+
+- Bootstrap otimizado em produção: cinco medições entre `143.856 ms` e
+  `244.074 ms`; preflight do driver: `283.576 ms`.
+- Sessão Pintura `1ba751d4-59d9-4ba6-92d2-d5d193d7889b`, lead 150, parou no
+  terceiro turno; os cenários de troca e adição não foram criados.
+- Três inbounds provaram exatamente uma decisão, um proof válido, um outbound
+  inerte e commit completo. Todos ficaram terminais `sent`.
+- Health durante a sessão: 35/35 HTTP 200, máximo `47.224 ms`, p95 `43.073 ms`.
+- Falha semântica: o modelo extraiu corretamente `nome_cliente=Beatriz` e avançou
+  para `objective`, mas o template forneceu o ID externo do inbound enquanto o
+  proof checker comparou com o ID interno projetado de `messages`.
+- Correção local pendente normaliza `source_message_id` dos fatos para a
+  identidade autoritativa do backend antes da prova. Owner, trecho literal,
+  schema, overwrite e dependências continuam sendo validados.
+- Testes focados de runtime/proof/Validator: `127 passed`.
+- Nenhum destinatário ou ID externo de outbound real; nenhum WhatsApp enviado.

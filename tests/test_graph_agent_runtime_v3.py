@@ -1685,6 +1685,49 @@ def test_direct_literal_answer_is_reconciled_to_last_published_missing_field():
     assert fact.source_message_id == "msg-objective"
 
 
+def test_fact_source_message_id_is_normalized_to_backend_inbound_identity():
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{
+            "role": "user",
+            "message_id": "db-message-1946",
+            "external_message_id": "provider-message-abc",
+            "content": "Beatriz",
+        }],
+        cart={}, rag_nodes=[], rag_paths=[], graph_contract={},
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposal = ConversationProposal(
+        branch_action="keep",
+        branch_anchor_node_id="branch:a",
+        branch_path_checksum="path:a",
+        branch_evidence_span="",
+        extracted_facts=[{
+            "field_key": "nome_cliente",
+            "owner_node_id": "persona:one",
+            "status": "known",
+            "value": "Beatriz",
+            "source_message_id": "provider-message-abc",
+            "evidence_span": "Beatriz",
+            "confidence": 1,
+        }],
+        claims=[],
+        next_question_node_id="q:objective",
+        cited_node_ids=[],
+        cited_chunk_ids=[],
+        reply="Prazer, Beatriz!",
+        qualification_complete=False,
+        handoff_requested=False,
+    )
+
+    normalized = graph_agent_runtime_v3._normalize_fact_source_message_ids(
+        proposal, context,
+    )
+
+    assert normalized.extracted_facts[0].source_message_id == "db-message-1946"
+
+
 def test_direct_reconciliation_does_not_turn_a_supported_doubt_into_a_fact():
     contract = {
         "fields": [{

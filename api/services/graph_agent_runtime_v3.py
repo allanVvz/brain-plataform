@@ -767,6 +767,29 @@ def _reconcile_direct_answer_to_pending_field(
     })
 
 
+def _normalize_fact_source_message_ids(
+    proposal: ConversationProposal,
+    context: ConversationContext,
+) -> ConversationProposal:
+    """Attach facts to the backend-authoritative current inbound identity.
+
+    ``source_message_id`` is technical lineage, not model-authored content.
+    The n8n prompt exposes the provider/external identity while the projected
+    recent-message package can use the database message identity.  Both refer
+    to the same inbound, but requiring the model to echo whichever projection
+    the proof checker happened to choose made valid literal facts fail
+    nondeterministically.  Values still have to pass owner, literal-span,
+    schema, overwrite and dependency proof below.
+    """
+    source_message_id = _source_message_id(context.messages)
+    return proposal.model_copy(update={
+        "extracted_facts": [
+            fact.model_copy(update={"source_message_id": source_message_id})
+            for fact in proposal.extracted_facts
+        ],
+    })
+
+
 def _project_recent_messages(messages: list[dict[str, Any]], limit: int = 6) -> list[dict[str, Any]]:
     projected: list[dict[str, Any]] = []
     for row in messages[-limit:]:
@@ -1405,6 +1428,7 @@ def _decide(
         if grouped_facts else context.cart.get("facts") or {}
     )
     proposal = _normalize_servico_owner(proposal, contract)
+    proposal = _normalize_fact_source_message_ids(proposal, context)
     proposal = _reconcile_direct_answer_to_pending_field(
         proposal, context, contract, contract_facts,
     )
