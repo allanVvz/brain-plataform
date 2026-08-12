@@ -48,3 +48,19 @@ def test_recovery_is_locking_non_proactive_and_pause_safe():
     assert "status='retry'" in claim
     assert "INSERT INTO public.messages" not in claim
     assert "direction='outbound'" in claim
+
+
+def test_trigger_functions_are_not_publicly_executable():
+    assert (
+        "REVOKE ALL ON FUNCTION public.assign_conversation_ledger_journey_v1() "
+        "FROM PUBLIC,anon,authenticated;"
+    ) in SQL
+    assert (
+        "REVOKE ALL ON FUNCTION public.assign_conversation_proof_journey_v1() "
+        "FROM PUBLIC,anon,authenticated;"
+    ) in SQL
+    assert "trg_project_conversation_journey_from_proof_v1" in SQL
+    assert (
+        "REVOKE ALL ON FUNCTION public.project_conversation_journey_from_proof_v1() "
+        "FROM PUBLIC,anon,authenticated;"
+    ) in SQL

@@ -103,6 +103,36 @@ CREATE TRIGGER trg_assign_conversation_proof_journey_v1
   BEFORE INSERT OR UPDATE OF ledger_id ON public.conversation_turn_proofs FOR EACH ROW
   EXECUTE FUNCTION public.assign_conversation_proof_journey_v1();
 
+CREATE OR REPLACE FUNCTION public.project_conversation_journey_from_proof_v1()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE v_confirmed boolean; v_handed_off boolean;
+BEGIN
+  IF NEW.journey_id IS NULL
+     OR jsonb_typeof(NEW.proof_result->'missing_fields') IS DISTINCT FROM 'array'
+     OR jsonb_array_length(NEW.proof_result->'missing_fields')<>0 THEN
+    RETURN NEW;
+  END IF;
+  v_confirmed:=coalesce((NEW.proof_result->>'explicit_confirmation')::boolean,false);
+  v_handed_off:=v_confirmed AND coalesce(NEW.final_decision->>'route','')='human';
+  UPDATE public.conversation_journeys SET
+    state=CASE WHEN v_handed_off THEN 'handed_off'
+               WHEN v_confirmed THEN 'qualified_confirmed'
+               ELSE 'awaiting_confirmation' END,
+    qualification_completed_at=coalesce(qualification_completed_at,NEW.created_at),
+    qualification_confirmed_at=CASE WHEN v_confirmed THEN coalesce(qualification_confirmed_at,NEW.created_at) ELSE qualification_confirmed_at END,
+    handed_off_at=CASE WHEN v_handed_off THEN coalesce(handed_off_at,NEW.created_at) ELSE handed_off_at END,
+    updated_at=now()
+   WHERE id=NEW.journey_id;
+  IF v_confirmed THEN
+    PERFORM public.maybe_open_next_conversation_journey_v1(NEW.journey_id);
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS trg_project_conversation_journey_from_proof_v1 ON public.conversation_turn_proofs;
+CREATE TRIGGER trg_project_conversation_journey_from_proof_v1
+  AFTER INSERT ON public.conversation_turn_proofs FOR EACH ROW
+  EXECUTE FUNCTION public.project_conversation_journey_from_proof_v1();
+
 -- Preserve the complete, battle-tested v3 commit body from migration 112 and
 -- narrow only its ledger lock to the current journey. Repeating that large
 -- function here would make later safety fixes drift between two copies.
@@ -323,6 +353,9 @@ BEGIN
 END $$;
 
 REVOKE ALL ON FUNCTION public.ensure_current_conversation_journey_v1(uuid,bigint,uuid,text,text) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.assign_conversation_ledger_journey_v1() FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.assign_conversation_proof_journey_v1() FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.project_conversation_journey_from_proof_v1() FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.maybe_open_next_conversation_journey_v1(uuid) FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.record_purchase_completed_v1(uuid,bigint,text,text,timestamptz,text,bigint,text,jsonb,jsonb,uuid) FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.mark_conversation_journey_qualification_v1(uuid,bigint,boolean,boolean) FROM PUBLIC,anon,authenticated;
