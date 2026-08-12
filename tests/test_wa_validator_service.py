@@ -440,6 +440,17 @@ def test_semantic_turn_audit_rejects_repeated_reply_and_fallback():
     assert "model_reconciled_without_fallback" in audit["failures"]
 
 
+def test_semantic_turn_audit_allows_repeated_question_while_field_is_pending():
+    inputs = _semantic_audit_inputs()
+    inputs["recent_replies"] = [inputs["turn"]["text"]]
+    inputs["previous_question_node_id"] = "q:name"
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is True
+    assert audit["criteria"]["reply_not_repeated"] is True
+
+
 def test_semantic_turn_audit_accepts_published_completion_fallback():
     inputs = _semantic_audit_inputs()
     inputs["proof_record"]["proof_result"].update({

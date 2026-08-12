@@ -871,6 +871,24 @@ def _repeats_recent_outbound(reply: str, messages: list[dict[str, Any]]) -> bool
     )
 
 
+def _repeated_pending_question_is_allowed(
+    *,
+    next_question_node_id: str | None,
+    aggregate_missing: list[dict[str, Any]],
+    asked_question_node_ids: list[str],
+) -> bool:
+    """Allow a repeated reply only when its published question is still pending."""
+    if not next_question_node_id:
+        return False
+    return (
+        next_question_node_id in set(asked_question_node_ids)
+        and any(
+            field.get("question_node_id") == next_question_node_id
+            for field in aggregate_missing
+        )
+    )
+
+
 def _compact_prompt_chunk(row: dict[str, Any]) -> dict[str, Any]:
     metadata = row.get("metadata") or {}
     provenance = metadata.get("provenance") or {}
@@ -1684,7 +1702,15 @@ def _decide(
             next_question_node_id=next_question_id,
             contract=question_contract,
         )
-        if _repeats_recent_outbound(reply, context.messages):
+        repeated_pending_question = _repeated_pending_question_is_allowed(
+            next_question_node_id=next_question_id,
+            aggregate_missing=aggregate_missing,
+            asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
+        )
+        if (
+            _repeats_recent_outbound(reply, context.messages)
+            and not repeated_pending_question
+        ):
             raise RuntimeError("semantic reply repetition blocked by recent outbound proof")
 
         facts = _facts_for_contract(

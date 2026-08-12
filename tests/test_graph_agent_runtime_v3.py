@@ -823,6 +823,28 @@ def test_short_explicit_service_phrase_remains_a_deterministic_switch_signal():
     assert matches[0]["branch_evidence_span"] == "Beta"
 
 
+def test_recent_reply_similarity_is_detected_before_pending_question_exception():
+    reply = "Fazemos sim. Antes de tudo, como voce se chama?"
+    messages = [{"role": "assistant", "content": reply}]
+
+    assert graph_agent_runtime_v3._repeats_recent_outbound(reply, messages) is True
+
+
+def test_repeated_question_is_allowed_only_while_its_field_remains_pending():
+    asked = ["q:name"]
+
+    assert graph_agent_runtime_v3._repeated_pending_question_is_allowed(
+        next_question_node_id="q:name",
+        aggregate_missing=[{"key": "name", "question_node_id": "q:name"}],
+        asked_question_node_ids=asked,
+    ) is True
+    assert graph_agent_runtime_v3._repeated_pending_question_is_allowed(
+        next_question_node_id="q:name",
+        aggregate_missing=[{"key": "objective", "question_node_id": "q:objective"}],
+        asked_question_node_ids=asked,
+    ) is False
+
+
 def test_pending_condition_answer_does_not_change_branch_from_service_word():
     contract = {
         "fields": [

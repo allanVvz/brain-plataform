@@ -148,3 +148,21 @@ Updated: 2026-08-12
 - Correção local agrega fields/questions de todos os ramos ativos para auditar o
   primeiro campo pendente, preservando owner e pergunta publicados. Não aceita
   campo/pergunta fora desses contratos.
+
+### Terceiro aceite após o release `5a4f42e`
+
+- Sessão `b9f63b60-409f-4fd4-a8fb-b298d3b35277`, lead 157, parou no segundo
+  inbound; o primeiro turno passou com proof/commit/outbound inerte.
+- Auditoria mostrou execução n8n 1109 concluída pelo ramo de quarentena após
+  `/internal/conversations/decide` retornar HTTP 500. Traceback:
+  `semantic reply repetition blocked by recent outbound proof`.
+- A dúvida “Vocês fazem pintura?” retomaria a pergunta de nome ainda pendente;
+  o bloqueio contradizia a regra do usuário de que repetir a mesma pergunta é
+  válido enquanto o campo continuar pendente.
+- Correção local permite similaridade quando o mesmo `next_question_node_id`
+  continua sendo o primeiro campo agregado pendente e já havia sido perguntado.
+  Repetição sem campo pendente ou após o campo ser conhecido continua bloqueada.
+- Verificação local sem Docker: suíte completa com 642 testes aprovados e zero
+  skips; após extrair a condição para teste direto, 105 testes focados aprovados,
+  além de `py_compile` e `git diff --check`.
+- Health: 110/110 HTTP 200, máximo 103.452 ms, p95 5.396 ms; nenhum envio real.

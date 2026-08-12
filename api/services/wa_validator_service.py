@@ -1532,6 +1532,12 @@ def _semantic_turn_audit(
         "known_fact_not_reasked": not asked_fact_already_known,
         "reply_not_repeated": (
             all(_semantic_similarity(previous, reply) < 0.92 for previous in recent_replies[-4:])
+            or (
+                bool(first_missing)
+                and bool(question_id)
+                and question_id == previous_question_node_id
+                and question_id == expected_question_id
+            )
         ),
         "model_reconciled_without_fallback": (
             # A valid, complete proof intentionally resolves to the published
