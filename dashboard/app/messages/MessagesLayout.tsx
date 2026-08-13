@@ -701,22 +701,22 @@ const EvidenceCard = memo(function EvidenceCard({
 }) {
   const summary = extractEvidenceSummary(item.title, item.markdown);
   return (
-    <article className="rounded-lg border border-obs-line bg-obs-surface/40 p-2.5">
-      <div className="flex items-start gap-1.5">
-        <span className="mt-0.5 shrink-0 rounded border border-obs-teal/30 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-obs-teal">
-          {item.node_type}
-        </span>
-        <p className="min-w-0 flex-1 text-xs font-medium leading-snug text-obs-text">{item.title}</p>
-        {item.used_in_last_decision && (
-          <span
-            title="Usado na última decisão"
-            className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400"
-          />
+    <article className="relative z-10 flex items-start gap-2.5 py-1.5">
+      {/* Ponto da linha de evidência — cheio quando usado na última
+          decisão, vazado quando só relacionado. Fio conector vive no
+          container pai (EvidenceLine). */}
+      <span className="flex w-3.5 shrink-0 justify-center pt-1">
+        <span
+          className={`h-2 w-2 shrink-0 rounded-full ${item.used_in_last_decision ? "bg-obs-teal" : "border border-obs-teal/55 bg-obs-surface"}`}
+        />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium leading-snug text-obs-text">{item.title}</p>
+        <p className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-obs-faint">{item.node_type}</p>
+        {summary && summary !== item.title && (
+          <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-obs-subtle">{summary}</p>
         )}
       </div>
-      {summary && summary !== item.title && (
-        <p className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-obs-subtle">{summary}</p>
-      )}
     </article>
   );
 });
@@ -1237,6 +1237,18 @@ function sortRelatedByEssentiality(cards: ContextCard[]): ContextCard[] {
   });
 }
 
+// O fio vertical que costura os pontos de ContextCardButton — a assinatura
+// visual da direção "Evidência". Fica atrás dos botões (z-0 vs. z-10 deles)
+// e corre do centro do primeiro ao centro do último ponto.
+function EvidenceLine({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative">
+      <div className="pointer-events-none absolute left-[1.1rem] top-2.5 bottom-2.5 w-px bg-obs-teal/25" />
+      <div className="space-y-0.5">{children}</div>
+    </div>
+  );
+}
+
 function ContextCardButton({
   card,
   decisive,
@@ -1253,19 +1265,31 @@ function ContextCardButton({
     <button
       type="button"
       onClick={onClick}
-      className="w-full rounded-lg border border-obs-line bg-obs-surface/80 p-2.5 text-left transition hover:border-obs-teal/40 focus:outline-none focus:ring-2 focus:ring-obs-teal/40"
+      className="group relative z-10 flex w-full items-start gap-2.5 rounded-lg py-1.5 pr-1.5 text-left transition hover:bg-obs-teal/5 focus:outline-none focus:ring-2 focus:ring-obs-teal/30"
     >
-      <div className="flex items-start gap-1.5">
-        <span className="mt-0.5 rounded border border-obs-teal/30 px-1 py-0.5 text-[9px] font-semibold uppercase text-obs-teal">
+      {/* Ponto da linha de evidência — cheio quando decisivo, vazado
+          quando só relacionado. O fio conector vive no container pai
+          (ver EvidenceLine), não aqui, pra atravessar vários cards. */}
+      <span className="flex w-3.5 shrink-0 justify-center pt-1">
+        <span
+          className={`h-2 w-2 shrink-0 rounded-full ${decisive ? "bg-obs-teal" : "border border-obs-teal/55 bg-obs-surface"}`}
+        />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start gap-1.5">
+          <span className="min-w-0 flex-1 text-xs font-medium leading-snug text-obs-text">{card.title}</span>
+          <ChevronRight size={11} className="mt-0.5 shrink-0 text-obs-faint" />
+        </div>
+        <p className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-obs-faint">
           {humanizeNodeType(card.node_type)}
-        </span>
-        <span className="min-w-0 flex-1 text-xs font-medium leading-snug text-obs-text">{card.title}</span>
-        <ChevronRight size={11} className="mt-0.5 shrink-0 text-obs-faint" />
-      </div>
-      {summary && <p className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-obs-subtle">{summary}</p>}
-      <div className="mt-1.5 flex flex-wrap gap-1">
-        {decisive && <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] text-emerald-400">decisivo</span>}
-        {changed && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-400">alterado depois</span>}
+        </p>
+        {summary && <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-obs-subtle">{summary}</p>}
+        {(decisive || changed) && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {decisive && <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] text-emerald-400">decisivo</span>}
+            {changed && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-400">alterado depois</span>}
+          </div>
+        )}
       </div>
     </button>
   );
@@ -1466,38 +1490,46 @@ export function KnowledgeSidebar({
         </div>
 
         <KnowledgeSection icon={<Boxes size={11} />} title="Usado nesta resposta" count={used.length} showEmpty>
-          {used.length > 0 ? used.map((card) => {
-            const current = ctx.current_cards?.[card.id];
-            return (
-              <ContextCardButton
-                key={`${card.id}:${card.content_checksum}`}
-                card={card}
-                decisive={decisive.has(card.id)}
-                changed={Boolean(current && current.content_checksum !== card.content_checksum)}
-                onClick={() => setSelectedCard(card)}
-              />
-            );
-          }) : <p className="text-[11px] text-obs-faint">Nenhum card confirmado para esta resposta.</p>}
+          {used.length > 0 ? (
+            <EvidenceLine>
+              {used.map((card) => {
+                const current = ctx.current_cards?.[card.id];
+                return (
+                  <ContextCardButton
+                    key={`${card.id}:${card.content_checksum}`}
+                    card={card}
+                    decisive={decisive.has(card.id)}
+                    changed={Boolean(current && current.content_checksum !== card.content_checksum)}
+                    onClick={() => setSelectedCard(card)}
+                  />
+                );
+              })}
+            </EvidenceLine>
+          ) : <p className="text-[11px] text-obs-faint">Nenhum card confirmado para esta resposta.</p>}
         </KnowledgeSection>
 
         {related.length > 0 && (
           <div className="mt-4 rounded-lg border border-obs-line bg-obs-surface/50 p-2.5">
             <p className="text-[11px] font-medium text-obs-text">Relacionados · {related.length}</p>
             <p className="mt-1 text-[10px] text-obs-faint">Não usados nesta resposta.</p>
-            <div className="mt-2 space-y-1.5">
-              {essentialRelated.map((card) => (
-                <ContextCardButton key={`related:${card.id}`} card={card} decisive={false} changed={false} onClick={() => setSelectedCard(card)} />
-              ))}
+            <div className="mt-2">
+              <EvidenceLine>
+                {essentialRelated.map((card) => (
+                  <ContextCardButton key={`related:${card.id}`} card={card} decisive={false} changed={false} onClick={() => setSelectedCard(card)} />
+                ))}
+              </EvidenceLine>
             </div>
             {extraRelated.length > 0 && (
               <details className="mt-2">
                 <summary className="cursor-pointer text-[10px] font-medium text-obs-faint hover:text-obs-subtle">
                   Mostrar mais {extraRelated.length}
                 </summary>
-                <div className="mt-2 space-y-1.5">
-                  {extraRelated.map((card) => (
-                    <ContextCardButton key={`related:${card.id}`} card={card} decisive={false} changed={false} onClick={() => setSelectedCard(card)} />
-                  ))}
+                <div className="mt-2">
+                  <EvidenceLine>
+                    {extraRelated.map((card) => (
+                      <ContextCardButton key={`related:${card.id}`} card={card} decisive={false} changed={false} onClick={() => setSelectedCard(card)} />
+                    ))}
+                  </EvidenceLine>
                 </div>
               </details>
             )}
@@ -1533,9 +1565,11 @@ export function KnowledgeSidebar({
           count={operator.primary.length}
           showEmpty
         >
-          {primaryRanked.length > 0 ? primaryRanked.map((item) => (
-            <EvidenceCard key={item.id} item={item} />
-          )) : (
+          {primaryRanked.length > 0 ? (
+            <EvidenceLine>
+              {primaryRanked.map((item) => <EvidenceCard key={item.id} item={item} />)}
+            </EvidenceLine>
+          ) : (
             <p className="text-[11px] text-obs-faint">
               Nenhuma evidência registrada na última decisão.
             </p>
@@ -1547,9 +1581,11 @@ export function KnowledgeSidebar({
           count={operator.faq_rules.length}
           showEmpty
         >
-          {faqRulesRanked.length > 0 ? faqRulesRanked.map((item) => (
-            <EvidenceCard key={item.id} item={item} />
-          )) : (
+          {faqRulesRanked.length > 0 ? (
+            <EvidenceLine>
+              {faqRulesRanked.map((item) => <EvidenceCard key={item.id} item={item} />)}
+            </EvidenceLine>
+          ) : (
             <p className="text-[11px] text-obs-faint">
               Nenhuma FAQ ou regra relacionada neste contexto.
             </p>
