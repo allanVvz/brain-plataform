@@ -2369,26 +2369,39 @@ export function MessagesLayout({
   const showList = layoutMode === "single" ? mobilePane === "list" : isConversationSidebarOpen;
   const showThread = layoutMode !== "single" || mobilePane === "thread";
   const knowledgeAsOverlay = layoutMode !== "triple";
+  // No portal em modo single, um único painel ocupa a tela inteira por vez
+  // — o "cartão flutuante" com margem/gradiente/cantos arredondados é uma
+  // estética de admin (Obsidiana) que não faz sentido de app nativo aqui.
+  // Desktop do portal e o admin inteiro continuam com o cartão de sempre.
+  const mobileFullBleed = isPortal && layoutMode === "single";
 
   return (
     <div
-      className={`messages-page flex ${resolvedHeightClassName} overflow-hidden rounded-xl p-3`}
-      style={{
-        background:
-          "radial-gradient(circle at 15% 10%, rgba(124,92,255,0.10), transparent 28%), radial-gradient(circle at 85% 20%, rgba(120,180,255,0.10), transparent 26%), rgb(var(--obs-deep))",
-      }}
+      className={`messages-page flex ${resolvedHeightClassName} overflow-hidden ${mobileFullBleed ? "" : "rounded-xl p-3"}`}
+      style={
+        mobileFullBleed
+          ? { background: "rgb(var(--obs-base))" }
+          : {
+              background:
+                "radial-gradient(circle at 15% 10%, rgba(124,92,255,0.10), transparent 28%), radial-gradient(circle at 85% 20%, rgba(120,180,255,0.10), transparent 26%), rgb(var(--obs-deep))",
+            }
+      }
     >
       {/* ── Left: Leads list ───────────────────────────────────────────── */}
       {showList && (
       <aside
-        className="conversation-sidebar w-full lg:w-72 shrink-0 flex flex-col overflow-hidden rounded-l-xl"
-        style={{
-          border: "1px solid var(--border-glass)",
-          background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
-          backdropFilter: "blur(18px) saturate(130%)",
-          WebkitBackdropFilter: "blur(18px) saturate(130%)",
-          boxShadow: "var(--glass-shadow)",
-        }}
+        className={`conversation-sidebar w-full lg:w-72 shrink-0 flex flex-col overflow-hidden ${mobileFullBleed ? "" : "rounded-l-xl"}`}
+        style={
+          mobileFullBleed
+            ? { background: "rgb(var(--obs-base))" }
+            : {
+                border: "1px solid var(--border-glass)",
+                background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
+                backdropFilter: "blur(18px) saturate(130%)",
+                WebkitBackdropFilter: "blur(18px) saturate(130%)",
+                boxShadow: "var(--glass-shadow)",
+              }
+        }
       >
         {/* Header — o portal não tem header de página (removido, ver
             PortalContext); o título "Mensagens" vive aqui. O admin mantém
@@ -2557,14 +2570,18 @@ export function MessagesLayout({
       {/* ── Right: Chat view ───────────────────────────────────────────── */}
       {showThread && (
       <div
-        className="message-panel relative flex-1 flex flex-col overflow-hidden rounded-xl min-w-0"
-        style={{
-          background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
-          border: "1px solid var(--border-glass)",
-          backdropFilter: "blur(18px) saturate(130%)",
-          WebkitBackdropFilter: "blur(18px) saturate(130%)",
-          boxShadow: "var(--glass-shadow)",
-        }}
+        className={`message-panel relative flex-1 flex flex-col overflow-hidden min-w-0 ${mobileFullBleed ? "" : "rounded-xl"}`}
+        style={
+          mobileFullBleed
+            ? { background: "rgb(var(--obs-base))" }
+            : {
+                background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
+                border: "1px solid var(--border-glass)",
+                backdropFilter: "blur(18px) saturate(130%)",
+                WebkitBackdropFilter: "blur(18px) saturate(130%)",
+                boxShadow: "var(--glass-shadow)",
+              }
+        }
       >
         {/* Chat header — o toggle da lista mora aqui dentro agora (era um
             botão flutuante `absolute`, inconsistente com o estado vazio,
