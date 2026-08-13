@@ -128,4 +128,40 @@ describe("Mensagens — modos responsivos (single/dual/triple)", () => {
     });
     expect(document.querySelector(".conversation-sidebar")).toBeTruthy();
   });
+
+  it("single: o painel de conhecimento abre como overlay com backdrop, não inline", async () => {
+    render(<MessagesLayout portalSlug="test-persona" canEdit />);
+    const leadButton = await screen.findByText("Jose Debug");
+    fireEvent.click(leadButton);
+    await waitFor(() => expect(document.querySelector(".message-panel")).toBeTruthy());
+
+    fireEvent.click(screen.getByTitle("Mostrar conhecimento"));
+
+    await waitFor(() => {
+      const panel = document.querySelector(".knowledge-panel");
+      expect(panel).toBeTruthy();
+      expect(panel!.className).toMatch(/fixed/);
+      expect(panel!.className).not.toMatch(/w-80/);
+    });
+    // Backdrop que fecha o overlay ao clicar fora.
+    expect(document.querySelector(".fixed.inset-0.z-40")).toBeTruthy();
+  });
+
+  it("triple: o painel de conhecimento fica inline, sem overlay/backdrop", async () => {
+    installMatchMedia("triple");
+    render(<MessagesLayout portalSlug="test-persona" canEdit />);
+    const leadButton = await screen.findByText("Jose Debug");
+    fireEvent.click(leadButton);
+    await waitFor(() => expect(document.querySelector(".message-panel")).toBeTruthy());
+
+    fireEvent.click(screen.getByTitle("Mostrar conhecimento"));
+
+    await waitFor(() => {
+      const panel = document.querySelector(".knowledge-panel");
+      expect(panel).toBeTruthy();
+      expect(panel!.className).toMatch(/w-80/);
+      expect(panel!.className).not.toMatch(/fixed/);
+    });
+    expect(document.querySelector(".fixed.inset-0.z-40")).toBeNull();
+  });
 });
