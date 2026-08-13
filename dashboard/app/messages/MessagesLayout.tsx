@@ -1807,13 +1807,22 @@ export function MessagesLayout({
   const portalMatch = portalSlug ? [pathname, portalSlug] : pathname.match(/^\/clientes\/([^/]+)/);
   const isPortal = Boolean(portalSlug);
   // O portal não tem mais header nem padding de `main` nesta rota (ver
-  // PortalContext) — só a bottom nav mobile (~5rem com safe-area) segue
-  // reservada. `heightClassName` continua sendo o escape hatch para quem
-  // ainda precisa do orçamento antigo (ex.: banner de canal não conectado).
-  // dvh, não vh: no iOS a barra de URL colapsando dentro de vh empurra o
-  // composer pra baixo do chrome do navegador.
+  // PortalContext) — só a bottom nav mobile segue reservada, e com a
+  // altura EXATA dela (pt-1.5 + min-h-12 + pb safe-area — os mesmos
+  // números do <nav> em PortalContext.tsx), não um chute redondo tipo
+  // "5rem": um orçamento generoso demais deixava um vão em branco entre o
+  // composer e a bottom nav. `max()` dentro do `calc()` é a mesma conta que
+  // o padding-bottom da nav já faz — se o valor real da safe-area mudar
+  // (ex.: notch de outro aparelho), os dois lados casam sozinhos.
+  // `heightClassName` continua sendo o escape hatch para quem ainda precisa
+  // do orçamento antigo (ex.: banner de canal não conectado). dvh, não vh:
+  // no iOS a barra de URL colapsando dentro de vh empurra o composer pra
+  // baixo do chrome do navegador.
   const resolvedHeightClassName =
-    heightClassName || (isPortal ? "h-[calc(100dvh-5rem)] lg:h-dvh" : "h-[calc(100dvh-6rem)]");
+    heightClassName ||
+    (isPortal
+      ? "h-[calc(100dvh-3.375rem-max(0.4rem,env(safe-area-inset-bottom)))] lg:h-dvh"
+      : "h-[calc(100dvh-6rem)]");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [search, setSearch] = useState("");
