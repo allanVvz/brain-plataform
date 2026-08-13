@@ -2042,6 +2042,17 @@ export function MessagesLayout({
   }, [isPortal, selectedId, personaFilterId, portalSlug, validationScope]);
 
   const openLead = useCallback((lead: Lead) => {
+    // Ir para a thread é sempre a intenção de tocar um lead, independente
+    // do resto abaixo — que fica atrás de `changed`, uma flag lida
+    // sincronamente logo após o updater funcional de setSelectedId. Esse
+    // updater não roda de forma síncrona aqui, então `changed` já chegava
+    // sempre falso antes desta mudança: o bloco de reset (mensagens,
+    // conhecimento, rascunho etc.) nunca executava, silenciosamente, desde
+    // sempre — mascarado porque o efeito de fetch abaixo, que depende
+    // corretamente de selectedId, sempre sobrescreve os dados velhos assim
+    // que chega. Não mexo nesse bloco pré-existente agora; só tiro esta
+    // troca de aba dele, que precisa ser incondicional.
+    setMobilePane("thread");
     let changed = false;
     setSelectedId((current) => {
       if (current === lead.id) return current;
@@ -2062,7 +2073,6 @@ export function MessagesLayout({
     setSendError(null);
     setMessagesError(null);
     setKnowledgeError(null);
-    setMobilePane("thread");
     // No mobile, focar o composer sozinho abre o teclado virtual a cada
     // lead aberto — incômodo demais para valer o ganho no desktop.
     if (layoutMode !== "single") setTimeout(() => draftRef.current?.focus(), 80);
