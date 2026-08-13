@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
 import { api } from "@/lib/api";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { MessageSquare, User, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, PanelRightClose, PanelRightOpen, ArrowLeft, ChevronLeft, ChevronRight, Tag } from "lucide-react";
+import { MessageSquare, User, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, PanelRightClose, PanelRightOpen, ArrowLeft, ChevronLeft, ChevronRight, Tag, StickyNote } from "lucide-react";
 import { LeadInfoModal } from "@/components/leads/LeadInfoModal";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -2592,111 +2592,123 @@ export function MessagesLayout({
               }
         }
       >
-        {/* Chat header — o toggle da lista mora aqui dentro agora (era um
-            botão flutuante `absolute`, inconsistente com o estado vazio,
-            que já o renderiza inline). Sempre centralizado verticalmente
-            na barra, nunca sobreposto ao conteúdo da thread. */}
+        {/* Chat header — duas linhas para caber em telas estreitas: a linha
+            principal (voltar/avatar/nome/toggle de IA/conhecimento) nunca
+            disputa espaço com os metadados secundários (estágio, telefone,
+            interesse, contagem), que ficam numa segunda linha menor e podem
+            quebrar livremente sem apertar os botões. */}
         <div
-          className="flex items-center gap-3 px-3 py-3 shrink-0"
+          className="flex flex-col gap-1 px-3 py-2 shrink-0"
           style={{ borderBottom: "1px solid var(--border-glass)", background: "rgb(var(--glass-solid-bg) / 0.58)" }}
         >
-          {/* No modo single vira botão voltar (fecha a thread, volta pra
-              lista); em dual/triple continua o toggle de sempre. */}
-          <button
-            type="button"
-            onClick={() => (layoutMode === "single" ? setMobilePane("list") : setIsConversationSidebarOpen((v) => !v))}
-            className="flex h-8 w-8 shrink-0 items-center justify-center self-center rounded-full text-obs-text transition hover:opacity-70"
-            style={{ background: "rgb(var(--glass-solid-bg) / var(--glass-solid-hover))", border: "1px solid var(--border-glass-strong)" }}
-            aria-label={layoutMode === "single" ? "Voltar para a lista" : isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
-            title={layoutMode === "single" ? "Voltar para a lista" : isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
-          >
-            {layoutMode === "single" ? <ArrowLeft size={15} /> : isConversationSidebarOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
-          </button>
-          {selectedLead ? (
-            <>
-              {/* Avatar/nome/nota comercial não abrem mais o modal aqui —
-                  ele vive só no rail direito (ContactPanel) agora. */}
-              <div
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold"
-                style={{ background: "rgb(var(--obs-text) / 0.08)", color: "rgb(var(--obs-subtle))" }}
-              >
-                {chatName[0].toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-obs-text truncate">{chatName}</p>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <StageBadge stage={selectedLead.stage} />
-                  {selectedLead.telefone && (
-                    <span className="text-[10px] text-obs-faint">{selectedLead.telefone}</span>
-                  )}
-                  {selectedLead.interesse_produto && (
-                    <span className="text-[10px] text-obs-subtle truncate">
-                      {selectedLead.interesse_produto}
+          <div className="flex items-center gap-2">
+            {/* No modo single vira botão voltar (fecha a thread, volta pra
+                lista); em dual/triple continua o toggle de sempre. */}
+            <button
+              type="button"
+              onClick={() => (layoutMode === "single" ? setMobilePane("list") : setIsConversationSidebarOpen((v) => !v))}
+              className="flex h-8 w-8 shrink-0 items-center justify-center self-center rounded-full text-obs-text transition hover:opacity-70"
+              style={{ background: "rgb(var(--glass-solid-bg) / var(--glass-solid-hover))", border: "1px solid var(--border-glass-strong)" }}
+              aria-label={layoutMode === "single" ? "Voltar para a lista" : isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
+              title={layoutMode === "single" ? "Voltar para a lista" : isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
+            >
+              {layoutMode === "single" ? <ArrowLeft size={15} /> : isConversationSidebarOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+            </button>
+            {selectedLead ? (
+              <>
+                {/* Avatar/nome/nota comercial não abrem mais o modal aqui —
+                    ele vive só no rail direito (ContactPanel) agora. */}
+                <div
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold"
+                  style={{ background: "rgb(var(--obs-text) / 0.08)", color: "rgb(var(--obs-subtle))" }}
+                >
+                  {chatName[0].toUpperCase()}
+                </div>
+                <div className="flex flex-1 min-w-0 items-center gap-1.5">
+                  <p className="text-sm font-semibold text-obs-text truncate">{chatName}</p>
+                  {commercialNoteSummary(selectedLead.metadata?.commercial_note) && (
+                    <span
+                      className="shrink-0 text-obs-faint hover:text-obs-teal transition"
+                      title={`Nota comercial\n${commercialNoteTitle(selectedLead.metadata?.commercial_note)}`}
+                    >
+                      <StickyNote size={12} />
                     </span>
                   )}
-                  <span className="text-[10px] text-obs-faint ml-auto">
-                    {messages.length} msgs
+                </div>
+
+                {/* Live indicator — só o ícone; o texto "live" foi removido
+                    da leitura de relance e vive no title. */}
+                {liveSync && (
+                  <span className="shrink-0" title="Sincronização em tempo real ativa">
+                    <Radio size={12} className="text-green-400 animate-pulse" />
                   </span>
-                </div>
-              </div>
+                )}
 
-              {/* Live indicator */}
-              {liveSync && (
-                <div className="flex items-center gap-1 shrink-0" title="Sincronização em tempo real ativa">
-                  <Radio size={11} className="text-green-400 animate-pulse" />
-                  <span className="text-[10px] text-green-400">live</span>
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={togglePause}
-                disabled={pausing}
-                title={
-                  selectedHandoffLevel === "full"
-                    ? "IA pausada — clique para retomar"
-                    : selectedHandoffLevel === "partial"
-                    ? `IA ainda respondendo — precisa de atenção${selectedLead.metadata?.handoff_reason ? ` (${selectedLead.metadata.handoff_reason})` : ""}. Clique para confirmar.`
-                    : "IA ativa — clique para pausar"
-                }
-                className={`text-[10px] font-medium px-2.5 py-1 rounded-full shrink-0 border transition disabled:opacity-50 ${
-                  selectedHandoffLevel === "full"
-                    ? "border-red-400/60 bg-red-500/25 text-red-300 hover:bg-red-500/35"
-                    : selectedHandoffLevel === "partial"
-                    ? "border-amber-400/60 bg-amber-500/25 text-amber-300 hover:bg-amber-500/35"
-                    : "border-emerald-400/50 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
-                }`}
-              >
-                <span
-                  className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle ${
+                {/* Toggle de IA — rótulo de uma palavra só; o detalhe
+                    completo (motivo do handoff etc.) permanece no title. */}
+                <button
+                  type="button"
+                  onClick={togglePause}
+                  disabled={pausing}
+                  title={
                     selectedHandoffLevel === "full"
-                      ? "bg-red-400"
+                      ? "IA pausada — clique para retomar"
                       : selectedHandoffLevel === "partial"
-                      ? "bg-amber-400"
-                      : "bg-emerald-400"
+                      ? `IA ainda respondendo — precisa de atenção${selectedLead.metadata?.handoff_reason ? ` (${selectedLead.metadata.handoff_reason})` : ""}. Clique para confirmar.`
+                      : "IA ativa — clique para pausar"
+                  }
+                  className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full shrink-0 border transition disabled:opacity-50 ${
+                    selectedHandoffLevel === "full"
+                      ? "border-red-400/60 bg-red-500/15 text-red-300 hover:bg-red-500/25"
+                      : selectedHandoffLevel === "partial"
+                      ? "border-amber-400/60 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
+                      : "border-emerald-400/50 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
                   }`}
-                />
-                {selectedHandoffLevel === "full"
-                  ? "IA pausada · humano"
-                  : selectedHandoffLevel === "partial"
-                  ? "Atenção · IA respondendo"
-                  : "IA ativa"}
-              </button>
+                >
+                  <span
+                    className={`inline-block w-1.5 h-1.5 rounded-full ${
+                      selectedHandoffLevel === "full"
+                        ? "bg-red-400"
+                        : selectedHandoffLevel === "partial"
+                        ? "bg-amber-400"
+                        : "bg-emerald-400"
+                    }`}
+                  />
+                  {selectedHandoffLevel === "full" ? "Pausada" : selectedHandoffLevel === "partial" ? "Atenção" : "Ativa"}
+                </button>
 
-              {/* Toggle the right-hand knowledge sidebar. */}
-              <button
-                type="button"
-                onClick={() => setIsKnowledgeSidebarOpen((v) => !v)}
-                title={isKnowledgeSidebarOpen ? "Esconder conhecimento" : "Mostrar conhecimento"}
-                className="p-1.5 rounded-md text-obs-subtle hover:text-obs-teal transition shrink-0 hover:[background:rgb(var(--glass-solid-bg)/0.6)]"
-              >
-                {isKnowledgeSidebarOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
-              </button>
-            </>
-          ) : (
-            <div className="flex items-center gap-2">
-              <MessageSquare size={13} className="text-obs-faint" />
-              <p className="text-sm text-obs-faint">Selecione um lead para ver a conversa</p>
+                {/* Toggle the right-hand knowledge sidebar. */}
+                <button
+                  type="button"
+                  onClick={() => setIsKnowledgeSidebarOpen((v) => !v)}
+                  title={isKnowledgeSidebarOpen ? "Esconder conhecimento" : "Mostrar conhecimento"}
+                  className="p-1.5 rounded-md text-obs-subtle hover:text-obs-teal transition shrink-0 hover:[background:rgb(var(--glass-solid-bg)/0.6)]"
+                >
+                  {isKnowledgeSidebarOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
+                </button>
+              </>
+            ) : (
+              <div className="flex items-center gap-2">
+                <MessageSquare size={13} className="text-obs-faint" />
+                <p className="text-sm text-obs-faint">Selecione um lead para ver a conversa</p>
+              </div>
+            )}
+          </div>
+
+          {selectedLead && (
+            <div className="flex items-center gap-2 flex-wrap pl-[2.5rem]">
+              <StageBadge stage={selectedLead.stage} />
+              {selectedLead.telefone && (
+                <span className="text-[10px] text-obs-faint">{selectedLead.telefone}</span>
+              )}
+              {selectedLead.interesse_produto && (
+                <span className="text-[10px] text-obs-subtle truncate max-w-[10rem]">
+                  {selectedLead.interesse_produto}
+                </span>
+              )}
+              <span className="text-[10px] text-obs-faint ml-auto">
+                {messages.length} msgs
+              </span>
             </div>
           )}
         </div>
