@@ -2521,38 +2521,36 @@ export function MessagesLayout({
           boxShadow: "var(--glass-shadow)",
         }}
       >
-        <button
-          type="button"
-          onClick={() => setIsConversationSidebarOpen((v) => !v)}
-          className="absolute left-3 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full text-obs-text shadow-sm backdrop-blur transition hover:opacity-70"
-          style={{ background: "rgb(var(--glass-solid-bg) / var(--glass-solid-hover))", border: "1px solid var(--border-glass-strong)" }}
-          aria-label={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
-          title={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
-        >
-          {isConversationSidebarOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
-        </button>
-        {/* Chat header */}
+        {/* Chat header — o toggle da lista mora aqui dentro agora (era um
+            botão flutuante `absolute`, inconsistente com o estado vazio,
+            que já o renderiza inline). Sempre centralizado verticalmente
+            na barra, nunca sobreposto ao conteúdo da thread. */}
         <div
-          className="flex items-center gap-3 px-14 py-3 shrink-0"
+          className="flex items-center gap-3 px-3 py-3 shrink-0"
           style={{ borderBottom: "1px solid var(--border-glass)", background: "rgb(var(--glass-solid-bg) / 0.58)" }}
         >
+          <button
+            type="button"
+            onClick={() => setIsConversationSidebarOpen((v) => !v)}
+            className="flex h-8 w-8 shrink-0 items-center justify-center self-center rounded-full text-obs-text transition hover:opacity-70"
+            style={{ background: "rgb(var(--glass-solid-bg) / var(--glass-solid-hover))", border: "1px solid var(--border-glass-strong)" }}
+            aria-label={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
+            title={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
+          >
+            {isConversationSidebarOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+          </button>
           {selectedLead ? (
             <>
-              <button
-                type="button"
-                onClick={() => setShowLeadInfo(true)}
-                title="Ver/editar informacoes do lead"
-                className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 transition hover:opacity-80"
+              {/* Avatar/nome/nota comercial não abrem mais o modal aqui —
+                  ele vive só no rail direito (ContactPanel) agora. */}
+              <div
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold"
                 style={{ background: "rgb(var(--obs-text) / 0.08)", color: "rgb(var(--obs-subtle))" }}
               >
                 {chatName[0].toUpperCase()}
-              </button>
-              <div
-                className="flex-1 min-w-0 cursor-pointer"
-                onClick={() => setShowLeadInfo(true)}
-                title="Ver/editar informacoes do lead"
-              >
-                <p className="text-sm font-semibold text-obs-text truncate hover:opacity-70">{chatName}</p>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-obs-text truncate">{chatName}</p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <StageBadge stage={selectedLead.stage} />
                   {selectedLead.telefone && (
@@ -2561,14 +2559,6 @@ export function MessagesLayout({
                   {selectedLead.interesse_produto && (
                     <span className="text-[10px] text-obs-subtle truncate">
                       {selectedLead.interesse_produto}
-                    </span>
-                  )}
-                  {commercialNoteSummary(selectedLead.metadata?.commercial_note) && (
-                    <span
-                      title={commercialNoteTitle(selectedLead.metadata?.commercial_note)}
-                      className="rounded border border-obs-line bg-obs-surface px-1.5 py-0.5 text-[10px] text-obs-subtle"
-                    >
-                      Nota comercial · {commercialNoteSummary(selectedLead.metadata?.commercial_note)}
                     </span>
                   )}
                   <span className="text-[10px] text-obs-faint ml-auto">
@@ -2779,7 +2769,13 @@ export function MessagesLayout({
           {/* Contato — topo do rail direito, altura própria (não cresce).
               Nada aqui é buscado de novo: tudo já está em selectedLead. */}
           {selectedLead && (
-            <div className="max-h-[45%] shrink-0 overflow-y-auto p-4" style={{ borderBottom: "1px solid var(--border-glass)" }}>
+            <button
+              type="button"
+              onClick={() => setShowLeadInfo(true)}
+              title="Ver/editar informações do lead"
+              className="block max-h-[45%] w-full shrink-0 overflow-y-auto p-4 text-left transition hover:bg-obs-teal/5"
+              style={{ borderBottom: "1px solid var(--border-glass)" }}
+            >
               <div className="flex items-center gap-3">
                 <div
                   className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-base font-semibold"
@@ -2804,11 +2800,13 @@ export function MessagesLayout({
                     <p className="text-obs-subtle"><span className="text-obs-faint">Interesse · </span>{selectedLead.interesse_produto}</p>
                   )}
                   {commercialNoteSummary(selectedLead.metadata?.commercial_note) && (
-                    <p className="text-obs-subtle"><span className="text-obs-faint">Nota · </span>{commercialNoteSummary(selectedLead.metadata?.commercial_note)}</p>
+                    <p className="text-obs-subtle" title={commercialNoteTitle(selectedLead.metadata?.commercial_note)}>
+                      <span className="text-obs-faint">Nota comercial · </span>{commercialNoteSummary(selectedLead.metadata?.commercial_note)}
+                    </p>
                   )}
                 </div>
               )}
-            </div>
+            </button>
           )}
 
           <div
