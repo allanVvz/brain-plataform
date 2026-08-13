@@ -160,6 +160,15 @@
   --obs-amber:   217 119  6;
   --obs-slate:   100 116 139;
   --obs-rose:    225  29  72;
+  /* Evidence/knowledge accent for the Mensagens screen — deliberately teal,
+     not violet: hue ~193° keeps it visibly apart from --obs-live's ~154°
+     green and --obs-amber/rose. Scoped to graph-evidence UI only; the rest
+     of the app's violet branding (buttons, focus rings, login) is
+     untouched. See PROJECT plan "Correções de revisão visual" §2/§8.4. */
+  --obs-teal:    14 116 144;
+  /* "Estado bom" — canal conectado / IA ativa, and reused for
+     estágio-positivo-do-funil (qualificado/oportunidade/fechado) badges. */
+  --obs-live:    15 157  99;
 
   /* Neutral scrim foreground — drives white/X classes. */
   --scrim-fg: 17 24 39;
@@ -225,6 +234,8 @@
   --obs-amber:   245 158  11;
   --obs-slate:   100 116 139;
   --obs-rose:    244  63  94;
+  --obs-teal:    34 165 186;
+  --obs-live:    16 185 129;
 
   --scrim-fg: 255 255 255;
 

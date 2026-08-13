@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
 import { api } from "@/lib/api";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { MessageSquare, User, Clock, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, PanelRightClose, PanelRightOpen, ArrowLeft, ChevronLeft, ChevronRight, Tag } from "lucide-react";
+import { MessageSquare, User, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, PanelRightClose, PanelRightOpen, ArrowLeft, ChevronLeft, ChevronRight, Tag } from "lucide-react";
 import { LeadInfoModal } from "@/components/leads/LeadInfoModal";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -231,7 +231,10 @@ function attentionFor(
 }
 
 function attentionRowStyle(state: AttentionState, active: boolean): React.CSSProperties {
-  if (active) return { background: "rgba(124,111,255,0.10)", borderLeft: "2px solid #7c6fff" };
+  // Selection reads as ink/weight, never an accent colour — an accent here
+  // would collide with the meaning already reserved for evidence (teal) and
+  // attention (amber/red) elsewhere in this screen.
+  if (active) return { background: "rgb(var(--obs-text) / 0.06)", borderLeft: "2px solid rgb(var(--obs-text))" };
   if (state === "human_replying") return { background: "rgba(245,158,11,0.06)", borderLeft: "2px solid rgba(245,158,11,0.55)" };
   if (state === "awaiting_bot")   return { background: "rgba(239,68,68,0.05)",  borderLeft: "2px solid rgba(239,68,68,0.55)" };
   return { background: "transparent", borderLeft: "2px solid transparent" };
@@ -284,11 +287,14 @@ function isOutbound(msg: Message): boolean {
     type === "ai"
   );
 }
+// Estágio "positivo do funil" — qualificado, oportunidade ou fechado — lê
+// como o mesmo verde de --obs-live (canal conectado / IA ativa): as duas
+// leituras da mesma ideia, "estado bom". Estágios anteriores ficam neutros.
+const POSITIVE_STAGES = new Set(["qualificado", "interested", "oportunidade", "fechado", "won"]);
+
 function stageColor(stage: string | null): string {
   const s = (stage || "").toLowerCase();
-  if (s === "novo") return "text-blue-400 border-blue-400/30";
-  if (s === "qualificado" || s === "interested") return "text-yellow-400 border-yellow-400/30";
-  if (s === "fechado" || s === "won") return "text-green-400 border-green-400/30";
+  if (POSITIVE_STAGES.has(s)) return "text-obs-live border-obs-live/30";
   if (s === "perdido" || s === "lost") return "text-red-400 border-red-400/30";
   return "text-obs-subtle border-obs-line";
 }
@@ -404,8 +410,16 @@ function MessageBubble({
   const out = isOutbound(msg);
   const mediaUrl = extractMediaUrl(msg.metadata);
   const hasText = (msg.texto || "").trim().length > 0;
+  // Outbound message written by a person on the team, not the model — same
+  // sender_type the runtime writes for a manual reply. The evidence tint on
+  // the bubble is reserved for the IA's own answers, so a human's outbound
+  // text must not carry it (previously both rendered identically violet).
+  const isHumanOperator = ["human", "operator"].includes(String(msg.sender_type || "").toLowerCase());
+  const isAiSender = out && !isHumanOperator;
   const senderName = out
-    ? (msg.sender_type === "assistant" ? "Assistente IA" : msg.sender_type || "IA")
+    ? isHumanOperator
+      ? "Operador"
+      : (msg.sender_type === "assistant" ? "Assistente IA" : msg.sender_type || "IA")
     : displayName(lead, msg);
   const deliveryLabel = (() => {
     const status = String(msg.status || "").toLowerCase();
@@ -422,7 +436,7 @@ function MessageBubble({
 
   return (
     <div
-      className={`flex flex-col gap-0.5 rounded-xl p-1 transition ${out ? "items-end" : "items-start"} ${selected ? "ring-2 ring-obs-violet/60 bg-obs-violet/5" : ""}`}
+      className={`flex flex-col gap-0.5 rounded-xl p-1 transition ${out ? "items-end" : "items-start"} ${selected ? "ring-2 ring-obs-teal/60 bg-obs-teal/5" : ""}`}
       role={hasKnowledgeEvidence(msg) ? "button" : undefined}
       tabIndex={hasKnowledgeEvidence(msg) ? 0 : undefined}
       aria-label={hasKnowledgeEvidence(msg) ? "Mostrar conhecimentos usados nesta resposta" : undefined}
@@ -442,13 +456,15 @@ function MessageBubble({
         className={`max-w-[72%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${out ? "rounded-tr-sm" : "rounded-tl-sm"}`}
         style={
           out
-            ? { background: "rgba(124,111,255,0.16)", border: "1px solid rgba(124,111,255,0.24)", color: "rgb(var(--obs-text))" }
+            ? isAiSender
+              ? { background: "rgb(var(--obs-teal) / 0.14)", border: "1px solid rgb(var(--obs-teal) / 0.22)", color: "rgb(var(--obs-text))" }
+              : { background: "rgb(var(--glass-solid-bg) / 0.85)", border: "1px solid var(--border-glass-strong)", color: "rgb(var(--obs-text))" }
             : { background: "rgb(var(--glass-solid-bg) / 0.74)", border: "1px solid var(--border-glass)", color: "rgb(var(--obs-text))" }
         }
       >
         {hasText && <p className="whitespace-pre-wrap break-words">{msg.texto}</p>}
         {!hasText && mediaUrl && (
-          <a href={mediaUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline text-obs-violet">
+          <a href={mediaUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline text-obs-teal">
             Ver mídia anexada
           </a>
         )}
@@ -687,7 +703,7 @@ const EvidenceCard = memo(function EvidenceCard({
   return (
     <article className="rounded-lg border border-obs-line bg-obs-surface/40 p-2.5">
       <div className="flex items-start gap-1.5">
-        <span className="mt-0.5 shrink-0 rounded border border-obs-violet/30 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-obs-violet">
+        <span className="mt-0.5 shrink-0 rounded border border-obs-teal/30 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-obs-teal">
           {item.node_type}
         </span>
         <p className="min-w-0 flex-1 text-xs font-medium leading-snug text-obs-text">{item.title}</p>
@@ -759,8 +775,8 @@ function NodePill({
       onClick={() => onSelect(id)}
       className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
       style={{
-        background: active ? "rgba(124,111,255,0.22)" : "rgba(124,111,255,0.10)",
-        border: `1px solid ${active ? "rgba(124,111,255,0.65)" : "rgba(124,111,255,0.30)"}`,
+        background: active ? "rgb(var(--obs-teal) / 0.22)" : "rgb(var(--obs-teal) / 0.10)",
+        border: `1px solid ${active ? "rgb(var(--obs-teal) / 0.65)" : "rgb(var(--obs-teal) / 0.30)"}`,
         color: "rgb(var(--obs-text))",
       }}
     >
@@ -782,7 +798,7 @@ function NodePill({
           ))}
         </div>
       )}
-      {url && <p className="mt-1 truncate text-[10px] text-obs-violet">{url}</p>}
+      {url && <p className="mt-1 truncate text-[10px] text-obs-teal">{url}</p>}
       {typeof node.graph_distance === "number" && (
         <p className="mt-1 text-[10px] text-obs-faint">
           dist. {node.graph_distance}{graphPath ? ` · ${graphPath}` : ""}
@@ -858,16 +874,16 @@ function KbCard({
       <button
         type="button"
         onClick={() => onSelect(id)}
-        className="block w-full rounded-lg border border-violet-300/40 bg-violet-50/80 px-3 py-2.5 text-left text-xs transition hover:border-violet-400/60"
+        className="block w-full rounded-lg border border-obs-teal/25 bg-obs-teal/5 px-3 py-2.5 text-left text-xs transition hover:border-obs-teal/45"
       >
         <div className="flex items-start gap-2">
-          <span className="mt-0.5 rounded bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">FAQ</span>
+          <span className="mt-0.5 rounded bg-obs-teal px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">FAQ</span>
           <p className="line-clamp-2 flex-1 font-semibold leading-snug text-obs-text">{title}</p>
           {pendingLabel(entry)}
-          <ChevronRight size={11} className="mt-0.5 shrink-0 text-violet-500" />
+          <ChevronRight size={11} className="mt-0.5 shrink-0 text-obs-teal" />
         </div>
         {body && (
-          <p className="mt-2 line-clamp-4 border-t border-violet-200/70 pt-2 text-[11px] leading-relaxed text-obs-subtle">
+          <p className="mt-2 line-clamp-4 border-t border-obs-teal/20 pt-2 text-[11px] leading-relaxed text-obs-subtle">
             {body}
           </p>
         )}
@@ -915,8 +931,8 @@ function AssetCard({ asset }: { asset: KnowledgeAsset }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url!} alt={asset.title} className="w-full h-24 object-cover" />
       ) : (
-        <div className="flex items-center justify-center h-16" style={{ background: "rgba(124,111,255,0.10)" }}>
-          <Icon size={20} className="text-obs-violet" />
+        <div className="flex items-center justify-center h-16" style={{ background: "rgb(var(--obs-teal) / 0.10)" }}>
+          <Icon size={20} className="text-obs-teal" />
         </div>
       )}
       <div className="px-2 py-1.5 space-y-0.5">
@@ -1112,7 +1128,7 @@ function KnowledgeDetail({
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[11px] text-obs-violet underline break-all"
+            className="text-[11px] text-obs-teal underline break-all"
           >
             {url}
           </a>
@@ -1178,7 +1194,7 @@ function KnowledgeDetail({
       <div className="pt-2">
         <a
           href={graphTarget(focus)}
-          className="block w-full text-center text-[11px] py-1.5 rounded-md border border-obs-violet/40 bg-obs-violet/10 text-obs-violet hover:bg-obs-violet/20 transition"
+          className="block w-full text-center text-[11px] py-1.5 rounded-md border border-obs-teal/40 bg-obs-teal/10 text-obs-teal hover:bg-obs-teal/20 transition"
         >
           Ver no grafo →
         </a>
@@ -1237,10 +1253,10 @@ function ContextCardButton({
     <button
       type="button"
       onClick={onClick}
-      className="w-full rounded-lg border border-obs-line bg-obs-surface/80 p-2.5 text-left transition hover:border-obs-violet/40 focus:outline-none focus:ring-2 focus:ring-obs-violet/40"
+      className="w-full rounded-lg border border-obs-line bg-obs-surface/80 p-2.5 text-left transition hover:border-obs-teal/40 focus:outline-none focus:ring-2 focus:ring-obs-teal/40"
     >
       <div className="flex items-start gap-1.5">
-        <span className="mt-0.5 rounded border border-obs-violet/30 px-1 py-0.5 text-[9px] font-semibold uppercase text-obs-violet">
+        <span className="mt-0.5 rounded border border-obs-teal/30 px-1 py-0.5 text-[9px] font-semibold uppercase text-obs-teal">
           {humanizeNodeType(card.node_type)}
         </span>
         <span className="min-w-0 flex-1 text-xs font-medium leading-snug text-obs-text">{card.title}</span>
@@ -1307,7 +1323,7 @@ function ContextCardModal({
       <div className="modal-content max-h-[90vh] w-full max-w-3xl overflow-y-auto">
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-obs-violet">{card.node_type} · revisão {card.revision}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-obs-teal">{card.node_type} · revisão {card.revision}</p>
             <h2 id="context-card-title" className="mt-1 text-lg font-semibold text-obs-text">{card.title}</h2>
           </div>
           <button type="button" onClick={onClose} className="rounded-md border border-obs-line px-2 py-1 text-xs text-obs-subtle">Fechar</button>
@@ -1328,7 +1344,7 @@ function ContextCardModal({
         {canEdit && personaSlug && currentGraphVersion && (
           <section className="mt-4 rounded-lg border border-obs-line p-3">
             {!editing ? (
-              <button type="button" onClick={() => setEditing(true)} className="rounded-md bg-obs-violet px-3 py-1.5 text-xs font-medium text-white">Editar versão atual</button>
+              <button type="button" onClick={() => setEditing(true)} className="rounded-md bg-obs-teal px-3 py-1.5 text-xs font-medium text-white">Editar versão atual</button>
             ) : (
               <div className="space-y-2">
                 <label className="block text-[10px] font-semibold uppercase text-obs-faint">Conteúdo editável</label>
@@ -1549,7 +1565,7 @@ export function KnowledgeSidebar({
             <ol className="space-y-1">
               {operator.graph_path.map((step, index) => (
                 <li key={`${step.node_id || step.slug}-${index}`} className="flex items-center gap-2 text-[11px] text-obs-subtle">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-obs-violet/10 text-[9px] text-obs-violet">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-obs-teal/10 text-[9px] text-obs-teal">
                     {index + 1}
                   </span>
                   <span>{step.title || step.slug}</span>
@@ -2291,7 +2307,7 @@ export function MessagesLayout({
           style={{ borderBottom: "1px solid var(--border-glass)" }}
         >
           <div className="flex items-center gap-2">
-            <User size={13} className="text-obs-violet" />
+            <User size={13} className="text-obs-subtle" />
             <span className="text-xs font-semibold text-obs-text">Leads</span>
             {!loadingLeads && (
               <span className="text-[10px] text-obs-faint">({filtered.length})</span>
@@ -2349,6 +2365,10 @@ export function MessagesLayout({
             const attention = attentionFor(conv, now);
             const lastTs = conv?.last_at || lead.last_update || lead.updated_at;
             const name = displayName(lead);
+            // Not backed by the API yet (roadmap backend #4 — Não lidas):
+            // renders nothing until the field exists, never a fabricated
+            // count.
+            const unread = Number(lead.metadata?.unread_count) || 0;
             return (
               <button
                 key={lead.id}
@@ -2363,16 +2383,26 @@ export function MessagesLayout({
                   <div className="flex items-center gap-1.5 min-w-0">
                     <div
                       className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0"
-                      style={{ background: "rgba(124,111,255,0.20)", color: "rgb(var(--obs-violet))" }}
+                      style={{ background: "rgb(var(--obs-text) / 0.08)", color: "rgb(var(--obs-subtle))" }}
                     >
                       {name[0].toUpperCase()}
                     </div>
-                    <span className="text-xs font-medium text-obs-text truncate">{name}</span>
+                    <span className={`text-xs truncate ${unread > 0 ? "font-semibold text-obs-text" : "font-medium text-obs-text"}`}>{name}</span>
                   </div>
-                  <StageBadge stage={lead.stage} />
+                  {unread > 0 && (
+                    <span
+                      className="flex h-[19px] min-w-[19px] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white"
+                      style={{ background: "rgb(var(--obs-text))" }}
+                      aria-label={`${unread} não lidas`}
+                    >
+                      {unread}
+                    </span>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 pl-6 text-[10px] text-obs-faint">
-                  <span>Score {lead.qualification_score || 0}/100</span>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6 text-[10px] text-obs-faint">
+                  <StageBadge stage={lead.stage} />
+                  <span>{lead.qualification_score || 0}%</span>
+                  {lastTs && <span>{relativeTs(lastTs)}</span>}
                   {(lead.qualification_signals?.length || 0) > 0 && (
                     <span className="truncate">
                       {lead.qualification_signals?.slice(0, 2).map((signal) => signal.label || signal.key).join(" · ")}
@@ -2405,12 +2435,6 @@ export function MessagesLayout({
                       <span className="text-[10px]">{lead.telefone}</span>
                     </div>
                   )}
-                  {lastTs && (
-                    <div className="flex items-center gap-1 text-obs-faint ml-auto">
-                      <Clock size={9} />
-                      <span className="text-[10px]">{relativeTs(lastTs)}</span>
-                    </div>
-                  )}
                 </div>
               </button>
             );
@@ -2433,7 +2457,7 @@ export function MessagesLayout({
         <button
           type="button"
           onClick={() => setIsConversationSidebarOpen((v) => !v)}
-          className="absolute left-3 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full text-obs-text shadow-sm backdrop-blur transition hover:text-obs-violet"
+          className="absolute left-3 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full text-obs-text shadow-sm backdrop-blur transition hover:opacity-70"
           style={{ background: "rgb(var(--glass-solid-bg) / var(--glass-solid-hover))", border: "1px solid var(--border-glass-strong)" }}
           aria-label={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
           title={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
@@ -2452,7 +2476,7 @@ export function MessagesLayout({
                 onClick={() => setShowLeadInfo(true)}
                 title="Ver/editar informacoes do lead"
                 className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 transition hover:opacity-80"
-                style={{ background: "rgba(124,111,255,0.20)", color: "rgb(var(--obs-violet))" }}
+                style={{ background: "rgb(var(--obs-text) / 0.08)", color: "rgb(var(--obs-subtle))" }}
               >
                 {chatName[0].toUpperCase()}
               </button>
@@ -2461,7 +2485,7 @@ export function MessagesLayout({
                 onClick={() => setShowLeadInfo(true)}
                 title="Ver/editar informacoes do lead"
               >
-                <p className="text-sm font-semibold text-obs-text truncate hover:text-obs-violet">{chatName}</p>
+                <p className="text-sm font-semibold text-obs-text truncate hover:opacity-70">{chatName}</p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <StageBadge stage={selectedLead.stage} />
                   {selectedLead.telefone && (
@@ -2475,7 +2499,7 @@ export function MessagesLayout({
                   {commercialNoteSummary(selectedLead.metadata?.commercial_note) && (
                     <span
                       title={commercialNoteTitle(selectedLead.metadata?.commercial_note)}
-                      className="rounded border border-violet-300/50 bg-violet-100/70 px-1.5 py-0.5 text-[10px] text-violet-700"
+                      className="rounded border border-obs-line bg-obs-surface px-1.5 py-0.5 text-[10px] text-obs-subtle"
                     >
                       Nota comercial · {commercialNoteSummary(selectedLead.metadata?.commercial_note)}
                     </span>
@@ -2534,7 +2558,7 @@ export function MessagesLayout({
                 type="button"
                 onClick={() => setIsKnowledgeSidebarOpen((v) => !v)}
                 title={isKnowledgeSidebarOpen ? "Esconder conhecimento" : "Mostrar conhecimento"}
-                className="p-1.5 rounded-md text-obs-subtle hover:text-obs-violet transition shrink-0 hover:[background:rgb(var(--glass-solid-bg)/0.6)]"
+                className="p-1.5 rounded-md text-obs-subtle hover:text-obs-teal transition shrink-0 hover:[background:rgb(var(--glass-solid-bg)/0.6)]"
               >
                 {isKnowledgeSidebarOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
               </button>
@@ -2589,7 +2613,7 @@ export function MessagesLayout({
                 type="button"
                 onClick={loadOlderMessages}
                 disabled={loadingOlderMessages}
-                className="rounded-full border border-obs-violet/30 px-3 py-1 text-[11px] text-obs-violet transition hover:bg-obs-violet/10 disabled:opacity-50"
+                className="rounded-full border border-obs-line px-3 py-1 text-[11px] text-obs-subtle transition hover:bg-obs-surface disabled:opacity-50"
               >
                 {loadingOlderMessages ? "Carregando..." : "Carregar mensagens anteriores"}
               </button>
@@ -2688,13 +2712,13 @@ export function MessagesLayout({
           className="flex items-center gap-2 px-4 py-3 shrink-0"
           style={{ borderBottom: "1px solid var(--border-glass)" }}
         >
-          <Boxes size={13} className="text-obs-violet" />
+          <Boxes size={13} className="text-obs-teal" />
           <span className="text-xs font-semibold text-obs-text">Conhecimento</span>
           {selectedResponseMessageId && (
             <button
               type="button"
               onClick={() => setSelectedResponseMessageId(null)}
-              className="ml-auto rounded border border-obs-violet/30 px-1.5 py-0.5 text-[9px] text-obs-violet"
+              className="ml-auto rounded border border-obs-teal/30 px-1.5 py-0.5 text-[9px] text-obs-teal"
             >
               Acompanhar mais recente
             </button>

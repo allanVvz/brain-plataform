@@ -5,10 +5,10 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   LogOut,
-  Megaphone,
   MessageSquare,
   Settings,
   Sparkles,
+  Target,
   UserCircle,
   Users,
 } from "lucide-react";
@@ -56,7 +56,7 @@ const links = [
   { key: "mensagens", label: "Mensagens", icon: MessageSquare },
   { key: "leads", label: "Leads", icon: Users },
   { key: "pipeline", label: "Pipeline", icon: Activity },
-  { key: "disparos", label: "Disparos", icon: Megaphone },
+  { key: "disparos", label: "Disparos", icon: Target },
 ];
 
 // Every route's title, shown in the persistent header instead of each page
@@ -166,19 +166,22 @@ export default function PortalProvider({
   return (
     <PortalContext.Provider value={value}>
       <div className="portal-theme flex min-h-screen bg-[#f4f6fa] text-slate-950">
-        <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
-          <div className="border-b border-slate-100 px-6 py-6">
-            <div className="flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-slate-950 text-white shadow-sm">
-                <Sparkles size={17} />
-              </span>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{value.persona.name}</p>
-                <p className="text-xs text-slate-500">Portal do cliente</p>
-              </div>
+        {/* Rail auto-expansível por hover/foco — sem botão, sem estado
+            persistido. Repouso = 72px, só ícones; passar o mouse (ou
+            navegar por Tab até um item de dentro) expande para 264px com
+            os rótulos. Tudo resolvido em CSS (hover:/focus-within:), sem
+            estado em React: não há preferência de usuário para lembrar. */}
+        <aside className="group hidden w-[72px] shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white transition-[width] duration-200 ease-out hover:w-64 focus-within:w-64 lg:flex">
+          <div className="flex items-center gap-3 border-b border-slate-100 px-3 py-6">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-950 text-white shadow-sm">
+              <Sparkles size={17} />
+            </span>
+            <div className="min-w-0 max-w-0 overflow-hidden opacity-0 transition-all duration-150 group-hover:max-w-[160px] group-hover:opacity-100 group-focus-within:max-w-[160px] group-focus-within:opacity-100">
+              <p className="truncate text-sm font-semibold">{value.persona.name}</p>
+              <p className="truncate text-xs text-slate-500">Portal do cliente</p>
             </div>
           </div>
-          <nav className="flex-1 space-y-1 p-4" aria-label="Navegação do portal">
+          <nav className="flex-1 space-y-1 p-3" aria-label="Navegação do portal">
             {links.map(({ key, label, icon: Icon }) => {
               const href = `${base}/${key}`;
               const active = pathname === href || pathname.startsWith(`${href}/`);
@@ -186,21 +189,24 @@ export default function PortalProvider({
                 <Link
                   key={key}
                   href={href}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                  title={label}
+                  className={`flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-sm font-medium transition ${
                     active
                       ? "bg-slate-950 text-white shadow-sm"
                       : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
                   }`}
                 >
-                  <Icon size={17} />
-                  {label}
+                  <Icon size={17} className="shrink-0" />
+                  <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-150 group-hover:max-w-[160px] group-hover:opacity-100 group-focus-within:max-w-[160px] group-focus-within:opacity-100">
+                    {label}
+                  </span>
                 </Link>
               );
             })}
           </nav>
           <div className="relative border-t border-slate-100 p-3">
             {accountMenuOpen && (
-              <div className="absolute bottom-full left-3 right-3 mb-2 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+              <div className="absolute bottom-full left-3 right-3 mb-2 w-56 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
                 <Link
                   href={`${base}/configuracoes`}
                   onClick={() => setAccountMenuOpen(false)}
@@ -220,14 +226,14 @@ export default function PortalProvider({
             <button
               type="button"
               onClick={() => setAccountMenuOpen((open) => !open)}
-              className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-slate-100"
+              className="flex w-full items-center gap-2 rounded-xl px-1.5 py-2 text-left transition hover:bg-slate-100"
               aria-label="Abrir menu da conta"
               aria-expanded={accountMenuOpen}
             >
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950/5 text-slate-600">
                 <UserCircle size={17} />
               </span>
-              <span className="min-w-0 flex-1">
+              <span className="min-w-0 max-w-0 flex-1 overflow-hidden opacity-0 transition-all duration-150 group-hover:max-w-[160px] group-hover:opacity-100 group-focus-within:max-w-[160px] group-focus-within:opacity-100">
                 <p className="truncate text-xs font-medium text-slate-700">
                   {value.user?.name || value.user?.email}
                 </p>

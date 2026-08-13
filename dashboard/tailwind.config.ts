@@ -36,6 +36,15 @@ const config: Config = {
           "violet-soft": "rgb(var(--obs-violet) / 0.15)",
           "violet-glow": "rgb(var(--obs-violet) / 0.08)",
 
+          // Evidência do grafo (Mensagens) — nunca roxo. Ver globals.css.
+          teal:        rgbVar("--obs-teal"),
+          "teal-soft": "rgb(var(--obs-teal) / 0.15)",
+          "teal-glow": "rgb(var(--obs-teal) / 0.08)",
+
+          // "Estado bom" — canal/IA ativa e estágio positivo do funil.
+          live:        rgbVar("--obs-live"),
+          "live-soft": "rgb(var(--obs-live) / 0.15)",
+
           slate:        rgbVar("--obs-slate"),
           "slate-soft": "rgb(var(--obs-slate) / 0.12)",
 
