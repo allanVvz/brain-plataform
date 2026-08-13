@@ -1770,8 +1770,12 @@ export function MessagesLayout({
   const pathname = usePathname();
   const portalMatch = portalSlug ? [pathname, portalSlug] : pathname.match(/^\/clientes\/([^/]+)/);
   const isPortal = Boolean(portalSlug);
+  // O portal não tem mais header nem padding de `main` nesta rota (ver
+  // PortalContext) — só a bottom nav mobile (~5rem com safe-area) segue
+  // reservada. `heightClassName` continua sendo o escape hatch para quem
+  // ainda precisa do orçamento antigo (ex.: banner de canal não conectado).
   const resolvedHeightClassName =
-    heightClassName || (isPortal ? "h-[calc(100vh-11rem)] lg:h-[calc(100vh-8rem)]" : "h-[calc(100vh-6rem)]");
+    heightClassName || (isPortal ? "h-[calc(100vh-5rem)] lg:h-screen" : "h-[calc(100vh-6rem)]");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [search, setSearch] = useState("");
@@ -2279,6 +2283,11 @@ export function MessagesLayout({
     ));
   }, [leads, search]);
 
+  const awaitingCount = useMemo(
+    () => filtered.filter((l) => attentionFor(convByRef.get(l.id), now) === "awaiting_bot").length,
+    [filtered, convByRef, now],
+  );
+
   const chatName = displayName(selectedLead);
 
   return (
@@ -2301,25 +2310,47 @@ export function MessagesLayout({
           boxShadow: "var(--glass-shadow)",
         }}
       >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-4 py-3"
-          style={{ borderBottom: "1px solid var(--border-glass)" }}
-        >
-          <div className="flex items-center gap-2">
-            <User size={13} className="text-obs-subtle" />
-            <span className="text-xs font-semibold text-obs-text">Leads</span>
-            {!loadingLeads && (
-              <span className="text-[10px] text-obs-faint">({filtered.length})</span>
-            )}
+        {/* Header — o portal não tem header de página (removido, ver
+            PortalContext); o título "Mensagens" vive aqui. O admin mantém
+            "Leads (N)", que já tem o resto do chrome da página em volta. */}
+        {isPortal ? (
+          <div className="flex items-start justify-between gap-2 px-4 pb-3 pt-4" style={{ borderBottom: "1px solid var(--border-glass)" }}>
+            <div className="min-w-0">
+              <h1 className="text-base font-semibold text-obs-text">Mensagens</h1>
+              <p className="mt-0.5 truncate text-[11px] text-obs-faint">
+                {filtered.length} conversa{filtered.length === 1 ? "" : "s"}
+                {awaitingCount > 0 ? ` · ${awaitingCount} aguardando resposta` : ""}
+              </p>
+            </div>
+            <button
+              onClick={loadLeads}
+              className="mt-0.5 shrink-0 rounded p-1 text-obs-subtle transition-colors hover:text-obs-text"
+              aria-label="Atualizar lista"
+              title="Atualizar lista"
+            >
+              <RefreshCw size={13} />
+            </button>
           </div>
-          <button
-            onClick={loadLeads}
-            className="p-1 rounded text-obs-subtle hover:text-obs-text transition-colors"
+        ) : (
+          <div
+            className="flex items-center justify-between px-4 py-3"
+            style={{ borderBottom: "1px solid var(--border-glass)" }}
           >
-            <RefreshCw size={11} />
-          </button>
-        </div>
+            <div className="flex items-center gap-2">
+              <User size={13} className="text-obs-subtle" />
+              <span className="text-xs font-semibold text-obs-text">Leads</span>
+              {!loadingLeads && (
+                <span className="text-[10px] text-obs-faint">({filtered.length})</span>
+              )}
+            </div>
+            <button
+              onClick={loadLeads}
+              className="p-1 rounded text-obs-subtle hover:text-obs-text transition-colors"
+            >
+              <RefreshCw size={11} />
+            </button>
+          </div>
+        )}
 
         {/* Search */}
         <div className="px-3 py-2" style={{ borderBottom: "1px solid var(--border-glass-soft)" }}>
@@ -2708,39 +2739,101 @@ export function MessagesLayout({
           boxShadow: "var(--glass-shadow)",
         }}
       >
-        <div
-          className="flex items-center gap-2 px-4 py-3 shrink-0"
-          style={{ borderBottom: "1px solid var(--border-glass)" }}
-        >
-          <Boxes size={13} className="text-obs-teal" />
-          <span className="text-xs font-semibold text-obs-text">Conhecimento</span>
-          {selectedResponseMessageId && (
-            <button
-              type="button"
-              onClick={() => setSelectedResponseMessageId(null)}
-              className="ml-auto rounded border border-obs-teal/30 px-1.5 py-0.5 text-[9px] text-obs-teal"
-            >
-              Acompanhar mais recente
-            </button>
+        <>
+          {/* Contato — topo do rail direito, altura própria (não cresce).
+              Nada aqui é buscado de novo: tudo já está em selectedLead. */}
+          {selectedLead && (
+            <div className="max-h-[45%] shrink-0 overflow-y-auto p-4" style={{ borderBottom: "1px solid var(--border-glass)" }}>
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-base font-semibold"
+                  style={{ background: "rgb(var(--obs-text) / 0.08)", color: "rgb(var(--obs-subtle))" }}
+                >
+                  {chatName[0]?.toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-obs-text">{chatName}</p>
+                  {selectedLead.telefone && <p className="truncate text-xs text-obs-faint">{selectedLead.telefone}</p>}
+                </div>
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                <StageBadge stage={selectedLead.stage} />
+                <span className="rounded-full px-2 py-0.5 text-[10px] text-obs-faint" style={{ background: "rgb(var(--obs-text) / 0.05)" }}>
+                  score {selectedLead.qualification_score || 0}%
+                </span>
+              </div>
+              {(selectedLead.interesse_produto || commercialNoteSummary(selectedLead.metadata?.commercial_note)) && (
+                <div className="mt-2.5 space-y-1 text-xs">
+                  {selectedLead.interesse_produto && (
+                    <p className="text-obs-subtle"><span className="text-obs-faint">Interesse · </span>{selectedLead.interesse_produto}</p>
+                  )}
+                  {commercialNoteSummary(selectedLead.metadata?.commercial_note) && (
+                    <p className="text-obs-subtle"><span className="text-obs-faint">Nota · </span>{commercialNoteSummary(selectedLead.metadata?.commercial_note)}</p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
-          {knowledgeError && (
-            <span className={`${selectedResponseMessageId ? "" : "ml-auto"} text-[10px] text-red-500 truncate`}>{knowledgeError}</span>
+
+          <div
+            className="flex items-center gap-2 px-4 py-3 shrink-0"
+            style={{ borderBottom: "1px solid var(--border-glass)" }}
+          >
+            <Boxes size={13} className="text-obs-teal" />
+            <span className="text-xs font-semibold text-obs-text">Conhecimento</span>
+            {selectedResponseMessageId && (
+              <button
+                type="button"
+                onClick={() => setSelectedResponseMessageId(null)}
+                className="ml-auto rounded border border-obs-teal/30 px-1.5 py-0.5 text-[9px] text-obs-teal"
+              >
+                Acompanhar mais recente
+              </button>
+            )}
+            {knowledgeError && (
+              <span className={`${selectedResponseMessageId ? "" : "ml-auto"} text-[10px] text-red-500 truncate`}>{knowledgeError}</span>
+            )}
+            {knowledge?.query_terms && knowledge.query_terms.length > 0 && (
+              <span className="text-[10px] text-obs-faint truncate">
+                · {knowledge.query_terms.slice(0, 3).join(", ")}
+              </span>
+            )}
+          </div>
+
+          {/* KnowledgeSidebar gerencia o próprio scroll interno (h-full
+              overflow-y-auto) — precisa continuar sendo o único filho
+              flex-1 do rail, senão colapsa a altura 0. Contato e Mídia
+              ficam fora dele, com altura própria. */}
+          <div className="flex-1 overflow-hidden">
+            <KnowledgeSidebar
+              ctx={knowledge}
+              loading={knowledgeLoading}
+              leadSelected={!!selectedLead}
+              canEdit={canEdit}
+              onPublished={() => setKnowledgeRefreshKey((value) => value + 1)}
+            />
+          </div>
+
+          {/* Mídia · Arquivos · Links — o webhook do Evolution ainda
+              descarta imagem/áudio/documento (roadmap backend #1/#2), então
+              isto fica honesto sobre estar pendente em vez de fingir dado. */}
+          {selectedLead && (
+            <div className="shrink-0 p-4" style={{ borderTop: "1px solid var(--border-glass)" }}>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-obs-faint">Mídia · Arquivos · Links</p>
+              <div className="mt-2.5 grid grid-cols-3 gap-2">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-16 rounded-lg border border-dashed" style={{ borderColor: "var(--border-glass-strong)", background: "rgb(var(--obs-text) / 0.02)" }} />
+                ))}
+              </div>
+              <div className="mt-2.5 rounded-lg p-2.5" style={{ background: "rgb(var(--obs-text) / 0.03)" }}>
+                <p className="text-[11px] font-medium text-obs-subtle">Aguardando backend</p>
+                <p className="mt-0.5 text-[10px] leading-relaxed text-obs-faint">
+                  A captura de mídia recebida ainda não existe no webhook do Evolution.
+                </p>
+              </div>
+            </div>
           )}
-          {knowledge?.query_terms && knowledge.query_terms.length > 0 && (
-            <span className="text-[10px] text-obs-faint truncate">
-              · {knowledge.query_terms.slice(0, 3).join(", ")}
-            </span>
-          )}
-        </div>
-        <div className="flex-1 overflow-hidden">
-          <KnowledgeSidebar
-            ctx={knowledge}
-            loading={knowledgeLoading}
-            leadSelected={!!selectedLead}
-            canEdit={canEdit}
-            onPublished={() => setKnowledgeRefreshKey((value) => value + 1)}
-          />
-        </div>
+        </>
       </aside>
       )}
 

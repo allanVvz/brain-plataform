@@ -128,10 +128,16 @@ export default function PortalProvider({
 
   const base = `/clientes/${personaSlug}`;
   const value = useMemo(() => state, [state]);
-  const pageTitle = useMemo(() => {
-    const segment = pathname.replace(base, "").split("/").filter(Boolean)[0];
-    return (segment && PAGE_TITLES[segment]) || "Mensagens";
-  }, [pathname, base]);
+  const segment = useMemo(
+    () => pathname.replace(base, "").split("/").filter(Boolean)[0] || "mensagens",
+    [pathname, base],
+  );
+  const pageTitle = PAGE_TITLES[segment] || "Mensagens";
+  // Mensagens já mostra o próprio título (e a contagem de conversas) dentro
+  // da coluna de lista — repeti-lo num header de página é o header
+  // duplicado que a revisão apontou. As outras telas ainda não têm título
+  // próprio, então mantêm o header por enquanto.
+  const showHeader = segment !== "mensagens";
 
   async function logout() {
     await api.logout().catch(() => undefined);
@@ -156,7 +162,7 @@ export default function PortalProvider({
         aria-busy="true"
       >
         <div className="flex items-center gap-3 text-sm text-slate-600">
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-violet-600" />
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-obs-teal" />
           Validando seu acesso…
         </div>
       </main>
@@ -171,14 +177,14 @@ export default function PortalProvider({
             navegar por Tab até um item de dentro) expande para 264px com
             os rótulos. Tudo resolvido em CSS (hover:/focus-within:), sem
             estado em React: não há preferência de usuário para lembrar. */}
-        <aside className="group hidden w-[72px] shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white transition-[width] duration-200 ease-out hover:w-64 focus-within:w-64 lg:flex">
-          <div className="flex items-center gap-3 border-b border-slate-100 px-3 py-6">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-950 text-white shadow-sm">
+        <aside className="group hidden w-[72px] shrink-0 flex-col overflow-hidden border-r border-[#2A2E38] bg-[#12141A] transition-[width] duration-200 ease-out hover:w-64 focus-within:w-64 lg:flex">
+          <div className="flex items-center gap-3 px-3 py-6">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-obs-teal text-white shadow-sm">
               <Sparkles size={17} />
             </span>
             <div className="min-w-0 max-w-0 overflow-hidden opacity-0 transition-all duration-150 group-hover:max-w-[160px] group-hover:opacity-100 group-focus-within:max-w-[160px] group-focus-within:opacity-100">
-              <p className="truncate text-sm font-semibold">{value.persona.name}</p>
-              <p className="truncate text-xs text-slate-500">Portal do cliente</p>
+              <p className="truncate text-sm font-semibold text-white">{value.persona.name}</p>
+              <p className="truncate text-xs text-white/45">Portal do cliente</p>
             </div>
           </div>
           <nav className="flex-1 space-y-1 p-3" aria-label="Navegação do portal">
@@ -192,8 +198,8 @@ export default function PortalProvider({
                   title={label}
                   className={`flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-sm font-medium transition ${
                     active
-                      ? "bg-slate-950 text-white shadow-sm"
-                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+                      ? "bg-[#22252E] text-white"
+                      : "text-white/65 hover:bg-[#22252E] hover:text-white"
                   }`}
                 >
                   <Icon size={17} className="shrink-0" />
@@ -204,7 +210,25 @@ export default function PortalProvider({
               );
             })}
           </nav>
-          <div className="relative border-t border-slate-100 p-3">
+
+          {/* Status do canal — vive aqui desde que o header sumiu de
+              Mensagens (era exibido lá antes). */}
+          <div className="flex items-center gap-2 border-t border-[#2A2E38] px-3 py-3 text-[11px] text-white/70">
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                isChannelConnected(value.channel.status) ? "bg-obs-live" : "bg-amber-400"
+              }`}
+            />
+            <span className="max-w-0 overflow-hidden truncate whitespace-nowrap opacity-0 transition-all duration-150 group-hover:max-w-[160px] group-hover:opacity-100 group-focus-within:max-w-[160px] group-focus-within:opacity-100">
+              {!value.channel.configured
+                ? "Canal não conectado"
+                : isChannelConnected(value.channel.status)
+                  ? "Canal conectado"
+                  : "Aguardando conexão"}
+            </span>
+          </div>
+
+          <div className="relative border-t border-[#2A2E38] p-3">
             {accountMenuOpen && (
               <div className="absolute bottom-full left-3 right-3 mb-2 w-56 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
                 <Link
@@ -226,18 +250,18 @@ export default function PortalProvider({
             <button
               type="button"
               onClick={() => setAccountMenuOpen((open) => !open)}
-              className="flex w-full items-center gap-2 rounded-xl px-1.5 py-2 text-left transition hover:bg-slate-100"
+              className="flex w-full items-center gap-2 rounded-xl px-1.5 py-2 text-left transition hover:bg-[#22252E]"
               aria-label="Abrir menu da conta"
               aria-expanded={accountMenuOpen}
             >
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950/5 text-slate-600">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/10 text-white/80">
                 <UserCircle size={17} />
               </span>
               <span className="min-w-0 max-w-0 flex-1 overflow-hidden opacity-0 transition-all duration-150 group-hover:max-w-[160px] group-hover:opacity-100 group-focus-within:max-w-[160px] group-focus-within:opacity-100">
-                <p className="truncate text-xs font-medium text-slate-700">
+                <p className="truncate text-xs font-medium text-white/90">
                   {value.user?.name || value.user?.email}
                 </p>
-                <p className="truncate text-[11px] text-slate-500">
+                <p className="truncate text-[11px] text-white/45">
                   {value.accessProfile.replaceAll("_", " ")}
                 </p>
               </span>
@@ -246,27 +270,29 @@ export default function PortalProvider({
         </aside>
 
         <div className="min-w-0 flex-1">
-          <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur lg:px-8">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-950">{pageTitle}</p>
-              <p className="hidden truncate text-xs text-slate-500 lg:block">
-                {value.persona.name} · Ambiente seguro · dados exclusivos da sua operação
-              </p>
-            </div>
-            <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-slate-500">
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  isChannelConnected(value.channel.status) ? "bg-emerald-500" : "bg-amber-400"
-                }`}
-              />
-              {!value.channel.configured
-                ? "Canal não conectado"
-                : isChannelConnected(value.channel.status)
-                  ? "Conectado"
-                  : "Aguardando conexão"}
-            </div>
-          </header>
-          <main className="mx-auto w-full max-w-[1500px] p-4 pb-24 lg:p-8">
+          {showHeader && (
+            <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur lg:px-8">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-950">{pageTitle}</p>
+                <p className="hidden truncate text-xs text-slate-500 lg:block">
+                  {value.persona.name} · Ambiente seguro · dados exclusivos da sua operação
+                </p>
+              </div>
+              <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-slate-500">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    isChannelConnected(value.channel.status) ? "bg-emerald-500" : "bg-amber-400"
+                  }`}
+                />
+                {!value.channel.configured
+                  ? "Canal não conectado"
+                  : isChannelConnected(value.channel.status)
+                    ? "Conectado"
+                    : "Aguardando conexão"}
+              </div>
+            </header>
+          )}
+          <main className={showHeader ? "mx-auto w-full max-w-[1500px] p-4 pb-24 lg:p-8" : ""}>
             {children}
           </main>
         </div>
@@ -283,7 +309,7 @@ export default function PortalProvider({
                 key={key}
                 href={href}
                 className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[10px] font-medium ${
-                  active ? "text-violet-700" : "text-slate-500"
+                  active ? "text-slate-950" : "text-slate-500"
                 }`}
               >
                 <Icon size={18} />
