@@ -1810,8 +1810,10 @@ export function MessagesLayout({
   // PortalContext) — só a bottom nav mobile (~5rem com safe-area) segue
   // reservada. `heightClassName` continua sendo o escape hatch para quem
   // ainda precisa do orçamento antigo (ex.: banner de canal não conectado).
+  // dvh, não vh: no iOS a barra de URL colapsando dentro de vh empurra o
+  // composer pra baixo do chrome do navegador.
   const resolvedHeightClassName =
-    heightClassName || (isPortal ? "h-[calc(100vh-5rem)] lg:h-screen" : "h-[calc(100vh-6rem)]");
+    heightClassName || (isPortal ? "h-[calc(100dvh-5rem)] lg:h-dvh" : "h-[calc(100dvh-6rem)]");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [search, setSearch] = useState("");
@@ -1820,6 +1822,30 @@ export function MessagesLayout({
   const [isConversationSidebarOpen, setIsConversationSidebarOpen] = useState(!focused);
   const [showLeadInfo, setShowLeadInfo] = useState(false);
   const [isKnowledgeSidebarOpen, setIsKnowledgeSidebarOpen] = useState(false);
+
+  // Três modos derivados do viewport: single (<1024px) mostra um painel por
+  // vez (lista | thread), dual (1024-1279px) mostra lista+thread com o rail
+  // direito virando overlay, triple (≥1280px) é o comportamento de sempre.
+  // Nunca escreve em isConversationSidebarOpen/isKnowledgeSidebarOpen — esses
+  // continuam sendo intenção pura do usuário; o breakpoint só afeta como
+  // essa intenção é derivada e renderizada.
+  const [layoutMode, setLayoutMode] = useState<"single" | "dual" | "triple">("triple");
+  const [mobilePane, setMobilePane] = useState<"list" | "thread">(focused ? "thread" : "list");
+
+  useEffect(() => {
+    const mqSingle = window.matchMedia("(max-width: 1023px)");
+    const mqDual = window.matchMedia("(min-width: 1024px) and (max-width: 1279px)");
+    const compute = () => {
+      setLayoutMode(mqSingle.matches ? "single" : mqDual.matches ? "dual" : "triple");
+    };
+    compute();
+    mqSingle.addEventListener("change", compute);
+    mqDual.addEventListener("change", compute);
+    return () => {
+      mqSingle.removeEventListener("change", compute);
+      mqDual.removeEventListener("change", compute);
+    };
+  }, []);
   const [personaFilterId, setPersonaFilterId] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
@@ -2036,8 +2062,11 @@ export function MessagesLayout({
     setSendError(null);
     setMessagesError(null);
     setKnowledgeError(null);
-    setTimeout(() => draftRef.current?.focus(), 80);
-  }, []);
+    setMobilePane("thread");
+    // No mobile, focar o composer sozinho abre o teclado virtual a cada
+    // lead aberto — incômodo demais para valer o ganho no desktop.
+    if (layoutMode !== "single") setTimeout(() => draftRef.current?.focus(), 80);
+  }, [layoutMode]);
 
   useEffect(() => {
     if (!initialLeadId || loadingLeads || selectedId === initialLeadId) return;
@@ -2326,6 +2355,11 @@ export function MessagesLayout({
 
   const chatName = displayName(selectedLead);
 
+  // Derivação por breakpoint — nunca escreve nos toggles manuais acima.
+  const showList = layoutMode === "single" ? mobilePane === "list" : isConversationSidebarOpen;
+  const showThread = layoutMode !== "single" || mobilePane === "thread";
+  const knowledgeAsOverlay = layoutMode !== "triple";
+
   return (
     <div
       className={`messages-page flex ${resolvedHeightClassName} overflow-hidden rounded-xl p-3`}
@@ -2335,9 +2369,9 @@ export function MessagesLayout({
       }}
     >
       {/* ── Left: Leads list ───────────────────────────────────────────── */}
-      {isConversationSidebarOpen && (
+      {showList && (
       <aside
-        className="conversation-sidebar w-72 shrink-0 flex flex-col overflow-hidden rounded-l-xl"
+        className="conversation-sidebar w-full lg:w-72 shrink-0 flex flex-col overflow-hidden rounded-l-xl"
         style={{
           border: "1px solid var(--border-glass)",
           background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
@@ -2511,8 +2545,9 @@ export function MessagesLayout({
       )}
 
       {/* ── Right: Chat view ───────────────────────────────────────────── */}
+      {showThread && (
       <div
-        className="message-panel relative flex-1 flex flex-col overflow-hidden rounded-xl"
+        className="message-panel relative flex-1 flex flex-col overflow-hidden rounded-xl min-w-0"
         style={{
           background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
           border: "1px solid var(--border-glass)",
@@ -2529,15 +2564,17 @@ export function MessagesLayout({
           className="flex items-center gap-3 px-3 py-3 shrink-0"
           style={{ borderBottom: "1px solid var(--border-glass)", background: "rgb(var(--glass-solid-bg) / 0.58)" }}
         >
+          {/* No modo single vira botão voltar (fecha a thread, volta pra
+              lista); em dual/triple continua o toggle de sempre. */}
           <button
             type="button"
-            onClick={() => setIsConversationSidebarOpen((v) => !v)}
+            onClick={() => (layoutMode === "single" ? setMobilePane("list") : setIsConversationSidebarOpen((v) => !v))}
             className="flex h-8 w-8 shrink-0 items-center justify-center self-center rounded-full text-obs-text transition hover:opacity-70"
             style={{ background: "rgb(var(--glass-solid-bg) / var(--glass-solid-hover))", border: "1px solid var(--border-glass-strong)" }}
-            aria-label={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
-            title={isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
+            aria-label={layoutMode === "single" ? "Voltar para a lista" : isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
+            title={layoutMode === "single" ? "Voltar para a lista" : isConversationSidebarOpen ? "Esconder conversas" : "Mostrar conversas"}
           >
-            {isConversationSidebarOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
+            {layoutMode === "single" ? <ArrowLeft size={15} /> : isConversationSidebarOpen ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
           </button>
           {selectedLead ? (
             <>
@@ -2632,7 +2669,7 @@ export function MessagesLayout({
         <div
           ref={messageListRef}
           onScroll={onMessageListScroll}
-          className="flex-1 overflow-y-auto px-6 py-4 space-y-3"
+          className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-3 lg:px-6"
         >
           {!selectedLead && (
             <div className="flex flex-col items-center justify-center h-full gap-3">
@@ -2702,10 +2739,11 @@ export function MessagesLayout({
         {/* Send bar */}
         {selectedLead && canEdit && (
           <div
-            className="px-4 py-3 shrink-0"
+            className="px-4 pt-3 shrink-0"
             style={{
               borderTop: "1px solid var(--border-glass)",
               background: "rgb(var(--glass-solid-bg) / 0.58)",
+              paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
             }}
           >
             <div
@@ -2752,19 +2790,36 @@ export function MessagesLayout({
           </div>
         )}
       </div>
+      )}
 
       {/* ── Right: Knowledge sidebar ────────────────────────────────────── */}
+      {/* Em single/dual vira um overlay (a Sheet que o plano previa, sem
+          depender de uma lib nova) em vez do aside inline do triple — o
+          mesmo isKnowledgeSidebarOpen controla os dois, então o botão do
+          ChatHeader não muda de comportamento entre os modos. */}
       {isKnowledgeSidebarOpen && (
-      <aside
-        className="knowledge-panel w-80 shrink-0 flex flex-col overflow-hidden rounded-r-xl"
-        style={{
-          border: "1px solid var(--border-glass)",
-          background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
-          backdropFilter: "blur(18px) saturate(130%)",
-          WebkitBackdropFilter: "blur(18px) saturate(130%)",
-          boxShadow: "var(--glass-shadow)",
-        }}
-      >
+      <>
+        {knowledgeAsOverlay && (
+          <div
+            className="fixed inset-0 z-40 bg-black/30"
+            onClick={() => setIsKnowledgeSidebarOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+        <aside
+          className={`knowledge-panel flex flex-col overflow-hidden ${
+            knowledgeAsOverlay
+              ? "fixed inset-y-0 right-0 z-50 w-full max-w-sm rounded-l-xl"
+              : "w-80 shrink-0 rounded-r-xl"
+          }`}
+          style={{
+            border: "1px solid var(--border-glass)",
+            background: "rgb(var(--glass-solid-bg) / var(--glass-solid-alpha))",
+            backdropFilter: "blur(18px) saturate(130%)",
+            WebkitBackdropFilter: "blur(18px) saturate(130%)",
+            boxShadow: "var(--glass-shadow)",
+          }}
+        >
         <>
           {/* Contato — topo do rail direito, altura própria (não cresce).
               Nada aqui é buscado de novo: tudo já está em selectedLead. */}
@@ -2868,7 +2923,8 @@ export function MessagesLayout({
             </div>
           )}
         </>
-      </aside>
+        </aside>
+      </>
       )}
 
       {showLeadInfo && selectedLead && (
