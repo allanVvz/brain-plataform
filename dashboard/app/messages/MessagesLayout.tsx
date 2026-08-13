@@ -2768,6 +2768,8 @@ export function MessagesLayout({
                 placeholder={
                   selectedLead.ai_paused
                     ? "IA pausada — você está respondendo como operador. Enter envia, Shift+Enter quebra linha."
+                    : isPortal
+                    ? `Escreva para ${chatName}… Enter envia, Shift+Enter quebra linha.`
                     : "Responder como operador (envia ao agente + WhatsApp). Enter envia, Shift+Enter quebra linha."
                 }
                 rows={2}
@@ -2782,6 +2784,8 @@ export function MessagesLayout({
                     <span className="text-amber-300/80">IA pausada — só você responde até retomar.</span>
                   ) : selectedHandoffLevel === "partial" ? (
                     <span className="text-amber-300/80">IA ainda respondendo — sinalizado para atenção humana.</span>
+                  ) : isPortal ? (
+                    <span>A IA está ativa e pode responder antes de você.</span>
                   ) : (
                     <span>insere no banco · dispara webhook do agente</span>
                   )}
@@ -2925,9 +2929,9 @@ export function MessagesLayout({
                 ))}
               </div>
               <div className="mt-2.5 rounded-lg p-2.5" style={{ background: "rgb(var(--obs-text) / 0.03)" }}>
-                <p className="text-[11px] font-medium text-obs-subtle">Aguardando backend</p>
+                <p className="text-[11px] font-medium text-obs-subtle">Em breve</p>
                 <p className="mt-0.5 text-[10px] leading-relaxed text-obs-faint">
-                  A captura de mídia recebida ainda não existe no webhook do Evolution.
+                  Fotos, áudios e arquivos trocados nesta conversa vão aparecer aqui assim que estiverem disponíveis.
                 </p>
               </div>
             </div>
