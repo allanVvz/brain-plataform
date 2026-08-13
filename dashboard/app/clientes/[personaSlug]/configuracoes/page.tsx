@@ -91,7 +91,7 @@ export default function ClientSettingsPage() {
 
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-start gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-700">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-700">
             <Smartphone size={20} />
           </span>
           <div>
@@ -107,9 +107,9 @@ export default function ClientSettingsPage() {
         </div>
 
         {evolutionPending && (
-          <div className="mt-5 rounded-xl border border-violet-200 bg-violet-50/60 p-4">
+          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex items-start gap-3">
-              <QrCode className="mt-0.5 text-violet-700" size={20} />
+              <QrCode className="mt-0.5 text-slate-700" size={20} />
               <div>
                 <h3 className="text-sm font-semibold text-slate-900">Concluir conexão do WhatsApp</h3>
                 <p className="mt-1 text-xs leading-5 text-slate-600">
@@ -137,7 +137,7 @@ export default function ClientSettingsPage() {
                 type="button"
                 disabled={busy}
                 onClick={requestEvolutionQr}
-                className="mt-4 flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+                className="mt-4 flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
               >
                 <QrCode size={16} /> {busy ? "Atualizando..." : "Gerar ou atualizar QR Code"}
               </button>
@@ -195,7 +195,7 @@ export default function ClientSettingsPage() {
           </p>
           <button
             disabled={busy}
-            className="rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
           >
             Alterar senha
           </button>

@@ -71,7 +71,7 @@ export default function ClientLeadsPage() {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Buscar por nome, telefone, e-mail ou interesse"
-          className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm shadow-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+          className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
         />
       </label>
 
@@ -103,7 +103,7 @@ export default function ClientLeadsPage() {
                       <button
                         type="button"
                         onClick={() => setInfoLead(lead)}
-                        className="font-semibold text-slate-950 hover:text-violet-700"
+                        className="font-semibold text-slate-950 hover:text-slate-950"
                         title="Ver/editar informações do lead"
                       >
                         {lead.nome || lead.telefone || `Lead #${lead.id}`}
@@ -111,7 +111,7 @@ export default function ClientLeadsPage() {
                     ) : (
                       <Link
                         href={`/clientes/${personaSlug}/mensagens/${lead.id}`}
-                        className="font-semibold text-slate-950 hover:text-violet-700"
+                        className="font-semibold text-slate-950 hover:text-slate-950"
                       >
                         {lead.nome || lead.telefone || `Lead #${lead.id}`}
                       </Link>

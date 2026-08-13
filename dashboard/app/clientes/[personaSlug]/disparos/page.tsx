@@ -262,7 +262,7 @@ export default function ClientDisparosPage() {
             type="button"
             disabled={!capabilities.edit || busy || !name || !purpose || !audienceId || !selectedImports.length}
             onClick={runPreview}
-            className="flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            className="flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />} Avaliar elegibilidade
           </button>
@@ -281,7 +281,7 @@ export default function ClientDisparosPage() {
               type="button"
               disabled={!capabilities.edit || busy || !preview.counts.selected_unique || !reason.trim()}
               onClick={createDraft}
-              className="rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+              className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
             >
               Confirmar draft congelado
             </button>
@@ -303,7 +303,7 @@ export default function ClientDisparosPage() {
               {["draft", "validated", "running"].includes(row.status) && (
                 <button type="button" disabled={!capabilities.edit}
                   onClick={() => { setStatusAction({ campaign: row, action: "send" }); setStatusReason(""); }}
-                  className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
                   <Send size={12} /> Enviar
                 </button>
               )}
@@ -339,7 +339,7 @@ export default function ClientDisparosPage() {
                 <button type="button" disabled={busy || (statusAction.action !== "send" && !statusReason.trim())
                   || (statusAction.action === "send" && row.provider === "meta_cloud" && !statusReason.trim())}
                   onClick={confirmStatusChange}
-                  className="rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+                  className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
                   Confirmar
                 </button>
                 <button type="button" onClick={() => setStatusAction(null)}
