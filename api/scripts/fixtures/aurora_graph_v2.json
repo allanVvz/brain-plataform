@@ -760,11 +760,13 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
-          "polimento",
+          "polimento técnico",
+          "polimento do carro",
+          "polimento da carroceria",
           "polir carro",
           "correção de pintura"
         ],
-        "summary": "Polimento com lavagem detalhada, descontaminação da pintura, isolamento de partes sensíveis e polimento para ativar o brilho ou corrigir riscos.",
+        "summary": "Correção mais detalhada da pintura, feita após avaliação e medição do verniz. Remove ou reduz riscos, hologramas, manchas e marcas de lavagem.",
         "price_qualifier": "quote_only",
         "booking": {
           "capacity": 5,
@@ -797,7 +799,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Polimento para ativar o brilho ou corrigir riscos, conforme o estado da pintura."
+        "content": "Correção mais detalhada da pintura, feita após avaliação e medição do verniz. Remove ou reduz riscos, hologramas, manchas e marcas de lavagem."
       }
     },
     {
@@ -1110,7 +1112,7 @@
           "polir vidros",
           "vidros"
         ],
-        "summary": "Polimento de vidros.",
+        "summary": "Reduz manchas minerais, marcas de chuva ácida e pequenas imperfeições no vidro.",
         "price_qualifier": "quote_only",
         "booking": {
           "capacity": 5,
@@ -1143,7 +1145,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Polimento de vidros."
+        "content": "Reduz manchas minerais, marcas de chuva ácida e pequenas imperfeições no vidro."
       }
     },
     {
@@ -1156,7 +1158,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Vocês fazem polimento de vidros?",
-        "answer": "Fazemos, sim — o polimento de vidros faz parte dos serviços da Aurora.",
+        "answer": "Fazemos, sim — o polimento de vidros reduz manchas minerais, marcas de chuva ácida e pequenas imperfeições no vidro.",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -2045,9 +2047,15 @@
         "aplica_se_a": [
           "higienizacao-interna",
           "polimento-tecnico",
+          "polimento-comercial",
+          "polimento-uma-etapa",
+          "polimento-multiplas-etapas",
+          "polimento-localizado",
+          "polimento-acabamento",
           "vitrificacao",
           "ppf",
           "polimento-de-vidros",
+          "restauracao-de-farois",
           "chapeacao",
           "pintura"
         ],
@@ -2103,6 +2111,650 @@
           "condition": "information_unavailable",
           "text_key": "lacuna_conhecimento"
         }
+      }
+    },
+    {
+      "id": "aurora-product-polish-commercial",
+      "node_type": "product",
+      "slug": "polimento-comercial",
+      "label": "Polimento comercial",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "aliases": [
+          "polimento comercial",
+          "polimento rapido",
+          "polimento mais barato"
+        ],
+        "summary": "Processo rápido para recuperar o brilho e reduzir marcas leves. Tem preço mais acessível, mas não remove riscos profundos.",
+        "price_qualifier": "quote_only",
+        "booking": {
+          "capacity": 5,
+          "confirmation_required": true,
+          "provider": "manual",
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "objective",
+            "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
+            "condicao"
+          ]
+        },
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-lacunas"
+        }
+      }
+    },
+    {
+      "id": "aurora-copy-polish-commercial",
+      "node_type": "copy",
+      "slug": "copy-polimento-comercial",
+      "label": "Copy — Polimento comercial",
+      "parent_id": "aurora-product-polish-commercial",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "channel": "whatsapp",
+        "content": "Processo rápido para recuperar o brilho e reduzir marcas leves. Tem preço mais acessível, mas não remove riscos profundos."
+      }
+    },
+    {
+      "id": "aurora-faq-polish-commercial",
+      "node_type": "faq",
+      "slug": "faq-polimento-comercial",
+      "label": "Vocês fazem polimento comercial?",
+      "parent_id": "aurora-copy-polish-commercial",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Vocês fazem polimento comercial?",
+        "answer": "Fazemos, sim — o polimento comercial é um processo rápido para recuperar o brilho e reduzir marcas leves. Tem preço mais acessível, mas não remove riscos profundos.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish-commercial",
+          "aurora-copy-polish-commercial"
+        ],
+        "source_node_id": "aurora-product-polish-commercial",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-commercial"
+            ],
+            "source_node_id": "aurora-product-polish-commercial",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-commercial",
+              "aurora-copy-polish-commercial"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-product-polish-one-step",
+      "node_type": "product",
+      "slug": "polimento-uma-etapa",
+      "label": "Polimento de uma etapa",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "aliases": [
+          "polimento de uma etapa",
+          "polimento one step",
+          "one step"
+        ],
+        "summary": "Corte leve e acabamento realizados em uma única etapa. Indicado para pinturas com poucos defeitos.",
+        "price_qualifier": "quote_only",
+        "booking": {
+          "capacity": 5,
+          "confirmation_required": true,
+          "provider": "manual",
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "objective",
+            "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
+            "condicao"
+          ]
+        },
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-lacunas"
+        }
+      }
+    },
+    {
+      "id": "aurora-copy-polish-one-step",
+      "node_type": "copy",
+      "slug": "copy-polimento-uma-etapa",
+      "label": "Copy — Polimento de uma etapa",
+      "parent_id": "aurora-product-polish-one-step",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "channel": "whatsapp",
+        "content": "Corte leve e acabamento realizados em uma única etapa. Indicado para pinturas com poucos defeitos."
+      }
+    },
+    {
+      "id": "aurora-faq-polish-one-step",
+      "node_type": "faq",
+      "slug": "faq-polimento-uma-etapa",
+      "label": "Vocês fazem polimento de uma etapa (one step)?",
+      "parent_id": "aurora-copy-polish-one-step",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Vocês fazem polimento de uma etapa (one step)?",
+        "answer": "Fazemos, sim — o polimento de uma etapa: corte leve e acabamento realizados em uma única etapa. Indicado para pinturas com poucos defeitos.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish-one-step",
+          "aurora-copy-polish-one-step"
+        ],
+        "source_node_id": "aurora-product-polish-one-step",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-one-step"
+            ],
+            "source_node_id": "aurora-product-polish-one-step",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-one-step",
+              "aurora-copy-polish-one-step"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-product-polish-multi-step",
+      "node_type": "product",
+      "slug": "polimento-multiplas-etapas",
+      "label": "Polimento em múltiplas etapas",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "aliases": [
+          "polimento em multiplas etapas",
+          "polimento em etapas",
+          "polimento multietapas"
+        ],
+        "summary": "Utiliza etapas separadas de corte, refino e lustro. Indicado para pinturas mais danificadas ou quando se busca acabamento superior.",
+        "price_qualifier": "quote_only",
+        "booking": {
+          "capacity": 5,
+          "confirmation_required": true,
+          "provider": "manual",
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "objective",
+            "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
+            "condicao"
+          ]
+        },
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-lacunas"
+        }
+      }
+    },
+    {
+      "id": "aurora-copy-polish-multi-step",
+      "node_type": "copy",
+      "slug": "copy-polimento-multiplas-etapas",
+      "label": "Copy — Polimento em múltiplas etapas",
+      "parent_id": "aurora-product-polish-multi-step",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "channel": "whatsapp",
+        "content": "Utiliza etapas separadas de corte, refino e lustro. Indicado para pinturas mais danificadas ou quando se busca acabamento superior."
+      }
+    },
+    {
+      "id": "aurora-faq-polish-multi-step",
+      "node_type": "faq",
+      "slug": "faq-polimento-multiplas-etapas",
+      "label": "Vocês fazem polimento em múltiplas etapas?",
+      "parent_id": "aurora-copy-polish-multi-step",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Vocês fazem polimento em múltiplas etapas?",
+        "answer": "Fazemos, sim — o polimento em múltiplas etapas: utiliza etapas separadas de corte, refino e lustro. Indicado para pinturas mais danificadas ou quando se busca acabamento superior.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish-multi-step",
+          "aurora-copy-polish-multi-step"
+        ],
+        "source_node_id": "aurora-product-polish-multi-step",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-multi-step"
+            ],
+            "source_node_id": "aurora-product-polish-multi-step",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-multi-step",
+              "aurora-copy-polish-multi-step"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-product-polish-localized",
+      "node_type": "product",
+      "slug": "polimento-localizado",
+      "label": "Polimento localizado",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "aliases": [
+          "polimento localizado",
+          "polimento em uma peca",
+          "polimento numa area especifica"
+        ],
+        "summary": "Aplicado somente em uma peça ou região específica, como porta, capô ou área riscada.",
+        "price_qualifier": "quote_only",
+        "booking": {
+          "capacity": 5,
+          "confirmation_required": true,
+          "provider": "manual",
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "objective",
+            "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
+            "condicao"
+          ]
+        },
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-lacunas"
+        }
+      }
+    },
+    {
+      "id": "aurora-copy-polish-localized",
+      "node_type": "copy",
+      "slug": "copy-polimento-localizado",
+      "label": "Copy — Polimento localizado",
+      "parent_id": "aurora-product-polish-localized",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "channel": "whatsapp",
+        "content": "Aplicado somente em uma peça ou região específica, como porta, capô ou área riscada."
+      }
+    },
+    {
+      "id": "aurora-faq-polish-localized",
+      "node_type": "faq",
+      "slug": "faq-polimento-localizado",
+      "label": "Vocês fazem polimento localizado, só em uma peça?",
+      "parent_id": "aurora-copy-polish-localized",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Vocês fazem polimento localizado, só em uma peça?",
+        "answer": "Fazemos, sim — o polimento localizado: aplicado somente em uma peça ou região específica, como porta, capô ou área riscada.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish-localized",
+          "aurora-copy-polish-localized"
+        ],
+        "source_node_id": "aurora-product-polish-localized",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-localized"
+            ],
+            "source_node_id": "aurora-product-polish-localized",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-localized",
+              "aurora-copy-polish-localized"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-product-polish-finish",
+      "node_type": "product",
+      "slug": "polimento-acabamento",
+      "label": "Polimento de acabamento (lustro)",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "aliases": [
+          "polimento de acabamento",
+          "polimento de lustro",
+          "lustro do carro"
+        ],
+        "summary": "Melhora o brilho e remove pequenas marcas ou hologramas, com pouca ou nenhuma correção profunda.",
+        "price_qualifier": "quote_only",
+        "booking": {
+          "capacity": 5,
+          "confirmation_required": true,
+          "provider": "manual",
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "objective",
+            "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
+            "condicao"
+          ]
+        },
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-lacunas"
+        }
+      }
+    },
+    {
+      "id": "aurora-copy-polish-finish",
+      "node_type": "copy",
+      "slug": "copy-polimento-acabamento",
+      "label": "Copy — Polimento de acabamento (lustro)",
+      "parent_id": "aurora-product-polish-finish",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "channel": "whatsapp",
+        "content": "Melhora o brilho e remove pequenas marcas ou hologramas, com pouca ou nenhuma correção profunda."
+      }
+    },
+    {
+      "id": "aurora-faq-polish-finish",
+      "node_type": "faq",
+      "slug": "faq-polimento-acabamento",
+      "label": "Vocês fazem polimento de acabamento ou lustro?",
+      "parent_id": "aurora-copy-polish-finish",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Vocês fazem polimento de acabamento ou lustro?",
+        "answer": "Fazemos, sim — o polimento de acabamento: melhora o brilho e remove pequenas marcas ou hologramas, com pouca ou nenhuma correção profunda.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish-finish",
+          "aurora-copy-polish-finish"
+        ],
+        "source_node_id": "aurora-product-polish-finish",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-finish"
+            ],
+            "source_node_id": "aurora-product-polish-finish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-finish",
+              "aurora-copy-polish-finish"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-product-polish-headlight",
+      "node_type": "product",
+      "slug": "restauracao-de-farois",
+      "label": "Restauração de faróis",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "aliases": [
+          "restauracao de farois",
+          "restauracao e polimento de farois",
+          "polimento de farois",
+          "farois",
+          "farol",
+          "restaurar farol"
+        ],
+        "summary": "Recupera faróis amarelados ou opacos e normalmente recebe uma proteção UV depois.",
+        "price_qualifier": "quote_only",
+        "booking": {
+          "capacity": 5,
+          "confirmation_required": true,
+          "provider": "manual",
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "objective",
+            "can_visit_in_person",
+            "modelo_veiculo",
+            "vehicle_year",
+            "condicao"
+          ]
+        },
+        "requires_in_person_evaluation": true,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-lacunas"
+        }
+      }
+    },
+    {
+      "id": "aurora-copy-polish-headlight",
+      "node_type": "copy",
+      "slug": "copy-restauracao-de-farois",
+      "label": "Copy — Restauração de faróis",
+      "parent_id": "aurora-product-polish-headlight",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "channel": "whatsapp",
+        "content": "Recupera faróis amarelados ou opacos e normalmente recebe uma proteção UV depois."
+      }
+    },
+    {
+      "id": "aurora-faq-polish-headlight",
+      "node_type": "faq",
+      "slug": "faq-restauracao-de-farois",
+      "label": "Vocês fazem restauração de faróis?",
+      "parent_id": "aurora-copy-polish-headlight",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Vocês fazem restauração de faróis?",
+        "answer": "Fazemos, sim — a restauração de faróis: recupera faróis amarelados ou opacos e normalmente recebe uma proteção UV depois.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish-headlight",
+          "aurora-copy-polish-headlight"
+        ],
+        "source_node_id": "aurora-product-polish-headlight",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-headlight"
+            ],
+            "source_node_id": "aurora-product-polish-headlight",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-headlight",
+              "aurora-copy-polish-headlight"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-polimento-tipos",
+      "node_type": "faq",
+      "slug": "faq-tipos-de-polimento",
+      "label": "Quais tipos de polimento vocês oferecem?",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Quais tipos de polimento vocês oferecem?",
+        "answer": "Temos vários tipos de polimento: polimento técnico, polimento comercial, polimento de uma etapa, polimento em múltiplas etapas, polimento localizado, polimento de acabamento (lustro), polimento de vidros, restauração de faróis. Me conta o que está te incomodando no carro que eu te indico o mais indicado.",
+        "source_node_id": "aurora-services",
+        "source_node_type": "product_group",
+        "markdown_document": true,
+        "question_count": 1,
+        "scope": "product_group",
+        "grouped_faq": true,
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services"
+        ],
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polimento-tipos"
+            ],
+            "source_node_id": "aurora-services",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services"
+            ]
+          }
+        ]
       }
     }
   ],
@@ -2745,6 +3397,214 @@
       "target": "aurora-faq-remote",
       "relation": "answers_question",
       "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-commercial",
+      "source": "aurora-services",
+      "target": "aurora-product-polish-commercial",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-commercial-copy",
+      "source": "aurora-product-polish-commercial",
+      "target": "aurora-copy-polish-commercial",
+      "relation": "supports_copy",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-commercial-faq",
+      "source": "aurora-copy-polish-commercial",
+      "target": "aurora-faq-polish-commercial",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-commercial-embedded",
+      "source": "aurora-faq-polish-commercial",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-one-step",
+      "source": "aurora-services",
+      "target": "aurora-product-polish-one-step",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-one-step-copy",
+      "source": "aurora-product-polish-one-step",
+      "target": "aurora-copy-polish-one-step",
+      "relation": "supports_copy",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-one-step-faq",
+      "source": "aurora-copy-polish-one-step",
+      "target": "aurora-faq-polish-one-step",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-one-step-embedded",
+      "source": "aurora-faq-polish-one-step",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-multi-step",
+      "source": "aurora-services",
+      "target": "aurora-product-polish-multi-step",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-multi-step-copy",
+      "source": "aurora-product-polish-multi-step",
+      "target": "aurora-copy-polish-multi-step",
+      "relation": "supports_copy",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-multi-step-faq",
+      "source": "aurora-copy-polish-multi-step",
+      "target": "aurora-faq-polish-multi-step",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-multi-step-embedded",
+      "source": "aurora-faq-polish-multi-step",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-localized",
+      "source": "aurora-services",
+      "target": "aurora-product-polish-localized",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-localized-copy",
+      "source": "aurora-product-polish-localized",
+      "target": "aurora-copy-polish-localized",
+      "relation": "supports_copy",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-localized-faq",
+      "source": "aurora-copy-polish-localized",
+      "target": "aurora-faq-polish-localized",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-localized-embedded",
+      "source": "aurora-faq-polish-localized",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-finish",
+      "source": "aurora-services",
+      "target": "aurora-product-polish-finish",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-finish-copy",
+      "source": "aurora-product-polish-finish",
+      "target": "aurora-copy-polish-finish",
+      "relation": "supports_copy",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-finish-faq",
+      "source": "aurora-copy-polish-finish",
+      "target": "aurora-faq-polish-finish",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-finish-embedded",
+      "source": "aurora-faq-polish-finish",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-headlight",
+      "source": "aurora-services",
+      "target": "aurora-product-polish-headlight",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-headlight-copy",
+      "source": "aurora-product-polish-headlight",
+      "target": "aurora-copy-polish-headlight",
+      "relation": "supports_copy",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-copy-headlight-faq",
+      "source": "aurora-copy-polish-headlight",
+      "target": "aurora-faq-polish-headlight",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-headlight-embedded",
+      "source": "aurora-faq-polish-headlight",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-polimento-tipos-faq",
+      "source": "aurora-services",
+      "target": "aurora-faq-polimento-tipos",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-polimento-tipos-embedded",
+      "source": "aurora-faq-polimento-tipos",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
       "metadata": {}
     }
   ],

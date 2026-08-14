@@ -649,8 +649,45 @@ def _deterministic_branch_candidates(
                 "branch_evidence_span": matched[1],
                 "evidence_chunk_ids": [],
                 "deterministic_alias_match": True,
+                "match_length": len(matched[0]),
             })
-    return matches if len(matches) == 1 else []
+    if len(matches) <= 1:
+        return matches
+    # More than one anchor's title/slug/alias literally appears in the
+    # message -- this happens whenever a generic alias (e.g. "polimento")
+    # is a substring of a more specific one ("polimento de vidros"). Prefer
+    # the single strictly-more-specific (longer) match instead of discarding
+    # every candidate; only a genuine tie falls through to semantic search.
+    matches.sort(key=lambda item: item["match_length"], reverse=True)
+    if matches[0]["match_length"] > matches[1]["match_length"]:
+        return [matches[0]]
+    return []
+
+
+def _previously_mentioned_service_titles(
+    document: dict[str, Any], messages: list[dict[str, Any]],
+) -> list[str]:
+    """Service titles the agent already pitched earlier in this conversation.
+
+    Computed from the same recent-history window already loaded for every
+    turn (`messages`) -- no new persisted state. Used only to tell the model
+    what not to re-introduce as if it were new; it never blocks a reply.
+    """
+    node_by_id = document.get("node_by_id") or {}
+    agent_texts = [
+        _normalized_phrase(str(row.get("content") or row.get("texto") or row.get("text") or ""))
+        for row in messages if _is_agent_message(row)
+    ]
+    titles: list[str] = []
+    for anchor in document.get("branch_anchors") or []:
+        node = node_by_id.get(anchor) or {}
+        phrase = _normalized_phrase(node.get("title"))
+        if not phrase or len(phrase) < 3:
+            continue
+        padded = f" {phrase} "
+        if any(padded in f" {text} " for text in agent_texts):
+            titles.append(str(node.get("title")))
+    return titles
 
 
 def _apply_authoritative_branch_resolution(
@@ -1179,6 +1216,26 @@ def _is_greeting(message: str) -> bool:
     )
 
 
+def _is_agent_message(row: dict[str, Any]) -> bool:
+    return (
+        str(row.get("role") or "") == "assistant"
+        or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
+    )
+
+
+def _already_engaged(messages: list[dict[str, Any]]) -> bool:
+    """True once the agent has already replied at least once in this window.
+
+    A mid-conversation message that happens to start with "oi"/"olá" (very
+    natural in PT-BR -- "oi, e sobre os faróis?") must not re-trigger the
+    canned greeting. `messages` is the same recent-history window already
+    used by `_repeats_recent_outbound`/`_repeated_pending_question_is_allowed`,
+    so this adds no new state or persistence -- it only asks a question that
+    window can already answer: has the agent said anything here before?
+    """
+    return any(_is_agent_message(row) for row in messages)
+
+
 def _persona_node(document: dict[str, Any]) -> dict[str, Any]:
     return next(
         (node for node in document.get("nodes") or [] if node.get("node_type") == "persona"),
@@ -1324,12 +1381,13 @@ def build_context(
         [] if pending_field_answer
         else _deterministic_branch_candidates(document, message)
     )
+    greeting_eligible = _is_greeting(message) and not _already_engaged(messages)
     greeting_prefix = _greeting_policy(
         document, contract=active_contract, facts=ledger.get("facts") or {},
-    ) if _is_greeting(message) else None
+    ) if greeting_eligible else None
     greeting = _greeting_policy(
         document, contract=active_contract, facts=ledger.get("facts") or {},
-    ) if _is_greeting(message) and not deterministic_candidates else None
+    ) if greeting_eligible and not deterministic_candidates else None
     if greeting:
         persona_node = _persona_node(document)
         reply = "\n\n".join(
@@ -1560,6 +1618,16 @@ def build_context(
         "explicitamente os dados relevantes já conhecidos antes de "
         "prosseguir."
     )
+    already_mentioned_services = _previously_mentioned_service_titles(document, messages)
+    if already_mentioned_services:
+        prompt += (
+            "\n\nServiços que você já apresentou nesta conversa: "
+            + ", ".join(already_mentioned_services)
+            + ". Não reapresente a descrição desses serviços como se fosse "
+            "novidade de novo -- responda só o que for perguntado sobre "
+            "eles, ou siga para o próximo passo, sem repetir a explicação "
+            "inteira."
+        )
     return ConversationContext(
         persona_slug=persona_slug, agent_slug=str((persona.get("config") or {}).get("agent_slug") or "agent"),
         graph_version=int(publication["version"]), graph_checksum=publication["checksum"],

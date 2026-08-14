@@ -353,7 +353,7 @@ def test_list_services_records_every_product_and_faq_as_graph_evidence(monkeypat
     assert sum(
         node.node_type == "product" and node.id in decision.evidence_node_ids
         for node in graph.nodes
-    ) == 9
+    ) == 15
     assert "Serviços da Aurora:" in (response.reply_text or "")
 
 
@@ -482,14 +482,14 @@ def test_build_context_wires_golden_dataset_rag_chunks(monkeypatch):
     _mock_build_context_deps(monkeypatch, rag_chunks_impl=fake_search)
 
     context = conversation_runtime.build_context(
-        persona_slug="aurora", lead_ref=23, message="Quanto custa o polimento?",
+        persona_slug="aurora", lead_ref=23, message="Quanto custa o polimento técnico?",
     )
 
     assert context.rag_chunks == [
         {"rag_entry_id": "e1", "chunk_text": "Polimento leva 4 horas.", "source": "golden_dataset"}
     ]
     assert calls[0]["persona_id"] == "aurora-id"
-    assert calls[0]["query"] == "Quanto custa o polimento?"
+    assert calls[0]["query"] == "Quanto custa o polimento técnico?"
     assert calls[0]["branch_anchor_node_id"] == "aurora-product-polish"
     assert "aurora-product-polish" in calls[0]["allowed_node_ids"]
     assert "aurora-product-interior" not in calls[0]["allowed_node_ids"]

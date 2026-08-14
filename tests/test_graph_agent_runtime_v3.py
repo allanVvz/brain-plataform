@@ -1117,6 +1117,91 @@ def test_ambiguous_alias_never_selects_a_branch_deterministically():
     assert graph_agent_runtime_v3._deterministic_branch_candidates(document, "alpha") == []
 
 
+def test_ambiguous_alias_resolves_to_the_strictly_more_specific_match():
+    """A generic alias colliding with a more specific one must not discard
+    both candidates -- it should prefer the longer, more specific match
+    instead of falling through to semantic search. Mirrors the real-world
+    collision between "polimento" (generic) and "polimento de vidros"
+    (specific) that made every glass-polish mention unresolvable."""
+    document = {
+        "branch_anchors": ["branch:polish", "branch:glass"],
+        "node_by_id": {
+            "branch:polish": {"title": "Polimento técnico", "slug": "polimento-tecnico", "data": {"aliases": ["polimento tecnico"]}},
+            "branch:glass": {"title": "Polimento de vidros", "slug": "polimento-de-vidros", "data": {"aliases": ["polimento de vidros"]}},
+        },
+        "coordinates": {
+            "branch:polish": {"path_checksum": "checksum:polish"},
+            "branch:glass": {"path_checksum": "checksum:glass"},
+        },
+    }
+    # Simulate the pre-fix alias shape (bare "polimento" alias on the
+    # technical-polish node) to prove the tie-break -- not the alias data
+    # fix -- is what resolves the collision.
+    document["node_by_id"]["branch:polish"]["data"]["aliases"] = ["polimento"]
+
+    matches = graph_agent_runtime_v3._deterministic_branch_candidates(
+        document, "vocês fazem polimento de vidros?",
+    )
+
+    assert [row["branch_anchor_node_id"] for row in matches] == ["branch:glass"]
+
+
+def test_already_engaged_is_false_before_any_agent_reply():
+    assert graph_agent_runtime_v3._already_engaged([
+        {"role": "user", "texto": "oi"},
+    ]) is False
+
+
+def test_already_engaged_is_true_once_the_agent_has_replied():
+    assert graph_agent_runtime_v3._already_engaged([
+        {"role": "user", "texto": "oi"},
+        {"role": "assistant", "texto": "Olá! Que bom falar com você."},
+        {"role": "user", "texto": "oi, tudo bem?"},
+    ]) is True
+
+
+def test_already_engaged_recognizes_sender_type_rows_without_a_role():
+    assert graph_agent_runtime_v3._already_engaged([
+        {"sender_type": "lead", "texto": "oi"},
+        {"sender_type": "agent", "texto": "Olá!"},
+    ]) is True
+
+
+def test_previously_mentioned_service_titles_is_empty_before_any_pitch():
+    document = {
+        "branch_anchors": ["branch:a"],
+        "node_by_id": {"branch:a": {"title": "Polimento de vidros"}},
+    }
+    messages = [{"role": "user", "texto": "vocês fazem polimento de vidros?"}]
+    assert graph_agent_runtime_v3._previously_mentioned_service_titles(document, messages) == []
+
+
+def test_previously_mentioned_service_titles_flags_a_service_the_agent_already_pitched():
+    document = {
+        "branch_anchors": ["branch:a", "branch:b"],
+        "node_by_id": {
+            "branch:a": {"title": "Polimento de vidros"},
+            "branch:b": {"title": "Restauração de faróis"},
+        },
+    }
+    messages = [
+        {"role": "user", "texto": "vocês fazem polimento de vidros?"},
+        {"role": "assistant", "texto": "Fazemos, sim -- o polimento de vidros reduz manchas minerais."},
+    ]
+    assert graph_agent_runtime_v3._previously_mentioned_service_titles(document, messages) == [
+        "Polimento de vidros"
+    ]
+
+
+def test_previously_mentioned_service_titles_ignores_the_customers_own_message():
+    document = {
+        "branch_anchors": ["branch:a"],
+        "node_by_id": {"branch:a": {"title": "Polimento de vidros"}},
+    }
+    messages = [{"role": "user", "texto": "vocês fazem polimento de vidros?"}]
+    assert graph_agent_runtime_v3._previously_mentioned_service_titles(document, messages) == []
+
+
 def test_recent_messages_and_chunks_are_projected_to_minimum_prompt_contract():
     messages = graph_agent_runtime_v3._project_recent_messages([
         {

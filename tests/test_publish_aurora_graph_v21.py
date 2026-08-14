@@ -47,8 +47,8 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
 
     assert valid, errors
     assert graph.schema_version == "2.1"
-    assert len(graph.nodes) == 68
-    assert len(graph.edges) == 130
+    assert len(graph.nodes) == 87
+    assert len(graph.edges) == 168
 
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
     assert embedded.action is not None
@@ -61,7 +61,7 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
         and edge.relation_type == "publishes_to"
         and edge.lifecycle.status == "active"
     ]
-    assert len(grants) == 65
+    assert len(grants) == 84
     assert {edge.source for edge in grants} == {
         node.id
         for node in graph.nodes
@@ -70,6 +70,38 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
         and node.lifecycle.status == "approved"
     }
     assert len({edge.id for edge in graph.edges}) == len(graph.edges)
+
+
+def test_full_qualification_walk_never_asks_the_same_published_question_twice() -> None:
+    """Offline equivalent of a WA Validator "sdr_qualificacao_carro" run:
+    walks every published branch's full field list (the same order
+    build_context()/decide() ask them in) and asserts no two fields resolve
+    to the same question_node_id -- the one thing that would make the agent
+    ask an identical published question twice in a row across a complete
+    qualification, independent of what the model itself does. Runs against
+    every branch produced by the real fixture (all 13 polimento variants
+    included), not a synthetic one.
+    """
+    document = _compile(graph_markdown.canonicalize_graph(build_graph()))
+    branch_anchors = document["branch_anchors"]
+    assert len(branch_anchors) >= 13  # sanity: the polimento family is really there
+
+    for anchor in branch_anchors:
+        contract = document["branch_contracts"][anchor]
+        fields = contract.get("fields") or []
+        assert fields, f"branch {anchor} published with no qualification fields"
+        seen: dict[str, str] = {}
+        for field in fields:
+            qid = str(field.get("question_node_id") or "")
+            key = str(field.get("key") or "")
+            assert qid, f"branch {anchor} field {key} has no question_node_id"
+            if qid in seen:
+                assert seen[qid] == key, (
+                    f"branch {anchor}: fields '{seen[qid]}' and '{key}' both "
+                    f"resolve to question_node_id={qid} -- the agent would "
+                    "ask the same published question twice"
+                )
+            seen[qid] = key
 
 
 def test_shared_qualification_fields_share_one_owner_across_products() -> None:
