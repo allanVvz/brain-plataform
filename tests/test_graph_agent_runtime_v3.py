@@ -1028,6 +1028,44 @@ def test_deterministic_additive_service_keeps_existing_branch_and_appends_new_on
     assert resolved.extracted_facts[0].owner_node_id == "branch:b"
 
 
+def test_system_prompt_explains_when_to_select_vs_keep():
+    """Regression test for the "keep sem branch ativa" loop (2026-08-14).
+
+    Confirmed live: the model proposed branch_action="keep" instead of
+    "select" on the very turn that should have established the first
+    branch, with an otherwise-perfect proposal (right branch, right
+    extracted fact, natural reply). graph_proof_checker_v3.check() rejects
+    "keep" without an active branch unconditionally, with no recovery path
+    when there was real evidence -- the whole good proposal gets discarded
+    and the turn falls back to the raw published question, repeating
+    forever. Root cause: the prompt never explained the branch_action verbs
+    in natural language, only the bare JSON Schema enum. This asserts the
+    explanation exists and actually distinguishes "select" (first branch,
+    no active branch yet) from "keep" (already-established branch only).
+    """
+    prompt = graph_agent_runtime_v3.SYSTEM_PROMPT
+    assert "branch_action" in prompt
+    for verb in ('"select"', '"keep"', '"switch"', '"add"'):
+        assert verb in prompt
+    assert "active_branch_node_id vazio" in prompt
+    assert "Nunca proponha \"keep\" nesse momento" in prompt
+
+
+def test_system_prompt_still_has_anti_repetition_instruction():
+    """Regression guard for the SYSTEM_PROMPT extraction (2026-08-14).
+
+    build_context() used to build this text inline as a local `prompt`
+    variable; it was extracted into a module-level constant so it's
+    testable without mocking the whole context-building call chain. This
+    confirms the extraction didn't drop or corrupt the pre-existing
+    anti-repetition instruction.
+    """
+    prompt = graph_agent_runtime_v3.SYSTEM_PROMPT
+    assert "nunca repita a pergunta ou frase do turno anterior" in prompt
+    assert "handoff_requested só pode ser true" in prompt
+    assert "fatos_conhecidos lista tudo" in prompt
+
+
 def test_contract_fact_scope_does_not_compare_service_from_another_owner():
     contract = {"fields": [
         {"key": "servico", "owner_node_id": "branch:paint"},
