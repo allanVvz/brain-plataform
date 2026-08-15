@@ -2,7 +2,7 @@
 
 Contract-ID: `graph-agent-runtime-v3`
 
-Compiler: `graph-compiler-v3.2.1`
+Compiler: `graph-compiler-v3.3.0`
 
 Este Markdown faz parte da proveniência de cada publicação. O compilador grava
 seu caminho e checksum no Graph JSON; qualquer alteração deliberada neste
@@ -36,6 +36,11 @@ quando declara `capabilities.branch_anchor=true`.
 
 ## Turno conversacional
 
+Antes do turno, `embed` e `embedded` compilam para o mesmo tipo protegido e a
+subarvore de um node `global_context` integra todas as memberships de branch.
+Publicacoes com `faq_projection_contract=v1` so ativam quando cada FAQ factual
+elegivel possui membership, entry e chunk canonico `faq` com pergunta e resposta.
+
 ```text
 inbound canônico
 → resolução semântica de branch
@@ -58,6 +63,11 @@ de branch. Mudanças de publicação invalidam fatos incompatíveis antes do
 próximo commit.
 
 ## Identidade e auditoria
+
+Em mensagens compostas, a clausula interrogativa e ranqueada separadamente.
+Pergunta ou alias normalizado exato vence; selecao semantica exige score minimo
+de `0.18` e margem de `0.03`. A resposta canonica do FAQ precede exatamente a
+primeira pergunta pendente e seu chunk reservado nao participa do MMR.
 
 `canonical_inbound_id` é único em `conversation_turn_proofs`. Fatos preservam
 mensagem, evidence span, confiança, revisão e supersessão. O binding define

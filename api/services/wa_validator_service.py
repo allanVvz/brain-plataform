@@ -1124,11 +1124,17 @@ def store_validation_media(
     if message.get("id") and not asset.get("message_id"):
         asset = supabase_client.update_asset(asset_id, {"message_id": message["id"]}) or asset
 
+    graph_attachment: dict[str, Any]
     try:
         from services import conversation_graph
-        conversation_graph.attach_inbound_asset(asset_id)
+        graph_attachment = conversation_graph.attach_inbound_asset(asset_id)
     except Exception as exc:
         logger.warning("validator media graph attach skipped asset=%s: %s", asset_id, exc)
+        graph_attachment = {
+            "attached": False,
+            "status": "error",
+            "reason": type(exc).__name__,
+        }
 
     return {
         "session_id": session_id,
@@ -1143,6 +1149,7 @@ def store_validation_media(
             "media_url": f"/assets/{asset_id}/media",
         },
         "message": message,
+        "graph_attachment": graph_attachment,
         "idempotent": bool(existing_rows),
         "outbound_enqueued": False,
     }

@@ -154,6 +154,69 @@ def test_semantic_chunks_index_executable_contract_data():
     assert {"claims", "rule", "validators"}.issubset(kinds)
 
 
+def test_compiler_projects_global_faq_subtree_to_every_branch_and_normalizes_embed():
+    root = node(1, "persona:generic", parent_type="persona")
+    branch_a = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    branch_b = node(3, "branch:b", data={"capabilities": {"branch_anchor": True}})
+    global_root = node(4, "context:global", data={"capabilities": {"global_context": True}})
+    faq = node(5, "faq:payment", parent_type="faq", data={
+        "question": "Quais são as formas de pagamento?",
+        "answer": "Aceitamos as formas publicadas pela empresa.",
+        "aliases": ["Como posso pagar?"],
+        "claims": [{
+            "claim_type": "other", "policy": {"mode": "informational"},
+            "evidence_node_ids": ["faq:payment"],
+        }],
+    })
+    embed = node(6, "embed:generic", parent_type="embed")
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=[root, branch_a, branch_b, global_root, faq, embed],
+        edge_rows=[
+            edge(1, root, branch_a), edge(2, root, branch_b),
+            edge(3, root, global_root), edge(4, global_root, faq),
+            edge(5, faq, embed, relation="publishes_to"),
+        ],
+    )
+
+    assert document["node_by_id"]["embed:generic"]["node_type"] == "embedded"
+    assert document["faq_projection_contract"] == "v1"
+    assert document["eligible_faq_node_ids"] == ["faq:payment"]
+    for branch in ("branch:a", "branch:b"):
+        assert document["branch_memberships"][branch]["faq:payment"]["inclusion_reason"] == "global_context_descendant"
+        assert document["branch_contracts"][branch]["eligible_faq_node_ids"] == ["faq:payment"]
+    faq_chunk = next(
+        chunk for chunk in graph_compiler_v3.semantic_chunks(document["node_by_id"]["faq:payment"])
+        if chunk["kind"] == "faq"
+    )
+    assert "Pergunta: Quais são as formas de pagamento?" in faq_chunk["text"]
+    assert "Resposta: Aceitamos as formas publicadas pela empresa." in faq_chunk["text"]
+
+
+def test_compound_message_faq_selection_prefers_exact_question_and_defers_ambiguity():
+    clause = graph_agent_runtime_v3._interrogative_clause(
+        "Quero continuar com o veículo… Onde o PPF é aplicado?"
+    )
+    assert clause == "Onde o PPF é aplicado?"
+    exact, method, _trace = graph_agent_runtime_v3._select_faq_candidate(clause, [{
+        "faq_node_id": "faq:ppf", "chunk_id": "chunk:ppf",
+        "question": "Onde o PPF é aplicado?", "aliases": [],
+        "semantic_score": 0.19,
+    }])
+    assert exact and exact["faq_node_id"] == "faq:ppf"
+    assert method == "exact_normalized"
+
+    selected, method, _trace = graph_agent_runtime_v3._select_faq_candidate(
+        "Onde é aplicado?",
+        [
+            {"faq_node_id": "faq:a", "chunk_id": "a", "question": "A?", "semantic_score": 0.31},
+            {"faq_node_id": "faq:b", "chunk_id": "b", "question": "B?", "semantic_score": 0.29},
+        ],
+    )
+    assert selected is None
+    assert method == "semantic_ambiguous_margin"
+
+
 def test_compiler_rejects_primary_ambiguity_and_dependency_cycle():
     root = node(1, "root")
     other = node(2, "other")
@@ -2179,14 +2242,19 @@ def test_doubt_resolution_uses_only_self_authorized_faq_in_active_package():
         messages=[{"role": "user", "content": "O que inclui?", "message_id": "msg-doubt"}],
         cart={}, rag_nodes=[faq], rag_paths=[], graph_contract={},
         active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        retrieval_trace={
+            "faq_selection_method": "exact_normalized",
+            "interrogative_clause": "O que inclui?",
+            "selected_faq_node_id": "faq:detail",
+            "selected_faq_chunk_id": "chunk:detail",
+            "faq_candidates": [{"faq_node_id": "faq:detail", "exact": True}],
+        },
     )
     proposed = ConversationProposal(
         branch_action="keep", branch_anchor_node_id="branch:a",
         branch_path_checksum="sha256:path", extracted_facts=[],
-        claims=[{"claim_type": "other", "value": {},
-                 "evidence_node_ids": ["faq:detail"], "evidence_chunk_ids": ["chunk:detail"]}],
-        next_question_node_id="q:name", cited_node_ids=["faq:detail"],
-        cited_chunk_ids=["chunk:detail"], reply="Texto do modelo.",
+        claims=[], next_question_node_id="q:name", cited_node_ids=[],
+        cited_chunk_ids=[], reply="Texto do modelo.",
         qualification_complete=False, handoff_requested=False,
     )
 
@@ -2201,6 +2269,7 @@ def test_doubt_resolution_uses_only_self_authorized_faq_in_active_package():
     assert resolution["text"] == "Inclui a etapa aprovada."
     assert resolution["faq_node_id"] == "faq:detail"
     assert resolution["doubt_chunk_ids"] == ["chunk:detail"]
+    assert resolution["faq_selection_method"] == "exact_normalized"
 
 
 def test_doubt_resolution_defers_from_graph_when_no_authorized_faq_exists():

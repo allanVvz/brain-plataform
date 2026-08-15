@@ -18,7 +18,7 @@ def _compile(graph) -> dict:
     shape and compile it, mirroring how graph_compiler_v3.compile_graph is
     actually fed in production (knowledge_nodes/knowledge_edges rows, not
     GraphJson objects directly)."""
-    knowledge_ids = {node.id for node in graph.nodes if node.node_class == "knowledge"}
+    knowledge_ids = {node.id for node in graph.nodes}
     node_rows = [{
         "id": node.id,
         "node_type": node.node_type,
@@ -28,7 +28,7 @@ def _compile(graph) -> dict:
         "tags": [],
         "status": node.lifecycle.status,
         "metadata": {"graph_json_node_id": node.id, **(node.data or {})},
-    } for node in graph.nodes if node.node_class == "knowledge"]
+    } for node in graph.nodes]
     edge_rows = [{
         "id": edge.id,
         "source_node_id": edge.source,
@@ -102,6 +102,21 @@ def test_full_qualification_walk_never_asks_the_same_published_question_twice() 
                     "ask the same published question twice"
                 )
             seen[qid] = key
+
+
+def test_all_aurora_factual_faqs_receive_v33_projection_membership() -> None:
+    graph = graph_markdown.canonicalize_graph(build_graph())
+    document = _compile(graph)
+
+    assert document["compiler_version"] == "graph-compiler-v3.3.0"
+    assert document["faq_projection_contract"] == "v1"
+    assert len(document["eligible_faq_node_ids"]) == 30
+    # Thirteen portfolio/global FAQs are available in every branch; a branch
+    # may additionally own service-specific FAQs.
+    assert all(
+        len(contract["eligible_faq_node_ids"]) >= 13
+        for contract in document["branch_contracts"].values()
+    )
 
 
 def test_shared_qualification_fields_share_one_owner_across_products() -> None:

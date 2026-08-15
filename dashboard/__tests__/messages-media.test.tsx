@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { MessageBubble, ConversationMediaRail } from "@/app/messages/MessagesLayout";
@@ -61,6 +61,43 @@ describe("message media", () => {
     const img = container.querySelector("img");
     expect(img).toBeInTheDocument();
     expect(img?.getAttribute("src")).toContain("/assets/asset-2/media");
+  });
+
+  it("exposes the private file link only after the image decodes", () => {
+    const { container } = render(
+      <MessageBubble
+        msg={message({
+          metadata: { asset_id: "asset-decoded", media: { kind: "image", filename: "foto.png" } },
+        })}
+        lead={null}
+      />,
+    );
+    const img = container.querySelector("img") as HTMLImageElement;
+    expect(screen.getByLabelText("Carregando imagem")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Abrir foto.png" })).not.toBeInTheDocument();
+    Object.defineProperty(img, "complete", { configurable: true, value: true });
+    Object.defineProperty(img, "naturalWidth", { configurable: true, value: 32 });
+    fireEvent.load(img);
+    expect(screen.getByRole("link", { name: "Abrir foto.png" })).toBeInTheDocument();
+  });
+
+  it("retries once with a cache buster and then offers a manual retry", () => {
+    const { container } = render(
+      <MessageBubble
+        msg={message({
+          metadata: { asset_id: "asset-retry", media: { kind: "image", filename: "falha.png" } },
+        })}
+        lead={null}
+      />,
+    );
+    let img = container.querySelector("img") as HTMLImageElement;
+    fireEvent.error(img);
+    img = container.querySelector("img") as HTMLImageElement;
+    expect(img.src).toContain("_media_retry=1");
+    fireEvent.error(img);
+    expect(screen.getByText(/Nao foi possivel decodificar/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Tentar novamente" }));
+    expect((container.querySelector("img") as HTMLImageElement).src).toContain("_media_retry=2");
   });
 
   it("marks an attachment as still downloading before its bytes land", () => {

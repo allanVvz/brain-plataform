@@ -37,6 +37,12 @@ def build_graph() -> GraphJson:
     appointment_policy = (persona_node.data or {}).get("appointment_policy") or {}
     question_ids = appointment_policy.get("field_question_node_ids") or {}
     conditional_fields = appointment_policy.get("conditional_fields") or {}
+    node_by_id = {node.id: node for node in graph.nodes}
+    primary_parent_id = {
+        edge.target: edge.source
+        for edge in graph.edges
+        if edge.relation_type == "contains" and edge.lifecycle.status == "active"
+    }
 
     def value_schema(field_key: str) -> dict:
         # Schema belongs to the published Aurora graph; the runtime never knows
@@ -53,6 +59,7 @@ def build_graph() -> GraphJson:
     for node in graph.nodes:
         data = dict(node.data or {})
         capabilities = dict(data.get("capabilities") or {})
+        parent_node = node_by_id.get(primary_parent_id.get(node.id))
         if node.node_type == "product":
             capabilities["branch_anchor"] = True
             booking = data.get("booking") if isinstance(data.get("booking"), dict) else {}
@@ -183,6 +190,15 @@ def build_graph() -> GraphJson:
                 "text", appointment_policy.get("texts", {}).get(text_key)
             )
             data["handoff_rule"] = handoff_rule
+        elif (
+            node.node_type == "faq"
+            and parent_node is not None
+            and parent_node.node_type == "product_group"
+            and data.get("role") != "qualification_question"
+        ):
+            # FAQs authored directly under the catalog/service group describe
+            # the portfolio as a whole, not one product branch.
+            capabilities["global_context"] = True
         elif node.node_type in {"tone"}:
             capabilities["global_context"] = True
         if capabilities:

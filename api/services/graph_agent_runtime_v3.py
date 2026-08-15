@@ -29,6 +29,8 @@ logger = logging.getLogger("graph_agent_runtime_v3")
 
 RUNTIME_VERSION = "graph_agent_runtime_v3"
 MAX_PENDING_QUESTION_ATTEMPTS = 1
+FAQ_SEMANTIC_MIN_SCORE = 0.18
+FAQ_SEMANTIC_MIN_MARGIN = 0.03
 
 
 def _normalize_servico_owner(
@@ -518,6 +520,88 @@ def _normalized_phrase(value: Any) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
 
 
+def _interrogative_clause(message: str) -> str:
+    """Isolate the customer's doubt from a compound qualification answer."""
+    raw = str(message or "").strip()
+    if not raw:
+        return ""
+    clauses = [
+        part.strip(" \t\r\n,;:-")
+        for part in re.split(r"(?<=[.!?…])\s+|[\r\n]+", raw)
+        if part.strip(" \t\r\n,;:-")
+    ]
+    questions = [part for part in clauses if _looks_like_customer_question(part)]
+    if questions:
+        return questions[-1]
+    normalized = _normalized_phrase(raw)
+    prefixes = (
+        "como ", "quando ", "onde ", "qual ", "quais ", "quanto ",
+        "por que ", "porque ", "posso ", "podem ", "poderia ",
+        "voces ", "tem como ", "gostaria de saber ", "queria saber ",
+        "sera que ",
+    )
+    positions = [normalized.rfind(prefix) for prefix in prefixes]
+    start = max(positions, default=-1)
+    if start > 0:
+        # Use the original suffix only as a best-effort fallback; normalized
+        # text is reserved for comparison and is never shown to the customer.
+        words_before = len(normalized[:start].split())
+        return " ".join(raw.split()[words_before:]).strip()
+    return raw if _looks_like_customer_question(raw) else ""
+
+
+def _select_faq_candidate(
+    interrogative_clause: str, rows: list[dict[str, Any]]
+) -> tuple[dict[str, Any] | None, str, list[dict[str, Any]]]:
+    """Select an exact FAQ or a safely separated semantic winner."""
+    normalized_query = _normalized_phrase(interrogative_clause)
+    candidates: list[dict[str, Any]] = []
+    exact_by_node: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        aliases = row.get("aliases") or []
+        if isinstance(aliases, str):
+            try:
+                aliases = json.loads(aliases)
+            except (TypeError, ValueError):
+                aliases = []
+        phrases = [row.get("question"), *(aliases if isinstance(aliases, list) else [])]
+        exact = bool(normalized_query) and normalized_query in {
+            _normalized_phrase(value) for value in phrases if value
+        }
+        candidate = {
+            "faq_node_id": str(row.get("faq_node_id") or row.get("source_node_id") or ""),
+            "chunk_id": str(row.get("chunk_id") or row.get("id") or ""),
+            "question": str(row.get("question") or ""),
+            "semantic_score": round(float(row.get("semantic_score") or 0), 6),
+            "lexical_score": round(float(row.get("lexical_score") or 0), 6),
+            "exact": exact,
+        }
+        candidates.append(candidate)
+        if exact and candidate["faq_node_id"]:
+            exact_by_node[candidate["faq_node_id"]] = row
+    if len(exact_by_node) == 1:
+        return next(iter(exact_by_node.values())), "exact_normalized", candidates
+    if len(exact_by_node) > 1:
+        return None, "ambiguous_exact", candidates
+
+    ranked = sorted(
+        rows,
+        key=lambda row: (
+            -float(row.get("semantic_score") or 0),
+            str(row.get("faq_node_id") or row.get("source_node_id") or ""),
+        ),
+    )
+    if not ranked:
+        return None, "no_candidates", candidates
+    top = float(ranked[0].get("semantic_score") or 0)
+    second = float(ranked[1].get("semantic_score") or 0) if len(ranked) > 1 else 0.0
+    if top < FAQ_SEMANTIC_MIN_SCORE:
+        return None, "semantic_below_threshold", candidates
+    if top - second < FAQ_SEMANTIC_MIN_MARGIN:
+        return None, "semantic_ambiguous_margin", candidates
+    return ranked[0], "semantic_margin", candidates
+
+
 _ADDITIVE_SERVICE_MARKER = re.compile(
     r"\b(?:tamb[eé]m|al[eé]m(?:\s+de)?|junto(?:s|\s+com)?|adiciona(?:r|ndo)?|"
     r"incluir|inclui(?:r|ndo)?|mais\s+um|also|too)\b",
@@ -855,10 +939,19 @@ def _doubt_resolution(
 ) -> dict[str, Any] | None:
     message = _latest_user_message(context)
     closure = set(contract.get("closure_node_ids") or [])
-    cited = [*proposal.cited_node_ids]
-    cited.extend(
-        chunk_sources.get(chunk_id, "") for chunk_id in proposal.cited_chunk_ids
+    selected_faq_node_id = str(
+        context.retrieval_trace.get("selected_faq_node_id") or ""
     )
+    selected_faq_chunk_id = str(
+        context.retrieval_trace.get("selected_faq_chunk_id") or ""
+    )
+    deterministic_faq_trace = "faq_selection_method" in context.retrieval_trace
+    cited = [selected_faq_node_id] if selected_faq_node_id else []
+    if not deterministic_faq_trace:
+        cited.extend(proposal.cited_node_ids)
+        cited.extend(
+            chunk_sources.get(chunk_id, "") for chunk_id in proposal.cited_chunk_ids
+        )
     factual_faqs: list[dict[str, Any]] = []
     for node_id in dict.fromkeys(value for value in cited if value):
         node = (document.get("node_by_id") or {}).get(node_id) or {}
@@ -881,7 +974,8 @@ def _doubt_resolution(
         ):
             factual_faqs.append(node)
     detected = bool(
-        _looks_like_customer_question(message)
+        context.retrieval_trace.get("interrogative_clause")
+        or _looks_like_customer_question(message)
         or proposal.claims
         or factual_faqs
     )
@@ -896,10 +990,17 @@ def _doubt_resolution(
         faq = factual_faqs[0]
         answer = _factual_answer_only((faq.get("data") or {}).get("answer"))
         if answer:
-            used_chunks = [
-                chunk_id for chunk_id, source_id in chunk_sources.items()
-                if source_id == faq.get("id")
-            ]
+            used_chunks = (
+                [selected_faq_chunk_id] if selected_faq_chunk_id
+                else [
+                    chunk_id for chunk_id, source_id in chunk_sources.items()
+                    if source_id == faq.get("id")
+                ]
+            )
+            if not used_chunks or any(
+                chunk_sources.get(chunk_id) != faq.get("id") for chunk_id in used_chunks
+            ):
+                raise RuntimeError("selected FAQ evidence is outside the proof package")
             return {
                 "customer_doubt_detected": True,
                 "doubt_resolution": "answered",
@@ -907,6 +1008,9 @@ def _doubt_resolution(
                 "faq_node_id": faq.get("id"),
                 "doubt_node_ids": [faq.get("id")],
                 "doubt_chunk_ids": used_chunks,
+                "interrogative_clause": context.retrieval_trace.get("interrogative_clause"),
+                "faq_candidates": context.retrieval_trace.get("faq_candidates") or [],
+                "faq_selection_method": context.retrieval_trace.get("faq_selection_method"),
             }
     deferred = str(doubt_policy.get("deferred_response") or "").strip()
     if not deferred:
@@ -918,6 +1022,10 @@ def _doubt_resolution(
         "faq_node_id": None,
         "doubt_node_ids": [],
         "doubt_chunk_ids": [],
+        "interrogative_clause": context.retrieval_trace.get("interrogative_clause"),
+        "faq_candidates": context.retrieval_trace.get("faq_candidates") or [],
+        "faq_selection_method": context.retrieval_trace.get("faq_selection_method"),
+        "faq_deferral_reason": context.retrieval_trace.get("faq_deferral_reason") or "no_safe_match",
     }
 
 
@@ -1671,6 +1779,25 @@ def build_context(
         raise RuntimeError("GraphRAG publication has no resolvable branch")
     contract = (document.get("branch_contracts") or {}).get(retrieval_branch) or {}
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(contract, ledger.get("facts") or {})]
+    interrogative_clause = _interrogative_clause(message)
+    faq_rows: list[dict[str, Any]] = []
+    selected_faq_row: dict[str, Any] | None = None
+    faq_selection_method = "no_interrogative_clause"
+    faq_candidates: list[dict[str, Any]] = []
+    eligible_faq_node_ids = [
+        str(node_id) for node_id in contract.get("eligible_faq_node_ids") or [] if node_id
+    ]
+    if interrogative_clause and eligible_faq_node_ids:
+        faq_embedding = graph_compiler_v3.query_embeddings([interrogative_clause])[0]
+        faq_rows = supabase_client.search_graph_faq_v3(
+            persona_id=str(persona["id"]), publication_id=publication["id"],
+            branch_node_id=retrieval_branch, query=interrogative_clause,
+            query_embedding=faq_embedding,
+            eligible_faq_node_ids=eligible_faq_node_ids, limit=64,
+        )
+        selected_faq_row, faq_selection_method, faq_candidates = _select_faq_candidate(
+            interrogative_clause, faq_rows,
+        )
     branch_package_started = time.perf_counter()
     rows = supabase_client.search_graph_rag_v3(
         persona_id=str(persona["id"]), publication_id=publication["id"],
@@ -1689,26 +1816,58 @@ def build_context(
     )
     structural = branch_package.get("chunks") or []
     branch_package_ms = round((time.perf_counter() - branch_package_started) * 1000, 3)
-    merged = {str(row.get("chunk_id") or row.get("id")): row for row in [*rows, *structural]}
+    selected_faq_chunk: dict[str, Any] | None = None
+    if selected_faq_row:
+        selected_faq_chunk = {
+            **selected_faq_row,
+            "source_node_id": str(
+                selected_faq_row.get("faq_node_id")
+                or selected_faq_row.get("source_node_id") or ""
+            ),
+            "chunk_kind": "faq",
+            "hybrid_score": float(selected_faq_row.get("faq_score") or 1),
+        }
+        if not selected_faq_chunk.get("chunk_id") or not selected_faq_chunk.get("source_node_id"):
+            raise RuntimeError("selected FAQ evidence is missing its chunk or node identity")
+    merged = {
+        str(row.get("chunk_id") or row.get("id")): row
+        for row in [*rows, *structural, *([selected_faq_chunk] if selected_faq_chunk else [])]
+    }
     required_structural = _required_structural_chunks(structural)
-    if len(required_structural) > RAG_CHUNK_LIMIT:
+    reserved = [selected_faq_chunk] if selected_faq_chunk else []
+    reserved_ids = {
+        str(row.get("chunk_id") or row.get("id")) for row in reserved
+    }
+    if len(required_structural) + len(reserved) > RAG_CHUNK_LIMIT:
         raise RuntimeError(
-            "required structural graph chunks exceed the 12-chunk prompt limit"
+            "required structural and FAQ chunks exceed the 12-chunk prompt limit"
         )
     structural_ids = {
         str(row.get("chunk_id") or row.get("id")) for row in required_structural
     }
-    selected = _mmr(
-        [
-            row for key, row in merged.items()
-            if key not in structural_ids
-        ],
-        RAG_CHUNK_LIMIT - len(required_structural),
+    required_token_count = sum(
+        _estimated_tokens(str(row.get("chunk_text") or ""))
+        for row in [*required_structural, *reserved]
+    )
+    if required_token_count > RAG_CHUNK_TOKEN_BUDGET:
+        raise RuntimeError("required structural and FAQ chunks exceed the prompt token budget")
+    remaining_token_budget = RAG_CHUNK_TOKEN_BUDGET - required_token_count
+    selected = (
+        _mmr(
+            [
+                row for key, row in merged.items()
+                if key not in structural_ids and key not in reserved_ids
+            ],
+            RAG_CHUNK_LIMIT - len(required_structural) - len(reserved),
+            max_tokens=remaining_token_budget,
+        )
+        if remaining_token_budget > 0 else []
     )
     # Phase-A candidates are represented only by their compact snippets in the
     # retrieval trace. Full content enters the prompt solely from phase B.
     package = list({
         **{str(row.get("chunk_id") or row.get("id")): row for row in required_structural},
+        **{str(row.get("chunk_id") or row.get("id")): row for row in reserved},
         **{str(row.get("chunk_id") or row.get("id")): row for row in selected},
     }.values())
     by_source: dict[str, list[dict[str, Any]]] = {}
@@ -1744,6 +1903,17 @@ def build_context(
             greeting_prefix.get("response") if greeting_prefix else None
         ),
         "retrieval_branch_node_id": retrieval_branch,
+        "interrogative_clause": interrogative_clause or None,
+        "faq_candidates": faq_candidates,
+        "selected_faq_node_id": (
+            str(selected_faq_chunk.get("source_node_id")) if selected_faq_chunk else None
+        ),
+        "selected_faq_chunk_id": (
+            str(selected_faq_chunk.get("chunk_id") or selected_faq_chunk.get("id"))
+            if selected_faq_chunk else None
+        ),
+        "faq_selection_method": faq_selection_method,
+        "faq_deferral_reason": faq_selection_method if interrogative_clause and not selected_faq_chunk else None,
         "branch_candidates": _evidenced_branch_candidates(candidates),
         "possible_switches": possible_switches,
         "context_batch_ms": context_batch_ms,
@@ -1895,6 +2065,28 @@ def _decide(
         str(chunk_id): str(source_id)
         for chunk_id, source_id in (observation.get("repair_context_chunk_sources") or {}).items()
     }
+    selected_faq_node_id = str(
+        context.retrieval_trace.get("selected_faq_node_id") or ""
+    )
+    selected_faq_chunk_id = str(
+        context.retrieval_trace.get("selected_faq_chunk_id") or ""
+    )
+    if selected_faq_node_id and selected_faq_chunk_id:
+        node_by_id = document.get("node_by_id") or {}
+        cited_nodes = [
+            node_id for node_id in proposal.cited_node_ids
+            if (node_by_id.get(node_id) or {}).get("node_type") != "faq"
+            or node_id == selected_faq_node_id
+        ]
+        cited_chunks = [
+            chunk_id for chunk_id in proposal.cited_chunk_ids
+            if (node_by_id.get(chunk_sources.get(chunk_id, "")) or {}).get("node_type") != "faq"
+            or chunk_id == selected_faq_chunk_id
+        ]
+        proposal = proposal.model_copy(update={
+            "cited_node_ids": list(dict.fromkeys([*cited_nodes, selected_faq_node_id])),
+            "cited_chunk_ids": list(dict.fromkeys([*cited_chunks, selected_faq_chunk_id])),
+        })
     if (
         proposal.branch_action.value == "switch"
         and context.active_branch_node_id

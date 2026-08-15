@@ -19,7 +19,8 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.2.1"
+COMPILER_VERSION = "graph-compiler-v3.3.0"
+FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
 _local_embedding_model: Any | None = None
@@ -193,6 +194,27 @@ def _question_text(node: dict[str, Any]) -> str:
     return str(content.get("question") or data.get("question") or node.get("title") or "").strip()
 
 
+def _faq_question_answer(node: dict[str, Any]) -> tuple[str, str]:
+    """Return only explicit FAQ fields; a display title is not a FAQ question."""
+    data = node.get("data") or {}
+    content = data.get("content") if isinstance(data.get("content"), dict) else {}
+    question = str(content.get("question") or data.get("question") or "").strip()
+    answer = str(
+        content.get("answer") or content.get("resposta") or data.get("answer") or ""
+    ).strip()
+    return question, answer
+
+
+def _self_evidenced_faq(node: dict[str, Any]) -> bool:
+    claims = (node.get("data") or {}).get("claims")
+    return isinstance(claims, list) and any(
+        isinstance(claim, dict)
+        and claim.get("policy")
+        and [str(value) for value in claim.get("evidence_node_ids") or []] == [node["id"]]
+        for claim in claims
+    )
+
+
 def _topological_fields(
     fields: list[dict[str, Any]], *, preferred_order: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
@@ -255,7 +277,10 @@ def compile_graph(
         nodes.append({
             "id": stable_id,
             "projection_node_id": str(row.get("id")),
-            "node_type": str(row.get("node_type") or "knowledge"),
+            "node_type": (
+                "embedded" if str(row.get("node_type") or "").lower() == "embed"
+                else str(row.get("node_type") or "knowledge").lower()
+            ),
             "slug": str(row.get("slug") or stable_id),
             "title": str(row.get("title") or row.get("slug") or stable_id),
             "summary": str(row.get("summary") or ""),
@@ -344,6 +369,23 @@ def compile_graph(
         if node_by_id.get(edge["source"], {}).get("node_type") == "faq"
         and node_by_id.get(edge["target"], {}).get("node_type") == "embedded"
     }
+    eligible_faq_ids: set[str] = set()
+    for node_id in embedded_faq_ids:
+        node = node_by_id[node_id]
+        data = node.get("data") or {}
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        role = str(metadata.get("role") or data.get("role") or "")
+        if (
+            node.get("node_type") == "faq"
+            and role != "qualification_question"
+            and all(_faq_question_answer(node))
+            and _self_evidenced_faq(node)
+        ):
+            eligible_faq_ids.add(node_id)
+    global_context_members: set[str] = set()
+    for node in nodes:
+        if _capability(node["data"], "global_context"):
+            global_context_members.update(descendants(node["id"]))
 
     memberships: dict[str, dict[str, dict[str, Any]]] = {}
     contracts: dict[str, dict[str, Any]] = {}
@@ -355,9 +397,12 @@ def compile_graph(
             node_id: ("branch_descendant" if node_id not in path else "branch_ancestor")
             for node_id in primary_members
         }
-        for node in nodes:
-            if _capability(node["data"], "global_context"):
-                reasons[node["id"]] = "global_context_capability"
+        for node_id in sorted(global_context_members):
+            reasons[node_id] = (
+                "global_context_capability"
+                if _capability(node_by_id[node_id]["data"], "global_context")
+                else "global_context_descendant"
+            )
         # A semantic edge expands a branch only when the graph explicitly says
         # it participates in branch scope.  In particular, publication edges
         # to a shared Embedded action must never connect otherwise independent
@@ -552,6 +597,10 @@ def compile_graph(
             "handoff": handoff if isinstance(handoff, dict) else {},
             "handoff_rule_node_ids": handoff_rules,
             "handoff_rules": handoff_contract_rules,
+            "eligible_faq_node_ids": sorted(
+                node_id for node_id in eligible_faq_ids if node_id in closure
+            ),
+            "faq_projection_contract": FAQ_PROJECTION_CONTRACT,
             "compiler_version": COMPILER_VERSION,
         }
         contracts[anchor] = contract
@@ -609,6 +658,10 @@ def compile_graph(
         "embedding_provider": embedding_provider(),
         "embedding_model": embedding_model_name(),
     }
+    projected_eligible_faq_ids = sorted(
+        node_id for node_id in eligible_faq_ids
+        if any(node_id in members for members in memberships.values())
+    )
     document = {
         "schema_version": "3.0",
         "compiler_version": COMPILER_VERSION,
@@ -626,6 +679,8 @@ def compile_graph(
         "branch_anchors": anchors,
         "branch_memberships": memberships,
         "branch_contracts": contracts,
+        "faq_projection_contract": FAQ_PROJECTION_CONTRACT,
+        "eligible_faq_node_ids": projected_eligible_faq_ids,
         "projection_manifest": projection_manifest,
     }
     document["checksum"] = canonical_checksum(document)
@@ -636,6 +691,9 @@ def semantic_chunks(node: dict[str, Any]) -> list[dict[str, Any]]:
     """Split one node by semantic role instead of arbitrary character windows."""
     data = node.get("data") or {}
     values: list[tuple[str, str]] = []
+    faq_question, faq_answer = _faq_question_answer(node)
+    if node.get("node_type") == "faq" and faq_question and faq_answer:
+        values.append(("faq", f"Pergunta: {faq_question}\nResposta: {faq_answer}"))
     question = _question_text(node)
     if question:
         values.append(("question", question))
@@ -879,6 +937,15 @@ def compile_persona_publication(
                             "field_keys": [field["key"] for field in fields],
                             "priority": max([field["priority"] for field in fields] or [0.5]),
                             "provenance": {"projection_node_id": node["projection_node_id"]},
+                            **({
+                                "faq_question": _faq_question_answer(node)[0],
+                                "faq_answer": _faq_question_answer(node)[1],
+                                "faq_aliases": [
+                                    str(alias) for alias in (node.get("data") or {}).get("aliases") or []
+                                    if str(alias).strip()
+                                ],
+                                "faq_projection_contract": FAQ_PROJECTION_CONTRACT,
+                            } if chunk["kind"] == "faq" else {}),
                         },
                     })
                     index += 1
