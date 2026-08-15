@@ -32,7 +32,10 @@
           "intents": {
             "greeting": {
               "responses": [
-                "Olá! Que bom falar com você."
+                "Olá! Que bom falar com você.",
+                "Oi! Seja bem-vindo à Aurora.",
+                "Olá! Obrigada por chamar a gente.",
+                "Oi! Bom ter você por aqui."
               ],
               "always_acknowledge": true
             }
@@ -89,6 +92,7 @@
             "ano",
             "cor (quando o serviço envolve pintura)"
           ],
+          "identity_field": "nome_cliente",
           "required_fields": [
             "nome_cliente",
             "servico",

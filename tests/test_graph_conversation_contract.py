@@ -70,6 +70,26 @@ def test_publication_materializes_graph_owned_qualification_faqs():
         assert node.data["question"] == policy["field_questions"][field]
 
 
+def test_contract_fields_follow_appointment_required_fields_order():
+    graph = _graph()
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    policy = persona.data["appointment_policy"]
+    expected = list(policy["required_fields"])
+    persona.data["qualification"] = {
+        "fields": [
+            {"key": expected[1], "required": True},
+            {"key": expected[0], "required": True},
+        ]
+    }
+
+    contract = contract_service.compile_branch_contract(
+        graph,
+        "aurora-product-interior",
+    )
+
+    assert contract["required_fields"][: len(expected)] == expected
+
+
 def test_coordinate_is_derived_from_real_hierarchy_edges():
     graph = _graph()
     coordinate = contract_service.coordinate_for_node(

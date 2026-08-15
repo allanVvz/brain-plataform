@@ -430,6 +430,38 @@ def test_semantic_turn_audit_accepts_acknowledgement_and_first_missing_question(
     assert audit["asked_field"] == "nome_cliente"
 
 
+def test_semantic_turn_audit_rejects_a_later_field_before_first_missing():
+    """The validator must enforce the same graph-owned order as proof."""
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"]["intended_facts"] = {}
+    inputs["turn"]["text"] = "Perfeito! Qual seu objetivo com o carro?"
+    inputs["proof_record"]["proof_result"]["missing_fields"] = ["nome_cliente", "objective"]
+    inputs["proof_record"]["proof_result"]["next_question_node_id"] = "q:objective"
+    inputs["proof_record"]["proof_result"]["accepted_facts"] = []
+    inputs["ledger_after"]["facts"] = {
+        "servico": {"status": "known", "value": "service-one", "owner_node_id": "branch:one"},
+    }
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is False
+    assert audit["asked_field"] == "objective"
+    assert "first_missing_field_only" in audit["failures"]
+
+
+def test_semantic_turn_audit_rejects_a_question_for_a_field_that_is_not_missing():
+    inputs = _semantic_audit_inputs()
+    inputs["turn"]["text"] = "Perfeito! Qual seu objetivo com o carro?"
+    inputs["proof_record"]["proof_result"]["next_question_node_id"] = "q:objective"
+    # "objective" is not in missing_fields (still just ["nome_cliente"]) --
+    # the question does not target a genuinely pending field.
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is False
+    assert "first_missing_field_only" in audit["failures"]
+
+
 def test_semantic_turn_audit_rejects_repeated_reply_and_fallback():
     inputs = _semantic_audit_inputs()
     inputs["recent_replies"] = [inputs["turn"]["text"]]

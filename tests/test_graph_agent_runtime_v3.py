@@ -305,21 +305,30 @@ def test_exact_graph_switch_is_an_explicit_branch_fact_correction():
     assert proof["valid"], proof["errors"]
 
 
-def test_graph_owned_greeting_is_short_and_model_free():
-    document = {
-        "nodes": [{
-            "id": "persona:generic", "node_type": "persona",
-            "data": {
-                "conversation_policy": {"intents": {"greeting": {
-                    "responses": ["Olá! Bem-vindo."], "always_acknowledge": True,
-                }}},
-                "appointment_policy": {
-                    "required_fields": ["nome_cliente"],
-                    "field_questions": {"nome_cliente": "Como você se chama?"},
+def greeting_document(responses=None, nodes=None):
+    return {
+        "nodes": [
+            {
+                "id": "persona:generic", "node_type": "persona",
+                "data": {
+                    "conversation_policy": {"intents": {"greeting": {
+                        "responses": responses or ["Olá! Bem-vindo."],
+                        "always_acknowledge": True,
+                    }}},
+                    "appointment_policy": {
+                        "identity_field": "nome_cliente",
+                        "required_fields": ["nome_cliente"],
+                        "field_questions": {"nome_cliente": "Como você se chama?"},
+                    },
                 },
             },
-        }]
+            *(nodes or []),
+        ]
     }
+
+
+def test_graph_owned_greeting_is_short_and_model_free():
+    document = greeting_document()
     greeting = graph_agent_runtime_v3._greeting_policy(document, contract={}, facts={})
     assert graph_agent_runtime_v3._is_greeting("Olá") is True
     assert graph_agent_runtime_v3._is_greeting("Olá, quero branch a") is True
@@ -348,6 +357,117 @@ def test_graph_owned_greeting_is_short_and_model_free():
     assert decision.intent == "greeting"
     assert response.reply_text.endswith("Como você se chama?")
     assert response.token_usage["model_calls"] == 0
+
+
+def test_greeting_recognizer_covers_how_people_actually_type():
+    """WhatsApp openings stretch letters and chain forms; typos must not pass."""
+    for message in (
+        "oi", "oii", "Oiii!", "Olá", "olaa", "opa", "Alô", "salve", "e aí",
+        "eai", "ei", "Bom dia", "bom diaa", "Boa tarde", "boa noite", "boa",
+        "tudo bem?", "Tudo bom", "beleza", "blz", "hey", "hello",
+        "Oi, tudo bem? Queria saber quais serviços vocês fazem",
+    ):
+        assert graph_agent_runtime_v3._is_greeting(message) is True, message
+    for message in (
+        "oio", "oitenta reais", "eixo dianteiro", "quanto custa", "polimento",
+    ):
+        assert graph_agent_runtime_v3._is_greeting(message) is False, message
+
+
+def test_only_a_greeting_without_a_request_may_skip_the_model():
+    """Confirmed live 2026-08-14: a first-contact doubt was silently dropped.
+
+    "Oi! Tudo bem? Queria saber quais serviços vocês fazem aí na Aurora."
+    matched _is_greeting, named no branch anchor, and so took the
+    deterministic short-circuit -- the question about services was never
+    answered. Chained greeting forms must all be consumed before deciding.
+    """
+    for message in ("Oi", "oi, tudo bem?", "Bom dia! Tudo bem?", "olá, e aí"):
+        assert graph_agent_runtime_v3._is_bare_greeting(message) is True, message
+    for message in (
+        "Oi! Tudo bem? Queria saber quais serviços vocês fazem aí na Aurora.",
+        "bom dia, quanto custa um polimento",
+        "oi, quero agendar",
+    ):
+        assert graph_agent_runtime_v3._is_bare_greeting(message) is False, message
+        assert graph_agent_runtime_v3._is_greeting(message) is True, message
+
+
+def test_greeting_responses_rotate_per_lead_without_new_state():
+    responses = ["Olá! A.", "Oi! B.", "Olá! C.", "Oi! D."]
+    document = greeting_document(responses=responses)
+    seen = {
+        graph_agent_runtime_v3._greeting_policy(
+            document, contract={}, facts={}, lead_ref=lead_ref,
+        )["response"]
+        for lead_ref in range(4)
+    }
+    assert seen == set(responses)
+    assert all(
+        graph_agent_runtime_v3._greeting_policy(
+            document, contract={}, facts={}, lead_ref=87,
+        )["response"] == responses[87 % 4]
+        for _ in range(3)
+    )
+
+
+def test_greeting_resolves_the_published_name_question_without_a_contract():
+    """Without this the ask-once guard never sees the greeting's question.
+
+    A first-contact greeting has no active branch, so contract["questions"]
+    is empty and question_node_id used to come back None -- _decide then
+    recorded nothing in asked_question_node_ids and the name could be asked
+    again on a later turn.
+    """
+    document = greeting_document(nodes=[{
+        "id": "faq:qualification:generic:nome_cliente", "node_type": "faq",
+        "data": {"metadata": {
+            "role": "qualification_question", "field_key": "nome_cliente",
+        }},
+    }])
+    greeting = graph_agent_runtime_v3._greeting_policy(document, contract={}, facts={})
+    assert greeting["question_node_id"] == "faq:qualification:generic:nome_cliente"
+
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test", messages=[{"role": "user", "content": "Olá"}],
+        cart={"facts": {}, "asked_question_node_ids": []}, rag_nodes=[], rag_paths=[],
+        rag_chunks=[], context_cards=[], system_prompt="", available_services=[],
+        active_branch_node_id=None, active_branch_node_ids=[], active_path_checksum=None,
+        branch_node_ids=[], graph_contract={}, publication_id="publication-1",
+        runtime_version=graph_agent_runtime_v3.RUNTIME_VERSION,
+        retrieval_trace={
+            "deterministic_intent": "greeting",
+            "deterministic_reply": "Olá! Bem-vindo.\n\nComo você se chama?",
+            "asked_field_key": "nome_cliente", "missing_fields": ["nome_cliente"],
+            "next_question_node_id": greeting["question_node_id"],
+            "ledger_revision": 0,
+        },
+    )
+    decision, _ = graph_agent_runtime_v3.decide(context, model_observation=None)
+    assert decision.evidence_node_ids == ["faq:qualification:generic:nome_cliente"]
+
+
+def test_greeting_follows_the_first_missing_field_from_contract_order():
+    """The greeting cannot create an order different from the proof checker."""
+    contract = {
+        "fields": [
+            {"key": "servico", "owner_node_id": "branch:a",
+             "question_node_id": "question:servico", "required": True},
+            {"key": "nome_cliente", "owner_node_id": "persona:generic",
+             "question_node_id": "question:nome", "required": True},
+        ],
+        "questions": {
+            "question:servico": {"field_key": "servico", "text": "Qual serviço?"},
+            "question:nome": {"field_key": "nome_cliente", "text": "Como você se chama?"},
+        },
+    }
+    greeting = graph_agent_runtime_v3._greeting_policy(
+        greeting_document(), contract=contract, facts={},
+    )
+    assert greeting["asked_field_key"] == "servico"
+    assert greeting["question_node_id"] == "question:servico"
+    assert greeting["question"] == "Qual serviço?"
 
 
 def test_claims_and_handoff_need_published_policy():

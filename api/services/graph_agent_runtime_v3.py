@@ -1201,19 +1201,53 @@ def _publication_fact_is_compatible(
     )
 
 
-_GREETING_FORMS = {
-    "oi", "ola", "oie", "opa", "bom dia", "boa tarde", "boa noite",
-    "e ai", "ei", "hello", "hey",
-}
+# Matched against _normalized_phrase output, so accents and punctuation are
+# already gone ("Olá!" -> "ola"). Ordered longest-first where two alternatives
+# share a prefix ("boa tarde" before the bare "boa"), because alternation
+# takes the first match, not the longest one. The trailing repeated-letter
+# allowances ("oiii", "olaa", "bom diaa") are how people actually type a
+# greeting on WhatsApp; "oio" stays out because \b fails mid-word.
+_GREETING_PATTERN = re.compile(
+    r"^(?:"
+    r"bo[ma]\s+(?:dia|tarde|noite)a*"
+    r"|tudo\s+(?:bem|bom|certo)|td\s+bem|como\s+vai(?:\s+voce)?"
+    r"|oi+e?|ola+|opa+|alo+|salve|e\s?ai+|ei+"
+    r"|beleza|blz|boa"
+    r"|hello|hey|hi"
+    r")\b"
+)
 
 
 def _is_greeting(message: str) -> bool:
     """Recognize only the linguistic intent; response copy remains graph-owned."""
-    normalized = _normalized_phrase(message)
-    return any(
-        normalized == form or normalized.startswith(f"{form} ")
-        for form in _GREETING_FORMS
-    )
+    return bool(_GREETING_PATTERN.match(_normalized_phrase(message)))
+
+
+def _greeting_remainder(message: str) -> str:
+    """What the customer actually said once every greeting form is stripped.
+
+    Greetings chain in PT-BR ("oi, bom dia, tudo bem"), so this consumes
+    every leading form rather than only the first one -- what is left is the
+    real request, if there is one.
+    """
+    remainder = _normalized_phrase(message)
+    while match := _GREETING_PATTERN.match(remainder):
+        remainder = remainder[match.end():].strip()
+    return remainder
+
+
+def _is_bare_greeting(message: str) -> bool:
+    """A greeting carrying no request -- the only turn that may skip the model.
+
+    Confirmed live 2026-08-14 (captured in the aurora-premium-sdr skill's
+    exemplos-de-conversas): "Oi! Tudo bem? Queria saber quais serviços vocês
+    fazem aí na Aurora." took the deterministic greeting short-circuit
+    because "serviços" matches no branch anchor, so the reply was the canned
+    greeting plus the name question and the question about services was
+    never answered at all. A greeting that carries a doubt has to reach the
+    model; only a greeting with nothing else in it stays model-free.
+    """
+    return _is_greeting(message) and not _greeting_remainder(message)
 
 
 def _is_agent_message(row: dict[str, Any]) -> bool:
@@ -1243,40 +1277,76 @@ def _persona_node(document: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _qualification_question_node_id(document: dict[str, Any], field_key: str) -> str | None:
+    """Find the published question node for a field outside any branch contract.
+
+    On a first-contact greeting there is no active branch yet, so
+    contract["questions"] is empty and the greeting turn used to carry
+    question_node_id=None -- which meant _decide never recorded the question
+    in asked_question_node_ids, leaving the ask-once guard
+    (MAX_PENDING_QUESTION_ATTEMPTS) with nothing but a fuzzy text match to
+    work from. The nodes exist regardless of contract: they are the FAQs
+    materialized by graph_conversation_contract.materialize_qualification_questions,
+    carrying the same data.metadata.role/field_key contract read here.
+    """
+    if not field_key:
+        return None
+    for node in document.get("nodes") or []:
+        if node.get("node_type") != "faq":
+            continue
+        data = node.get("data") or {}
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        role = metadata.get("role") or data.get("role")
+        key = str(metadata.get("field_key") or data.get("field_key") or "").strip()
+        if role == "qualification_question" and key == field_key:
+            return str(node.get("id") or "") or None
+    return None
+
+
 def _greeting_policy(
     document: dict[str, Any], *, contract: dict[str, Any], facts: dict[str, Any],
+    lead_ref: int = 0,
 ) -> dict[str, Any] | None:
     persona = _persona_node(document)
     data = persona.get("data") or {}
     policy = data.get("conversation_policy") or {}
     greeting = ((policy.get("intents") or {}).get("greeting") or {})
-    responses = greeting.get("responses")
-    response = str(
-        (responses[0] if isinstance(responses, list) and responses else None)
-        or greeting.get("response") or ""
-    ).strip()
+    responses = [
+        text for value in (greeting.get("responses") or [])
+        if isinstance(value, str) and (text := value.strip())
+    ]
+    # The graph may publish several openings. Rotating by lead_ref keeps every
+    # lead on a stable phrase across their own turns while spreading the
+    # variants across leads, and needs no extra persisted state to do it.
+    response = (
+        responses[int(lead_ref) % len(responses)] if responses
+        else str(greeting.get("response") or "").strip()
+    )
     if not response:
         return None
     pending = graph_proof_checker_v3.pending_fields(contract, facts) if contract else []
     askable = graph_proof_checker_v3.askable_pending_fields(contract, facts) if contract else []
-    question_id = askable[0].get("question_node_id") if askable else None
+    # The published contract is the sole owner of qualification order. The
+    # graph validator guarantees that a declared identity_field is the first
+    # required field, so the greeting must never bypass missing_fields[0].
+    chosen = askable[0] if askable else None
+    question_id = chosen.get("question_node_id") if chosen else None
     question = str(
         (((contract.get("questions") or {}).get(str(question_id or "")) or {}).get("text"))
         or ""
     ).strip()
-    field_key = askable[0].get("key") if askable else None
+    field_key = chosen.get("key") if chosen else None
     if not contract:
         appointment = data.get("appointment_policy") or {}
         required = [str(value) for value in appointment.get("required_fields") or [] if value]
         questions = appointment.get("field_questions") or {}
-        field_key = next(
-            (
-                key for key in required
-                if not graph_proof_checker_v3.field_resolved({}, facts.get(key))
-            ),
-            None,
-        )
+        unresolved = [
+            key for key in required
+            if not graph_proof_checker_v3.field_resolved({}, facts.get(key))
+        ]
+        field_key = next(iter(unresolved), None)
         question = str(questions.get(field_key) or "").strip() if field_key else ""
+        question_id = _qualification_question_node_id(document, str(field_key or ""))
     return {
         "response": response,
         "question": question,
@@ -1345,12 +1415,12 @@ SYSTEM_PROMPT = (
     "encaixa melhor: X ou Y?\"), nunca dando a entender que ele foi confuso "
     "ou impreciso (evite \"não entendi\" ou \"pode ser mais específico?\").\n\n"
 
-    "Uma pergunta publicada pode aparecer no máximo duas vezes enquanto "
-    "o campo estiver pendente. Depois disso o backend marca o campo como "
+    "Uma pergunta publicada é feita uma única vez enquanto o campo estiver "
+    "pendente. Se o cliente não responder, o backend marca o campo como "
     "unknown e segue para o próximo; não tente perguntá-lo novamente. Se o "
     "cliente fornecer esse dado espontaneamente mais tarde, extraia-o "
-    "normalmente como known para substituir unknown. Fora dessa única "
-    "repetição autorizada, nunca repita a pergunta ou frase do turno anterior "
+    "normalmente como known para substituir unknown. Além disso, "
+    "nunca repita a pergunta ou frase do turno anterior "
     "quase palavra por palavra, nem a mesma construção turno após turno. "
     "Confira recent_messages (as últimas mensagens da conversa, incluindo "
     "suas próprias respostas) antes de escrever a reply e varie a "
@@ -1490,10 +1560,16 @@ def build_context(
     greeting_eligible = _is_greeting(message) and not _already_engaged(messages)
     greeting_prefix = _greeting_policy(
         document, contract=active_contract, facts=ledger.get("facts") or {},
+        lead_ref=lead_ref,
     ) if greeting_eligible else None
-    greeting = _greeting_policy(
-        document, contract=active_contract, facts=ledger.get("facts") or {},
-    ) if greeting_eligible and not deterministic_candidates else None
+    # Only a greeting that asks nothing and names no service skips the model.
+    # Anything else -- a doubt, a service, both -- has to be answered, with
+    # the greeting riding along as a prefix instead.
+    greeting = greeting_prefix if (
+        greeting_eligible
+        and _is_bare_greeting(message)
+        and not deterministic_candidates
+    ) else None
     if greeting:
         persona_node = _persona_node(document)
         reply = "\n\n".join(
@@ -1634,8 +1710,11 @@ def build_context(
         "deterministic_branch_resolution": (
             deterministic_candidates[0] if len(deterministic_candidates) == 1 else None
         ),
+        # Reached only when the deterministic greeting turn did not return
+        # above, so any eligible greeting here is one that must be prefixed
+        # onto a model reply -- whether it named a service or asked a doubt.
         "greeting_response": (
-            greeting_prefix.get("response") if greeting_prefix and deterministic_candidates else None
+            greeting_prefix.get("response") if greeting_prefix else None
         ),
         "retrieval_branch_node_id": retrieval_branch,
         "branch_candidates": _evidenced_branch_candidates(candidates),

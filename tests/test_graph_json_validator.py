@@ -113,6 +113,22 @@ def test_validate_graph_json_rejects_incomplete_graph_owned_conversation_policy(
     assert "appointment persona requires conversation_policy.doubt_handling" in errors
 
 
+def test_appointment_identity_field_must_be_first_required_field():
+    graph = build_aurora_graph()
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    policy = persona.data["appointment_policy"]
+    policy["required_fields"] = [
+        "servico",
+        "nome_cliente",
+        *policy["required_fields"][2:],
+    ]
+
+    valid, errors = validate_graph_json(graph)
+
+    assert valid is False
+    assert "appointment_policy.identity_field must equal required_fields[0]" in errors
+
+
 def test_appointment_publication_requires_self_authorized_factual_faq_claim():
     graph = build_aurora_graph()
     faq = next(node for node in graph.nodes if node.id == "aurora-faq-wash-includes")

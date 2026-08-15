@@ -345,6 +345,15 @@ def compile_branch_contract(
     question_texts = policy.get("field_questions")
     question_texts = question_texts if isinstance(question_texts, dict) else {}
 
+    # Preserve the graph-authored qualification order explicitly. Relying on
+    # dict insertion order lets qualification field declarations accidentally
+    # outrank appointment_policy.required_fields.
+    declared_order: list[str] = []
+    for value in policy.get("required_fields") or []:
+        key = str(value).strip()
+        if key and key not in declared_order:
+            declared_order.append(key)
+
     fields: dict[str, dict[str, Any]] = {}
     persona_owner = persona.id if persona else ""
     persona_qualification = persona_data.get("qualification")
@@ -371,6 +380,8 @@ def compile_branch_contract(
         for key in booking.get("required_fields") or []:
             normalized = str(key).strip()
             if normalized:
+                if normalized not in declared_order:
+                    declared_order.append(normalized)
                 fields.setdefault(normalized, {
                     "key": normalized,
                     "required": True,
@@ -384,6 +395,8 @@ def compile_branch_contract(
             if branch.slug not in (branches or []):
                 fields.pop(str(key), None)
                 continue
+            if str(key) not in declared_order:
+                declared_order.append(str(key))
             fields.setdefault(str(key), {
                 "key": str(key),
                 "required": True,
@@ -392,7 +405,10 @@ def compile_branch_contract(
             })
 
     ordered: list[dict[str, Any]] = []
-    for key, spec in fields.items():
+    ordered_keys = [key for key in declared_order if key in fields]
+    ordered_keys.extend(key for key in fields if key not in ordered_keys)
+    for key in ordered_keys:
+        spec = fields[key]
         owner = str(spec.get("owner_node_id") or persona_owner)
         question_id = str(spec.get("question_node_id") or question_ids.get(key) or "")
         question_node = by_id.get(question_id) if question_id else None

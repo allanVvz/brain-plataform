@@ -203,6 +203,24 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
         if normalized not in all_required:
             all_required.append(normalized)
 
+    # Qualification order has one graph-owned authority: required_fields.
+    # When identity_field is declared it documents the first question; it
+    # must not create a competing runtime override for a later field.
+    identity_field = str(raw_policy.get("identity_field") or "").strip()
+    if identity_field:
+        if identity_field not in all_required:
+            errors.append(
+                "appointment_policy.identity_field must be listed in required_fields"
+            )
+        elif identity_field != all_required[0]:
+            errors.append(
+                "appointment_policy.identity_field must equal required_fields[0]"
+            )
+        if not str(questions.get(identity_field) or "").strip():
+            errors.append(
+                f"appointment_policy.field_questions.{identity_field} must be non-empty"
+            )
+
     for node in nodes:
         if getattr(node, "node_type", None) not in {"product", "service"}:
             continue
