@@ -162,8 +162,14 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
                 errors.append("conversation_policy.direct_booking.silent_handoff must be true")
 
         repetition = conversation_policy.get("question_repetition") or {}
-        if repetition and repetition.get("max_attempts") != 1:
-            errors.append("conversation_policy.question_repetition.max_attempts must equal 1")
+        if repetition and (
+            not isinstance(repetition.get("max_attempts"), int)
+            or isinstance(repetition.get("max_attempts"), bool)
+            or repetition.get("max_attempts") not in {0, 1}
+        ):
+            errors.append(
+                "conversation_policy.question_repetition.max_attempts must be 0 or 1"
+            )
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     business_model = str(
         data.get("business_model") or metadata.get("business_model") or ""

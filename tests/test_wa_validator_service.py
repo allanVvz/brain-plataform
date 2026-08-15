@@ -127,7 +127,8 @@ def test_semantic_script_uses_branch_as_service_existence_doubt_evidence():
         initial_state="cold",
     )
     assert script["driver"]["doubt"]["expected_evidence_node_ids"] == ["branch:one"]
-    assert script["driver"]["expected_handoff"] is False
+    assert script["driver"]["expected_handoff"] is True
+    assert script["driver"]["second_ignore"]["text"]
 
 
 def test_published_service_existence_faq_accepts_faq_or_active_branch_evidence():
@@ -472,15 +473,140 @@ def test_semantic_turn_audit_rejects_repeated_reply_and_fallback():
     assert "model_reconciled_without_fallback" in audit["failures"]
 
 
-def test_semantic_turn_audit_allows_repeated_question_while_field_is_pending():
+def test_semantic_turn_audit_rejects_identical_reply_while_field_is_pending():
     inputs = _semantic_audit_inputs()
     inputs["recent_replies"] = [inputs["turn"]["text"]]
     inputs["previous_question_node_id"] = "q:name"
 
     audit = wv._semantic_turn_audit(**inputs)
 
-    assert audit["passed"] is True
-    assert audit["criteria"]["reply_not_repeated"] is True
+    assert audit["passed"] is False
+    assert audit["criteria"]["reply_not_repeated"] is False
+    assert "reply_not_repeated" in audit["failures"]
+
+
+def test_semantic_turn_audit_accepts_one_contextual_question_resumption():
+    inputs = _semantic_audit_inputs()
+    inputs["recent_replies"] = ["Qual seu nome?"]
+    inputs["previous_question_node_id"] = "q:name"
+    inputs["ledger_before"]["asked_question_node_ids"] = ["q:name"]
+    inputs["contract"]["conversation_policy"] = {
+        "question_repetition": {"max_attempts": 1},
+    }
+    inputs["turn"]["text"] = (
+        "Sobre o ponto que você trouxe, a equipe vai explicar esse detalhe. "
+        "Qual seu nome?"
+    )
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is True, audit["failures"]
+    assert audit["repetition_audit"]["previous_question_emissions"] == 1
+
+
+def test_semantic_turn_audit_rejects_rewritten_third_question_by_node_budget():
+    inputs = _semantic_audit_inputs()
+    inputs["recent_replies"] = [
+        "Qual seu nome?",
+        "Para registrar o atendimento corretamente, preciso desse dado. Qual seu nome?",
+    ]
+    inputs["previous_question_node_id"] = "q:name"
+    inputs["ledger_before"]["asked_question_node_ids"] = ["q:name", "q:name"]
+    inputs["contract"]["conversation_policy"] = {
+        "question_repetition": {"max_attempts": 1},
+    }
+    inputs["turn"]["text"] = (
+        "Para encaminhar o histórico com contexto suficiente, preciso dessa informação. "
+        "Qual seu nome?"
+    )
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is False
+    assert "question_repetition_budget" in audit["failures"]
+    assert "question_attempt_budget_exceeded" in audit["repetition_audit"]["failures"]
+
+
+def test_semantic_turn_audit_rejects_superficially_reworded_reply():
+    inputs = _semantic_audit_inputs()
+    inputs["recent_replies"] = [
+        "Para registrar sua solicitação com cuidado, preciso entender agora qual é o "
+        "principal objetivo que você deseja alcançar com este atendimento. Qual seu nome?",
+    ]
+    inputs["turn"]["text"] = (
+        "Para registrar sua solicitação com cuidado, preciso entender agora qual é o "
+        "principal resultado que você deseja alcançar com este atendimento. Qual seu nome?"
+    )
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is False
+    assert "reply_not_repeated" in audit["failures"]
+    assert "semantic_repetition" in audit["repetition_audit"]["failures"]
+
+
+def test_semantic_failure_is_technical_pass_quality_fail_and_records_inbound():
+    audit = {
+        "failures": ["reply_not_repeated"],
+        "criteria": {"reply_not_repeated": False},
+        "repetition_audit": {"failures": ["semantic_repetition"]},
+    }
+
+    failure, output, event = wv._semantic_failure_records(
+        conversation=[{"role": "bot", "text": "same"}],
+        turn_index=2,
+        audit=audit,
+        session_id="session:one",
+        persona_slug="generic",
+        buffer_id="buffer:canonical",
+        external_message_id="message:canonical",
+        correlation_id="correlation:canonical",
+    )
+
+    assert failure == "semantic_turn_failed:reply_not_repeated"
+    assert output["technical_pass"] is True
+    assert output["quality_pass"] is False
+    assert output["failed_turn"] == 2
+    assert event["event_type"] == "wa_validator_semantic_failed"
+    assert event["payload"]["criteria"] == {"reply_not_repeated": False}
+    assert event["payload"]["canonical_inbound"] == {
+        "buffer_id": "buffer:canonical",
+        "external_message_id": "message:canonical",
+        "correlation_id": "correlation:canonical",
+    }
+
+
+def test_semantic_driver_uses_pure_interruption_then_second_ignore():
+    driver = {
+        "doubt": {"text": "How does that work?", "expected_evidence_node_ids": ["faq:one"]},
+        "second_ignore": {"text": "Can we continue without that?"},
+        "interruption_after_answered_fields": 2,
+        "answers": {"name": {"text": "Beatriz", "value": "Beatriz"}},
+    }
+    state = {}
+
+    interruption = wv._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="name",
+        answered_fields={"service", "goal"},
+        active_anchor="branch:one",
+        expected_active_branches=["branch:one"],
+    )
+    ignored_again = wv._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="name",
+        answered_fields={"service", "goal"},
+        active_anchor="branch:one",
+        expected_active_branches=["branch:one"],
+    )
+
+    assert interruption["kind"] == "doubt"
+    assert interruption["text"] == "How does that work?"
+    assert interruption["intended_facts"] == {}
+    assert ignored_again["kind"] == "ignored_again"
+    assert ignored_again["intended_facts"] == {}
 
 
 def test_semantic_turn_audit_accepts_published_completion_fallback():

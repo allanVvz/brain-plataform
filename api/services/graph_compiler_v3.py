@@ -363,6 +363,15 @@ def compile_graph(
         return result
 
     persona_node = next((n for n in nodes if n["node_type"] == "persona"), None)
+    persona_data = (persona_node or {}).get("data") or {}
+    conversation_policy = persona_data.get("conversation_policy")
+    conversation_policy = (
+        conversation_policy if isinstance(conversation_policy, dict) else {}
+    )
+    appointment_policy = persona_data.get("appointment_policy")
+    appointment_policy = (
+        appointment_policy if isinstance(appointment_policy, dict) else {}
+    )
     embedded_faq_ids = {
         edge["source"]
         for edge in edges
@@ -594,6 +603,8 @@ def compile_graph(
             },
             "claims": claims,
             "completion": completion,
+            "conversation_policy": conversation_policy,
+            "field_labels": dict(appointment_policy.get("field_labels") or {}),
             "handoff": handoff if isinstance(handoff, dict) else {},
             "handoff_rule_node_ids": handoff_rules,
             "handoff_rules": handoff_contract_rules,

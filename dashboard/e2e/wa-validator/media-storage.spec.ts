@@ -9,6 +9,8 @@ test.describe.configure({ mode: "serial" });
 const DASHBOARD_URL = required("E2E_DASHBOARD_URL");
 const ADMIN_EMAIL = required("E2E_ADMIN_EMAIL");
 const ADMIN_PASSWORD = required("E2E_ADMIN_PASSWORD");
+const CLIENT_EMAIL = required("E2E_WA_MEDIA_CLIENT_EMAIL");
+const CLIENT_PASSWORD = required("E2E_WA_MEDIA_CLIENT_PASSWORD");
 const PERSONA_SLUG = required("E2E_WA_MEDIA_PERSONA");
 const MEDIA_DIR = required("E2E_WA_MEDIA_DIR");
 const FIXTURE_NAMES = ["ex 1.png", "ex 2.png", "teste 1.pdf"];
@@ -34,11 +36,11 @@ function fixture(name: string) {
   };
 }
 
-async function login(page: Page) {
+async function login(page: Page, email: string, password: string) {
   await page.goto("/login");
   if (!page.url().includes("/login")) return;
-  await page.getByPlaceholder("operador@empresa.com").fill(ADMIN_EMAIL);
-  await page.getByPlaceholder("Digite sua senha").fill(ADMIN_PASSWORD);
+  await page.getByPlaceholder("operador@empresa.com").fill(email);
+  await page.getByPlaceholder("Digite sua senha").fill(password);
   await Promise.all([
     page.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api-brain/auth/login",
@@ -49,6 +51,38 @@ async function login(page: Page) {
   await expect.poll(async () =>
     (await page.context().cookies()).some((cookie) => cookie.name === "ai_brain_session")
   ).toBe(true);
+}
+
+function startAuthenticatedAudit(page: Page) {
+  const failures: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error" && !message.text().includes("favicon")) {
+      failures.push(`console: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
+  page.on("response", (response) => {
+    const pathname = new URL(response.url()).pathname;
+    if (
+      pathname.startsWith("/api-brain/")
+      && [401, 403].includes(response.status())
+    ) {
+      failures.push(`http ${response.status()}: ${pathname}`);
+    }
+  });
+  return failures;
+}
+
+async function expectDecodedImage(page: Page, name: string) {
+  const image = page.getByRole("img", { name });
+  await expect(image).toBeVisible({ timeout: API_TIMEOUT });
+  await expect.poll(
+    async () => image.evaluate(async (node: HTMLImageElement) => {
+      await node.decode();
+      return node.naturalWidth;
+    }),
+    { timeout: API_TIMEOUT },
+  ).toBeGreaterThan(0);
 }
 
 async function selectPersona(page: Page) {
@@ -76,14 +110,8 @@ test("armazena e reabre PNG/PDF no WA Validator sem outbound real", async ({ bro
   const fixtures = FIXTURE_NAMES.map(fixture);
   const context = await browser.newContext({ baseURL: DASHBOARD_URL });
   const page = await context.newPage();
-  const consoleErrors: string[] = [];
-  const pageErrors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => pageErrors.push(error.message));
-
-  await login(page);
+  await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+  const adminFailures = startAuthenticatedAudit(page);
   await openValidationWorkspace(page);
   await page.screenshot({ path: testInfo.outputPath("media-before.png"), fullPage: true });
 
@@ -195,12 +223,7 @@ test("armazena e reabre PNG/PDF no WA Validator sem outbound real", async ({ bro
   await expect(page.getByText(leadLabel, { exact: true }).first()).toBeVisible({ timeout: API_TIMEOUT });
   await page.getByText(leadLabel, { exact: true }).first().click();
   for (const item of fixtures.filter((entry) => entry.mimeType.startsWith("image/"))) {
-    const image = page.getByRole("img", { name: item.name });
-    await expect(image).toBeVisible({ timeout: API_TIMEOUT });
-    await expect.poll(
-      async () => image.evaluate((node: HTMLImageElement) => node.naturalWidth),
-      { timeout: API_TIMEOUT },
-    ).toBeGreaterThan(0);
+    await expectDecodedImage(page, item.name);
   }
   await expect(page.getByRole("link", { name: /teste 1\.pdf/ })).toBeVisible({ timeout: API_TIMEOUT });
   await page.screenshot({ path: testInfo.outputPath("media-stored-and-visible.png"), fullPage: true });
@@ -212,19 +235,39 @@ test("armazena e reabre PNG/PDF no WA Validator sem outbound real", async ({ bro
   await expect(page.getByText(leadLabel, { exact: true }).first()).toBeVisible({ timeout: API_TIMEOUT });
   await page.getByText(leadLabel, { exact: true }).first().click();
   for (const name of ["ex 1.png", "ex 2.png"]) {
-    const image = page.getByRole("img", { name });
-    await expect(image).toBeVisible({ timeout: API_TIMEOUT });
-    await expect.poll(
-      async () => image.evaluate((node: HTMLImageElement) => node.naturalWidth),
-      { timeout: API_TIMEOUT },
-    ).toBeGreaterThan(0);
+    await expectDecodedImage(page, name);
   }
   await expect(page.getByRole("link", { name: /teste 1\.pdf/ })).toBeVisible({ timeout: API_TIMEOUT });
 
-  expect(pageErrors, "uncaught browser errors").toEqual([]);
-  expect(
-    consoleErrors.filter((message) => !message.includes("favicon")),
-    "unexpected browser console errors",
-  ).toEqual([]);
+  expect(adminFailures, "authenticated admin browser failures").toEqual([]);
+
+  const clientContext = await browser.newContext({ baseURL: DASHBOARD_URL });
+  const clientPage = await clientContext.newPage();
+  await login(clientPage, CLIENT_EMAIL, CLIENT_PASSWORD);
+  const clientFailures = startAuthenticatedAudit(clientPage);
+  for (const asset of assets.filter((_item, index) => fixtures[index].mimeType.startsWith("image/"))) {
+    const response = await clientContext.request.get(`/api-brain${asset.media_url}`, {
+      timeout: API_TIMEOUT,
+    });
+    expect(response.status(), `${asset.filename} client media status`).toBe(200);
+  }
+  await clientPage.goto(`/clientes/${PERSONA_SLUG}/mensagens`);
+  await expect(clientPage.getByText(leadLabel, { exact: true }).first()).toBeVisible({
+    timeout: API_TIMEOUT,
+  });
+  await clientPage.getByText(leadLabel, { exact: true }).first().click();
+  for (const name of ["ex 1.png", "ex 2.png"]) {
+    await expectDecodedImage(clientPage, name);
+  }
+  await clientPage.reload();
+  await expect(clientPage.getByText(leadLabel, { exact: true }).first()).toBeVisible({
+    timeout: API_TIMEOUT,
+  });
+  await clientPage.getByText(leadLabel, { exact: true }).first().click();
+  for (const name of ["ex 1.png", "ex 2.png"]) {
+    await expectDecodedImage(clientPage, name);
+  }
+  expect(clientFailures, "authenticated client browser failures").toEqual([]);
+  await clientContext.close();
   await context.close();
 });

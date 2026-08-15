@@ -946,7 +946,7 @@ def test_semantic_driver_can_defer_then_answer_field_spontaneously():
     assert next_answer["intended_facts"] == {"objective": "conservar"}
 
 
-def test_semantic_driver_doubt_turn_also_answers_current_required_field():
+def test_semantic_driver_doubt_turn_is_a_pure_interruption():
     driver = {
         "answers": {
             "nome_cliente": {"text": "Meu nome é Beatriz.", "value": "Beatriz"},
@@ -967,9 +967,9 @@ def test_semantic_driver_doubt_turn_also_answers_current_required_field():
         expected_active_branches=["paint"],
     )
 
-    assert step["kind"] == "doubt_with_field_answer"
-    assert step["intended_facts"] == {"nome_cliente": "Beatriz"}
-    assert step["text"] == "Meu nome é Beatriz. E vocês fazem polimento?"
+    assert step["kind"] == "doubt"
+    assert step["intended_facts"] == {}
+    assert step["text"] == "E vocês fazem polimento?"
     assert step["expected_evidence_node_ids"] == ["faq:polimento"]
 
 

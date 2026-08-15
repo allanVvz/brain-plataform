@@ -53,11 +53,11 @@
             ]
           },
           "qualification": {
-            "summary_template": "Confira os dados informados: {informed_fields}.",
+            "summary_template": "Resumo para a Equipe Aurora: {informed_fields}.",
             "confirmation_question": "Esses dados estão corretos?",
             "correction_prompt": "Diga qual informação precisa ser corrigida.",
-            "completion_message": "Obrigada. Sua solicitação foi registrada e a equipe continuará o atendimento.",
-            "incomplete_handoff_template": "Informado: {informed_fields}. Não informado: {missing_fields}."
+            "completion_message": "Obrigada. Vou encaminhar agora para a Equipe Aurora continuar o atendimento e confirmar os próximos passos.",
+            "incomplete_handoff_template": "Vou encaminhar agora para a Equipe Aurora. Dados informados: {informed_fields}. Dados não confirmados: {missing_fields}."
           },
           "direct_booking": {
             "intent_aliases": [
@@ -145,7 +145,8 @@
             "reclamacao_recebida": "Sinto muito pelo transtorno. Vou encaminhar isso agora mesmo para a Equipe Aurora resolver com você.",
             "complemento_confirmacao": "Anotei tudo por aqui. A Equipe Aurora vai te chamar para confirmar o valor e o melhor horário. Tem mais alguma coisa que você gostaria de melhorar no carro?",
             "esclarecimento_duvida": "Vou chamar a Equipe Aurora para te ajudar direitinho nisso. Enquanto isso, me conta seu nome, o serviço que você procura e o modelo do carro?",
-            "encaminhamento_duvida_persistente": "Já chamei a Equipe Aurora para continuar com você. Se puder, me diga seu nome, o serviço que procura e o modelo do carro enquanto aguarda."
+            "encaminhamento_duvida_persistente": "Já chamei a Equipe Aurora para continuar com você. Se puder, me diga seu nome, o serviço que procura e o modelo do carro enquanto aguarda.",
+            "encaminhamento_incompleto": "Vou encaminhar agora para a Equipe Aurora com os dados já informados, sem insistir novamente no que não foi confirmado."
           }
         }
       }
@@ -298,17 +299,23 @@
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_09",
         "status": "validated",
-        "regra": "Uma pergunta por turno; ao lidar com objeção, dúvida ou desvio de assunto, reconhecer brevemente, responder o que foi perguntado e só depois retomar a pergunta pendente, tudo na mesma mensagem; mensagens curtas (no máximo 2-3 frases); se não entender a resposta do cliente, pedir esclarecimento uma vez, depois oferecer alternativas concretas, e só então sinalizar handoff.",
-        "papel_da_ia": "Conduzir a conversa com ritmo natural de atendimento humano por WhatsApp: nunca empilhar perguntas, sempre reconhecer o que o cliente disse antes de prosseguir, e ter uma escada clara de recuperação quando a resposta do cliente não for compreendida.",
-        "summary": "Uma pergunta por turno, reconhecer-responder-retomar em objeções/desvios, mensagens curtas, e uma escada clara de recuperação quando não entender a resposta.",
+        "regra": "Uma pergunta por turno; a pergunta inicial pode ter somente uma retomada contextual. Ao lidar com objeção, dúvida ou desvio, reconhecer ou responder primeiro e só então retomar a pergunta publicada. Se a retomada também for ignorada, registrar o campo como não confirmado e encaminhar sem uma terceira pergunta.",
+        "papel_da_ia": "Conduzir a conversa com ritmo natural de atendimento humano por WhatsApp: nunca empilhar perguntas, reconhecer o conteúdo novo antes da única retomada e encerrar a coleta com resumo e handoff quando o orçamento terminar.",
+        "summary": "Pergunta inicial mais uma retomada contextual; na segunda ignorada, registrar o dado como não confirmado, resumir e encaminhar para humano sem insistir.",
         "flow_rules": [
           "Nunca empilhe duas perguntas na mesma mensagem -- mesmo reformulando, faça só uma pergunta por turno.",
           "Ao lidar com objeção, dúvida ou desvio de assunto: reconheça brevemente, responda o que foi perguntado, e só depois retome a pergunta pendente -- tudo na mesma mensagem, sem pular a pergunta pendente.",
           "Mensagens curtas: no máximo 2-3 frases por resposta.",
-          "Se não entender a resposta do cliente: peça esclarecimento uma vez; se continuar confuso, ofereça alternativas concretas; se ainda assim não resolver, sinalize handoff -- nunca insista na mesma pergunta do mesmo jeito mais de duas vezes."
+          "A pergunta inicial admite uma única retomada contextual; se o cliente ignorar novamente, marque o campo como não confirmado e faça handoff sem uma terceira emissão."
         ],
         "capabilities": {
-          "global_context": true
+          "global_context": true,
+          "handoff_rule": true
+        },
+        "handoff_rule": {
+          "id": "aurora-incomplete-qualification-handoff",
+          "condition": "qualification_incomplete",
+          "text_key": "encaminhamento_incompleto"
         }
       }
     },

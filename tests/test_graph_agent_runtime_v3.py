@@ -422,6 +422,45 @@ def test_graph_owned_greeting_is_short_and_model_free():
     assert response.token_usage["model_calls"] == 0
 
 
+def test_invalid_model_fallback_cannot_leave_terminal_state_on_sdr():
+    contract = {
+        "branch_anchor_node_id": "branch:a",
+        "fields": [{
+            "key": "name", "owner_node_id": "branch:a", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:name",
+        }],
+        "questions": {"q:name": {"field_key": "name", "text": "What is your name?"}},
+        "conversation_policy": {
+            "question_repetition": {"max_attempts": 1},
+            "qualification": {
+                "summary_template": "Known: {informed_fields}.",
+                "completion_message": "The team will continue.",
+                "incomplete_handoff_template": "Missing: {missing_fields}.",
+            },
+        },
+        "field_labels": {"name": "name"},
+    }
+    known = {
+        "status": "known", "value": "Beatriz", "owner_node_id": "branch:a",
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test", messages=[{"role": "user", "content": "Beatriz"}],
+        cart={"facts": {"name": known}, "facts_by_key": {"name": [known]}},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+
+    decision, response = graph_agent_runtime_v3._invalid_proposal_fallback(
+        context, {"invalid": True}, ["proposal_schema_invalid"],
+    )
+
+    assert decision.intent == "qualification_complete"
+    assert decision.route.value == "HUMAN"
+    assert response.handoff_required is True
+    assert response.reply_text == "Known: name: Beatriz.\n\nThe team will continue."
+
+
 def test_greeting_recognizer_covers_how_people_actually_type():
     """WhatsApp openings stretch letters and chain forms; typos must not pass."""
     for message in (
@@ -588,7 +627,8 @@ def test_claim_evidence_and_handoff_condition_are_exactly_authorized():
         qualification_complete=True, handoff_requested=False,
     )
     missing_handoff = check(document, completed, active="branch:a", message="10")
-    assert "handoff_required_by_rule" in missing_handoff["errors"]
+    assert missing_handoff["errors"] == []
+    assert missing_handoff["handoff_required"] is True
     completed["handoff_requested"] = True
     assert check(document, completed, active="branch:a", message="10")["valid"]
 
@@ -1101,13 +1141,153 @@ def test_third_pending_question_attempt_marks_field_unknown():
 
     fact = graph_agent_runtime_v3._unanswered_fact_after_question_limit(
         context=context, contract=contract, ledger_facts={}, proposal=proposal,
+        max_attempts=1,
     )
 
     assert fact == {
         "field_key": "name", "owner_node_id": "persona:one",
         "status": "unknown", "value": None, "source_message_id": "",
         "evidence_span": "", "confidence": 1.0,
+        "reason": "ignored_twice", "metadata": {"reason": "ignored_twice"},
     }
+
+
+def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypatch):
+    root = node(1, "persona:generic", parent_type="persona", data={
+        "conversation_policy": {
+            "question_repetition": {"max_attempts": 1},
+            "doubt_handling": {
+                "answer_before_qualification": "Answer first.",
+                "continue_with_first_missing_field": "Continue with the pending field.",
+                "deferred_response": "The team will explain that published detail.",
+            },
+            "qualification": {
+                "summary_template": "Summary: {informed_fields}.",
+                "completion_message": "The team will continue.",
+                "incomplete_handoff_template": (
+                    "Known: {informed_fields}. Not confirmed: {missing_fields}."
+                ),
+            },
+        },
+        "appointment_policy": {
+            "field_labels": {"name": "name", "goal": "goal"},
+        },
+    })
+    branch = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    q_name = node(3, "q:name", parent_type="faq", data={"question": "What is your name?"})
+    q_goal = node(4, "q:goal", parent_type="faq", data={"question": "What is your goal?"})
+    branch["metadata"]["qualification"] = {"fields": [
+        {
+            "key": "name", "owner_node_id": "branch:a",
+            "question_node_id": "q:name", "required": True,
+            "accepted_statuses": ["known", "unknown"], "value_schema": {"type": "string"},
+        },
+        {
+            "key": "goal", "owner_node_id": "branch:a",
+            "question_node_id": "q:goal", "required": True,
+            "accepted_statuses": ["known"], "value_schema": {"type": "string"},
+        },
+    ]}
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=[root, branch, q_name, q_goal],
+        edge_rows=[
+            edge(1, root, branch), edge(2, branch, q_name), edge(3, branch, q_goal),
+        ],
+    )
+    pub = publication(document)
+    contract = document["branch_contracts"]["branch:a"]
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_persona",
+        lambda _slug: {**PERSONA, "config": {}},
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
+        lambda _persona_id: pub,
+    )
+    known_goal = {
+        "field_key": "goal", "status": "known", "value": "receive support",
+        "owner_node_id": "branch:a", "source_message_id": "msg:goal",
+    }
+    first_context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], publication_id=pub["id"],
+        messages=[
+            {"role": "assistant", "content": "What is your name?"},
+            {"message_id": "msg:interrupt", "role": "user", "content": "How does support work?"},
+        ],
+        cart={
+            "facts": {"goal": known_goal},
+            "facts_by_key": {"goal": [known_goal]},
+            "asked_question_node_ids": ["q:name"],
+        },
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        retrieval_trace={"retrieval_branch_node_id": "branch:a"},
+    )
+    first_proposal = {
+        "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": contract["branch_path_checksum"],
+        "branch_evidence_span": "", "extracted_facts": [], "claims": [],
+        "next_question_node_id": "q:name", "cited_node_ids": [],
+        "cited_chunk_ids": [],
+        "reply": "Support is reviewed by the team for each request. What is your name?",
+        "qualification_complete": False, "handoff_requested": False,
+    }
+
+    first_decision, first_response = graph_agent_runtime_v3.decide(
+        first_context, model_observation={"proposal": first_proposal},
+    )
+
+    assert first_decision.route.value == "SDR"
+    assert first_response.handoff_required is False
+    assert first_response.cart_state["asked_question_node_ids"].count("q:name") == 2
+
+    second_context = first_context.model_copy(update={
+        "messages": [
+            *first_context.messages,
+            {"role": "assistant", "content": first_response.reply_text},
+            {"message_id": "msg:ignored", "role": "user", "content": "Can we move on without that?"},
+        ],
+        "cart": first_response.cart_state,
+    })
+    second_proposal = {
+        **first_proposal,
+        "reply": "I will preserve what was already provided. What is your name?",
+    }
+
+    second_decision, second_response = graph_agent_runtime_v3.decide(
+        second_context, model_observation={"proposal": second_proposal},
+    )
+
+    unknown = second_response.cart_state["facts_by_key"]["name"][0]
+    assert unknown["status"] == "unknown"
+    assert unknown["reason"] == "ignored_twice"
+    assert second_decision.intent == "qualification_incomplete"
+    assert second_decision.route.value == "HUMAN"
+    assert second_response.handoff_required is True
+    assert second_response.proof["next_question_node_id"] is None
+    assert second_response.reply_text == (
+        "Known: goal: receive support. Not confirmed: name."
+    )
+
+    terminal_context = second_context.model_copy(update={
+        "messages": [
+            *second_context.messages,
+            {"role": "assistant", "content": second_response.reply_text},
+            {"message_id": "msg:after-terminal", "role": "user", "content": "Thanks"},
+        ],
+        "cart": second_response.cart_state,
+    })
+    with pytest.raises(RuntimeError, match="terminal_repetition"):
+        graph_agent_runtime_v3.decide(
+            terminal_context,
+            model_observation={"proposal": {
+                **second_proposal,
+                "next_question_node_id": None,
+                "reply": "The team will take it from here.",
+            }},
+        )
 
 
 def test_pending_condition_answer_does_not_change_branch_from_service_word():
@@ -1940,7 +2120,9 @@ def test_decide_fallback_uses_the_published_closing_text_instead_of_silence(monk
     decision, response = graph_agent_runtime_v3.decide(
         context, model_observation={"proposal": stale_proposal},
     )
-    assert decision.intent == "published_fallback"
+    assert decision.intent == "qualification_complete"
+    assert decision.route.value == "HUMAN"
+    assert response.handoff_required is True
     assert response.reply_text == "Perfeito! Anotei tudo, a equipe vai te chamar em breve."
 
 

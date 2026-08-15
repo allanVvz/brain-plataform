@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 from services import (
+    conversation_repetition,
     conversation_runtime,
     graph_agent_runtime_v3,
     graph_json_v2_store,
@@ -589,9 +590,18 @@ def _semantic_appointment_script(
             len(item_contract.get("fields") or [])
             for _item_anchor, _item_node, item_contract in branches[:2]
         ) + 6,
-        "expected_handoff": False,
+        "expected_handoff": True,
         "switch": switch,
         "doubt": doubt,
+        "interruption_after_answered_fields": max(
+            0, len(driver_required_fields) - 1,
+        ),
+        "second_ignore": {
+            "text": "Podemos seguir sem essa informação?",
+        },
+        "question_repetition": dict(
+            (contract.get("conversation_policy") or {}).get("question_repetition") or {}
+        ),
         "initial_known_fields": (
             ["nome_cliente"] if initial_state == "known_name" else []
         ),
@@ -1614,7 +1624,35 @@ def _active_validator_contract(
                 continue
             seen_fields.add(identity)
             fields.append(field)
-    return {"fields": fields, "questions": questions}
+    persona = next(
+        (
+            node for node in (graph_document.get("node_by_id") or {}).values()
+            if str(node.get("node_type") or "") == "persona"
+        ),
+        {},
+    )
+    persona_data = persona.get("data") or {}
+    first_contract = next(
+        (
+            (graph_document.get("branch_contracts") or {}).get(anchor) or {}
+            for anchor in active_branch_node_ids
+            if (graph_document.get("branch_contracts") or {}).get(anchor)
+        ),
+        {},
+    )
+    return {
+        "fields": fields,
+        "questions": questions,
+        "conversation_policy": (
+            first_contract.get("conversation_policy")
+            or persona_data.get("conversation_policy")
+            or {}
+        ),
+        "field_labels": (
+            first_contract.get("field_labels")
+            or ((persona_data.get("appointment_policy") or {}).get("field_labels") or {})
+        ),
+    }
 
 
 def _semantic_turn_audit(
@@ -1713,6 +1751,29 @@ def _semantic_turn_audit(
         or decision.get("handoff_requested")
         or str(turn.get("route") or "").upper() == "HUMAN"
     )
+    terminal_intent = None
+    if handoff_observed:
+        terminal_intent = (
+            "qualification_complete" if qualification_complete
+            else "qualification_incomplete"
+        )
+    repetition_policy = (
+        (contract.get("conversation_policy") or {}).get("question_repetition") or {}
+    )
+    repetition = conversation_repetition.assess_repetition(
+        current_reply=reply,
+        recent_replies=recent_replies[-4:],
+        question_node_id=question_id,
+        question_text=question_text,
+        asked_question_node_ids=ledger_before.get("asked_question_node_ids") or [],
+        max_attempts=repetition_policy.get("max_attempts", 0),
+        field_pending=bool(first_askable and question_id == expected_question_id),
+        terminal_intent=terminal_intent,
+        previous_terminal_intent=str(
+            ((ledger_before.get("terminal_handoff") or {}).get("intent") or "")
+        ) or None,
+    )
+    repetition_failures = set(repetition["failures"])
     criteria = {
         "intent_identified": bool(decision.get("intent")),
         "doubt_answered_first": (
@@ -1728,21 +1789,27 @@ def _semantic_turn_audit(
         "first_missing_field_only": (
             (not missing and question_id is None)
             or (
+                handoff_observed
+                and question_id is None
+                and first_askable is None
+            )
+            or (
                 question_id == expected_question_id
                 and bool(question_text)
                 and graph_proof_checker_v3._question_already_asked(question_text, reply)
             )
         ),
         "known_fact_not_reasked": not asked_fact_already_known,
-        "reply_not_repeated": (
-            all(_semantic_similarity(previous, reply) < 0.92 for previous in recent_replies[-4:])
-            or (
-                bool(first_askable)
-                and bool(question_id)
-                and question_id == previous_question_node_id
-                and question_id == expected_question_id
-            )
+        "reply_not_repeated": not bool(
+            repetition_failures & {"semantic_repetition", "terminal_repetition"}
         ),
+        "question_repetition_budget": (
+            "question_attempt_budget_exceeded" not in repetition_failures
+        ),
+        "contextual_retry_valid": not bool(
+            repetition_failures & {"contextual_bridge_required", "question_field_not_pending"}
+        ),
+        "terminal_not_repeated": "terminal_repetition" not in repetition_failures,
         "model_reconciled_without_fallback": (
             # A valid, complete proof intentionally resolves to the published
             # deterministic completion reply. That is not a model-repair
@@ -1786,10 +1853,12 @@ def _semantic_turn_audit(
             or previous_asked_field not in intended
         ),
         "handoff_only_after_completion": (
-            not handoff_observed or qualification_complete
+            not handoff_observed
+            or qualification_complete
+            or bool(missing and first_askable is None)
         ),
         "expected_handoff_reached": (
-            not qualification_complete or not expected_handoff or handoff_observed
+            not expected_handoff or first_askable is not None or handoff_observed
         ),
     }
     failures = [name for name, passed in criteria.items() if not passed]
@@ -1807,7 +1876,49 @@ def _semantic_turn_audit(
         "ledger_revision": ledger_after.get("revision"),
         "qualification_complete": qualification_complete,
         "handoff_observed": handoff_observed,
+        "repetition_audit": repetition,
     }
+
+
+def _semantic_failure_records(
+    *,
+    conversation: list[dict],
+    turn_index: int,
+    audit: dict,
+    session_id: str,
+    persona_slug: str,
+    buffer_id: str,
+    external_message_id: str,
+    correlation_id: str,
+) -> tuple[str, dict, dict]:
+    """Build the terminal quality-failure result and its non-secret event."""
+    failure = "semantic_turn_failed:" + ",".join(audit.get("failures") or [])
+    output = {
+        "conversation": conversation,
+        "status": "error",
+        "technical_pass": True,
+        "quality_pass": False,
+        "failed_turn": turn_index,
+        "failure": failure,
+    }
+    event = {
+        "event_type": "wa_validator_semantic_failed",
+        "payload": {
+            "session_id": session_id,
+            "persona_slug": persona_slug,
+            "turn": turn_index,
+            "failures": audit.get("failures") or [],
+            "criteria": audit.get("criteria") or {},
+            "repetition_audit": audit.get("repetition_audit") or {},
+            "canonical_inbound_id": buffer_id,
+            "canonical_inbound": {
+                "buffer_id": buffer_id,
+                "external_message_id": external_message_id,
+                "correlation_id": correlation_id,
+            },
+        },
+    }
+    return failure, output, event
 
 
 def enqueue_session_direct(session_id: str) -> dict:
@@ -1830,34 +1941,37 @@ def _next_semantic_driver_step(
 ) -> dict | None:
     """Select the next synthetic customer turn for a semantic validation.
 
-    ``deferred_answer`` is an opt-in Validator probe. It deliberately leaves
-    one asked field unanswered, then supplies it as an unsolicited fact after
-    the runtime advances. Normal generated scripts do not set it, so this
-    exercises the production policy without changing real conversations or
-    the standard validation flows.
+    The standard appointment driver answers graph fields until one remains,
+    sends a pure interruption, verifies one contextual resumption, then
+    ignores that field again to require an incomplete terminal handoff.
     """
+    second_ignore = driver.get("second_ignore")
+    if (
+        state.get("doubt_sent")
+        and not state.get("second_ignore_sent")
+        and asked_field
+        and asked_field == state.get("interrupted_field")
+        and isinstance(second_ignore, dict)
+        and str(second_ignore.get("text") or "").strip()
+    ):
+        state["second_ignore_sent"] = True
+        return {
+            **second_ignore,
+            "kind": "ignored_again",
+            "intended_facts": {},
+            "expected_branch_node_id": active_anchor,
+            "expected_active_branch_node_ids": list(expected_active_branches),
+        }
+
     doubt = driver.get("doubt")
-    if isinstance(doubt, dict) and not state.get("doubt_sent"):
+    interruption_threshold = int(driver.get("interruption_after_answered_fields") or 0)
+    if (
+        isinstance(doubt, dict)
+        and not state.get("doubt_sent")
+        and len(answered_fields) >= interruption_threshold
+    ):
         state["doubt_sent"] = True
-        answer = (driver.get("answers") or {}).get(asked_field)
-        answer_text = str((answer or {}).get("text") or "").strip()
-        doubt_text = str(doubt.get("text") or "").strip()
-        if isinstance(answer, dict) and answer_text:
-            # The standard semantic run expects terminal qualification. With
-            # the graph-owned single-attempt policy, sending a pure
-            # interruption here makes the currently asked required field
-            # unknown and therefore intentionally incomplete. Combine the
-            # field answer and doubt in one realistic customer turn instead:
-            # the runtime must extract the fact, answer the doubt first and
-            # then advance to the next missing graph question.
-            return {
-                **doubt,
-                "text": " ".join(part for part in (answer_text, doubt_text) if part),
-                "kind": "doubt_with_field_answer",
-                "intended_facts": {asked_field: answer.get("value")},
-                "expected_branch_node_id": active_anchor,
-                "expected_active_branch_node_ids": list(expected_active_branches),
-            }
+        state["interrupted_field"] = asked_field
         return {
             **doubt,
             "kind": "doubt",
@@ -2073,7 +2187,11 @@ async def run_session_direct(
             max_turns = int(driver.get("max_turns") or len(step_queue) or 1)
             recent_replies: list[str] = []
             previous_question_node_id: str | None = None
-            answered_fields: set[str] = set()
+            answered_fields: set[str] = {
+                str(value) for value in driver.get("initial_known_fields") or []
+            } | {
+                str(value) for value in (driver.get("opening") or {}).get("intended_facts") or {}
+            }
             driver_state = {
                 "doubt_sent": False,
                 "switch_sent": False,
@@ -2399,29 +2517,21 @@ async def run_session_direct(
                         },
                     )
                     if not audit.get("passed"):
-                        failure = "semantic_turn_failed:" + ",".join(audit.get("failures") or [])
-                        failure_output = {
-                            "conversation": conversation,
-                            "status": "error",
-                            "technical_pass": True,
-                            "quality_pass": False,
-                            "failed_turn": i,
-                            "failure": failure,
-                        }
+                        failure, failure_output, failure_event = _semantic_failure_records(
+                            conversation=conversation,
+                            turn_index=i,
+                            audit=audit,
+                            session_id=session_id,
+                            persona_slug=persona_slug,
+                            buffer_id=buffer_uuid,
+                            external_message_id=message_id,
+                            correlation_id=correlation_id,
+                        )
                         _session_update(
                             session_id, status="error", output=failure_output,
                             error=failure,
                         )
-                        supabase_client.insert_event({
-                            "event_type": "wa_validator_semantic_failed",
-                            "payload": {
-                                "session_id": session_id,
-                                "persona_slug": persona_slug,
-                                "turn": i,
-                                "failures": audit.get("failures") or [],
-                                "canonical_inbound_id": buffer_uuid,
-                            },
-                        })
+                        supabase_client.insert_event(failure_event)
                         return
 
                     recent_replies.append(str(turn.get("text") or ""))
@@ -2431,7 +2541,7 @@ async def run_session_direct(
                             str(value)
                             for value in step.get("expected_active_branch_node_ids") or []
                         ]
-                    if audit.get("qualification_complete"):
+                    if audit.get("handoff_observed"):
                         semantic_complete = True
                         break
 
@@ -2470,7 +2580,7 @@ async def run_session_direct(
                 i += 1
 
             if semantic_mode and not semantic_complete:
-                failure = "semantic_driver_exhausted_before_qualification"
+                failure = "semantic_driver_exhausted_before_terminal_handoff"
                 final_output = {
                     "conversation": conversation,
                     "status": "error",
