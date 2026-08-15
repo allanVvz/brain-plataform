@@ -1651,6 +1651,25 @@ def _next_semantic_driver_step(
     doubt = driver.get("doubt")
     if isinstance(doubt, dict) and not state.get("doubt_sent"):
         state["doubt_sent"] = True
+        answer = (driver.get("answers") or {}).get(asked_field)
+        answer_text = str((answer or {}).get("text") or "").strip()
+        doubt_text = str(doubt.get("text") or "").strip()
+        if isinstance(answer, dict) and answer_text:
+            # The standard semantic run expects terminal qualification. With
+            # the graph-owned single-attempt policy, sending a pure
+            # interruption here makes the currently asked required field
+            # unknown and therefore intentionally incomplete. Combine the
+            # field answer and doubt in one realistic customer turn instead:
+            # the runtime must extract the fact, answer the doubt first and
+            # then advance to the next missing graph question.
+            return {
+                **doubt,
+                "text": " ".join(part for part in (answer_text, doubt_text) if part),
+                "kind": "doubt_with_field_answer",
+                "intended_facts": {asked_field: answer.get("value")},
+                "expected_branch_node_id": active_anchor,
+                "expected_active_branch_node_ids": list(expected_active_branches),
+            }
         return {
             **doubt,
             "kind": "doubt",
@@ -2221,7 +2240,9 @@ async def run_session_direct(
                         semantic_complete = True
                         break
 
-                    if step.get("kind") in {"field_answer", "loose_field_answer"}:
+                    if step.get("kind") in {
+                        "field_answer", "loose_field_answer", "doubt_with_field_answer",
+                    }:
                         answered_fields.update(
                             str(key) for key in (step.get("intended_facts") or {})
                         )

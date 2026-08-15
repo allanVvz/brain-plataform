@@ -946,6 +946,33 @@ def test_semantic_driver_can_defer_then_answer_field_spontaneously():
     assert next_answer["intended_facts"] == {"objective": "conservar"}
 
 
+def test_semantic_driver_doubt_turn_also_answers_current_required_field():
+    driver = {
+        "answers": {
+            "nome_cliente": {"text": "Meu nome é Beatriz.", "value": "Beatriz"},
+        },
+        "doubt": {
+            "text": "E vocês fazem polimento?",
+            "expected_evidence_node_ids": ["faq:polimento"],
+        },
+    }
+    state = {}
+
+    step = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="nome_cliente",
+        answered_fields=set(),
+        active_anchor="paint",
+        expected_active_branches=["paint"],
+    )
+
+    assert step["kind"] == "doubt_with_field_answer"
+    assert step["intended_facts"] == {"nome_cliente": "Beatriz"}
+    assert step["text"] == "Meu nome é Beatriz. E vocês fazem polimento?"
+    assert step["expected_evidence_node_ids"] == ["faq:polimento"]
+
+
 def test_wa_validator_generate_script_rejects_flow_incompatible_with_persona(
     monkeypatch,
 ):
