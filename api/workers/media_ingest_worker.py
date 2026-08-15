@@ -61,6 +61,16 @@ class MediaIngestWorker(BaseWorker):
         asset_id = str(asset.get("id") or "")
         metadata = asset.get("metadata") or {}
         descriptor = metadata.get("media") or {}
+        if asset.get("message_id") and asset_id:
+            try:
+                supabase_client.link_inbound_media_asset_to_message(
+                    int(asset["message_id"]), asset_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "message media projection failed asset=%s message=%s: %s",
+                    asset_id, asset.get("message_id"), exc,
+                )
         if self._is_stale(asset):
             self._fail(asset, "reading timed out")
             return

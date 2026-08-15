@@ -230,6 +230,31 @@ def _source_message_id(messages: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _overlay_canonical_inbound(
+    messages: list[dict[str, Any]], message: str, message_id: str | None,
+) -> list[dict[str, Any]]:
+    """Use the claimed burst text for the current turn's proof package."""
+    if not message:
+        return messages
+    current_identity = str(message_id or "")
+    matched = False
+    projected: list[dict[str, Any]] = []
+    for row in messages:
+        row_identity = str(row.get("message_id") or row.get("external_message_id") or "")
+        if current_identity and row_identity == current_identity:
+            row = {**row, "content": message, "texto": message}
+            matched = True
+        projected.append(row)
+    if not matched:
+        projected.append({
+            "message_id": message_id,
+            "sender_type": "lead",
+            "role": "user",
+            "texto": message,
+        })
+    return projected
+
+
 def _parse_timestamp(value: Any) -> datetime | None:
     if not value:
         return None
@@ -1211,7 +1236,7 @@ _GREETING_PATTERN = re.compile(
     r"^(?:"
     r"bo[ma]\s+(?:dia|tarde|noite)a*"
     r"|tudo\s+(?:bem|bom|certo)|td\s+bem|como\s+vai(?:\s+voce)?"
-    r"|oi+e?|ola+|opa+|alo+|salve|e\s?ai+|ei+"
+    r"|oi+e?|ola+|opa+|alo+|salve|e\s?a(?:i+|e+)|ei+"
     r"|beleza|blz|boa"
     r"|hello|hey|hi"
     r")\b"
@@ -1487,8 +1512,10 @@ def build_context(
         raise RuntimeError("active GraphRAG v3 publication not found")
     document = publication.get("document_json") or {}
     messages = batch.get("messages") or supabase_client.get_messages(str(lead_ref), limit=8) or []
-    if message and not any(str(row.get("message_id") or row.get("external_message_id") or "") == str(message_id or "") for row in messages):
-        messages.append({"message_id": message_id, "sender_type": "lead", "role": "user", "texto": message})
+    # The buffer can canonically coalesce several physical messages. Use that
+    # ordered text for this decision/proof without rewriting persisted history
+    # or changing the canonical inbound identity.
+    messages = _overlay_canonical_inbound(messages, message, message_id)
     ledger = batch.get("ledger") or None
     if ledger:
         ledger["facts_by_key"] = _facts_by_key(batch.get("facts") or [])

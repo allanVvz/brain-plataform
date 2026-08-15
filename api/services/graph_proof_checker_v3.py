@@ -14,6 +14,10 @@ except ModuleNotFoundError:  # local bootstrap before requirements are rebuilt
 
 
 VALID_STATUSES = {"known", "unknown", "declined", "needs_confirmation", "invalid"}
+_MEDIA_PLACEHOLDER = re.compile(
+    r"^\[o cliente enviou (?:um|uma) (?:audio|imagem|video|documento)\]$",
+    re.IGNORECASE,
+)
 _CORRECTION_MARKER = re.compile(
     r"\b(corrig|corre[cç][aã]o|na verdade|retific|correction|actually|i meant)\w*\b",
     re.IGNORECASE,
@@ -25,8 +29,12 @@ _FINAL_CONFIRMATION = re.compile(
 
 
 def _literal_span(message: str, span: Any) -> bool:
-    value = str(span or "")
-    return bool(value and value in (message or ""))
+    # A quiet burst is persisted as multiple physical messages but dispatched
+    # as one canonical text separated by newlines. Whitespace folding preserves
+    # literal word order while allowing evidence to span adjacent burst members.
+    value = re.sub(r"\s+", " ", str(span or "")).strip()
+    canonical = re.sub(r"\s+", " ", str(message or "")).strip()
+    return bool(value and value in canonical)
 
 
 def _condition_matches(condition: Any, facts: dict[str, Any]) -> bool:
@@ -391,6 +399,8 @@ def check(
             errors.append(f"fact_status_not_accepted:{key}:{status}")
         value = fact.get("value")
         if status == "known":
+            if _MEDIA_PLACEHOLDER.fullmatch(str(value or "").strip()):
+                errors.append(f"fact_evidence_placeholder:{key}")
             schema_error = _schema_error(field.get("value_schema") or {}, value)
             if schema_error:
                 errors.append(f"fact_schema_invalid:{key}:{schema_error}")

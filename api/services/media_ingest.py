@@ -134,7 +134,7 @@ def register_inbound_media(
     lead: dict,
     descriptor: dict,
     buffer_id: Optional[str],
-    message_id: Optional[Any],
+    message_row_id: Optional[Any],
     binding_id: Optional[str] = None,
 ) -> Optional[dict]:
     """Create the ``assets`` row for a just-received attachment.
@@ -157,7 +157,7 @@ def register_inbound_media(
         asset = supabase_client.insert_inbound_media_asset(
             persona_id=persona_id,
             lead_id=int(lead_id),
-            message_id=int(message_id) if message_id else None,
+            message_id=int(message_row_id) if message_row_id is not None else None,
             descriptor=enriched,
             campaign_id=attribution.get("campaign_id"),
             campaign_recipient_id=attribution.get("campaign_recipient_id"),
@@ -170,5 +170,18 @@ def register_inbound_media(
         return None
     if asset is None:
         # Provider retry for a message we already registered.
-        logger.info("inbound media already registered message_id=%s", message_id)
+        logger.info("inbound media already registered message_row_id=%s", message_row_id)
+    elif message_row_id is not None and asset.get("id"):
+        try:
+            supabase_client.link_inbound_media_asset_to_message(
+                int(message_row_id), str(asset["id"]),
+            )
+        except Exception as exc:
+            # The asset row remains the canonical relationship through
+            # assets.message_id. The messages read path hydrates this link too,
+            # so a transient projection failure must not lose the attachment.
+            logger.warning(
+                "inbound media message link failed message_row_id=%s asset=%s: %s",
+                message_row_id, asset.get("id"), exc,
+            )
     return asset

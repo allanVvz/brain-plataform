@@ -151,6 +151,24 @@ def test_one_bad_asset_does_not_stall_the_queue(worker, monkeypatch):
     assert failed == ["bad"]
 
 
+def test_message_projection_failure_does_not_fail_media_ingest(worker, monkeypatch):
+    instance = worker.MediaIngestWorker()
+    monkeypatch.setattr(
+        worker.supabase_client, "link_inbound_media_asset_to_message",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("projection unavailable")),
+    )
+    monkeypatch.setattr(instance, "_is_stale", lambda _asset: True)
+    failed = []
+    monkeypatch.setattr(instance, "_fail", lambda asset, error: failed.append((asset["id"], error)))
+
+    instance._process({
+        "id": "asset-1", "message_id": 2378,
+        "metadata": {"media": {"kind": "image"}},
+    })
+
+    assert failed == [("asset-1", "reading timed out")]
+
+
 def test_unknown_fetch_strategy_is_rejected(worker):
     instance = worker.MediaIngestWorker()
     with pytest.raises(RuntimeError, match="unsupported media fetch strategy"):

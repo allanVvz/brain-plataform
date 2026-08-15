@@ -363,7 +363,7 @@ def test_greeting_recognizer_covers_how_people_actually_type():
     """WhatsApp openings stretch letters and chain forms; typos must not pass."""
     for message in (
         "oi", "oii", "Oiii!", "Olá", "olaa", "opa", "Alô", "salve", "e aí",
-        "eai", "ei", "Bom dia", "bom diaa", "Boa tarde", "boa noite", "boa",
+        "eai", "eae", "eaee", "E aee!", "ei", "Bom dia", "bom diaa", "Boa tarde", "boa noite", "boa",
         "tudo bem?", "Tudo bom", "beleza", "blz", "hey", "hello",
         "Oi, tudo bem? Queria saber quais serviços vocês fazem",
     ):
@@ -391,6 +391,22 @@ def test_only_a_greeting_without_a_request_may_skip_the_model():
     ):
         assert graph_agent_runtime_v3._is_bare_greeting(message) is False, message
         assert graph_agent_runtime_v3._is_greeting(message) is True, message
+
+
+def test_canonical_burst_overlays_the_latest_physical_message_for_proof():
+    messages = [
+        {"id": 1, "role": "user", "external_message_id": "wamid-1", "content": "Byd"},
+        {"id": 2, "role": "user", "external_message_id": "wamid-2", "content": "Dolphin"},
+    ]
+
+    projected = graph_agent_runtime_v3._overlay_canonical_inbound(
+        messages, "Byd\nDolphin", "wamid-2",
+    )
+
+    assert projected[0]["content"] == "Byd"
+    assert projected[1]["content"] == "Byd\nDolphin"
+    assert projected[1]["external_message_id"] == "wamid-2"
+    assert messages[1]["content"] == "Dolphin"
 
 
 def test_greeting_responses_rotate_per_lead_without_new_state():

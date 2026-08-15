@@ -321,6 +321,7 @@ export type MessageAttachment = {
   voiceNote: boolean;
   durationSeconds: number | null;
   mime: string | null;
+  status: string | null;
 };
 
 /**
@@ -338,17 +339,20 @@ function messageAttachment(msg: Message): MessageAttachment | null {
     // Older rows only ever carried a bare URL.
     const legacy = extractMediaUrl(msg.metadata);
     return legacy
-      ? { kind: "document", url: legacy, filename: null, voiceNote: false, durationSeconds: null, mime: null }
+      ? { kind: "document", url: legacy, filename: null, voiceNote: false, durationSeconds: null, mime: null, status: "ready" }
       : null;
   }
   const assetId = meta.asset_id || media.asset_id || null;
+  const assetStatus = meta.media_asset_status || media.asset_status || null;
+  const assetReady = assetId && (!assetStatus || assetStatus === "ready");
   return {
     kind: (["image", "audio", "video", "document"].includes(media.kind) ? media.kind : "document") as MessageAttachment["kind"],
-    url: assetId ? api.assetMediaUrl(String(assetId)) : extractMediaUrl(msg.metadata),
+    url: assetReady ? api.assetMediaUrl(String(assetId)) : extractMediaUrl(msg.metadata),
     filename: media.filename || null,
     voiceNote: Boolean(media.voice_note),
     durationSeconds: typeof media.duration_seconds === "number" ? media.duration_seconds : null,
     mime: media.mime || null,
+    status: assetStatus,
   };
 }
 
@@ -361,9 +365,16 @@ function formatDuration(seconds: number | null): string {
 
 /** Inline renderer for a message attachment: image, audio player or file chip. */
 function MessageMedia({ attachment }: { attachment: MessageAttachment }) {
-  const { kind, url, filename, voiceNote, durationSeconds } = attachment;
+  const { kind, url, filename, voiceNote, durationSeconds, status } = attachment;
 
   if (!url) {
+    if (status === "failed") {
+      return (
+        <span className="flex items-center gap-1.5 text-xs italic text-red-300/80">
+          Arquivo recebido, mas indisponivel para visualizacao.
+        </span>
+      );
+    }
     return (
       <span className="flex items-center gap-1.5 text-xs italic text-obs-faint">
         <RefreshCw size={12} className="animate-spin" />

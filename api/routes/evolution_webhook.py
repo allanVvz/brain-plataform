@@ -275,7 +275,7 @@ async def evolution_webhook(binding_id: str, request: Request):
                 lead=lead,
                 descriptor=media,
                 buffer_id=result.get("buffer_id"),
-                message_id=result.get("message_id"),
+                message_row_id=result.get("message_row_id"),
                 binding_id=binding_id,
             )
         accepted += 1

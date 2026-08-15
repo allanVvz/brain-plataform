@@ -866,7 +866,59 @@ def get_messages_page(
         },
     ).execute()
     rows = [_normalize_message_row(row) for row in (result.data or [])]
-    return _sort_messages_for_chat(rows)
+    return _sort_messages_for_chat(_hydrate_message_media_asset_refs(rows))
+
+
+def _hydrate_message_media_asset_refs(rows: list[dict]) -> list[dict]:
+    """Project persisted inbound assets onto their conversation messages.
+
+    ``assets.message_id`` is the canonical relationship. Mirroring ``asset_id``
+    into message metadata makes the dashboard renderer cheap, but the read path
+    must not depend on that denormalized write succeeding during webhook ingest.
+    """
+    message_ids = [
+        int(row["id"])
+        for row in rows
+        if row.get("id") is not None
+        and isinstance(row.get("metadata"), dict)
+        and (
+            (row.get("metadata") or {}).get("media")
+            or (row.get("metadata") or {}).get("asset_id")
+        )
+    ]
+    if not message_ids:
+        return rows
+    assets = _q(
+        get_client().table("assets")
+        .select("id,message_id,status")
+        .in_("message_id", message_ids)
+        .eq("upload_context", "whatsapp_inbound")
+    )
+    return _project_message_media_asset_refs(rows, assets)
+
+
+def _project_message_media_asset_refs(
+    rows: list[dict], assets: list[dict],
+) -> list[dict]:
+    """Pure projection used by the dashboard read path and regression tests."""
+    by_message_id = {
+        int(asset["message_id"]): asset
+        for asset in assets
+        if asset.get("message_id") is not None and asset.get("id")
+    }
+    hydrated: list[dict] = []
+    for row in rows:
+        asset = by_message_id.get(int(row["id"])) if row.get("id") is not None else None
+        if not asset:
+            hydrated.append(row)
+            continue
+        metadata = {
+            **(row.get("metadata") or {}),
+            "asset_id": str(asset["id"]),
+            "media_asset_status": asset.get("status"),
+        }
+        hydrated.append({**row, "metadata": metadata})
+    return hydrated
 
 
 def _sort_messages_for_chat(rows: list) -> list:
@@ -5822,6 +5874,28 @@ def insert_inbound_media_asset(
         if "duplicate" in text or "unique" in text or "23505" in text:
             return None
         raise
+
+
+def link_inbound_media_asset_to_message(message_row_id: int, asset_id: str) -> bool:
+    """Idempotently mirror a canonical inbound asset onto message metadata."""
+    if not message_row_id or not asset_id:
+        return False
+    row = _one(
+        get_client().table("messages")
+        .select("id,metadata")
+        .eq("id", int(message_row_id))
+        .maybe_single()
+    ) or {}
+    if not row:
+        return False
+    metadata = {**(row.get("metadata") or {}), "asset_id": str(asset_id)}
+    result = (
+        get_client().table("messages")
+        .update({"metadata": metadata})
+        .eq("id", int(message_row_id))
+        .execute()
+    )
+    return bool(result.data)
 
 
 def claim_pending_media_assets(limit: int = 10) -> list:

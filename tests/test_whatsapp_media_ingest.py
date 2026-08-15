@@ -155,7 +155,9 @@ def test_webhook_registers_the_asset_and_holds_dispatch(monkeypatch, app_client)
     monkeypatch.setattr(
         mod.supabase_client,
         "enqueue_whatsapp_envelope",
-        lambda **kwargs: enqueued.update(kwargs) or {"buffer_id": "buf-1", "message_id": 7},
+        lambda **kwargs: enqueued.update(kwargs) or {
+            "buffer_id": "buf-1", "message_id": "WAMID-AUDIO", "message_row_id": 7,
+        },
     )
     registered = {}
     monkeypatch.setattr(
@@ -198,8 +200,39 @@ def test_webhook_registers_the_asset_and_holds_dispatch(monkeypatch, app_client)
     assert enqueued["message"]["content"] == payload["text"]
 
     assert registered["buffer_id"] == "buf-1"
-    assert registered["message_id"] == 7
+    assert registered["message_row_id"] == 7
     assert registered["descriptor"]["kind"] == "audio"
+
+
+def test_registration_uses_the_internal_message_row_and_projects_the_asset(monkeypatch):
+    from services import media_ingest
+
+    inserted = {}
+    linked = []
+    monkeypatch.setattr(media_ingest, "resolve_campaign_attribution", lambda *_args: {})
+    monkeypatch.setattr(
+        media_ingest.supabase_client,
+        "insert_inbound_media_asset",
+        lambda **kwargs: inserted.update(kwargs) or {"id": "asset-1"},
+    )
+    monkeypatch.setattr(
+        media_ingest.supabase_client,
+        "link_inbound_media_asset_to_message",
+        lambda message_row_id, asset_id: linked.append((message_row_id, asset_id)) or True,
+    )
+
+    asset = media_ingest.register_inbound_media(
+        persona_id="persona-1",
+        lead={"id": 42},
+        descriptor={"kind": "image", "mime": "image/jpeg"},
+        buffer_id="buf-1",
+        message_row_id=2378,
+        binding_id="binding-1",
+    )
+
+    assert asset == {"id": "asset-1"}
+    assert inserted["message_id"] == 2378
+    assert linked == [(2378, "asset-1")]
 
 
 def test_text_message_is_not_held(monkeypatch, app_client):
@@ -212,7 +245,9 @@ def test_text_message_is_not_held(monkeypatch, app_client):
     monkeypatch.setattr(
         mod.supabase_client,
         "enqueue_whatsapp_envelope",
-        lambda **kwargs: enqueued.update(kwargs) or {"buffer_id": "buf-2", "message_id": 8},
+        lambda **kwargs: enqueued.update(kwargs) or {
+            "buffer_id": "buf-2", "message_id": "WAMID-TEXT", "message_row_id": 8,
+        },
     )
 
     def _no_media(**_kwargs):

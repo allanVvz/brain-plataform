@@ -157,6 +157,63 @@ def test_loose_later_answer_can_replace_unknown_without_correction_marker():
     assert proof["accepted_facts"][0]["value"] == "Beatriz"
 
 
+def _single_fact_proof(*, message: str, value: str, evidence_span: str) -> dict:
+    contract = {
+        "branch_path_checksum": "checksum:a",
+        "closure_node_ids": ["branch:a"],
+        "fields": [{
+            "key": "vehicle", "owner_node_id": "branch:a", "required": True,
+            "accepted_statuses": ["known"], "value_schema": {"type": "string"},
+        }],
+        "questions": {},
+    }
+    return graph_proof_checker_v3.check(
+        publication={
+            "status": "active", "checksum": "sha256:x",
+            "document_json": {"branch_anchors": ["branch:a"]},
+        },
+        contract=contract,
+        ledger={"graph_checksum": "sha256:x", "facts": {}},
+        proposal={
+            "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+            "branch_path_checksum": "checksum:a", "branch_evidence_span": "",
+            "extracted_facts": [{
+                "field_key": "vehicle", "owner_node_id": "branch:a",
+                "status": "known", "value": value,
+                "source_message_id": "msg-2", "evidence_span": evidence_span,
+                "confidence": 1,
+            }],
+            "claims": [], "next_question_node_id": None,
+            "cited_node_ids": [], "cited_chunk_ids": [], "reply": "Anotado.",
+            "qualification_complete": True, "handoff_requested": False,
+        },
+        message=message, source_message_id="msg-2",
+        package_node_ids={"branch:a"}, package_chunk_ids=set(),
+        active_branch_node_id="branch:a", branch_selection_allowed=False,
+        branch_switch_allowed=False,
+    )
+
+
+def test_fact_evidence_can_span_adjacent_messages_in_a_canonical_burst():
+    proof = _single_fact_proof(
+        message="Byd\nDolphin", value="Byd Dolphin", evidence_span="Byd Dolphin",
+    )
+
+    assert proof["valid"] is True, proof["errors"]
+    assert proof["accepted_facts"][0]["value"] == "Byd Dolphin"
+
+
+def test_media_placeholder_cannot_be_persisted_as_a_known_fact():
+    proof = _single_fact_proof(
+        message="[o cliente enviou uma imagem]",
+        value="[o cliente enviou uma imagem]",
+        evidence_span="[o cliente enviou uma imagem]",
+    )
+
+    assert "fact_evidence_placeholder:vehicle" in proof["errors"]
+    assert proof["accepted_facts"] == []
+
+
 def _base_check_kwargs(**overrides):
     document = {"branch_anchors": ["branch:a", "branch:b"]}
     publication = {"status": "active", "checksum": "sha256:x", "document_json": document}

@@ -87,6 +87,25 @@ describe("message media", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
+  it("shows a stable failure state instead of an endless media spinner", () => {
+    render(
+      <MessageBubble
+        msg={message({
+          texto: "[o cliente enviou uma imagem]",
+          metadata: {
+            asset_id: "asset-failed",
+            media_asset_status: "failed",
+            media: { kind: "image", mime: "image/jpeg" },
+          },
+        })}
+        lead={null}
+      />,
+    );
+
+    expect(screen.getByText(/indisponivel para visualizacao/)).toBeInTheDocument();
+    expect(screen.queryByText(/baixando arquivo/)).not.toBeInTheDocument();
+  });
+
   it("renders a document chip with its filename", () => {
     render(
       <MessageBubble
