@@ -32,11 +32,13 @@ jobs:
             files="$(git diff --name-only "$base" "$GITHUB_SHA")"
           fi
           changed() { grep -Eq "$1" <<<"$files" && echo true || echo false; }
-          echo "backend=$(changed '^(api/|tests/|supabase/migrations/|scripts/check_.*\.py$)')" >> "$GITHUB_OUTPUT"
-          echo "frontend=$(changed '^dashboard/')" >> "$GITHUB_OUTPUT"
-          echo "compose=$(changed '^(docker-compose\.yml|\.env\.compose\.example|infra/|ops/vps/|Caddyfile|kong\.yml)')" >> "$GITHUB_OUTPUT"
-          echo "python_deps=$(changed '^api/requirements(-dev)?\.txt$')" >> "$GITHUB_OUTPUT"
-          echo "image=$(changed '^(api/Dockerfile|api/requirements(-dev)?\.txt|infra/migrate\.Dockerfile)$')" >> "$GITHUB_OUTPUT"
+          force_all="$(changed '^\.github/workflows/ci\.yml$')"
+          scoped() { if [ "$force_all" = "true" ]; then echo true; else changed "$1"; fi; }
+          echo "backend=$(scoped '^(api/|tests/|supabase/migrations/|scripts/check_.*\.py$)')" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(scoped '^dashboard/')" >> "$GITHUB_OUTPUT"
+          echo "compose=$(scoped '^(docker-compose\.yml|\.env\.compose\.example|infra/|ops/vps/|Caddyfile|kong\.yml)')" >> "$GITHUB_OUTPUT"
+          echo "python_deps=$(scoped '^api/requirements(-dev)?\.txt$')" >> "$GITHUB_OUTPUT"
+          echo "image=$(scoped '^(api/Dockerfile|api/requirements(-dev)?\.txt|infra/migrate\.Dockerfile)$')" >> "$GITHUB_OUTPUT"
           echo "workflows=$(changed '^\.github/workflows/')" >> "$GITHUB_OUTPUT"
 
       - name: Validar sintaxe dos workflows alterados
