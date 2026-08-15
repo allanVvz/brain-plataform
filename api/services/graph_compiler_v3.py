@@ -126,6 +126,27 @@ def _published(row: dict[str, Any]) -> bool:
     )
 
 
+def _select_persona_node(
+    nodes: list[dict[str, Any]], errors: list[str]
+) -> dict[str, Any] | None:
+    """Select the canonical persona without depending on database row order."""
+    candidates = [node for node in nodes if node["node_type"] == "persona"]
+    projected = [
+        node
+        for node in candidates
+        if (node.get("data") or {}).get("graph_json_import") is True
+    ]
+    eligible = projected if projected else candidates
+    if len(eligible) == 1:
+        return eligible[0]
+    if len(eligible) > 1:
+        errors.append(
+            "ambiguous_persona_node:"
+            + ",".join(sorted(str(node.get("id") or "") for node in eligible))
+        )
+    return None
+
+
 def _condition_valid(condition: Any, field_keys: set[str]) -> bool:
     if condition in (None, {}, []):
         return True
@@ -362,7 +383,7 @@ def compile_graph(
             queue.extend((child, _distance + 1) for child in children.get(current, []))
         return result
 
-    persona_node = next((n for n in nodes if n["node_type"] == "persona"), None)
+    persona_node = _select_persona_node(nodes, errors)
     persona_data = (persona_node or {}).get("data") or {}
     conversation_policy = persona_data.get("conversation_policy")
     conversation_policy = (
