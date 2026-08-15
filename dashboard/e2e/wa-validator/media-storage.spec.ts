@@ -62,6 +62,9 @@ async function selectPersona(page: Page) {
 async function openValidationWorkspace(page: Page) {
   await page.goto(`/settings?tab=messaging&sub=validacoes&persona=${encodeURIComponent(PERSONA_SLUG)}`);
   await selectPersona(page);
+  const flowSelect = page.getByText("Fluxo a testar", { exact: true }).locator("..").locator("select");
+  await expect(flowSelect).toBeEnabled({ timeout: API_TIMEOUT });
+  await expect.poll(async () => flowSelect.inputValue()).not.toBe("");
   await expect(page.getByRole("button", { name: "Gerar Script de Teste" })).toBeEnabled({
     timeout: API_TIMEOUT,
   });

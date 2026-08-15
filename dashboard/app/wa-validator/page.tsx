@@ -196,10 +196,14 @@ export default function WaValidatorPage({
       setError("Selecione um cliente no cabeçalho antes de gerar o script.");
       return;
     }
+    const effectiveFlow = flowId || flows[0]?.id;
+    if (!effectiveFlow) {
+      setError("Aguarde o carregamento dos fluxos antes de gerar o script.");
+      return;
+    }
     setError("");
     setGenerating(true);
     try {
-      const effectiveFlow = flowId || flows[0]?.id;
       const result = await api.waGenerateScript({
         persona_slug: globalPersona.slug,
         flow_id: effectiveFlow,
@@ -349,7 +353,7 @@ export default function WaValidatorPage({
 
           <button
             onClick={handleGenerate}
-            disabled={generating || !globalPersona.slug}
+            disabled={generating || !globalPersona.slug || !flowId || flows.length === 0}
             className="py-2 px-3 text-sm font-medium rounded-lg bg-brain-accent/90 hover:bg-brain-accent text-white transition disabled:opacity-40"
           >
             {generating ? "Gerando script..." : "Gerar Script de Teste"}
