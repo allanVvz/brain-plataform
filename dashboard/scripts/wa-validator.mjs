@@ -195,11 +195,16 @@ try {
     ? [semanticDriver.opening]
     : [...(script.steps || [])];
   const knownFactKeys = new Set(semanticDriver?.initial_known_fields || []);
+  const unknownFactKeys = new Set();
   const answeredFields = new Set();
   const recentBotReplies = [];
+  const askedQuestionNodeIds = [];
   let doubtSent = false;
+  let secondIgnoreSent = false;
+  let interruptedField = null;
   let switchSent = false;
   let semanticComplete = false;
+  let previousTerminalIntent = null;
   const maxTurns = semanticDriver
     ? Number(semanticDriver.max_turns || 1)
     : stepQueue.length;
@@ -314,6 +319,10 @@ try {
         knownFactKeys,
         requiredFields: semanticDriver.required_fields || [],
         recentReplies: recentBotReplies,
+        askedQuestionNodeIds,
+        maxAttempts: Number(semanticDriver.question_repetition?.max_attempts || 0),
+        unknownFactKeys,
+        previousTerminalIntent,
         step,
       });
       for (const [name, passed] of Object.entries(browserAudit.criteria)) {
@@ -329,7 +338,11 @@ try {
           `__SEMANTIC_FAILED__:${browserAudit.failures.join(",")}`,
         );
       }
-      if (browserAudit.qualificationComplete) {
+      if (browserAudit.matchedQuestion?.questionId) {
+        askedQuestionNodeIds.push(browserAudit.matchedQuestion.questionId);
+      }
+      previousTerminalIntent = browserAudit.terminalIntent || previousTerminalIntent;
+      if (browserAudit.qualificationTerminal) {
         semanticComplete = true;
         recentBotReplies.push(botReplyText);
         break;
@@ -337,8 +350,29 @@ try {
       const matchedQuestion = browserAudit.matchedQuestion;
       recentBotReplies.push(botReplyText);
       let nextStep = null;
-      if (semanticDriver.doubt && !doubtSent) {
+      if (
+        doubtSent
+        && !secondIgnoreSent
+        && interruptedField
+        && matchedQuestion.fieldKey === interruptedField
+        && semanticDriver.second_ignore?.text
+      ) {
+        secondIgnoreSent = true;
+        unknownFactKeys.add(interruptedField);
+        nextStep = {
+          ...semanticDriver.second_ignore,
+          kind: "ignored_again",
+          intended_facts: {},
+        };
+      } else if (
+        semanticDriver.doubt
+        && !doubtSent
+        && knownFactKeys.size >= Number(
+          semanticDriver.interruption_after_answered_fields || 0,
+        )
+      ) {
         doubtSent = true;
+        interruptedField = matchedQuestion.fieldKey;
         nextStep = {
           ...semanticDriver.doubt,
           kind: "doubt",
@@ -374,7 +408,7 @@ try {
   }
 
   if (semanticDriver && !semanticComplete) {
-    throw new Error("__SEMANTIC_FAILED__:driver_exhausted_before_completion");
+    throw new Error("__SEMANTIC_FAILED__:driver_exhausted_before_terminal_handoff");
   }
   output.status = "done";
   output.assertions.push({

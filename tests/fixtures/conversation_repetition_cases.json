@@ -1,0 +1,72 @@
+[
+  {
+    "name": "igualdade_apos_normalizacao",
+    "previous_replies": ["Qual é o seu nome?"],
+    "current_reply": "QUAL E O SEU NOME",
+    "expected_failures": ["semantic_repetition"]
+  },
+  {
+    "name": "mudanca_apenas_de_pontuacao",
+    "previous_replies": ["Para continuar, qual é o seu nome?"],
+    "current_reply": "Para continuar: qual e o seu nome!!!",
+    "expected_failures": ["semantic_repetition"]
+  },
+  {
+    "name": "troca_superficial_de_uma_palavra",
+    "previous_replies": ["Para registrar sua solicitação com cuidado preciso entender agora qual é o principal objetivo que você deseja alcançar com este atendimento"],
+    "current_reply": "Para registrar sua solicitação com cuidado preciso entender agora qual é o principal resultado que você deseja alcançar com este atendimento",
+    "expected_failures": ["semantic_repetition"]
+  },
+  {
+    "name": "mesma_pergunta_com_prefixo_vazio",
+    "previous_replies": ["Qual é o seu nome?"],
+    "current_reply": "Certo. Qual é o seu nome?",
+    "question_node_id": "q:name",
+    "question_text": "Qual é o seu nome?",
+    "asked_question_node_ids": ["q:name"],
+    "max_attempts": 1,
+    "field_pending": true,
+    "expected_failures": ["contextual_bridge_required"]
+  },
+  {
+    "name": "retomada_verdadeiramente_contextual",
+    "previous_replies": ["Qual é o seu nome?"],
+    "current_reply": "Sobre a dúvida que você trouxe, esse detalhe será confirmado pela equipe. Qual é o seu nome?",
+    "question_node_id": "q:name",
+    "question_text": "Qual é o seu nome?",
+    "asked_question_node_ids": ["q:name"],
+    "max_attempts": 1,
+    "field_pending": true,
+    "expected_failures": []
+  },
+  {
+    "name": "progressao_para_pergunta_diferente",
+    "previous_replies": ["Qual é o seu nome?"],
+    "current_reply": "Qual é o seu objetivo?",
+    "question_node_id": "q:goal",
+    "question_text": "Qual é o seu objetivo?",
+    "asked_question_node_ids": ["q:name"],
+    "max_attempts": 1,
+    "field_pending": true,
+    "expected_failures": []
+  },
+  {
+    "name": "terceira_emissao_da_mesma_pergunta",
+    "previous_replies": ["Qual é o seu nome?", "Antes de seguir, preciso registrar esse dado. Qual é o seu nome?"],
+    "current_reply": "Para deixar o cadastro correto para a equipe, preciso dessa informação. Qual é o seu nome?",
+    "question_node_id": "q:name",
+    "question_text": "Qual é o seu nome?",
+    "asked_question_node_ids": ["q:name", "q:name"],
+    "max_attempts": 1,
+    "field_pending": true,
+    "expected_failures": ["question_attempt_budget_exceeded"]
+  },
+  {
+    "name": "repeticao_da_confirmacao_terminal",
+    "previous_replies": ["Resumo registrado. A equipe continuará o atendimento."],
+    "current_reply": "Os dados foram anotados e agora o time seguirá com você.",
+    "terminal_intent": "qualification_complete",
+    "previous_terminal_intent": "qualification_complete",
+    "expected_failures": ["terminal_repetition"]
+  }
+]

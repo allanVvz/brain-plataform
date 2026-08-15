@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 
 import { auditBrowserTurn, matchPublishedQuestion } from "./wa-validator-driver.mjs";
+import { assessRepetition } from "./conversation-repetition.mjs";
 
 
 const questions = {
@@ -87,4 +89,24 @@ test("completion requires every graph field to have been sent", () => {
   });
   assert.equal(audit.passed, true);
   assert.equal(audit.qualificationComplete, true);
+});
+
+
+test("shared anti-repetition corpus matches the backend verdicts", () => {
+  const corpusUrl = new URL("../../tests/fixtures/conversation_repetition_cases.json", import.meta.url);
+  const cases = JSON.parse(fs.readFileSync(corpusUrl, "utf8"));
+  for (const item of cases) {
+    const result = assessRepetition({
+      currentReply: item.current_reply,
+      recentReplies: item.previous_replies || [],
+      questionNodeId: item.question_node_id,
+      questionText: item.question_text,
+      askedQuestionNodeIds: item.asked_question_node_ids || [],
+      maxAttempts: item.max_attempts || 0,
+      fieldPending: Boolean(item.field_pending),
+      terminalIntent: item.terminal_intent,
+      previousTerminalIntent: item.previous_terminal_intent,
+    });
+    assert.deepEqual(result.failures, item.expected_failures, item.name);
+  }
 });

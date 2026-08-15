@@ -1,4 +1,5 @@
 import os
+import re
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -58,6 +59,18 @@ def is_public_path(path: str) -> bool:
         remainder = path.removeprefix("/api/menu/").strip("/")
         return bool(remainder) and "/" not in remainder
     return False
+
+
+def is_client_path_allowed(method: str, path: str) -> bool:
+    """Client portal allowlist; asset media remains persona-scoped in-route."""
+    if path in {"/auth/me", "/auth/logout", "/auth/change-password"}:
+        return True
+    if path.startswith("/portal/"):
+        return True
+    return bool(
+        str(method or "").upper() == "GET"
+        and re.fullmatch(r"/assets/[^/]+/media", path or "")
+    )
 
 
 def _admin_test_token_user(request: Request) -> dict | None:
@@ -155,11 +168,7 @@ async def auth_middleware(request: Request, call_next):
 
     account_type = user.get("account_type") or "internal"
     if account_type == "client":
-        allowed = (
-            path in {"/auth/me", "/auth/logout", "/auth/change-password"}
-            or path.startswith("/portal/")
-        )
-        if not allowed:
+        if not is_client_path_allowed(request.method, path):
             return JSONResponse({"detail": "Acesso negado."}, status_code=403)
     response = await call_next(request)
     return _disable_auth_response_cache(response) if is_auth_path else response

@@ -1,18 +1,13 @@
-export function foldText(value) {
-  return String(value || "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
+import {
+  assessRepetition,
+  normalizeText,
+  tokenOverlap,
+} from "./conversation-repetition.mjs";
+
+export const foldText = normalizeText;
 
 export function tokenSimilarity(left, right) {
-  const a = new Set(foldText(left).split(/\s+/).filter(Boolean));
-  const b = new Set(foldText(right).split(/\s+/).filter(Boolean));
-  if (a.size === 0 || b.size === 0) return 0;
-  const overlap = [...a].filter((token) => b.has(token)).length;
-  return overlap / Math.max(a.size, b.size);
+  return tokenOverlap(left, right);
 }
 
 export function matchPublishedQuestion(reply, questions) {
@@ -42,18 +37,38 @@ export function auditBrowserTurn({
   knownFactKeys,
   requiredFields,
   recentReplies,
+  askedQuestionNodeIds = [],
+  maxAttempts = 0,
+  unknownFactKeys = new Set(),
+  previousTerminalIntent = null,
   step,
 }) {
-  const repeated = recentReplies.some(
-    (previous) =>
-      foldText(previous) === foldText(reply)
-      || tokenSimilarity(previous, reply) >= 0.92,
-  );
   const matchedQuestion = matchPublishedQuestion(reply, questions);
   const allRequiredKnown = requiredFields.every((field) => knownFactKeys.has(String(field)));
+  const allRequiredResolved = requiredFields.every(
+    (field) => knownFactKeys.has(String(field)) || unknownFactKeys.has(String(field)),
+  );
   const knownFactReasked = Boolean(
     matchedQuestion && knownFactKeys.has(matchedQuestion.fieldKey),
   );
+  const terminalIntent = !matchedQuestion && allRequiredResolved
+    ? (allRequiredKnown ? "qualification_complete" : "qualification_incomplete")
+    : null;
+  const repetition = assessRepetition({
+    currentReply: reply,
+    recentReplies,
+    questionNodeId: matchedQuestion?.questionId,
+    questionText: matchedQuestion?.text,
+    askedQuestionNodeIds,
+    maxAttempts,
+    fieldPending: Boolean(
+      matchedQuestion && !knownFactKeys.has(matchedQuestion.fieldKey)
+      && !unknownFactKeys.has(matchedQuestion.fieldKey)
+    ),
+    terminalIntent,
+    previousTerminalIntent,
+  });
+  const repetitionFailures = new Set(repetition.failures);
   let doubtAnsweredFirst = true;
   if (step?.kind === "doubt") {
     const segments = String(reply || "").match(/[^.!?]+[.!?]?/g) || [];
@@ -71,8 +86,13 @@ export function auditBrowserTurn({
       );
   }
   const criteria = {
-    reply_not_repeated: !repeated,
-    question_matches_published_graph: Boolean(matchedQuestion) || allRequiredKnown,
+    reply_not_repeated: !repetitionFailures.has("semantic_repetition")
+      && !repetitionFailures.has("terminal_repetition"),
+    question_repetition_budget: !repetitionFailures.has("question_attempt_budget_exceeded"),
+    contextual_retry_valid: !repetitionFailures.has("contextual_bridge_required")
+      && !repetitionFailures.has("question_field_not_pending"),
+    terminal_not_repeated: !repetitionFailures.has("terminal_repetition"),
+    question_matches_published_graph: Boolean(matchedQuestion) || allRequiredResolved,
     known_fact_not_reasked: !knownFactReasked,
     doubt_answered_before_question: doubtAnsweredFirst,
   };
@@ -84,6 +104,9 @@ export function auditBrowserTurn({
     failures,
     criteria,
     matchedQuestion,
+    repetition,
     qualificationComplete: !matchedQuestion && allRequiredKnown,
+    qualificationTerminal: !matchedQuestion && allRequiredResolved,
+    terminalIntent,
   };
 }

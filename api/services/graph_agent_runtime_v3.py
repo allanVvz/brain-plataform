@@ -6,7 +6,6 @@ import logging
 import re
 import time
 import unicodedata
-import difflib
 from datetime import datetime, timezone
 from typing import Any
 
@@ -22,13 +21,17 @@ from schemas.conversation import (
     ConversationRoute,
     ExtractedFact,
 )
-from services import graph_compiler_v3, graph_proof_checker_v3, supabase_client
+from services import (
+    conversation_repetition,
+    graph_compiler_v3,
+    graph_proof_checker_v3,
+    supabase_client,
+)
 
 
 logger = logging.getLogger("graph_agent_runtime_v3")
 
 RUNTIME_VERSION = "graph_agent_runtime_v3"
-MAX_PENDING_QUESTION_ATTEMPTS = 1
 FAQ_SEMANTIC_MIN_SCORE = 0.18
 FAQ_SEMANTIC_MIN_MARGIN = 0.03
 
@@ -189,33 +192,99 @@ def _invalid_proposal_fallback(
 ) -> tuple[ConversationDecision, AgentResponse]:
     contract = context.graph_contract or {}
     facts = context.cart.get("facts") or {}
+    missing = graph_proof_checker_v3.pending_fields(contract, facts)
     pending = graph_proof_checker_v3.askable_pending_fields(contract, facts)
     question_id = next(
         (field.get("question_node_id") for field in pending if field.get("question_node_id")),
         None,
     )
-    reply = graph_proof_checker_v3.compose_published_question(
-        reply="", next_question_node_id=question_id, contract=contract
+    facts_by_key = context.cart.get("facts_by_key") or {
+        key: [value] for key, value in facts.items()
+    }
+    unconfirmed = _dedupe_fields([
+        *missing,
+        *_unknown_fields(contract.get("fields") or [], facts_by_key),
+    ])
+    terminal_intent = None
+    if context.active_branch_node_id and contract.get("fields") and not pending:
+        terminal_intent = (
+            "qualification_complete" if not unconfirmed else "qualification_incomplete"
+        )
+    if terminal_intent:
+        document = {
+            "branch_contracts": {context.active_branch_node_id: contract},
+            "node_by_id": {},
+        }
+        reply = _terminal_reply(
+            document=document,
+            contract=contract,
+            active_branch_ids=[context.active_branch_node_id],
+            facts_by_key=facts_by_key,
+            missing_fields=unconfirmed,
+            qualification_complete=not unconfirmed,
+        )
+    else:
+        reply = graph_proof_checker_v3.compose_published_question(
+            reply="", next_question_node_id=question_id, contract=contract
+        )
+    repetition = conversation_repetition.assess_repetition(
+        current_reply=reply,
+        recent_replies=[
+            str(row.get("content") or row.get("texto") or "")
+            for row in context.messages
+            if str(row.get("role") or "") == "assistant"
+            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
+        ][-4:],
+        question_node_id=question_id,
+        question_text=str(
+            ((contract.get("questions") or {}).get(question_id or "") or {}).get("text") or ""
+        ),
+        asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
+        max_attempts=_question_repetition_max_attempts(contract),
+        field_pending=bool(question_id),
+        terminal_intent=terminal_intent,
+        previous_terminal_intent=str(
+            ((context.cart.get("terminal_handoff") or {}).get("intent") or "")
+        ) or None,
     )
+    if not repetition["passed"]:
+        raise RuntimeError(
+            "conversation repetition blocked: " + ",".join(repetition["failures"])
+        )
     proof = {
         "valid": False,
         "errors": list(dict.fromkeys(errors)),
         "repair_required": False,
         "fallback_used": True,
         "model_proposal": raw if isinstance(raw, dict) else {"raw_type": type(raw).__name__},
-        "missing_fields": [field["key"] for field in pending],
+        "missing_fields": [field["key"] for field in unconfirmed],
+        "qualification_complete": not unconfirmed,
+        "qualification_incomplete": bool(unconfirmed and not pending),
+        "repetition_audit": repetition,
+    }
+    route = ConversationRoute.HUMAN if terminal_intent else ConversationRoute.SDR
+    state = {
+        **context.cart,
+        "asked_question_node_ids": [
+            *(context.cart.get("asked_question_node_ids") or []),
+            *([question_id] if question_id else []),
+        ],
+        **({
+            "terminal_handoff": {"intent": terminal_intent, "emitted": True}
+        } if terminal_intent else {}),
     }
     return (
         ConversationDecision(
-            classifier="graph_proof_checker_v3", intent="published_fallback",
-            route=ConversationRoute.SDR, confidence=0,
+            classifier="graph_proof_checker_v3", intent=terminal_intent or "published_fallback",
+            route=route, confidence=0,
             lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+            handoff_reason="graph_terminal_qualification" if terminal_intent else None,
             evidence_node_ids=[question_id] if question_id else [],
         ),
         AgentResponse(
-            reply_text=reply or None, role=ConversationRoute.SDR,
+            reply_text=reply or None, role=route,
             evidence_node_ids=[question_id] if question_id else [],
-            cart_state=context.cart, handoff_required=False, proof=proof,
+            cart_state=state, handoff_required=bool(terminal_intent), proof=proof,
         ),
     )
 
@@ -981,8 +1050,9 @@ def _doubt_resolution(
     )
     if not detected:
         return None
-    persona = _persona_node(document)
-    conversation_policy = ((persona.get("data") or {}).get("conversation_policy") or {})
+    conversation_policy, _field_labels = _published_conversation_policies(
+        document, contract,
+    )
     doubt_policy = conversation_policy.get("doubt_handling")
     if not isinstance(doubt_policy, dict):
         raise RuntimeError("published appointment graph missing conversation_policy.doubt_handling")
@@ -1079,8 +1149,9 @@ def _unanswered_fact_after_question_limit(
     contract: dict[str, Any],
     ledger_facts: dict[str, Any],
     proposal: ConversationProposal,
+    max_attempts: int,
 ) -> dict[str, Any] | None:
-    """Mark an unanswered field unknown after two published attempts."""
+    """Mark an unanswered field unknown after initial ask plus allowed retries."""
     pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
     if not pending:
         return None
@@ -1116,7 +1187,8 @@ def _unanswered_fact_after_question_limit(
             str(row.get("content") or row.get("texto") or row.get("text") or ""),
         )
     )
-    if max(asked.count(question_id), observed_attempts) < MAX_PENDING_QUESTION_ATTEMPTS:
+    allowed_emissions = 1 + max(0, min(int(max_attempts), 1))
+    if max(asked.count(question_id), observed_attempts) < allowed_emissions:
         return None
     return {
         "field_key": key,
@@ -1126,6 +1198,8 @@ def _unanswered_fact_after_question_limit(
         "source_message_id": _source_message_id(context.messages),
         "evidence_span": "",
         "confidence": 1.0,
+        "reason": "ignored_twice",
+        "metadata": {"reason": "ignored_twice"},
     }
 
 
@@ -1165,19 +1239,19 @@ def _project_recent_messages(messages: list[dict[str, Any]], limit: int = 6) -> 
 
 
 def _repeats_recent_outbound(reply: str, messages: list[dict[str, Any]]) -> bool:
-    folded = _normalized_phrase(reply)
-    if not folded:
-        return False
     recent = [
-        _normalized_phrase(row.get("content") or row.get("texto") or "")
+        str(row.get("content") or row.get("texto") or "")
         for row in messages
         if str(row.get("role") or "") == "assistant"
         or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
     ][-3:]
-    return any(
-        previous and difflib.SequenceMatcher(None, folded, previous, autojunk=False).ratio() >= 0.92
-        for previous in recent
-    )
+    return any(conversation_repetition.is_semantic_repetition(previous, reply) for previous in recent)
+
+
+def _question_repetition_max_attempts(contract: dict[str, Any]) -> int:
+    repetition = ((contract.get("conversation_policy") or {}).get("question_repetition") or {})
+    value = repetition.get("max_attempts", 0)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value in {0, 1} else 0
 
 
 def _repeated_pending_question_is_allowed(
@@ -1185,18 +1259,187 @@ def _repeated_pending_question_is_allowed(
     next_question_node_id: str | None,
     aggregate_missing: list[dict[str, Any]],
     asked_question_node_ids: list[str],
+    reply: str = "",
+    question_text: str = "",
+    recent_replies: list[str] | None = None,
+    max_attempts: int = 0,
 ) -> bool:
-    """Allow a repeated reply only when its published question is still pending."""
+    """Allow one graph-budgeted, contextual and semantically distinct retry."""
     if not next_question_node_id:
         return False
-    return (
-        0 < asked_question_node_ids.count(next_question_node_id)
-        < MAX_PENDING_QUESTION_ATTEMPTS
-        and any(
-            field.get("question_node_id") == next_question_node_id
-            for field in aggregate_missing
-        )
+    pending = any(
+        field.get("question_node_id") == next_question_node_id
+        for field in aggregate_missing
     )
+    if asked_question_node_ids.count(next_question_node_id) <= 0:
+        return False
+    result = conversation_repetition.assess_repetition(
+        current_reply=reply,
+        recent_replies=recent_replies or [],
+        question_node_id=next_question_node_id,
+        question_text=question_text,
+        asked_question_node_ids=asked_question_node_ids,
+        max_attempts=max_attempts,
+        field_pending=pending,
+    )
+    return result["passed"]
+
+
+def _active_contract_fields(
+    document: dict[str, Any], active_branch_ids: list[str], fallback: dict[str, Any],
+) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    contracts = document.get("branch_contracts") or {}
+    for branch_id in active_branch_ids or [str(fallback.get("branch_anchor_node_id") or "")]:
+        contract = contracts.get(branch_id) or fallback
+        for field in contract.get("fields") or []:
+            identity = (str(field.get("key") or ""), str(field.get("owner_node_id") or ""))
+            if not identity[0] or identity in seen:
+                continue
+            seen.add(identity)
+            fields.append(field)
+    return fields
+
+
+def _unknown_fields(
+    fields: list[dict[str, Any]], facts_by_key: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Fields explicitly exhausted as unknown, even if the graph accepts them."""
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for field in fields:
+        key = str(field.get("key") or "")
+        owner = str(field.get("owner_node_id") or "")
+        identity = (key, owner)
+        if not key or identity in seen:
+            continue
+        if any(
+            str(fact.get("owner_node_id") or "") == owner
+            and fact.get("status") == "unknown"
+            for fact in facts_by_key.get(key) or []
+        ):
+            seen.add(identity)
+            result.append(field)
+    return result
+
+
+def _dedupe_fields(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for field in fields:
+        identity = (
+            str(field.get("key") or ""), str(field.get("owner_node_id") or ""),
+        )
+        if not identity[0] or identity in seen:
+            continue
+        seen.add(identity)
+        result.append(field)
+    return result
+
+
+def _published_conversation_policies(
+    document: dict[str, Any], contract: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    conversation_policy = contract.get("conversation_policy") or {}
+    field_labels = contract.get("field_labels") or {}
+    if conversation_policy and field_labels:
+        return conversation_policy, field_labels
+    persona = next(
+        (
+            node for node in (document.get("node_by_id") or {}).values()
+            if str(node.get("node_type") or "") == "persona"
+        ),
+        {},
+    )
+    data = persona.get("data") or {}
+    appointment_policy = data.get("appointment_policy") or {}
+    return (
+        conversation_policy or data.get("conversation_policy") or {},
+        field_labels or appointment_policy.get("field_labels") or {},
+    )
+
+
+def _render_fact_value(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return str(value)
+
+
+def _terminal_reply(
+    *,
+    document: dict[str, Any],
+    contract: dict[str, Any],
+    active_branch_ids: list[str],
+    facts_by_key: dict[str, list[dict[str, Any]]],
+    missing_fields: list[dict[str, Any]],
+    qualification_complete: bool,
+) -> str:
+    """Render terminal copy exclusively from the published graph contract."""
+    conversation_policy, labels = _published_conversation_policies(document, contract)
+    qualification = conversation_policy.get("qualification") or {}
+    fields = _active_contract_fields(document, active_branch_ids, contract)
+    informed: list[str] = []
+    for field in fields:
+        key = str(field.get("key") or "")
+        owner = str(field.get("owner_node_id") or "")
+        fact = next(
+            (
+                row for row in facts_by_key.get(key) or []
+                if str(row.get("owner_node_id") or "") == owner
+                and row.get("status") == "known"
+                and row.get("value") not in (None, "")
+            ),
+            None,
+        )
+        if fact:
+            informed.append(
+                f"{str(labels.get(key) or key)}: {_render_fact_value(fact.get('value'))}"
+            )
+    missing_labels = list(dict.fromkeys(
+        str(labels.get(str(field.get("key") or "")) or field.get("key") or "")
+        for field in missing_fields
+        if str(field.get("key") or "")
+    ))
+    replacements = {
+        "{informed_fields}": "; ".join(informed),
+        "{missing_fields}": ", ".join(missing_labels),
+    }
+
+    def render(template: Any) -> str:
+        result = str(template or "").strip()
+        for marker, value in replacements.items():
+            result = result.replace(marker, value)
+        return result.strip()
+
+    if qualification_complete:
+        parts = [
+            render(qualification.get("summary_template")),
+            render(qualification.get("completion_message")),
+        ]
+        reply = "\n\n".join(part for part in parts if part)
+    else:
+        reply = render(qualification.get("incomplete_handoff_template"))
+    if reply:
+        return reply
+
+    facts = {
+        key: rows[-1] for key, rows in facts_by_key.items() if rows
+    }
+    for branch_id in active_branch_ids:
+        candidate = (document.get("branch_contracts") or {}).get(branch_id) or {}
+        rule = next(
+            (
+                row for row in candidate.get("handoff_rules") or []
+                if row.get("text") and graph_proof_checker_v3.handoff_rule_matches(
+                    row, facts=facts, qualification_complete=qualification_complete,
+                )
+            ),
+            None,
+        )
+        if rule:
+            return str(rule["text"]).strip()
+    raise RuntimeError("published graph missing terminal qualification copy")
 
 
 def _compact_prompt_chunk(row: dict[str, Any]) -> dict[str, Any]:
@@ -1416,8 +1659,8 @@ def _qualification_question_node_id(document: dict[str, Any], field_key: str) ->
     On a first-contact greeting there is no active branch yet, so
     contract["questions"] is empty and the greeting turn used to carry
     question_node_id=None -- which meant _decide never recorded the question
-    in asked_question_node_ids, leaving the ask-once guard
-    (MAX_PENDING_QUESTION_ATTEMPTS) with nothing but a fuzzy text match to
+    in asked_question_node_ids, leaving the graph-budgeted repetition guard
+    with nothing but a fuzzy text match to
     work from. The nodes exist regardless of contract: they are the FAQs
     materialized by graph_conversation_contract.materialize_qualification_questions,
     carrying the same data.metadata.role/field_key contract read here.
@@ -1548,9 +1791,12 @@ SYSTEM_PROMPT = (
     "encaixa melhor: X ou Y?\"), nunca dando a entender que ele foi confuso "
     "ou impreciso (evite \"não entendi\" ou \"pode ser mais específico?\").\n\n"
 
-    "Uma pergunta publicada é feita uma única vez enquanto o campo estiver "
-    "pendente. Se o cliente não responder, o backend marca o campo como "
-    "unknown e segue para o próximo; não tente perguntá-lo novamente. Se o "
+    "conversation_policy.question_repetition.max_attempts informa quantas "
+    "retomadas são permitidas além da pergunta inicial (somente zero ou uma). "
+    "Na primeira ignorada, reconheça ou responda o conteúdo novo antes de "
+    "retomar a pergunta publicada com uma ponte contextual substantiva. "
+    "Depois que esse orçamento terminar, o backend marca o campo como unknown "
+    "e segue ou encaminha; nunca faça uma terceira emissão. Se o "
     "cliente fornecer esse dado espontaneamente mais tarde, extraia-o "
     "normalmente como known para substituir unknown. Além disso, "
     "nunca repita a pergunta ou frase do turno anterior "
@@ -1558,7 +1804,8 @@ SYSTEM_PROMPT = (
     "Confira recent_messages (as últimas mensagens da conversa, incluindo "
     "suas próprias respostas) antes de escrever a reply e varie a "
     "formulação a cada turno, mesmo quando a pergunta de fundo "
-    "(next_question_node_id) continuar a mesma. Peça no máximo uma "
+    "(next_question_node_id) continuar a mesma. Um prefixo vazio como 'Certo' "
+    "não é ponte contextual. Peça no máximo uma "
     "informação pendente por mensagem, salvo duas informações muito "
     "relacionadas.\n\n"
 
@@ -2237,12 +2484,19 @@ def _decide(
             contract=contract,
             ledger_facts=contract_facts,
             proposal=proposal,
+            max_attempts=_question_repetition_max_attempts(contract),
         )
         if unanswered_fact:
             accepted_facts.append(unanswered_fact)
         next_grouped = {
             str(key): list(values) for key, values in grouped_facts.items()
         }
+        if not next_grouped:
+            for field in contract.get("fields") or []:
+                key = str(field.get("key") or "")
+                fact = contract_facts.get(key)
+                if key and fact:
+                    next_grouped.setdefault(key, []).append(fact)
         for fact in accepted_facts:
             key = str(fact.get("field_key") or "")
             owner = str(fact.get("owner_node_id") or "")
@@ -2280,6 +2534,11 @@ def _decide(
         aggregate_askable = graph_proof_checker_v3.aggregate_askable_fields(
             document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
         ) if active_branch_ids else []
+        active_fields = _active_contract_fields(document, active_branch_ids, contract)
+        terminal_unconfirmed = _dedupe_fields([
+            *aggregate_missing,
+            *_unknown_fields(active_fields, next_grouped),
+        ])
         next_question_id = next(
             (field.get("question_node_id") for field in aggregate_askable if field.get("question_node_id")),
             None,
@@ -2291,6 +2550,17 @@ def _decide(
             ),
             contract,
         )
+        qualification_complete = not terminal_unconfirmed and not discovery_only
+        qualification_incomplete = bool(
+            terminal_unconfirmed and not aggregate_askable and not discovery_only
+        )
+        terminal_intent = (
+            "qualification_complete"
+            if qualification_complete
+            else "qualification_incomplete"
+            if qualification_incomplete
+            else None
+        )
         reply_seed = str((doubt or {}).get("text") or proposal.reply)
         if (
             not accepted_facts
@@ -2300,32 +2570,62 @@ def _decide(
             and len(_latest_user_message(context).split()) <= 3
         ):
             reply_seed = ""
-        reply = graph_proof_checker_v3.compose_published_question(
-            reply=reply_seed,
-            next_question_node_id=next_question_id,
-            contract=question_contract,
-        )
+        if terminal_intent:
+            reply = _terminal_reply(
+                document=document,
+                contract=contract,
+                active_branch_ids=active_branch_ids,
+                facts_by_key=next_grouped,
+                missing_fields=terminal_unconfirmed,
+                qualification_complete=qualification_complete,
+            )
+        else:
+            reply = graph_proof_checker_v3.compose_published_question(
+                reply=reply_seed,
+                next_question_node_id=next_question_id,
+                contract=question_contract,
+            )
         greeting_response = str(context.retrieval_trace.get("greeting_response") or "").strip()
         if greeting_response and not _normalized_phrase(reply).startswith(
             _normalized_phrase(greeting_response)
         ):
             reply = "\n\n".join(part for part in (greeting_response, reply) if part)
-        if unanswered_fact and not next_question_id:
+        if unanswered_fact and not next_question_id and not terminal_intent:
             reply = " ".join(
                 sentence.strip()
                 for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", reply_seed)
                 if sentence.strip() and "?" not in sentence
             ).strip()
-        repeated_pending_question = _repeated_pending_question_is_allowed(
-            next_question_node_id=next_question_id,
-            aggregate_missing=aggregate_missing,
-            asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
+        recent_replies = [
+            str(row.get("content") or row.get("texto") or "")
+            for row in context.messages
+            if str(row.get("role") or "") == "assistant"
+            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
+        ][-4:]
+        question_text = str(
+            ((question_contract.get("questions") or {}).get(next_question_id or "") or {}).get("text")
+            or ""
         )
-        if (
-            _repeats_recent_outbound(reply, context.messages)
-            and not repeated_pending_question
-        ):
-            raise RuntimeError("semantic reply repetition blocked by recent outbound proof")
+        repetition = conversation_repetition.assess_repetition(
+            current_reply=reply,
+            recent_replies=recent_replies,
+            question_node_id=next_question_id,
+            question_text=question_text,
+            asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
+            max_attempts=_question_repetition_max_attempts(question_contract),
+            field_pending=any(
+                field.get("question_node_id") == next_question_id
+                for field in aggregate_askable
+            ),
+            terminal_intent=terminal_intent,
+            previous_terminal_intent=str(
+                ((context.cart.get("terminal_handoff") or {}).get("intent") or "")
+            ) or None,
+        )
+        if not repetition["passed"]:
+            raise RuntimeError(
+                "conversation repetition blocked: " + ",".join(repetition["failures"])
+            )
 
         facts = _facts_for_contract(
             (document.get("branch_contracts") or {}).get(committed_branch) or {},
@@ -2337,25 +2637,28 @@ def _decide(
                  "asked_question_node_ids": [
                       *(context.cart.get("asked_question_node_ids") or []),
                       *([next_question_id] if next_question_id else []),
-                  ]}
-        qualification_complete = not aggregate_missing and not discovery_only
-        route = (
-            ConversationRoute.HUMAN
-            if proposal.handoff_requested and qualification_complete
-            else ConversationRoute.SDR
-        )
+                  ],
+                 **({
+                     "terminal_handoff": {
+                         "intent": terminal_intent,
+                         "emitted": True,
+                     }
+                 } if terminal_intent else {})}
+        route = ConversationRoute.HUMAN if terminal_intent else ConversationRoute.SDR
         proof = {
             **proof,
-            "missing_fields": [field.get("key") for field in aggregate_missing],
-            "aggregate_missing_fields": aggregate_missing,
+            "missing_fields": [field.get("key") for field in terminal_unconfirmed],
+            "aggregate_missing_fields": terminal_unconfirmed,
             "next_question_node_id": next_question_id,
             "asked_field_key": next(
-                (field.get("key") for field in aggregate_missing
+                (field.get("key") for field in terminal_unconfirmed
                  if field.get("question_node_id") == next_question_id),
                 None,
             ),
             "qualification_complete": qualification_complete,
+            "qualification_incomplete": qualification_incomplete,
             "accepted_facts": accepted_facts,
+            "repetition_audit": repetition,
             "fallback_used": False,
             **(doubt or {}),
         }
@@ -2365,46 +2668,74 @@ def _decide(
         ]))
         return (
             ConversationDecision(classifier="graph_proof_checker_v3",
-                                 intent="qualification_complete" if qualification_complete else "collect_graph_fields",
+                                 intent=terminal_intent or "collect_graph_fields",
                                  route=route, confidence=1, lead_stage="qualificado" if qualification_complete else "engajado",
-                                 handoff_reason="graph_handoff_rule" if proposal.handoff_requested else None,
+                                 handoff_reason="graph_terminal_qualification" if terminal_intent else None,
                                  evidence_node_ids=evidence_node_ids),
             AgentResponse(reply_text=reply, role=route, evidence_node_ids=evidence_node_ids,
                           cart_state=state,
-                          handoff_required=proposal.handoff_requested and qualification_complete,
+                          handoff_required=bool(terminal_intent),
                           proposal=proposal, proof=proof),
         )
-    # A technical failure emits only the next published question.  It never
-    # fabricates commercial copy and never requests handoff by itself.
-    fallback_id = next((field.get("question_node_id") for field in contract.get("fields") or []
-                        if field["key"] in proof.get("missing_fields") or []), None)
-    closing_text = ""
-    if not fallback_id:
-        # Confirmed live 2026-08-09: when the rejected proposal's own
-        # completion/handoff signal was the only problem (no field actually
-        # missing), fallback_id is None and compose_published_question(reply="",
-        # next_question_node_id=None, ...) returns an empty string -- and
-        # commit() only ever sends a non-empty reply_text, so the customer's
-        # message that completes qualification got silently no response at
-        # all. The branch's own published closing text (the same text a
-        # normal handoff turn would use) is exactly what belongs here
-        # instead of empty, and only applies when nothing is left to ask.
-        facts = (proof.get("ledger") or {}).get("facts") or {}
-        closing_rule = next(
-            (
-                rule for rule in contract.get("handoff_rules") or []
-                if rule.get("text")
-                and graph_proof_checker_v3.handoff_rule_matches(
-                    rule, facts=facts, qualification_complete=True,
-                )
-            ),
-            None,
-        )
-        closing_text = str((closing_rule or {}).get("text") or "")
-    fallback = graph_proof_checker_v3.compose_published_question(
-        reply=closing_text, next_question_node_id=fallback_id, contract=contract
+    # A rejected model proposal may only emit a graph-owned question or a
+    # graph-owned terminal summary. Routing remains deterministic.
+    proof_facts = (proof.get("ledger") or {}).get("facts") or contract_facts
+    fallback_askable = graph_proof_checker_v3.askable_pending_fields(
+        contract, proof_facts,
     )
-    deterministic_fallback_valid = bool(fallback_id or closing_text)
+    fallback_id = next(
+        (field.get("question_node_id") for field in fallback_askable if field.get("question_node_id")),
+        None,
+    )
+    fallback_missing = graph_proof_checker_v3.pending_fields(contract, proof_facts)
+
+    fallback_grouped = {
+        str(key): list(values)
+        for key, values in (context.cart.get("facts_by_key") or {}).items()
+    }
+    if not fallback_grouped:
+        for field in contract.get("fields") or []:
+            key = str(field.get("key") or "")
+            fact = proof_facts.get(key)
+            if key and fact:
+                fallback_grouped.setdefault(key, []).append(fact)
+    for fact in proof.get("accepted_facts") or []:
+        key = str(fact.get("field_key") or "")
+        owner = str(fact.get("owner_node_id") or "")
+        fallback_grouped[key] = [
+            current for current in fallback_grouped.get(key, [])
+            if str(current.get("owner_node_id") or "") != owner
+        ] + [fact]
+
+    fallback_unconfirmed = _dedupe_fields([
+        *fallback_missing,
+        *_unknown_fields(contract.get("fields") or [], fallback_grouped),
+    ])
+    fallback_complete = not fallback_unconfirmed
+    fallback_incomplete = bool(fallback_unconfirmed and not fallback_askable)
+
+    fallback_terminal_intent = (
+        "qualification_complete"
+        if fallback_complete
+        else "qualification_incomplete"
+        if fallback_incomplete
+        else None
+    )
+    if fallback_terminal_intent:
+        fallback = _terminal_reply(
+            document=document,
+            contract=contract,
+            active_branch_ids=context.active_branch_node_ids
+            or [proposal.branch_anchor_node_id],
+            facts_by_key=fallback_grouped,
+            missing_fields=fallback_unconfirmed,
+            qualification_complete=fallback_complete,
+        )
+    else:
+        fallback = graph_proof_checker_v3.compose_published_question(
+            reply="", next_question_node_id=fallback_id, contract=contract
+        )
+    deterministic_fallback_valid = bool(fallback)
     fallback_proof = {
         **proof,
         "valid": deterministic_fallback_valid,
@@ -2413,6 +2744,10 @@ def _decide(
         "mode": "published_fallback",
         "repair_required": False,
         "fallback_used": True,
+        "missing_fields": [field.get("key") for field in fallback_unconfirmed],
+        "aggregate_missing_fields": fallback_unconfirmed,
+        "qualification_complete": fallback_complete,
+        "qualification_incomplete": fallback_incomplete,
     }
     fallback_facts = dict(context.cart.get("facts") or {})
     for fact in proof.get("accepted_facts") or []:
@@ -2434,19 +2769,58 @@ def _decide(
     fallback_state = {
         **context.cart,
         "facts": fallback_facts,
+        "facts_by_key": fallback_grouped,
         "active_branch_node_id": fallback_branch,
         "active_branch_node_ids": fallback_active_branches,
         "asked_question_node_ids": [
             *(context.cart.get("asked_question_node_ids") or []),
             *([fallback_id] if fallback_id else []),
         ],
+        **({
+            "terminal_handoff": {
+                "intent": fallback_terminal_intent,
+                "emitted": True,
+            }
+        } if fallback_terminal_intent else {}),
     }
+    fallback_question_text = str(
+        ((contract.get("questions") or {}).get(fallback_id or "") or {}).get("text") or ""
+    )
+    fallback_repetition = conversation_repetition.assess_repetition(
+        current_reply=fallback,
+        recent_replies=[
+            str(row.get("content") or row.get("texto") or "")
+            for row in context.messages
+            if str(row.get("role") or "") == "assistant"
+            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
+        ][-4:],
+        question_node_id=fallback_id,
+        question_text=fallback_question_text,
+        asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
+        max_attempts=_question_repetition_max_attempts(contract),
+        field_pending=bool(fallback_id),
+        terminal_intent=fallback_terminal_intent,
+        previous_terminal_intent=str(
+            ((context.cart.get("terminal_handoff") or {}).get("intent") or "")
+        ) or None,
+    )
+    fallback_proof["repetition_audit"] = fallback_repetition
+    if not fallback_repetition["passed"]:
+        raise RuntimeError(
+            "conversation repetition blocked: "
+            + ",".join(fallback_repetition["failures"])
+        )
+    fallback_route = (
+        ConversationRoute.HUMAN if fallback_terminal_intent else ConversationRoute.SDR
+    )
     return (
-        ConversationDecision(classifier="graph_proof_checker_v3", intent="published_fallback",
-                             route=ConversationRoute.SDR, confidence=0,
+        ConversationDecision(classifier="graph_proof_checker_v3",
+                             intent=fallback_terminal_intent or "published_fallback",
+                             route=fallback_route, confidence=0,
                              lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+                             handoff_reason="graph_terminal_qualification" if fallback_terminal_intent else None,
                              evidence_node_ids=[fallback_id] if fallback_id else []),
-        AgentResponse(reply_text=fallback or None, role=ConversationRoute.SDR,
+        AgentResponse(reply_text=fallback or None, role=fallback_route,
                       evidence_node_ids=[fallback_id] if fallback_id else [], cart_state=fallback_state,
-                      handoff_required=False, proposal=proposal, proof=fallback_proof),
+                      handoff_required=bool(fallback_terminal_intent), proposal=proposal, proof=fallback_proof),
     )

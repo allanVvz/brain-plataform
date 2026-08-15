@@ -537,8 +537,9 @@ def check(
     )
     if proposal.get("handoff_requested") is True and not handoff_required:
         errors.append("handoff_not_authorized")
-    if proposal.get("handoff_requested") is not True and handoff_required:
-        errors.append("handoff_required_by_rule")
+    # Routing is server-owned. A model may request an authorized handoff, but
+    # omitting the flag can never keep a terminal qualification on the SDR
+    # route; graph_agent_runtime_v3 derives and commits that transition.
     if _FINAL_CONFIRMATION.search(str(proposal.get("reply") or "")) and missing:
         errors.append("premature_final_confirmation")
 
@@ -551,6 +552,7 @@ def check(
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
         "next_question_node_id": question_id,
         "qualification_complete": not missing,
+        "handoff_required": handoff_required,
         "required_field_count": required_field_count(contract, facts),
     }
 

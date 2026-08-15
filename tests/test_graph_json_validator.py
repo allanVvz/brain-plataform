@@ -109,8 +109,18 @@ def test_validate_graph_json_rejects_incomplete_graph_owned_conversation_policy(
     assert "conversation_policy.qualification.incomplete_handoff_template must be non-empty" in errors
     assert "conversation_policy.direct_booking.intent_aliases must be non-empty" in errors
     assert "conversation_policy.direct_booking.silent_handoff must be true" in errors
-    assert "conversation_policy.question_repetition.max_attempts must equal 1" in errors
+    assert "conversation_policy.question_repetition.max_attempts must be 0 or 1" in errors
     assert "appointment persona requires conversation_policy.doubt_handling" in errors
+
+
+def test_question_repetition_accepts_zero_contextual_retries():
+    graph = build_aurora_graph()
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    persona.data["conversation_policy"]["question_repetition"]["max_attempts"] = 0
+
+    valid, errors = validate_graph_json(graph)
+
+    assert valid is True, errors
 
 
 def test_appointment_identity_field_must_be_first_required_field():
