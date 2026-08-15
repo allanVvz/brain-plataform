@@ -198,5 +198,90 @@ def test_persona_scope_field_resolves_to_persona_node_id():
     assert service_field["owner_node_id"] == "persona:aurora"
 
 
+def test_compiler_prefers_canonical_graph_json_persona_over_legacy_persona():
+    """A legacy persona row must not erase policies from the Graph JSON root."""
+    legacy_root = node(
+        1, "node:persona:self", parent_type="persona", data={"role": "root"}
+    )
+    canonical_root = node(
+        2,
+        "persona:canonical",
+        parent_type="persona",
+        data={
+            "graph_json_import": True,
+            "conversation_policy": {
+                "question_repetition": {"max_attempts": 1},
+            },
+            "appointment_policy": {
+                "field_labels": {"nome_cliente": "nome"},
+            },
+        },
+    )
+    branch = node(
+        3,
+        "branch:appointment",
+        parent_type="product",
+        data={"capabilities": {"branch_anchor": True}},
+    )
+    question = node(
+        4,
+        "question:nome",
+        parent_type="faq",
+        data={"question": "Como você se chama?"},
+    )
+    branch["metadata"]["qualification"] = {
+        "fields": [
+            {
+                "key": "nome_cliente",
+                "question_node_id": "question:nome",
+                "required": True,
+                "accepted_statuses": ["known"],
+                "value_schema": {"type": "string", "minLength": 1},
+                "scope": "persona",
+            }
+        ]
+    }
+
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=[legacy_root, canonical_root, branch, question],
+        edge_rows=[
+            edge(1, canonical_root, branch),
+            edge(2, branch, question),
+        ],
+    )
+    contract = document["branch_contracts"]["branch:appointment"]
+    assert contract["conversation_policy"]["question_repetition"] == {
+        "max_attempts": 1
+    }
+    assert contract["field_labels"] == {"nome_cliente": "nome"}
+    assert contract["fields"][0]["owner_node_id"] == "persona:canonical"
+
+
+def test_compiler_rejects_multiple_canonical_graph_json_personas():
+    first = node(
+        1, "persona:first", parent_type="persona", data={"graph_json_import": True}
+    )
+    second = node(
+        2, "persona:second", parent_type="persona", data={"graph_json_import": True}
+    )
+    branch = node(
+        3,
+        "branch:appointment",
+        parent_type="product",
+        data={"capabilities": {"branch_anchor": True}},
+    )
+    with pytest.raises(graph_compiler_v3.GraphCompilationError) as exc_info:
+        graph_compiler_v3.compile_graph(
+            persona=PERSONA,
+            node_rows=[first, second, branch],
+            edge_rows=[edge(1, first, branch)],
+        )
+    assert any(
+        error.startswith("ambiguous_persona_node:")
+        for error in exc_info.value.errors
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
