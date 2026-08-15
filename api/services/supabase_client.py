@@ -4395,6 +4395,34 @@ def search_graph_rag_v3(
     return result.data or []
 
 
+def search_graph_faq_v3(
+    *,
+    persona_id: str,
+    publication_id: str,
+    branch_node_id: str,
+    query: str,
+    query_embedding: list[float] | None,
+    eligible_faq_node_ids: list[str],
+    limit: int = 64,
+) -> list[dict]:
+    """Search only compiler-approved FAQ chunks inside one branch closure."""
+    if not eligible_faq_node_ids:
+        return []
+    result = get_client().rpc(
+        "graph_faq_search_v3",
+        {
+            "p_persona_id": persona_id,
+            "p_publication_id": publication_id,
+            "p_branch_node_id": branch_node_id,
+            "p_query": query,
+            "p_query_embedding": query_embedding,
+            "p_eligible_faq_node_ids": eligible_faq_node_ids,
+            "p_limit": max(1, min(int(limit), 200)),
+        },
+    ).execute()
+    return result.data or []
+
+
 def rank_graph_branches_v3(
     *,
     persona_id: str,

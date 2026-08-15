@@ -83,7 +83,6 @@ def ensure_conversation_node(
     node = supabase_client.upsert_knowledge_node({
         "persona_id": persona_id,
         "source_table": "leads",
-        "source_id": str(lead_id),
         "node_type": "conversation",
         "slug": f"conversa-{lead_id}",
         "title": f"Conversa — {display}",
@@ -171,7 +170,11 @@ def attach_inbound_asset(asset_id: str) -> dict[str, Any]:
     )
     return {
         "attached": True,
+        "status": "attached",
         "conversation_node_id": conversation.get("id"),
         "audience_node_id": (audience_node or {}).get("id"),
         "asset_node_id": (result.get("asset_node") or {}).get("id"),
+        "conversation_asset_edge_id": (result.get("parent_edge") or {}).get("id"),
+        "gallery_node_id": (result.get("gallery_node") or {}).get("id"),
+        "asset_gallery_edge_id": (result.get("gallery_edge") or {}).get("id"),
     }

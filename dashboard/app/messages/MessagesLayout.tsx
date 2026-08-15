@@ -366,6 +366,13 @@ function formatDuration(seconds: number | null): string {
 /** Inline renderer for a message attachment: image, audio player or file chip. */
 function MessageMedia({ attachment }: { attachment: MessageAttachment }) {
   const { kind, url, filename, voiceNote, durationSeconds, status } = attachment;
+  const [imageState, setImageState] = useState<"loading" | "decoded" | "error">("loading");
+  const [imageAttempt, setImageAttempt] = useState(0);
+
+  useEffect(() => {
+    setImageState("loading");
+    setImageAttempt(0);
+  }, [url]);
 
   if (!url) {
     if (status === "failed") {
@@ -384,17 +391,63 @@ function MessageMedia({ attachment }: { attachment: MessageAttachment }) {
   }
 
   if (kind === "image") {
+    const imageUrl = imageAttempt > 0
+      ? `${url}${url.includes("?") ? "&" : "?"}_media_retry=${imageAttempt}`
+      : url;
+    const retryImage = () => {
+      setImageState("loading");
+      setImageAttempt((attempt) => attempt + 1);
+    };
+    const failImage = () => {
+      if (imageAttempt === 0) {
+        retryImage();
+      } else {
+        setImageState("error");
+      }
+    };
     return (
-      <a href={url} target="_blank" rel="noopener noreferrer" className="block">
+      <div className="relative min-h-24 min-w-40 overflow-hidden rounded-lg" data-media-state={imageState}>
+        {imageState === "loading" && (
+          <span
+            className="absolute inset-0 animate-pulse rounded-lg bg-white/10"
+            aria-label="Carregando imagem"
+          />
+        )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={url}
+          src={imageUrl}
           alt={filename || "Imagem recebida"}
           loading="lazy"
-          className="max-h-64 w-auto max-w-full rounded-lg object-cover transition hover:opacity-90"
+          className={`max-h-64 w-auto max-w-full rounded-lg object-cover transition ${imageState === "decoded" ? "opacity-100" : "opacity-0"}`}
           style={{ border: "1px solid var(--border-glass)" }}
+          onLoad={(event) => {
+            const image = event.currentTarget;
+            if (image.complete && image.naturalWidth > 0) {
+              setImageState("decoded");
+            } else {
+              failImage();
+            }
+          }}
+          onError={failImage}
         />
-      </a>
+        {imageState === "decoded" && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Abrir ${filename || "imagem recebida"}`}
+            className="absolute inset-0 rounded-lg transition hover:bg-black/10"
+          />
+        )}
+        {imageState === "error" && (
+          <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg bg-red-950/30 p-3 text-center text-xs text-red-200">
+            Nao foi possivel decodificar a imagem.
+            <button type="button" onClick={retryImage} className="rounded border border-red-200/30 px-2 py-1 hover:bg-white/10">
+              Tentar novamente
+            </button>
+          </span>
+        )}
+      </div>
     );
   }
 

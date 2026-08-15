@@ -77,6 +77,7 @@ def test_conversation_node_carries_the_lead_and_is_not_rag_eligible(monkeypatch)
     assert node["id"] == "node-1"
     assert captured["node_type"] == "conversation"
     assert captured["slug"] == "conversa-42"
+    assert "source_id" not in captured
     assert captured["metadata"]["lead_id"] == 42
     # Customer conversation content must never feed the vector layer.
     assert captured["metadata"]["rag_eligible"] is False
@@ -104,6 +105,47 @@ def test_organic_contact_gets_a_conversation_node_without_an_audience_edge(monke
         persona_id="persona-1", lead={"id": 43}, audience_node=None,
     )
     assert node["id"] == "node-2"
+
+
+def test_inbound_asset_reports_both_graph_edges_and_never_gets_a_landing_slot(monkeypatch):
+    from routes import assets as assets_route
+    from services import conversation_graph
+
+    monkeypatch.setattr(conversation_graph.supabase_client, "get_asset", lambda _asset_id: {
+        "id": "asset-1", "persona_id": "persona-1", "lead_id": 42,
+        "name": "foto.png", "type": "image", "metadata": {"media": {"kind": "image"}},
+        "storage_bucket": "whatsapp-media", "storage_path": "persona-1/42/foto.png",
+    })
+    monkeypatch.setattr(conversation_graph.supabase_client, "get_lead", lambda _lead_id: {"id": 42})
+    monkeypatch.setattr(conversation_graph, "_audience_node_for_recipient", lambda *_args: None)
+    monkeypatch.setattr(
+        conversation_graph, "ensure_conversation_node",
+        lambda **_kwargs: {"id": "conversation-1", "node_type": "conversation"},
+    )
+    captured = {}
+    monkeypatch.setattr(assets_route, "_ensure_asset_graph_contract", lambda **kwargs: (
+        captured.update(kwargs) or {
+            "asset_node": {"id": "asset-node-1"},
+            "parent_edge": {"id": "conversation-asset-edge-1"},
+            "gallery_node": {"id": "gallery-1"},
+            "gallery_edge": {"id": "asset-gallery-edge-1"},
+        }
+    ))
+
+    attachment = conversation_graph.attach_inbound_asset("asset-1")
+
+    assert attachment == {
+        "attached": True,
+        "status": "attached",
+        "conversation_node_id": "conversation-1",
+        "audience_node_id": None,
+        "asset_node_id": "asset-node-1",
+        "conversation_asset_edge_id": "conversation-asset-edge-1",
+        "gallery_node_id": "gallery-1",
+        "asset_gallery_edge_id": "asset-gallery-edge-1",
+    }
+    assert captured["parent_node"]["id"] == "conversation-1"
+    assert captured["asset_function"] is None
 
 
 # ── RAG gate ─────────────────────────────────────────────────────────────

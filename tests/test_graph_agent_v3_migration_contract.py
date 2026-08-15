@@ -13,6 +13,7 @@ SQL = "\n".join(
         "098_recover_uncommitted_graph_inbound.sql",
         "099_recover_unsent_committed_outbound.sql",
         "100_reconcile_committed_graph_inbound.sql",
+        "120_graphrag_faq_projection_v1.sql",
     )
 )
 
@@ -48,6 +49,20 @@ def test_activation_requires_contracts_and_embeddings_and_has_rollback():
     assert "branch contracts are incomplete" in SQL
     assert "activate_graph_publication_v3" in SQL
     assert "rollback_graph_publication_v3" in SQL
+    assert "faq projections are incomplete" in SQL
+    assert "faq_projection_contract" in SQL
+
+
+def test_faq_search_is_internal_branch_and_persona_scoped():
+    assert "graph_faq_search_v3" in SQL
+    assert "c.persona_id = p_persona_id" in SQL
+    assert "c.publication_id = p_publication_id" in SQL
+    assert "c.branch_anchor_node_id = p_branch_node_id" in SQL
+    assert "c.source_graph_node_id = any" in SQL
+    assert "p.status = 'active'" in SQL
+    assert "eligible_faq_node_ids" in SQL
+    assert "revoke all on function public.graph_faq_search_v3" in SQL
+    assert "from public, anon, authenticated" in SQL
 
 
 def test_only_validated_graph_publication_can_grant_protected_embed_edges():
