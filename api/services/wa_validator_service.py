@@ -6,8 +6,10 @@ and analyses conversation gaps to feed back into KB Intake.
 
 import asyncio
 import difflib
+import hashlib
 import httpx
 import json
+import logging
 import os
 import random
 import re
@@ -26,9 +28,12 @@ from services import (
     graph_agent_runtime_v3,
     graph_json_v2_store,
     graph_proof_checker_v3,
+    media_ingest,
     n8n_client,
     supabase_client,
 )
+
+logger = logging.getLogger("wa_validator_service")
 
 # Flows that collect the customer's name as one of their scripted steps --
 # the only ones "known_name" initial state can meaningfully apply to (a
@@ -967,6 +972,182 @@ def get_session(session_id: str) -> dict:
     return session
 
 
+def store_validation_media(
+    session_id: str,
+    *,
+    filename: str,
+    content_type: str,
+    content: bytes,
+    idempotency_key: str,
+) -> dict:
+    """Persist an inbound media fixture for a direct-validator conversation.
+
+    This is deliberately not a provider webhook and does not enqueue a
+    ``lead_buffer`` row.  It gives the browser E2E a safe way to prove private
+    storage and CRM rendering without touching a real WhatsApp account or
+    triggering an agent decision/outbound.
+    """
+    session = get_session(session_id)
+    if str(session.get("status") or "") != "done":
+        raise ValueError("A sessao direta precisa terminar antes do upload de midia.")
+    lead_ref = session.get("lead_ref")
+    if not lead_ref:
+        raise ValueError("Execute a sessao direta antes de anexar uma midia de teste.")
+
+    persona_slug = str(session.get("persona_slug") or "")
+    persona = supabase_client.get_persona(persona_slug) or {}
+    persona_id = str(persona.get("id") or "")
+    lead = supabase_client.get_lead_by_ref(int(lead_ref)) or {}
+    validation = (lead.get("metadata") or {}).get("validation") or {}
+    if not persona_id or str(validation.get("session_id") or "") != session_id:
+        raise ValueError("A sessao nao esta vinculada a um lead sintetico valido.")
+
+    safe_name = Path(str(filename or "arquivo").replace("\\", "/")).name[:180]
+    mime = str(content_type or "application/octet-stream").split(";", 1)[0].lower()
+    if not content or len(content) > 20 * 1024 * 1024:
+        raise ValueError("O arquivo deve ter entre 1 byte e 20 MB.")
+    if mime == "image/png" and not content.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("O conteudo nao corresponde a um PNG valido.")
+    if mime == "image/jpeg" and not content.startswith(b"\xff\xd8\xff"):
+        raise ValueError("O conteudo nao corresponde a um JPEG valido.")
+    if mime == "image/webp" and not (content.startswith(b"RIFF") and content[8:12] == b"WEBP"):
+        raise ValueError("O conteudo nao corresponde a um WebP valido.")
+    if mime == "application/pdf" and not content.startswith(b"%PDF-"):
+        raise ValueError("O conteudo nao corresponde a um PDF valido.")
+    if mime not in {"image/png", "image/jpeg", "image/webp", "application/pdf"}:
+        raise ValueError("Formato de teste nao suportado. Use PNG, JPEG, WebP ou PDF.")
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{8,160}", idempotency_key or ""):
+        raise ValueError("Chave de idempotencia invalida.")
+
+    checksum = hashlib.sha256(content).hexdigest()
+    client = supabase_client.get_client()
+    existing_rows = (
+        client.table("assets")
+        .select("*")
+        .eq("persona_id", persona_id)
+        .eq("lead_id", int(lead_ref))
+        .eq("upload_context", "whatsapp_inbound")
+        .contains("metadata", {"validator_media": {"idempotency_key": idempotency_key}})
+        .limit(1)
+        .execute()
+    ).data or []
+    asset = existing_rows[0] if existing_rows else None
+    if asset:
+        recorded = ((asset.get("metadata") or {}).get("validator_media") or {}).get("sha256")
+        if recorded and recorded != checksum:
+            raise ValueError("A chave de idempotencia ja foi usada por outro arquivo.")
+
+    kind = "image" if mime.startswith("image/") else "document"
+    descriptor = {
+        "kind": kind,
+        "mime": mime,
+        "filename": safe_name,
+        "size": len(content),
+        "reading_status": "completed",
+        "validator_direct": True,
+    }
+    attribution = media_ingest.resolve_campaign_attribution(persona_id, int(lead_ref))
+    if not asset:
+        asset = supabase_client.insert_asset({
+            "persona_id": persona_id,
+            "lead_id": int(lead_ref),
+            "campaign_id": attribution.get("campaign_id"),
+            "campaign_recipient_id": attribution.get("campaign_recipient_id"),
+            "type": "image" if kind == "image" else "pdf",
+            "name": safe_name,
+            "source": "whatsapp",
+            "upload_context": "whatsapp_inbound",
+            "status": "reading",
+            "mime_type": mime,
+            "file_size": len(content),
+            "original_filename": safe_name,
+            "metadata": {
+                "media": descriptor,
+                "direction": "inbound",
+                "reading_status": "completed",
+                "validation_status": "not_applicable",
+                "upload_context": "whatsapp_inbound",
+                "rag_eligible": False,
+                "validator_media": {
+                    "session_id": session_id,
+                    "idempotency_key": idempotency_key,
+                    "sha256": checksum,
+                },
+            },
+        })
+
+    asset_id = str(asset.get("id") or "")
+    if not asset_id:
+        raise RuntimeError("Nao foi possivel registrar o asset de validacao.")
+    extension = ".pdf" if mime == "application/pdf" else {
+        "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+    }[mime]
+    storage_path = f"{persona_id}/{lead_ref}/{asset_id}-validator{extension}"
+    supabase_client.upload_to_storage(
+        supabase_client.WHATSAPP_MEDIA_BUCKET, storage_path, content, mime,
+    )
+    asset = supabase_client.update_asset(asset_id, {
+        "status": "ready",
+        "storage_bucket": supabase_client.WHATSAPP_MEDIA_BUCKET,
+        "storage_path": storage_path,
+        "file_size": len(content),
+    }) or asset
+
+    external_id = f"validator-media:{session_id}:{idempotency_key}"
+    text = f"[imagem de teste recebida: {safe_name}]" if kind == "image" else f"[documento: {safe_name}]"
+    supabase_client.insert_message({
+        "lead_id": int(lead_ref),
+        "role": "user",
+        "content": text,
+        "direction": "inbound",
+        "status": "delivered",
+        "channel": "whatsapp",
+        "sender_id": external_id,
+        "external_message_id": external_id,
+        "channel_binding_id": session.get("channel_binding_id"),
+        "correlation_id": external_id,
+        "metadata": {
+            "asset_id": asset_id,
+            "media": descriptor,
+            "validation": {"is_validation": True, "session_id": session_id},
+        },
+    })
+    message_rows = (
+        client.table("messages")
+        .select("id,external_message_id,direction,created_at")
+        .eq("lead_id", int(lead_ref))
+        .eq("external_message_id", external_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    message = message_rows[0] if message_rows else {}
+    if message.get("id") and not asset.get("message_id"):
+        asset = supabase_client.update_asset(asset_id, {"message_id": message["id"]}) or asset
+
+    try:
+        from services import conversation_graph
+        conversation_graph.attach_inbound_asset(asset_id)
+    except Exception as exc:
+        logger.warning("validator media graph attach skipped asset=%s: %s", asset_id, exc)
+
+    return {
+        "session_id": session_id,
+        "lead_ref": int(lead_ref),
+        "asset": {
+            "id": asset_id,
+            "filename": safe_name,
+            "mime_type": mime,
+            "file_size": len(content),
+            "sha256": checksum,
+            "status": "ready",
+            "media_url": f"/assets/{asset_id}/media",
+        },
+        "message": message,
+        "idempotent": bool(existing_rows),
+        "outbound_enqueued": False,
+    }
+
+
 def list_sessions(
     *, persona_slug: str | None = None, since_hours: int | None = None, limit: int = 100,
 ) -> list:
@@ -1839,6 +2020,13 @@ async def run_session_direct(
             f"Lead de validação para {persona_slug} não recebeu channel_binding_id "
             "automático; configure um workflow_binding ativo para a persona."
         )
+    # Keep the exact synthetic conversation identity on the session. Follow-up
+    # QA actions must never guess a lead from its display name.
+    _session_update(
+        session_id,
+        lead_ref=int(lead_ref),
+        channel_binding_id=str(channel_binding_id),
+    )
     initial_state = script.get("meta", {}).get("initial_state", "cold")
     if initial_state == "known_name":
         _seed_known_name(

@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from services import secret_store
+from services.whatsapp_providers import media as _media
 from utils.tls import get_ca_bundle_path
 
 
@@ -148,6 +149,68 @@ class EvolutionWhatsAppProvider:
     def delete_instance(self, binding: dict[str, Any]) -> dict[str, Any]:
         return self._request("DELETE", f"/instance/delete/{self._name(binding)}")
 
+    def get_media_base64(self, binding: dict[str, Any], message_key: dict[str, Any]) -> bytes:
+        """Download the bytes of a received media message.
+
+        Baileys keeps the media encrypted on WhatsApp's CDN, so there is no
+        plain URL to GET: Evolution decrypts it on demand and hands it back
+        base64-encoded. Called from the media ingest worker, never from the
+        webhook — the webhook must return before this round trip completes.
+        """
+        body = self._request(
+            "POST",
+            f"/chat/getBase64FromMediaMessage/{self._name(binding)}",
+            json={"message": {"key": message_key}, "convertToMp4": False},
+        )
+        encoded = body.get("base64") or (body.get("data") or {}).get("base64")
+        if not encoded:
+            raise RuntimeError("Evolution returned no base64 payload for media message")
+        return base64.b64decode(encoded, validate=True)
+
+    # Message containers Baileys uses for attachments, in the order we probe
+    # them. ``sticker`` is last because a sticker reply can ride alongside a
+    # quoted image and we prefer the real attachment.
+    _MEDIA_CONTAINERS = (
+        ("imageMessage", "image"),
+        ("audioMessage", "audio"),
+        ("videoMessage", "video"),
+        ("documentMessage", "document"),
+        ("documentWithCaptionMessage", "document"),
+        ("stickerMessage", "image"),
+    )
+
+    @classmethod
+    def _extract_media(cls, message: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+        """Return ``(descriptor, caption)`` for the first attachment found."""
+        for container, hint in cls._MEDIA_CONTAINERS:
+            node = message.get(container)
+            if not isinstance(node, dict):
+                continue
+            # documentWithCaptionMessage wraps a real documentMessage.
+            if container == "documentWithCaptionMessage":
+                inner = (node.get("message") or {}).get("documentMessage")
+                if isinstance(inner, dict):
+                    node = inner
+            mime = node.get("mimetype") or node.get("mimeType")
+            caption = str(node.get("caption") or "")
+            return (
+                _media.build_descriptor(
+                    provider="evolution_baileys",
+                    kind=_media.kind_for_mime(mime, hint),
+                    mime=mime,
+                    filename=node.get("fileName") or node.get("filename"),
+                    caption=caption,
+                    size=node.get("fileLength") or node.get("fileSize"),
+                    voice_note=bool(node.get("ptt")),
+                    duration_seconds=node.get("seconds"),
+                    # Evolution needs the whole message key back to locate and
+                    # decrypt the file; it is small, so we carry it verbatim.
+                    fetch_ref={"strategy": "evolution_base64"},
+                ),
+                caption,
+            )
+        return None, ""
+
     def normalize_webhook(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         event = str(payload.get("event") or payload.get("type") or "").upper().replace(".", "_")
         data = payload.get("data") or {}
@@ -156,10 +219,17 @@ class EvolutionWhatsAppProvider:
         remote_alt = key.get("remoteJidAlt") or data.get("remoteJidAlt")
         external_contact = remote_alt or remote_jid
         message = data.get("message") or {}
+        media, caption = self._extract_media(message)
+        if media:
+            # The message key is the fetch handle; store it alongside the
+            # descriptor so the worker needs nothing else from the raw event.
+            media["fetch_ref"]["message_key"] = key
         text = (
             message.get("conversation")
             or (message.get("extendedTextMessage") or {}).get("text")
             or data.get("text")
+            # A captioned photo carries its text on the attachment itself.
+            or caption
             or ""
         )
         return [{
@@ -172,5 +242,6 @@ class EvolutionWhatsAppProvider:
             "from_me": bool(key.get("fromMe") or data.get("fromMe")),
             "status": data.get("status") or data.get("update", {}).get("status"),
             "text": text,
+            "media": media,
             "raw": data,
         }]

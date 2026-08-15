@@ -46,6 +46,16 @@ x-backend-environment: &backend-environment
   WA_VALIDATOR_RUNNER_URL: ${WA_VALIDATOR_RUNNER_URL:-http://wa-validator:3010}
   WA_VALIDATOR_RUN_ENABLED: ${WA_VALIDATOR_RUN_ENABLED:-false}
   WA_VALIDATOR_RETENTION_ENABLED: ${WA_VALIDATOR_RETENTION_ENABLED:-false}
+  # Inbound WhatsApp media. WHATSAPP_MEDIA_HOLD_SECONDS is how long a reply
+  # waits for the file to be downloaded and read; when it expires the
+  # conversation continues with a placeholder instead of stalling.
+  WHATSAPP_MEDIA_HOLD_SECONDS: ${WHATSAPP_MEDIA_HOLD_SECONDS:-45}
+  # Voice-note transcription (faster-whisper, local). `small` in int8 holds
+  # roughly 0.5-1 GB resident in the workers container — raise
+  # WORKERS_MEMORY_LIMIT alongside it, or drop to `base`/`tiny` on a small VPS.
+  WHISPER_MODEL: ${WHISPER_MODEL:-small}
+  WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+  WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
 
 services:
   db:

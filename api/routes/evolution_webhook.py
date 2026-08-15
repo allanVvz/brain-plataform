@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from services import auth_service, supabase_client
+from services import auth_service, media_ingest, supabase_client
 from services.whatsapp_providers import get_provider
 
 router = APIRouter(prefix="/webhooks/evolution", tags=["evolution-webhook"])
@@ -216,6 +216,15 @@ async def evolution_webhook(binding_id: str, request: Request):
             },
         )
         correlation_id = f"evolution:{binding_id}:{external_id}"
+        media = event.get("media")
+        # A media message is enqueued with a longer hold so the ingest worker
+        # has time to download and read the file before the agent answers.
+        # `text` starts as an honest placeholder — if the worker never lands,
+        # the hold expires and the conversation continues with it rather than
+        # with an empty string.
+        payload_text = event.get("text") or ""
+        if media:
+            payload_text = payload_text or media_ingest.placeholder_text(media)
         result = supabase_client.enqueue_whatsapp_envelope(
             buffer={
                 "persona_id": binding["persona_id"],
@@ -225,12 +234,15 @@ async def evolution_webhook(binding_id: str, request: Request):
                 "external_message_id": external_id,
                 "direction": "inbound",
                 "payload": {
-                    "text": event.get("text") or "",
+                    "text": payload_text,
                     "sender": contact,
+                    **({"media": media} if media else {}),
                 },
                 "status": "buffered",
                 "batch_key": f"{binding['persona_id']}:{lead['id']}",
-                "available_at": supabase_client.debounce_available_at(3),
+                "available_at": supabase_client.debounce_available_at(
+                    media_ingest.MEDIA_HOLD_SECONDS if media else 3
+                ),
                 "idempotency_key": (
                     f"inbound:evolution_baileys:{binding_id}:{external_id}"
                 ),
@@ -239,7 +251,7 @@ async def evolution_webhook(binding_id: str, request: Request):
             message={
                 "lead_id": lead["id"],
                 "role": "user",
-                "content": event.get("text") or "",
+                "content": payload_text,
                 "direction": "inbound",
                 "status": "buffered",
                 "channel": "whatsapp",
@@ -247,13 +259,25 @@ async def evolution_webhook(binding_id: str, request: Request):
                 "external_message_id": external_id,
                 "channel_binding_id": binding_id,
                 "correlation_id": correlation_id,
-                "metadata": {"provider": "evolution_baileys"},
+                "metadata": {
+                    "provider": "evolution_baileys",
+                    **({"media": media} if media else {}),
+                },
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
         if result.get("deduplicated"):
             duplicate += 1
             continue
+        if media:
+            media_ingest.register_inbound_media(
+                persona_id=binding["persona_id"],
+                lead=lead,
+                descriptor=media,
+                buffer_id=result.get("buffer_id"),
+                message_id=result.get("message_id"),
+                binding_id=binding_id,
+            )
         accepted += 1
     return JSONResponse(
         {

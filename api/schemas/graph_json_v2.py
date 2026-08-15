@@ -16,6 +16,10 @@ KnowledgeNodeType = Literal[
     "persona", "brand", "briefing", "campaign", "audience",
     "product_group", "product", "offer", "copy", "faq", "rule", "tone",
     "asset",
+    # One per lead with an open conversation; parent of any media the customer
+    # sends over WhatsApp. Lives under the audience, which lives under the
+    # campaign that originated the outreach.
+    "conversation",
 ]
 ActionNodeType = Literal["gallery", "embedded", "marketing_workspace"]
 

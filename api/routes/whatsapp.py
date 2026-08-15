@@ -18,7 +18,8 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from starlette.responses import PlainTextResponse
 
-from services import event_emitter, supabase_client
+from services import event_emitter, media_ingest, supabase_client
+from services.whatsapp_providers.meta import MetaWhatsAppProvider
 
 router = APIRouter(prefix="/webhooks/whatsapp", tags=["whatsapp"])
 internal_router = APIRouter(prefix="/internal/whatsapp", tags=["whatsapp"])
@@ -135,6 +136,14 @@ async def _process_inbound(payload: dict[str, Any]) -> dict:
                 if not lead.get("id"):
                     raise RuntimeError("failed to resolve lead for Meta inbound")
                 correlation_id = f"meta:{binding['id']}:{external_id}"
+                media = MetaWhatsAppProvider.describe_media(message)
+                # An attachment holds dispatch until the ingest worker has
+                # read it; `text` carries an honest placeholder meanwhile, so
+                # a reading failure degrades the answer instead of producing
+                # an empty user turn. A captioned image keeps its caption.
+                payload_text = _text(message) or (media or {}).get("caption") or ""
+                if media:
+                    payload_text = payload_text or media_ingest.placeholder_text(media)
                 result = supabase_client.enqueue_whatsapp_envelope(
                     buffer={
                         "persona_id": binding["persona_id"],
@@ -145,20 +154,23 @@ async def _process_inbound(payload: dict[str, Any]) -> dict:
                         "direction": "inbound",
                         "payload": {
                             "type": message.get("type"),
-                            "text": _text(message),
+                            "text": payload_text,
                             "sender": sender,
                             "raw": message,
+                            **({"media": media} if media else {}),
                         },
                         "status": "buffered",
                         "batch_key": f"{binding['persona_id']}:{lead['id']}",
-                        "available_at": supabase_client.debounce_available_at(3),
+                        "available_at": supabase_client.debounce_available_at(
+                            media_ingest.MEDIA_HOLD_SECONDS if media else 3
+                        ),
                         "idempotency_key": f"inbound:meta_cloud:{binding['id']}:{external_id}",
                         "correlation_id": correlation_id,
                     },
                     message={
                         "lead_id": lead["id"],
                         "role": "user",
-                        "content": _text(message),
+                        "content": payload_text,
                         "direction": "inbound",
                         "status": "buffered",
                         "channel": "whatsapp",
@@ -170,6 +182,7 @@ async def _process_inbound(payload: dict[str, Any]) -> dict:
                         "metadata": {
                             "type": message.get("type"),
                             "provider": "meta_cloud",
+                            **({"media": media} if media else {}),
                         },
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     },
@@ -177,6 +190,15 @@ async def _process_inbound(payload: dict[str, Any]) -> dict:
                 if result.get("deduplicated"):
                     duplicate += 1
                     continue
+                if media:
+                    media_ingest.register_inbound_media(
+                        persona_id=binding["persona_id"],
+                        lead=lead,
+                        descriptor=media,
+                        buffer_id=result.get("buffer_id"),
+                        message_id=result.get("message_id"),
+                        binding_id=binding["id"],
+                    )
                 accepted += 1
                 event_emitter.emit("whatsapp.inbound_buffered", entity_type="lead", entity_id=str(lead.get("id") or ""), persona_id=binding["persona_id"], payload={"correlation_id": correlation_id, "sender": _mask(sender)}, source="whatsapp.inbound")
     return {"accepted": accepted, "duplicate": duplicate, "ignored": ignored}

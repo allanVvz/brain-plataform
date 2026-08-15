@@ -58,6 +58,16 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
 - O grafo deve tratar como categorias diferentes: Persona, Brand, Campanha, Produto, Publico, FAQ, Copy, Assets, Galeria, Embed, Backgrounds, Texturas, Regras, Tom de voz e Entidades.
 - Cada categoria pode ter visual, conector e nivel hierarquico proprio.
 
+### Conversa (midia recebida no WhatsApp)
+- `conversation` e um node por lead com conversa aberta, criado quando o cliente
+  envia uma midia. Cadeia canonica: `campanha -> publico -> conversa -> asset`.
+- A campanha e resolvida por `campaign_recipients`, nunca por
+  `messages.campaign_id` (a constraint de 087 exige `direction='outbound'`).
+- Sem campanha atribuivel, a conversa e criada fora da arvore primaria em vez de
+  inventar uma campanha; o asset ainda chega a Gallery.
+- Midia enviada pelo cliente nunca recebe `asset_function` nem slot de landing,
+  e nunca entra no RAG (`is_rag_eligible` continua so `faq`).
+
 ## Grafos - Embed e Gallery
 - Embed e destino final de KB.
 - Gallery e destino final de Assets.

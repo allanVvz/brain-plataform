@@ -1,7 +1,18 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { X, Loader2, CheckCircle2, AlertTriangle, Link2, Maximize2, Trash2 } from "lucide-react";
-import { api, API_URL } from "@/lib/api";
+import { X, Loader2, CheckCircle2, AlertTriangle, Link2, Maximize2, Trash2, Radio } from "lucide-react";
+import { api } from "@/lib/api";
+
+// asset_readings.reading_type — see api/services/asset_pipeline/schemas.py
+const READING_LABEL: Record<string, string> = {
+  transcription: "Transcrição",
+  ocr: "OCR",
+  ai_fallback: "Leitura visual",
+  pdf_text: "Texto do PDF",
+  video_mock: "Vídeo",
+  classification: "Classificação",
+  rename: "Nomeação",
+};
 
 interface AssetConnection {
   edge_id: string;
@@ -62,7 +73,7 @@ function targetKey(target: LandingTarget) {
 interface Props {
   assetId: string;
   initialPreviewUrl?: string | null;
-  mediaType?: "image" | "video" | "document";
+  mediaType?: "image" | "video" | "audio" | "pdf" | "document";
   fileExt?: string | null;
   onClose: () => void;
   onChanged?: () => void;
@@ -376,16 +387,27 @@ export default function AssetDetailModal({
 
   const asset = data?.asset;
   const assetMeta = asset?.metadata || {};
+  // Ordered so the substantive readings (transcript, OCR, PDF text) come
+  // first; classification and rename are bookkeeping.
+  const readings = (data?.readings || []).filter(
+    (r: any) => !["classification", "rename"].includes(r.reading_type),
+  );
   const storagePath =
     assetMeta?.preview_bucket && assetMeta?.preview_path
       ? `${assetMeta.preview_bucket}:${assetMeta.preview_path}`
       : asset?.storage_bucket && asset?.storage_path
       ? `${asset.storage_bucket}:${asset.storage_path}`
       : null;
-  const fileUrl = storagePath && API_URL
-    ? `${API_URL}/knowledge/file?path=${encodeURIComponent(storagePath)}`
-    : initialPreviewUrl || assetMeta?.preview_url || asset?.url || null;
-  const mt = mediaType || (asset?.type === "video" ? "video" : asset?.type === "image" ? "image" : "document");
+  // Private WhatsApp media goes through the persona-scoped /assets/{id}/media
+  // route; public marketing assets keep using /knowledge/file.
+  const fileUrl = api.assetFileUrl(asset)
+    || initialPreviewUrl || assetMeta?.preview_url || asset?.url || null;
+  const mt = mediaType
+    || (asset?.type === "video" ? "video"
+      : asset?.type === "image" ? "image"
+      : asset?.type === "audio" ? "audio"
+      : asset?.type === "pdf" ? "pdf"
+      : "document");
   const inGraph = !!data?.graph?.in_graph;
   const primaryConnection = connections[0];
   const currentPathLabel = primaryConnection
@@ -447,6 +469,26 @@ export default function AssetDetailModal({
                 />
               ) : mt === "video" && fileUrl ? (
                 <video src={fileUrl} controls className="max-h-[70vh] w-full" />
+              ) : mt === "audio" && fileUrl ? (
+                <div className="flex w-full flex-col items-center gap-3 p-6">
+                  <Radio size={40} className="text-obs-teal" />
+                  <audio src={fileUrl} controls preload="metadata" className="w-full max-w-md" />
+                </div>
+              ) : mt === "pdf" && fileUrl ? (
+                <object data={fileUrl} type="application/pdf" className="h-[70vh] w-full">
+                  {/* Browsers without an inline PDF viewer land here. */}
+                  <div className="flex h-full flex-col items-center justify-center gap-2">
+                    <span className="text-xs text-obs-subtle">Sem visualizador de PDF neste navegador.</span>
+                    <a
+                      href={fileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-obs-violet/40 bg-obs-violet/15 px-3 py-1.5 text-xs text-obs-violet"
+                    >
+                      <Maximize2 size={12} /> Abrir PDF
+                    </a>
+                  </div>
+                </object>
               ) : fileUrl ? (
                 <a
                   href={fileUrl}
@@ -694,6 +736,53 @@ export default function AssetDetailModal({
               </ul>
             )}
           </section>
+
+          {/* Machine readings — transcription of a voice note, OCR of a
+              photo, text pulled from a PDF. Fetched all along but never
+              shown until now. */}
+          {readings.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-[12px] font-semibold uppercase tracking-wider text-obs-text">
+                Leitura automática
+              </h3>
+              <div className="space-y-2">
+                {readings.map((reading: any) => {
+                  const body = (reading.extracted_text || reading.visual_summary || reading.summary || "").trim();
+                  if (!body && !reading.metadata?.error) return null;
+                  return (
+                    <div
+                      key={reading.id}
+                      className="rounded-lg border border-white/10 bg-obs-raised p-3 space-y-1.5"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wide text-obs-teal">
+                          {READING_LABEL[reading.reading_type] || reading.reading_type}
+                        </span>
+                        {reading.model_used && (
+                          <span className="text-[10px] text-obs-faint">{reading.model_used}</span>
+                        )}
+                        {reading.metadata?.duration_seconds ? (
+                          <span className="text-[10px] text-obs-faint">
+                            {Math.round(reading.metadata.duration_seconds)}s
+                          </span>
+                        ) : null}
+                        {reading.status === "failed" && (
+                          <span className="text-[10px] text-obs-rose">falhou</span>
+                        )}
+                      </div>
+                      {body ? (
+                        <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-obs-subtle">{body}</p>
+                      ) : (
+                        <p className="text-[11px] italic text-obs-faint">
+                          {reading.metadata?.error || "Sem conteúdo extraído."}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           <section className="space-y-2">
             <h3 className="text-[12px] font-semibold uppercase tracking-wider text-obs-text">

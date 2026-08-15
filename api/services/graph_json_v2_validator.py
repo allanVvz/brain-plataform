@@ -33,10 +33,15 @@ CANONICAL_PARENT: dict[str, tuple[str, ...]] = {
     "tone": ("campaign", "briefing", "brand", "persona"),
     "faq": ("copy", "product", "product_group", "audience", "briefing", "campaign", "brand", "persona", "rule"),
     "embedded": ("faq",),
+    # One node per lead that has an open conversation, hanging under the
+    # audience it belongs to — which in turn hangs under the campaign that
+    # originated the outreach. Files a customer sends over WhatsApp attach
+    # here, so a received photo is traceable to the campaign that produced it.
+    "conversation": ("audience",),
     # Gallery is an output sink, never the hierarchical parent of an asset.
     # The asset belongs below the commercial node it represents and reaches
     # Gallery through a secondary ``asset -> gallery`` edge.
-    "asset": ("product", "product_group", "campaign", "brand"),
+    "asset": ("product", "product_group", "campaign", "brand", "conversation"),
 }
 
 # Types that may attach to persona as a protected branch outside the main chain.
@@ -51,6 +56,7 @@ ALLOWED_CLAIM_TYPES = {
 V21_KNOWLEDGE_TYPES = {
     "persona", "brand", "briefing", "campaign", "audience", "product_group",
     "product", "service", "offer", "copy", "faq", "rule", "tone", "asset",
+    "conversation",
 }
 V21_ACTION_TYPES = {"gallery", "embedded", "marketing_workspace"}
 V21_RELATIONS = {

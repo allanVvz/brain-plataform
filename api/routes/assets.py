@@ -23,7 +23,7 @@ import io
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 from schemas.graph_json_v2 import Edge, GraphJson, Node
 
@@ -1144,6 +1144,84 @@ def get_asset_route(asset_id: str, request: Request):
         "parent_card": parent_card,
         "graph": _graph_state(asset),
     }
+
+
+# ── GET /assets/{id}/media ────────────────────────────────────────────────
+
+def _parse_range(header: Optional[str], size: int) -> Optional[tuple[int, int]]:
+    """Parse a single ``bytes=start-end`` range. Multi-range is not supported."""
+    if not header or not header.startswith("bytes=") or size <= 0:
+        return None
+    spec = header.removeprefix("bytes=").split(",")[0].strip()
+    start_raw, _, end_raw = spec.partition("-")
+    try:
+        if not start_raw:  # suffix form: bytes=-500 (last 500 bytes)
+            length = int(end_raw)
+            if length <= 0:
+                return None
+            return max(size - length, 0), size - 1
+        start = int(start_raw)
+        end = int(end_raw) if end_raw else size - 1
+    except ValueError:
+        return None
+    end = min(end, size - 1)
+    if start > end or start < 0:
+        return None
+    return start, end
+
+
+@router.get("/{asset_id}/media")
+def get_asset_media(asset_id: str, request: Request, range: Optional[str] = Header(None)):
+    """Stream an asset's bytes, scoped to the caller's persona.
+
+    ``GET /knowledge/file`` cannot serve this: it requires a session but does
+    no persona scoping, so any authenticated user could read any object. That
+    is tolerable for marketing material in a public bucket; it is not for a
+    customer's photo or voice note, which live in the private
+    ``whatsapp-media`` bucket.
+
+    Range support is what makes ``<audio>`` seekable — without a 206 the
+    browser can only play a voice note straight through.
+    """
+    asset = supabase_client.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset nao encontrado")
+    persona_id = asset.get("persona_id")
+    if not persona_id:
+        raise HTTPException(422, "Asset sem persona nao pode ser servido.")
+    auth_service.assert_persona_access(request, persona_id=persona_id)
+
+    metadata = asset.get("metadata") or {}
+    bucket = asset.get("storage_bucket") or metadata.get("storage_bucket")
+    path = asset.get("storage_path") or metadata.get("storage_path")
+    if not bucket or not path:
+        raise HTTPException(
+            409,
+            {"error": "media_not_ready", "status": asset.get("status"),
+             "message": "O arquivo ainda nao foi baixado do WhatsApp."},
+        )
+    try:
+        data = supabase_client.download_from_storage(bucket, path)
+    except Exception as exc:
+        logger.warning("asset media download failed asset=%s: %s", asset_id, exc)
+        raise HTTPException(404, "Arquivo nao encontrado no storage.") from exc
+
+    media_type = asset.get("mime_type") or metadata.get("mime") or "application/octet-stream"
+    size = len(data)
+    # private: this is customer content, so it must never land in a shared
+    # cache between personas.
+    headers = {"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=300"}
+
+    window = _parse_range(range, size)
+    if window:
+        start, end = window
+        return Response(
+            content=data[start:end + 1],
+            status_code=206,
+            media_type=media_type,
+            headers={**headers, "Content-Range": f"bytes {start}-{end}/{size}"},
+        )
+    return Response(content=data, media_type=media_type, headers=headers)
 
 
 # ── POST /assets/{id}/ensure-gallery ──────────────────────────────────────

@@ -1,12 +1,17 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Upload, Maximize2, X } from "lucide-react";
-import { api, API_URL } from "@/lib/api";
+import { Upload, Maximize2, X, Radio, FileText, MessageSquare } from "lucide-react";
+import { api } from "@/lib/api";
 import AssetUploadDialog from "@/components/assets/AssetUploadDialog";
 import AssetDetailModal from "@/components/assets/AssetDetailModal";
 
 const IMAGE_EXTS = new Set(["png","jpg","jpeg","svg","gif","webp"]);
 const VIDEO_EXTS = new Set(["mp4","mov","webm"]);
+// WhatsApp voice notes are ogg/opus; the rest cover attached audio files.
+const AUDIO_EXTS = new Set(["ogg","opus","mp3","m4a","amr","wav","aac","mpeg"]);
+const PDF_EXTS = new Set(["pdf"]);
+
+type MediaType = "image" | "video" | "audio" | "pdf" | "document";
 
 interface KItem {
   id: string; title: string; status: string; content_type: string;
@@ -14,6 +19,10 @@ interface KItem {
   persona_id: string | null; created_at: string; source?: string; url?: string | null;
   approval_status?: string | null;
   landing_path?: any;
+  /** Where the file came from — 'whatsapp_inbound' for customer-sent media. */
+  upload_context?: string | null;
+  /** Raw row, so helpers like api.assetFileUrl can pick the right route. */
+  raw?: any;
 }
 interface Persona { id: string; slug: string; name: string; }
 
@@ -44,8 +53,18 @@ function approvalStatus(row: any) {
 const FILTER_TYPES = [
   { value: "", label: "Todos" },
   { value: "image", label: "Imagens" },
+  { value: "audio", label: "Áudios" },
   { value: "video", label: "Vídeos" },
+  { value: "pdf", label: "PDFs" },
   { value: "document", label: "Documentos" },
+];
+
+// Where the file entered the platform. `whatsapp_inbound` is media a customer
+// sent in a conversation, which never becomes marketing material.
+const FILTER_SOURCES = [
+  { value: "", label: "Todas as origens" },
+  { value: "asset_card", label: "Upload" },
+  { value: "whatsapp_inbound", label: "WhatsApp" },
 ];
 
 export default function AssetsPage() {
@@ -54,12 +73,13 @@ export default function AssetsPage() {
   const [filterPersona, setFilterPersona] = useState("");
   const [filterMedia, setFilterMedia] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterSource, setFilterSource] = useState("");
   const [loading, setLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [detail, setDetail] = useState<{
     assetId: string;
     previewUrl: string | null;
-    mediaType: "image" | "video" | "document";
+    mediaType: MediaType;
     fileExt: string | null;
   } | null>(null);
 
@@ -67,7 +87,11 @@ export default function AssetsPage() {
     setLoading(true);
     try {
       const [assetRows, personasData] = await Promise.all([
-        api.assetList({ persona_id: filterPersona || undefined, limit: 200 }),
+        api.assetList({
+          persona_id: filterPersona || undefined,
+          upload_context: filterSource || undefined,
+          limit: 200,
+        }),
         api.personas(),
       ]);
       const merged = new Map<string, KItem>();
@@ -95,9 +119,11 @@ export default function AssetsPage() {
           persona_id: asset.persona_id || null,
           created_at: asset.created_at || "",
           source: "asset",
-          url: asset.metadata?.preview_url || asset.display_url || asset.url || null,
+          url: api.assetFileUrl(asset),
           landing_path: asset.landing_path || null,
           approval_status: approvalStatus(asset),
+          upload_context: asset.upload_context || asset.metadata?.upload_context || null,
+          raw: asset,
         });
       }
       setItems(Array.from(merged.values()));
@@ -111,23 +137,27 @@ export default function AssetsPage() {
     await load();
   }
 
-  useEffect(() => { load(); }, [filterPersona]);
+  // filterSource is a server-side param (upload_context), so it re-fetches;
+  // media type and status stay client-side.
+  useEffect(() => { load(); }, [filterPersona, filterSource]);
 
   const pName = (id: string | null) => personas.find((p) => p.id === id)?.name;
 
-  function mediaType(item: KItem): "image" | "video" | "document" {
+  function mediaType(item: KItem): MediaType {
     const ft = (item.file_type || "").toLowerCase();
     if (IMAGE_EXTS.has(ft)) return "image";
+    // `asset_type` is authoritative for WhatsApp media: a voice note can
+    // arrive with no filename at all, leaving no extension to sniff.
+    if (AUDIO_EXTS.has(ft) || item.asset_type === "audio") return "audio";
     if (VIDEO_EXTS.has(ft)) return "video";
+    if (PDF_EXTS.has(ft) || item.asset_type === "pdf") return "pdf";
     return "document";
   }
 
   const filtered = items.filter((item) => {
     if (filterStatus === "pending" && !["pending_validation","pending","ready","reading"].includes(item.status)) return false;
     if (filterStatus && filterStatus !== "pending" && item.status !== filterStatus) return false;
-    if (filterMedia === "image" && mediaType(item) !== "image") return false;
-    if (filterMedia === "video" && mediaType(item) !== "video") return false;
-    if (filterMedia === "document" && mediaType(item) !== "document") return false;
+    if (filterMedia && mediaType(item) !== filterMedia) return false;
     return true;
   });
 
@@ -171,6 +201,12 @@ export default function AssetsPage() {
         ))}
 
         <div className="ml-auto flex gap-2">
+          <select value={filterSource} onChange={(e) => setFilterSource(e.target.value)}
+            className="bg-obs-base border border-white/06 rounded-lg px-2 py-1 text-xs text-obs-text focus:outline-none">
+            {FILTER_SOURCES.map(({ value, label }) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
           <select value={filterPersona} onChange={(e) => setFilterPersona(e.target.value)}
             className="bg-obs-base border border-white/06 rounded-lg px-2 py-1 text-xs text-obs-text focus:outline-none">
             <option value="">Todos clientes</option>
@@ -218,9 +254,9 @@ export default function AssetsPage() {
         {filtered.map((item) => {
           const mt = mediaType(item);
           const ft = (item.file_type || "").toLowerCase();
-          const fileUrl = item.file_path && API_URL
-            ? `${API_URL}/knowledge/file?path=${encodeURIComponent(item.file_path)}`
-            : item.url || null;
+          // Routes private WhatsApp media through the persona-scoped endpoint
+          // and public marketing assets through /knowledge/file.
+          const fileUrl = api.assetFileUrl(item.raw) || item.url || null;
           const statusBadge = STATUS_BADGE[item.status] || "border-white/10 text-obs-subtle";
           const isPending = ["pending","pending_validation","ready","reading","needs_persona","needs_category"].includes(item.status);
 
@@ -235,6 +271,28 @@ export default function AssetsPage() {
                     onError={(e) => { (e.target as HTMLImageElement).src = ""; (e.target as HTMLImageElement).parentElement!.classList.add("bg-obs-raised"); }} />
                 ) : mt === "video" && fileUrl ? (
                   <video src={fileUrl} className="w-full h-full object-cover" preload="metadata" muted playsInline />
+                ) : mt === "audio" ? (
+                  // Playable straight from the grid — hearing a voice note is
+                  // the whole point of surfacing it here.
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 px-3">
+                    <Radio size={32} className="text-obs-teal" />
+                    {fileUrl && (
+                      <audio
+                        controls
+                        preload="metadata"
+                        src={fileUrl}
+                        className="w-full h-8"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    )}
+                  </div>
+                ) : mt === "pdf" && fileUrl ? (
+                  <object data={fileUrl} type="application/pdf" className="w-full h-full">
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-2">
+                      <FileText size={32} className="text-obs-faint" />
+                      <span className="text-xs text-obs-faint">PDF</span>
+                    </div>
+                  </object>
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">
                     <span className="text-4xl font-mono text-obs-faint">.{ft || "?"}</span>
@@ -299,6 +357,13 @@ export default function AssetsPage() {
               <div className="px-3 py-2.5 space-y-1">
                 <p className="text-xs font-medium text-obs-text truncate">{item.title}</p>
                 <div className="flex items-center gap-1.5">
+                  {/* Customer-sent media is not marketing material — label it
+                      so nobody reaches for it as brand content. */}
+                  {item.upload_context === "whatsapp_inbound" && (
+                    <span className="inline-flex items-center gap-1 text-[9px] text-obs-teal bg-obs-teal/10 px-1.5 py-0.5 rounded">
+                      <MessageSquare size={9} /> WhatsApp
+                    </span>
+                  )}
                   {item.asset_type && (
                     <span className="text-[9px] text-obs-subtle bg-white/5 px-1.5 py-0.5 rounded">{item.asset_type}</span>
                   )}

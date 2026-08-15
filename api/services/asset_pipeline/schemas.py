@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
 
 ReadingType = Literal[
-    "classification", "ocr", "ai_fallback", "pdf_text", "video_mock", "rename"
+    "classification", "ocr", "ai_fallback", "pdf_text", "video_mock", "rename",
+    "transcription",
 ]
 ReadingStatus = Literal["pending", "completed", "partial", "mocked", "failed"]
 AssetKind = Literal[
@@ -19,9 +20,12 @@ AssetKind = Literal[
     "text",
     "markdown",
     "video",
+    "audio",
     "unknown",
 ]
-UploadContext = Literal["sofia_chat", "create_sidebar", "asset_card", "imported"]
+UploadContext = Literal[
+    "sofia_chat", "create_sidebar", "asset_card", "imported", "whatsapp_inbound"
+]
 
 
 @dataclass
@@ -74,6 +78,15 @@ class AiFallbackResult:
 
 
 @dataclass
+class TranscriptionResult:
+    transcript: str
+    language: Optional[str]
+    duration_seconds: Optional[float]
+    model_used: str
+    error: Optional[str] = None
+
+
+@dataclass
 class RenameResult:
     filename: str
     title: str
@@ -94,6 +107,7 @@ class AssetReadingBundle:
     video_mock: Optional[dict[str, Any]]
     rename: RenameResult
     reading_status: ReadingStatus
+    transcription: Optional[TranscriptionResult] = None
     extracted_text: str = ""
     visual_summary: str = ""
     rows_to_persist: list[dict[str, Any]] = field(default_factory=list)
@@ -113,6 +127,8 @@ class AssetReadingBundle:
             "visual_summary": self.visual_summary or "",
             "pdf_pages": self.pdf_text.page_count if self.pdf_text else None,
             "video_reading_mocked": bool(self.video_mock),
+            "transcript": self.transcription.transcript if self.transcription else None,
+            "transcript_language": self.transcription.language if self.transcription else None,
             "rename": {
                 "filename": self.rename.filename,
                 "title": self.rename.title,

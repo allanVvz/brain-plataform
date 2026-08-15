@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { useGlobalPersona } from "@/lib/useGlobalPersona";
 import {
   Play, Zap, MessageCircle, AlertCircle,
-  CheckCircle2, Clock, Bot, FlaskConical,
+  CheckCircle2, Clock, Bot, FlaskConical, Paperclip,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────
@@ -130,6 +130,8 @@ export default function WaValidatorPage({
   const [running, setRunning] = useState(false);
   const [runningDirect, setRunningDirect] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [uploadedMedia, setUploadedMedia] = useState<Array<{ id: string; filename: string }>>([]);
   const [error, setError] = useState("");
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -262,6 +264,32 @@ export default function WaValidatorPage({
     }
   }
 
+  async function handleMediaFiles(files: FileList | null) {
+    if (!activeSession || !files?.length) return;
+    setError("");
+    setUploadingMedia(true);
+    try {
+      const uploaded: Array<{ id: string; filename: string }> = [];
+      for (const file of Array.from(files)) {
+        const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+        const hex = Array.from(new Uint8Array(digest))
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+        const result = await api.waUploadMedia(activeSession.id, file, `media-${hex}`);
+        uploaded.push({ id: result.asset.id, filename: result.asset.filename });
+      }
+      setUploadedMedia((current) => [
+        ...current.filter((item) => !uploaded.some((next) => next.id === item.id)),
+        ...uploaded,
+      ]);
+      onRunComplete?.();
+    } catch (cause: any) {
+      setError(cause?.message || "Não foi possível armazenar a mídia de teste.");
+    } finally {
+      setUploadingMedia(false);
+    }
+  }
+
   const expected: string[] = activeSession?.script?.expected_knowledge || [];
   const insights = activeSession?.insights;
   const isRunning = Boolean(
@@ -375,6 +403,36 @@ export default function WaValidatorPage({
           <p className="text-xs text-red-400 flex items-center gap-1">
             <AlertCircle size={12} /> {error}
           </p>
+        )}
+        {activeSession && isDone && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-brain-border pt-3">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-brain-border bg-brain-bg px-3 py-1.5 text-xs font-medium text-white transition hover:border-brain-accent/60 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40">
+              <Paperclip size={12} />
+              {uploadingMedia ? "Armazenando mídia…" : "Anexar mídia de teste (sem WA)"}
+              <input
+                data-testid="wa-validator-media-input"
+                className="sr-only"
+                type="file"
+                multiple
+                accept="image/png,image/jpeg,image/webp,application/pdf"
+                disabled={uploadingMedia}
+                onChange={(event) => {
+                  void handleMediaFiles(event.currentTarget.files);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+            <span className="text-[10px] text-brain-muted">
+              Persiste apenas no lead sintético; não envia ao WhatsApp e não aciona a IA.
+            </span>
+            {uploadedMedia.map((item) => (
+              <Badge
+                key={item.id}
+                label={`armazenado · ${item.filename}`}
+                color="bg-green-500/15 text-green-300 border-green-500/30"
+              />
+            ))}
+          </div>
         )}
       </div>
 

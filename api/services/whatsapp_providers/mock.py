@@ -16,7 +16,17 @@ import time
 import uuid
 from typing import Any
 
+from services.whatsapp_providers.evolution import EvolutionWhatsAppProvider
+
 logger = logging.getLogger("whatsapp_providers.mock")
+
+# Smallest valid PNG (1x1, transparent). Returned by get_media_base64 so a
+# media E2E run has real decodable bytes without shipping a fixture file.
+_STUB_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 class MockWhatsAppProvider:
@@ -29,12 +39,16 @@ class MockWhatsAppProvider:
     _lock = threading.Lock()
     sent: list[dict[str, Any]] = []
     instances: dict[str, dict[str, Any]] = {}
+    # Overridable by a test that wants to drive a specific file through the
+    # ingest pipeline (e.g. a real .ogg to exercise transcription).
+    media_bytes: bytes = _STUB_PNG
 
     @classmethod
     def reset(cls) -> None:
         with cls._lock:
             cls.sent = []
             cls.instances = {}
+            cls.media_bytes = _STUB_PNG
 
     @staticmethod
     def _name(binding: dict[str, Any]) -> str:
@@ -124,6 +138,11 @@ class MockWhatsAppProvider:
         event = str(payload.get("event") or payload.get("type") or "MESSAGES_UPSERT").upper()
         data = payload.get("data") or {}
         key = data.get("key") or {}
+        # Reuse Evolution's own extractor so a fixture exercising media takes
+        # the exact same path the real provider does.
+        media, caption = EvolutionWhatsAppProvider._extract_media(data.get("message") or {})
+        if media:
+            media["fetch_ref"]["message_key"] = key
         return [{
             "event_type": event,
             "instance": payload.get("instance") or data.get("instance"),
@@ -133,6 +152,11 @@ class MockWhatsAppProvider:
             "remote_jid_alt": key.get("remoteJidAlt") or data.get("remoteJidAlt"),
             "from_me": bool(key.get("fromMe") or data.get("fromMe")),
             "status": data.get("status"),
-            "text": data.get("text") or (data.get("message") or {}).get("conversation") or "",
+            "text": data.get("text") or (data.get("message") or {}).get("conversation") or caption or "",
+            "media": media,
             "raw": data,
         }]
+
+    def get_media_base64(self, binding: dict[str, Any], message_key: dict[str, Any]) -> bytes:
+        """Deterministic stand-in for the Evolution media download."""
+        return self.media_bytes

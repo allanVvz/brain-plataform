@@ -5,7 +5,7 @@ import logging
 import os
 import traceback
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from services import auth_service, wa_validator_service
 
@@ -170,6 +170,43 @@ def run_session_direct(request: Request, body: RunRequest):
             "message": str(e),
             "traceback": tb,
         })
+
+
+@router.post("/sessions/{session_id}/media")
+async def upload_validation_media(
+    request: Request,
+    session_id: str,
+    file: UploadFile = File(...),
+    idempotency_key: str = Form(...),
+):
+    """Store a local fixture as synthetic inbound media, without real WA.
+
+    This route is guarded by the same production run switch and persona access
+    as ``run-direct``. It never creates a dispatch buffer, so uploading a QA
+    fixture cannot trigger an agent decision or an outbound message.
+    """
+    try:
+        _assert_runs_enabled()
+        _assert_session_access(request, session_id)
+        content = await file.read()
+        return wa_validator_service.store_validation_media(
+            session_id,
+            filename=file.filename or "arquivo",
+            content_type=file.content_type or "application/octet-stream",
+            content=content,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        tb = traceback.format_exc()
+        logger.error("upload_validation_media failed session=%s\n%s", session_id, tb)
+        raise HTTPException(500, detail={
+            "error": type(exc).__name__,
+            "message": str(exc),
+        }) from exc
 
 
 @router.get("/retention")

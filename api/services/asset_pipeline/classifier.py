@@ -16,6 +16,11 @@ _IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/hei
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif", ".gif", ".svg"}
 _VIDEO_MIMES = {"video/mp4", "video/quicktime", "video/webm"}
 _VIDEO_EXTS = {".mp4", ".mov", ".webm"}
+# WhatsApp voice notes arrive as audio/ogg with the opus codec; some Android
+# builds send mp4/amr instead. The mime often carries codec parameters
+# ("audio/ogg; codecs=opus"), so matching is done on the type prefix.
+_AUDIO_MIMES = {"audio/ogg", "audio/opus", "audio/mpeg", "audio/mp4", "audio/amr", "audio/wav", "audio/aac", "audio/x-wav"}
+_AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".m4a", ".amr", ".wav", ".aac"}
 _PDF_MIMES = {"application/pdf"}
 _PDF_EXTS = {".pdf"}
 _TEXT_MIMES = {"text/plain"}
@@ -32,6 +37,8 @@ def _ext_of(filename: str) -> str:
 def _basic_kind(mime: str, ext: str) -> AssetKind:
     if mime in _IMAGE_MIMES or ext in _IMAGE_EXTS:
         return "image_other"
+    if mime in _AUDIO_MIMES or ext in _AUDIO_EXTS or mime.startswith("audio/"):
+        return "audio"
     if mime in _VIDEO_MIMES or ext in _VIDEO_EXTS:
         return "video"
     if mime in _PDF_MIMES or ext in _PDF_EXTS:
@@ -103,6 +110,12 @@ def detect(file_bytes: bytes, mime: Optional[str], filename: Optional[str]) -> C
         needs_ocr = False  # pdf_text handles it; OCR only if pypdf returns empty
         has_text_estimate = True
         confidence = 0.9
+    elif base == "audio":
+        kind = "audio"
+        needs_ocr = False
+        # The text is in the speech, recovered by transcription rather than OCR.
+        has_text_estimate = True
+        confidence = 0.95
     elif base == "video":
         kind = "video"
         needs_ocr = False

@@ -751,6 +751,43 @@ export const api = {
     return req<any[]>(`/assets${qs ? `?${qs}` : ""}`);
   },
   assetGet: (id: string) => req<any>(`/assets/${encodeURIComponent(id)}`),
+  /** Authenticated, persona-scoped, Range-capable URL for an asset's bytes. */
+  assetMediaUrl: (id: string): string | null =>
+    id && BASE ? `${BASE}/assets/${encodeURIComponent(id)}/media` : null,
+  /**
+   * Browser-usable URL for an asset's bytes.
+   *
+   * Files a customer sent over WhatsApp live in the private `whatsapp-media`
+   * bucket and must go through `/assets/{id}/media`, which checks persona
+   * access and supports Range requests (needed for audio seeking).
+   * `/knowledge/file` stays for marketing assets in the public buckets: it
+   * requires a session but does no persona scoping, so it must never serve
+   * customer content.
+   */
+  assetFileUrl: (asset: {
+    id?: string | null;
+    storage_bucket?: string | null;
+    storage_path?: string | null;
+    display_url?: string | null;
+    url?: string | null;
+    metadata?: any;
+  } | null): string | null => {
+    if (!asset) return null;
+    const meta = asset.metadata || {};
+    const bucket = asset.storage_bucket || meta.storage_bucket;
+    if (bucket === "whatsapp-media") {
+      return asset.id ? `${BASE}/assets/${encodeURIComponent(asset.id)}/media` : null;
+    }
+    const previewPath = meta.preview_bucket && meta.preview_path
+      ? `${meta.preview_bucket}:${meta.preview_path}`
+      : null;
+    const storagePath = bucket && (asset.storage_path || meta.storage_path)
+      ? `${bucket}:${asset.storage_path || meta.storage_path}`
+      : null;
+    const path = previewPath || storagePath;
+    if (path && BASE) return `${BASE}/knowledge/file?path=${encodeURIComponent(path)}`;
+    return meta.preview_url || asset.display_url || asset.url || null;
+  },
   assetUpdate: (id: string, body: { asset_type?: string | null; asset_function?: string | null }) =>
     req<any>(`/assets/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
   assetConnect: (id: string, body: { parent_node_id: string; relation_type?: string }) =>
@@ -1157,6 +1194,12 @@ export const api = {
     req<any>("/wa-validator/run", { method: "POST", body: JSON.stringify({ session_id }) }),
   waRunDirect: (session_id: string) =>
     req<any>("/wa-validator/run-direct", { method: "POST", body: JSON.stringify({ session_id }) }),
+  waUploadMedia: (sessionId: string, file: File, idempotencyKey: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("idempotency_key", idempotencyKey);
+    return reqForm<any>(`/wa-validator/sessions/${encodeURIComponent(sessionId)}/media`, form);
+  },
   waAnalyze: (session_id: string, model?: string) =>
     req<any>("/wa-validator/analyze", { method: "POST", body: JSON.stringify({ session_id, model }) }),
 

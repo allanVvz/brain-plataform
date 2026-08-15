@@ -5753,6 +5753,131 @@ def insert_asset_reading(data: dict) -> dict:
     return (result.data or [{}])[0]
 
 
+# ── Inbound WhatsApp media ───────────────────────────────────────────────
+# Files a lead sends over WhatsApp land in the PRIVATE `whatsapp-media`
+# bucket, never in the public `assets-raw` used by marketing uploads.
+WHATSAPP_MEDIA_BUCKET = "whatsapp-media"
+
+
+def _inbound_asset_type(kind: str, mime: Optional[str]) -> str:
+    """Map a media descriptor onto the assets.type CHECK constraint.
+
+    The constraint allows image|video|audio|pdf|text|copy|campaign|template;
+    anything else a customer might attach (docx, xlsx, ...) is stored as
+    `text`, which is the generic bucket rather than a claim about content.
+    """
+    if kind in ("image", "audio", "video"):
+        return kind
+    if (mime or "").split(";")[0].strip().lower() == "application/pdf":
+        return "pdf"
+    return "text"
+
+
+def insert_inbound_media_asset(
+    *,
+    persona_id: str,
+    lead_id: int,
+    message_id: Optional[int],
+    descriptor: dict,
+    campaign_id: Optional[str] = None,
+    campaign_recipient_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Register a received attachment before its bytes have been fetched.
+
+    Created in `status='reading'`: the row exists so the media ingest worker
+    has something to claim, but nothing is downloadable yet. Returns None when
+    the message already produced an asset (the unique partial index in
+    migration 119), which is the expected outcome of a provider retry.
+    """
+    kind = str(descriptor.get("kind") or "document")
+    filename = descriptor.get("filename") or f"{kind}-{lead_id}"
+    try:
+        return insert_asset({
+            "persona_id": persona_id,
+            "lead_id": lead_id,
+            "message_id": message_id,
+            "campaign_id": campaign_id,
+            "campaign_recipient_id": campaign_recipient_id,
+            "type": _inbound_asset_type(kind, descriptor.get("mime")),
+            "name": filename,
+            "source": "whatsapp",
+            "upload_context": "whatsapp_inbound",
+            "status": "reading",
+            "storage_bucket": WHATSAPP_MEDIA_BUCKET,
+            "mime_type": descriptor.get("mime"),
+            "file_size": descriptor.get("size"),
+            "original_filename": filename,
+            "metadata": {
+                "media": descriptor,
+                "direction": "inbound",
+                "reading_status": "pending",
+                # Customer-sent media is never a marketing asset: it must not
+                # acquire a landing slot or reach the public site.
+                "validation_status": "not_applicable",
+                "upload_context": "whatsapp_inbound",
+            },
+        })
+    except Exception as exc:
+        text = str(exc).lower()
+        if "duplicate" in text or "unique" in text or "23505" in text:
+            return None
+        raise
+
+
+def claim_pending_media_assets(limit: int = 10) -> list:
+    """Assets whose bytes still need fetching and reading."""
+    result = (
+        get_client().table("assets")
+        .select("*")
+        .eq("upload_context", "whatsapp_inbound")
+        .eq("status", "reading")
+        .order("created_at", desc=False)
+        .limit(limit)
+        .execute()
+    )
+    return result.data or []
+
+
+def resolve_media_buffer(
+    buffer_id: str,
+    text: str,
+    *,
+    reading_status: str = "completed",
+    debounce_seconds: int = 3,
+) -> dict:
+    """Publish the extracted text and release the dispatch hold.
+
+    Wraps the SQL function from migration 119 — it has to be one statement so
+    the quiet-burst string_agg cannot race with it and lose the transcription.
+    """
+    result = get_client().rpc("resolve_media_buffer", {
+        "p_buffer_id": buffer_id,
+        "p_text": text,
+        "p_reading_status": reading_status,
+        "p_debounce_seconds": debounce_seconds,
+    }).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else None
+    return payload if isinstance(payload, dict) else {"resolved": False}
+
+
+def list_lead_media_assets(persona_id: str, lead_id: int, limit: int = 50) -> list:
+    """Files exchanged with one lead, newest first (media rail in Mensagens)."""
+    if not persona_id or not lead_id:
+        return []
+    result = (
+        get_client().table("assets")
+        .select("*")
+        .eq("persona_id", persona_id)
+        .eq("lead_id", lead_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return result.data or []
+
+
 def list_asset_readings(asset_id: str) -> list:
     if not asset_id:
         return []

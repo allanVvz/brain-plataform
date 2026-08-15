@@ -299,12 +299,125 @@ function stageColor(stage: string | null): string {
   return "text-obs-subtle border-obs-line";
 }
 
-function extractMediaUrl(metadata: any): string | null {
+function parseMetadata(metadata: any): any {
   if (!metadata) return null;
   if (typeof metadata === "string") {
-    try { metadata = JSON.parse(metadata); } catch { return null; }
+    try { return JSON.parse(metadata); } catch { return null; }
   }
-  return metadata.media_url || metadata.image_url || metadata.file_url || metadata.url || null;
+  return metadata;
+}
+
+function extractMediaUrl(metadata: any): string | null {
+  const meta = parseMetadata(metadata);
+  if (!meta) return null;
+  return meta.media_url || meta.image_url || meta.file_url || meta.url || null;
+}
+
+export type MessageAttachment = {
+  kind: "image" | "audio" | "video" | "document";
+  /** Set once the ingest worker has stored the file; null while it downloads. */
+  url: string | null;
+  filename: string | null;
+  voiceNote: boolean;
+  durationSeconds: number | null;
+  mime: string | null;
+};
+
+/**
+ * Describe the file attached to a message, if any.
+ *
+ * The webhook writes `metadata.media` (the descriptor produced by the
+ * provider normalizer) and the ingest worker later adds `metadata.asset_id`
+ * once the bytes are stored. Until then the bubble shows the attachment as
+ * still loading rather than as a broken link.
+ */
+function messageAttachment(msg: Message): MessageAttachment | null {
+  const meta = parseMetadata(msg.metadata);
+  const media = meta?.media;
+  if (!media) {
+    // Older rows only ever carried a bare URL.
+    const legacy = extractMediaUrl(msg.metadata);
+    return legacy
+      ? { kind: "document", url: legacy, filename: null, voiceNote: false, durationSeconds: null, mime: null }
+      : null;
+  }
+  const assetId = meta.asset_id || media.asset_id || null;
+  return {
+    kind: (["image", "audio", "video", "document"].includes(media.kind) ? media.kind : "document") as MessageAttachment["kind"],
+    url: assetId ? api.assetMediaUrl(String(assetId)) : extractMediaUrl(msg.metadata),
+    filename: media.filename || null,
+    voiceNote: Boolean(media.voice_note),
+    durationSeconds: typeof media.duration_seconds === "number" ? media.duration_seconds : null,
+    mime: media.mime || null,
+  };
+}
+
+function formatDuration(seconds: number | null): string {
+  if (!seconds || seconds <= 0) return "";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+/** Inline renderer for a message attachment: image, audio player or file chip. */
+function MessageMedia({ attachment }: { attachment: MessageAttachment }) {
+  const { kind, url, filename, voiceNote, durationSeconds } = attachment;
+
+  if (!url) {
+    return (
+      <span className="flex items-center gap-1.5 text-xs italic text-obs-faint">
+        <RefreshCw size={12} className="animate-spin" />
+        {kind === "audio" ? "baixando áudio…" : "baixando arquivo…"}
+      </span>
+    );
+  }
+
+  if (kind === "image") {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" className="block">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={url}
+          alt={filename || "Imagem recebida"}
+          loading="lazy"
+          className="max-h-64 w-auto max-w-full rounded-lg object-cover transition hover:opacity-90"
+          style={{ border: "1px solid var(--border-glass)" }}
+        />
+      </a>
+    );
+  }
+
+  if (kind === "audio") {
+    return (
+      <div className="flex flex-col gap-1">
+        <audio controls preload="metadata" src={url} className="h-9 w-full min-w-[15rem] max-w-xs" />
+        <span className="text-[10px] text-obs-faint">
+          {voiceNote ? "Mensagem de voz" : "Áudio"}
+          {durationSeconds ? ` · ${formatDuration(durationSeconds)}` : ""}
+        </span>
+      </div>
+    );
+  }
+
+  if (kind === "video") {
+    return (
+      <video controls preload="metadata" src={url} className="max-h-64 w-auto max-w-full rounded-lg" />
+    );
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs transition hover:opacity-80"
+      style={{ background: "rgb(var(--obs-text) / 0.05)", border: "1px solid var(--border-glass)" }}
+    >
+      <FileText size={16} className="shrink-0 text-obs-teal" />
+      <span className="truncate">{filename || "Documento"}</span>
+      <ExternalLink size={12} className="shrink-0 text-obs-faint" />
+    </a>
+  );
 }
 
 function relativeTs(ts: string | null): string {
@@ -396,7 +509,81 @@ function hasKnowledgeEvidence(msg: Message): boolean {
   );
 }
 
-function MessageBubble({
+/**
+ * Files exchanged in the open conversation.
+ *
+ * Derived from the messages already in state — no extra request — so it stays
+ * in step with the thread as it pages and polls.
+ */
+export function ConversationMediaRail({ messages }: { messages: Message[] }) {
+  const items = useMemo(() => {
+    const found: { key: string; attachment: MessageAttachment; at: string }[] = [];
+    for (const msg of messages) {
+      const attachment = messageAttachment(msg);
+      if (attachment) found.push({ key: String(msg.id), attachment, at: msg.created_at });
+    }
+    return found.reverse().slice(0, 12);
+  }, [messages]);
+
+  return (
+    <div className="shrink-0 p-4" style={{ borderTop: "1px solid var(--border-glass)" }}>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-obs-faint">
+        Mídia · Arquivos · Links{items.length > 0 ? ` · ${items.length}` : ""}
+      </p>
+
+      {items.length === 0 ? (
+        <p className="mt-2 text-[10px] leading-relaxed text-obs-faint">
+          Nenhum arquivo trocado nesta conversa ainda.
+        </p>
+      ) : (
+        <div className="mt-2.5 grid grid-cols-3 gap-2">
+          {items.map(({ key, attachment, at }) => {
+            const label = attachment.filename
+              || (attachment.kind === "audio" ? (attachment.voiceNote ? "Voz" : "Áudio") : null)
+              || (attachment.kind === "image" ? "Imagem" : "Arquivo");
+            const Icon = attachment.kind === "image" ? ImageIcon
+              : attachment.kind === "video" ? FileVideo
+              : attachment.kind === "audio" ? Radio
+              : FileType;
+            const body = attachment.kind === "image" && attachment.url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={attachment.url} alt={label} loading="lazy" className="h-full w-full object-cover" />
+            ) : (
+              <span className="flex h-full w-full flex-col items-center justify-center gap-1 px-1">
+                <Icon size={16} className="text-obs-teal" />
+                <span className="w-full truncate text-center text-[9px] text-obs-faint">{label}</span>
+              </span>
+            );
+            const className = "h-16 overflow-hidden rounded-lg transition hover:opacity-80";
+            const style = {
+              border: "1px solid var(--border-glass)",
+              background: "rgb(var(--obs-text) / 0.03)",
+            } as const;
+            return attachment.url ? (
+              <a
+                key={key}
+                href={attachment.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`${label} · ${formatTs(at)}`}
+                className={className}
+                style={style}
+              >
+                {body}
+              </a>
+            ) : (
+              <div key={key} className={className} style={style} title="Baixando…">
+                {body}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function MessageBubble({
   msg,
   lead,
   selected = false,
@@ -408,7 +595,7 @@ function MessageBubble({
   onSelectEvidence?: (messageId: string) => void;
 }) {
   const out = isOutbound(msg);
-  const mediaUrl = extractMediaUrl(msg.metadata);
+  const attachment = messageAttachment(msg);
   const hasText = (msg.texto || "").trim().length > 0;
   // Outbound message written by a person on the team, not the model — same
   // sender_type the runtime writes for a manual reply. The evidence tint on
@@ -462,13 +649,15 @@ function MessageBubble({
             : { background: "rgb(var(--glass-solid-bg) / 0.74)", border: "1px solid var(--border-glass)", color: "rgb(var(--obs-text))" }
         }
       >
-        {hasText && <p className="whitespace-pre-wrap break-words">{msg.texto}</p>}
-        {!hasText && mediaUrl && (
-          <a href={mediaUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline text-obs-teal">
-            Ver mídia anexada
-          </a>
+        {/* Media renders alongside the text, never instead of it: a photo sent
+            with a caption used to lose the photo entirely. */}
+        {attachment && (
+          <div className={hasText ? "mb-1.5" : ""}>
+            <MessageMedia attachment={attachment} />
+          </div>
         )}
-        {!hasText && !mediaUrl && (
+        {hasText && <p className="whitespace-pre-wrap break-words">{msg.texto}</p>}
+        {!hasText && !attachment && (
           <span className="text-xs italic text-obs-faint">
             [{out ? "resposta automática" : "mensagem sem texto"}]
           </span>
@@ -2955,25 +3144,9 @@ export function MessagesLayout({
             />
           </div>
 
-          {/* Mídia · Arquivos · Links — o webhook do Evolution ainda
-              descarta imagem/áudio/documento (roadmap backend #1/#2), então
-              isto fica honesto sobre estar pendente em vez de fingir dado. */}
-          {selectedLead && (
-            <div className="shrink-0 p-4" style={{ borderTop: "1px solid var(--border-glass)" }}>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-obs-faint">Mídia · Arquivos · Links</p>
-              <div className="mt-2.5 grid grid-cols-3 gap-2">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="h-16 rounded-lg border border-dashed" style={{ borderColor: "var(--border-glass-strong)", background: "rgb(var(--obs-text) / 0.02)" }} />
-                ))}
-              </div>
-              <div className="mt-2.5 rounded-lg p-2.5" style={{ background: "rgb(var(--obs-text) / 0.03)" }}>
-                <p className="text-[11px] font-medium text-obs-subtle">Em breve</p>
-                <p className="mt-0.5 text-[10px] leading-relaxed text-obs-faint">
-                  Fotos, áudios e arquivos trocados nesta conversa vão aparecer aqui assim que estiverem disponíveis.
-                </p>
-              </div>
-            </div>
-          )}
+          {/* Mídia · Arquivos · Links — derivado das mensagens já carregadas,
+              sem fetch extra. */}
+          {selectedLead && <ConversationMediaRail messages={messages} />}
         </>
         </aside>
       </>

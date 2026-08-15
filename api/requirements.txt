@@ -24,3 +24,8 @@ pypdf==6.15.0
 # Optional local OCR backends (install in prod via Dockerfile if desired):
 #   paddleocr, easyocr, pytesseract — selected at runtime via ASSET_OCR_BACKEND env.
 # CI runs with backend=mock so no OCR lib is required for tests.
+# Local speech-to-text for WhatsApp voice notes. Kept local (not an API) so a
+# customer's audio never leaves the VPS. Needs ffmpeg in the image to decode
+# WhatsApp's OGG/Opus; asset_pipeline.transcribe degrades to the placeholder
+# text when the package or ffmpeg is missing.
+faster-whisper==1.1.1
