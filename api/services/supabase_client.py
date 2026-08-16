@@ -4219,6 +4219,30 @@ def get_current_conversation_journey(persona_id: str, lead_ref: int) -> Optional
     )
 
 
+def get_current_journeys_by_lead_refs(
+    persona_id: str, lead_refs: list[int], *, chunk_size: int = 100,
+) -> list[dict]:
+    """Current journey of many leads in bounded batches.
+
+    Same reasoning as ``get_leads_by_refs``: the conversation list paints every
+    row at once, so one request per lead would be an N+1, and an unbounded
+    ``in`` list would blow the PostgREST URL up.
+    """
+    refs = sorted({int(value) for value in lead_refs if value is not None})
+    if not persona_id or not refs:
+        return []
+    size = max(1, min(chunk_size, 100))
+    rows: list[dict] = []
+    for index in range(0, len(refs), size):
+        rows.extend(_q(
+            get_client().table("conversation_journeys")
+            .select("lead_ref,state,converted_at,closed_at,sequence,metadata")
+            .eq("persona_id", persona_id).eq("is_current", True)
+            .in_("lead_ref", refs[index:index + size])
+        ))
+    return rows
+
+
 def get_latest_conversation_journey(persona_id: str, lead_ref: int) -> Optional[dict]:
     if not persona_id or not lead_ref:
         return None

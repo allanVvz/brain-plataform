@@ -41,9 +41,20 @@ const config: Config = {
           "teal-soft": "rgb(var(--obs-teal) / 0.15)",
           "teal-glow": "rgb(var(--obs-teal) / 0.08)",
 
-          // "Estado bom" — canal/IA ativa e estágio positivo do funil.
+          // "Estado bom" — canal/IA ativa.
           live:        rgbVar("--obs-live"),
           "live-soft": "rgb(var(--obs-live) / 0.15)",
+
+          // Desfecho comercial da jornada — só na trilha da jornada.
+          // `qualificado` não tem token: usa obs-faint, ver globals.css.
+          "outcome-converted":        rgbVar("--obs-outcome-converted"),
+          "outcome-converted-soft":   "rgb(var(--obs-outcome-converted) / 0.12)",
+          "outcome-sold":             rgbVar("--obs-outcome-sold"),
+          "outcome-sold-soft":        "rgb(var(--obs-outcome-sold) / 0.12)",
+          "outcome-delivered":        rgbVar("--obs-outcome-delivered"),
+          "outcome-delivered-soft":   "rgb(var(--obs-outcome-delivered) / 0.12)",
+          "outcome-cancelled":        rgbVar("--obs-outcome-cancelled"),
+          "outcome-cancelled-soft":   "rgb(var(--obs-outcome-cancelled) / 0.12)",
 
           slate:        rgbVar("--obs-slate"),
           "slate-soft": "rgb(var(--obs-slate) / 0.12)",

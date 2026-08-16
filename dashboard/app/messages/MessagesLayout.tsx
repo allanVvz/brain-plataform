@@ -1,6 +1,11 @@
 "use client";
 import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
-import { api } from "@/lib/api";
+import { api, type JourneyEventType } from "@/lib/api";
+import {
+  isJourneySettled,
+  normalizeJourneyOutcome,
+  type JourneyOutcome,
+} from "@/lib/lead-state";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { MessageSquare, User, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, PanelRightClose, PanelRightOpen, ArrowLeft, ChevronLeft, ChevronRight, Tag, StickyNote } from "lucide-react";
@@ -33,6 +38,9 @@ interface Lead {
   } | null;
   qualification_score?: number;
   qualification_signals?: Array<{ key?: string; label?: string; points?: number }>;
+  // Desfecho comercial derivado da jornada corrente pelo backend. Eixo
+  // independente de `stage`, nunca um substituto dele.
+  journey_outcome?: string | null;
   validation?: {
     is_validation?: boolean;
     source?: string | null;
@@ -56,6 +64,7 @@ interface ConversationSummary {
   last_at: string;
   qualification_score?: number;
   qualification_signals?: Array<{ key?: string; label?: string; points?: number }>;
+  journey_outcome?: string | null;
   validation?: { is_validation?: boolean; scenario?: string | null; session_id?: string | null };
 }
 
@@ -287,16 +296,51 @@ function isOutbound(msg: Message): boolean {
     type === "ai"
   );
 }
-// Estágio "positivo do funil" — qualificado, oportunidade ou fechado — lê
-// como o mesmo verde de --obs-live (canal conectado / IA ativa): as duas
-// leituras da mesma ideia, "estado bom". Estágios anteriores ficam neutros.
-const POSITIVE_STAGES = new Set(["qualificado", "interested", "oportunidade", "fechado", "won"]);
-
+// O estágio é categórico, não semântico: o peso codifica o avanço em vez de
+// gastar um acento reservado. O verde de --obs-live é exclusivo de "canal
+// conectado / IA ativa" — usá-lo aqui fazia a mesma cor significar duas coisas
+// diferentes na mesma tela. Quem carrega cor agora é o desfecho da jornada.
 function stageColor(stage: string | null): string {
   const s = (stage || "").toLowerCase();
-  if (POSITIVE_STAGES.has(s)) return "text-obs-live border-obs-live/30";
-  if (s === "perdido" || s === "lost") return "text-red-400 border-red-400/30";
+  if (s === "perdido" || s === "lost") return "text-obs-subtle border-obs-line line-through";
+  if (s === "fechado" || s === "won") return "text-obs-text border-obs-line-strong font-semibold";
   return "text-obs-subtle border-obs-line";
+}
+
+// Desfecho comercial: o único eixo da tela que gasta cor por progresso.
+// `qualificado` fica deliberadamente cinza — só compromisso, venda e entrega
+// merecem acento. Ver a família resultado/* no design system.
+const OUTCOME_STYLE: Record<JourneyOutcome, { label: string; color: string; soft: string }> = {
+  qualificado: { label: "qualificado", color: "rgb(var(--obs-faint))", soft: "rgb(var(--obs-faint) / 0.12)" },
+  convertido: { label: "convertido", color: "rgb(var(--obs-outcome-converted))", soft: "rgb(var(--obs-outcome-converted) / 0.12)" },
+  vendido: { label: "vendido", color: "rgb(var(--obs-outcome-sold))", soft: "rgb(var(--obs-outcome-sold) / 0.12)" },
+  entregue: { label: "entregue", color: "rgb(var(--obs-outcome-delivered))", soft: "rgb(var(--obs-outcome-delivered) / 0.12)" },
+  cancelado: { label: "cancelado", color: "rgb(var(--obs-outcome-cancelled))", soft: "rgb(var(--obs-outcome-cancelled) / 0.12)" },
+};
+
+function OutcomeMark({ outcome, size = "sm" }: { outcome: JourneyOutcome; size?: "sm" | "md" }) {
+  const style = OUTCOME_STYLE[outcome];
+  const dot = size === "md" ? 8 : 7;
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1.5"
+      data-outcome={outcome}
+      title={`Jornada · ${style.label}`}
+    >
+      <span
+        className="rounded-full"
+        style={{ width: dot, height: dot, background: style.color }}
+      />
+      <span
+        className={`text-[10px] font-medium uppercase tracking-wide ${
+          outcome === "cancelado" ? "line-through" : ""
+        }`}
+        style={{ color: style.color }}
+      >
+        {style.label}
+      </span>
+    </span>
+  );
 }
 
 function parseMetadata(metadata: any): any {
@@ -553,6 +597,194 @@ function StageBadge({ stage }: { stage: string | null }) {
     >
       {stage || "novo"}
     </span>
+  );
+}
+
+// ── Jornada: pedido e ações ──────────────────────────────────────────────────
+
+type JourneyAction = {
+  key: string;
+  label: string;
+  event: JourneyEventType;
+  outcome: JourneyOutcome;
+  confirm?: string;
+};
+
+// A ordem é a da jornada, não a do alfabeto: conversão → compra na primeira
+// linha, os dois terminais na segunda.
+const JOURNEY_ACTIONS: JourneyAction[] = [
+  { key: "conversao", label: "Conversão", event: "converted", outcome: "convertido" },
+  { key: "compra", label: "Compra", event: "sale_recorded", outcome: "vendido" },
+  {
+    key: "entregue", label: "Entregue", event: "delivered", outcome: "entregue",
+    confirm: "Marcar como entregue fecha o pedido. A próxima mensagem do cliente abre uma jornada nova.",
+  },
+  {
+    key: "cancelamento", label: "Cancelamento", event: "cancelled", outcome: "cancelado",
+    confirm: "Cancelar fecha o pedido. Os fatos já coletados são preservados, mas a jornada não aceita mais eventos.",
+  },
+];
+
+// Espelha as regras do backend para não oferecer um clique que voltaria 409.
+function journeyActionState(
+  action: JourneyAction, outcome: JourneyOutcome | null,
+): "disponivel" | "concluido" | "bloqueado" {
+  if (isJourneySettled(outcome)) {
+    return outcome === action.outcome ? "concluido" : "bloqueado";
+  }
+  if (action.key === "conversao" && (outcome === "convertido" || outcome === "vendido")) return "concluido";
+  if (action.key === "compra" && outcome === "vendido") return "concluido";
+  // Entrega pressupõe venda registrada — senão não há o que entregar.
+  if (action.key === "entregue" && outcome !== "vendido") return "bloqueado";
+  return "disponivel";
+}
+
+function JourneyActions({
+  lead, outcome, canEdit, onRecorded,
+}: {
+  lead: Lead;
+  outcome: JourneyOutcome | null;
+  canEdit: boolean;
+  onRecorded: () => void | Promise<void>;
+}) {
+  const [pending, setPending] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<JourneyAction | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = useCallback(async (action: JourneyAction) => {
+    setPending(action.key);
+    setError(null);
+    try {
+      await api.recordJourneyEvent(lead.id, {
+        event_type: action.event,
+        // Determinística de propósito: dois cliques no mesmo botão da mesma
+        // jornada colidem na chave e o backend devolve deduplicated:true em
+        // vez de gravar o evento duas vezes.
+        idempotency_key: `dashboard:${lead.id}:${action.event}`,
+        source: "dashboard",
+        occurred_at: new Date().toISOString(),
+        metadata: { recorded_from: "messages" },
+      });
+      await onRecorded();
+    } catch (err) {
+      setError(getErrorMessage(err, "Não foi possível registrar o evento."));
+    } finally {
+      setPending(null);
+      setConfirming(null);
+    }
+  }, [lead.id, onRecorded]);
+
+  if (!canEdit) return null;
+
+  return (
+    <div className="shrink-0 px-4 pb-4">
+      <div className="grid grid-cols-2 gap-2">
+        {JOURNEY_ACTIONS.map((action) => {
+          const state = journeyActionState(action, outcome);
+          const style = OUTCOME_STYLE[action.outcome];
+          const done = state === "concluido";
+          const blocked = state === "bloqueado";
+          const busy = pending === action.key;
+          return (
+            <button
+              key={action.key}
+              type="button"
+              // `concluido` também trava: o evento é idempotente, mas
+              // reoferecer o clique sugere que falta algo a fazer.
+              disabled={blocked || done || busy || pending !== null}
+              onClick={() => (action.confirm ? setConfirming(action) : run(action))}
+              title={
+                blocked
+                  ? action.key === "entregue"
+                    ? "Registre a compra antes de marcar a entrega"
+                    : "A jornada já foi fechada"
+                  : done
+                    ? `Já registrado · ${style.label}`
+                    : action.label
+              }
+              className="flex items-center gap-2 rounded-[10px] border px-3 py-2.5 text-xs font-medium transition disabled:cursor-not-allowed"
+              style={{
+                background: done ? style.soft : "rgb(var(--obs-text) / 0.03)",
+                borderColor: done ? style.color : "var(--border-glass)",
+                color: done ? style.color : blocked ? "rgb(var(--obs-faint))" : "rgb(var(--obs-subtle))",
+                opacity: blocked ? 0.45 : 1,
+              }}
+            >
+              <span
+                className="h-[9px] w-[9px] shrink-0 rounded-full"
+                style={
+                  done
+                    ? { background: style.color }
+                    : { border: `1.5px solid rgb(var(--obs-${blocked ? "faint" : "faint"}))` }
+                }
+              />
+              <span className="truncate">{busy ? "…" : action.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      {error && <p className="mt-2 text-[11px] text-obs-rose">{error}</p>}
+
+      {/* Sem window.confirm: um diálogo nativo trava a sessão do navegador. */}
+      {confirming && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="absolute inset-0" style={{ background: "rgb(0 0 0 / 0.45)" }} onClick={() => setConfirming(null)} />
+          <div className="modal-content relative w-full max-w-sm p-5">
+            <p className="text-sm font-semibold text-obs-text">{confirming.label}</p>
+            <p className="mt-2 text-xs leading-relaxed text-obs-subtle">{confirming.confirm}</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="lg-btn lg-btn-secondary" onClick={() => setConfirming(null)}>
+                Voltar
+              </button>
+              <button
+                type="button"
+                className="lg-btn lg-btn-primary"
+                disabled={pending !== null}
+                onClick={() => run(confirming)}
+              >
+                {pending ? "Registrando…" : "Confirmar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PedidoBlock({ lead }: { lead: Lead }) {
+  const entries = commercialNoteEntries(lead.metadata?.commercial_note);
+  const [expanded, setExpanded] = useState(false);
+  if (entries.length === 0) return null;
+  // O resumo antigo mostrava duas chaves e escondia o resto num title=
+  // invisível. Aqui as notas são o conteúdo, não uma legenda. O nome do
+  // produto não se repete: ele já é o título do resumo no topo do rail.
+  const shown = expanded ? entries : entries.slice(0, 4);
+  return (
+    <div className="shrink-0 px-4 pt-4 pb-3">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-obs-faint">Pedido</p>
+      {shown.length > 0 && (
+        <dl className="mt-2.5 space-y-1.5">
+          {shown.map(([key, value]) => (
+            <div key={key} className="flex items-baseline gap-3">
+              <dt className="w-[88px] shrink-0 text-[10px] uppercase tracking-wide text-obs-faint">
+                {key.replace(/_/g, " ")}
+              </dt>
+              <dd className="min-w-0 flex-1 text-xs text-obs-text">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {entries.length > 4 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-2 text-[11px] font-medium text-obs-subtle transition hover:text-obs-text"
+        >
+          {expanded ? "Mostrar menos" : `+${entries.length - 4} campos`}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -2380,6 +2612,10 @@ export function MessagesLayout({
   );
   const selectedLeadPersonaId = selectedLead?.persona_id || undefined;
   const selectedLeadInterest = selectedLead?.interesse_produto || undefined;
+  const selectedOutcome = useMemo(
+    () => normalizeJourneyOutcome(selectedLead?.journey_outcome),
+    [selectedLead?.journey_outcome],
+  );
 
   useEffect(() => {
     if (!selectedLead || !personaFilterId) return;
@@ -2755,6 +2991,9 @@ export function MessagesLayout({
             // renders nothing until the field exists, never a fabricated
             // count.
             const unread = Number(lead.metadata?.unread_count) || 0;
+            const outcome = normalizeJourneyOutcome(
+              lead.journey_outcome ?? conv?.journey_outcome,
+            );
             return (
               <button
                 key={lead.id}
@@ -2763,6 +3002,9 @@ export function MessagesLayout({
                 style={{
                   ...attentionRowStyle(attention, active),
                   borderBottom: "1px solid var(--border-glass-soft)",
+                  // Cancelado sai de cena sem sumir: ainda é buscável e
+                  // clicável, só para de competir por atenção.
+                  ...(outcome === "cancelado" ? { opacity: 0.55 } : null),
                 }}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -2786,7 +3028,10 @@ export function MessagesLayout({
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6 text-[10px] text-obs-faint">
-                  <StageBadge stage={lead.stage} />
+                  {/* O desfecho toma o lugar do estágio nesta linha: 300px não
+                      comportam os dois eixos. O estágio completo continua no
+                      perfil do rail direito, onde há espaço para os dois. */}
+                  {outcome ? <OutcomeMark outcome={outcome} /> : <StageBadge stage={lead.stage} />}
                   <span>{lead.qualification_score || 0}%</span>
                   {lastTs && <span>{relativeTs(lastTs)}</span>}
                   {(lead.qualification_signals?.length || 0) > 0 && (
@@ -2951,6 +3196,7 @@ export function MessagesLayout({
           {selectedLead && (
             <div className="flex items-center gap-2 flex-wrap pl-[2.5rem]">
               <StageBadge stage={selectedLead.stage} />
+              {selectedOutcome && <OutcomeMark outcome={selectedOutcome} />}
               {selectedLead.telefone && (
                 <span className="text-[10px] text-obs-faint">{selectedLead.telefone}</span>
               )}
@@ -2962,6 +3208,36 @@ export function MessagesLayout({
               <span className="text-[10px] text-obs-faint ml-auto">
                 {messages.length} msgs
               </span>
+            </div>
+          )}
+
+          {/* Notas comerciais em destaque. Antes viviam só num title=, que é
+              invisível no toque e não aparece em leitor de tela como conteúdo:
+              cada nota vira um chip legível, truncado por chip e não pela
+              string inteira. */}
+          {selectedLead && commercialNoteEntries(selectedLead.metadata?.commercial_note).length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 pl-[2.5rem]">
+              {commercialNoteEntries(selectedLead.metadata?.commercial_note).slice(0, 3).map(([key, value]) => (
+                <span
+                  key={key}
+                  className="inline-flex max-w-[13rem] items-baseline gap-1.5 rounded-full border px-2 py-0.5"
+                  style={{ borderColor: "var(--border-glass)", background: "rgb(var(--obs-text) / 0.03)" }}
+                >
+                  <span className="shrink-0 text-[9px] uppercase tracking-wide text-obs-faint">
+                    {key.replace(/_/g, " ")}
+                  </span>
+                  <span className="truncate text-[11px] font-medium text-obs-text">{value}</span>
+                </span>
+              ))}
+              {commercialNoteEntries(selectedLead.metadata?.commercial_note).length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setShowLeadInfo(true)}
+                  className="text-[11px] font-medium text-obs-subtle transition hover:text-obs-text"
+                >
+                  +{commercialNoteEntries(selectedLead.metadata?.commercial_note).length - 3} notas
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -3126,7 +3402,31 @@ export function MessagesLayout({
           }}
         >
         <>
-          {/* Contato — topo do rail direito, altura própria (não cresce).
+          {/* Resumo do pedido — header do rail. Fica acima do perfil de
+              propósito: é a única linha que responde "em que pé está este
+              pedido?" sem rolar, inclusive com o rail em overlay. */}
+          {selectedLead && (selectedLead.interesse_produto || selectedOutcome) && (
+            <div
+              className="shrink-0 px-4 py-3"
+              style={{ borderBottom: "1px solid var(--border-glass)" }}
+            >
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 flex-1 truncate text-xs font-semibold text-obs-text">
+                  {selectedLead.interesse_produto || "Pedido sem produto definido"}
+                </p>
+                {selectedOutcome && (
+                  <span
+                    className="shrink-0 rounded-full px-2 py-0.5"
+                    style={{ background: OUTCOME_STYLE[selectedOutcome].soft }}
+                  >
+                    <OutcomeMark outcome={selectedOutcome} />
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Contato — altura própria (não cresce).
               Nada aqui é buscado de novo: tudo já está em selectedLead. */}
           {selectedLead && (
             <button
@@ -3154,19 +3454,23 @@ export function MessagesLayout({
                   score {selectedLead.qualification_score || 0}%
                 </span>
               </div>
-              {(selectedLead.interesse_produto || commercialNoteSummary(selectedLead.metadata?.commercial_note)) && (
-                <div className="mt-2.5 space-y-1 text-xs">
-                  {selectedLead.interesse_produto && (
-                    <p className="text-obs-subtle"><span className="text-obs-faint">Interesse · </span>{selectedLead.interesse_produto}</p>
-                  )}
-                  {commercialNoteSummary(selectedLead.metadata?.commercial_note) && (
-                    <p className="text-obs-subtle" title={commercialNoteTitle(selectedLead.metadata?.commercial_note)}>
-                      <span className="text-obs-faint">Nota comercial · </span>{commercialNoteSummary(selectedLead.metadata?.commercial_note)}
-                    </p>
-                  )}
-                </div>
-              )}
+              {/* Interesse e nota comercial saíram daqui: viraram o bloco
+                  Pedido abaixo, onde cabem por inteiro em vez de truncados. */}
             </button>
+          )}
+
+          {/* Pedido + ações. As ações ficam logo abaixo das notas: o operador
+              lê o que foi combinado e decide na mesma leitura. */}
+          {selectedLead && (
+            <div className="shrink-0" style={{ borderBottom: "1px solid var(--border-glass)" }}>
+              <PedidoBlock lead={selectedLead} />
+              <JourneyActions
+                lead={selectedLead}
+                outcome={selectedOutcome}
+                canEdit={canEdit}
+                onRecorded={() => refreshSelectedLead(selectedLead.id)}
+              />
+            </div>
           )}
 
           <div

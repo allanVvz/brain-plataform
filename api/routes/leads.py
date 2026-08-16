@@ -11,6 +11,7 @@ from services import (
     agents_service,
     auth_service,
     event_emitter,
+    journey_outcome,
     knowledge_graph,
     lead_qualification,
     supabase_client,
@@ -145,7 +146,9 @@ def list_leads(
                     offset=offset,
                     since_hours=hours if validation_scope == "only" else None,
                 ) or []
-                return lead_qualification.filter_validation_scope(rows, validation_scope)
+                return journey_outcome.decorate_leads(
+                    lead_qualification.filter_validation_scope(rows, validation_scope)
+                )
             except Exception:
                 return []
         if persona_id or persona_slug:
@@ -157,7 +160,9 @@ def list_leads(
                 offset=offset,
                 since_hours=hours if validation_scope == "only" else None,
             ) or []
-            return lead_qualification.filter_validation_scope(rows, validation_scope)
+            return journey_outcome.decorate_leads(
+                lead_qualification.filter_validation_scope(rows, validation_scope)
+            )
         rows = supabase_client.get_leads(
             persona_slug=persona_id or persona_slug,
             limit=limit,
@@ -818,7 +823,7 @@ def get_lead(lead_id: str, request: Request):
         # Compatibilidade: leads antigos sem membership ainda podem usar
         # leads.persona_id como fallback de visibilidade.
         auth_service.assert_persona_access(request, persona_id=lead.get("persona_id"))
-    return lead_qualification.decorate_lead(lead)
+    return journey_outcome.decorate_leads([lead_qualification.decorate_lead(lead)])[0]
 
 
 class LeadInfoUpdateBody(BaseModel):

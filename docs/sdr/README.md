@@ -18,3 +18,8 @@ Documentos publicáveis precisam declarar `persona`, `type`, `slug`, `title`,
 
 Metadados internos ficam no frontmatter e não devem ser copiados para o texto
 público.
+
+`campaign.md` declara `metadata.campaign_type` com o formato de apresentacao
+(`menu`, `catalog`). O eixo `metadata.offering_kind` (`product` | `service`),
+que decide como o agente qualifica, esta no roadmap — ver "Produto e servico"
+em `docs/knowledge-flow.md`.

@@ -106,3 +106,17 @@ commitados e o outbound duplicado é suprimido. CI e Validator continuam
 reprovando o critério semântico pelo proof. Todo proof expõe `intent_audit`,
 `service_resolution`, `journey_transition`, `confirmation_state` e
 `repetition_action`.
+
+## Desfecho comercial
+
+O SDR termina na qualificação. Conversão, venda, entrega e cancelamento são
+eventos humanos registrados em `POST /agents/leads/{lead_ref}/journey-events`,
+nunca inferidos pelo modelo, e levam a jornada a `converted` ou `closed`.
+
+A projeção a partir do proof **não regride** uma jornada em `converted` ou
+`closed`: `journey_transition` continua sendo emitido e a metadata continua
+evoluindo, mas o `state` fica com o desfecho registrado pelo humano. Um inbound
+depois da venda é suporte ao pedido, não uma nova coleta.
+
+O contrato completo — eventos, idempotência, derivação de `journey_outcome` e a
+paleta `resultado/*` — está em `docs/architecture/SDR_JOURNEY_STATE_MACHINE.md`.

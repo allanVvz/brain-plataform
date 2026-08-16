@@ -30,7 +30,10 @@ def test_purchase_normalizes_iso_currency_and_accepts_optional_value():
 
 @pytest.mark.parametrize(
     "event_type",
-    ["sale_recorded", "appointment_booked", "delivered", "service_completed", "cancelled"],
+    [
+        "converted", "sale_recorded", "appointment_booked", "delivered",
+        "service_completed", "cancelled",
+    ],
 )
 def test_journey_event_contract_accepts_the_published_variants(event_type):
     body = JourneyEventBody(
@@ -49,6 +52,27 @@ def test_closing_journey_event_rejects_commercial_payload():
             occurred_at=datetime.now(timezone.utc), amount_minor=100,
             currency="BRL",
         )
+
+
+def test_converted_event_carries_no_money():
+    """Conversao e o aceite do cliente, nao a venda. Valor entra em
+    sale_recorded/appointment_booked -- senao a mesma receita seria contada
+    duas vezes na mesma jornada."""
+    with pytest.raises(ValidationError):
+        JourneyEventBody(
+            event_type="converted", idempotency_key="conv:one", source="dashboard",
+            occurred_at=datetime.now(timezone.utc), amount_minor=100, currency="BRL",
+        )
+    with pytest.raises(ValidationError):
+        JourneyEventBody(
+            event_type="converted", idempotency_key="conv:two", source="dashboard",
+            occurred_at=datetime.now(timezone.utc), items=[{"sku": "x"}],
+        )
+    clean = JourneyEventBody(
+        event_type="converted", idempotency_key="conv:three", source="dashboard",
+        occurred_at=datetime.now(timezone.utc),
+    )
+    assert clean.amount_minor is None and clean.items == []
 
 
 def test_purchase_endpoint_adapter_records_sale_without_requesting_a_new_journey(monkeypatch):

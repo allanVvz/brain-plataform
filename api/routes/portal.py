@@ -21,6 +21,7 @@ from services import (
     campaigns_service,
     context_cards as context_cards_service,
     event_emitter,
+    journey_outcome,
     knowledge_graph,
     lead_qualification,
     secret_store,
@@ -190,9 +191,11 @@ def conversations(request: Request, persona_slug: str = Query(...)):
         for row in rows
         if row.get("lead_ref") is not None
     ])
+    outcomes = journey_outcome.outcomes_for_leads(persona["id"], list(leads_by_ref))
     decorated = []
     for row in rows:
-        lead = leads_by_ref.get(int(row.get("lead_ref") or 0), {})
+        ref = int(row.get("lead_ref") or 0)
+        lead = leads_by_ref.get(ref, {})
         extra = lead_qualification.decorate_lead(lead)
         if extra.get("validation", {}).get("is_validation"):
             continue
@@ -202,6 +205,7 @@ def conversations(request: Request, persona_slug: str = Query(...)):
             "qualification_score": extra.get("qualification_score") or 0,
             "qualification_signals": extra.get("qualification_signals") or [],
             "validation": extra.get("validation") or {},
+            "journey_outcome": outcomes.get(ref),
         })
     return decorated
 
@@ -422,7 +426,9 @@ async def send_message(request: Request, persona_slug: str = Query(...)):
 def leads(request: Request, persona_slug: str = Query(...), limit: int = Query(500, le=2000)):
     persona = _persona(persona_slug, request)
     rows = supabase_client.get_leads_for_persona_ids([persona["id"]], limit=limit, offset=0)
-    return lead_qualification.filter_validation_scope(rows, "exclude")
+    return journey_outcome.decorate_leads(
+        lead_qualification.filter_validation_scope(rows, "exclude"), persona["id"],
+    )
 
 
 @router.get("/leads/{lead_id}")
@@ -431,7 +437,9 @@ def lead_detail(lead_id: int, request: Request, persona_slug: str = Query(...)):
     lead = _lead(lead_id, persona["id"])
     if lead_qualification.is_validation_lead(lead):
         raise HTTPException(404, "Lead nao encontrada.")
-    return lead_qualification.decorate_lead(lead)
+    return journey_outcome.decorate_leads(
+        [lead_qualification.decorate_lead(lead)], persona["id"],
+    )[0]
 
 
 @router.patch("/leads/{lead_id}")
