@@ -86,6 +86,21 @@ class BranchAction(StrEnum):
     ADD = "add"
 
 
+class ServiceOperationAction(StrEnum):
+    ADD = "add"
+    KEEP = "keep"
+    DROP = "drop"
+
+
+class ServiceOperation(StrictModel):
+    """Graph-proved mutation of the active service set for one inbound."""
+
+    action: ServiceOperationAction
+    branch_anchor_node_id: str = Field(min_length=1)
+    branch_path_checksum: str = Field(min_length=1)
+    evidence_span: str = Field(min_length=1)
+
+
 class ExtractedFact(StrictModel):
     field_key: str = Field(min_length=1)
     value: Any | None = None
@@ -110,6 +125,7 @@ class ConversationProposal(StrictModel):
     branch_anchor_node_id: str
     branch_path_checksum: str
     branch_evidence_span: str = ""
+    service_operations: list[ServiceOperation] = Field(default_factory=list)
     extracted_facts: list[ExtractedFact] = Field(default_factory=list)
     claims: list[CommercialClaim] = Field(default_factory=list)
     next_question_node_id: str | None = None

@@ -1892,6 +1892,65 @@ def _knowledge_context_envelope(
     }
 
 
+def _structured_commercial_note_projection(
+    *,
+    document: dict[str, Any],
+    cart_state: dict[str, Any],
+) -> dict[str, Any]:
+    active = list(dict.fromkeys(
+        str(value) for value in cart_state.get("active_branch_node_ids") or [] if value
+    ))
+    focus = str(cart_state.get("active_branch_node_id") or "") or None
+    grouped = cart_state.get("facts_by_key") or {}
+    contracts = document.get("branch_contracts") or {}
+
+    def fact_for(key: str, owner: str) -> dict[str, Any] | None:
+        return next(
+            (
+                fact for fact in grouped.get(key, [])
+                if str(fact.get("owner_node_id") or "") == owner
+            ),
+            None,
+        )
+
+    declarations: dict[tuple[str, str], set[str]] = {}
+    for anchor in active:
+        for field in (contracts.get(anchor) or {}).get("fields") or []:
+            identity = (str(field.get("key") or ""), str(field.get("owner_node_id") or ""))
+            declarations.setdefault(identity, set()).add(anchor)
+
+    common: dict[str, Any] = {}
+    services: dict[str, Any] = {}
+    node_by_id = document.get("node_by_id") or {}
+    for anchor in active:
+        service_facts: dict[str, Any] = {}
+        for field in (contracts.get(anchor) or {}).get("fields") or []:
+            key = str(field.get("key") or "")
+            owner = str(field.get("owner_node_id") or "")
+            fact = fact_for(key, owner)
+            if not fact or fact.get("status") not in {"known", "unknown", "declined"}:
+                continue
+            value = fact.get("value") if fact.get("status") == "known" else "desconhecido"
+            if len(declarations.get((key, owner), set())) == len(active) and owner not in active:
+                common[key] = value
+            else:
+                service_facts[key] = value
+        node = node_by_id.get(anchor) or {}
+        services[anchor] = {
+            "slug": node.get("slug"),
+            "title": node.get("title"),
+            "facts": service_facts,
+        }
+    return {
+        "version": 1,
+        "focused_service_id": focus,
+        "active_service_ids": active,
+        "common_facts": common,
+        "services": services,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def _is_canonical_validation_lead(lead: dict[str, Any]) -> bool:
     """Require all canonical markers before bypassing real transport gates."""
     metadata = lead.get("metadata") or {}
@@ -2156,19 +2215,29 @@ def commit(
             )
         return result
     previous_metadata = dict(lead.get("metadata") or {})
+    v3_document: dict[str, Any] = {}
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
         facts = response.cart_state.get("facts") or {}
-        resolved = sorted(
-            key for key, fact in facts.items()
+        facts_by_key = response.cart_state.get("facts_by_key") or {
+            str(key): [fact]
+            for key, fact in facts.items()
             if isinstance(fact, dict)
-            and fact.get("status") in {"known", "unknown", "declined"}
+        }
+        resolved = sorted(
+            key for key, rows in facts_by_key.items()
+            if any(
+                isinstance(fact, dict)
+                and fact.get("status") in {"known", "unknown", "declined"}
+                for fact in rows or []
+            )
         )
         missing = list(response.proof.get("missing_fields") or [])
         required_total = int(response.proof.get("required_field_count") or 0)
         qualified_stage = decision.lead_stage
         qualification = {
             "version": graph_agent_runtime_v3.RUNTIME_VERSION,
-            "complete": not missing,
+            "complete": bool(response.proof.get("qualification_complete", not missing)),
+            "collection_complete": bool(response.proof.get("collection_complete", not missing)),
             "resolved_fields": resolved,
             "missing_fields": missing,
             "required_field_count": required_total,
@@ -2257,8 +2326,11 @@ def commit(
         active_branch = response.cart_state.get("active_branch_node_id")
         valid_owners = {active_branch} if active_branch else set()
         if active_branch:
-            publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
-            contract = ((publication.get("document_json") or {}).get("branch_contracts") or {}).get(active_branch) or {}
+            publication = supabase_client.get_active_graph_publication(
+                str(persona.get("id") or "")
+            ) or {}
+            v3_document = publication.get("document_json") or {}
+            contract = (v3_document.get("branch_contracts") or {}).get(active_branch) or {}
             valid_owners |= {
                 str(field.get("owner_node_id"))
                 for field in contract.get("fields") or []
@@ -2298,6 +2370,15 @@ def commit(
         metadata["commercial_note"] = commercial_note
     elif "commercial_note" in metadata:
         metadata.pop("commercial_note", None)
+    if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+        projection = response.cart_state.get("commercial_note_projection")
+        if isinstance(projection, dict) and projection.get("version"):
+            metadata["commercial_note_projection"] = projection
+        elif v3_document:
+            metadata["commercial_note_projection"] = _structured_commercial_note_projection(
+                document=v3_document,
+                cart_state=response.cart_state,
+            )
     lead_update = {"metadata": metadata, "stage": qualified_stage}
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
         facts = response.cart_state.get("facts") or {}

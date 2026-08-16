@@ -166,6 +166,34 @@ def _condition_valid(condition: Any, field_keys: set[str]) -> bool:
     })
 
 
+def _compiled_field_validation(item: dict[str, Any]) -> dict[str, Any]:
+    raw = item.get("validation")
+    validation = dict(raw) if isinstance(raw, dict) else {}
+    mode = str(
+        validation.get("mode")
+        or ("schema" if isinstance(item.get("value_schema"), dict) and item.get("value_schema") else "")
+    ).strip().lower()
+    if mode == "enum":
+        raw_values = validation.get("values") or validation.get("canonical_values") or []
+        values: list[dict[str, Any]] = []
+        for raw_value in raw_values if isinstance(raw_values, list) else []:
+            if isinstance(raw_value, dict):
+                canonical = raw_value.get("value", raw_value.get("canonical"))
+                aliases = raw_value.get("aliases") or []
+            else:
+                canonical = raw_value
+                aliases = []
+            if canonical in (None, ""):
+                continue
+            values.append({
+                "value": canonical,
+                "aliases": [str(alias) for alias in aliases if str(alias).strip()],
+            })
+        validation["values"] = values
+    validation["mode"] = mode
+    return validation
+
+
 def _field_declarations(
     node: dict[str, Any],
     *,
@@ -193,13 +221,15 @@ def _field_declarations(
             "key": key,
             "owner_node_id": str(
                 graph_conversation_contract.resolve_field_owner_node_id(
-                    item, branch_node=branch_node, persona_node=persona_node
+                    item, branch_node=branch_node, persona_node=persona_node,
+                    declaration_node=node,
                 ) or node["id"]
             ),
             "question_node_id": str(item.get("question_node_id") or "") or None,
             "required": item.get("required", True) is True,
             "accepted_statuses": list(dict.fromkeys(str(value) for value in accepted)),
             "value_schema": item.get("value_schema") if isinstance(item.get("value_schema"), dict) else {},
+            "validation": _compiled_field_validation(item),
             "normalization": item.get("normalization") or item.get("normalization_hint"),
             "depends_on": [str(value) for value in item.get("depends_on") or [] if value],
             "condition": item.get("condition"),
@@ -500,6 +530,28 @@ def compile_graph(
                 errors.append(
                     f"field_owner_persona_scope_no_persona_node:{anchor}:{field['key']}"
                 )
+            if field.get("scope") not in {None, "persona", "branch", "declaration"}:
+                errors.append(f"invalid_field_scope:{anchor}:{field['key']}")
+            validation = field.get("validation") or {}
+            validation_mode = str(validation.get("mode") or "")
+            if validation_mode not in {"enum", "schema", "semantic"}:
+                errors.append(f"field_validation_mode_missing:{anchor}:{field['key']}")
+            elif validation_mode == "enum":
+                values = validation.get("values") or []
+                canonical = [item.get("value") for item in values if isinstance(item, dict)]
+                if not canonical or len({json.dumps(value, sort_keys=True) for value in canonical}) != len(canonical):
+                    errors.append(f"field_enum_values_invalid:{anchor}:{field['key']}")
+            elif validation_mode == "schema" and not field.get("value_schema"):
+                errors.append(f"field_schema_missing:{anchor}:{field['key']}")
+            elif validation_mode == "semantic":
+                description = str(validation.get("description") or "").strip()
+                definition = (
+                    validation.get("semantic_type")
+                    or validation.get("examples")
+                    or validation.get("rules")
+                )
+                if not description or not definition:
+                    errors.append(f"field_semantic_definition_missing:{anchor}:{field['key']}")
             if not set(field["accepted_statuses"]).issubset(FACT_STATUSES):
                 errors.append(f"invalid_accepted_statuses:{anchor}:{field['key']}")
             if field["overwrite_policy"] not in {"never", "explicit_correction", "higher_confidence", "always"}:
@@ -633,6 +685,14 @@ def compile_graph(
                 node_id for node_id in eligible_faq_ids if node_id in closure
             ),
             "faq_projection_contract": FAQ_PROJECTION_CONTRACT,
+            "collection_policy": (
+                dict(qualification_policy)
+                if isinstance((qualification_policy := (
+                    (((persona_node or {}).get("data") or {}).get("conversation_policy") or {})
+                    .get("qualification")
+                )), dict)
+                else {}
+            ),
             "compiler_version": COMPILER_VERSION,
         }
         contracts[anchor] = contract
@@ -657,11 +717,11 @@ def compile_graph(
         }
         unique_owners = set(owners.values())
         if len(unique_owners) > 1:
-            all_branch_scoped = all(
-                by_anchor[anchor].get("scope") == "branch"
+            all_locally_scoped = all(
+                by_anchor[anchor].get("scope") in {"branch", "declaration"}
                 for anchor in by_anchor
             )
-            if not all_branch_scoped:
+            if not all_locally_scoped:
                 branches_with_owners = [
                     f"{anchor}(owner={owners[anchor][:8]}..., scope={by_anchor[anchor].get('scope', 'branch')})"
                     for anchor in sorted(by_anchor)

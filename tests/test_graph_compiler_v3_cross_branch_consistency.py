@@ -283,5 +283,122 @@ def test_compiler_rejects_multiple_canonical_graph_json_personas():
     )
 
 
+def test_declaration_scope_binds_field_to_campaign_node():
+    root = node(1, "persona:aurora", parent_type="persona")
+    campaign = node(2, "campaign:premium", parent_type="campaign")
+    branch = node(3, "product:service", parent_type="product",
+                  data={"capabilities": {"branch_anchor": True}})
+    question = node(4, "question:note", parent_type="faq",
+                    data={"question": "Qual detalhe desta campanha?"})
+    campaign["metadata"]["qualification"] = {"fields": [{
+        "key": "campaign_note", "scope": "declaration",
+        "question_node_id": "question:note", "required": True,
+        "value_schema": {"type": "string", "minLength": 1},
+        "validation": {
+            "mode": "semantic",
+            "description": "Nota comercial específica desta campanha.",
+            "examples": ["interesse na condição promocional"],
+        },
+    }]}
+    rows = [root, campaign, branch, question]
+    edges = [
+        edge(1, root, campaign), edge(2, campaign, branch),
+        edge(3, campaign, question),
+    ]
+
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA, node_rows=rows, edge_rows=edges,
+    )
+
+    field = document["branch_contracts"]["product:service"]["fields"][0]
+    assert field["owner_node_id"] == "campaign:premium"
+
+
+def test_declaration_scoped_field_can_have_distinct_campaign_owners():
+    root = node(1, "persona:aurora", parent_type="persona")
+    campaign_a = node(2, "campaign:a", parent_type="campaign")
+    campaign_b = node(3, "campaign:b", parent_type="campaign")
+    branch_a = node(4, "product:a", parent_type="product",
+                    data={"capabilities": {"branch_anchor": True}})
+    branch_b = node(5, "product:b", parent_type="product",
+                    data={"capabilities": {"branch_anchor": True}})
+    question_a = node(6, "question:a", parent_type="faq", data={"question": "Nota A?"})
+    question_b = node(7, "question:b", parent_type="faq", data={"question": "Nota B?"})
+    validation = {
+        "mode": "semantic", "description": "Nota específica desta campanha.",
+        "examples": ["condição comercial própria"],
+    }
+    campaign_a["metadata"]["qualification"] = {"fields": [{
+        "key": "campaign_note", "scope": "declaration",
+        "question_node_id": "question:a", "value_schema": {"type": "string"},
+        "validation": validation,
+    }]}
+    campaign_b["metadata"]["qualification"] = {"fields": [{
+        "key": "campaign_note", "scope": "declaration",
+        "question_node_id": "question:b", "value_schema": {"type": "string"},
+        "validation": validation,
+    }]}
+
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=[root, campaign_a, campaign_b, branch_a, branch_b, question_a, question_b],
+        edge_rows=[
+            edge(1, root, campaign_a), edge(2, campaign_a, branch_a),
+            edge(3, campaign_a, question_a), edge(4, root, campaign_b),
+            edge(5, campaign_b, branch_b), edge(6, campaign_b, question_b),
+        ],
+    )
+
+    assert document["branch_contracts"]["product:a"]["fields"][0]["owner_node_id"] == "campaign:a"
+    assert document["branch_contracts"]["product:b"]["fields"][0]["owner_node_id"] == "campaign:b"
+
+
+def test_closed_field_without_published_values_fails_compilation():
+    root = node(1, "persona:aurora", parent_type="persona")
+    branch = node(2, "product:service", parent_type="product",
+                  data={"capabilities": {"branch_anchor": True}})
+    question = node(3, "question:objective", parent_type="faq",
+                    data={"question": "Qual o objetivo?"})
+    branch["metadata"]["qualification"] = {"fields": [{
+        "key": "objective", "question_node_id": "question:objective",
+        "value_schema": {"type": "string"},
+        "validation": {"mode": "enum", "values": []},
+    }]}
+
+    with pytest.raises(graph_compiler_v3.GraphCompilationError) as exc_info:
+        graph_compiler_v3.compile_graph(
+            persona=PERSONA,
+            node_rows=[root, branch, question],
+            edge_rows=[edge(1, root, branch), edge(2, branch, question)],
+        )
+
+    assert any("field_enum_values_invalid" in error for error in exc_info.value.errors)
+
+
+def test_semantic_field_without_definition_fails_compilation():
+    root = node(1, "persona:aurora", parent_type="persona")
+    branch = node(2, "product:service", parent_type="product",
+                  data={"capabilities": {"branch_anchor": True}})
+    question = node(3, "question:note", parent_type="faq",
+                    data={"question": "Qual a observação?"})
+    branch["metadata"]["qualification"] = {"fields": [{
+        "key": "note", "question_node_id": "question:note",
+        "value_schema": {"type": "string"},
+        "validation": {"mode": "semantic"},
+    }]}
+
+    with pytest.raises(graph_compiler_v3.GraphCompilationError) as exc_info:
+        graph_compiler_v3.compile_graph(
+            persona=PERSONA,
+            node_rows=[root, branch, question],
+            edge_rows=[edge(1, root, branch), edge(2, branch, question)],
+        )
+
+    assert any(
+        "field_semantic_definition_missing" in error
+        for error in exc_info.value.errors
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
