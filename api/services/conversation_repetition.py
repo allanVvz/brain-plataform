@@ -7,7 +7,7 @@ from typing import Any, Iterable
 
 
 REPETITION_THRESHOLD = 0.92
-QUESTION_PARAPHRASE_THRESHOLD = 0.80
+QUESTION_PARAPHRASE_THRESHOLD = 0.60
 QUESTION_SUFFIX_MIN_RATIO = 0.60
 _EMPTY_BRIDGE_TOKENS = {
     "ah", "beleza", "bom", "certo", "claro", "entao", "entendi", "legal",
