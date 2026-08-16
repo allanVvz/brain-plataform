@@ -4,7 +4,7 @@ import path from "node:path";
 import { expect, test } from "playwright/test";
 
 
-const corpusPath = path.resolve(process.cwd(), "../tests/fixtures/sdr_flow_cases.json");
+const corpusPath = path.resolve(process.cwd(), "../api/evaluation/sdr_flow_cases.json");
 const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8")) as {
   version: number;
   cases: Array<Record<string, unknown> & { id: string; message: string }>;
