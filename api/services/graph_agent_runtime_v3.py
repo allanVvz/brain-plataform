@@ -3213,6 +3213,26 @@ def decide(
     return decision, _with_structural_proof_audit(context, decision, response)
 
 
+def _sanitize_untrusted_service_operations(raw: Any) -> Any:
+    """Discard model-only service operations that have no literal evidence.
+
+    Service state is resolved deterministically from the inbound before the
+    model is called and replaces this untrusted list after parsing.  Some
+    models still emit ``keep`` with an empty span on ordinary field answers;
+    letting that fail Pydantic would suppress a valid answer before the
+    authoritative resolver can apply its empty operation set.
+    """
+    if not isinstance(raw, dict) or not isinstance(raw.get("service_operations"), list):
+        return raw
+    operations = [
+        operation
+        for operation in raw["service_operations"]
+        if not isinstance(operation, dict)
+        or str(operation.get("evidence_span") or "").strip()
+    ]
+    return {**raw, "service_operations": operations}
+
+
 def _decide(
     context: ConversationContext, *, model_observation: dict[str, Any] | None
 ) -> tuple[ConversationDecision, AgentResponse]:
@@ -3276,6 +3296,7 @@ def _decide(
     ):
         return _service_disambiguation_response(context)
     raw = observation.get("proposal") if isinstance(observation.get("proposal"), dict) else observation
+    raw = _sanitize_untrusted_service_operations(raw)
     parse_errors = [str(value) for value in observation.get("proposal_parse_errors") or []]
     try:
         proposal = ConversationProposal.model_validate(raw)

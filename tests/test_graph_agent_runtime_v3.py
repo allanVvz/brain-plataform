@@ -1478,6 +1478,34 @@ def test_repeated_service_changes_focus_without_recreating_service_fact():
     assert reconciled.extracted_facts == []
 
 
+def test_blank_model_keep_operation_is_discarded_before_proposal_validation():
+    raw = {
+        "branch_action": "keep",
+        "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": "checksum:a",
+        "branch_evidence_span": "",
+        "service_operations": [{
+            "action": "keep",
+            "branch_anchor_node_id": "branch:a",
+            "branch_path_checksum": "checksum:a",
+            "evidence_span": "",
+        }],
+        "extracted_facts": [],
+        "claims": [],
+        "next_question_node_id": "q:condition",
+        "cited_node_ids": [],
+        "cited_chunk_ids": [],
+        "reply": "Qual é a condição?",
+        "qualification_complete": False,
+        "handoff_requested": False,
+    }
+
+    sanitized = graph_agent_runtime_v3._sanitize_untrusted_service_operations(raw)
+    proposal = ConversationProposal.model_validate(sanitized)
+
+    assert proposal.service_operations == []
+
+
 def test_pending_condition_answer_does_not_change_branch_from_service_word():
     contract = {
         "fields": [
