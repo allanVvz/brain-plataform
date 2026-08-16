@@ -1162,13 +1162,19 @@ def _unanswered_fact_after_question_limit(
     if not key or not owner or not question_id:
         return None
     accepted_statuses = set(field.get("accepted_statuses") or ["known"])
-    if any(
-        fact.field_key == key
-        and fact.owner_node_id == owner
-        and str(fact.status.value if hasattr(fact.status, "value") else fact.status)
-        in accepted_statuses
-        for fact in proposal.extracted_facts
-    ):
+    proposed = next(
+        (
+            fact
+            for fact in proposal.extracted_facts
+            if fact.field_key == key and fact.owner_node_id == owner
+        ),
+        None,
+    )
+    proposed_status = str(
+        proposed.status.value if proposed and hasattr(proposed.status, "value")
+        else proposed.status if proposed else ""
+    )
+    if proposed and proposed_status in accepted_statuses and proposed_status != "unknown":
         return None
     asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
     question_text = str(
@@ -1195,12 +1201,65 @@ def _unanswered_fact_after_question_limit(
         "owner_node_id": owner,
         "status": "unknown",
         "value": None,
-        "source_message_id": _source_message_id(context.messages),
-        "evidence_span": "",
-        "confidence": 1.0,
+        "source_message_id": (
+            proposed.source_message_id if proposed else None
+        ) or _source_message_id(context.messages),
+        "evidence_span": proposed.evidence_span if proposed else "",
+        "confidence": proposed.confidence if proposed else 1.0,
         "reason": "ignored_twice",
         "metadata": {"reason": "ignored_twice"},
     }
+
+
+def _drop_premature_unknown_for_pending_question(
+    proposal: ConversationProposal,
+    context: ConversationContext,
+    contract: dict[str, Any],
+    ledger_facts: dict[str, Any],
+    *,
+    max_attempts: int,
+) -> ConversationProposal:
+    """Do not let a model turn the first ignored answer into a terminal fact."""
+    pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
+    if not pending:
+        return proposal
+    field = pending[0]
+    key = str(field.get("key") or "")
+    owner = str(field.get("owner_node_id") or "")
+    question_id = str(field.get("question_node_id") or "")
+    question_text = str(
+        ((contract.get("questions") or {}).get(question_id) or {}).get("text") or ""
+    ).strip()
+    asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
+    observed_attempts = sum(
+        1
+        for row in context.messages
+        if (
+            str(row.get("role") or "") == "assistant"
+            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
+        )
+        and question_text
+        and graph_proof_checker_v3._question_already_asked(
+            question_text,
+            str(row.get("content") or row.get("texto") or row.get("text") or ""),
+        )
+    )
+    allowed_emissions = 1 + max(0, min(int(max_attempts), 1))
+    if max(asked.count(question_id), observed_attempts) >= allowed_emissions:
+        return proposal
+    filtered = [
+        fact
+        for fact in proposal.extracted_facts
+        if not (
+            fact.field_key == key
+            and fact.owner_node_id == owner
+            and str(fact.status.value if hasattr(fact.status, "value") else fact.status)
+            == "unknown"
+        )
+    ]
+    if len(filtered) == len(proposal.extracted_facts):
+        return proposal
+    return proposal.model_copy(update={"extracted_facts": filtered})
 
 
 def _normalize_fact_source_message_ids(
@@ -2295,6 +2354,13 @@ def _decide(
     )
     proposal = _normalize_servico_owner(proposal, contract)
     proposal = _normalize_fact_source_message_ids(proposal, context)
+    proposal = _drop_premature_unknown_for_pending_question(
+        proposal,
+        context,
+        contract,
+        contract_facts,
+        max_attempts=_question_repetition_max_attempts(contract),
+    )
     proposal = _reconcile_direct_answer_to_pending_field(
         proposal, context, contract, contract_facts,
     )
@@ -2487,6 +2553,15 @@ def _decide(
             max_attempts=_question_repetition_max_attempts(contract),
         )
         if unanswered_fact:
+            accepted_facts = [
+                fact
+                for fact in accepted_facts
+                if not (
+                    str(fact.get("field_key") or "") == unanswered_fact["field_key"]
+                    and str(fact.get("owner_node_id") or "")
+                    == unanswered_fact["owner_node_id"]
+                )
+            ]
             accepted_facts.append(unanswered_fact)
         next_grouped = {
             str(key): list(values) for key, values in grouped_facts.items()
