@@ -435,6 +435,7 @@ def _estimated_tokens(text: str) -> int:
 # instead of an assumption.
 RAG_CHUNK_TOKEN_BUDGET = 6000
 RAG_CHUNK_LIMIT = 12
+RAG_FAQ_CHUNK_RESERVE = 1
 
 
 def _mmr(candidates: list[dict[str, Any]], limit: int, *, max_tokens: int = RAG_CHUNK_TOKEN_BUDGET) -> list[dict[str, Any]]:
@@ -489,6 +490,26 @@ def _required_structural_chunks(rows: list[dict[str, Any]]) -> list[dict[str, An
         if current is None or score > current_score:
             selected[source] = row
     return list(selected.values())
+
+
+def _optional_retrieval_chunk_slots(
+    required_structural: list[dict[str, Any]],
+    reserved_faq: list[dict[str, Any]],
+) -> int:
+    """Return optional MMR capacity without charging FAQ against structure.
+
+    The branch contract can legitimately require all twelve structural slots.
+    A current-turn FAQ is separately selected, graph-authorized evidence and
+    therefore gets one explicit reserve.  The shared token budget still caps
+    the complete structural + FAQ package.
+    """
+    if len(required_structural) > RAG_CHUNK_LIMIT:
+        raise RuntimeError(
+            f"required structural chunks exceed the {RAG_CHUNK_LIMIT}-chunk prompt limit"
+        )
+    if len(reserved_faq) > RAG_FAQ_CHUNK_RESERVE:
+        raise RuntimeError("selected FAQ evidence exceeds its reserved chunk limit")
+    return RAG_CHUNK_LIMIT - len(required_structural)
 
 
 def _required_retrieval_node_ids(
@@ -2336,10 +2357,9 @@ def build_context(
     reserved_ids = {
         str(row.get("chunk_id") or row.get("id")) for row in reserved
     }
-    if len(required_structural) + len(reserved) > RAG_CHUNK_LIMIT:
-        raise RuntimeError(
-            "required structural and FAQ chunks exceed the 12-chunk prompt limit"
-        )
+    optional_chunk_slots = _optional_retrieval_chunk_slots(
+        required_structural, reserved,
+    )
     structural_ids = {
         str(row.get("chunk_id") or row.get("id")) for row in required_structural
     }
@@ -2356,7 +2376,7 @@ def build_context(
                 row for key, row in merged.items()
                 if key not in structural_ids and key not in reserved_ids
             ],
-            RAG_CHUNK_LIMIT - len(required_structural) - len(reserved),
+            optional_chunk_slots,
             max_tokens=remaining_token_budget,
         )
         if remaining_token_budget > 0 else []
