@@ -4610,6 +4610,22 @@ def record_purchase_completed(**payload: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def set_conversation_journey_state(**payload: Any) -> dict:
+    """Estado-alvo do pedido, escolhido por um humano.
+
+    Complementa ``record_conversation_journey_event``: aquele e append-only e
+    idempotente (integracao e agente), este calcula o delta ate o alvo e sabe
+    voltar atras.
+    """
+    result = get_client().rpc(
+        "set_conversation_journey_state_v1", payload,
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
 def record_conversation_journey_event(**payload: Any) -> dict:
     result = get_client().rpc(
         "record_conversation_journey_event_v1", payload,

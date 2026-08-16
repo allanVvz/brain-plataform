@@ -163,5 +163,21 @@ def decorate_leads(rows: list[dict[str, Any]], persona_id: str | None = None) ->
             resumos.get((pid, int(ref)), _VAZIO) if pid and ref is not None else _VAZIO
         )
         row.update(resumo)
+        # O carimbo vence a derivacao: `converted_at` pode ser limpo pelo
+        # seletor de estado, e a conversao da lead nao pode regredir com ele.
+        row["lead_converted"] = lead_converted(row) or bool(resumo.get("lead_converted"))
         row["business_model"] = models.get(pid, SALES)
     return rows
+
+
+def lead_converted(lead: dict[str, Any] | None) -> bool:
+    """A lead ja converteu alguma vez?
+
+    Permanente por construcao: `leads.metadata.first_converted_at` e escrito
+    uma unica vez na primeira venda ou agendamento e ninguem o apaga -- nem o
+    cancelamento (que estorna a compra, nao a conversao), nem o seletor de
+    estado, nem o ciclo seguinte.
+    """
+    metadata = (lead or {}).get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    return bool(metadata.get("first_converted_at"))

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from routes.conversations import _authorize as authorize_internal
-from services import auth_service, supabase_client
+from services import agents_service, auth_service, event_emitter, supabase_client
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 internal_router = APIRouter(prefix="/internal/agents", tags=["agents"])
@@ -79,6 +79,18 @@ class JourneyEventBody(BaseModel):
         return self
 
 
+class JourneyStateBody(BaseModel):
+    """Estado-alvo do pedido, escolhido pelo closer humano.
+
+    Sem `idempotency_key`: isto nao e um evento append-only, e a afirmacao de
+    onde o pedido esta agora. Reenviar o mesmo alvo devolve `changed=false`.
+    """
+    target: Literal["qualificado", "convertido", "vendido", "entregue", "cancelado"]
+    source: str = Field(min_length=1, max_length=100)
+    occurred_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 def _lead_or_404(lead_ref: int) -> dict:
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     if not lead or not lead.get("persona_id"):
@@ -104,6 +116,54 @@ def record_journey_event(
         raise HTTPException(409, "Journey event could not be recorded") from exc
 
 
+def set_journey_state(
+    lead_ref: int, body: JourneyStateBody, responsible_user_id: str | None,
+    *, offering: str = "sales",
+) -> dict:
+    """Aplica o estado-alvo e, ao fechar o pedido, devolve a IA ao atendimento.
+
+    Fechar por conclusao ou cancelamento reinicia o ciclo: `resume_lead` zera
+    `handoff_level`, marca `pending_reconfirmation` e devolve a fila os inbounds
+    que ficaram parqueados em `waiting_human` durante o handoff. Sem isso o lead
+    seguiria mudo indefinidamente -- nenhum worker reclama `waiting_human`.
+    """
+    lead = _lead_or_404(lead_ref)
+    try:
+        result = supabase_client.set_conversation_journey_state(
+            p_persona_id=lead["persona_id"], p_lead_ref=lead_ref,
+            p_target=body.target, p_source=body.source,
+            p_occurred_at=body.occurred_at.isoformat(), p_offering=offering,
+            p_responsible_user_id=responsible_user_id, p_metadata=body.metadata,
+        )
+    except Exception as exc:
+        raise HTTPException(409, _state_conflict_detail(exc)) from exc
+
+    if result.get("changed") and result.get("journey_closed"):
+        resumed = agents_service.resume_lead(lead_ref)
+        result["ai_resumed"] = bool(resumed)
+        if resumed:
+            # A origem precisa ser auditavel: isto nao foi um humano clicando
+            # em "retomar", foi o fechamento do pedido religando o ciclo.
+            event_emitter.emit(
+                "lead.ai_resumed", lead_ref=lead_ref,
+                payload={"ai_paused": False, "by": "journey_closed",
+                         "target": body.target},
+            )
+    return result
+
+
+def _state_conflict_detail(exc: Exception) -> str:
+    """Traduz as guardas nomeadas da RPC; o resto continua generico."""
+    texto = str(exc)
+    if "a newer order already exists" in texto:
+        return "Ja existe um pedido mais novo para esta lead; nao da para reabrir o anterior."
+    if "lead already converted" in texto:
+        return "Esta lead ja converteu: qualificado nao esta mais disponivel."
+    if "no journey for this lead" in texto:
+        return "Esta lead ainda nao tem pedido."
+    return "Journey state could not be changed"
+
+
 def _record_purchase(lead_ref: int, body: PurchaseCompletedBody, responsible_user_id: str | None) -> dict:
     return record_journey_event(
         lead_ref,
@@ -118,6 +178,14 @@ def journey_event(lead_ref: int, body: JourneyEventBody, request: Request) -> di
     user = auth_service.current_user(request)
     auth_service.assert_persona_capability(request, "edit", persona_id=lead["persona_id"])
     return record_journey_event(lead_ref, body, str(user["id"]))
+
+
+@router.post("/leads/{lead_ref}/journey-state")
+def journey_state(lead_ref: int, body: JourneyStateBody, request: Request) -> dict:
+    lead = _lead_or_404(lead_ref)
+    user = auth_service.current_user(request)
+    auth_service.assert_persona_capability(request, "edit", persona_id=lead["persona_id"])
+    return set_journey_state(lead_ref, body, str(user["id"]))
 
 
 @internal_router.post("/leads/{lead_ref}/journey-events")
