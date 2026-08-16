@@ -17,6 +17,16 @@ check_file() {
 
 check_file .deploy/release-source-sha release_source_sha
 check_file .deploy/release-directory release_directory
+if [[ -n "${EXPECTED_RELEASE_SHA:-}" && -s .deploy/release-source-sha ]]; then
+  installed_sha="$(tr -d '\r\n' < .deploy/release-source-sha)"
+  if [[ "$installed_sha" == "$EXPECTED_RELEASE_SHA" ]]; then
+    printf 'PASS\trelease_source_identity\t%s\n' "$installed_sha"
+  else
+    printf 'FAIL\trelease_source_identity\texpected=%s installed=%s\n' \
+      "$EXPECTED_RELEASE_SHA" "$installed_sha"
+    failed=1
+  fi
+fi
 if [[ -s .deploy/release-directory ]]; then
   release_dir="$(tr -d '\r\n' < .deploy/release-directory)"
   if [[ -d "$release_dir" && -f "$release_dir/SHA256SUMS" ]] \
@@ -36,7 +46,12 @@ where filename in (
   '113_quiet_burst_supersession.sql',
   '114_context_batches_indexes_and_validator_cas.sql',
   '115_internal_data_api_privileges.sql',
-  '116_reconcile_active_conversation_branches.sql'
+  '116_reconcile_active_conversation_branches.sql',
+  '117_wa_validator_queue_and_retention.sql',
+  '118_conversation_journeys_and_sales_conversions.sql',
+  '119_whatsapp_media_ingest.sql',
+  '120_graphrag_faq_projection_v1.sql',
+  '121_sdr_journey_state_machine.sql'
 ) order by filename;
 
 select 'unsafe_table_grants' metric, count(*)::text value
@@ -80,8 +95,13 @@ begin
       '113_quiet_burst_supersession.sql',
       '114_context_batches_indexes_and_validator_cas.sql',
       '115_internal_data_api_privileges.sql',
-      '116_reconcile_active_conversation_branches.sql')) <> 5 then
-    raise exception 'release migrations 112-116 are incomplete';
+      '116_reconcile_active_conversation_branches.sql',
+      '117_wa_validator_queue_and_retention.sql',
+      '118_conversation_journeys_and_sales_conversions.sql',
+      '119_whatsapp_media_ingest.sql',
+      '120_graphrag_faq_projection_v1.sql',
+      '121_sdr_journey_state_machine.sql')) <> 10 then
+    raise exception 'release migrations 112-121 are incomplete';
   end if;
   if exists (
     select 1 from information_schema.role_table_grants

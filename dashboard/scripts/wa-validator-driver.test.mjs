@@ -110,3 +110,22 @@ test("shared anti-repetition corpus matches the backend verdicts", () => {
     assert.deepEqual(result.failures, item.expected_failures, item.name);
   }
 });
+
+
+test("shared SDR corpus covers reactivation, confirmation and exactly-once terminal behavior", () => {
+  const corpusUrl = new URL("../../tests/fixtures/sdr_flow_cases.json", import.meta.url);
+  const corpus = JSON.parse(fs.readFileSync(corpusUrl, "utf8"));
+  const byId = new Map(corpus.cases.map((item) => [item.id, item]));
+  assert.equal(corpus.version, 1);
+  for (const id of [
+    "greeting_after_handoff_oi",
+    "greeting_after_handoff_oii",
+    "explicit_confirmation",
+    "duplicate_terminal",
+  ]) {
+    assert.ok(byId.has(id), id);
+  }
+  assert.equal(byId.get("greeting_after_handoff_oii").must_not_ask_service, true);
+  assert.equal(byId.get("explicit_confirmation").expected_handoff, true);
+  assert.equal(byId.get("duplicate_terminal").max_outbounds, 0);
+});

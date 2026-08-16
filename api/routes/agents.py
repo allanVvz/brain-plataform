@@ -49,6 +49,36 @@ class ConversionStatusBody(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class JourneyEventBody(BaseModel):
+    event_type: Literal[
+        "sale_recorded", "appointment_booked", "delivered",
+        "service_completed", "cancelled",
+    ]
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    source: str = Field(min_length=1, max_length=100)
+    occurred_at: datetime
+    external_ref: str | None = Field(default=None, max_length=300)
+    amount_minor: int | None = Field(default=None, ge=0)
+    currency: str | None = None
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("currency")
+    @classmethod
+    def validate_currency(cls, value: str | None) -> str | None:
+        return PurchaseCompletedBody.validate_currency(value)
+
+    @model_validator(mode="after")
+    def require_currency_for_amount(self) -> "JourneyEventBody":
+        if self.amount_minor is not None and self.currency is None:
+            raise ValueError("currency is required when amount_minor is present")
+        if self.event_type not in {"sale_recorded", "appointment_booked"} and (
+            self.amount_minor is not None or self.items
+        ):
+            raise ValueError("commercial values are only accepted for conversion events")
+        return self
+
+
 def _lead_or_404(lead_ref: int) -> dict:
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     if not lead or not lead.get("persona_id"):
@@ -56,11 +86,14 @@ def _lead_or_404(lead_ref: int) -> dict:
     return lead
 
 
-def _record_purchase(lead_ref: int, body: PurchaseCompletedBody, responsible_user_id: str | None) -> dict:
+def _record_journey_event(
+    lead_ref: int, body: JourneyEventBody, responsible_user_id: str | None,
+) -> dict:
     lead = _lead_or_404(lead_ref)
     try:
-        return supabase_client.record_purchase_completed(
+        return supabase_client.record_conversation_journey_event(
             p_persona_id=lead["persona_id"], p_lead_ref=lead_ref,
+            p_event_type=body.event_type,
             p_idempotency_key=body.idempotency_key, p_source=body.source,
             p_occurred_at=body.occurred_at.isoformat(), p_external_ref=body.external_ref,
             p_amount_minor=body.amount_minor, p_currency=body.currency,
@@ -68,7 +101,32 @@ def _record_purchase(lead_ref: int, body: PurchaseCompletedBody, responsible_use
             p_responsible_user_id=responsible_user_id,
         )
     except Exception as exc:
-        raise HTTPException(409, "Purchase conversion could not be recorded") from exc
+        raise HTTPException(409, "Journey event could not be recorded") from exc
+
+
+def _record_purchase(lead_ref: int, body: PurchaseCompletedBody, responsible_user_id: str | None) -> dict:
+    return _record_journey_event(
+        lead_ref,
+        JourneyEventBody(event_type="sale_recorded", **body.model_dump()),
+        responsible_user_id,
+    )
+
+
+@router.post("/leads/{lead_ref}/journey-events")
+def journey_event(lead_ref: int, body: JourneyEventBody, request: Request) -> dict:
+    lead = _lead_or_404(lead_ref)
+    user = auth_service.current_user(request)
+    auth_service.assert_persona_capability(request, "edit", persona_id=lead["persona_id"])
+    return _record_journey_event(lead_ref, body, str(user["id"]))
+
+
+@internal_router.post("/leads/{lead_ref}/journey-events")
+def journey_event_internal(
+    lead_ref: int, body: JourneyEventBody,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+) -> dict:
+    authorize_internal(x_webhook_token)
+    return _record_journey_event(lead_ref, body, None)
 
 
 @router.post("/leads/{lead_ref}/purchase-completed")

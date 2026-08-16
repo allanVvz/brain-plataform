@@ -4209,6 +4209,27 @@ def get_conversation_ledger(persona_id: str, lead_ref: int) -> Optional[dict]:
     return ledger
 
 
+def get_current_conversation_journey(persona_id: str, lead_ref: int) -> Optional[dict]:
+    if not persona_id or not lead_ref:
+        return None
+    return _one(
+        get_client().table("conversation_journeys").select("*")
+        .eq("persona_id", persona_id).eq("lead_ref", lead_ref)
+        .eq("is_current", True).maybe_single()
+    )
+
+
+def get_latest_conversation_journey(persona_id: str, lead_ref: int) -> Optional[dict]:
+    if not persona_id or not lead_ref:
+        return None
+    rows = _q(
+        get_client().table("conversation_journeys").select("*")
+        .eq("persona_id", persona_id).eq("lead_ref", lead_ref)
+        .order("sequence", desc=True).limit(1)
+    )
+    return rows[0] if rows else None
+
+
 def get_conversation_facts_by_key(ledger_id: str) -> dict:
     """Every current fact for a ledger, grouped by field_key.
 
@@ -4531,6 +4552,16 @@ def reset_conversation_ledger_branch_v3(*, persona_id: str, lead_ref: int) -> di
 
 def record_purchase_completed(**payload: Any) -> dict:
     result = get_client().rpc("record_purchase_completed_v1", payload).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def record_conversation_journey_event(**payload: Any) -> dict:
+    result = get_client().rpc(
+        "record_conversation_journey_event_v1", payload,
+    ).execute()
     value = getattr(result, "data", None)
     if isinstance(value, list):
         value = value[0] if value else {}

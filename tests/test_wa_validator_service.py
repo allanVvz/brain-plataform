@@ -128,7 +128,45 @@ def test_semantic_script_uses_branch_as_service_existence_doubt_evidence():
     )
     assert script["driver"]["doubt"]["expected_evidence_node_ids"] == ["branch:one"]
     assert script["driver"]["expected_handoff"] is True
-    assert script["driver"]["second_ignore"]["text"]
+    assert script["driver"]["second_ignore"] is None
+    assert script["driver"]["confirmation"]["text"] == "Sim"
+    assert "greeting_after_handoff_oii" in script["driver"]["regression_corpus_ids"]
+
+
+def test_reactivation_flow_executes_both_shared_post_handoff_greetings():
+    script = wv._semantic_appointment_script(
+        publication=_semantic_publication(),
+        flow_id="sdr_reativacao_pos_handoff",
+        initial_state="cold",
+    )
+    greetings = script["driver"]["post_handoff_greetings"]
+    assert [item["text"] for item in greetings] == ["Oi", "Oii"]
+    assert greetings[0]["resume_after_handoff"] is True
+    assert greetings[1]["resume_after_handoff"] is False
+
+
+def test_post_handoff_greeting_audit_requires_preserved_referential_service():
+    service = {
+        "field_key": "servico", "status": "known", "value": "service-one",
+        "owner_node_id": "branch:one",
+    }
+    audit = wv._post_handoff_greeting_audit(
+        customer_step={"text": "Oii", "kind": "post_handoff_greeting"},
+        turn={"text": "Olá! Como posso ajudar?", "intent": "greeting", "route": "SDR"},
+        proof_record={
+            "final_decision": {"intent": "greeting", "route": "SDR"},
+            "proof_result": {
+                "accepted_facts": [], "next_question_node_id": None,
+                "intent_audit": {"greeting": True},
+                "service_resolution": {"resolved": True},
+            },
+        },
+        ledger_before={"facts": {"servico": service}},
+        ledger_after={"facts": {"servico": dict(service)}},
+        journey_after={"state": "handed_off"},
+    )
+    assert audit["passed"] is True
+    assert all(audit["criteria"].values())
 
 
 def test_published_service_existence_faq_accepts_faq_or_active_branch_evidence():

@@ -46,3 +46,9 @@ def test_all_n8n_orchestrated_conversation_steps_bypass_session_auth():
         "/internal/conversations/technical-failure",
     ):
         assert is_public_path(path) is True, path
+
+
+def test_internal_journey_events_use_webhook_auth_but_operator_route_requires_session():
+    assert is_public_path("/internal/agents/leads/42/journey-events") is True
+    assert is_public_path("/internal/agents/leads/not-a-number/journey-events") is False
+    assert is_public_path("/agents/leads/42/journey-events") is False

@@ -3,6 +3,8 @@ from pathlib import Path
 
 SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
        "118_conversation_journeys_and_sales_conversions.sql").read_text(encoding="utf-8")
+STATE_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
+             "121_sdr_journey_state_machine.sql").read_text(encoding="utf-8")
 
 
 def test_journeys_are_current_once_and_ledgers_are_scoped():
@@ -23,13 +25,20 @@ def test_legacy_backfill_never_infers_confirmation_or_conversion():
     assert "sales_conversions" not in backfill
 
 
-def test_purchase_and_qualification_both_evaluate_same_atomic_gate():
+def test_legacy_purchase_gate_is_superseded_without_opening_a_new_journey():
     assert "record_purchase_completed_v1" in SQL
     assert "mark_conversation_journey_qualification_v1" in SQL
     assert SQL.count("maybe_open_next_conversation_journey_v1(") >= 3
     assert "conversion_type='purchase' AND c.completed_at IS NOT NULL" in SQL
     assert "qualification_confirmed_at IS NULL" in SQL
     assert "previous_journey_id=v_origin.id" in SQL
+    gate = STATE_SQL[
+        STATE_SQL.index("maybe_open_next_conversation_journey_v1"):
+        STATE_SQL.index("assign_conversation_ledger_journey_v1")
+    ]
+    assert "'new_journey_created',false" in gate
+    assert "current_request_remains_open" in gate
+    assert "INSERT INTO public.conversation_journeys" not in gate
 
 
 def test_conversion_history_is_non_destructive_and_idempotent():
@@ -66,3 +75,26 @@ def test_trigger_functions_are_not_publicly_executable():
         "REVOKE ALL ON FUNCTION public.project_conversation_journey_from_proof_v1() "
         "FROM PUBLIC,anon,authenticated;"
     ) in SQL
+
+
+def test_state_machine_records_idempotent_events_and_closes_only_on_terminal_outcome():
+    assert "record_conversation_journey_event_v1" in STATE_SQL
+    for event in (
+        "sale_recorded", "appointment_booked", "delivered",
+        "service_completed", "cancelled",
+    ):
+        assert event in STATE_SQL
+    assert "lead_first_conversion" in STATE_SQL
+    assert "'recurrence',NOT v_first" in STATE_SQL
+    assert "idempotency key belongs to a different journey event" in STATE_SQL
+    assert "is_current=false,state='closed'" in STATE_SQL
+    assert "new_demand_after_closed_request" in STATE_SQL
+    assert "CREATE TABLE" not in STATE_SQL
+
+
+def test_context_batch_and_cas_repair_are_current_journey_scoped():
+    assert "JOIN journey j ON j.id=l.journey_id" in STATE_SQL
+    assert "repair_conversation_ledger_branch_v1" in STATE_SQL
+    assert "p_expected_revision" in STATE_SQL
+    assert "p_apply boolean DEFAULT false" in STATE_SQL
+    assert "clear_active_branch_only" in STATE_SQL

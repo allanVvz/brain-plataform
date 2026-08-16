@@ -17,6 +17,21 @@ class ConversationRoute(StrEnum):
     HUMAN = "HUMAN"
 
 
+class ConversationJourneyState(StrEnum):
+    COLLECTING = "collecting"
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
+    QUALIFIED_CONFIRMED = "qualified_confirmed"
+    HANDED_OFF = "handed_off"
+    CONVERTED = "converted"
+    CLOSED = "closed"
+
+
+class ConversationOperationalMode(StrEnum):
+    COLLECTION = "collection"
+    CONFIRMATION = "confirmation"
+    POST_QUALIFICATION_SUPPORT = "post_qualification_support"
+
+
 class CartAction(StrEnum):
     NONE = "none"
     ADD_ITEM = "add_item"
@@ -129,6 +144,13 @@ class ConversationContext(StrictModel):
     known_facts: list[dict[str, Any]] = Field(default_factory=list)
     time_since_last_client_message: str | None = None
     pending_reconfirmation: bool = False
+    journey_id: str | None = None
+    journey_sequence: int = Field(default=1, ge=1)
+    journey_state: ConversationJourneyState = ConversationJourneyState.COLLECTING
+    pending_field_key: str | None = None
+    pending_question_node_id: str | None = None
+    last_handoff: dict[str, Any] = Field(default_factory=dict)
+    operational_mode: ConversationOperationalMode = ConversationOperationalMode.COLLECTION
 
 
 class ConversationDecision(StrictModel):

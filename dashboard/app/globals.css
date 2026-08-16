@@ -292,7 +292,9 @@
 /* Client portal is deliberately light, independent from the admin preference. */
 .portal-theme {
   color-scheme: light;
-  font-family: var(--portal-font-sans, Inter), system-ui, sans-serif;
+  /* A local system stack keeps clean CI/Vercel builds independent from
+     Google Fonts availability while retaining the portal's neutral grotesk. */
+  font-family: "IBM Plex Sans", "Segoe UI", Arial, system-ui, sans-serif;
   --obs-deep: 244 246 250;
   --obs-base: 244 246 250;
   --obs-surface: 255 255 255;

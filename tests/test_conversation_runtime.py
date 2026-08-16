@@ -292,15 +292,14 @@ def test_handoff_branch_reset_facts_requires_an_actual_handoff():
         correlation_id="corr-1",
     ) == []
 
-    # A genuine handoff completing (handoff_required=True) with full
-    # registration IS the documented case this reset exists for.
+    # A genuine handoff also preserves the qualified request. Branch facts
+    # are invalidated only by an explicit incompatible service switch.
     reset = conversation_runtime._handoff_branch_reset_facts(
         handoff_required=True, handoff_level="full", active_branch="branch:a",
         branch_contract=branch_contract, branch_facts=branch_facts,
         correlation_id="corr-2",
     )
-    assert {fact["field_key"] for fact in reset} == {"servico", "relato"}
-    assert all(fact["status"] == "invalid" and fact["value"] is None for fact in reset)
+    assert reset == []
 
     # A partial handoff (name or service still missing) never resets either.
     assert conversation_runtime._handoff_branch_reset_facts(

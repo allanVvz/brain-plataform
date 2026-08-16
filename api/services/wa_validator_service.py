@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 from services import (
+    agents_service,
     conversation_repetition,
     conversation_runtime,
     graph_agent_runtime_v3,
@@ -41,6 +42,7 @@ logger = logging.getLogger("wa_validator_service")
 # flow with no name-collection step has nothing to pre-seed or omit).
 _NAME_COLLECTING_FLOWS = {
     "sdr_qualificacao_carro", "sdr_troca_servico", "sdr_multiplos_servicos",
+    "sdr_reativacao_pos_handoff",
 }
 
 _MODEL_DEFAULT = "none"
@@ -62,6 +64,7 @@ _WA_ARTIFACTS = _ROOT_DIR / "test-artifacts" / "wa-validator"
 _WA_RUNNER_URL = (os.environ.get("WA_VALIDATOR_RUNNER_URL") or "").rstrip("/")
 _BRAIN_API_URL = os.environ.get("BRAIN_API_URL", "http://localhost:8080")
 _CUSTOMER_PROFILES_PATH = _API_DIR / "evaluation" / "wa_validator_customer_profiles.json"
+_SDR_FLOW_CORPUS_PATH = _ROOT_DIR / "tests" / "fixtures" / "sdr_flow_cases.json"
 
 # WA Validator sessions live in Supabase, not a plain in-process dict.
 # Confirmed live 2026-08-08: production runs GUNICORN_WORKERS=2, so a
@@ -319,6 +322,10 @@ _FLOWS = {
         "Múltiplos serviços na mesma conversa: adiciona um segundo ramo sem "
         "perder o primeiro e conclui somente quando o conjunto estiver completo."
     ),
+    "sdr_reativacao_pos_handoff": (
+        "Qualifica e confirma um pedido, reativa somente o lead sintético e "
+        "prova que Oi/Oii permanecem saudações sem reiniciar a coleta."
+    ),
 }
 
 # A fixed name (previously always "Allan") made every validator run
@@ -351,6 +358,7 @@ _FLOW_BUSINESS_MODELS: dict[str, set[str]] = {
     "sdr_qualificacao_carro": {"appointment"},
     "sdr_troca_servico": {"appointment"},
     "sdr_multiplos_servicos": {"appointment"},
+    "sdr_reativacao_pos_handoff": {"appointment"},
 }
 
 
@@ -415,6 +423,16 @@ def _customer_profile(business_model: str) -> dict:
             f"WA Validator não possui perfil de cliente para business_model={business_model}"
         )
     return profile
+
+
+def _sdr_flow_corpus() -> dict:
+    try:
+        payload = json.loads(_SDR_FLOW_CORPUS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Corpus SDR compartilhado inválido: {exc}") from exc
+    if payload.get("version") != 1 or not isinstance(payload.get("cases"), list):
+        raise ValueError("Corpus SDR compartilhado não possui contrato versionado")
+    return payload
 
 
 def _appointment_branch_candidates(document: dict) -> list[tuple[str, dict, dict]]:
@@ -596,14 +614,35 @@ def _semantic_appointment_script(
         "interruption_after_answered_fields": max(
             0, len(driver_required_fields) - 1,
         ),
-        "second_ignore": {
-            "text": "Podemos seguir sem essa informação?",
-        },
+        "second_ignore": (
+            {"text": "Podemos seguir sem essa informação?"}
+            if flow_id == "sdr_multiplos_servicos" else None
+        ),
+        "confirmation": {"text": "Sim"},
         "question_repetition": dict(
             (contract.get("conversation_policy") or {}).get("question_repetition") or {}
         ),
         "initial_known_fields": (
             ["nome_cliente"] if initial_state == "known_name" else []
+        ),
+        "regression_corpus_ids": [
+            str(item.get("id")) for item in _sdr_flow_corpus().get("cases") or []
+            if item.get("id")
+        ],
+        "post_handoff_greetings": (
+            [
+                {
+                    "text": str(item["message"]),
+                    "kind": "post_handoff_greeting",
+                    "intended_facts": {},
+                    "resume_after_handoff": index == 0,
+                }
+                for index, item in enumerate(_sdr_flow_corpus().get("cases") or [])
+                if item.get("id") in {
+                    "greeting_after_handoff_oi", "greeting_after_handoff_oii",
+                }
+            ]
+            if flow_id == "sdr_reativacao_pos_handoff" else []
         ),
     }
     known_name = (configured_answers.get("nome_cliente") or {}).get("value")
@@ -775,6 +814,7 @@ def generate_script(
     )
     semantic_appointment_flow = flow_id in {
         "sdr_qualificacao_carro", "sdr_troca_servico", "sdr_multiplos_servicos",
+        "sdr_reativacao_pos_handoff",
     }
     if business_model == "appointment" and semantic_appointment_flow and not v3_publication:
         raise ValueError(
@@ -1745,6 +1785,7 @@ def _semantic_turn_audit(
         if first_question_offset >= 0
     )
     qualification_complete = bool(proof.get("qualification_complete"))
+    confirmation_pending = proof.get("confirmation_state") == "awaiting_confirmation"
     handoff_observed = bool(
         turn.get("handoff")
         or proof.get("handoff_requested")
@@ -1858,7 +1899,10 @@ def _semantic_turn_audit(
             or bool(missing and first_askable is None)
         ),
         "expected_handoff_reached": (
-            not expected_handoff or first_askable is not None or handoff_observed
+            not expected_handoff
+            or first_askable is not None
+            or confirmation_pending
+            or handoff_observed
         ),
     }
     failures = [name for name, passed in criteria.items() if not passed]
@@ -1880,6 +1924,68 @@ def _semantic_turn_audit(
     }
 
 
+def _post_handoff_greeting_audit(
+    *, customer_step: dict, turn: dict, proof_record: dict,
+    ledger_before: dict, ledger_after: dict, journey_after: dict,
+) -> dict:
+    """Prove the original Oi/Oii regression on a reactivated synthetic lead."""
+    proof = proof_record.get("proof_result") or {}
+    decision = proof_record.get("final_decision") or {}
+    accepted_service = [
+        fact for fact in proof.get("accepted_facts") or []
+        if str(fact.get("field_key") or "") == "servico"
+    ]
+    service_before = (ledger_before.get("facts") or {}).get("servico") or {}
+    service_after = (ledger_after.get("facts") or {}).get("servico") or {}
+    message = str(customer_step.get("text") or "")
+    handoff_observed = bool(
+        turn.get("handoff")
+        or proof.get("handoff_requested")
+        or decision.get("handoff_requested")
+        or str(turn.get("route") or "").upper() == "HUMAN"
+    )
+    criteria = {
+        "greeting_intent_current_turn": (
+            str(decision.get("intent") or turn.get("intent") or "") == "greeting"
+            and (proof.get("intent_audit") or {}).get("greeting") is True
+        ),
+        "greeting_not_extracted_as_service": not accepted_service,
+        "service_fact_preserved": bool(
+            service_before
+            and service_after.get("status") == "known"
+            and service_after.get("value") == service_before.get("value")
+            and service_after.get("owner_node_id") == service_before.get("owner_node_id")
+            and str(service_after.get("value") or "").casefold() != message.casefold()
+        ),
+        "service_resolution_remains_referential": (
+            (proof.get("service_resolution") or {}).get("resolved") is True
+        ),
+        "no_service_or_field_requestion": not proof.get("next_question_node_id"),
+        "support_reply_emitted": bool(str(turn.get("text") or "").strip())
+        and not turn.get("timeout"),
+        "no_new_handoff": not handoff_observed,
+        "support_route_is_sdr": str(turn.get("route") or "").upper() == "SDR",
+        "journey_remains_handed_off": str(journey_after.get("state") or "")
+        == "handed_off",
+    }
+    failures = [name for name, passed in criteria.items() if not passed]
+    return {
+        "passed": not failures,
+        "criteria": criteria,
+        "failures": failures,
+        "asked_field": None,
+        "next_question_node_id": proof.get("next_question_node_id"),
+        "missing_fields": proof.get("missing_fields") or [],
+        "accepted_fact_keys": sorted(
+            str(fact.get("field_key") or "")
+            for fact in proof.get("accepted_facts") or []
+        ),
+        "qualification_complete": True,
+        "handoff_observed": False,
+        "post_handoff_support": True,
+    }
+
+
 def _semantic_failure_records(
     *,
     conversation: list[dict],
@@ -1890,6 +1996,7 @@ def _semantic_failure_records(
     buffer_id: str,
     external_message_id: str,
     correlation_id: str,
+    journey_state: str | None = None,
 ) -> tuple[str, dict, dict]:
     """Build the terminal quality-failure result and its non-secret event."""
     failure = "semantic_turn_failed:" + ",".join(audit.get("failures") or [])
@@ -1916,6 +2023,7 @@ def _semantic_failure_records(
                 "external_message_id": external_message_id,
                 "correlation_id": correlation_id,
             },
+            "journey_state": journey_state,
         },
     }
     return failure, output, event
@@ -1938,6 +2046,7 @@ def _next_semantic_driver_step(
     answered_fields: set[str],
     active_anchor: str,
     expected_active_branches: list[str],
+    qualification_complete: bool = False,
 ) -> dict | None:
     """Select the next synthetic customer turn for a semantic validation.
 
@@ -1945,6 +2054,19 @@ def _next_semantic_driver_step(
     sends a pure interruption, verifies one contextual resumption, then
     ignores that field again to require an incomplete terminal handoff.
     """
+    if qualification_complete and not state.get("confirmation_sent"):
+        confirmation = driver.get("confirmation") or {}
+        text = str(confirmation.get("text") or "").strip()
+        if text:
+            state["confirmation_sent"] = True
+            return {
+                "text": text,
+                "kind": "explicit_confirmation",
+                "intended_facts": {},
+                "expected_branch_node_id": active_anchor,
+                "expected_active_branch_node_ids": list(expected_active_branches),
+            }
+
     second_ignore = driver.get("second_ignore")
     if (
         state.get("doubt_sent")
@@ -2197,6 +2319,7 @@ async def run_session_direct(
                 "switch_sent": False,
                 "deferred_sent": False,
                 "loose_later_sent": False,
+                "post_handoff_started": False,
             }
             expected_active_branches: list[str] = []
             semantic_complete = False
@@ -2215,6 +2338,18 @@ async def run_session_direct(
                     _session_update(session_id, output={"conversation": list(conversation), "status": "running"})
                     i += 1
                     continue
+                if step.get("resume_after_handoff"):
+                    if not agents_service.resume_lead(int(lead_ref)):
+                        raise RuntimeError("synthetic lead could not be resumed")
+                    resumed = supabase_client.get_lead_by_ref(int(lead_ref)) or {}
+                    if str(resumed.get("handoff_level") or "none") != "none":
+                        raise RuntimeError("synthetic lead remained paused after resume")
+                    conversation.append({
+                        "role": "system",
+                        "text": "[synthetic lead reactivated after handoff]",
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "message_id": f"validator:{session_id}:{i}:resume",
+                    })
                 text = step.get("text", "")
                 configured_wait = float(step.get("wait", 10) or 10)
                 ts_now = datetime.now(timezone.utc).isoformat()
@@ -2471,6 +2606,10 @@ async def run_session_direct(
                         )
                         or {}
                     )
+                    journey_after = supabase_client.get_current_conversation_journey(
+                        str(persona.get("id") or ""), int(lead_ref),
+                    ) or {}
+                    turn["journey_state"] = journey_after.get("state")
                     active_anchor = str(
                         ledger_after.get("active_branch_node_id")
                         or step.get("expected_branch_node_id")
@@ -2494,6 +2633,15 @@ async def run_session_direct(
                             "failures": ["missing_semantic_commit_evidence"],
                             "qualification_complete": False,
                         }
+                    elif step.get("kind") == "post_handoff_greeting":
+                        audit = _post_handoff_greeting_audit(
+                            customer_step=step,
+                            turn=turn,
+                            proof_record=proof_record,
+                            ledger_before=ledger_before,
+                            ledger_after=ledger_after,
+                            journey_after=journey_after,
+                        )
                     else:
                         audit = _semantic_turn_audit(
                             customer_step=step,
@@ -2526,6 +2674,7 @@ async def run_session_direct(
                             buffer_id=buffer_uuid,
                             external_message_id=message_id,
                             correlation_id=correlation_id,
+                            journey_state=str(journey_after.get("state") or "") or None,
                         )
                         _session_update(
                             session_id, status="error", output=failure_output,
@@ -2536,12 +2685,27 @@ async def run_session_direct(
 
                     recent_replies.append(str(turn.get("text") or ""))
                     previous_question_node_id = audit.get("next_question_node_id")
+                    if step.get("kind") == "post_handoff_greeting":
+                        if not any(
+                            queued.get("kind") == "post_handoff_greeting"
+                            for queued in step_queue
+                        ):
+                            semantic_complete = True
+                            break
+                        i += 1
+                        continue
                     if step.get("expected_active_branch_node_ids"):
                         expected_active_branches = [
                             str(value)
                             for value in step.get("expected_active_branch_node_ids") or []
                         ]
                     if audit.get("handoff_observed"):
+                        post_handoff = list(driver.get("post_handoff_greetings") or [])
+                        if post_handoff and not driver_state["post_handoff_started"]:
+                            driver_state["post_handoff_started"] = True
+                            step_queue.extend(post_handoff)
+                            i += 1
+                            continue
                         semantic_complete = True
                         break
 
@@ -2559,6 +2723,7 @@ async def run_session_direct(
                         answered_fields=answered_fields,
                         active_anchor=active_anchor,
                         expected_active_branches=expected_active_branches,
+                        qualification_complete=bool(audit.get("qualification_complete")),
                     )
                     if not next_step:
                         failure = f"script_question_mismatch:{asked_field or 'unknown'}"

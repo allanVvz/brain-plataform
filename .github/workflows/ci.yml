@@ -34,7 +34,7 @@ jobs:
           changed() { grep -Eq "$1" <<<"$files" && echo true || echo false; }
           force_all="$(changed '^\.github/workflows/ci\.yml$')"
           scoped() { if [ "$force_all" = "true" ]; then echo true; else changed "$1"; fi; }
-          conversation_gate='^(tests/fixtures/conversation_repetition_cases\.json|api/services/(conversation_repetition|graph_agent_runtime_v3|graph_proof_checker_v3|wa_validator_service)\.py|api/scripts/fixtures/[^/]*graph[^/]*\.json|dashboard/scripts/(conversation-repetition|wa-validator-driver|wa-validator)\.mjs|dashboard/e2e/wa-validator/)'
+          conversation_gate='^(tests/fixtures/(conversation_repetition_cases|sdr_flow_cases)\.json|api/services/(conversation_repetition|graph_agent_runtime_v3|graph_proof_checker_v3|wa_validator_service)\.py|api/n8n-workflows/persona-conversation-template\.json|api/scripts/fixtures/[^/]*graph[^/]*\.json|dashboard/scripts/(conversation-repetition|wa-validator-driver|wa-validator)\.mjs|dashboard/e2e/wa-validator/)'
           echo "backend=$(scoped "^(api/|tests/|supabase/migrations/|scripts/check_.*\.py$|${conversation_gate#^})")" >> "$GITHUB_OUTPUT"
           echo "frontend=$(scoped "^(dashboard/|${conversation_gate#^})")" >> "$GITHUB_OUTPUT"
           echo "compose=$(scoped '^(docker-compose\.yml|\.env\.compose\.example|infra/|ops/vps/|Caddyfile|kong\.yml)')" >> "$GITHUB_OUTPUT"
@@ -93,7 +93,7 @@ jobs:
         env:
           API_INTERNAL_BASE_URL: https://api.example.com
           NEXT_PUBLIC_API_BASE_URL: /api-brain
-        run: npm ci && npm run build && npm test && npm run test:wa-validator-safe
+        run: npm ci && npm run build && npm test && npm run test:wa-validator-safe && npx playwright test e2e/wa-validator/sdr-flow-corpus.spec.ts --config=playwright.wa-validator.config.ts
 
       - name: Validar Compose alterado
         if: steps.changes.outputs.compose == 'true'

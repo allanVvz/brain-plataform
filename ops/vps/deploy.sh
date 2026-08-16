@@ -166,7 +166,13 @@ deploy_tag() {
   wait_for_api
   # Binding ownership/routing is operational content. Code deploys never
   # mutate persona bindings; use the reviewed reassignment procedure instead.
-  "${COMPOSE[@]}" up -d workers seed-admin
+  "${COMPOSE[@]}" up -d seed-admin
+  if [[ "${KEEP_WORKERS_PAUSED:-false}" == "true" ]]; then
+    "${COMPOSE[@]}" stop workers
+    echo "Workers remain paused for controlled production validation."
+  else
+    "${COMPOSE[@]}" up -d workers
+  fi
   if [[ "$evolution_enabled" =~ ^(1|true|yes)$ ]]; then
     "${COMPOSE[@]}" up -d evolution-redis evolution-api
   fi
