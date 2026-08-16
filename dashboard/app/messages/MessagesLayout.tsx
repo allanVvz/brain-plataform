@@ -8,7 +8,7 @@ import {
 } from "@/lib/lead-state";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { MessageSquare, User, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, Megaphone, FileQuestion, FileText, Palette, Image as ImageIcon, FileVideo, FileType, ExternalLink, Database, PanelRightClose, PanelRightOpen, ArrowLeft, ChevronLeft, ChevronRight, Tag, StickyNote } from "lucide-react";
+import { MessageSquare, User, RefreshCw, Search, Phone, Radio, AlertCircle, UserCheck, Send, Boxes, FileText, Image as ImageIcon, FileVideo, FileType, ExternalLink, PanelRightClose, PanelRightOpen, ArrowLeft, ChevronLeft, ChevronRight, StickyNote } from "lucide-react";
 import { LeadInfoModal } from "@/components/leads/LeadInfoModal";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -1136,64 +1136,6 @@ export function MessageBubble({
 
 // ── Knowledge sidebar ────────────────────────────────────────────────────────
 
-const ASSET_IMAGE_EXT = /\.(png|jpe?g|svg|gif|webp)$/i;
-const ASSET_VIDEO_EXT = /\.(mp4|mov|webm|avi)$/i;
-
-function nodesByType(ctx: ChatContext | null, type: string): KnowledgeNode[] {
-  return (ctx?.nodes || []).filter((n) => n.node_type === type);
-}
-
-function uniqueBy<T>(items: T[], identity: (item: T) => string): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const item of items) {
-    const key = identity(item);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-  }
-  return out;
-}
-
-function nodeIdentity(node: KnowledgeNode): string {
-  return node.id || `${node.node_type}:${node.slug}:${node.title}`;
-}
-
-function kbEntryIdentity(entry: KnowledgeKbEntry): string {
-  return (
-    entry.id ||
-    entry.source_id ||
-    entry.kb_id ||
-    `${entry.node_type || entry.tipo || "kb"}:${entry.titulo || ""}:${(entry.conteudo || "").slice(0, 80)}`
-  );
-}
-
-function assetIdentity(asset: KnowledgeAsset): string {
-  return asset.id || asset.url || asset.file_path || asset.title;
-}
-
-function scopedKey(scope: string, id: string): string {
-  return `${scope}:${id}`;
-}
-
-function similarIdentity(node: SimilarNode): string {
-  return node.node_id || `${node.node_type}:${node.slug}:${node.title}`;
-}
-
-function relationIdentity(edge: KnowledgeEdge): string {
-  return edge.id || `${edge.source_node_id || ""}:${edge.relation_type || ""}:${edge.target_node_id || ""}`;
-}
-
-function nodeFocus(node: { node_type?: string | null; slug?: string | null; id?: string | null }): string | null {
-  const type = node.node_type || "node";
-  const slug = node.slug || node.id;
-  return slug ? `${type}:${slug}` : null;
-}
-
-function graphTarget(focus?: string | null): string {
-  return focus ? `/knowledge/graph?focus=${focus}` : "/knowledge/graph";
-}
-
 function normalizeKnowledgeText(value?: string | null): string {
   return (value || "")
     .toLowerCase()
@@ -1204,122 +1146,7 @@ function normalizeKnowledgeText(value?: string | null): string {
     .trim();
 }
 
-function compactKnowledgeText(value?: string | null): string {
-  return normalizeKnowledgeText(value).replace(/\s+/g, "");
-}
-
-function knowledgeSearchText(node: KnowledgeNode): string {
-  const meta = node.metadata || {};
-  const aliases = Array.isArray(meta.aliases) ? meta.aliases.join(" ") : "";
-  const price = meta.price?.display || "";
-  return [node.title, node.slug, node.summary, aliases, price, ...(node.tags || [])].join(" ");
-}
-
-function typePriority(nodeType: string): number {
-  switch (nodeType) {
-    case "product": return 140;
-    case "brand": return 80;
-    case "faq": return 70;
-    case "copy": return 50;
-    case "campaign": return 45;
-    case "briefing": return 35;
-    case "rule":
-    case "tone": return 25;
-    case "asset": return 20;
-    case "mention": return -80;
-    case "tag":
-    case "persona": return -140;
-    default: return 10;
-  }
-}
-
-function nodeRelevanceScore(node: KnowledgeNode, queryTerms: string[]): number {
-  const rawText = knowledgeSearchText(node);
-  const text = normalizeKnowledgeText(rawText);
-  const compactText = compactKnowledgeText(rawText);
-  const title = normalizeKnowledgeText(node.title);
-  const slug = normalizeKnowledgeText(node.slug);
-  const terms = queryTerms.map(normalizeKnowledgeText).filter(Boolean);
-  let score = typePriority(node.node_type);
-
-  if (typeof node.graph_distance === "number") {
-    score += Math.max(0, 50 - node.graph_distance * 18);
-  }
-  if (node.validated || node.validation_status === "validated") score += 10;
-  if (node.node_type === "product" && productFacts(node.metadata).length > 0) score += 20;
-
-  for (const term of terms) {
-    const compactTerm = term.replace(/\s+/g, "");
-    if (!term) continue;
-    if (title === term || slug === term) score += 160;
-    else if (title.includes(term) || slug.includes(term)) score += 110;
-    else if (text.includes(term)) score += 75;
-    if (compactTerm.length >= 5 && compactText.includes(compactTerm)) score += 75;
-
-    for (const word of term.split(" ").filter((w) => w.length >= 4)) {
-      if (title.includes(word) || slug.includes(word)) score += 12;
-      else if (text.includes(word)) score += 5;
-    }
-  }
-
-  return score;
-}
-
-function rankKnowledgeNodes(nodes: KnowledgeNode[], queryTerms: string[]): KnowledgeNode[] {
-  return [...nodes]
-    .map((node) => ({ node, score: nodeRelevanceScore(node, queryTerms) }))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      const da = typeof a.node.graph_distance === "number" ? a.node.graph_distance : 999;
-      const db = typeof b.node.graph_distance === "number" ? b.node.graph_distance : 999;
-      if (da !== db) return da - db;
-      return a.node.title.localeCompare(b.node.title);
-    })
-    .map((item) => item.node);
-}
-
-function pickPrimaryKnowledge(nodes: KnowledgeNode[], queryTerms: string[]): KnowledgeNode | null {
-  const ranked = rankKnowledgeNodes(nodes, queryTerms).filter((node) =>
-    !["tag", "mention", "persona"].includes(node.node_type)
-  );
-  return ranked[0] || null;
-}
-
 // ── Knowledge expand state ───────────────────────────────────────────────────
-
-type ExpandedKind = "node" | "kb" | "similar";
-type ExpandedKnowledge = { kind: ExpandedKind; id: string } | null;
-
-function productFacts(metadata: Record<string, any> | null): string[] {
-  const meta = metadata || {};
-  const price = meta.price || {};
-  const facts: string[] = [];
-  if (price.display) facts.push(String(price.display));
-  else if (price.amount && price.currency) facts.push(`${price.currency} ${price.amount}`);
-  if (meta.colors_count !== undefined && meta.colors_count !== null) facts.push(`${meta.colors_count} cores`);
-  if (meta.size) facts.push(`Tam. ${meta.size}`);
-  return facts;
-}
-
-function catalogUrl(metadata: Record<string, any> | null): string | null {
-  const meta = metadata || {};
-  return meta.catalog_url || meta.url || null;
-}
-
-function pathLabel(pathRelations?: string[], pathSlugs?: string[]): string {
-  if (pathRelations && pathRelations.length > 0) return pathRelations.join(" -> ");
-  if (pathSlugs && pathSlugs.length > 1) return pathSlugs.join(" -> ");
-  return "";
-}
-
-function pendingLabel(item: { validated?: boolean; validation_status?: string }) {
-  if (item.validated || item.validation_status === "validated") return null;
-  return (
-    <span className="ml-1 shrink-0 rounded border border-amber-400/40 bg-amber-500/10 px-1 py-0.5 text-[9px] uppercase text-amber-200">
-      Pendente
-    </span>
-  );
-}
 
 // Evidence markdown is authored as "# title\n\n## Pergunta\n\n{question}\n\n## Resposta\n\n{answer}".
 // The card already shows the title separately, so strip the repeated
@@ -1373,488 +1200,6 @@ const EvidenceCard = memo(function EvidenceCard({
   );
 });
 
-function sortEvidenceByRelevance<T extends { used_in_last_decision?: boolean }>(
-  items: T[],
-  limit: number,
-): T[] {
-  return [...items]
-    .sort((a, b) => Number(!!b.used_in_last_decision) - Number(!!a.used_in_last_decision))
-    .slice(0, limit);
-}
-
-function KnowledgeSection({
-  icon,
-  title,
-  count,
-  children,
-  showEmpty = false,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  count: number;
-  children: React.ReactNode;
-  showEmpty?: boolean;
-}) {
-  if (count === 0 && !showEmpty) return null;
-  return (
-    <section className="space-y-1.5">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-obs-faint">
-        {icon}
-        <span>{title}</span>
-        <span className="text-obs-faint/70">· {count}</span>
-      </div>
-      <div className="space-y-1.5">{children}</div>
-    </section>
-  );
-}
-
-function NodePill({
-  node,
-  active,
-  onSelect,
-}: {
-  node: KnowledgeNode;
-  active: boolean;
-  onSelect: (id: string) => void;
-}) {
-  const facts = productFacts(node.metadata);
-  const url = catalogUrl(node.metadata);
-  const graphPath = pathLabel(node.path_relations, node.path_slugs);
-  const id = nodeIdentity(node);
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(id)}
-      className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
-      style={{
-        background: active ? "rgb(var(--obs-teal) / 0.22)" : "rgb(var(--obs-teal) / 0.10)",
-        border: `1px solid ${active ? "rgb(var(--obs-teal) / 0.65)" : "rgb(var(--obs-teal) / 0.30)"}`,
-        color: "rgb(var(--obs-text))",
-      }}
-    >
-      <div className="flex items-center gap-1 min-w-0">
-        <p className="font-medium truncate">{node.title}</p>
-        <span className="shrink-0 rounded border border-obs-line px-1 py-0.5 text-[9px] uppercase text-obs-faint">
-          {node.node_type}
-        </span>
-        {pendingLabel(node)}
-        <ChevronRight size={10} className="ml-auto shrink-0 opacity-60" />
-      </div>
-      {node.summary && <p className="text-[11px] text-obs-subtle line-clamp-2 mt-0.5">{node.summary}</p>}
-      {facts.length > 0 && (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {facts.map((fact) => (
-            <span key={fact} className="rounded border border-obs-line bg-obs-surface/70 px-1.5 py-0.5 text-[10px] text-obs-subtle">
-              {fact}
-            </span>
-          ))}
-        </div>
-      )}
-      {url && <p className="mt-1 truncate text-[10px] text-obs-teal">{url}</p>}
-      {typeof node.graph_distance === "number" && (
-        <p className="mt-1 text-[10px] text-obs-faint">
-          dist. {node.graph_distance}{graphPath ? ` · ${graphPath}` : ""}
-        </p>
-      )}
-    </button>
-  );
-}
-
-function SimilarCard({
-  node,
-  active,
-  onSelect,
-}: {
-  node: SimilarNode;
-  active: boolean;
-  onSelect: (id: string) => void;
-}) {
-  const graphPath = pathLabel(node.path_relations, node.path_slugs);
-  const id = similarIdentity(node);
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(id)}
-      className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
-      style={{
-        background: active ? "rgba(34,211,238,0.18)" : "rgba(34,211,238,0.08)",
-        border: `1px solid ${active ? "rgba(34,211,238,0.55)" : "rgba(34,211,238,0.22)"}`,
-        color: "rgb(var(--obs-text))",
-      }}
-    >
-      <div className="flex items-center gap-1 min-w-0">
-        <p className="font-medium truncate">{node.title}</p>
-        <span className="shrink-0 rounded border border-obs-line px-1 py-0.5 text-[9px] uppercase text-obs-faint">
-          {node.node_type}
-        </span>
-        <span className="ml-auto shrink-0 text-[10px] text-obs-faint">d{node.graph_distance ?? "-"}</span>
-      </div>
-      {graphPath && <p className="mt-0.5 truncate text-[10px] text-obs-faint">{graphPath}</p>}
-    </button>
-  );
-}
-
-function KbCard({
-  entry,
-  active,
-  onSelect,
-}: {
-  entry: KnowledgeKbEntry;
-  active: boolean;
-  onSelect: (id: string) => void;
-}) {
-  const title = entry.titulo || "(sem título)";
-  const rawBody = entry.conteudo || "";
-  const isFaq = String(entry.node_type || entry.tipo || "").toLowerCase() === "faq";
-  let body = rawBody;
-  if (isFaq) {
-    try {
-      const parsed = JSON.parse(rawBody);
-      body = parsed.resposta || parsed.answer || parsed.content || rawBody;
-    } catch {
-      const lines = rawBody.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-      if (lines.length > 1 && normalizeKnowledgeText(lines[0]) === normalizeKnowledgeText(title)) {
-        lines.shift();
-      }
-      body = lines.join(" ").replace(/^resposta\s*:\s*/i, "");
-    }
-  }
-  body = body.slice(0, 320);
-  const id = kbEntryIdentity(entry);
-  if (isFaq) {
-    return (
-      <button
-        type="button"
-        onClick={() => onSelect(id)}
-        className="block w-full rounded-lg border border-obs-teal/25 bg-obs-teal/5 px-3 py-2.5 text-left text-xs transition hover:border-obs-teal/45"
-      >
-        <div className="flex items-start gap-2">
-          <span className="mt-0.5 rounded bg-obs-teal px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">FAQ</span>
-          <p className="line-clamp-2 flex-1 font-semibold leading-snug text-obs-text">{title}</p>
-          {pendingLabel(entry)}
-          <ChevronRight size={11} className="mt-0.5 shrink-0 text-obs-teal" />
-        </div>
-        {body && (
-          <p className="mt-2 line-clamp-4 border-t border-obs-teal/20 pt-2 text-[11px] leading-relaxed text-obs-subtle">
-            {body}
-          </p>
-        )}
-      </button>
-    );
-  }
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(id)}
-      className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
-      style={{
-        background: active ? "rgb(var(--obs-text) / 0.05)" : "rgb(var(--glass-solid-bg) / 0.72)",
-        border: `1px solid ${active ? "rgb(var(--obs-text) / 0.18)" : "var(--border-glass)"}`,
-      }}
-    >
-      <div className="flex items-center gap-1 min-w-0">
-        <p className="text-obs-text font-medium truncate">{title}</p>
-        {pendingLabel(entry)}
-        <ChevronRight size={10} className="ml-auto shrink-0 opacity-60" />
-      </div>
-      {body && <p className="text-[11px] text-obs-subtle line-clamp-3 mt-0.5">{body}</p>}
-    </button>
-  );
-}
-
-function AssetCard({ asset }: { asset: KnowledgeAsset }) {
-  const path = asset.file_path || "";
-  const url = asset.url;
-  const isImage = url && ASSET_IMAGE_EXT.test(path);
-  const isVideo = url && ASSET_VIDEO_EXT.test(path);
-  const Icon = isImage ? ImageIcon : isVideo ? FileVideo : FileType;
-  const ext = path.split(".").pop()?.toUpperCase() || "FILE";
-  const target = asset.link_target || url || "#";
-
-  return (
-    <a
-      href={target}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block rounded-md overflow-hidden text-xs hover:opacity-90 transition"
-      style={{ background: "rgb(var(--glass-solid-bg) / 0.78)", border: "1px solid var(--border-glass)" }}
-    >
-      {isImage ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={url!} alt={asset.title} className="w-full h-24 object-cover" />
-      ) : (
-        <div className="flex items-center justify-center h-16" style={{ background: "rgb(var(--obs-teal) / 0.10)" }}>
-          <Icon size={20} className="text-obs-teal" />
-        </div>
-      )}
-      <div className="px-2 py-1.5 space-y-0.5">
-        <p className="font-medium text-obs-text truncate">{asset.title}</p>
-        <div className="flex items-center justify-between text-[10px] text-obs-faint">
-          <span>{asset.asset_function || asset.asset_type || ext}</span>
-          {url && <ExternalLink size={9} />}
-        </div>
-      </div>
-    </a>
-  );
-}
-
-function RelationCard({
-  edge,
-  nodeById,
-  onSelect,
-}: {
-  edge: KnowledgeEdge;
-  nodeById: Map<string, KnowledgeNode>;
-  onSelect: (id: string) => void;
-}) {
-  const source = edge.source_node_id ? nodeById.get(edge.source_node_id) : undefined;
-  const targetNode = edge.target_node_id ? nodeById.get(edge.target_node_id) : undefined;
-  const handleClick = () => {
-    const pick = source || targetNode;
-    if (pick) onSelect(nodeIdentity(pick));
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="w-full text-left block rounded-md px-2.5 py-1.5 text-xs hover:opacity-90 transition"
-      style={{ background: "rgb(var(--glass-solid-bg) / 0.72)", border: "1px solid var(--border-glass)" }}
-    >
-      <div className="flex items-center gap-1 min-w-0">
-        <p className="font-medium text-obs-text truncate">{source?.title || edge.source_node_id || "origem"}</p>
-        <span className="shrink-0 text-[10px] text-obs-faint">→</span>
-        <p className="font-medium text-obs-text truncate">{targetNode?.title || edge.target_node_id || "destino"}</p>
-        <ChevronRight size={10} className="ml-auto shrink-0 opacity-60" />
-      </div>
-      <p className="mt-0.5 truncate text-[10px] text-obs-faint">
-        {edge.relation_type || "related"}
-        {typeof edge.weight === "number" ? ` · peso ${edge.weight}` : ""}
-      </p>
-    </button>
-  );
-}
-
-function KnowledgeDetail({
-  expanded,
-  ctx,
-  onBack,
-}: {
-  expanded: { kind: ExpandedKind; id: string };
-  ctx: ChatContext;
-  onBack: () => void;
-}) {
-  // Resolve the entity by kind+id
-  const node =
-    expanded.kind === "node"
-      ? (ctx.nodes || []).find((n) => nodeIdentity(n) === expanded.id) || null
-      : null;
-  const similar =
-    expanded.kind === "similar"
-      ? (ctx.similar || []).find((n) => similarIdentity(n) === expanded.id) || null
-      : null;
-  const kb =
-    expanded.kind === "kb"
-      ? (ctx.kb_entries || []).find((e) => kbEntryIdentity(e) === expanded.id) || null
-      : null;
-
-  const title = node?.title || similar?.title || kb?.titulo || "(sem detalhes)";
-  const nodeType = node?.node_type || similar?.node_type || kb?.node_type || kb?.tipo || null;
-  const slug = node?.slug || similar?.slug || null;
-  const summary = node?.summary || null;
-  const tags = node?.tags || (kb?.tags as string[] | null) || null;
-  const meta = node?.metadata || null;
-  const facts = productFacts(meta);
-  const url = catalogUrl(meta);
-  const isPending = node
-    ? !(node.validated || node.validation_status === "validated")
-    : kb
-    ? !(kb.validated || kb.validation_status === "validated")
-    : false;
-
-  // Resolve graph focus + connected edges
-  const targetId = node?.id || similar?.node_id || null;
-  const nodeById = new Map((ctx.nodes || []).map((n) => [n.id, n]));
-  const incoming = targetId
-    ? (ctx.edges || []).filter((e) => e.target_node_id === targetId)
-    : [];
-  const outgoing = targetId
-    ? (ctx.edges || []).filter((e) => e.source_node_id === targetId)
-    : [];
-
-  const focus = (() => {
-    if (node) return nodeFocus(node);
-    if (similar) return nodeFocus({ node_type: similar.node_type, slug: similar.slug, id: similar.node_id });
-    return null;
-  })();
-
-  return (
-    <div className="p-3 space-y-3 overflow-y-auto h-full">
-      {/* Header w/ back */}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex items-center gap-1 text-[11px] text-obs-subtle hover:text-obs-text transition"
-        >
-          <ArrowLeft size={11} />
-          <span>Voltar</span>
-        </button>
-        {nodeType && (
-          <span className="ml-auto rounded border border-obs-line px-1.5 py-0.5 text-[9px] uppercase text-obs-faint">
-            {nodeType}
-          </span>
-        )}
-        {isPending && (
-          <span className="rounded border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] uppercase text-amber-200">
-            Pendente
-          </span>
-        )}
-      </div>
-
-      <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-obs-text leading-tight">{title}</h3>
-        {slug && <p className="text-[11px] font-mono text-obs-subtle truncate">{slug}</p>}
-        {typeof similar?.graph_distance === "number" && (
-          <p className="text-[10px] text-obs-faint">distância no grafo: {similar.graph_distance}</p>
-        )}
-      </div>
-
-      {summary && (
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1">Resumo</p>
-          <p className="text-[12px] text-obs-subtle leading-snug">{summary}</p>
-        </div>
-      )}
-
-      {kb && (kb.conteudo || "").trim() && (
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1">Conteúdo</p>
-          <pre
-            className="text-[11px] text-obs-subtle whitespace-pre-wrap break-words rounded-md p-2 leading-relaxed font-mono max-h-56 overflow-y-auto"
-            style={{ background: "rgb(var(--glass-solid-bg) / 0.72)", border: "1px solid var(--border-glass)" }}
-          >
-            {kb.conteudo}
-          </pre>
-        </div>
-      )}
-
-      {facts.length > 0 && (
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1">Fatos</p>
-          <div className="flex flex-wrap gap-1">
-            {facts.map((f) => (
-              <span
-                key={f}
-                className="rounded border border-obs-line bg-obs-surface/70 px-1.5 py-0.5 text-[10px] text-obs-subtle"
-              >
-                {f}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {tags && tags.length > 0 && (
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1 flex items-center gap-1">
-            <Tag size={9} /> Tags
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {tags.map((t) => (
-              <span
-                key={t}
-                className="rounded-full bg-obs-slate/10 border border-obs-slate/20 text-obs-slate font-mono px-2 py-0.5 text-[10px]"
-              >
-                {t}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {url && (
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-obs-faint mb-1">Link</p>
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[11px] text-obs-teal underline break-all"
-          >
-            {url}
-          </a>
-        </div>
-      )}
-
-      {(incoming.length > 0 || outgoing.length > 0) && (
-        <div className="space-y-1.5">
-          <p className="text-[10px] uppercase tracking-wide text-obs-faint">
-            Conexões · {incoming.length + outgoing.length}
-          </p>
-          {outgoing.map((e) => {
-            const dest = e.target_node_id ? nodeById.get(e.target_node_id) : undefined;
-            return (
-              <div
-                key={`out-${relationIdentity(e)}`}
-                className="rounded-md px-2 py-1.5"
-                style={{ background: "rgb(var(--obs-surface) / 0.72)", border: "1px solid var(--border-glass)" }}
-              >
-                <div className="flex items-center gap-1 text-[11px] text-obs-text min-w-0">
-                  <span className="text-[10px] text-obs-faint">→</span>
-                  <span className="truncate">{dest?.title || e.target_node_id || "destino"}</span>
-                  {dest?.node_type && (
-                    <span className="ml-auto shrink-0 rounded border border-obs-line px-1 py-0.5 text-[9px] uppercase text-obs-faint">
-                      {dest.node_type}
-                    </span>
-                  )}
-                </div>
-                <p className="mt-0.5 text-[10px] text-obs-faint truncate">
-                  {e.relation_type || "related"}
-                  {typeof e.weight === "number" ? ` · peso ${e.weight}` : ""}
-                </p>
-              </div>
-            );
-          })}
-          {incoming.map((e) => {
-            const src = e.source_node_id ? nodeById.get(e.source_node_id) : undefined;
-            return (
-              <div
-                key={`in-${relationIdentity(e)}`}
-                className="rounded-md px-2 py-1.5"
-                style={{ background: "rgb(var(--obs-surface) / 0.72)", border: "1px solid var(--border-glass)" }}
-              >
-                <div className="flex items-center gap-1 text-[11px] text-obs-text min-w-0">
-                  <span className="text-[10px] text-obs-faint">←</span>
-                  <span className="truncate">{src?.title || e.source_node_id || "origem"}</span>
-                  {src?.node_type && (
-                    <span className="ml-auto shrink-0 rounded border border-obs-line px-1 py-0.5 text-[9px] uppercase text-obs-faint">
-                      {src.node_type}
-                    </span>
-                  )}
-                </div>
-                <p className="mt-0.5 text-[10px] text-obs-faint truncate">
-                  {e.relation_type || "related"}
-                  {typeof e.weight === "number" ? ` · peso ${e.weight}` : ""}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="pt-2">
-        <a
-          href={graphTarget(focus)}
-          className="block w-full text-center text-[11px] py-1.5 rounded-md border border-obs-teal/40 bg-obs-teal/10 text-obs-teal hover:bg-obs-teal/20 transition"
-        >
-          Ver no grafo →
-        </a>
-      </div>
-    </div>
-  );
-}
-
 const NODE_TYPE_LABELS: Record<string, string> = {
   persona: "Persona",
   brand: "Marca",
@@ -1873,20 +1218,6 @@ const NODE_TYPE_LABELS: Record<string, string> = {
 
 function humanizeNodeType(nodeType: string): string {
   return NODE_TYPE_LABELS[nodeType] || nodeType.replace(/_/g, " ");
-}
-
-// Mirrors the relevance ordering context_cards.py uses server-side
-// (rule/tone weighted above brand/persona) so the default "essential" set
-// shown before "mostrar mais" isn't an arbitrary cutoff.
-const RELATED_TYPE_ORDER = ["rule", "tone", "brand", "persona"];
-const ESSENTIAL_RELATED_LIMIT = 4;
-
-function sortRelatedByEssentiality(cards: ContextCard[]): ContextCard[] {
-  return [...cards].sort((a, b) => {
-    const ai = RELATED_TYPE_ORDER.indexOf(a.node_type);
-    const bi = RELATED_TYPE_ORDER.indexOf(b.node_type);
-    return (ai === -1 ? RELATED_TYPE_ORDER.length : ai) - (bi === -1 ? RELATED_TYPE_ORDER.length : bi);
-  });
 }
 
 // O fio vertical que costura os pontos de ContextCardButton — a assinatura
@@ -2092,6 +1423,16 @@ function ContextCardModal({
   );
 }
 
+// A aba mostra uma coisa só: o que o agente realmente usou para responder.
+//
+// Antes havia três renderizações — cards, `operator_context` e um despejo do
+// grafo em catorze seções. As duas últimas eram inalcançáveis: o endpoint monta
+// a resposta como `{...with_operator_context(ctx), ...turn}` e `turn` sempre
+// traz `used_cards`, então o primeiro ramo sempre vencia. Catorze seções de
+// produtos, campanhas, briefings, similaridade e assets nunca chegaram à tela.
+//
+// O bloco "Relacionados · não usados nesta resposta" também saiu: conhecimento
+// que não entrou na decisão não é evidência, é ruído ao lado dela.
 export function KnowledgeSidebar({
   ctx,
   loading,
@@ -2105,17 +1446,16 @@ export function KnowledgeSidebar({
   canEdit?: boolean;
   onPublished?: () => void;
 }) {
-  const [expanded, setExpanded] = useState<ExpandedKnowledge>(null);
   const [selectedCard, setSelectedCard] = useState<ContextCard | null>(null);
 
-  // Clear expand state when ctx changes (e.g., switching leads)
-  useEffect(() => { setExpanded(null); setSelectedCard(null); }, [ctx?.response?.message_id]);
+  // Troca de lead ou de resposta fecha o detalhe aberto.
+  useEffect(() => { setSelectedCard(null); }, [ctx?.response?.message_id]);
 
   if (!leadSelected) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-        <Boxes size={22} className="text-obs-faint/40 mb-2" />
-        <p className="text-xs text-obs-faint">Selecione um lead para ver o conhecimento relacionado.</p>
+      <div className="flex h-full flex-col items-center justify-center p-4 text-center">
+        <Boxes size={22} className="mb-2 text-obs-faint/40" />
+        <p className="text-xs text-obs-faint">Selecione um lead para ver o conhecimento usado.</p>
       </div>
     );
   }
@@ -2123,309 +1463,67 @@ export function KnowledgeSidebar({
     return <div className="p-4 text-xs text-obs-faint">Carregando conhecimento…</div>;
   }
   if (!ctx) return null;
-  if (ctx.used_cards !== undefined) {
-    const used = [...(ctx.used_cards || [])].sort((a, b) => a.position - b.position);
-    const decisive = new Set(ctx.decisive_node_ids || []);
-    const related = sortRelatedByEssentiality(ctx.related_cards || []);
-    const essentialRelated = related.slice(0, ESSENTIAL_RELATED_LIMIT);
-    const extraRelated = related.slice(ESSENTIAL_RELATED_LIMIT);
-    return (
-      <div className="h-full overflow-y-auto p-3">
-        <div className="mb-3 px-0.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${ctx.mode === "exact" ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-400"}`}>
-              {ctx.mode === "exact" ? "espelho exato" : "evidência reconstruída"}
-            </span>
-            <span className="text-[10px] text-obs-faint">grafo v{ctx.graph_version || "?"}</span>
-          </div>
-          {ctx.response?.created_at && <p className="mt-1 text-[10px] text-obs-faint">Resposta de {formatTs(ctx.response.created_at)}</p>}
-        </div>
 
-        <KnowledgeSection icon={<Boxes size={11} />} title="Usado nesta resposta" count={used.length} showEmpty>
-          {used.length > 0 ? (
-            <EvidenceLine>
-              {used.map((card) => {
-                const current = ctx.current_cards?.[card.id];
-                return (
-                  <ContextCardButton
-                    key={`${card.id}:${card.content_checksum}`}
-                    card={card}
-                    decisive={decisive.has(card.id)}
-                    changed={Boolean(current && current.content_checksum !== card.content_checksum)}
-                    onClick={() => setSelectedCard(card)}
-                  />
-                );
-              })}
-            </EvidenceLine>
-          ) : <p className="text-[11px] text-obs-faint">Nenhum card confirmado para esta resposta.</p>}
-        </KnowledgeSection>
-
-        {related.length > 0 && (
-          <div className="mt-4 rounded-lg border border-obs-line bg-obs-surface/50 p-2.5">
-            <p className="text-[11px] font-medium text-obs-text">Relacionados · {related.length}</p>
-            <p className="mt-1 text-[10px] text-obs-faint">Não usados nesta resposta.</p>
-            <div className="mt-2">
-              <EvidenceLine>
-                {essentialRelated.map((card) => (
-                  <ContextCardButton key={`related:${card.id}`} card={card} decisive={false} changed={false} onClick={() => setSelectedCard(card)} />
-                ))}
-              </EvidenceLine>
-            </div>
-            {extraRelated.length > 0 && (
-              <details className="mt-2">
-                <summary className="cursor-pointer text-[10px] font-medium text-obs-faint hover:text-obs-subtle">
-                  Mostrar mais {extraRelated.length}
-                </summary>
-                <div className="mt-2">
-                  <EvidenceLine>
-                    {extraRelated.map((card) => (
-                      <ContextCardButton key={`related:${card.id}`} card={card} decisive={false} changed={false} onClick={() => setSelectedCard(card)} />
-                    ))}
-                  </EvidenceLine>
-                </div>
-              </details>
-            )}
-          </div>
-        )}
-
-        {selectedCard && (
-          <ContextCardModal
-            key={`${selectedCard.id}:${selectedCard.content_checksum}`}
-            card={selectedCard}
-            current={ctx.current_cards?.[selectedCard.id]}
-            canEdit={canEdit}
-            personaSlug={ctx.persona_slug}
-            currentGraphVersion={ctx.current_graph_version}
-            onClose={() => setSelectedCard(null)}
-            onPublished={onPublished}
-          />
-        )}
-      </div>
-    );
-  }
-  if (ctx.operator_context) {
-    const operator = ctx.operator_context;
-    // Cap and rank by "used in the last decision" so the cards most useful
-    // for the current decision surface first, without overwhelming the panel.
-    const primaryRanked = sortEvidenceByRelevance(operator.primary, 4);
-    const faqRulesRanked = sortEvidenceByRelevance(operator.faq_rules, 4);
-    return (
-      <div className="h-full space-y-4 overflow-y-auto p-3">
-        <KnowledgeSection
-          icon={<Boxes size={11} />}
-          title="Usado nesta resposta"
-          count={operator.primary.length}
-          showEmpty
-        >
-          {primaryRanked.length > 0 ? (
-            <EvidenceLine>
-              {primaryRanked.map((item) => <EvidenceCard key={item.id} item={item} />)}
-            </EvidenceLine>
-          ) : (
-            <p className="text-[11px] text-obs-faint">
-              Nenhuma evidência registrada na última decisão.
-            </p>
-          )}
-        </KnowledgeSection>
-        <KnowledgeSection
-          icon={<FileQuestion size={11} />}
-          title="FAQ e regras relacionadas"
-          count={operator.faq_rules.length}
-          showEmpty
-        >
-          {faqRulesRanked.length > 0 ? (
-            <EvidenceLine>
-              {faqRulesRanked.map((item) => <EvidenceCard key={item.id} item={item} />)}
-            </EvidenceLine>
-          ) : (
-            <p className="text-[11px] text-obs-faint">
-              Nenhuma FAQ ou regra relacionada neste contexto.
-            </p>
-          )}
-        </KnowledgeSection>
-        <KnowledgeSection
-          icon={<Radio size={11} />}
-          title="Caminho no grafo"
-          count={operator.graph_path.length}
-          showEmpty
-        >
-          {operator.graph_path.length > 0 ? (
-            <ol className="space-y-1">
-              {operator.graph_path.map((step, index) => (
-                <li key={`${step.node_id || step.slug}-${index}`} className="flex items-center gap-2 text-[11px] text-obs-subtle">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-obs-teal/10 text-[9px] text-obs-teal">
-                    {index + 1}
-                  </span>
-                  <span>{step.title || step.slug}</span>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="text-[11px] text-obs-faint">
-              Caminho indisponível para esta evidência.
-            </p>
-          )}
-        </KnowledgeSection>
-      </div>
-    );
-  }
-
-  const graphNodes = uniqueBy(ctx.nodes || [], nodeIdentity);
-  const dedupedCtx = { ...ctx, nodes: graphNodes };
-  const nodeById = new Map(graphNodes.map((n) => [n.id, n]));
-  const relations = uniqueBy(ctx.edges || [], relationIdentity).slice(0, 8);
-  const primaryNode = pickPrimaryKnowledge(graphNodes, ctx.query_terms || []);
-  const primaryId = primaryNode ? nodeIdentity(primaryNode) : null;
-  const rankedGraphNodes = rankKnowledgeNodes(graphNodes, ctx.query_terms || []);
-  const graphHighlights = rankedGraphNodes
-    .filter((n) => nodeIdentity(n) !== primaryId)
-    .filter((n) => !["tag", "mention", "persona"].includes(n.node_type))
-    .slice(0, 6);
-  const products  = rankKnowledgeNodes(uniqueBy(nodesByType(dedupedCtx, "product"), nodeIdentity), ctx.query_terms || [])
-    .filter((n) => nodeIdentity(n) !== primaryId)
-    .slice(0, 5);
-  const campaigns = rankKnowledgeNodes(uniqueBy(nodesByType(dedupedCtx, "campaign"), nodeIdentity), ctx.query_terms || []).slice(0, 4);
-  const briefings = rankKnowledgeNodes(uniqueBy(nodesByType(dedupedCtx, "briefing"), nodeIdentity), ctx.query_terms || []).slice(0, 3);
-  const rules     = rankKnowledgeNodes(uniqueBy([...nodesByType(dedupedCtx, "rule"), ...nodesByType(dedupedCtx, "tone")], nodeIdentity), ctx.query_terms || []).slice(0, 4);
-  const kbEntries = uniqueBy(ctx.kb_entries || [], kbEntryIdentity);
-  const faqs      = kbEntries.filter((e) => (e.node_type || e.tipo || "").toLowerCase() === "faq").slice(0, 5);
-  const copies    = kbEntries.filter((e) => (e.node_type || e.tipo || "").toLowerCase() === "copy").slice(0, 3);
-  const activeKb  = kbEntries.filter((e) => !["faq", "copy"].includes((e.node_type || e.tipo || "").toLowerCase())).slice(0, 5);
-  const related   = graphNodes.filter((n) =>
-    !["persona", "product", "campaign", "briefing", "faq", "copy", "asset", "tag", "mention", "rule", "tone"].includes(n.node_type)
-  ).slice(0, 5);
-  const similar = uniqueBy(ctx.similar || [], similarIdentity).slice(0, 5);
-  const assets = uniqueBy(ctx.assets || [], assetIdentity).slice(0, 6);
-  const pendingNodes = uniqueBy(ctx.unvalidated?.nodes || [], nodeIdentity).filter((n) =>
-    !["persona", "tag"].includes(n.node_type)
-  ).slice(0, 5);
-  const pendingEntries = uniqueBy(ctx.unvalidated?.kb_entries || [], kbEntryIdentity).slice(0, 5);
-  const pendingAssets = uniqueBy(ctx.unvalidated?.assets || [], assetIdentity).slice(0, 4);
-  const total =
-    (primaryNode ? 1 : 0) + graphHighlights.length + products.length + campaigns.length + briefings.length + rules.length +
-    activeKb.length + faqs.length + copies.length + related.length + relations.length + similar.length + assets.length +
-    pendingNodes.length + pendingEntries.length + pendingAssets.length;
-
-  if (total === 0) {
-    return (
-      <div className="p-4 text-xs text-obs-faint space-y-2">
-        <div className="flex items-center gap-1.5">
-          <Boxes size={14} className="text-obs-faint/60" />
-          <span>Nenhum conhecimento detectado nessa conversa ainda.</span>
-        </div>
-        {ctx.query_terms.length > 0 && (
-          <p className="text-[11px]">Termos: {ctx.query_terms.join(", ")}</p>
-        )}
-      </div>
-    );
-  }
-
-  // If a knowledge is expanded, replace the list with the detail view
-  if (expanded) {
-    return (
-      <KnowledgeDetail
-        expanded={expanded}
-        ctx={ctx}
-        onBack={() => setExpanded(null)}
-      />
-    );
-  }
-
-  // After the early return above, `expanded` is null in this branch, so cards
-  // render in their non-active state. Active styling kicks in only after a
-  // future click before detail view is rendered (single render cycle).
-  const selectNode = (id: string) => setExpanded({ kind: "node", id });
-  const selectKb = (id: string) => setExpanded({ kind: "kb", id });
-  const selectSimilar = (id: string) => setExpanded({ kind: "similar", id });
-  const isActiveNode = (_n: KnowledgeNode) => false;
-  const isActiveKb = (_e: KnowledgeKbEntry) => false;
-  const isActiveSimilar = (_n: SimilarNode) => false;
+  const used = [...(ctx.used_cards || [])].sort((a, b) => a.position - b.position);
+  const decisive = new Set(ctx.decisive_node_ids || []);
 
   return (
-    <div className="p-3 space-y-3 overflow-y-auto h-full">
-      {ctx.summary && (
-        <p className="text-[11px] text-obs-subtle leading-snug">{ctx.summary}</p>
+    <div className="h-full overflow-y-auto p-3">
+      {/* "espelho exato" x "evidência reconstruída" fica: é a diferença entre
+          ver o que o agente usou e ver uma aproximação do que ele teria usado. */}
+      <div className="mb-3 flex items-center justify-between gap-2 px-0.5">
+        <span
+          className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${
+            ctx.mode === "exact"
+              ? "bg-emerald-500/15 text-emerald-400"
+              : "bg-amber-500/15 text-amber-400"
+          }`}
+        >
+          {ctx.mode === "exact" ? "espelho exato" : "evidência reconstruída"}
+        </span>
+        {ctx.response?.created_at && (
+          <span className="text-[10px] text-obs-faint">{formatTs(ctx.response.created_at)}</span>
+        )}
+      </div>
+
+      {used.length > 0 ? (
+        <EvidenceLine>
+          {used.map((card) => {
+            const current = ctx.current_cards?.[card.id];
+            return (
+              <ContextCardButton
+                key={`${card.id}:${card.content_checksum}`}
+                card={card}
+                decisive={decisive.has(card.id)}
+                changed={Boolean(current && current.content_checksum !== card.content_checksum)}
+                onClick={() => setSelectedCard(card)}
+              />
+            );
+          })}
+        </EvidenceLine>
+      ) : (
+        <p className="text-[11px] text-obs-faint">
+          Nenhum card confirmado para esta resposta.
+        </p>
       )}
 
-      <KnowledgeSection icon={<Boxes size={11} />} title="Conhecimento principal" count={primaryNode ? 1 : 0}>
-        {primaryNode && (
-          <NodePill
-            key={scopedKey("primary", nodeIdentity(primaryNode))}
-            node={primaryNode}
-            active={isActiveNode(primaryNode)}
-            onSelect={selectNode}
-          />
-        )}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<Boxes size={11} />} title="Mais proximos" count={graphHighlights.length}>
-        {graphHighlights.map((n) => <NodePill key={scopedKey("graph", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<Radio size={11} />} title="Relações do grafo" count={relations.length}>
-        {relations.map((e) => <RelationCard key={scopedKey("edge", relationIdentity(e))} edge={e} nodeById={nodeById} onSelect={selectNode} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<Boxes size={11} />} title="Produtos" count={products.length}>
-        {products.map((n) => <NodePill key={scopedKey("product", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<Megaphone size={11} />} title="Campanhas" count={campaigns.length}>
-        {campaigns.map((n) => <NodePill key={scopedKey("campaign", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<Database size={11} />} title="Golden Dataset ativo" count={activeKb.length}>
-        {activeKb.map((e) => <KbCard key={scopedKey("active-kb", kbEntryIdentity(e))} entry={e} active={isActiveKb(e)} onSelect={selectKb} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<FileQuestion size={11} />} title="FAQs" count={faqs.length}>
-        {faqs.map((e) => <KbCard key={scopedKey("faq", kbEntryIdentity(e))} entry={e} active={isActiveKb(e)} onSelect={selectKb} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<FileText size={11} />} title="Briefings" count={briefings.length}>
-        {briefings.map((n) => <NodePill key={scopedKey("briefing", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<FileText size={11} />} title="Copies" count={copies.length}>
-        {copies.map((e) => <KbCard key={scopedKey("copy", kbEntryIdentity(e))} entry={e} active={isActiveKb(e)} onSelect={selectKb} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<Palette size={11} />} title="Regras / Tom" count={rules.length}>
-        {rules.map((n) => <NodePill key={scopedKey("rule", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<Boxes size={11} />} title="Conhecimentos relacionados" count={related.length}>
-        {related.map((n) => <NodePill key={scopedKey("related", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<Radio size={11} />} title="Busca por similaridade" count={similar.length}>
-        {similar.map((n) => <SimilarCard key={scopedKey("similar", similarIdentity(n))} node={n} active={isActiveSimilar(n)} onSelect={selectSimilar} />)}
-      </KnowledgeSection>
-
-      <KnowledgeSection icon={<ImageIcon size={11} />} title="Assets" count={assets.length}>
-        <div className="grid grid-cols-2 gap-1.5">
-          {assets.map((a) => <AssetCard key={scopedKey("asset", assetIdentity(a))} asset={a} />)}
-        </div>
-      </KnowledgeSection>
-
-      <KnowledgeSection
-        icon={<AlertCircle size={11} className="text-amber-300" />}
-        title="Pendentes de validação"
-        count={pendingNodes.length + pendingEntries.length + pendingAssets.length}
-      >
-        {pendingNodes.map((n) => <NodePill key={scopedKey("pending-node", nodeIdentity(n))} node={n} active={isActiveNode(n)} onSelect={selectNode} />)}
-        {pendingEntries.map((e) => <KbCard key={scopedKey("pending-kb", kbEntryIdentity(e))} entry={e} active={isActiveKb(e)} onSelect={selectKb} />)}
-        {pendingAssets.length > 0 && (
-          <div className="grid grid-cols-2 gap-1.5">
-            {pendingAssets.map((a) => <AssetCard key={scopedKey("pending-asset", assetIdentity(a))} asset={a} />)}
-          </div>
-        )}
-      </KnowledgeSection>
+      {selectedCard && (
+        <ContextCardModal
+          key={`${selectedCard.id}:${selectedCard.content_checksum}`}
+          card={selectedCard}
+          current={ctx.current_cards?.[selectedCard.id]}
+          canEdit={canEdit}
+          personaSlug={ctx.persona_slug}
+          currentGraphVersion={ctx.current_graph_version}
+          onClose={() => setSelectedCard(null)}
+          onPublished={onPublished}
+        />
+      )}
     </div>
   );
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────────
 
 export function MessagesLayout({
   initialLeadId,
@@ -3199,13 +2297,11 @@ export function MessagesLayout({
                       comportam os dois eixos. O estágio completo continua no
                       perfil do rail direito, onde há espaço para os dois. */}
                   {outcome ? <OutcomeMark outcome={outcome} /> : <StageBadge stage={lead.stage} />}
-                  <span>{lead.qualification_score || 0}%</span>
                   {lastTs && <span>{relativeTs(lastTs)}</span>}
-                  {(lead.qualification_signals?.length || 0) > 0 && (
-                    <span className="truncate">
-                      {lead.qualification_signals?.slice(0, 2).map((signal) => signal.label || signal.key).join(" · ")}
-                    </span>
-                  )}
+                  {/* Score e sinais de qualificação saíram desta linha: são
+                      vocabulário interno do scoring ("Primeiro contato",
+                      "Descoberta ou listagem"), não algo que ajude a escolher
+                      uma conversa. O score continua no perfil do rail. */}
                 </div>
 
                 {/* Attention badge: humano respondendo OU bot inativo */}
@@ -3656,11 +2752,8 @@ export function MessagesLayout({
             {knowledgeError && (
               <span className={`${selectedResponseMessageId ? "" : "ml-auto"} text-[10px] text-red-500 truncate`}>{knowledgeError}</span>
             )}
-            {knowledge?.query_terms && knowledge.query_terms.length > 0 && (
-              <span className="text-[10px] text-obs-faint truncate">
-                · {knowledge.query_terms.slice(0, 3).join(", ")}
-              </span>
-            )}
+            {/* Os `query_terms` saíram: são o insumo da busca de contexto, não
+                o resultado. O que importa é o card que a resposta usou. */}
           </div>
 
           {/* KnowledgeSidebar gerencia o próprio scroll interno (h-full

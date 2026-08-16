@@ -226,8 +226,7 @@ describe("Mensagens — desfecho da jornada", () => {
   });
 
   it("o terminal oferece os dois desfechos e conclui com o evento do modelo", async () => {
-    setLead(makeLead({ journey_outcome: "vendido",
-    business_model: "sales", business_model: "appointment" }));
+    setLead(makeLead({ journey_outcome: "vendido", business_model: "appointment" }));
     const rail = await openLeadWithRail();
     fireEvent.click(within(rail).getByRole("button", { name: /Fechar pedido/ }));
 
