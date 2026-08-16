@@ -7,7 +7,7 @@ pelo modelo.
 
 Migrations relevantes: `118` (tabelas), `121` (máquina de estados),
 `122` (suporte pós-handoff), `123` (desfecho comercial), `124` (conversão
-reversível).
+reversível), `125` (cancelar estorna a compra).
 
 ## Estados
 
@@ -24,6 +24,22 @@ reversível).
 
 Exatamente uma jornada é corrente por `(persona, lead)` — índice parcial
 `idx_conversation_journeys_one_current`.
+
+### O ciclo do pedido
+
+O pedido anda em dois passos, e o par de eventos de cada passo depende do
+`business_model` da persona (`personas.config.portal.business_model`):
+
+| Passo | Produto (`sales`) | Serviço (`appointment`) |
+|---|---|---|
+| 1 — o pedido nasce | comprado (`sale_recorded`) | agendado (`appointment_booked`) |
+| 2 — o pedido fecha | entregue (`delivered`) | concluído (`service_completed`) |
+| 2 — ou morre | cancelado (`cancelled`) | cancelado (`cancelled`) |
+
+Os dois passos podem estar desligados: é o estado natural de um pedido que ainda
+não andou. Fechar — por conclusão ou cancelamento — **reinicia o ciclo
+agêntico**: a jornada sai de `is_current`, e o próximo inbound cria a seguinte
+com `opening_reason='new_demand_after_closed_request'`, ledger novo e sem fatos.
 
 ### Precedência: desfecho comercial vence proof
 
@@ -48,7 +64,7 @@ quatro ramos da projeção.
 | `appointment_booked` | Idem, `conversion_type='appointment_booked'`. | sim |
 | `delivered` | `state='closed'`, `is_current=false`, `metadata.closing_event`. | não |
 | `service_completed` | Idem — o equivalente de `delivered` para serviço. | não |
-| `cancelled` | Idem. Fatos preservados. | não |
+| `cancelled` | Idem, e **estorna a compra**: as conversões `completed` da jornada viram `cancelled` e `metadata.sold` é removido. | não |
 
 Valor comercial só é aceito em `sale_recorded`/`appointment_booked`. A regra é
 validada duas vezes, no Pydantic (`JourneyEventBody`) e no plpgsql, para que a
@@ -88,6 +104,23 @@ ele **remove** a entrada do `converted` que desfez. Sem isso o operador só
 conseguiria converter uma vez por jornada e o toggle não poderia voltar. A
 idempotência do revert vem do estado: reverter uma jornada que não está
 convertida é no-op.
+
+### Cancelar estorna a compra, não a conversão
+
+Cancelar transiciona para `cancelled` toda conversão ainda `completed` da
+jornada corrente e remove `metadata.sold` — o controle de venda volta a aparecer
+desligado e a receita deixa de ser contada. Antes da migration 125 a jornada
+fechava mas a linha em `sales_conversions` seguia `completed`: a tela dizia
+cancelado e o ledger discordava.
+
+`converted_at` **fica**. Depois do primeiro agendamento ou compra o lead está
+convertido, e cancelar o pedido não desfaz isso: conversão é fato do lead, venda
+é fato do pedido. Pela mesma razão `lead_first_conversion` ignora linhas
+canceladas — uma venda estornada não pode fazer a próxima parecer recorrência.
+
+A chave de idempotência de uma venda cancelada fica queimada: relançar com a
+mesma chave levanta `idempotency key belongs to a cancelled conversion`, em vez
+de ressuscitar a linha em silêncio.
 
 ### Conversão é reversível; venda não
 
@@ -161,10 +194,12 @@ Mensagens.
 codificado por peso, e só compromisso, venda e entrega gastam cor.
 
 No rail direito, a fase reversível vive num **toggle** (`qualificado ⇄
-convertido`) e não em botões: um botão sugere ação irreversível. Sobram duas
-ações, as que comprometem o pedido — **venda** e **cancelamento**. Entrega não é
-decisão do operador na tela de conversa: `delivered`/`service_completed` chegam
-pela variante interna do endpoint, por integração.
+convertido`) e não em botões: um botão sugere ação irreversível. Abaixo dele
+ficam os dois passos do pedido. O botão 2 é o terminal, e o próprio botão diz
+como o pedido fechou — `Entregue`/`Concluído` em navy, `Cancelado` riscado em
+cinza. A escolha entre os dois acontece num diálogo ao clicar; concluir fica
+indisponível enquanto o passo 1 não foi registrado, porque não há o que
+entregar.
 
 Na lista de conversas, o marcador de desfecho ocupa o lugar do `StageBadge` —
 300px não comportam os dois eixos, e o estágio completo continua no perfil do

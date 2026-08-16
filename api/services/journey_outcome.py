@@ -68,8 +68,28 @@ def outcomes_for_leads(persona_id: str, lead_refs: list[int]) -> dict[int, Optio
     return outcomes
 
 
+SALES = "sales"
+APPOINTMENT = "appointment"
+
+
+def business_models_for_personas(persona_ids: list[str]) -> dict[str, str]:
+    """`business_model` de cada persona, numa leitura so.
+
+    Ele decide o par de eventos do pedido: produto e comprado e entregue,
+    servico e agendado e concluido. Sem isso a tela registraria compra e
+    entrega para uma persona de agendamento.
+    """
+    configs = supabase_client.get_persona_configs_by_ids(list(persona_ids))
+    models: dict[str, str] = {}
+    for pid, config in configs.items():
+        portal = config.get("portal") if isinstance(config.get("portal"), dict) else {}
+        model = str(portal.get("business_model") or config.get("business_model") or SALES)
+        models[pid] = APPOINTMENT if model.strip().lower() == APPOINTMENT else SALES
+    return models
+
+
 def decorate_leads(rows: list[dict[str, Any]], persona_id: str | None = None) -> list[dict[str, Any]]:
-    """Anexa `journey_outcome` a cada lead ja decorado pela qualificacao.
+    """Anexa `journey_outcome` e `business_model` a cada lead decorado.
 
     `stage` continua sendo o funil manual: o desfecho e um eixo novo e
     independente, nunca uma reescrita do estagio.
@@ -88,6 +108,7 @@ def decorate_leads(rows: list[dict[str, Any]], persona_id: str | None = None) ->
     for pid, refs in grouped.items():
         for ref, outcome in outcomes_for_leads(pid, refs).items():
             outcomes[(pid, ref)] = outcome
+    models = business_models_for_personas(list(grouped))
 
     for row in rows:
         pid = str(persona_id or row.get("persona_id") or "")
@@ -95,4 +116,5 @@ def decorate_leads(rows: list[dict[str, Any]], persona_id: str | None = None) ->
         row["journey_outcome"] = (
             outcomes.get((pid, int(ref))) if pid and ref is not None else None
         )
+        row["business_model"] = models.get(pid, SALES)
     return rows

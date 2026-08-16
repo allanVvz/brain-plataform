@@ -41,6 +41,9 @@ interface Lead {
   // Desfecho comercial derivado da jornada corrente pelo backend. Eixo
   // independente de `stage`, nunca um substituto dele.
   journey_outcome?: string | null;
+  // `sales` | `appointment` — vem de personas.config.portal e decide o par de
+  // eventos do pedido: comprado/entregue ou agendado/concluído.
+  business_model?: string | null;
   validation?: {
     is_validation?: boolean;
     source?: string | null;
@@ -602,35 +605,28 @@ function StageBadge({ stage }: { stage: string | null }) {
 
 // ── Jornada: pedido e ações ──────────────────────────────────────────────────
 
-type JourneyAction = {
-  key: string;
-  label: string;
-  event: JourneyEventType;
-  outcome: JourneyOutcome;
-  confirm?: string;
+// O ciclo do pedido tem dois passos, e o par de eventos de cada um depende do
+// modelo de negócio da persona: produto é comprado e entregue, serviço é
+// agendado e concluído. Registrar "compra" numa persona de agendamento estava
+// rotulando errado o que aconteceu.
+type OfferingKind = "sales" | "appointment";
+
+const OFFERING: Record<OfferingKind, {
+  aberto: { label: string; event: JourneyEventType };
+  concluido: { label: string; event: JourneyEventType };
+}> = {
+  sales: {
+    aberto: { label: "Venda", event: "sale_recorded" },
+    concluido: { label: "Entregue", event: "delivered" },
+  },
+  appointment: {
+    aberto: { label: "Agendamento", event: "appointment_booked" },
+    concluido: { label: "Concluído", event: "service_completed" },
+  },
 };
 
-// Só as duas ações que comprometem o pedido. Conversão saiu para o
-// ToggleConversao porque é reversível enquanto não há dinheiro envolvido, e a
-// entrega não é decisão do operador na tela de conversa: chega por integração
-// (`delivered` / `service_completed` na variante interna do endpoint).
-const JOURNEY_ACTIONS: JourneyAction[] = [
-  { key: "venda", label: "Venda", event: "sale_recorded", outcome: "vendido" },
-  {
-    key: "cancelamento", label: "Cancelamento", event: "cancelled", outcome: "cancelado",
-    confirm: "Cancelar fecha o pedido. Os fatos já coletados são preservados, mas a jornada não aceita mais eventos.",
-  },
-];
-
-// Espelha as regras do backend para não oferecer um clique que voltaria 409.
-function journeyActionState(
-  action: JourneyAction, outcome: JourneyOutcome | null,
-): "disponivel" | "concluido" | "bloqueado" {
-  if (isJourneySettled(outcome)) {
-    return outcome === action.outcome ? "concluido" : "bloqueado";
-  }
-  if (action.key === "venda" && outcome === "vendido") return "concluido";
-  return "disponivel";
+function offeringKind(lead: Lead): OfferingKind {
+  return lead.business_model === "appointment" ? "appointment" : "sales";
 }
 
 // A conversão é a única fase reversível da jornada, e um toggle diz isso melhor
@@ -738,19 +734,25 @@ function JourneyActions({
   onRecorded: () => void | Promise<void>;
 }) {
   const [pending, setPending] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<JourneyAction | null>(null);
+  const [fechando, setFechando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const oferta = OFFERING[offeringKind(lead)];
 
-  const run = useCallback(async (action: JourneyAction) => {
-    setPending(action.key);
+  const vendido = outcome === "vendido";
+  const entregue = outcome === "entregue";
+  const cancelado = outcome === "cancelado";
+  const fechado = isJourneySettled(outcome);
+
+  const registrar = useCallback(async (event: JourneyEventType, key: string) => {
+    setPending(key);
     setError(null);
     try {
       await api.recordJourneyEvent(lead.id, {
-        event_type: action.event,
+        event_type: event,
         // Determinística de propósito: dois cliques no mesmo botão da mesma
         // jornada colidem na chave e o backend devolve deduplicated:true em
         // vez de gravar o evento duas vezes.
-        idempotency_key: `dashboard:${lead.id}:${action.event}`,
+        idempotency_key: `dashboard:${lead.id}:${event}`,
         source: "dashboard",
         occurred_at: new Date().toISOString(),
         metadata: { recorded_from: "messages" },
@@ -760,79 +762,154 @@ function JourneyActions({
       setError(getErrorMessage(err, "Não foi possível registrar o evento."));
     } finally {
       setPending(null);
-      setConfirming(null);
+      setFechando(false);
     }
   }, [lead.id, onRecorded]);
 
   if (!canEdit) return null;
 
+  // Botão 1 — o pedido nasce aqui: comprado ou agendado.
+  const abertoStyle = OUTCOME_STYLE.vendido;
+  const abertoLigado = vendido || entregue;
+  const abertoBloqueado = fechado || pending !== null;
+
+  // Botão 2 — o terminal. Fecha o pedido, e o próprio botão diz como fechou:
+  // entregue/concluído quando deu certo, cancelado quando não. Cancelar estorna
+  // o passo 1, então o botão de venda volta a aparecer desligado.
+  const terminalStyle = cancelado ? OUTCOME_STYLE.cancelado : OUTCOME_STYLE.entregue;
+  const terminalLabel = entregue
+    ? oferta.concluido.label
+    : cancelado
+      ? "Cancelado"
+      : "Fechar pedido";
+  const terminalLigado = fechado;
+  const terminalBloqueado = fechado || pending !== null || !outcome;
+
+  function botaoStyle(ligado: boolean, bloqueado: boolean, style: { color: string; soft: string }) {
+    return {
+      background: ligado ? style.soft : "rgb(var(--obs-text) / 0.03)",
+      borderColor: ligado ? style.color : "var(--border-glass)",
+      color: ligado ? style.color : bloqueado ? "rgb(var(--obs-faint))" : "rgb(var(--obs-subtle))",
+      opacity: bloqueado && !ligado ? 0.45 : 1,
+    };
+  }
+
   return (
     <div className="shrink-0 px-4 pb-4">
       <div className="grid grid-cols-2 gap-2">
-        {JOURNEY_ACTIONS.map((action) => {
-          const state = journeyActionState(action, outcome);
-          const style = OUTCOME_STYLE[action.outcome];
-          const done = state === "concluido";
-          const blocked = state === "bloqueado";
-          const busy = pending === action.key;
-          return (
-            <button
-              key={action.key}
-              type="button"
-              // `concluido` também trava: o evento é idempotente, mas
-              // reoferecer o clique sugere que falta algo a fazer.
-              disabled={blocked || done || busy || pending !== null}
-              onClick={() => (action.confirm ? setConfirming(action) : run(action))}
-              title={
-                blocked
-                  ? action.key === "entregue"
-                    ? "Registre a compra antes de marcar a entrega"
-                    : "A jornada já foi fechada"
-                  : done
-                    ? `Já registrado · ${style.label}`
-                    : action.label
-              }
-              className="flex items-center gap-2 rounded-[10px] border px-3 py-2.5 text-xs font-medium transition disabled:cursor-not-allowed"
-              style={{
-                background: done ? style.soft : "rgb(var(--obs-text) / 0.03)",
-                borderColor: done ? style.color : "var(--border-glass)",
-                color: done ? style.color : blocked ? "rgb(var(--obs-faint))" : "rgb(var(--obs-subtle))",
-                opacity: blocked ? 0.45 : 1,
-              }}
-            >
-              <span
-                className="h-[9px] w-[9px] shrink-0 rounded-full"
-                style={
-                  done
-                    ? { background: style.color }
-                    : { border: `1.5px solid rgb(var(--obs-${blocked ? "faint" : "faint"}))` }
-                }
-              />
-              <span className="truncate">{busy ? "…" : action.label}</span>
-            </button>
-          );
-        })}
+        <button
+          type="button"
+          disabled={abertoBloqueado || abertoLigado}
+          onClick={() => registrar(oferta.aberto.event, "aberto")}
+          title={
+            abertoLigado
+              ? `Já registrado · ${oferta.aberto.label.toLowerCase()}`
+              : fechado
+                ? "O pedido já foi fechado"
+                : oferta.aberto.label
+          }
+          className="flex items-center gap-2 rounded-[10px] border px-3 py-2.5 text-xs font-medium transition disabled:cursor-not-allowed"
+          style={botaoStyle(abertoLigado, abertoBloqueado, abertoStyle)}
+        >
+          <span
+            className="h-[9px] w-[9px] shrink-0 rounded-full"
+            style={
+              abertoLigado
+                ? { background: abertoStyle.color }
+                : { border: "1.5px solid rgb(var(--obs-faint))" }
+            }
+          />
+          <span className="truncate">
+            {pending === "aberto" ? "…" : oferta.aberto.label}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          disabled={terminalBloqueado}
+          onClick={() => setFechando(true)}
+          title={
+            fechado
+              ? `Pedido fechado · ${terminalLabel.toLowerCase()}`
+              : !outcome
+                ? "Ainda não há pedido para fechar"
+                : "Fechar o pedido"
+          }
+          className="flex items-center gap-2 rounded-[10px] border px-3 py-2.5 text-xs font-medium transition disabled:cursor-not-allowed"
+          style={botaoStyle(terminalLigado, terminalBloqueado, terminalStyle)}
+        >
+          <span
+            className="h-[9px] w-[9px] shrink-0 rounded-full"
+            style={
+              terminalLigado
+                ? { background: terminalStyle.color }
+                : { border: "1.5px solid rgb(var(--obs-faint))" }
+            }
+          />
+          <span className={`truncate ${cancelado ? "line-through" : ""}`}>
+            {pending && pending !== "aberto" ? "…" : terminalLabel}
+          </span>
+        </button>
       </div>
       {error && <p className="mt-2 text-[11px] text-obs-rose">{error}</p>}
 
       {/* Sem window.confirm: um diálogo nativo trava a sessão do navegador. */}
-      {confirming && (
+      {fechando && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true">
-          <div className="absolute inset-0" style={{ background: "rgb(0 0 0 / 0.45)" }} onClick={() => setConfirming(null)} />
+          <div className="absolute inset-0" style={{ background: "rgb(0 0 0 / 0.45)" }} onClick={() => setFechando(false)} />
           <div className="modal-content relative w-full max-w-sm p-5">
-            <p className="text-sm font-semibold text-obs-text">{confirming.label}</p>
-            <p className="mt-2 text-xs leading-relaxed text-obs-subtle">{confirming.confirm}</p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="lg-btn lg-btn-secondary" onClick={() => setConfirming(null)}>
-                Voltar
+            <p className="text-sm font-semibold text-obs-text">Fechar pedido</p>
+            <p className="mt-2 text-xs leading-relaxed text-obs-subtle">
+              Fechar encerra a jornada. A próxima mensagem do cliente abre um pedido
+              novo e o agente recomeça o ciclo.
+            </p>
+            <div className="mt-4 space-y-2">
+              <button
+                type="button"
+                disabled={!vendido || pending !== null}
+                onClick={() => registrar(oferta.concluido.event, "concluido")}
+                className="flex w-full items-start gap-3 rounded-[10px] border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45"
+                style={{ borderColor: "var(--border-glass)" }}
+              >
+                <span
+                  className="mt-[3px] h-[9px] w-[9px] shrink-0 rounded-full"
+                  style={{ background: OUTCOME_STYLE.entregue.color }}
+                />
+                <span className="min-w-0">
+                  <span className="block text-xs font-medium text-obs-text">
+                    {oferta.concluido.label}
+                  </span>
+                  <span className="block text-[11px] text-obs-faint">
+                    {vendido
+                      ? "O pedido foi cumprido."
+                      : `Registre ${oferta.aberto.label.toLowerCase()} antes de concluir.`}
+                  </span>
+                </span>
               </button>
               <button
                 type="button"
-                className="lg-btn lg-btn-primary"
                 disabled={pending !== null}
-                onClick={() => run(confirming)}
+                onClick={() => registrar("cancelled", "cancelado")}
+                className="flex w-full items-start gap-3 rounded-[10px] border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45"
+                style={{ borderColor: "var(--border-glass)" }}
               >
-                {pending ? "Registrando…" : "Confirmar"}
+                <span
+                  className="mt-[3px] h-[9px] w-[9px] shrink-0 rounded-full"
+                  style={{ background: OUTCOME_STYLE.cancelado.color }}
+                />
+                <span className="min-w-0">
+                  <span className="block text-xs font-medium text-obs-text">Cancelado</span>
+                  <span className="block text-[11px] text-obs-faint">
+                    {vendido
+                      ? `Estorna ${oferta.aberto.label.toLowerCase()}. A conversão do lead é preservada.`
+                      : "O pedido não seguiu adiante."}
+                  </span>
+                </span>
+              </button>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button type="button" className="lg-btn lg-btn-secondary" onClick={() => setFechando(false)}>
+                Voltar
               </button>
             </div>
           </div>

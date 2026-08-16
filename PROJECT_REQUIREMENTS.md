@@ -563,6 +563,12 @@ este pedido". Sao contratos distintos e nenhum dos dois substitui o outro.
   nenhum reescreve o outro.
 - Todo evento de jornada e idempotente por `(source, idempotency_key)`. Repetir
   devolve `deduplicated`, nunca um segundo registro.
+- O pedido anda em dois passos e o par de eventos vem do `business_model` da
+  persona: produto e comprado e entregue, servico e agendado e concluido.
+- Cancelar estorna a compra: as conversoes `completed` da jornada viram
+  `cancelled` e a receita deixa de ser contada. A conversao do lead e
+  preservada -- conversao e fato do lead, venda e fato do pedido.
+- Fechar o pedido, por conclusao ou cancelamento, reinicia o ciclo agentico.
 - Valor comercial so entra em evento de conversao (`sale_recorded`,
   `appointment_booked`), validado no schema e no plpgsql.
 
@@ -574,6 +580,10 @@ Testes obrigatorios:
 - Proof posterior a venda nao muda o `state` da jornada.
 - Evento repetido com a mesma chave nao duplica registro nem outbound.
 - Entrega so e oferecida depois da compra registrada.
+- Cancelar uma jornada vendida deixa a conversao em `cancelled` e nao contabiliza
+  receita, mas mantem `converted_at`.
+- Persona de agendamento registra `appointment_booked`/`service_completed`, nunca
+  `sale_recorded`/`delivered`.
 - Jornada fechada nao aceita evento novo.
 
 ## 15. Regra final de implementacao

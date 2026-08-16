@@ -192,6 +192,9 @@ def conversations(request: Request, persona_slug: str = Query(...)):
         if row.get("lead_ref") is not None
     ])
     outcomes = journey_outcome.outcomes_for_leads(persona["id"], list(leads_by_ref))
+    business_model = journey_outcome.business_models_for_personas(
+        [persona["id"]]
+    ).get(persona["id"], journey_outcome.SALES)
     decorated = []
     for row in rows:
         ref = int(row.get("lead_ref") or 0)
@@ -206,6 +209,7 @@ def conversations(request: Request, persona_slug: str = Query(...)):
             "qualification_signals": extra.get("qualification_signals") or [],
             "validation": extra.get("validation") or {},
             "journey_outcome": outcomes.get(ref),
+            "business_model": business_model,
         })
     return decorated
 

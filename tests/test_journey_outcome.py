@@ -90,6 +90,10 @@ def test_decorate_leads_never_rewrites_the_manual_stage(monkeypatch):
         journey_outcome.supabase_client, "get_current_journeys_by_lead_refs",
         lambda *_a, **_k: [{"lead_ref": 7, "state": "converted", "metadata": {}}],
     )
+    monkeypatch.setattr(
+        journey_outcome.supabase_client, "get_persona_configs_by_ids",
+        lambda *_a, **_k: {"persona:one": {"portal": {"business_model": "appointment"}}},
+    )
     rows = [
         {"id": 7, "persona_id": "persona:one", "stage": "qualificado"},
         {"id": 8, "persona_id": "persona:one", "stage": "fechado"},
@@ -99,6 +103,9 @@ def test_decorate_leads_never_rewrites_the_manual_stage(monkeypatch):
     assert decorated[0]["stage"] == "qualificado"
     assert decorated[1]["journey_outcome"] is None
     assert decorated[1]["stage"] == "fechado"
+    # o modelo de negocio viaja junto: a tela precisa dele para saber se o
+    # pedido e comprado/entregue ou agendado/concluido
+    assert decorated[0]["business_model"] == "appointment"
 
 
 def test_decorate_leads_groups_by_persona_for_the_admin_listing(monkeypatch):
@@ -112,6 +119,10 @@ def test_decorate_leads_groups_by_persona_for_the_admin_listing(monkeypatch):
     monkeypatch.setattr(
         journey_outcome.supabase_client, "get_current_journeys_by_lead_refs", fake,
     )
+    monkeypatch.setattr(
+        journey_outcome.supabase_client, "get_persona_configs_by_ids",
+        lambda *_a, **_k: {},
+    )
     rows = [
         {"id": 1, "persona_id": "persona:a"},
         {"id": 2, "persona_id": "persona:b"},
@@ -121,6 +132,8 @@ def test_decorate_leads_groups_by_persona_for_the_admin_listing(monkeypatch):
     assert [r["journey_outcome"] for r in decorated] == [
         journey_outcome.VENDIDO, journey_outcome.VENDIDO,
     ]
+    # persona sem config declarada cai em `sales`, nunca em None
+    assert [r["business_model"] for r in decorated] == ["sales", "sales"]
 
 
 # ── contrato da migration 123 ────────────────────────────────────────────────
@@ -187,3 +200,36 @@ def test_reverting_a_journey_that_is_not_converted_is_a_no_op():
 
 def test_revert_is_published_in_the_event_enum():
     assert "'converted','conversion_reverted','sale_recorded'" in REVERT_SQL
+
+
+# ── contrato da migration 125: cancelar estorna a compra ─────────────────────
+
+CANCEL_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
+              "125_cancel_reverses_the_purchase.sql").read_text(encoding="utf-8")
+
+
+def test_cancelling_reverses_the_purchase_in_the_ledger():
+    """Antes da 125 a jornada fechava mas a linha em sales_conversions ficava
+    `completed`: a tela dizia cancelado e a receita continuava contada."""
+    assert "CREATE TABLE" not in CANCEL_SQL
+    assert "status='cancelled'" in CANCEL_SQL
+    assert "WHERE journey_id=v_journey.id AND status='completed'" in CANCEL_SQL
+    assert "'reversed_conversions',v_reversed" in CANCEL_SQL
+
+
+def test_cancelling_turns_the_sale_off_but_keeps_the_lead_converted():
+    """Conversao e fato do lead, venda e fato do pedido. Depois do primeiro
+    agendamento ou compra o lead esta convertido, e cancelar nao desfaz isso."""
+    assert "(metadata-'sold'-'last_conversion')" in CANCEL_SQL
+    fechamento = CANCEL_SQL[CANCEL_SQL.index("IF p_event_type='cancelled' THEN"):]
+    assert "converted_at=NULL" not in fechamento
+
+
+def test_a_cancelled_key_cannot_resurrect_the_sale():
+    assert "idempotency key belongs to a cancelled conversion" in CANCEL_SQL
+
+
+def test_first_conversion_ignores_cancelled_rows():
+    """`lead_first_conversion` marca a primeira venda de verdade -- uma venda
+    cancelada nao pode fazer a proxima parecer recorrencia."""
+    assert "completed_at IS NOT NULL AND status<>'cancelled'" in CANCEL_SQL

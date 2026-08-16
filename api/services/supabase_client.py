@@ -2969,6 +2969,30 @@ def get_persona_by_id(persona_id: str) -> Optional[dict]:
     return _one(get_client().table("personas").select("*").eq("id", persona_id).maybe_single())
 
 
+def get_persona_configs_by_ids(
+    persona_ids: list[str], *, chunk_size: int = 50,
+) -> dict[str, dict]:
+    """`config` de várias personas numa leitura, para decorar listas de leads.
+
+    A tela de Mensagens precisa do `business_model` de cada lead para saber se
+    o pedido é compra/entrega ou agendamento/conclusão. Uma consulta por lead
+    seria N+1 numa lista de 500.
+    """
+    ids = sorted({str(value) for value in persona_ids if value})
+    if not ids:
+        return {}
+    size = max(1, min(chunk_size, 100))
+    configs: dict[str, dict] = {}
+    for index in range(0, len(ids), size):
+        for row in _q(
+            get_client().table("personas").select("id,config")
+            .in_("id", ids[index:index + size])
+        ):
+            if row.get("id"):
+                configs[str(row["id"])] = dict(row.get("config") or {})
+    return configs
+
+
 def upsert_persona(data: dict) -> None:
     get_client().table("personas").upsert(data, on_conflict="slug").execute()
 
