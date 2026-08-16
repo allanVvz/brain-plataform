@@ -1789,6 +1789,31 @@ def test_retrieval_structural_package_uses_only_the_next_missing_question():
     assert len(required) <= graph_agent_runtime_v3.RAG_CHUNK_LIMIT
 
 
+def test_retrieval_reserves_one_authorized_faq_beyond_full_structural_package():
+    structural = [
+        {"chunk_id": f"structural:{index}"}
+        for index in range(graph_agent_runtime_v3.RAG_CHUNK_LIMIT)
+    ]
+    faq = [{"chunk_id": "faq:current-turn"}]
+
+    optional_slots = graph_agent_runtime_v3._optional_retrieval_chunk_slots(
+        structural, faq,
+    )
+
+    assert optional_slots == 0
+    assert len(structural) + len(faq) == (
+        graph_agent_runtime_v3.RAG_CHUNK_LIMIT
+        + graph_agent_runtime_v3.RAG_FAQ_CHUNK_RESERVE
+    )
+
+
+def test_retrieval_rejects_more_than_one_reserved_faq_chunk():
+    with pytest.raises(RuntimeError, match="reserved chunk limit"):
+        graph_agent_runtime_v3._optional_retrieval_chunk_slots(
+            [], [{"chunk_id": "faq:a"}, {"chunk_id": "faq:b"}],
+        )
+
+
 def test_repair_package_keeps_exact_chunks_and_one_chunk_per_required_node():
     rows = [
         {
