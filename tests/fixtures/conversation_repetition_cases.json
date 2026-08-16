@@ -40,6 +40,26 @@
     "expected_failures": []
   },
   {
+    "name": "retomada_contextual_com_pergunta_parafraseada",
+    "current_reply": "Perfeito, Beatriz! Vou anotar o polimento localizado também. E sobre o carro, você pretende vender em breve ou vai continuar com ele e quer investir em cuidado e proteção?",
+    "question_node_id": "q:objective",
+    "question_text": "Você pretende vender o carro em breve ou vai continuar com ele e quer investir em cuidado e proteção?",
+    "asked_question_node_ids": ["q:objective"],
+    "max_attempts": 1,
+    "field_pending": true,
+    "expected_failures": []
+  },
+  {
+    "name": "pergunta_parafraseada_sem_ponte",
+    "current_reply": "Você pretende vender em breve ou vai continuar com ele e quer investir em cuidado e proteção?",
+    "question_node_id": "q:objective",
+    "question_text": "Você pretende vender o carro em breve ou vai continuar com ele e quer investir em cuidado e proteção?",
+    "asked_question_node_ids": ["q:objective"],
+    "max_attempts": 1,
+    "field_pending": true,
+    "expected_failures": ["contextual_bridge_required"]
+  },
+  {
     "name": "progressao_para_pergunta_diferente",
     "previous_replies": ["Qual é o seu nome?"],
     "current_reply": "Qual é o seu objetivo?",

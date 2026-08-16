@@ -1,4 +1,6 @@
 export const REPETITION_THRESHOLD = 0.92;
+export const QUESTION_PARAPHRASE_THRESHOLD = 0.80;
+export const QUESTION_SUFFIX_MIN_RATIO = 0.60;
 
 const EMPTY_BRIDGE_TOKENS = new Set([
   "ah", "beleza", "bom", "certo", "claro", "entao", "entendi", "legal",
@@ -58,7 +60,30 @@ function contextualBridge(reply, questionText) {
   const foldedQuestion = normalizeText(questionText);
   if (!foldedReply || !foldedQuestion) return "";
   const offset = foldedReply.lastIndexOf(foldedQuestion);
-  return offset < 0 ? "" : foldedReply.slice(0, offset).trim();
+  if (offset >= 0) return foldedReply.slice(0, offset).trim();
+
+  // Mirror the backend: a close paraphrase of the graph-owned question can
+  // still have an auditable bridge, but a bare paraphrase cannot manufacture
+  // one because only the prefix before the best-matching suffix is returned.
+  const replyTokens = foldedReply.split(/\s+/).filter(Boolean);
+  const questionTokens = foldedQuestion.split(/\s+/).filter(Boolean);
+  const minimumSuffix = Math.max(
+    3,
+    Math.floor(questionTokens.length * QUESTION_SUFFIX_MIN_RATIO),
+  );
+  let bestOffset = -1;
+  let bestScore = 0;
+  for (let tokenOffset = 0; tokenOffset < replyTokens.length; tokenOffset += 1) {
+    const suffixTokens = replyTokens.slice(tokenOffset);
+    if (suffixTokens.length < minimumSuffix) break;
+    const score = semanticSimilarity(suffixTokens.join(" "), foldedQuestion);
+    if (score > bestScore) {
+      bestScore = score;
+      bestOffset = tokenOffset;
+    }
+  }
+  if (bestOffset < 0 || bestScore < QUESTION_PARAPHRASE_THRESHOLD) return "";
+  return replyTokens.slice(0, bestOffset).join(" ").trim();
 }
 
 export function hasSubstantiveContextualBridge(reply, questionText) {

@@ -7,6 +7,8 @@ from typing import Any, Iterable
 
 
 REPETITION_THRESHOLD = 0.92
+QUESTION_PARAPHRASE_THRESHOLD = 0.80
+QUESTION_SUFFIX_MIN_RATIO = 0.60
 _EMPTY_BRIDGE_TOKENS = {
     "ah", "beleza", "bom", "certo", "claro", "entao", "entendi", "legal",
     "ok", "otimo", "perfeito", "sim", "ta", "tudo", "vamos",
@@ -66,9 +68,29 @@ def _contextual_bridge(reply: Any, question_text: Any) -> str:
     if not folded_reply or not folded_question:
         return ""
     offset = folded_reply.rfind(folded_question)
-    if offset < 0:
+    if offset >= 0:
+        return folded_reply[:offset].strip()
+
+    # A contextual resumption remains valid when the model lightly
+    # paraphrases the graph-owned question. Compare token suffixes so the
+    # prefix can still be audited as the bridge; comparing the whole reply
+    # would let a substantive prefix hide a bare repeated question.
+    reply_tokens = folded_reply.split()
+    question_tokens = folded_question.split()
+    minimum_suffix = max(3, int(len(question_tokens) * QUESTION_SUFFIX_MIN_RATIO))
+    best_offset = -1
+    best_score = 0.0
+    for token_offset in range(len(reply_tokens)):
+        suffix_tokens = reply_tokens[token_offset:]
+        if len(suffix_tokens) < minimum_suffix:
+            break
+        score = semantic_similarity(" ".join(suffix_tokens), folded_question)
+        if score > best_score:
+            best_score = score
+            best_offset = token_offset
+    if best_offset < 0 or best_score < QUESTION_PARAPHRASE_THRESHOLD:
         return ""
-    return folded_reply[:offset].strip()
+    return " ".join(reply_tokens[:best_offset]).strip()
 
 
 def has_substantive_contextual_bridge(reply: Any, question_text: Any) -> bool:
