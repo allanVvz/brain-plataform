@@ -6,7 +6,7 @@ from pathlib import Path
 from services import graph_agent_runtime_v3
 
 
-CORPUS_PATH = Path(__file__).parent / "fixtures" / "sdr_flow_cases.json"
+CORPUS_PATH = Path(__file__).parents[1] / "api" / "evaluation" / "sdr_flow_cases.json"
 CORPUS = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
 CASES = {case["id"]: case for case in CORPUS["cases"]}
 

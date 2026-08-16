@@ -64,7 +64,7 @@ _WA_ARTIFACTS = _ROOT_DIR / "test-artifacts" / "wa-validator"
 _WA_RUNNER_URL = (os.environ.get("WA_VALIDATOR_RUNNER_URL") or "").rstrip("/")
 _BRAIN_API_URL = os.environ.get("BRAIN_API_URL", "http://localhost:8080")
 _CUSTOMER_PROFILES_PATH = _API_DIR / "evaluation" / "wa_validator_customer_profiles.json"
-_SDR_FLOW_CORPUS_PATH = _ROOT_DIR / "tests" / "fixtures" / "sdr_flow_cases.json"
+_SDR_FLOW_CORPUS_PATH = _API_DIR / "evaluation" / "sdr_flow_cases.json"
 
 # WA Validator sessions live in Supabase, not a plain in-process dict.
 # Confirmed live 2026-08-08: production runs GUNICORN_WORKERS=2, so a

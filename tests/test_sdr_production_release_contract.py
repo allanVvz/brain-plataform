@@ -12,6 +12,10 @@ WORKFLOW = (
 PORTAL_LAYOUT = (
     ROOT / "dashboard" / "app" / "clientes" / "[personaSlug]" / "layout.tsx"
 ).read_text(encoding="utf-8")
+WA_VALIDATOR = (
+    ROOT / "api" / "services" / "wa_validator_service.py"
+).read_text(encoding="utf-8")
+API_DOCKERFILE = (ROOT / "api" / "Dockerfile").read_text(encoding="utf-8")
 
 
 def test_production_deploy_leaves_workers_paused_for_controlled_validation():
@@ -30,3 +34,11 @@ def test_release_validator_requires_this_release_migration_and_exact_sha():
 
 def test_portal_build_does_not_download_google_fonts_during_release():
     assert "next/font/google" not in PORTAL_LAYOUT
+
+
+def test_sdr_corpus_is_packaged_inside_the_production_api_image():
+    corpus = ROOT / "api" / "evaluation" / "sdr_flow_cases.json"
+    assert corpus.is_file()
+    assert '_API_DIR / "evaluation" / "sdr_flow_cases.json"' in WA_VALIDATOR
+    assert "COPY --chown=appuser:appuser api/ /app/" in API_DOCKERFILE
+    assert 'ROOT_DIR / "tests" / "fixtures"' not in WA_VALIDATOR
