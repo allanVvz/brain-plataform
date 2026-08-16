@@ -28,6 +28,8 @@ from services import (
     supabase_client,
     whatsapp_outbox,
 )
+from routes import agents as agents_routes
+from routes.agents import JourneyEventBody
 from services.whatsapp_providers import get_provider
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -498,6 +500,25 @@ def _set_ai(lead_id: int, request: Request, persona_slug: str, paused: bool):
         metadata["vitoria_state"] = state
         supabase_client.update_lead(lead_id, {"metadata": metadata})
     return {"ok": True, "lead_id": lead_id, "ai_paused": paused}
+
+
+@router.post("/leads/{lead_id}/journey-events")
+def journey_event(
+    lead_id: int, body: JourneyEventBody, request: Request,
+    persona_slug: str = Query(...),
+):
+    """Desfecho comercial do pedido, na variante do portal.
+
+    A rota gemea em `/agents` nao serve o portal: o middleware de auth so
+    libera `/portal/*`, `/auth/*` e a midia de asset para contas `client`,
+    entao um operador do portal levava 403 antes de chegar a rota. Aqui o
+    escopo tambem fica mais estreito -- `_lead` confirma que a lead pertence a
+    persona da URL, checagem que a rota de `/agents` nao faz.
+    """
+    persona = _persona(persona_slug, request, "edit")
+    _lead(lead_id, persona["id"])
+    user = auth_service.current_user(request)
+    return agents_routes.record_journey_event(lead_id, body, str(user["id"]))
 
 
 @router.post("/leads/{lead_id}/ai/pause")

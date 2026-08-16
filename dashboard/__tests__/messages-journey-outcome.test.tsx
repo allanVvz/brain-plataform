@@ -47,9 +47,13 @@ const h = vi.hoisted(() => ({
   recordJourneyEvent: vi.fn(async () => ({
     event_type: "delivered", deduplicated: false, new_journey_created: false,
   })),
+  portalRecordJourneyEvent: vi.fn(async () => ({
+    event_type: "delivered", deduplicated: false, new_journey_created: false,
+  })),
   lead: { current: null as any },
 }));
-const recordJourneyEvent = h.recordJourneyEvent;
+const recordJourneyEvent = h.portalRecordJourneyEvent;
+const adminRecordJourneyEvent = h.recordJourneyEvent;
 
 function setLead(lead: Record<string, unknown>) {
   h.lead.current = lead;
@@ -72,6 +76,7 @@ vi.mock("@/lib/api", () => ({
     portalResumeAi: vi.fn(async () => ({})),
     portalAcknowledgeHandoff: vi.fn(async () => ({})),
     recordJourneyEvent: h.recordJourneyEvent,
+    portalRecordJourneyEvent: h.portalRecordJourneyEvent,
   },
   ApiError: class ApiError extends Error {},
 }));
@@ -122,6 +127,7 @@ describe("Mensagens — desfecho da jornada", () => {
   beforeEach(() => {
     installMatchMedia();
     recordJourneyEvent.mockClear();
+    adminRecordJourneyEvent.mockClear();
     setLead(makeLead());
   });
 
@@ -168,7 +174,7 @@ describe("Mensagens — desfecho da jornada", () => {
 
     fireEvent.click(toggle);
     await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(recordJourneyEvent).toHaveBeenCalledWith(1, expect.objectContaining({
+    expect(recordJourneyEvent).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
       event_type: "converted",
       idempotency_key: "dashboard:1:converted",
     }));
@@ -182,7 +188,7 @@ describe("Mensagens — desfecho da jornada", () => {
 
     fireEvent.click(toggle);
     await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(recordJourneyEvent).toHaveBeenCalledWith(1, expect.objectContaining({
+    expect(recordJourneyEvent).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
       event_type: "conversion_reverted",
       idempotency_key: "dashboard:1:conversion_reverted",
     }));
@@ -207,7 +213,7 @@ describe("Mensagens — desfecho da jornada", () => {
     expect(within(rail).getByRole("button", { name: /Venda/ })).toBeTruthy();
     fireEvent.click(within(rail).getByRole("button", { name: /Venda/ }));
     await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(recordJourneyEvent).toHaveBeenCalledWith(1, expect.objectContaining({
+    expect(recordJourneyEvent).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
       event_type: "sale_recorded",
     }));
   });
@@ -220,7 +226,7 @@ describe("Mensagens — desfecho da jornada", () => {
     expect(within(rail).queryByRole("button", { name: /Venda/ })).toBeNull();
     fireEvent.click(within(rail).getByRole("button", { name: /Agendamento/ }));
     await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(recordJourneyEvent).toHaveBeenCalledWith(1, expect.objectContaining({
+    expect(recordJourneyEvent).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
       event_type: "appointment_booked",
     }));
   });
@@ -238,7 +244,7 @@ describe("Mensagens — desfecho da jornada", () => {
 
     fireEvent.click(concluir);
     await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(recordJourneyEvent).toHaveBeenCalledWith(1, expect.objectContaining({
+    expect(recordJourneyEvent).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
       event_type: "service_completed",
       idempotency_key: "dashboard:1:service_completed",
     }));
@@ -280,6 +286,20 @@ describe("Mensagens — desfecho da jornada", () => {
     setLead(makeLead({ journey_outcome: null }));
     const rail = await openLeadWithRail();
     expect(within(rail).getByRole("button", { name: /Fechar pedido/ })).toBeDisabled();
+  });
+
+  it("no portal, o evento vai pela rota do portal e nunca por /agents", async () => {
+    // O middleware de auth so libera `/portal/*` para contas `client`: chamar
+    // `/agents/leads/{ref}/journey-events` do portal devolvia 403 "Acesso
+    // negado." antes de chegar ao backend.
+    setLead(makeLead({ journey_outcome: "convertido" }));
+    const rail = await openLeadWithRail();
+    fireEvent.click(within(rail).getByRole("button", { name: /Venda/ }));
+    await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
+    expect(adminRecordJourneyEvent).not.toHaveBeenCalled();
+    expect(recordJourneyEvent).toHaveBeenCalledWith(
+      "test-persona", 1, expect.objectContaining({ event_type: "sale_recorded" }),
+    );
   });
 
   it("sem permissão de edição, nenhuma ação é oferecida", async () => {

@@ -611,6 +611,13 @@ function StageBadge({ stage }: { stage: string | null }) {
 // rotulando errado o que aconteceu.
 type OfferingKind = "sales" | "appointment";
 
+// Quem grava o evento muda com a superficie: o portal tem rota propria porque
+// o middleware de auth nao libera `/agents/*` para contas `client`.
+type RecordJourneyEvent = (
+  leadRef: number,
+  body: Parameters<typeof api.recordJourneyEvent>[1],
+) => Promise<unknown>;
+
 const OFFERING: Record<OfferingKind, {
   aberto: { label: string; event: JourneyEventType };
   concluido: { label: string; event: JourneyEventType };
@@ -634,12 +641,13 @@ function offeringKind(lead: Lead): OfferingKind {
 // leitura se corrige. Depois da venda vira fato e o controle trava — desfazer
 // passaria por estorno em sales_conversions, que é outro contrato.
 function ToggleConversao({
-  lead, outcome, canEdit, onRecorded,
+  lead, outcome, canEdit, onRecorded, recordEvent,
 }: {
   lead: Lead;
   outcome: JourneyOutcome | null;
   canEdit: boolean;
   onRecorded: () => void | Promise<void>;
+  recordEvent: RecordJourneyEvent;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -657,7 +665,7 @@ function ToggleConversao({
     setPending(true);
     setError(null);
     try {
-      await api.recordJourneyEvent(lead.id, {
+      await recordEvent(lead.id, {
         event_type: event,
         idempotency_key: `dashboard:${lead.id}:${event}`,
         source: "dashboard",
@@ -670,7 +678,7 @@ function ToggleConversao({
     } finally {
       setPending(false);
     }
-  }, [converted, lead.id, onRecorded]);
+  }, [converted, lead.id, onRecorded, recordEvent]);
 
   const content = (
     <span className="inline-flex items-center gap-[7px]">
@@ -726,12 +734,13 @@ function ToggleConversao({
 }
 
 function JourneyActions({
-  lead, outcome, canEdit, onRecorded,
+  lead, outcome, canEdit, onRecorded, recordEvent,
 }: {
   lead: Lead;
   outcome: JourneyOutcome | null;
   canEdit: boolean;
   onRecorded: () => void | Promise<void>;
+  recordEvent: RecordJourneyEvent;
 }) {
   const [pending, setPending] = useState<string | null>(null);
   const [fechando, setFechando] = useState(false);
@@ -747,7 +756,7 @@ function JourneyActions({
     setPending(key);
     setError(null);
     try {
-      await api.recordJourneyEvent(lead.id, {
+      await recordEvent(lead.id, {
         event_type: event,
         // Determinística de propósito: dois cliques no mesmo botão da mesma
         // jornada colidem na chave e o backend devolve deduplicated:true em
@@ -764,7 +773,7 @@ function JourneyActions({
       setPending(null);
       setFechando(false);
     }
-  }, [lead.id, onRecorded]);
+  }, [lead.id, onRecorded, recordEvent]);
 
   if (!canEdit) return null;
 
@@ -1881,6 +1890,17 @@ export function MessagesLayout({
     () => normalizeJourneyOutcome(selectedLead?.journey_outcome),
     [selectedLead?.journey_outcome],
   );
+  // O portal nao pode chamar `/agents/*`: o middleware de auth so libera
+  // `/portal/*` para contas `client`, e a rota admin responde 403 antes de
+  // chegar ao backend. A rota do portal ainda confirma que a lead pertence a
+  // persona da URL, checagem que a de `/agents` nao faz.
+  const recordJourneyEvent = useCallback<RecordJourneyEvent>(
+    (leadRef, body) =>
+      isPortal
+        ? api.portalRecordJourneyEvent(portalSlug!, leadRef, body)
+        : api.recordJourneyEvent(leadRef, body),
+    [isPortal, portalSlug],
+  );
 
   useEffect(() => {
     if (!selectedLead || !personaFilterId) return;
@@ -2682,6 +2702,7 @@ export function MessagesLayout({
                   outcome={selectedOutcome}
                   canEdit={canEdit}
                   onRecorded={() => refreshSelectedLead(selectedLead.id)}
+                  recordEvent={recordJourneyEvent}
                 />
               </div>
             </div>
@@ -2730,6 +2751,7 @@ export function MessagesLayout({
                 outcome={selectedOutcome}
                 canEdit={canEdit}
                 onRecorded={() => refreshSelectedLead(selectedLead.id)}
+                recordEvent={recordJourneyEvent}
               />
             </div>
           )}

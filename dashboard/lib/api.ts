@@ -297,11 +297,12 @@ export const api = {
     interesse_produto?: string;
     commercial_note?: Record<string, string>;
   }) => req<any>(`/leads/${leadRef}`, { method: "PATCH", body: JSON.stringify(body) }),
-  // Desfecho comercial da jornada. A rota é a mesma para admin e portal: o
-  // backend autoriza por capability "edit" na persona do lead, então não há
-  // variante /portal. `idempotency_key` é determinística — dois cliques no
-  // mesmo botão da mesma jornada devolvem deduplicated:true em vez de gravar
-  // o evento duas vezes.
+  // Desfecho comercial da jornada, variante admin. O portal NÃO pode usar esta
+  // rota: o middleware de auth só libera `/portal/*`, `/auth/*` e a mídia de
+  // asset para contas `client`, então ela responde 403 antes de chegar ao
+  // backend. Use `portalRecordJourneyEvent` no portal.
+  // `idempotency_key` é determinística — dois cliques no mesmo botão da mesma
+  // jornada devolvem deduplicated:true em vez de gravar o evento duas vezes.
   recordJourneyEvent: (
     leadRef: number,
     body: {
@@ -422,6 +423,21 @@ export const api = {
   updatePortalLead: (slug: string, leadRef: number | string, body: Record<string, unknown>) =>
     req<any>(`/portal/leads/${leadRef}?${personaQuery(slug)}`, {
       method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  portalRecordJourneyEvent: (
+    slug: string,
+    leadRef: number | string,
+    body: {
+      event_type: JourneyEventType;
+      idempotency_key: string;
+      source: string;
+      occurred_at: string;
+      metadata?: Record<string, unknown>;
+    },
+  ) =>
+    req<JourneyEventResult>(`/portal/leads/${leadRef}/journey-events?${personaQuery(slug)}`, {
+      method: "POST",
       body: JSON.stringify(body),
     }),
   portalPauseAi: (slug: string, leadRef: number) =>
