@@ -97,7 +97,7 @@ def test_validate_graph_json_rejects_incomplete_graph_owned_conversation_policy(
                 "confirmed_acknowledgement": "Thank you.",
                 "silent_handoff": False,
             },
-            "question_repetition": {"max_attempts": 2},
+            "question_repetition": {"max_attempts": 1},
         },
     }
     graph = GraphJson.model_validate(payload)
@@ -109,7 +109,7 @@ def test_validate_graph_json_rejects_incomplete_graph_owned_conversation_policy(
     assert "conversation_policy.qualification.incomplete_handoff_template must be non-empty" in errors
     assert "conversation_policy.direct_booking.intent_aliases must be non-empty" in errors
     assert "conversation_policy.direct_booking.silent_handoff must be true" in errors
-    assert "conversation_policy.question_repetition.max_attempts must equal 1" in errors
+    assert "conversation_policy.question_repetition.max_attempts must equal 2" in errors
     assert "appointment persona requires conversation_policy.doubt_handling" in errors
 
 

@@ -93,7 +93,7 @@ def fact_compatible(field: dict[str, Any], fact: dict[str, Any] | None) -> bool:
 
 
 def _resolved_for_field_owner(field: dict[str, Any], fact: dict[str, Any] | None) -> bool:
-    """field_resolved(), plus an owner_node_id match.
+    """Qualification requires a known value from the declared owner.
 
     Confirmed live 2026-08-06: field keys are shared across every product's
     field declarations (nome_cliente, modelo_veiculo, servico, ...), each
@@ -108,7 +108,12 @@ def _resolved_for_field_owner(field: dict[str, Any], fact: dict[str, Any] | None
     in fact_compatible()'s schema re-validation (meant for publication
     changes, not plain branch switches).
     """
-    return field_resolved(field, fact) and bool(fact) and fact.get("owner_node_id") == field.get("owner_node_id")
+    return bool(
+        fact
+        and fact.get("owner_node_id") == field.get("owner_node_id")
+        and fact.get("status") == "known"
+        and fact.get("value") not in (None, "")
+    )
 
 
 def _applicable_required_fields(contract: dict[str, Any], facts: dict[str, Any]) -> list[dict[str, Any]]:
@@ -135,7 +140,7 @@ def askable_pending_fields(
         if not (
             (fact := facts.get(field["key"]))
             and fact.get("owner_node_id") == field.get("owner_node_id")
-            and fact.get("status") == "unknown"
+            and fact.get("status") in {"unknown", "declined"}
         )
     ]
 
@@ -203,10 +208,37 @@ def aggregate_askable_fields(
         )
         if not any(
             fact.get("owner_node_id") == field.get("owner_node_id")
-            and fact.get("status") == "unknown"
+            and fact.get("status") in {"unknown", "declined"}
             for fact in facts_by_key.get(str(field.get("key") or ""), [])
         )
     ]
+
+
+def aggregate_required_field_count(
+    branch_contracts: dict[str, dict[str, Any]],
+    active_branch_anchors: list[str],
+    facts_by_key: dict[str, list[dict[str, Any]]],
+) -> int:
+    """Count applicable requirements once per field owner across services."""
+    seen: set[tuple[str, str]] = set()
+    for anchor in active_branch_anchors:
+        contract = branch_contracts.get(anchor) or {}
+        scoped_facts = {
+            str(field.get("key") or ""): next(
+                (
+                    fact for fact in facts_by_key.get(str(field.get("key") or ""), [])
+                    if fact.get("owner_node_id") == field.get("owner_node_id")
+                ),
+                None,
+            )
+            for field in contract.get("fields") or []
+        }
+        for field in _applicable_required_fields(contract, scoped_facts):
+            seen.add((
+                str(field.get("key") or ""),
+                str(field.get("owner_node_id") or anchor),
+            ))
+    return len(seen)
 
 
 def _claim_policy(contract: dict[str, Any], claim_type: str) -> list[dict[str, Any]]:
@@ -262,6 +294,93 @@ def _schema_error(schema: dict[str, Any], value: Any) -> str | None:
     if "enum" in schema and value not in schema["enum"]:
         return "value is not in enum"
     return None
+
+
+def _canonical_field_value(
+    field: dict[str, Any], value: Any, evidence_span: Any,
+) -> tuple[Any, str | None]:
+    """Validate and normalize a value using only its compiled declaration."""
+    validation = field.get("validation") or {}
+    mode = str(validation.get("mode") or "schema")
+    if mode == "enum":
+        candidates = {_fold(str(value)), _fold(str(evidence_span))}
+        for item in validation.get("values") or []:
+            if not isinstance(item, dict):
+                continue
+            canonical = item.get("value")
+            published = [canonical, *(item.get("aliases") or [])]
+            if any(_fold(str(option)) in candidates for option in published):
+                return canonical, None
+        return value, "value is not in published enum"
+    if mode == "semantic":
+        if not isinstance(value, str) or not value.strip():
+            return value, "semantic value must be non-empty text"
+        semantic_type = str(validation.get("semantic_type") or "")
+        if semantic_type == "human_name":
+            folded = _fold(value)
+            tokens = folded.split()
+            if not (1 <= len(tokens) <= 6) or any(any(char.isdigit() for char in token) for token in tokens):
+                return value, "value is not a plausible human name"
+        schema_error = _schema_error(field.get("value_schema") or {}, value)
+        return value.strip(), schema_error
+    return value, _schema_error(field.get("value_schema") or {}, value)
+
+
+def check_service_operations(
+    *,
+    document: dict[str, Any],
+    message: str,
+    operations: list[dict[str, Any]],
+    active_branch_node_ids: list[str],
+) -> dict[str, Any]:
+    """Prove a first-class service-set transition independently of fields."""
+    anchors = set(document.get("branch_anchors") or [])
+    after = list(dict.fromkeys(str(value) for value in active_branch_node_ids if value))
+    errors: list[str] = []
+    applied: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for operation in operations:
+        action = str(operation.get("action") or "")
+        anchor = str(operation.get("branch_anchor_node_id") or "")
+        identity = (action, anchor)
+        if identity in seen:
+            errors.append(f"duplicate_service_operation:{action}:{anchor}")
+            continue
+        seen.add(identity)
+        if action not in {"add", "keep", "drop"}:
+            errors.append(f"invalid_service_operation:{action}")
+            continue
+        if anchor not in anchors:
+            errors.append(f"service_anchor_not_published:{anchor}")
+            continue
+        expected_checksum = str(
+            ((document.get("coordinates") or {}).get(anchor) or {}).get("path_checksum")
+            or ""
+        )
+        if str(operation.get("branch_path_checksum") or "") != expected_checksum:
+            errors.append(f"service_path_checksum_mismatch:{anchor}")
+        if not _literal_span(message, operation.get("evidence_span")):
+            errors.append(f"service_evidence_not_literal:{anchor}")
+        if action == "add":
+            if anchor in after:
+                errors.append(f"service_add_duplicate:{anchor}")
+            else:
+                after.append(anchor)
+        elif action == "keep":
+            if anchor not in after:
+                errors.append(f"service_keep_inactive:{anchor}")
+        elif anchor not in after:
+            errors.append(f"service_drop_inactive:{anchor}")
+        else:
+            after.remove(anchor)
+        applied.append(dict(operation))
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "operations": applied,
+        "previous_active_branch_node_ids": list(active_branch_node_ids),
+        "next_active_branch_node_ids": after,
+    }
 
 
 def check(
@@ -365,6 +484,7 @@ def check(
     facts = next_ledger.setdefault("facts", {})
     fields = {field["key"]: field for field in contract.get("fields") or []}
     accepted_facts: list[dict[str, Any]] = []
+    field_validation: list[dict[str, Any]] = []
     proposal_facts = proposal.get("extracted_facts") or []
     duplicate_keys = {
         str(fact.get("field_key") or "") for fact in proposal_facts
@@ -401,7 +521,9 @@ def check(
         if status == "known":
             if _MEDIA_PLACEHOLDER.fullmatch(str(value or "").strip()):
                 errors.append(f"fact_evidence_placeholder:{key}")
-            schema_error = _schema_error(field.get("value_schema") or {}, value)
+            value, schema_error = _canonical_field_value(
+                field, value, fact.get("evidence_span"),
+            )
             if schema_error:
                 errors.append(f"fact_schema_invalid:{key}:{schema_error}")
         elif value is not None:
@@ -437,13 +559,28 @@ def check(
         if not _condition_matches(field.get("condition"), facts):
             errors.append(f"fact_condition_not_met:{key}")
         if len(errors) != fact_error_count:
+            field_validation.append({
+                "field_key": key,
+                "owner_node_id": fact.get("owner_node_id"),
+                "valid": False,
+                "errors": errors[fact_error_count:],
+            })
             continue
         accepted = {
-            **fact, "field_key": key, "source_message_id": source_message_id,
+            **fact, "value": value, "field_key": key,
+            "source_message_id": source_message_id,
             "confidence": float(fact.get("confidence") or 0),
         }
         facts[key] = accepted
         accepted_facts.append(accepted)
+        field_validation.append({
+            "field_key": key,
+            "owner_node_id": fact.get("owner_node_id"),
+            "valid": True,
+            "status": status,
+            "canonical_value": value if status == "known" else None,
+            "errors": [],
+        })
 
     missing = pending_fields(contract, facts)
     missing_keys = [field["key"] for field in missing]
@@ -552,6 +689,7 @@ def check(
         "next_question_node_id": question_id,
         "qualification_complete": not missing,
         "required_field_count": required_field_count(contract, facts),
+        "field_validation": field_validation,
     }
 
 

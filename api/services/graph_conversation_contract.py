@@ -29,13 +29,14 @@ def resolve_field_owner_node_id(
     *,
     branch_node: dict[str, Any] | None = None,
     persona_node: dict[str, Any] | None = None,
+    declaration_node: dict[str, Any] | None = None,
 ) -> str:
     """Resolve owner_node_id for a field declaration based on its scope.
 
-    A field may declare `scope: "persona"` to indicate it is shared across all
-    branches (e.g., name, vehicle model, contact info). When scope is "persona",
-    the compiler assigns the persona node as owner; when scope is "branch" (or
-    omitted, the default), it uses the branch's own node ID.
+    ``scope: "declaration"`` binds the fact to the node that declares it. This
+    lets Persona, Campaign and branch nodes publish different commercial notes
+    without teaching the runtime any field or customer names. ``persona`` and
+    ``branch`` remain supported for existing publications.
 
     This generalizes the pattern already applied to Aurora's product branches
     (publish_aurora_graph.py:90) to all branch types and all personas,
@@ -55,6 +56,8 @@ def resolve_field_owner_node_id(
 
     # Scope-driven resolution
     scope = field.get("scope", "branch")
+    if scope == "declaration" and declaration_node:
+        return str(declaration_node.get("id"))
     if scope == "persona" and persona_node:
         return str(persona_node.get("id"))
     if scope == "branch" and branch_node:

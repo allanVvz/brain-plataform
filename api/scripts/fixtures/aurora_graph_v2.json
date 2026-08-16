@@ -46,7 +46,7 @@
             "after_seconds": 300
           },
           "question_repetition": {
-            "max_attempts": 1,
+            "max_attempts": 2,
             "restart_requires": [
               "qualification_confirmed",
               "purchase_completed"

@@ -34,6 +34,12 @@ def build_graph() -> GraphJson:
     graph = graph_json_v21_adapter.upgrade_to_v21(legacy)
     graph = graph_conversation_contract.materialize_qualification_questions(graph)
     persona_node = next(node for node in graph.nodes if node.node_type == "persona")
+    conversation_policy = dict((persona_node.data or {}).get("conversation_policy") or {})
+    conversation_policy["question_repetition"] = {
+        **dict(conversation_policy.get("question_repetition") or {}),
+        "max_attempts": 2,
+    }
+    persona_node.data = {**dict(persona_node.data or {}), "conversation_policy": conversation_policy}
     appointment_policy = (persona_node.data or {}).get("appointment_policy") or {}
     question_ids = appointment_policy.get("field_question_node_ids") or {}
     conditional_fields = appointment_policy.get("conditional_fields") or {}
@@ -49,6 +55,82 @@ def build_graph() -> GraphJson:
         if field_key == "can_visit_in_person":
             return {"type": ["string", "boolean"]}
         return {"type": "string", "minLength": 1}
+
+    service_values = [
+        {
+            "value": node.slug,
+            "aliases": list(dict.fromkeys([
+                str(node.title or node.label or node.slug),
+                *[str(value) for value in ((node.data or {}).get("aliases") or [])],
+            ])),
+        }
+        for node in graph.nodes if node.node_type in {"product", "service"}
+    ]
+
+    def field_validation(field_key: str) -> dict:
+        invalid_response = "Não consegui entender essa informação com segurança."
+        if field_key == "servico":
+            return {
+                "mode": "enum", "values": service_values,
+                "invalid_response": "Não entendi exatamente qual serviço você quis dizer.",
+            }
+        if field_key == "objective":
+            return {
+                "mode": "enum",
+                "values": [
+                    {
+                        "value": "vender_em_breve",
+                        "aliases": ["vender o carro", "pretendo vender", "vender em breve"],
+                    },
+                    {
+                        "value": "continuar_cuidar_proteger",
+                        "aliases": [
+                            "continuar com o veículo e cuidar bem dele",
+                            "continuar com o carro",
+                            "cuidado e proteção",
+                        ],
+                    },
+                ],
+                "invalid_response": "Não consegui identificar se o objetivo é vender ou continuar cuidando do veículo.",
+            }
+        if field_key == "can_visit_in_person":
+            return {
+                "mode": "enum",
+                "values": [
+                    {"value": True, "aliases": ["sim", "consigo levar", "posso levar"]},
+                    {"value": False, "aliases": ["não", "prefiro seguir por aqui", "não consigo levar"]},
+                ],
+                "invalid_response": invalid_response,
+            }
+        if field_key == "vehicle_year":
+            return {"mode": "schema", "invalid_response": invalid_response}
+        semantic = {
+            "nome_cliente": {
+                "semantic_type": "human_name",
+                "description": "Nome humano pelo qual o cliente quer ser chamado.",
+                "examples": ["Beatriz", "José", "Ana Paula"],
+            },
+            "modelo_veiculo": {
+                "description": "Modelo ou identificação comercial do veículo.",
+                "examples": ["Onix", "Civic", "Corolla Cross"],
+            },
+            "condicao": {
+                "description": "Relato literal do estado atual ou incômodo percebido no veículo.",
+                "examples": ["riscos na porta", "bancos manchados"],
+            },
+            "vehicle_color": {
+                "description": "Cor informada para o veículo.",
+                "examples": ["prata", "preto", "azul"],
+            },
+            "reclamacao_relato": {
+                "description": "Relato literal do cliente sobre a ocorrência reclamada.",
+                "examples": ["o problema voltou depois do atendimento"],
+            },
+        }.get(field_key) or {
+            "description": "Informação comercial livre declarada por este node.",
+            "examples": ["informação fornecida pelo cliente"],
+        }
+        return {"mode": "semantic", **semantic, "invalid_response": invalid_response}
 
     for node in graph.nodes:
         data = dict(node.data or {})
@@ -95,6 +177,7 @@ def build_graph() -> GraphJson:
                     ["known", "unknown"] if field_key == "vehicle_color" else ["known"]
                 ),
                 "value_schema": value_schema(field_key),
+                "validation": field_validation(field_key),
                 "normalization": (
                     "Retorne quatro dígitos." if field_key == "vehicle_year" else None
                 ),
@@ -138,7 +221,12 @@ def build_graph() -> GraphJson:
             # materialize_qualification_questions() has run.
             capabilities["branch_anchor"] = True
             data["qualification"] = {"fields": [
-                {**field, "question_node_id": question_ids.get(str(field.get("key")))}
+                {
+                    **field,
+                    "question_node_id": question_ids.get(str(field.get("key"))),
+                    "validation": field.get("validation")
+                    or field_validation(str(field.get("key"))),
+                }
                 for field in ((data.get("qualification") or {}).get("fields") or [])
                 if isinstance(field, dict) and field.get("key")
             ]}

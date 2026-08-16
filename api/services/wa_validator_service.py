@@ -1700,6 +1700,20 @@ def _semantic_turn_audit(
         if first_question_offset >= 0
     )
     qualification_complete = bool(proof.get("qualification_complete"))
+    collection_complete = bool(proof.get("collection_complete"))
+    consumed_service_values = {
+        _semantic_fold(str(span.get("text") or ""))
+        for span in proof.get("consumed_service_spans") or []
+        if str(span.get("text") or "").strip()
+    }
+    service_value_not_reused_as_field = not any(
+        str(fact.get("field_key") or "") != "servico"
+        and (
+            _semantic_fold(str(fact.get("value") or "")) in consumed_service_values
+            or _semantic_fold(str(fact.get("evidence_span") or "")) in consumed_service_values
+        )
+        for fact in proof.get("accepted_facts") or []
+    )
     handoff_observed = bool(
         turn.get("handoff")
         or proof.get("handoff_requested")
@@ -1717,6 +1731,7 @@ def _semantic_turn_audit(
             )
         ),
         "all_intended_facts_extracted": accepted_all,
+        "service_value_not_reused_as_field": service_value_not_reused_as_field,
         "received_content_acknowledged": not intended or bool(declarative_parts),
         "first_missing_field_only": (
             (not missing and question_id is None)
@@ -1779,7 +1794,7 @@ def _semantic_turn_audit(
             or previous_asked_field not in intended
         ),
         "handoff_only_after_completion": (
-            not handoff_observed or qualification_complete
+            not handoff_observed or qualification_complete or collection_complete
         ),
         "expected_handoff_reached": (
             not qualification_complete or not expected_handoff or handoff_observed

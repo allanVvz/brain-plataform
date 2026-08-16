@@ -214,8 +214,8 @@ def test_compiler_rejects_factual_faq_without_self_authorized_claim():
             ],
         )
 
-@pytest.mark.parametrize("status", ["unknown", "declined", "needs_confirmation"])
-def test_semantic_fact_statuses_are_contract_owned(status):
+@pytest.mark.parametrize("status", ["unknown", "declined"])
+def test_non_known_terminal_statuses_finish_collection_without_qualification(status):
     document = compiled_fixture(accepted=["known", status])
     value = proposal(document, branch_action="keep", branch_evidence_span="", extracted_facts=[{
         "field_key": "metragem", "owner_node_id": "branch:a", "status": status,
@@ -225,7 +225,23 @@ def test_semantic_fact_statuses_are_contract_owned(status):
                      cited_node_ids=["branch:a"], cited_chunk_ids=[])
     proof = check(document, value, active="branch:a", message="não sei")
     assert proof["valid"], proof["errors"]
-    assert proof["missing_fields"] == []
+    assert proof["missing_fields"] == ["metragem"]
+
+
+def test_needs_confirmation_remains_askable():
+    document = compiled_fixture(accepted=["known", "needs_confirmation"])
+    value = proposal(document, branch_action="keep", branch_evidence_span="", extracted_facts=[{
+        "field_key": "metragem", "owner_node_id": "branch:a",
+        "status": "needs_confirmation", "value": None,
+        "source_message_id": "msg-1", "evidence_span": "talvez 20 metros",
+        "confidence": 0.9,
+    }], next_question_node_id="question:a", qualification_complete=False,
+                     cited_node_ids=["branch:a"], cited_chunk_ids=[])
+
+    proof = check(document, value, active="branch:a", message="talvez 20 metros")
+
+    assert proof["valid"], proof["errors"]
+    assert proof["missing_fields"] == ["metragem"]
 
 
 def test_unknown_rejected_and_json_schema_is_generic():
@@ -993,7 +1009,7 @@ def test_repeated_question_is_allowed_only_while_its_field_remains_pending():
         next_question_node_id="q:name",
         aggregate_missing=[{"key": "name", "question_node_id": "q:name"}],
         asked_question_node_ids=asked,
-    ) is False
+    ) is True
     assert graph_agent_runtime_v3._repeated_pending_question_is_allowed(
         next_question_node_id="q:name",
         aggregate_missing=[{"key": "objective", "question_node_id": "q:objective"}],
@@ -1044,7 +1060,159 @@ def test_third_pending_question_attempt_marks_field_unknown():
         "field_key": "name", "owner_node_id": "persona:one",
         "status": "unknown", "value": None, "source_message_id": "",
         "evidence_span": "", "confidence": 1.0,
+        "metadata": {"reason": "ignored_twice"},
     }
+
+
+def test_explicit_unknown_marks_field_unknown_immediately():
+    contract = {
+        "fields": [{
+            "key": "objective", "owner_node_id": "persona:one", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:objective",
+        }],
+        "questions": {"q:objective": {"field_key": "objective", "text": "Qual é o objetivo?"}},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"role": "user", "content": "Não sei"}],
+        cart={"facts": {}, "asked_question_node_ids": ["q:objective"]},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="checksum:a", extracted_facts=[], claims=[],
+        next_question_node_id="q:objective", cited_node_ids=[], cited_chunk_ids=[],
+        reply="", qualification_complete=False, handoff_requested=False,
+    )
+
+    fact = graph_agent_runtime_v3._unanswered_fact_after_question_limit(
+        context=context, contract=contract, ledger_facts={}, proposal=proposal,
+    )
+
+    assert fact and fact["status"] == "unknown"
+    assert fact["metadata"] == {"reason": "explicit_unknown"}
+
+
+def test_commercial_projection_separates_common_and_per_service_facts():
+    document = {
+        "node_by_id": {
+            "branch:a": {"slug": "service-a", "title": "Service A"},
+            "branch:b": {"slug": "service-b", "title": "Service B"},
+        },
+        "branch_contracts": {
+            "branch:a": {"fields": [
+                {"key": "name", "owner_node_id": "persona"},
+                {"key": "condition", "owner_node_id": "branch:a"},
+            ]},
+            "branch:b": {"fields": [
+                {"key": "name", "owner_node_id": "persona"},
+                {"key": "condition", "owner_node_id": "branch:b"},
+            ]},
+        },
+    }
+    projection = graph_agent_runtime_v3._commercial_note_projection(
+        document=document,
+        active_branch_ids=["branch:a", "branch:b"],
+        focused_branch_id="branch:b",
+        facts_by_key={
+            "name": [{"owner_node_id": "persona", "status": "known", "value": "José"}],
+            "condition": [
+                {"owner_node_id": "branch:a", "status": "known", "value": "riscos"},
+                {"owner_node_id": "branch:b", "status": "unknown", "value": None},
+            ],
+        },
+    )
+
+    assert projection["common_facts"] == {"name": "José"}
+    assert projection["services"]["branch:a"]["facts"] == {"condition": "riscos"}
+    assert projection["services"]["branch:b"]["facts"] == {"condition": "desconhecido"}
+    assert projection["focused_service_id"] == "branch:b"
+
+
+def test_drop_only_service_operation_does_not_invent_focus_evidence():
+    document = {
+        "node_by_id": {
+            "branch:a": {"slug": "service-a", "title": "Service A"},
+            "branch:b": {"slug": "service-b", "title": "Service B"},
+        },
+        "coordinates": {
+            "branch:a": {"path_checksum": "checksum:a"},
+            "branch:b": {"path_checksum": "checksum:b"},
+        },
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"message_id": "msg:1", "role": "user", "content": "Remova Service B"}],
+        cart={"facts": {}}, rag_nodes=[], rag_paths=[], graph_contract={},
+        active_branch_node_id="branch:b",
+        active_branch_node_ids=["branch:a", "branch:b"],
+        retrieval_trace={"service_resolution": {
+            "focused_branch_node_id": "branch:a",
+            "operations": [{
+                "action": "drop", "branch_anchor_node_id": "branch:b",
+                "branch_path_checksum": "checksum:b", "evidence_span": "Service B",
+            }],
+        }},
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:b",
+        branch_path_checksum="checksum:b", extracted_facts=[], claims=[],
+        next_question_node_id=None, cited_node_ids=[], cited_chunk_ids=[],
+        reply="", qualification_complete=False, handoff_requested=False,
+    )
+
+    reconciled = graph_agent_runtime_v3._apply_authoritative_branch_resolution(
+        proposal, context, document,
+    )
+    drop_facts = graph_agent_runtime_v3._service_facts_for_operations(
+        operations=[item.model_dump(mode="json") for item in reconciled.service_operations],
+        document=document, grouped_facts={}, source_message_id="msg:1",
+    )
+
+    assert reconciled.extracted_facts == []
+    assert reconciled.branch_anchor_node_id == "branch:a"
+    assert drop_facts[0]["status"] == "declined"
+    assert drop_facts[0]["value"] is None
+
+
+def test_repeated_service_changes_focus_without_recreating_service_fact():
+    document = {
+        "node_by_id": {"branch:a": {"slug": "service-a", "title": "Service A"}},
+        "coordinates": {"branch:a": {"path_checksum": "checksum:a"}},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"message_id": "msg:2", "role": "user", "content": "Service A"}],
+        cart={"facts_by_key": {"servico": [{
+            "owner_node_id": "branch:a", "status": "known", "value": "service-a",
+        }]}},
+        rag_nodes=[], rag_paths=[], graph_contract={},
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        retrieval_trace={"service_resolution": {
+            "focused_branch_node_id": "branch:a",
+            "operations": [{
+                "action": "keep", "branch_anchor_node_id": "branch:a",
+                "branch_path_checksum": "checksum:a", "evidence_span": "Service A",
+            }],
+        }},
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="checksum:a", extracted_facts=[], claims=[],
+        next_question_node_id=None, cited_node_ids=[], cited_chunk_ids=[],
+        reply="", qualification_complete=False, handoff_requested=False,
+    )
+
+    reconciled = graph_agent_runtime_v3._apply_authoritative_branch_resolution(
+        proposal, context, document,
+    )
+
+    assert reconciled.service_operations[0].action.value == "keep"
+    assert reconciled.extracted_facts == []
 
 
 def test_pending_condition_answer_does_not_change_branch_from_service_word():
@@ -1374,6 +1542,118 @@ def test_previously_mentioned_service_titles_ignores_the_customers_own_message()
     }
     messages = [{"role": "user", "texto": "vocês fazem polimento de vidros?"}]
     assert graph_agent_runtime_v3._previously_mentioned_service_titles(document, messages) == []
+
+
+def test_new_service_is_added_by_default_even_while_another_field_is_pending():
+    document = {
+        "branch_anchors": ["aurora-product-polish-localized", "aurora-product-vitrification"],
+        "node_by_id": {
+            "aurora-product-polish-localized": {
+                "title": "Polimento localizado", "slug": "polimento-localizado", "data": {},
+            },
+            "aurora-product-vitrification": {
+                "title": "Vitrificação", "slug": "vitrificacao", "data": {},
+            },
+        },
+        "coordinates": {
+            "aurora-product-polish-localized": {"path_checksum": "checksum:polish"},
+            "aurora-product-vitrification": {"path_checksum": "checksum:vitrification"},
+        },
+    }
+
+    resolution = graph_agent_runtime_v3._resolve_service_operations(
+        document, "Vitrificação",
+        active_branch_node_id="aurora-product-polish-localized",
+        active_branch_node_ids=["aurora-product-polish-localized"],
+    )
+
+    assert resolution["status"] == "resolved"
+    assert [item["action"] for item in resolution["operations"]] == ["add"]
+    assert resolution["next_active_branch_node_ids"] == [
+        "aurora-product-polish-localized", "aurora-product-vitrification",
+    ]
+    assert resolution["focused_branch_node_id"] == "aurora-product-vitrification"
+
+
+def test_two_services_in_one_message_are_both_added_without_additive_word():
+    document = {
+        "branch_anchors": ["branch:a", "branch:b"],
+        "node_by_id": {
+            "branch:a": {"title": "Serviço Alpha", "slug": "alpha", "data": {}},
+            "branch:b": {"title": "Serviço Beta", "slug": "beta", "data": {}},
+        },
+        "coordinates": {
+            "branch:a": {"path_checksum": "checksum:a"},
+            "branch:b": {"path_checksum": "checksum:b"},
+        },
+    }
+
+    resolution = graph_agent_runtime_v3._resolve_service_operations(
+        document, "Quero Serviço Alpha e Serviço Beta",
+        active_branch_node_id=None, active_branch_node_ids=[],
+    )
+
+    assert [(item["action"], item["branch_anchor_node_id"]) for item in resolution["operations"]] == [
+        ("add", "branch:a"), ("add", "branch:b"),
+    ]
+    assert resolution["next_active_branch_node_ids"] == ["branch:a", "branch:b"]
+
+
+def test_explicit_service_switch_drops_focus_before_adding_new_service():
+    document = {
+        "branch_anchors": ["branch:a", "branch:b"],
+        "node_by_id": {
+            "branch:a": {"title": "Serviço Alpha", "slug": "alpha", "data": {}},
+            "branch:b": {"title": "Serviço Beta", "slug": "beta", "data": {}},
+        },
+        "coordinates": {
+            "branch:a": {"path_checksum": "checksum:a"},
+            "branch:b": {"path_checksum": "checksum:b"},
+        },
+    }
+
+    resolution = graph_agent_runtime_v3._resolve_service_operations(
+        document, "Na verdade, prefiro Serviço Beta",
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+
+    assert [item["action"] for item in resolution["operations"]] == ["drop", "add"]
+    assert resolution["next_active_branch_node_ids"] == ["branch:b"]
+
+
+def test_service_evidence_cannot_be_reused_as_objective_value():
+    document = {
+        "branch_anchors": ["branch:vitrification"],
+        "node_by_id": {
+            "branch:vitrification": {
+                "title": "Vitrificação", "slug": "vitrificacao", "data": {},
+            },
+        },
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"message_id": "msg-jose", "role": "user", "content": "Vitrificação"}],
+        cart={}, rag_nodes=[], rag_paths=[],
+        retrieval_trace={"service_resolution": {
+            "consumed_spans": [{"text": "Vitrificação", "start": 0, "end": 12}],
+        }},
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:vitrification",
+        branch_path_checksum="checksum",
+        extracted_facts=[ExtractedFact(
+            field_key="objective", owner_node_id="persona:aurora",
+            value="Vitrificação", evidence_span="Vitrificação",
+        )],
+    )
+
+    cleaned, validation = graph_agent_runtime_v3._remove_consumed_service_facts(
+        proposal, context=context, document=document,
+    )
+
+    assert cleaned.extracted_facts == []
+    assert validation[0]["errors"] == ["service_evidence_consumed"]
 
 
 def test_recent_messages_and_chunks_are_projected_to_minimum_prompt_contract():
@@ -1808,6 +2088,141 @@ def test_decide_add_action_grows_active_branch_node_ids_without_dropping_the_cur
     assert response.cart_state["active_branch_node_id"] == "branch:b"
 
 
+def test_jose_service_turn_adds_vitrification_without_filling_pending_objective(monkeypatch):
+    persona_node = node(1, "persona:aurora", parent_type="persona")
+    polish = node(2, "aurora-product-polish-localized", parent_type="product", data={
+        "capabilities": {"branch_anchor": True}, "aliases": ["polimento localizado"],
+    })
+    vitrification = node(3, "aurora-product-vitrification", parent_type="product", data={
+        "capabilities": {"branch_anchor": True}, "aliases": ["vitrificação"],
+    })
+    q_service = node(4, "q:service", parent_type="faq", data={
+        "question": "Qual serviço te interessa?",
+    })
+    q_objective = node(5, "q:objective", parent_type="faq", data={
+        "question": "Você pretende vender o carro ou continuar cuidando dele?",
+    })
+    persona_node["metadata"]["qualification"] = {"fields": [{
+        "key": "objective", "scope": "declaration",
+        "question_node_id": "q:objective", "required": True,
+        "accepted_statuses": ["known"],
+        "value_schema": {"type": "string", "enum": ["sell", "keep"]},
+        "validation": {
+            "mode": "enum",
+            "values": [
+                {"value": "sell", "aliases": ["vender"]},
+                {"value": "keep", "aliases": ["continuar cuidando"]},
+            ],
+            "invalid_response": "Não consegui identificar seu objetivo.",
+        },
+    }]}
+    for branch, slug, title in (
+        (polish, "polimento-localizado", "Polimento localizado"),
+        (vitrification, "vitrificacao", "Vitrificação"),
+    ):
+        branch["slug"] = slug
+        branch["title"] = title
+        branch["metadata"]["qualification"] = {"fields": [{
+            "key": "servico", "scope": "branch",
+            "question_node_id": "q:service", "required": True,
+            "accepted_statuses": ["known"],
+            "value_schema": {"type": "string"},
+            "validation": {
+                "mode": "enum",
+                "values": [{"value": slug, "aliases": [title]}],
+                "invalid_response": "Não entendi exatamente qual serviço.",
+            },
+        }]}
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=[persona_node, polish, vitrification, q_service, q_objective],
+        edge_rows=[
+            edge(1, persona_node, polish), edge(2, persona_node, vitrification),
+            edge(3, persona_node, q_service), edge(4, persona_node, q_objective),
+        ],
+    )
+    pub = publication(document)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_persona",
+        lambda slug: {**PERSONA, "config": {}},
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
+        lambda persona_id: pub,
+    )
+    resolution = graph_agent_runtime_v3._resolve_service_operations(
+        document, "Vitrificação",
+        active_branch_node_id="aurora-product-polish-localized",
+        active_branch_node_ids=["aurora-product-polish-localized"],
+    )
+    existing_service = {
+        "field_key": "servico", "owner_node_id": "aurora-product-polish-localized",
+        "status": "known", "value": "polimento-localizado",
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"],
+        messages=[{"message_id": "msg-jose", "role": "user", "content": "Vitrificação"}],
+        cart={
+            "facts": {"servico": existing_service},
+            "facts_by_key": {"servico": [existing_service]},
+            "asked_question_node_ids": ["q:objective"],
+        },
+        rag_nodes=[], rag_paths=[], context_cards=[],
+        graph_contract=document["branch_contracts"]["aurora-product-vitrification"],
+        active_branch_node_id="aurora-product-polish-localized",
+        active_branch_node_ids=["aurora-product-polish-localized"],
+        publication_id=pub["id"], runtime_version="graph_agent_runtime_v3",
+        retrieval_trace={
+            "service_resolution": resolution,
+            "possible_switches": ["aurora-product-vitrification"],
+            "retrieval_branch_node_id": "aurora-product-vitrification",
+        },
+    )
+    model_proposal = {
+        "branch_action": "keep",
+        "branch_anchor_node_id": "aurora-product-polish-localized",
+        "branch_path_checksum": document["branch_contracts"]["aurora-product-polish-localized"]["branch_path_checksum"],
+        "branch_evidence_span": "",
+        "extracted_facts": [{
+            "field_key": "objective", "owner_node_id": "persona:aurora",
+            "status": "known", "value": "Vitrificação",
+            "source_message_id": "msg-jose", "evidence_span": "Vitrificação",
+            "confidence": 1,
+        }],
+        "claims": [], "next_question_node_id": "q:objective",
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "reply": "Agora temos dois serviços.",
+        "qualification_complete": False, "handoff_requested": False,
+    }
+
+    _decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": model_proposal},
+    )
+
+    assert response.proof["valid"], response.proof["errors"]
+    assert response.cart_state["active_branch_node_ids"] == [
+        "aurora-product-polish-localized", "aurora-product-vitrification",
+    ]
+    service_facts = response.cart_state["facts_by_key"]["servico"]
+    assert {fact["owner_node_id"] for fact in service_facts} == {
+        "aurora-product-polish-localized", "aurora-product-vitrification",
+    }
+    assert "objective" not in response.cart_state["facts_by_key"]
+    assert response.proof["next_question_node_id"] == "q:objective"
+    assert response.proof["service_operations"][0]["action"] == "add"
+    assert any(
+        item["field_key"] == "objective"
+        and item["errors"] == ["service_evidence_consumed"]
+        for item in response.proof["field_validation"]
+    )
+    assert "Adicionei Vitrificação" in response.reply_text
+    assert "Não consegui identificar seu objetivo." in response.reply_text
+    assert response.reply_text.endswith(
+        "Você pretende vender o carro ou continuar cuidando dele?"
+    )
+
+
 def test_decide_fallback_uses_the_published_closing_text_instead_of_silence(monkeypatch):
     """Regression test for the silent-closing-turn bug found live 2026-08-09
     (docs/reports/WA_VALIDATOR_E2E_REPORT_2026-08-09.md, item C).
@@ -2153,7 +2568,7 @@ def test_doubt_resolution_uses_only_self_authorized_faq_in_active_package():
     faq = {
         "id": "faq:detail", "node_type": "faq", "status": "validated",
         "data": {
-            "answer": "Inclui a etapa aprovada. Qual Ã© o seu nome?",
+            "answer": "Inclui a etapa aprovada. Qual é o seu nome?",
             "claims": [{
                 "claim_type": "service_detail", "policy": {"mode": "informational"},
                 "evidence_node_ids": ["faq:detail"],
@@ -2247,7 +2662,7 @@ def test_decide_reconciles_faq_answer_before_exact_next_question_without_fallbac
         }},
     })
     branch = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
-    question = node(3, "q:name", parent_type="faq", data={"question": "Como vocÃª se chama?"})
+    question = node(3, "q:name", parent_type="faq", data={"question": "Como você se chama?"})
     faq = node(4, "faq:detail", parent_type="faq", data={
         "question": "O que inclui?", "answer": "Inclui a etapa aprovada.",
         "claims": [{
@@ -2302,7 +2717,7 @@ def test_decide_reconciles_faq_answer_before_exact_next_question_without_fallbac
     )
 
     assert decision.intent == "collect_graph_fields"
-    assert response.reply_text == "Inclui a etapa aprovada.\n\nComo vocÃª se chama?"
+    assert response.reply_text == "Inclui a etapa aprovada.\n\nComo você se chama?"
     assert response.reply_text.count("?") == 1
     assert response.proof["customer_doubt_detected"] is True
     assert response.proof["doubt_resolution"] == "answered"

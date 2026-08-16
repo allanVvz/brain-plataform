@@ -110,9 +110,11 @@ export function QualificationBadge({
 }) {
   const value = Number(score || 0);
   return (
-    <div className="rounded-lg border border-white/06 bg-white/[0.025] p-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] uppercase tracking-[0.12em] text-obs-faint">Qualificação</span>
+    <div
+      className="rounded-lg border border-white/06 bg-white/[0.025] p-2"
+      aria-label={`Qualificação: ${value} de 100`}
+    >
+      <div className="flex items-center justify-end">
         <span className="text-sm font-semibold text-obs-text">{value}/100</span>
       </div>
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/5">
