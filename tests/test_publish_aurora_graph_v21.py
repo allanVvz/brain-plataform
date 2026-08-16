@@ -166,6 +166,26 @@ def test_aurora_conversation_contract_rejects_blank_message_cleanly() -> None:
         raise AssertionError("blank Aurora messages must be rejected before runtime")
 
 
+def test_aurora_publishes_two_attempts_and_closed_objective_values() -> None:
+    graph = build_graph()
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    policy = (persona.data or {}).get("conversation_policy") or {}
+    assert policy["question_repetition"]["max_attempts"] == 1
+    assert policy["qualification"]["incomplete_handoff_template"]
+
+    objective_fields = [
+        field
+        for node in graph.nodes
+        for field in ((node.data or {}).get("qualification") or {}).get("fields") or []
+        if field.get("key") == "objective"
+    ]
+    assert objective_fields
+    assert all(field["validation"]["mode"] == "enum" for field in objective_fields)
+    assert {
+        item["value"] for item in objective_fields[0]["validation"]["values"]
+    } == {"vender_em_breve", "continuar_cuidar_proteger"}
+
+
 def test_non_sales_service_branches_are_reachable_with_authorized_handoff() -> None:
     """Regression test for the atendente_humano/reclamacao gap (2026-08-08).
 

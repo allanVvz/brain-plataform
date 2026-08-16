@@ -75,6 +75,23 @@ def test_aggregate_missing_fields_is_empty_when_every_active_branch_is_resolved(
     ) == []
 
 
+def test_aggregate_required_count_deduplicates_shared_owner():
+    branch_contracts = {
+        "branch:a": {"fields": [
+            {"key": "name", "owner_node_id": "persona", "required": True},
+            {"key": "service", "owner_node_id": "branch:a", "required": True},
+        ]},
+        "branch:b": {"fields": [
+            {"key": "name", "owner_node_id": "persona", "required": True},
+            {"key": "service", "owner_node_id": "branch:b", "required": True},
+        ]},
+    }
+
+    assert graph_proof_checker_v3.aggregate_required_field_count(
+        branch_contracts, ["branch:a", "branch:b"], {},
+    ) == 3
+
+
 def test_aggregate_missing_fields_with_a_single_active_branch_matches_pending_fields():
     """With exactly one active branch, aggregation must reduce to the same
     result as the existing single-branch pending_fields() -- multi-service
@@ -109,6 +126,19 @@ def test_unknown_field_stays_missing_but_is_not_asked_again():
     assert [field["key"] for field in graph_proof_checker_v3.askable_pending_fields(
         contract, facts,
     )] == ["objective"]
+
+
+def test_unknown_never_qualifies_even_when_legacy_contract_accepts_it():
+    field = {
+        "key": "color", "owner_node_id": "persona", "required": True,
+        "accepted_statuses": ["known", "unknown"], "question_node_id": "q:color",
+    }
+    facts = {
+        "color": {"status": "unknown", "value": None, "owner_node_id": "persona"},
+    }
+
+    assert graph_proof_checker_v3.pending_fields({"fields": [field]}, facts) == [field]
+    assert graph_proof_checker_v3.askable_pending_fields({"fields": [field]}, facts) == []
 
 
 def test_loose_later_answer_can_replace_unknown_without_correction_marker():
