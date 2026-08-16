@@ -1228,7 +1228,12 @@ def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypat
     first_proposal = {
         "branch_action": "keep", "branch_anchor_node_id": "branch:a",
         "branch_path_checksum": contract["branch_path_checksum"],
-        "branch_evidence_span": "", "extracted_facts": [], "claims": [],
+        "branch_evidence_span": "", "extracted_facts": [{
+            "field_key": "name", "owner_node_id": "branch:a",
+            "status": "unknown", "value": None,
+            "source_message_id": "msg:interrupt",
+            "evidence_span": "How does support work?", "confidence": 1.0,
+        }], "claims": [],
         "next_question_node_id": "q:name", "cited_node_ids": [],
         "cited_chunk_ids": [],
         "reply": "Support is reviewed by the team for each request. What is your name?",
@@ -1242,6 +1247,7 @@ def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypat
     assert first_decision.route.value == "SDR"
     assert first_response.handoff_required is False
     assert first_response.cart_state["asked_question_node_ids"].count("q:name") == 2
+    assert "name" not in first_response.cart_state["facts_by_key"]
 
     second_context = first_context.model_copy(update={
         "messages": [
@@ -1253,6 +1259,11 @@ def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypat
     })
     second_proposal = {
         **first_proposal,
+        "extracted_facts": [{
+            **first_proposal["extracted_facts"][0],
+            "source_message_id": "msg:ignored",
+            "evidence_span": "Can we move on without that?",
+        }],
         "reply": "I will preserve what was already provided. What is your name?",
     }
 
@@ -1263,6 +1274,12 @@ def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypat
     unknown = second_response.cart_state["facts_by_key"]["name"][0]
     assert unknown["status"] == "unknown"
     assert unknown["reason"] == "ignored_twice"
+    proof_unknown = next(
+        fact for fact in second_response.proof["accepted_facts"]
+        if fact["field_key"] == "name"
+    )
+    assert proof_unknown["reason"] == "ignored_twice"
+    assert proof_unknown["metadata"] == {"reason": "ignored_twice"}
     assert second_decision.intent == "qualification_incomplete"
     assert second_decision.route.value == "HUMAN"
     assert second_response.handoff_required is True
