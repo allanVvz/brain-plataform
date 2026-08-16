@@ -233,3 +233,39 @@ def test_first_conversion_ignores_cancelled_rows():
     """`lead_first_conversion` marca a primeira venda de verdade -- uma venda
     cancelada nao pode fazer a proxima parecer recorrencia."""
     assert "completed_at IS NOT NULL AND status<>'cancelled'" in CANCEL_SQL
+
+
+# ── superficie do portal ──────────────────────────────────────────────────────
+
+def test_portal_has_its_own_journey_event_route():
+    """Conta `client` so passa pelo middleware em `/portal/*`, `/auth/*` e na
+    midia de asset. A rota de `/agents` respondia 403 para o operador do portal
+    antes mesmo de chegar ao backend -- 403 "Acesso negado." vem do middleware,
+    nao da checagem de capability."""
+    from middleware.auth import is_client_path_allowed
+    from routes import portal
+
+    assert is_client_path_allowed("POST", "/portal/leads/21/journey-events") is True
+    assert is_client_path_allowed("POST", "/agents/leads/21/journey-events") is False
+
+    rotas = {
+        r.path for r in portal.router.routes
+        if "POST" in getattr(r, "methods", set())
+    }
+    assert "/portal/leads/{lead_id}/journey-events" in rotas
+
+
+def test_portal_route_scopes_the_lead_to_the_persona_in_the_url(monkeypatch):
+    """A rota de `/agents` resolve a persona a partir da propria lead; a do
+    portal exige que a lead pertenca a persona da URL, senao um operador com
+    acesso a persona A registraria evento numa lead da persona B."""
+    from fastapi import HTTPException
+    from routes import portal
+
+    monkeypatch.setattr(
+        portal.supabase_client, "get_lead_by_ref",
+        lambda _ref: {"id": 21, "persona_id": "persona:outra"},
+    )
+    with pytest.raises(HTTPException) as exc:
+        portal._lead(21, "persona:da-url")
+    assert exc.value.status_code == 404

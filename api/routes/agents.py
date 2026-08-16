@@ -86,7 +86,7 @@ def _lead_or_404(lead_ref: int) -> dict:
     return lead
 
 
-def _record_journey_event(
+def record_journey_event(
     lead_ref: int, body: JourneyEventBody, responsible_user_id: str | None,
 ) -> dict:
     lead = _lead_or_404(lead_ref)
@@ -105,7 +105,7 @@ def _record_journey_event(
 
 
 def _record_purchase(lead_ref: int, body: PurchaseCompletedBody, responsible_user_id: str | None) -> dict:
-    return _record_journey_event(
+    return record_journey_event(
         lead_ref,
         JourneyEventBody(event_type="sale_recorded", **body.model_dump()),
         responsible_user_id,
@@ -117,7 +117,7 @@ def journey_event(lead_ref: int, body: JourneyEventBody, request: Request) -> di
     lead = _lead_or_404(lead_ref)
     user = auth_service.current_user(request)
     auth_service.assert_persona_capability(request, "edit", persona_id=lead["persona_id"])
-    return _record_journey_event(lead_ref, body, str(user["id"]))
+    return record_journey_event(lead_ref, body, str(user["id"]))
 
 
 @internal_router.post("/leads/{lead_ref}/journey-events")
@@ -126,7 +126,7 @@ def journey_event_internal(
     x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
 ) -> dict:
     authorize_internal(x_webhook_token)
-    return _record_journey_event(lead_ref, body, None)
+    return record_journey_event(lead_ref, body, None)
 
 
 @router.post("/leads/{lead_ref}/purchase-completed")
