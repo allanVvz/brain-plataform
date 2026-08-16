@@ -4,6 +4,15 @@
 em `state='closed'` e so se distinguem por `metadata.closing_event`. A UI precisa
 de um valor unico e estavel por lead, entao a leitura vive aqui e nao espalhada
 por rota, componente e query.
+
+Dois eixos diferentes moram aqui, e confundi-los foi a origem de um bug:
+
+- `journey_outcome` e do **pedido**. Vale para o pedido corrente e, quando ele
+  fecha, continua descrevendo o ultimo pedido -- senao o pedido concluido some
+  da tela no instante em que e concluido.
+- `lead_converted` e do **lead** e e permanente. Depois do primeiro agendamento
+  ou compra o lead esta convertido para sempre: cancelar o pedido nao desfaz, e
+  o pedido seguinte nao volta o lead para "qualificado".
 """
 from __future__ import annotations
 
@@ -18,6 +27,9 @@ ENTREGUE = "entregue"
 CANCELADO = "cancelado"
 
 OUTCOMES = (QUALIFICADO, CONVERTIDO, VENDIDO, ENTREGUE, CANCELADO)
+
+SALES = "sales"
+APPOINTMENT = "appointment"
 
 # Estados em que a qualificacao ja foi concluida mas nada comercial aconteceu.
 _QUALIFIED_STATES = {"qualified_confirmed", "handed_off"}
@@ -50,8 +62,32 @@ def derive(journey: dict[str, Any] | None) -> Optional[str]:
     return None
 
 
-def outcomes_for_leads(persona_id: str, lead_refs: list[int]) -> dict[int, Optional[str]]:
-    """Desfecho corrente de varios leads numa leitura so.
+def summarize(journeys: list[dict[str, Any]]) -> dict[str, Any]:
+    """Resume todas as jornadas de um lead num estado unico para a tela.
+
+    Le a jornada de maior `sequence` -- corrente ou nao. Ler so a corrente
+    fazia o pedido concluido desaparecer da tela assim que fechava, e o botao
+    de venda voltava a parecer disponivel enquanto o backend respondia 409
+    porque nao existe jornada corrente para receber o evento.
+    """
+    if not journeys:
+        return {
+            "journey_outcome": None, "lead_converted": False,
+            "journey_is_open": False, "journey_sequence": 0,
+        }
+    ordered = sorted(journeys, key=lambda row: int(row.get("sequence") or 0))
+    latest = ordered[-1]
+    return {
+        "journey_outcome": derive(latest),
+        # Permanente: basta uma jornada ter convertido alguma vez.
+        "lead_converted": any(row.get("converted_at") for row in ordered),
+        "journey_is_open": bool(latest.get("is_current")),
+        "journey_sequence": int(latest.get("sequence") or 0),
+    }
+
+
+def summaries_for_leads(persona_id: str, lead_refs: list[int]) -> dict[int, dict[str, Any]]:
+    """Estado de jornada de varios leads numa leitura so.
 
     A lista de conversas pinta todos os itens de uma vez -- uma consulta por
     lead transformaria a tela em N+1.
@@ -59,17 +95,21 @@ def outcomes_for_leads(persona_id: str, lead_refs: list[int]) -> dict[int, Optio
     refs = sorted({int(ref) for ref in lead_refs if ref})
     if not persona_id or not refs:
         return {}
-    outcomes: dict[int, Optional[str]] = {}
-    for journey in supabase_client.get_current_journeys_by_lead_refs(persona_id, refs):
+    por_lead: dict[int, list[dict[str, Any]]] = {}
+    for journey in supabase_client.get_journeys_by_lead_refs(persona_id, refs):
         ref = journey.get("lead_ref")
         if ref is None:
             continue
-        outcomes[int(ref)] = derive(journey)
-    return outcomes
+        por_lead.setdefault(int(ref), []).append(journey)
+    return {ref: summarize(rows) for ref, rows in por_lead.items()}
 
 
-SALES = "sales"
-APPOINTMENT = "appointment"
+def outcomes_for_leads(persona_id: str, lead_refs: list[int]) -> dict[int, Optional[str]]:
+    """Compatibilidade: so o desfecho, sem os demais eixos."""
+    return {
+        ref: resumo.get("journey_outcome")
+        for ref, resumo in summaries_for_leads(persona_id, lead_refs).items()
+    }
 
 
 def business_models_for_personas(persona_ids: list[str]) -> dict[str, str]:
@@ -88,8 +128,14 @@ def business_models_for_personas(persona_ids: list[str]) -> dict[str, str]:
     return models
 
 
+_VAZIO = {
+    "journey_outcome": None, "lead_converted": False,
+    "journey_is_open": False, "journey_sequence": 0,
+}
+
+
 def decorate_leads(rows: list[dict[str, Any]], persona_id: str | None = None) -> list[dict[str, Any]]:
-    """Anexa `journey_outcome` e `business_model` a cada lead decorado.
+    """Anexa o estado da jornada e o `business_model` a cada lead decorado.
 
     `stage` continua sendo o funil manual: o desfecho e um eixo novo e
     independente, nunca uma reescrita do estagio.
@@ -104,17 +150,18 @@ def decorate_leads(rows: list[dict[str, Any]], persona_id: str | None = None) ->
             continue
         grouped.setdefault(pid, []).append(int(ref))
 
-    outcomes: dict[tuple[str, int], Optional[str]] = {}
+    resumos: dict[tuple[str, int], dict[str, Any]] = {}
     for pid, refs in grouped.items():
-        for ref, outcome in outcomes_for_leads(pid, refs).items():
-            outcomes[(pid, ref)] = outcome
+        for ref, resumo in summaries_for_leads(pid, refs).items():
+            resumos[(pid, ref)] = resumo
     models = business_models_for_personas(list(grouped))
 
     for row in rows:
         pid = str(persona_id or row.get("persona_id") or "")
         ref = row.get("id")
-        row["journey_outcome"] = (
-            outcomes.get((pid, int(ref))) if pid and ref is not None else None
+        resumo = (
+            resumos.get((pid, int(ref)), _VAZIO) if pid and ref is not None else _VAZIO
         )
+        row.update(resumo)
         row["business_model"] = models.get(pid, SALES)
     return rows

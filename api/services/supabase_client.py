@@ -4243,14 +4243,18 @@ def get_current_conversation_journey(persona_id: str, lead_ref: int) -> Optional
     )
 
 
-def get_current_journeys_by_lead_refs(
+def get_journeys_by_lead_refs(
     persona_id: str, lead_refs: list[int], *, chunk_size: int = 100,
 ) -> list[dict]:
-    """Current journey of many leads in bounded batches.
+    """Every journey of many leads, in bounded batches.
 
     Same reasoning as ``get_leads_by_refs``: the conversation list paints every
     row at once, so one request per lead would be an N+1, and an unbounded
     ``in`` list would blow the PostgREST URL up.
+
+    Deliberately *not* filtered by ``is_current``: a closed order must keep
+    describing itself on screen, and the permanent "lead converted" fact lives
+    in whichever journey converted first.
     """
     refs = sorted({int(value) for value in lead_refs if value is not None})
     if not persona_id or not refs:
@@ -4260,8 +4264,8 @@ def get_current_journeys_by_lead_refs(
     for index in range(0, len(refs), size):
         rows.extend(_q(
             get_client().table("conversation_journeys")
-            .select("lead_ref,state,converted_at,closed_at,sequence,metadata")
-            .eq("persona_id", persona_id).eq("is_current", True)
+            .select("lead_ref,state,is_current,converted_at,closed_at,sequence,metadata")
+            .eq("persona_id", persona_id)
             .in_("lead_ref", refs[index:index + size])
         ))
     return rows

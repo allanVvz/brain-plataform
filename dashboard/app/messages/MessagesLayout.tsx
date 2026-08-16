@@ -44,6 +44,12 @@ interface Lead {
   // `sales` | `appointment` — vem de personas.config.portal e decide o par de
   // eventos do pedido: comprado/entregue ou agendado/concluído.
   business_model?: string | null;
+  // Permanente: depois do primeiro agendamento ou compra a lead está
+  // convertida e não volta a qualificada, nem ao cancelar, nem no pedido
+  // seguinte.
+  lead_converted?: boolean | null;
+  // Há jornada corrente para receber evento? Sem ela o backend devolve 409.
+  journey_is_open?: boolean | null;
   validation?: {
     is_validation?: boolean;
     source?: string | null;
@@ -636,10 +642,11 @@ function offeringKind(lead: Lead): OfferingKind {
   return lead.business_model === "appointment" ? "appointment" : "sales";
 }
 
-// A conversão é a única fase reversível da jornada, e um toggle diz isso melhor
-// que um botão: enquanto não há venda, converter é uma leitura do operador e
-// leitura se corrige. Depois da venda vira fato e o controle trava — desfazer
-// passaria por estorno em sales_conversions, que é outro contrato.
+// Conversão da LEAD, não do pedido. É reversível apenas enquanto for leitura do
+// operador: assim que o primeiro agendamento ou compra acontece, a lead está
+// convertida e não volta a qualificada — nem ao cancelar o pedido, nem no
+// pedido seguinte. Desfazer aí passaria por estorno em sales_conversions, que
+// é outro contrato.
 function ToggleConversao({
   lead, outcome, canEdit, onRecorded, recordEvent,
 }: {
@@ -652,16 +659,17 @@ function ToggleConversao({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const converted = outcome === "convertido";
-  const locked = outcome === "vendido" || isJourneySettled(outcome);
-  // Sem jornada ainda não há o que converter — o backend responderia 409.
-  const readable: JourneyOutcome = converted || locked
-    ? (outcome as JourneyOutcome)
-    : "qualificado";
-  const style = OUTCOME_STYLE[locked ? readable : converted ? "convertido" : "qualificado"];
+  const leadConverted = Boolean(lead.lead_converted) || outcome === "convertido"
+    || outcome === "vendido";
+  const journeyOpen = lead.journey_is_open !== false;
+  // Depois da primeira venda a conversão é fato; sem jornada corrente não há
+  // o que gravar (o backend responderia 409).
+  const locked = Boolean(lead.lead_converted) || !journeyOpen;
+  const readable: JourneyOutcome = leadConverted ? "convertido" : "qualificado";
+  const style = OUTCOME_STYLE[readable];
 
   const toggle = useCallback(async () => {
-    const event: JourneyEventType = converted ? "conversion_reverted" : "converted";
+    const event: JourneyEventType = leadConverted ? "conversion_reverted" : "converted";
     setPending(true);
     setError(null);
     try {
@@ -678,7 +686,7 @@ function ToggleConversao({
     } finally {
       setPending(false);
     }
-  }, [converted, lead.id, onRecorded, recordEvent]);
+  }, [leadConverted, lead.id, onRecorded, recordEvent]);
 
   const content = (
     <span className="inline-flex items-center gap-[7px]">
@@ -687,7 +695,7 @@ function ToggleConversao({
         style={{ background: style.color }}
       />
       <span
-        className={`text-[11px] font-medium ${readable === "cancelado" ? "line-through" : ""}`}
+        className="text-[11px] font-medium"
         style={{ color: style.color }}
       >
         {pending ? "…" : style.label}
@@ -695,15 +703,17 @@ function ToggleConversao({
     </span>
   );
 
-  if (!canEdit || locked || !outcome) {
+  if (!canEdit || locked) {
     return (
       <span
         className="shrink-0 rounded-full px-2.5 py-1"
         data-outcome={readable}
         title={
-          locked
-            ? "A venda já foi registrada — a conversão deixou de ser reversível"
-            : `Jornada · ${style.label}`
+          lead.lead_converted
+            ? "A lead converteu no primeiro pedido — isso não volta atrás"
+            : !journeyOpen
+              ? "Sem pedido aberto: o próximo contato do cliente inicia o próximo ciclo"
+              : `Lead · ${style.label}`
         }
         style={{ background: style.soft }}
       >
@@ -719,10 +729,10 @@ function ToggleConversao({
         onClick={toggle}
         disabled={pending}
         role="switch"
-        aria-checked={converted}
-        aria-label="Conversão do pedido"
-        data-outcome={converted ? "convertido" : "qualificado"}
-        title={converted ? "Desfazer a conversão" : "Marcar como convertido"}
+        aria-checked={leadConverted}
+        aria-label="Conversão da lead"
+        data-outcome={readable}
+        title={leadConverted ? "Desfazer a conversão" : "Marcar como convertido"}
         className="rounded-full px-2.5 py-1 transition hover:opacity-80 disabled:opacity-50"
         style={{ background: style.soft, border: `1px solid ${style.color}` }}
       >
@@ -750,7 +760,12 @@ function JourneyActions({
   const vendido = outcome === "vendido";
   const entregue = outcome === "entregue";
   const cancelado = outcome === "cancelado";
-  const fechado = isJourneySettled(outcome);
+  // Sem jornada corrente o backend levanta `current journey not found` e
+  // devolve 409. Antes o botao ficava clicavel e o clique falhava em silencio:
+  // um pedido concluido deixa `is_current=false` e so o proximo inbound do
+  // cliente abre o pedido seguinte.
+  const semPedidoAberto = lead.journey_is_open === false;
+  const fechado = isJourneySettled(outcome) || semPedidoAberto;
 
   const registrar = useCallback(async (event: JourneyEventType, key: string) => {
     setPending(key);
@@ -813,9 +828,11 @@ function JourneyActions({
           title={
             abertoLigado
               ? `Já registrado · ${oferta.aberto.label.toLowerCase()}`
-              : fechado
-                ? "O pedido já foi fechado"
-                : oferta.aberto.label
+              : semPedidoAberto
+                ? "Sem pedido aberto: o próximo contato do cliente inicia o próximo ciclo"
+                : fechado
+                  ? "O pedido já foi fechado"
+                  : oferta.aberto.label
           }
           className="flex items-center gap-2 rounded-[10px] border px-3 py-2.5 text-xs font-medium transition disabled:cursor-not-allowed"
           style={botaoStyle(abertoLigado, abertoBloqueado, abertoStyle)}
@@ -838,11 +855,13 @@ function JourneyActions({
           disabled={terminalBloqueado}
           onClick={() => setFechando(true)}
           title={
-            fechado
-              ? `Pedido fechado · ${terminalLabel.toLowerCase()}`
-              : !outcome
-                ? "Ainda não há pedido para fechar"
-                : "Fechar o pedido"
+            semPedidoAberto
+              ? "Sem pedido aberto: o próximo contato do cliente inicia o próximo ciclo"
+              : fechado
+                ? `Pedido fechado · ${terminalLabel.toLowerCase()}`
+                : !outcome
+                  ? "Ainda não há pedido para fechar"
+                  : "Fechar o pedido"
           }
           className="flex items-center gap-2 rounded-[10px] border px-3 py-2.5 text-xs font-medium transition disabled:cursor-not-allowed"
           style={botaoStyle(terminalLigado, terminalBloqueado, terminalStyle)}
@@ -2478,8 +2497,12 @@ export function MessagesLayout({
 
           {selectedLead && (
             <div className="flex items-center gap-2 flex-wrap pl-[2.5rem]">
-              <StageBadge stage={selectedLead.stage} />
-              {selectedOutcome && <OutcomeMark outcome={selectedOutcome} />}
+              {/* Um estado só: o desfecho do pedido quando existe, senão o
+                  estágio do funil. Os dois juntos repetiam a mesma palavra —
+                  "qualificado" aparecia duas vezes no mesmo header. */}
+              {selectedOutcome
+                ? <OutcomeMark outcome={selectedOutcome} />
+                : <StageBadge stage={selectedLead.stage} />}
               {selectedLead.telefone && (
                 <span className="text-[10px] text-obs-faint">{selectedLead.telefone}</span>
               )}
@@ -2688,7 +2711,9 @@ export function MessagesLayout({
           {/* Resumo do pedido — header do rail. Fica acima do perfil de
               propósito: é a única linha que responde "em que pé está este
               pedido?" sem rolar, inclusive com o rail em overlay. */}
-          {selectedLead && (selectedLead.interesse_produto || selectedOutcome) && (
+          {/* Sempre presente quando há lead: a conversão é fato da lead e não
+              depende de existir pedido aberto. */}
+          {selectedLead && (
             <div
               className="shrink-0 px-4 py-3"
               style={{ borderBottom: "1px solid var(--border-glass)" }}
@@ -2731,7 +2756,9 @@ export function MessagesLayout({
                 </div>
               </div>
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                <StageBadge stage={selectedLead.stage} />
+                {/* O estágio saiu daqui: o toggle no topo do rail já responde
+                    "em que pé está esta lead" e os dois diziam a mesma palavra.
+                    O funil manual continua na lista e no Pipeline. */}
                 <span className="rounded-full px-2 py-0.5 text-[10px] text-obs-faint" style={{ background: "rgb(var(--obs-text) / 0.05)" }}>
                   score {selectedLead.qualification_score || 0}%
                 </span>

@@ -36,6 +36,8 @@ function makeLead(overrides: Record<string, unknown> = {}) {
     qualification_score: 72,
     journey_outcome: "vendido",
     business_model: "sales",
+    lead_converted: true,
+    journey_is_open: true,
     ...overrides,
   };
 }
@@ -166,9 +168,9 @@ describe("Mensagens — desfecho da jornada", () => {
 
 
   it("o toggle alterna qualificado para convertido", async () => {
-    setLead(makeLead({ journey_outcome: "qualificado" }));
+    setLead(makeLead({ journey_outcome: "qualificado", lead_converted: false }));
     const rail = await openLeadWithRail();
-    const toggle = within(rail).getByRole("switch", { name: "Conversão do pedido" });
+    const toggle = within(rail).getByRole("switch", { name: "Conversão da lead" });
     expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(within(toggle).getByText("qualificado")).toBeTruthy();
 
@@ -181,9 +183,9 @@ describe("Mensagens — desfecho da jornada", () => {
   });
 
   it("o toggle desfaz a conversão enquanto não há venda", async () => {
-    setLead(makeLead({ journey_outcome: "convertido" }));
+    setLead(makeLead({ journey_outcome: "convertido", lead_converted: false }));
     const rail = await openLeadWithRail();
-    const toggle = within(rail).getByRole("switch", { name: "Conversão do pedido" });
+    const toggle = within(rail).getByRole("switch", { name: "Conversão da lead" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
 
     fireEvent.click(toggle);
@@ -194,21 +196,57 @@ describe("Mensagens — desfecho da jornada", () => {
     }));
   });
 
-  it("depois da venda a conversão deixa de ser reversível", async () => {
-    const rail = await openLeadWithRail(); // vendido
+  it("depois da primeira venda a lead fica convertida para sempre", async () => {
+    const rail = await openLeadWithRail(); // vendido, lead_converted
+    // Deixa de ser um controle: vira leitura.
     expect(within(rail).queryByRole("switch")).toBeNull();
-    const marca = rail.querySelector('[data-outcome="vendido"]');
+    const marca = rail.querySelector('[data-outcome="convertido"]');
     expect(marca).toBeTruthy();
     expect(marca).toHaveAttribute(
       "title",
-      "A venda já foi registrada — a conversão deixou de ser reversível",
+      "A lead converteu no primeiro pedido — isso não volta atrás",
+    );
+  });
+
+  it("a lead segue convertida com o pedido cancelado", async () => {
+    // Cancelar estorna a compra, não a conversão da lead.
+    setLead(makeLead({
+      journey_outcome: "cancelado", lead_converted: true, journey_is_open: false,
+    }));
+    const rail = await openLeadWithRail();
+    expect(rail.querySelector('[data-outcome="convertido"]')).toBeTruthy();
+  });
+
+  it("a lead não regride a qualificada no ciclo seguinte", async () => {
+    // Pedido seguinte recomeça em qualificado; a lead, não.
+    setLead(makeLead({
+      journey_outcome: "qualificado", lead_converted: true, journey_is_open: true,
+    }));
+    const rail = await openLeadWithRail();
+    expect(within(rail).queryByRole("switch")).toBeNull();
+    expect(rail.querySelector('[data-outcome="convertido"]')).toBeTruthy();
+    expect(rail.querySelector('[data-outcome="qualificado"]')).toBeNull();
+  });
+
+  it("sem pedido aberto nenhum evento pode ser gravado", async () => {
+    // `is_current=false` depois de concluir: o backend responderia 409, então
+    // o botão não pode parecer disponível.
+    setLead(makeLead({
+      journey_outcome: "cancelado", lead_converted: true, journey_is_open: false,
+    }));
+    const rail = await openLeadWithRail();
+    const venda = within(rail).getByRole("button", { name: /Venda/ });
+    expect(venda).toBeDisabled();
+    expect(venda).toHaveAttribute(
+      "title",
+      "Sem pedido aberto: o próximo contato do cliente inicia o próximo ciclo",
     );
   });
 
 
 
   it("produto: o pedido é comprado e entregue", async () => {
-    setLead(makeLead({ journey_outcome: "convertido", business_model: "sales" }));
+    setLead(makeLead({ journey_outcome: "convertido", business_model: "sales", lead_converted: false }));
     const rail = await openLeadWithRail();
     expect(within(rail).getByRole("button", { name: /Venda/ })).toBeTruthy();
     fireEvent.click(within(rail).getByRole("button", { name: /Venda/ }));
@@ -219,7 +257,7 @@ describe("Mensagens — desfecho da jornada", () => {
   });
 
   it("serviço: o mesmo pedido é agendado e concluído", async () => {
-    setLead(makeLead({ journey_outcome: "convertido", business_model: "appointment" }));
+    setLead(makeLead({ journey_outcome: "convertido", business_model: "appointment", lead_converted: false }));
     const rail = await openLeadWithRail();
     // O rótulo muda com o modelo de negócio — registrar "compra" numa persona
     // de agendamento rotularia errado o que aconteceu.
@@ -251,7 +289,7 @@ describe("Mensagens — desfecho da jornada", () => {
   });
 
   it("não dá para concluir um pedido que nunca foi vendido", async () => {
-    setLead(makeLead({ journey_outcome: "convertido" }));
+    setLead(makeLead({ journey_outcome: "convertido", lead_converted: false }));
     const rail = await openLeadWithRail();
     fireEvent.click(within(rail).getByRole("button", { name: /Fechar pedido/ }));
     const dialog = await screen.findByRole("dialog");
@@ -261,7 +299,7 @@ describe("Mensagens — desfecho da jornada", () => {
   });
 
   it("cancelado desliga o botão de venda e risca o terminal", async () => {
-    setLead(makeLead({ journey_outcome: "cancelado" }));
+    setLead(makeLead({ journey_outcome: "cancelado", journey_is_open: false }));
     const rail = await openLeadWithRail();
     const venda = within(rail).getByRole("button", { name: /Venda/ });
     const terminal = within(rail).getByRole("button", { name: /Cancelado/ });
@@ -273,7 +311,7 @@ describe("Mensagens — desfecho da jornada", () => {
   });
 
   it("entregue mantém a venda ligada e fecha o terminal", async () => {
-    setLead(makeLead({ journey_outcome: "entregue" }));
+    setLead(makeLead({ journey_outcome: "entregue", journey_is_open: false }));
     const rail = await openLeadWithRail();
     const venda = within(rail).getByRole("button", { name: /Venda/ });
     expect(venda.getAttribute("style")).toContain("--obs-outcome-sold");
@@ -283,7 +321,7 @@ describe("Mensagens — desfecho da jornada", () => {
   });
 
   it("sem jornada não há pedido para fechar", async () => {
-    setLead(makeLead({ journey_outcome: null }));
+    setLead(makeLead({ journey_outcome: null, lead_converted: false }));
     const rail = await openLeadWithRail();
     expect(within(rail).getByRole("button", { name: /Fechar pedido/ })).toBeDisabled();
   });

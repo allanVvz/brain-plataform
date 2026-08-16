@@ -62,12 +62,13 @@ def test_outcomes_for_leads_reads_once_for_the_whole_list(monkeypatch):
     def fake(persona_id, lead_refs, **_kwargs):
         calls.append((persona_id, list(lead_refs)))
         return [
-            {"lead_ref": 1, "state": "handed_off", "metadata": {}},
-            {"lead_ref": 2, "state": "converted", "metadata": {"sold": True}},
+            {"lead_ref": 1, "state": "handed_off", "sequence": 1, "is_current": True, "metadata": {}},
+            {"lead_ref": 2, "state": "converted", "sequence": 1, "is_current": True,
+             "converted_at": "2026-08-16T00:00:00Z", "metadata": {"sold": True}},
         ]
 
     monkeypatch.setattr(
-        journey_outcome.supabase_client, "get_current_journeys_by_lead_refs", fake,
+        journey_outcome.supabase_client, "get_journeys_by_lead_refs", fake,
     )
     outcomes = journey_outcome.outcomes_for_leads("persona:one", [2, 1, 1, None, 3])
     assert calls == [("persona:one", [1, 2, 3])]
@@ -79,7 +80,7 @@ def test_outcomes_for_leads_skips_the_roundtrip_when_there_is_nothing_to_read(mo
         raise AssertionError("nao deve consultar sem leads")
 
     monkeypatch.setattr(
-        journey_outcome.supabase_client, "get_current_journeys_by_lead_refs", explode,
+        journey_outcome.supabase_client, "get_journeys_by_lead_refs", explode,
     )
     assert journey_outcome.outcomes_for_leads("persona:one", []) == {}
     assert journey_outcome.outcomes_for_leads("", [1, 2]) == {}
@@ -87,8 +88,9 @@ def test_outcomes_for_leads_skips_the_roundtrip_when_there_is_nothing_to_read(mo
 
 def test_decorate_leads_never_rewrites_the_manual_stage(monkeypatch):
     monkeypatch.setattr(
-        journey_outcome.supabase_client, "get_current_journeys_by_lead_refs",
-        lambda *_a, **_k: [{"lead_ref": 7, "state": "converted", "metadata": {}}],
+        journey_outcome.supabase_client, "get_journeys_by_lead_refs",
+        lambda *_a, **_k: [{"lead_ref": 7, "state": "converted", "sequence": 1,
+                            "is_current": True, "metadata": {}}],
     )
     monkeypatch.setattr(
         journey_outcome.supabase_client, "get_persona_configs_by_ids",
@@ -113,11 +115,12 @@ def test_decorate_leads_groups_by_persona_for_the_admin_listing(monkeypatch):
 
     def fake(persona_id, lead_refs, **_kwargs):
         seen.append(persona_id)
-        return [{"lead_ref": ref, "state": "converted", "metadata": {"sold": True}}
+        return [{"lead_ref": ref, "state": "converted", "sequence": 1, "is_current": True,
+                 "converted_at": "2026-08-16T00:00:00Z", "metadata": {"sold": True}}
                 for ref in lead_refs]
 
     monkeypatch.setattr(
-        journey_outcome.supabase_client, "get_current_journeys_by_lead_refs", fake,
+        journey_outcome.supabase_client, "get_journeys_by_lead_refs", fake,
     )
     monkeypatch.setattr(
         journey_outcome.supabase_client, "get_persona_configs_by_ids",
@@ -269,3 +272,98 @@ def test_portal_route_scopes_the_lead_to_the_persona_in_the_url(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         portal._lead(21, "persona:da-url")
     assert exc.value.status_code == 404
+
+
+# ── regras de negocio do ciclo do pedido ─────────────────────────────────────
+#
+# O ciclo completo: qualifica -> converte -> vende/agenda -> conclui/cancela ->
+# proximo inbound abre o pedido seguinte. Cada teste abaixo fixa uma regra que
+# ja quebrou pelo menos uma vez.
+
+def jornada(seq, state, *, current=True, converted=False, **metadata):
+    return {
+        "lead_ref": 1, "sequence": seq, "state": state, "is_current": current,
+        "converted_at": "2026-08-16T00:00:00Z" if converted else None,
+        "metadata": dict(metadata),
+    }
+
+
+def test_pedido_fechado_continua_se_descrevendo_na_tela():
+    """Ler so a jornada corrente fazia o pedido sumir no instante em que era
+    concluido: `is_current` vira false e a tela ficava sem desfecho nenhum,
+    com o botao de venda parecendo disponivel enquanto o backend respondia 409
+    por nao haver jornada corrente."""
+    fechada = [jornada(1, "closed", current=False, converted=True,
+                       sold=True, closing_event="service_completed")]
+    resumo = journey_outcome.summarize(fechada)
+    assert resumo["journey_outcome"] == journey_outcome.ENTREGUE
+    assert resumo["journey_is_open"] is False
+
+
+def test_lead_fica_convertido_para_sempre_apos_a_primeira_venda():
+    """Regra do negocio: depois do primeiro agendamento ou compra a lead esta
+    convertida e nao volta para qualificada -- nem ao cancelar, nem no pedido
+    seguinte."""
+    cancelada = [jornada(1, "closed", current=False, converted=True,
+                         closing_event="cancelled")]
+    assert journey_outcome.summarize(cancelada)["lead_converted"] is True
+
+    # pedido seguinte comeca do zero, a lead segue convertida
+    segundo_ciclo = cancelada + [jornada(2, "handed_off")]
+    resumo = journey_outcome.summarize(segundo_ciclo)
+    assert resumo["lead_converted"] is True
+    assert resumo["journey_outcome"] == journey_outcome.QUALIFICADO
+    assert resumo["journey_is_open"] is True
+
+
+def test_lead_sem_nenhuma_venda_nao_e_convertida():
+    assert journey_outcome.summarize([jornada(1, "handed_off")])["lead_converted"] is False
+    assert journey_outcome.summarize([])["lead_converted"] is False
+
+
+def test_o_resumo_sempre_le_o_pedido_mais_recente():
+    """Com varias jornadas, a tela fala do pedido atual -- nao do primeiro."""
+    historico = [
+        jornada(1, "closed", current=False, converted=True, sold=True,
+                closing_event="delivered"),
+        jornada(2, "closed", current=False, converted=True, closing_event="cancelled"),
+        jornada(3, "converted", converted=True, sold=True),
+    ]
+    resumo = journey_outcome.summarize(list(reversed(historico)))  # ordem nao importa
+    assert resumo["journey_outcome"] == journey_outcome.VENDIDO
+    assert resumo["journey_sequence"] == 3
+    assert resumo["journey_is_open"] is True
+
+
+def test_sem_jornada_aberta_nao_ha_pedido_para_receber_evento():
+    """O front usa isto para desabilitar os botoes: sem jornada corrente o
+    backend levanta `current journey not found` e devolve 409. O ciclo so
+    reinicia no proximo inbound do cliente."""
+    fechada = journey_outcome.summarize(
+        [jornada(1, "closed", current=False, closing_event="cancelled")]
+    )
+    assert fechada["journey_is_open"] is False
+    sem_nada = journey_outcome.summarize([])
+    assert sem_nada["journey_is_open"] is False and sem_nada["journey_outcome"] is None
+
+
+def test_decoracao_expoe_os_dois_eixos_separados(monkeypatch):
+    """`stage` (funil manual), `journey_outcome` (pedido) e `lead_converted`
+    (permanente) sao tres fatos distintos e nenhum reescreve o outro."""
+    monkeypatch.setattr(
+        journey_outcome.supabase_client, "get_journeys_by_lead_refs",
+        lambda *_a, **_k: [jornada(1, "closed", current=False, converted=True,
+                                   sold=True, closing_event="delivered")],
+    )
+    monkeypatch.setattr(
+        journey_outcome.supabase_client, "get_persona_configs_by_ids",
+        lambda *_a, **_k: {"p": {"portal": {"business_model": "appointment"}}},
+    )
+    row = journey_outcome.decorate_leads(
+        [{"id": 1, "persona_id": "p", "stage": "qualificado"}]
+    )[0]
+    assert row["stage"] == "qualificado"
+    assert row["journey_outcome"] == journey_outcome.ENTREGUE
+    assert row["lead_converted"] is True
+    assert row["journey_is_open"] is False
+    assert row["business_model"] == "appointment"
