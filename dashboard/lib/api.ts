@@ -14,6 +14,7 @@ export const API_OFFLINE_ERROR =
 // entrega, serviço conclui.
 export type JourneyEventType =
   | "converted"
+  | "conversion_reverted"
   | "sale_recorded"
   | "appointment_booked"
   | "delivered"

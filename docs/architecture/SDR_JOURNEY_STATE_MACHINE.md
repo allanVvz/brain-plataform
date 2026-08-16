@@ -6,7 +6,8 @@ cancelamento são **decisões humanas registradas explicitamente**, nunca inferi
 pelo modelo.
 
 Migrations relevantes: `118` (tabelas), `121` (máquina de estados),
-`122` (suporte pós-handoff), `123` (desfecho comercial).
+`122` (suporte pós-handoff), `123` (desfecho comercial), `124` (conversão
+reversível).
 
 ## Estados
 
@@ -37,11 +38,12 @@ quatro ramos da projeção.
 
 ## Eventos
 
-`POST /agents/leads/{lead_ref}/journey-events` — seis tipos:
+`POST /agents/leads/{lead_ref}/journey-events` — sete tipos:
 
 | Evento | Efeito | Aceita valor? |
 |---|---|---|
-| `converted` | `state='converted'`, `converted_at`. Jornada segue corrente. | não |
+| `converted` | `state='converted'`, `converted_at`, guarda `state_before_conversion`. Jornada segue corrente. | não |
+| `conversion_reverted` | Desfaz a conversão e volta ao `state_before_conversion`. Recusa se houver venda. | não |
 | `sale_recorded` | Insere `sales_conversions` (`purchase`), `state='converted'`, `metadata.sold=true`. | sim |
 | `appointment_booked` | Idem, `conversion_type='appointment_booked'`. | sim |
 | `delivered` | `state='closed'`, `is_current=false`, `metadata.closing_event`. | não |
@@ -80,6 +82,25 @@ devolve `deduplicated: true` sem gravar de novo.
 
 O dashboard usa chave determinística `dashboard:{lead_ref}:{event_type}` — clique
 duplo colide na chave em vez de gerar dois registros.
+
+`conversion_reverted` é a exceção deliberada: em vez de anexar a própria entrada,
+ele **remove** a entrada do `converted` que desfez. Sem isso o operador só
+conseguiria converter uma vez por jornada e o toggle não poderia voltar. A
+idempotência do revert vem do estado: reverter uma jornada que não está
+convertida é no-op.
+
+### Conversão é reversível; venda não
+
+Conversão é leitura do operador — e leitura se corrige. Enquanto não existe
+registro em `sales_conversions`, o toggle vai e volta entre `qualificado` e
+`convertido` quantas vezes for preciso. Assim que a venda entra, `metadata.sold`
+trava o controle: desfazer passaria por estorno em `sales_conversions`, que é
+outro contrato.
+
+`converted` guarda `state_before_conversion` para que o retorno seja ao estado
+real de origem. Sem isso, uma jornada convertida a partir de
+`qualified_confirmed` voltaria para `handed_off` e pareceria ter sido entregue
+ao humano sem nunca ter sido.
 
 ## Desfecho (`journey_outcome`)
 
@@ -139,6 +160,12 @@ Mensagens.
 `qualificado` não ganha token de propósito: o estágio continua categórico,
 codificado por peso, e só compromisso, venda e entrega gastam cor.
 
+No rail direito, a fase reversível vive num **toggle** (`qualificado ⇄
+convertido`) e não em botões: um botão sugere ação irreversível. Sobram duas
+ações, as que comprometem o pedido — **venda** e **cancelamento**. Entrega não é
+decisão do operador na tela de conversa: `delivered`/`service_completed` chegam
+pela variante interna do endpoint, por integração.
+
 Na lista de conversas, o marcador de desfecho ocupa o lugar do `StageBadge` —
 300px não comportam os dois eixos, e o estágio completo continua no perfil do
 rail direito. **Atenção e desfecho coexistem**: `attentionRowStyle` continua dono
@@ -160,9 +187,12 @@ A migration 121 deixou duas funções da 118 órfãs. Continuam definidas e com
 ## Testes
 
 - `tests/test_journey_outcome.py` — derivação, leitura em lote e o contrato SQL
-  da migration 123 (guarda de regressão, `converted`, marcador `sold`).
+  das migrations 123 (guarda de regressão, `converted`, marcador `sold`) e 124
+  (retorno ao estado de origem, venda torna a conversão final, liberação da
+  chave de idempotência).
 - `tests/test_agents_conversion_api.py` — contrato do endpoint e a proibição de
   valor comercial em `converted`.
 - `tests/test_conversation_journeys_migration.py` — invariantes das 118/121/122.
 - `dashboard/__tests__/messages-journey-outcome.test.tsx` — cor na lista, notas
-  no rail, regras dos botões, confirmação e idempotência do clique duplo.
+  no rail, o toggle nos dois sentidos, o travamento após a venda, regras dos
+  botões, confirmação e idempotência do clique duplo.

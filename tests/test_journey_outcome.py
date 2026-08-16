@@ -7,6 +7,8 @@ from services import journey_outcome
 
 OUTCOME_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
                "123_journey_outcome_events.sql").read_text(encoding="utf-8")
+REVERT_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
+              "124_reversible_conversion.sql").read_text(encoding="utf-8")
 
 
 def journey(state, **metadata):
@@ -146,3 +148,42 @@ def test_conversion_keeps_the_request_open_and_closing_events_close_it():
     assert "state=CASE WHEN state='closed' THEN state ELSE 'converted' END" in events
     assert events.count("'new_journey_created',false") >= 4
     assert "is_current=false,state='closed'" in events
+
+
+# ── contrato da migration 124: conversao reversivel ──────────────────────────
+
+def test_revert_returns_to_the_state_the_journey_actually_came_from():
+    """Sem `state_before_conversion` o retorno seria um default adivinhado --
+    uma jornada convertida a partir de `qualified_confirmed` voltaria para
+    `handed_off` e pareceria ter sido entregue ao humano sem nunca ter sido."""
+    assert "CREATE TABLE" not in REVERT_SQL
+    assert "'state_before_conversion',v_previous" in REVERT_SQL
+    assert "state=coalesce(nullif(metadata->>'state_before_conversion',''),'handed_off')" in REVERT_SQL
+    assert "converted_at=NULL" in REVERT_SQL
+
+
+def test_sale_makes_the_conversion_final():
+    assert "conversion backed by a sale cannot be reverted" in REVERT_SQL
+    revert = REVERT_SQL[REVERT_SQL.index("IF v_revert THEN"):]
+    assert "(v_journey.metadata->>'sold')::boolean" in revert
+
+
+def test_revert_frees_the_conversion_key_instead_of_appending_its_own():
+    """O toggle precisa poder ir e voltar quantas vezes o operador corrigir.
+    Se o revert apenas anexasse uma entrada, a chave de `converted` seguiria
+    ocupada e a segunda conversao seria deduplicada em silencio."""
+    start = REVERT_SQL.index("IF v_revert THEN")
+    revert = REVERT_SQL[start:REVERT_SQL.index("IF v_sale THEN", start)]
+    assert "e->>'type' IS DISTINCT FROM 'converted'" in revert
+    # a varredura de idempotencia por metadata nao roda para o revert
+    assert "ELSIF NOT v_revert THEN" in REVERT_SQL
+
+
+def test_reverting_a_journey_that_is_not_converted_is_a_no_op():
+    revert = REVERT_SQL[REVERT_SQL.index("IF v_revert THEN"):]
+    assert "IF v_journey.state<>'converted' THEN" in revert
+    assert revert.index("IF v_journey.state<>'converted' THEN") < revert.index("'deduplicated',true")
+
+
+def test_revert_is_published_in_the_event_enum():
+    assert "'converted','conversion_reverted','sale_recorded'" in REVERT_SQL

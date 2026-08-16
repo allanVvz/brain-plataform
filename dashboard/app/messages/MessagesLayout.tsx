@@ -610,15 +610,12 @@ type JourneyAction = {
   confirm?: string;
 };
 
-// A ordem é a da jornada, não a do alfabeto: conversão → compra na primeira
-// linha, os dois terminais na segunda.
+// Só as duas ações que comprometem o pedido. Conversão saiu para o
+// ToggleConversao porque é reversível enquanto não há dinheiro envolvido, e a
+// entrega não é decisão do operador na tela de conversa: chega por integração
+// (`delivered` / `service_completed` na variante interna do endpoint).
 const JOURNEY_ACTIONS: JourneyAction[] = [
-  { key: "conversao", label: "Conversão", event: "converted", outcome: "convertido" },
-  { key: "compra", label: "Compra", event: "sale_recorded", outcome: "vendido" },
-  {
-    key: "entregue", label: "Entregue", event: "delivered", outcome: "entregue",
-    confirm: "Marcar como entregue fecha o pedido. A próxima mensagem do cliente abre uma jornada nova.",
-  },
+  { key: "venda", label: "Venda", event: "sale_recorded", outcome: "vendido" },
   {
     key: "cancelamento", label: "Cancelamento", event: "cancelled", outcome: "cancelado",
     confirm: "Cancelar fecha o pedido. Os fatos já coletados são preservados, mas a jornada não aceita mais eventos.",
@@ -632,11 +629,104 @@ function journeyActionState(
   if (isJourneySettled(outcome)) {
     return outcome === action.outcome ? "concluido" : "bloqueado";
   }
-  if (action.key === "conversao" && (outcome === "convertido" || outcome === "vendido")) return "concluido";
-  if (action.key === "compra" && outcome === "vendido") return "concluido";
-  // Entrega pressupõe venda registrada — senão não há o que entregar.
-  if (action.key === "entregue" && outcome !== "vendido") return "bloqueado";
+  if (action.key === "venda" && outcome === "vendido") return "concluido";
   return "disponivel";
+}
+
+// A conversão é a única fase reversível da jornada, e um toggle diz isso melhor
+// que um botão: enquanto não há venda, converter é uma leitura do operador e
+// leitura se corrige. Depois da venda vira fato e o controle trava — desfazer
+// passaria por estorno em sales_conversions, que é outro contrato.
+function ToggleConversao({
+  lead, outcome, canEdit, onRecorded,
+}: {
+  lead: Lead;
+  outcome: JourneyOutcome | null;
+  canEdit: boolean;
+  onRecorded: () => void | Promise<void>;
+}) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const converted = outcome === "convertido";
+  const locked = outcome === "vendido" || isJourneySettled(outcome);
+  // Sem jornada ainda não há o que converter — o backend responderia 409.
+  const readable: JourneyOutcome = converted || locked
+    ? (outcome as JourneyOutcome)
+    : "qualificado";
+  const style = OUTCOME_STYLE[locked ? readable : converted ? "convertido" : "qualificado"];
+
+  const toggle = useCallback(async () => {
+    const event: JourneyEventType = converted ? "conversion_reverted" : "converted";
+    setPending(true);
+    setError(null);
+    try {
+      await api.recordJourneyEvent(lead.id, {
+        event_type: event,
+        idempotency_key: `dashboard:${lead.id}:${event}`,
+        source: "dashboard",
+        occurred_at: new Date().toISOString(),
+        metadata: { recorded_from: "messages" },
+      });
+      await onRecorded();
+    } catch (err) {
+      setError(getErrorMessage(err, "Não foi possível alterar a conversão."));
+    } finally {
+      setPending(false);
+    }
+  }, [converted, lead.id, onRecorded]);
+
+  const content = (
+    <span className="inline-flex items-center gap-[7px]">
+      <span
+        className="h-[7px] w-[7px] shrink-0 rounded-full"
+        style={{ background: style.color }}
+      />
+      <span
+        className={`text-[11px] font-medium ${readable === "cancelado" ? "line-through" : ""}`}
+        style={{ color: style.color }}
+      >
+        {pending ? "…" : style.label}
+      </span>
+    </span>
+  );
+
+  if (!canEdit || locked || !outcome) {
+    return (
+      <span
+        className="shrink-0 rounded-full px-2.5 py-1"
+        data-outcome={readable}
+        title={
+          locked
+            ? "A venda já foi registrada — a conversão deixou de ser reversível"
+            : `Jornada · ${style.label}`
+        }
+        style={{ background: style.soft }}
+      >
+        {content}
+      </span>
+    );
+  }
+
+  return (
+    <span className="shrink-0">
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={pending}
+        role="switch"
+        aria-checked={converted}
+        aria-label="Conversão do pedido"
+        data-outcome={converted ? "convertido" : "qualificado"}
+        title={converted ? "Desfazer a conversão" : "Marcar como convertido"}
+        className="rounded-full px-2.5 py-1 transition hover:opacity-80 disabled:opacity-50"
+        style={{ background: style.soft, border: `1px solid ${style.color}` }}
+      >
+        {content}
+      </button>
+      {error && <p className="mt-1 text-[10px] text-obs-rose">{error}</p>}
+    </span>
+  );
 }
 
 function JourneyActions({
@@ -3414,14 +3504,12 @@ export function MessagesLayout({
                 <p className="min-w-0 flex-1 truncate text-xs font-semibold text-obs-text">
                   {selectedLead.interesse_produto || "Pedido sem produto definido"}
                 </p>
-                {selectedOutcome && (
-                  <span
-                    className="shrink-0 rounded-full px-2 py-0.5"
-                    style={{ background: OUTCOME_STYLE[selectedOutcome].soft }}
-                  >
-                    <OutcomeMark outcome={selectedOutcome} />
-                  </span>
-                )}
+                <ToggleConversao
+                  lead={selectedLead}
+                  outcome={selectedOutcome}
+                  canEdit={canEdit}
+                  onRecorded={() => refreshSelectedLead(selectedLead.id)}
+                />
               </div>
             </div>
           )}

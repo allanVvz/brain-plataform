@@ -156,35 +156,69 @@ describe("Mensagens — desfecho da jornada", () => {
     expect(within(rail).getByText("aceita frete grátis")).toBeTruthy();
   });
 
-  it("as 4 ações aparecem em duas linhas e respeitam o estado da jornada", async () => {
+  it("sobram duas ações: só venda e cancelamento comprometem o pedido", async () => {
     const rail = await openLeadWithRail();
-    for (const label of ["Conversão", "Compra", "Entregue", "Cancelamento"]) {
-      expect(within(rail).getByRole("button", { name: new RegExp(label) })).toBeTruthy();
-    }
-    // vendido: conversão e compra já feitas, entrega liberada.
-    expect(within(rail).getByRole("button", { name: /Conversão/ })).toBeDisabled();
-    expect(within(rail).getByRole("button", { name: /Compra/ })).toBeDisabled();
-    expect(within(rail).getByRole("button", { name: /Entregue/ })).not.toBeDisabled();
-  });
-
-  it("entrega bloqueada enquanto a compra não foi registrada", async () => {
-    setLead(makeLead({ journey_outcome: "convertido" }));
-    const rail = await openLeadWithRail();
-    expect(within(rail).getByRole("button", { name: /Entregue/ })).toBeDisabled();
-    expect(within(rail).getByRole("button", { name: /Compra/ })).not.toBeDisabled();
+    expect(within(rail).getByRole("button", { name: /Venda/ })).toBeTruthy();
+    expect(within(rail).getByRole("button", { name: /Cancelamento/ })).toBeTruthy();
+    // Conversão virou toggle; entrega chega por integração, não pelo operador.
+    expect(within(rail).queryByRole("button", { name: /Entregue/ })).toBeNull();
+    expect(within(rail).queryByRole("button", { name: /^Conversão$/ })).toBeNull();
+    // vendido: a venda já está registrada.
+    expect(within(rail).getByRole("button", { name: /Venda/ })).toBeDisabled();
+    expect(within(rail).getByRole("button", { name: /Cancelamento/ })).not.toBeDisabled();
   });
 
   it("jornada fechada não aceita mais nenhum evento", async () => {
     setLead(makeLead({ journey_outcome: "cancelado" }));
     const rail = await openLeadWithRail();
-    for (const label of ["Conversão", "Compra", "Entregue", "Cancelamento"]) {
+    for (const label of ["Venda", "Cancelamento"]) {
       expect(within(rail).getByRole("button", { name: new RegExp(label) })).toBeDisabled();
     }
   });
 
-  it("entregue e cancelamento pedem confirmação antes de fechar o pedido", async () => {
+  it("o toggle alterna qualificado para convertido", async () => {
+    setLead(makeLead({ journey_outcome: "qualificado" }));
     const rail = await openLeadWithRail();
-    fireEvent.click(within(rail).getByRole("button", { name: /Entregue/ }));
+    const toggle = within(rail).getByRole("switch", { name: "Conversão do pedido" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(within(toggle).getByText("qualificado")).toBeTruthy();
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
+    expect(recordJourneyEvent).toHaveBeenCalledWith(1, expect.objectContaining({
+      event_type: "converted",
+      idempotency_key: "dashboard:1:converted",
+    }));
+  });
+
+  it("o toggle desfaz a conversão enquanto não há venda", async () => {
+    setLead(makeLead({ journey_outcome: "convertido" }));
+    const rail = await openLeadWithRail();
+    const toggle = within(rail).getByRole("switch", { name: "Conversão do pedido" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
+    expect(recordJourneyEvent).toHaveBeenCalledWith(1, expect.objectContaining({
+      event_type: "conversion_reverted",
+      idempotency_key: "dashboard:1:conversion_reverted",
+    }));
+  });
+
+  it("depois da venda a conversão deixa de ser reversível", async () => {
+    const rail = await openLeadWithRail(); // vendido
+    expect(within(rail).queryByRole("switch")).toBeNull();
+    const marca = rail.querySelector('[data-outcome="vendido"]');
+    expect(marca).toBeTruthy();
+    expect(marca).toHaveAttribute(
+      "title",
+      "A venda já foi registrada — a conversão deixou de ser reversível",
+    );
+  });
+
+  it("cancelamento pede confirmação antes de fechar o pedido", async () => {
+    const rail = await openLeadWithRail();
+    fireEvent.click(within(rail).getByRole("button", { name: /Cancelamento/ }));
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/fecha o pedido/)).toBeTruthy();
@@ -193,21 +227,21 @@ describe("Mensagens — desfecho da jornada", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Confirmar" }));
     await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
     expect(recordJourneyEvent).toHaveBeenCalledWith(1, expect.objectContaining({
-      event_type: "delivered",
-      idempotency_key: "dashboard:1:delivered",
+      event_type: "cancelled",
+      idempotency_key: "dashboard:1:cancelled",
       source: "dashboard",
     }));
   });
 
   it("a chave de idempotência é determinística — clique duplo não duplica evento", async () => {
-    setLead(makeLead({ journey_outcome: "qualificado" }));
+    setLead(makeLead({ journey_outcome: "convertido" }));
     const rail = await openLeadWithRail();
-    const botao = within(rail).getByRole("button", { name: /Conversão/ });
+    const botao = within(rail).getByRole("button", { name: /Venda/ });
     fireEvent.click(botao);
     fireEvent.click(botao);
     await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalled());
     const chaves = new Set(recordJourneyEvent.mock.calls.map((c: any[]) => c[1].idempotency_key));
-    expect(chaves).toEqual(new Set(["dashboard:1:converted"]));
+    expect(chaves).toEqual(new Set(["dashboard:1:sale_recorded"]));
   });
 
   it("sem permissão de edição, nenhuma ação é oferecida", async () => {
