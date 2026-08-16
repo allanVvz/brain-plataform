@@ -166,9 +166,21 @@
      of the app's violet branding (buttons, focus rings, login) is
      untouched. See PROJECT plan "Correções de revisão visual" §2/§8.4. */
   --obs-teal:    14 116 144;
-  /* "Estado bom" — canal conectado / IA ativa, and reused for
-     estágio-positivo-do-funil (qualificado/oportunidade/fechado) badges. */
+  /* "Estado bom" — canal conectado / IA ativa. */
   --obs-live:    15 157  99;
+
+  /* Desfecho comercial da jornada — quarto eixo semântico, aplicado só na
+     trilha da jornada (lista de conversas + rail do pedido). Os hues foram
+     escolhidos para não colidir com nenhum acento reservado: --obs-violet
+     (~250°) é evidência do grafo, --obs-live (~155°) é canal/IA ativa,
+     --obs-amber (~35°) exige ação humana e --obs-teal (~193°) é evidência na
+     tela de Mensagens. Sobram azul (~217°), magenta (~325°) e o navy, que é
+     tinta e não acento. `qualificado` não ganha token: fica em --obs-faint de
+     propósito, porque o estágio continua categórico. */
+  --obs-outcome-converted: 37  99 201;  /* #2563C9 azul    */
+  --obs-outcome-sold:     163  46 122;  /* #A32E7A magenta */
+  --obs-outcome-delivered: 20  55  94;  /* #14375E navy    */
+  --obs-outcome-cancelled:100 116 139;  /* #64748B cinza   */
 
   /* Neutral scrim foreground — drives white/X classes. */
   --scrim-fg: 17 24 39;
@@ -237,6 +249,14 @@
   --obs-teal:    34 165 186;
   --obs-live:    16 185 129;
 
+  /* Desfecho no tema escuro: os mesmos hues, clareados para manter contraste
+     sobre --obs-surface. O navy do `entregue` inverte para um azul-ardósia
+     claro — no escuro ele é a cor mais quieta, não a mais escura. */
+  --obs-outcome-converted:108 155 238;
+  --obs-outcome-sold:     212 112 176;
+  --obs-outcome-delivered:143 168 204;
+  --obs-outcome-cancelled:100 116 139;
+
   --scrim-fg: 255 255 255;
 
   --border-glass:        rgba(255, 255, 255, 0.08);
@@ -302,6 +322,14 @@
   --obs-text: 15 23 42;
   --obs-subtle: 71 85 105;
   --obs-faint: 100 116 139;
+  /* Mesmo vazamento descrito abaixo: o portal é sempre claro, então os tokens
+     de desfecho precisam ser redeclarados aqui — senão um admin que já tenha
+     ligado o tema escuro carrega os valores claros do dark para dentro do
+     portal. */
+  --obs-outcome-converted: 37  99 201;
+  --obs-outcome-sold:     163  46 122;
+  --obs-outcome-delivered: 20  55  94;
+  --obs-outcome-cancelled:100 116 139;
   --scrim-fg: 255 255 255;
   --border-glass: rgba(15, 23, 42, 0.10);
   --border-glass-soft: rgba(15, 23, 42, 0.06);

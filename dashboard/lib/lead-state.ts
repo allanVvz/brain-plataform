@@ -66,3 +66,34 @@ export function summarizeLeadLifecycle(
 export function normalizeLeadStage(stage: string | null | undefined) {
   return normalizeStageValue(stage);
 }
+
+// ── Desfecho comercial da jornada ────────────────────────────────────────────
+// Eixo independente do `stage`: o estágio é o funil manual (novo → contatado →
+// … → fechado/perdido) e continua sendo editado por humano no pipeline. O
+// desfecho vem de conversation_journeys e é derivado no backend por
+// api/services/journey_outcome.py — o frontend só normaliza e pinta, nunca
+// recalcula. Um lead pode estar `qualificado` no funil e `convertido` na
+// jornada ao mesmo tempo; os dois valores são verdadeiros.
+
+export const JOURNEY_OUTCOMES = [
+  "qualificado",
+  "convertido",
+  "vendido",
+  "entregue",
+  "cancelado",
+] as const;
+
+export type JourneyOutcome = (typeof JOURNEY_OUTCOMES)[number];
+
+const OUTCOME_SET = new Set<string>(JOURNEY_OUTCOMES);
+
+export function normalizeJourneyOutcome(value: unknown): JourneyOutcome | null {
+  const normalized = String(value ?? "").toLowerCase().trim();
+  return OUTCOME_SET.has(normalized) ? (normalized as JourneyOutcome) : null;
+}
+
+// Uma jornada fechada não aceita evento novo: o pedido acabou e o próximo
+// inbound abre a jornada seguinte.
+export function isJourneySettled(outcome: JourneyOutcome | null) {
+  return outcome === "entregue" || outcome === "cancelado";
+}

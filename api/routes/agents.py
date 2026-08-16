@@ -51,8 +51,8 @@ class ConversionStatusBody(BaseModel):
 
 class JourneyEventBody(BaseModel):
     event_type: Literal[
-        "sale_recorded", "appointment_booked", "delivered",
-        "service_completed", "cancelled",
+        "converted", "conversion_reverted", "sale_recorded", "appointment_booked",
+        "delivered", "service_completed", "cancelled",
     ]
     idempotency_key: str = Field(min_length=1, max_length=200)
     source: str = Field(min_length=1, max_length=100)

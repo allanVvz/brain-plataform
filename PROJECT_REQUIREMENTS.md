@@ -546,6 +546,46 @@ com `spawn EPERM`.
   persistencia de `whatsapp_phone_number_id`.
 - Criar testes de roteamento n8n e assinatura de webhook.
 
+## 14b. Jornada comercial do pedido
+
+O grafo responde "o que a persona vende". A jornada responde "em que pe esta
+este pedido". Sao contratos distintos e nenhum dos dois substitui o outro.
+
+- O SDR termina na qualificacao. Conversao, venda, entrega e cancelamento sao
+  decisoes humanas registradas explicitamente, nunca inferidas pelo modelo.
+- Uma unica jornada e corrente por `(persona, lead)`. Venda nao abre jornada
+  nova: a seguinte nasce no proximo inbound depois de entrega, conclusao ou
+  cancelamento.
+- Desfecho registrado por humano nao pode ser regredido por proof do SDR. Um
+  inbound depois da venda e suporte ao pedido, nao uma nova coleta.
+- `journey_outcome` e eixo independente de `stage`. `stage` continua sendo o
+  funil manual do pipeline; os dois valores sao verdadeiros ao mesmo tempo e
+  nenhum reescreve o outro.
+- Todo evento de jornada e idempotente por `(source, idempotency_key)`. Repetir
+  devolve `deduplicated`, nunca um segundo registro.
+- O pedido anda em dois passos e o par de eventos vem do `business_model` da
+  persona: produto e comprado e entregue, servico e agendado e concluido.
+- Cancelar estorna a compra: as conversoes `completed` da jornada viram
+  `cancelled` e a receita deixa de ser contada. A conversao do lead e
+  preservada -- conversao e fato do lead, venda e fato do pedido.
+- Fechar o pedido, por conclusao ou cancelamento, reinicia o ciclo agentico.
+- Valor comercial so entra em evento de conversao (`sale_recorded`,
+  `appointment_booked`), validado no schema e no plpgsql.
+
+Contrato completo em `docs/architecture/SDR_JOURNEY_STATE_MACHINE.md`.
+
+Testes obrigatorios:
+
+- Desfecho terminal vence: vendido e depois cancelado le `cancelado`.
+- Proof posterior a venda nao muda o `state` da jornada.
+- Evento repetido com a mesma chave nao duplica registro nem outbound.
+- Entrega so e oferecida depois da compra registrada.
+- Cancelar uma jornada vendida deixa a conversao em `cancelled` e nao contabiliza
+  receita, mas mantem `converted_at`.
+- Persona de agendamento registra `appointment_booked`/`service_completed`, nunca
+  `sale_recorded`/`delivered`.
+- Jornada fechada nao aceita evento novo.
+
 ## 15. Regra final de implementacao
 
 Antes de salvar, publicar, renderizar ou alimentar agente:

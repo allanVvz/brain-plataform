@@ -8,6 +8,28 @@ export const API_URL = BASE;
 export const API_OFFLINE_ERROR =
   "Backend indisponivel agora. Confirme o backend (API_INTERNAL_BASE_URL), o endpoint /health e tente novamente.";
 
+// Eventos de desfecho da jornada — espelham o Literal de
+// api/routes/agents.py::JourneyEventBody. `delivered` e `service_completed`
+// são o mesmo desfecho ("entregue") em modelos de negócio diferentes: produto
+// entrega, serviço conclui.
+export type JourneyEventType =
+  | "converted"
+  | "conversion_reverted"
+  | "sale_recorded"
+  | "appointment_booked"
+  | "delivered"
+  | "service_completed"
+  | "cancelled";
+
+export type JourneyEventResult = {
+  event_type: JourneyEventType;
+  deduplicated: boolean;
+  new_journey_created: boolean;
+  journey?: Record<string, unknown>;
+  conversion?: Record<string, unknown>;
+  lead_first_conversion?: boolean;
+};
+
 export type ApiErrorKind =
   | "network"
   | "unauthenticated"
@@ -275,6 +297,25 @@ export const api = {
     interesse_produto?: string;
     commercial_note?: Record<string, string>;
   }) => req<any>(`/leads/${leadRef}`, { method: "PATCH", body: JSON.stringify(body) }),
+  // Desfecho comercial da jornada. A rota é a mesma para admin e portal: o
+  // backend autoriza por capability "edit" na persona do lead, então não há
+  // variante /portal. `idempotency_key` é determinística — dois cliques no
+  // mesmo botão da mesma jornada devolvem deduplicated:true em vez de gravar
+  // o evento duas vezes.
+  recordJourneyEvent: (
+    leadRef: number,
+    body: {
+      event_type: JourneyEventType;
+      idempotency_key: string;
+      source: string;
+      occurred_at: string;
+      metadata?: Record<string, unknown>;
+    },
+  ) =>
+    req<JourneyEventResult>(`/agents/leads/${leadRef}/journey-events`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   pauseAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/pause-ai`, { method: "POST" }),
   resumeAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/resume-ai`, { method: "POST" }),
   acknowledgeHandoff: (leadRef: number) =>

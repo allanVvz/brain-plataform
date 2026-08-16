@@ -1,0 +1,235 @@
+from pathlib import Path
+
+import pytest
+
+from services import journey_outcome
+
+
+OUTCOME_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
+               "123_journey_outcome_events.sql").read_text(encoding="utf-8")
+REVERT_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
+              "124_reversible_conversion.sql").read_text(encoding="utf-8")
+
+
+def journey(state, **metadata):
+    return {"state": state, "lead_ref": 1, "metadata": dict(metadata)}
+
+
+# ── derivacao ────────────────────────────────────────────────────────────────
+
+def test_pre_qualification_has_no_outcome():
+    for state in ("collecting", "awaiting_confirmation"):
+        assert journey_outcome.derive(journey(state)) is None
+    assert journey_outcome.derive(None) is None
+    assert journey_outcome.derive({}) is None
+
+
+@pytest.mark.parametrize("state", ["qualified_confirmed", "handed_off"])
+def test_qualification_reads_as_qualificado(state):
+    assert journey_outcome.derive(journey(state)) == journey_outcome.QUALIFICADO
+
+
+def test_converted_separates_the_customer_yes_from_the_sale():
+    """`converted` e o aceite; `sold` so aparece quando houve venda de fato.
+    Os dois compartilham state='converted', entao o marcador e o que os
+    distingue -- sem ele a lista mostraria 'vendido' para quem so disse sim."""
+    assert journey_outcome.derive(journey("converted")) == journey_outcome.CONVERTIDO
+    assert journey_outcome.derive(journey("converted", sold=True)) == journey_outcome.VENDIDO
+
+
+@pytest.mark.parametrize("event", ["delivered", "service_completed"])
+def test_completion_events_collapse_into_entregue(event):
+    assert journey_outcome.derive(
+        journey("closed", closing_event=event, sold=True)
+    ) == journey_outcome.ENTREGUE
+
+
+def test_cancellation_wins_over_a_previous_sale():
+    assert journey_outcome.derive(
+        journey("closed", closing_event="cancelled", sold=True)
+    ) == journey_outcome.CANCELADO
+
+
+def test_closed_without_a_closing_event_is_not_guessed():
+    assert journey_outcome.derive(journey("closed", sold=True)) is None
+
+
+# ── leitura em lote ──────────────────────────────────────────────────────────
+
+def test_outcomes_for_leads_reads_once_for_the_whole_list(monkeypatch):
+    calls = []
+
+    def fake(persona_id, lead_refs, **_kwargs):
+        calls.append((persona_id, list(lead_refs)))
+        return [
+            {"lead_ref": 1, "state": "handed_off", "metadata": {}},
+            {"lead_ref": 2, "state": "converted", "metadata": {"sold": True}},
+        ]
+
+    monkeypatch.setattr(
+        journey_outcome.supabase_client, "get_current_journeys_by_lead_refs", fake,
+    )
+    outcomes = journey_outcome.outcomes_for_leads("persona:one", [2, 1, 1, None, 3])
+    assert calls == [("persona:one", [1, 2, 3])]
+    assert outcomes == {1: journey_outcome.QUALIFICADO, 2: journey_outcome.VENDIDO}
+
+
+def test_outcomes_for_leads_skips_the_roundtrip_when_there_is_nothing_to_read(monkeypatch):
+    def explode(*_args, **_kwargs):
+        raise AssertionError("nao deve consultar sem leads")
+
+    monkeypatch.setattr(
+        journey_outcome.supabase_client, "get_current_journeys_by_lead_refs", explode,
+    )
+    assert journey_outcome.outcomes_for_leads("persona:one", []) == {}
+    assert journey_outcome.outcomes_for_leads("", [1, 2]) == {}
+
+
+def test_decorate_leads_never_rewrites_the_manual_stage(monkeypatch):
+    monkeypatch.setattr(
+        journey_outcome.supabase_client, "get_current_journeys_by_lead_refs",
+        lambda *_a, **_k: [{"lead_ref": 7, "state": "converted", "metadata": {}}],
+    )
+    monkeypatch.setattr(
+        journey_outcome.supabase_client, "get_persona_configs_by_ids",
+        lambda *_a, **_k: {"persona:one": {"portal": {"business_model": "appointment"}}},
+    )
+    rows = [
+        {"id": 7, "persona_id": "persona:one", "stage": "qualificado"},
+        {"id": 8, "persona_id": "persona:one", "stage": "fechado"},
+    ]
+    decorated = journey_outcome.decorate_leads(rows)
+    assert decorated[0]["journey_outcome"] == journey_outcome.CONVERTIDO
+    assert decorated[0]["stage"] == "qualificado"
+    assert decorated[1]["journey_outcome"] is None
+    assert decorated[1]["stage"] == "fechado"
+    # o modelo de negocio viaja junto: a tela precisa dele para saber se o
+    # pedido e comprado/entregue ou agendado/concluido
+    assert decorated[0]["business_model"] == "appointment"
+
+
+def test_decorate_leads_groups_by_persona_for_the_admin_listing(monkeypatch):
+    seen = []
+
+    def fake(persona_id, lead_refs, **_kwargs):
+        seen.append(persona_id)
+        return [{"lead_ref": ref, "state": "converted", "metadata": {"sold": True}}
+                for ref in lead_refs]
+
+    monkeypatch.setattr(
+        journey_outcome.supabase_client, "get_current_journeys_by_lead_refs", fake,
+    )
+    monkeypatch.setattr(
+        journey_outcome.supabase_client, "get_persona_configs_by_ids",
+        lambda *_a, **_k: {},
+    )
+    rows = [
+        {"id": 1, "persona_id": "persona:a"},
+        {"id": 2, "persona_id": "persona:b"},
+    ]
+    decorated = journey_outcome.decorate_leads(rows)
+    assert sorted(seen) == ["persona:a", "persona:b"]
+    assert [r["journey_outcome"] for r in decorated] == [
+        journey_outcome.VENDIDO, journey_outcome.VENDIDO,
+    ]
+    # persona sem config declarada cai em `sales`, nunca em None
+    assert [r["business_model"] for r in decorated] == ["sales", "sales"]
+
+
+# ── contrato da migration 123 ────────────────────────────────────────────────
+
+def test_migration_introduces_converted_without_creating_a_table():
+    assert "CREATE TABLE" not in OUTCOME_SQL
+    assert "'converted','sale_recorded','appointment_booked'" in OUTCOME_SQL
+    assert "'sold',true" in OUTCOME_SQL
+
+
+def test_proof_projection_never_regresses_a_settled_journey():
+    """Desfecho comercial e registrado por humano. O proof do SDR continua
+    escrevendo metadata, mas nao pode jogar uma jornada convertida ou fechada
+    de volta para collecting/handed_off no proximo inbound."""
+    projection = OUTCOME_SQL[
+        OUTCOME_SQL.index("project_conversation_journey_from_proof_v1"):
+        OUTCOME_SQL.index("record_conversation_journey_event_v1")
+    ]
+    assert "state IN ('converted','closed') INTO v_settled" in projection
+    assert projection.count("CASE WHEN v_settled THEN state") == 4
+
+
+def test_conversion_keeps_the_request_open_and_closing_events_close_it():
+    events = OUTCOME_SQL[OUTCOME_SQL.index("record_conversation_journey_event_v1"):]
+    assert "state=CASE WHEN state='closed' THEN state ELSE 'converted' END" in events
+    assert events.count("'new_journey_created',false") >= 4
+    assert "is_current=false,state='closed'" in events
+
+
+# ── contrato da migration 124: conversao reversivel ──────────────────────────
+
+def test_revert_returns_to_the_state_the_journey_actually_came_from():
+    """Sem `state_before_conversion` o retorno seria um default adivinhado --
+    uma jornada convertida a partir de `qualified_confirmed` voltaria para
+    `handed_off` e pareceria ter sido entregue ao humano sem nunca ter sido."""
+    assert "CREATE TABLE" not in REVERT_SQL
+    assert "'state_before_conversion',v_previous" in REVERT_SQL
+    assert "state=coalesce(nullif(metadata->>'state_before_conversion',''),'handed_off')" in REVERT_SQL
+    assert "converted_at=NULL" in REVERT_SQL
+
+
+def test_sale_makes_the_conversion_final():
+    assert "conversion backed by a sale cannot be reverted" in REVERT_SQL
+    revert = REVERT_SQL[REVERT_SQL.index("IF v_revert THEN"):]
+    assert "(v_journey.metadata->>'sold')::boolean" in revert
+
+
+def test_revert_frees_the_conversion_key_instead_of_appending_its_own():
+    """O toggle precisa poder ir e voltar quantas vezes o operador corrigir.
+    Se o revert apenas anexasse uma entrada, a chave de `converted` seguiria
+    ocupada e a segunda conversao seria deduplicada em silencio."""
+    start = REVERT_SQL.index("IF v_revert THEN")
+    revert = REVERT_SQL[start:REVERT_SQL.index("IF v_sale THEN", start)]
+    assert "e->>'type' IS DISTINCT FROM 'converted'" in revert
+    # a varredura de idempotencia por metadata nao roda para o revert
+    assert "ELSIF NOT v_revert THEN" in REVERT_SQL
+
+
+def test_reverting_a_journey_that_is_not_converted_is_a_no_op():
+    revert = REVERT_SQL[REVERT_SQL.index("IF v_revert THEN"):]
+    assert "IF v_journey.state<>'converted' THEN" in revert
+    assert revert.index("IF v_journey.state<>'converted' THEN") < revert.index("'deduplicated',true")
+
+
+def test_revert_is_published_in_the_event_enum():
+    assert "'converted','conversion_reverted','sale_recorded'" in REVERT_SQL
+
+
+# ── contrato da migration 125: cancelar estorna a compra ─────────────────────
+
+CANCEL_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
+              "125_cancel_reverses_the_purchase.sql").read_text(encoding="utf-8")
+
+
+def test_cancelling_reverses_the_purchase_in_the_ledger():
+    """Antes da 125 a jornada fechava mas a linha em sales_conversions ficava
+    `completed`: a tela dizia cancelado e a receita continuava contada."""
+    assert "CREATE TABLE" not in CANCEL_SQL
+    assert "status='cancelled'" in CANCEL_SQL
+    assert "WHERE journey_id=v_journey.id AND status='completed'" in CANCEL_SQL
+    assert "'reversed_conversions',v_reversed" in CANCEL_SQL
+
+
+def test_cancelling_turns_the_sale_off_but_keeps_the_lead_converted():
+    """Conversao e fato do lead, venda e fato do pedido. Depois do primeiro
+    agendamento ou compra o lead esta convertido, e cancelar nao desfaz isso."""
+    assert "(metadata-'sold'-'last_conversion')" in CANCEL_SQL
+    fechamento = CANCEL_SQL[CANCEL_SQL.index("IF p_event_type='cancelled' THEN"):]
+    assert "converted_at=NULL" not in fechamento
+
+
+def test_a_cancelled_key_cannot_resurrect_the_sale():
+    assert "idempotency key belongs to a cancelled conversion" in CANCEL_SQL
+
+
+def test_first_conversion_ignores_cancelled_rows():
+    """`lead_first_conversion` marca a primeira venda de verdade -- uma venda
+    cancelada nao pode fazer a proxima parecer recorrencia."""
+    assert "completed_at IS NOT NULL AND status<>'cancelled'" in CANCEL_SQL

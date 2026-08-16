@@ -527,3 +527,35 @@ O sistema nao deve depender de strings hardcoded de cliente, produto, campanha, 
 - `artifact_id` quando disponivel.
 
 O grafo e a camada canonica devem ser a fonte para entender relacoes, duplicatas, importancia e contexto. A fila e a KB ativa continuam existindo para compatibilidade operacional, mas nao devem ser tratadas como verdades isoladas.
+
+## Produto e servico (roadmap do closer agentico)
+
+Ainda nao implementado. A definicao fica registrada aqui para o grafo ja nascer
+preparado.
+
+A distincao entre produto e servico **nao pertence a persona** — pertence a
+**campanha**. Uma mesma persona pode operar campanhas dos dois tipos ao mesmo
+tempo, e e a campanha do pedido corrente que decide como o agente qualifica e o
+que ele enxerga.
+
+- `campaign.metadata.offering_kind ∈ {product, service}`. Eixo novo e ortogonal
+  ao `campaign_type` atual, que continua descrevendo o formato de apresentacao
+  (`menu`, `catalog`) e nao a natureza da oferta.
+- O `offering_kind` da campanha determina os fields obrigatorios de qualificacao
+  do ramo: produto puxa quantidade, endereco e entrega; servico puxa data,
+  janela e as caracteristicas do bem atendido. Hoje esse conjunto e escolhido
+  por `business_model` da persona — o que impede uma persona de vender produto e
+  servico ao mesmo tempo.
+- O mesmo eixo escolhe o evento de desfecho correto: produto fecha em
+  `delivered`, servico em `service_completed`; produto converte em
+  `sale_recorded`, servico em `appointment_booked`. Os dois pares colapsam no
+  mesmo `journey_outcome`, entao a escolha afeta o rotulo comercial, nao a cor.
+- As edges `visible_to_agent` passam a distinguir SDR de Closer. O Closer so
+  enxerga o subgrafo da campanha do pedido corrente — nunca o catalogo inteiro
+  da persona.
+- O Closer agentico consome `journey_outcome`: entra em jornada `qualificado` ou
+  `convertido` e nunca em `entregue` ou `cancelado`.
+
+Enquanto `offering_kind` nao existir, o dashboard registra `sale_recorded` e
+`delivered` por padrao. Para persona de agendamento isso rotula a conversao como
+compra em vez de agendamento; o desfecho exibido continua correto.

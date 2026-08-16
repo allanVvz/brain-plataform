@@ -2969,6 +2969,30 @@ def get_persona_by_id(persona_id: str) -> Optional[dict]:
     return _one(get_client().table("personas").select("*").eq("id", persona_id).maybe_single())
 
 
+def get_persona_configs_by_ids(
+    persona_ids: list[str], *, chunk_size: int = 50,
+) -> dict[str, dict]:
+    """`config` de várias personas numa leitura, para decorar listas de leads.
+
+    A tela de Mensagens precisa do `business_model` de cada lead para saber se
+    o pedido é compra/entrega ou agendamento/conclusão. Uma consulta por lead
+    seria N+1 numa lista de 500.
+    """
+    ids = sorted({str(value) for value in persona_ids if value})
+    if not ids:
+        return {}
+    size = max(1, min(chunk_size, 100))
+    configs: dict[str, dict] = {}
+    for index in range(0, len(ids), size):
+        for row in _q(
+            get_client().table("personas").select("id,config")
+            .in_("id", ids[index:index + size])
+        ):
+            if row.get("id"):
+                configs[str(row["id"])] = dict(row.get("config") or {})
+    return configs
+
+
 def upsert_persona(data: dict) -> None:
     get_client().table("personas").upsert(data, on_conflict="slug").execute()
 
@@ -4217,6 +4241,30 @@ def get_current_conversation_journey(persona_id: str, lead_ref: int) -> Optional
         .eq("persona_id", persona_id).eq("lead_ref", lead_ref)
         .eq("is_current", True).maybe_single()
     )
+
+
+def get_current_journeys_by_lead_refs(
+    persona_id: str, lead_refs: list[int], *, chunk_size: int = 100,
+) -> list[dict]:
+    """Current journey of many leads in bounded batches.
+
+    Same reasoning as ``get_leads_by_refs``: the conversation list paints every
+    row at once, so one request per lead would be an N+1, and an unbounded
+    ``in`` list would blow the PostgREST URL up.
+    """
+    refs = sorted({int(value) for value in lead_refs if value is not None})
+    if not persona_id or not refs:
+        return []
+    size = max(1, min(chunk_size, 100))
+    rows: list[dict] = []
+    for index in range(0, len(refs), size):
+        rows.extend(_q(
+            get_client().table("conversation_journeys")
+            .select("lead_ref,state,converted_at,closed_at,sequence,metadata")
+            .eq("persona_id", persona_id).eq("is_current", True)
+            .in_("lead_ref", refs[index:index + size])
+        ))
+    return rows
 
 
 def get_latest_conversation_journey(persona_id: str, lead_ref: int) -> Optional[dict]:
