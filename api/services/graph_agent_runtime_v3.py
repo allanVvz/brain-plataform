@@ -2677,7 +2677,11 @@ def _decide(
             "missing_fields": context.retrieval_trace.get("missing_fields") or [],
             "asked_field_key": context.retrieval_trace.get("asked_field_key"),
             "model_calls": 0,
-            "confirmation_state": str(context.journey_state),
+            "confirmation_state": (
+                "post_qualification_support"
+                if str(context.operational_mode) == "post_qualification_support"
+                else str(context.journey_state)
+            ),
         }
         return (
             ConversationDecision(
