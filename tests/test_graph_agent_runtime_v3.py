@@ -1642,6 +1642,9 @@ def test_reactivated_handoff_greeting_stays_in_support_without_restarting_servic
     assert response.proof["intent_audit"]["greeting"] is True
     assert response.proof["service_resolution"]["rejected_non_service_value"] is True
     assert response.proof["service_resolution"]["resolved"] is True
+    assert response.proof["confirmation_state"] == "post_qualification_support"
+    assert response.proof["journey_transition"]["from"] == "handed_off"
+    assert response.proof["journey_transition"]["to"] == "handed_off"
 
 
 def test_social_message_cannot_become_referential_service_fact():
