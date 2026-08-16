@@ -55,7 +55,8 @@ where filename in (
   '122_preserve_post_handoff_journey.sql',
   '123_journey_outcome_events.sql',
   '124_reversible_conversion.sql',
-  '125_cancel_reverses_the_purchase.sql'
+  '125_cancel_reverses_the_purchase.sql',
+  '126_journey_state_selector.sql'
 ) order by filename;
 
 select 'unsafe_table_grants' metric, count(*)::text value
@@ -108,8 +109,9 @@ begin
       '122_preserve_post_handoff_journey.sql',
       '123_journey_outcome_events.sql',
       '124_reversible_conversion.sql',
-      '125_cancel_reverses_the_purchase.sql')) <> 14 then
-    raise exception 'release migrations 112-125 are incomplete';
+      '125_cancel_reverses_the_purchase.sql',
+      '126_journey_state_selector.sql')) <> 15 then
+    raise exception 'release migrations 112-126 are incomplete';
   end if;
   if exists (
     select 1 from information_schema.role_table_grants

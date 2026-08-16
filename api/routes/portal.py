@@ -29,7 +29,7 @@ from services import (
     whatsapp_outbox,
 )
 from routes import agents as agents_routes
-from routes.agents import JourneyEventBody
+from routes.agents import JourneyEventBody, JourneyStateBody
 from services.whatsapp_providers import get_provider
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -214,6 +214,9 @@ def conversations(request: Request, persona_slug: str = Query(...)):
                 "journey_outcome": None, "lead_converted": False,
                 "journey_is_open": False, "journey_sequence": 0,
             }),
+            # O carimbo permanente vence a derivacao por `converted_at`.
+            "lead_converted": journey_outcome.lead_converted(lead)
+            or bool((resumos.get(ref) or {}).get("lead_converted")),
             "business_model": business_model,
         })
     return decorated
@@ -522,6 +525,27 @@ def journey_event(
     _lead(lead_id, persona["id"])
     user = auth_service.current_user(request)
     return agents_routes.record_journey_event(lead_id, body, str(user["id"]))
+
+
+@router.post("/leads/{lead_id}/journey-state")
+def journey_state(
+    lead_id: int, body: JourneyStateBody, request: Request,
+    persona_slug: str = Query(...),
+):
+    """Estado do pedido escolhido pelo closer, na variante do portal.
+
+    O `business_model` da persona decide o par de eventos por tras do alvo:
+    produto e comprado e entregue, servico e agendado e concluido.
+    """
+    persona = _persona(persona_slug, request, "edit")
+    _lead(lead_id, persona["id"])
+    user = auth_service.current_user(request)
+    offering = journey_outcome.business_models_for_personas(
+        [persona["id"]]
+    ).get(persona["id"], journey_outcome.SALES)
+    return agents_routes.set_journey_state(
+        lead_id, body, str(user["id"]), offering=offering,
+    )
 
 
 @router.post("/leads/{lead_id}/ai/pause")

@@ -21,6 +21,31 @@ export type JourneyEventType =
   | "service_completed"
   | "cancelled";
 
+// Estado-alvo do pedido, escolhido pelo closer. Não é evento append-only: é a
+// afirmação de onde o pedido está agora, e sabe voltar atrás.
+export type JourneyStateTarget =
+  | "qualificado"
+  | "convertido"
+  | "vendido"
+  | "entregue"
+  | "cancelado";
+
+export type JourneyStateBody = {
+  target: JourneyStateTarget;
+  source: string;
+  occurred_at: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type JourneyStateResult = {
+  target: JourneyStateTarget;
+  from: string;
+  changed: boolean;
+  journey_closed?: boolean;
+  reversed_conversions?: number;
+  ai_resumed?: boolean;
+};
+
 export type JourneyEventResult = {
   event_type: JourneyEventType;
   deduplicated: boolean;
@@ -317,6 +342,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  setJourneyState: (leadRef: number, body: JourneyStateBody) =>
+    req<JourneyStateResult>(`/agents/leads/${leadRef}/journey-state`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   pauseAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/pause-ai`, { method: "POST" }),
   resumeAi: (leadRef: number) => req<{ ok: boolean; ai_paused: boolean }>(`/leads/${leadRef}/resume-ai`, { method: "POST" }),
   acknowledgeHandoff: (leadRef: number) =>
@@ -437,6 +467,11 @@ export const api = {
     },
   ) =>
     req<JourneyEventResult>(`/portal/leads/${leadRef}/journey-events?${personaQuery(slug)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  portalSetJourneyState: (slug: string, leadRef: number | string, body: JourneyStateBody) =>
+    req<JourneyStateResult>(`/portal/leads/${leadRef}/journey-state?${personaQuery(slug)}`, {
       method: "POST",
       body: JSON.stringify(body),
     }),

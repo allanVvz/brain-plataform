@@ -367,3 +367,123 @@ def test_decoracao_expoe_os_dois_eixos_separados(monkeypatch):
     assert row["lead_converted"] is True
     assert row["journey_is_open"] is False
     assert row["business_model"] == "appointment"
+
+
+# ── seletor de estado: contrato da migration 126 ─────────────────────────────
+
+SELECTOR_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
+                "126_journey_state_selector.sql").read_text(encoding="utf-8")
+
+
+def test_selector_nao_cria_tabela_e_so_service_role_executa():
+    assert "CREATE TABLE" not in SELECTOR_SQL
+    assert "GRANT EXECUTE ON FUNCTION public.set_conversation_journey_state_v1" in SELECTOR_SQL
+    assert "FROM PUBLIC,anon,authenticated" in SELECTOR_SQL
+
+
+def test_reabrir_pedido_falha_se_ja_existe_um_mais_novo():
+    """`idx_conversation_journeys_one_current` garante uma jornada corrente por
+    lead. Reabrir por cima corromperia o indice, entao a guarda levanta erro
+    nomeado em vez de deixar o banco recusar com violacao de indice."""
+    assert "a newer order already exists for this lead" in SELECTOR_SQL
+    guarda = SELECTOR_SQL[SELECTOR_SQL.index("IF v_open AND NOT v_journey.is_current"):]
+    assert "sequence>v_journey.sequence" in guarda
+
+
+def test_piso_permanente_impede_voltar_a_qualificado():
+    assert "lead already converted: qualificado is no longer available" in SELECTOR_SQL
+    assert "first_converted_at" in SELECTOR_SQL
+
+
+def test_sair_de_vendido_estorna_a_conversao():
+    assert "v_from='vendido' AND p_target IN ('qualificado','convertido')" in SELECTOR_SQL
+    assert "status='cancelled'" in SELECTOR_SQL
+
+
+def test_reentrar_em_vendido_usa_chave_nova():
+    """Uma venda estornada queimou a chave; a proxima precisa de outra ou
+    colidiria no UNIQUE(persona,source,idempotency_key)."""
+    assert "'selector:'||v_journey.id::text||':'||v_seq::text" in SELECTOR_SQL
+
+
+def test_carimbo_de_conversao_e_escrito_uma_vez_e_retroativo():
+    """O carimbo tambem sai da via de eventos, para integracao e seletor
+    concordarem, e o backfill cobre quem ja converteu antes da migration."""
+    assert "trg_stamp_lead_first_conversion_v1" in SELECTOR_SQL
+    assert "coalesce(metadata->>'first_converted_at'" in SELECTOR_SQL
+    assert "UPDATE public.leads l SET" in SELECTOR_SQL  # backfill
+
+
+def test_lead_converted_le_o_carimbo_e_nao_regride():
+    """`converted_at` pode ser limpo pelo seletor; o carimbo nao."""
+    assert journey_outcome.lead_converted(
+        {"metadata": {"first_converted_at": "2026-08-16T00:00:00Z"}}
+    ) is True
+    assert journey_outcome.lead_converted({"metadata": {}}) is False
+    assert journey_outcome.lead_converted(None) is False
+
+
+# ── seletor de estado: religamento automatico da IA ──────────────────────────
+
+def _corpo(target):
+    from datetime import datetime, timezone
+    from routes.agents import JourneyStateBody
+    return JourneyStateBody(
+        target=target, source="dashboard", occurred_at=datetime.now(timezone.utc),
+    )
+
+
+def test_fechar_o_pedido_religa_a_ia(monkeypatch):
+    """Sem isto o lead segue mudo para sempre: o handoff grava
+    `handoff_level='full'` e nenhum worker reclama `waiting_human`."""
+    from routes import agents
+
+    monkeypatch.setattr(agents.supabase_client, "get_lead_by_ref",
+                        lambda _ref: {"id": 21, "persona_id": "p"})
+    monkeypatch.setattr(agents.supabase_client, "set_conversation_journey_state",
+                        lambda **_kw: {"changed": True, "journey_closed": True})
+    chamados = []
+    monkeypatch.setattr(agents.agents_service, "resume_lead",
+                        lambda ref: chamados.append(ref) or True)
+    monkeypatch.setattr(agents.event_emitter, "emit", lambda *a, **k: None)
+
+    resultado = agents.set_journey_state(21, _corpo("entregue"), "user:1")
+    assert chamados == [21]
+    assert resultado["ai_resumed"] is True
+
+
+def test_estado_aberto_nao_religa_a_ia(monkeypatch):
+    from routes import agents
+
+    monkeypatch.setattr(agents.supabase_client, "get_lead_by_ref",
+                        lambda _ref: {"id": 21, "persona_id": "p"})
+    monkeypatch.setattr(agents.supabase_client, "set_conversation_journey_state",
+                        lambda **_kw: {"changed": True, "journey_closed": False})
+    def explode(_ref):
+        raise AssertionError("nao deve religar em estado aberto")
+    monkeypatch.setattr(agents.agents_service, "resume_lead", explode)
+
+    agents.set_journey_state(21, _corpo("vendido"), "user:1")
+
+
+def test_alvo_repetido_nao_religa_nem_grava(monkeypatch):
+    from routes import agents
+
+    monkeypatch.setattr(agents.supabase_client, "get_lead_by_ref",
+                        lambda _ref: {"id": 21, "persona_id": "p"})
+    monkeypatch.setattr(agents.supabase_client, "set_conversation_journey_state",
+                        lambda **_kw: {"changed": False, "journey_closed": True})
+    def explode(_ref):
+        raise AssertionError("alvo repetido nao muda nada")
+    monkeypatch.setattr(agents.agents_service, "resume_lead", explode)
+
+    agents.set_journey_state(21, _corpo("entregue"), "user:1")
+
+
+def test_recusas_da_rpc_viram_mensagem_legivel():
+    from routes import agents
+    assert "pedido mais novo" in agents._state_conflict_detail(
+        Exception("a newer order already exists for this lead"))
+    assert "ja converteu" in agents._state_conflict_detail(
+        Exception("lead already converted: qualificado is no longer available"))
+    assert agents._state_conflict_detail(Exception("boom")) == "Journey state could not be changed"

@@ -7,7 +7,7 @@ pelo modelo.
 
 Migrations relevantes: `118` (tabelas), `121` (máquina de estados),
 `122` (suporte pós-handoff), `123` (desfecho comercial), `124` (conversão
-reversível), `125` (cancelar estorna a compra).
+reversível), `125` (cancelar estorna a compra), `126` (seletor de estado).
 
 ## Estados
 
@@ -40,6 +40,48 @@ Os dois passos podem estar desligados: é o estado natural de um pedido que aind
 não andou. Fechar — por conclusão ou cancelamento — **reinicia o ciclo
 agêntico**: a jornada sai de `is_current`, e o próximo inbound cria a seguinte
 com `opening_reason='new_demand_after_closed_request'`, ledger novo e sem fatos.
+
+### O closer humano é quem manda: seletor de estado
+
+`record_conversation_journey_event_v1` é append-only e idempotente — certo para
+integração e para o agente, errado para um humano corrigindo o registro. A outra
+metade do contrato é `set_conversation_journey_state_v1` (migration 126), que
+recebe o **estado-alvo** e calcula o delta, inclusive os caminhos de volta:
+
+| De → para | O que acontece |
+|---|---|
+| vendido → convertido | estorna a conversão e remove `metadata.sold` |
+| convertido → qualificado | limpa `converted_at` desta jornada |
+| fechado → qualquer aberto | reabre (`is_current=true`) |
+
+**Reabrir falha se já existir jornada com `sequence` maior.** O índice parcial
+`idx_conversation_journeys_one_current` garante uma corrente por lead; a função
+levanta `a newer order already exists for this lead` em vez de deixar o banco
+recusar com violação de índice.
+
+Rotas: `POST /portal/leads/{id}/journey-state` e a gêmea em `/agents`. O
+endpoint de eventos continua existindo para integração.
+
+### Fechar o pedido religa a IA
+
+Alvo `entregue` ou `cancelado` chama `agents_service.resume_lead`: zera
+`handoff_level`, marca `pending_reconfirmation` e — o que importa — devolve à
+fila os inbounds parqueados em `waiting_human`. Sem isso o lead segue mudo
+indefinidamente: o handoff grava `handoff_level='full'` automaticamente
+(`conversation_runtime.py`) e **nenhum worker reclama `waiting_human`**.
+
+O religamento emite `lead.ai_resumed` com `by: "journey_closed"`, para a origem
+ser auditável em vez de parecer um resume manual.
+
+### Conversão da lead é permanente
+
+`leads.metadata.first_converted_at` é carimbado uma única vez na primeira venda
+ou agendamento — pela via de eventos (trigger em `sales_conversions`) e pelo
+seletor. Ninguém o apaga: nem o cancelamento, nem o seletor, nem o ciclo
+seguinte. Ele vira o **piso** do seletor: uma lead já convertida não recebe
+`qualificado` como opção.
+
+Não use `converted_at` para isso — o seletor pode limpá-lo ao voltar um estado.
 
 ### Precedência: desfecho comercial vence proof
 

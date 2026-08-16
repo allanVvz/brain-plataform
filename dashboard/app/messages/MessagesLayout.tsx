@@ -327,14 +327,19 @@ const OUTCOME_STYLE: Record<JourneyOutcome, { label: string; color: string; soft
   cancelado: { label: "cancelado", color: "rgb(var(--obs-outcome-cancelled))", soft: "rgb(var(--obs-outcome-cancelled) / 0.12)" },
 };
 
-function OutcomeMark({ outcome, size = "sm" }: { outcome: JourneyOutcome; size?: "sm" | "md" }) {
+function OutcomeMark({
+  outcome, size = "sm", offering = "sales",
+}: { outcome: JourneyOutcome; size?: "sm" | "md"; offering?: OfferingKind }) {
   const style = OUTCOME_STYLE[outcome];
+  // Produto e serviço nomeiam os mesmos passos de formas diferentes; a cor é a
+  // mesma, a palavra não.
+  const label = outcomeLabel(outcome, offering);
   const dot = size === "md" ? 8 : 7;
   return (
     <span
       className="inline-flex shrink-0 items-center gap-1.5"
       data-outcome={outcome}
-      title={`Jornada · ${style.label}`}
+      title={`Pedido · ${label}`}
     >
       <span
         className="rounded-full"
@@ -346,7 +351,7 @@ function OutcomeMark({ outcome, size = "sm" }: { outcome: JourneyOutcome; size?:
         }`}
         style={{ color: style.color }}
       >
-        {style.label}
+        {label}
       </span>
     </span>
   );
@@ -617,11 +622,11 @@ function StageBadge({ stage }: { stage: string | null }) {
 // rotulando errado o que aconteceu.
 type OfferingKind = "sales" | "appointment";
 
-// Quem grava o evento muda com a superficie: o portal tem rota propria porque
-// o middleware de auth nao libera `/agents/*` para contas `client`.
-type RecordJourneyEvent = (
+// Quem grava muda com a superfície: o portal tem rota própria porque o
+// middleware de auth não libera `/agents/*` para contas `client`.
+type SetJourneyState = (
   leadRef: number,
-  body: Parameters<typeof api.recordJourneyEvent>[1],
+  body: Parameters<typeof api.setJourneyState>[1],
 ) => Promise<unknown>;
 
 const OFFERING: Record<OfferingKind, {
@@ -642,308 +647,199 @@ function offeringKind(lead: Lead): OfferingKind {
   return lead.business_model === "appointment" ? "appointment" : "sales";
 }
 
-// Conversão da LEAD, não do pedido. É reversível apenas enquanto for leitura do
-// operador: assim que o primeiro agendamento ou compra acontece, a lead está
-// convertida e não volta a qualificada — nem ao cancelar o pedido, nem no
-// pedido seguinte. Desfazer aí passaria por estorno em sales_conversions, que
-// é outro contrato.
-function ToggleConversao({
-  lead, outcome, canEdit, onRecorded, recordEvent,
+// O ciclo do pedido é infinito e quem manda nele é o closer humano. Um controle
+// só, livre: qualquer estado, qualquer direção, inclusive voltando atrás quando
+// o clique foi errado. Antes eram um toggle mais dois botões que travavam ao
+// chegar no fim — e um pedido fechado não tinha como ser corrigido.
+//
+// Fechar o pedido (concluído ou cancelado) religa a IA no backend: o próximo
+// contato do cliente inicia o ciclo seguinte.
+const ESTADOS: JourneyOutcome[] = [
+  "qualificado", "convertido", "vendido", "entregue", "cancelado",
+];
+
+// Produto e serviço nomeiam os mesmos dois passos de formas diferentes.
+function outcomeLabel(outcome: JourneyOutcome, offering: OfferingKind): string {
+  if (outcome === "vendido") return offering === "appointment" ? "agendado" : "comprado";
+  if (outcome === "entregue") return offering === "appointment" ? "concluído" : "entregue";
+  return outcome;
+}
+
+const DESCRICAO: Record<JourneyOutcome, string> = {
+  qualificado: "SDR terminou; aguarda o closer.",
+  convertido: "O cliente aceitou a proposta.",
+  vendido: "Registrado no comercial.",
+  entregue: "Pedido cumprido — fecha o ciclo e religa a IA.",
+  cancelado: "Não seguiu adiante — fecha o ciclo e religa a IA.",
+};
+
+function SeletorEstadoPedido({
+  lead, outcome, canEdit, onRecorded, setState,
 }: {
   lead: Lead;
   outcome: JourneyOutcome | null;
   canEdit: boolean;
   onRecorded: () => void | Promise<void>;
-  recordEvent: RecordJourneyEvent;
+  setState: SetJourneyState;
 }) {
-  const [pending, setPending] = useState(false);
+  const [aberto, setAberto] = useState(false);
+  const [confirmando, setConfirmando] = useState<JourneyOutcome | null>(null);
+  const [pending, setPending] = useState<JourneyOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const leadConverted = Boolean(lead.lead_converted) || outcome === "convertido"
-    || outcome === "vendido";
-  const journeyOpen = lead.journey_is_open !== false;
-  // Depois da primeira venda a conversão é fato; sem jornada corrente não há
-  // o que gravar (o backend responderia 409).
-  const locked = Boolean(lead.lead_converted) || !journeyOpen;
-  const readable: JourneyOutcome = leadConverted ? "convertido" : "qualificado";
-  const style = OUTCOME_STYLE[readable];
+  const offering = offeringKind(lead);
+  const atual = outcome;
+  const style = atual ? OUTCOME_STYLE[atual] : OUTCOME_STYLE.qualificado;
+  // Depois da primeira venda a lead não volta a qualificada.
+  const disponiveis = ESTADOS.filter(
+    (estado) => !(estado === "qualificado" && lead.lead_converted),
+  );
 
-  const toggle = useCallback(async () => {
-    const event: JourneyEventType = leadConverted ? "conversion_reverted" : "converted";
-    setPending(true);
+  const aplicar = useCallback(async (alvo: JourneyOutcome) => {
+    setPending(alvo);
     setError(null);
     try {
-      await recordEvent(lead.id, {
-        event_type: event,
-        idempotency_key: `dashboard:${lead.id}:${event}`,
+      await setState(lead.id, {
+        target: alvo,
         source: "dashboard",
         occurred_at: new Date().toISOString(),
         metadata: { recorded_from: "messages" },
       });
       await onRecorded();
+      setAberto(false);
     } catch (err) {
-      setError(getErrorMessage(err, "Não foi possível alterar a conversão."));
+      setError(getErrorMessage(err, "Não foi possível mudar o estado do pedido."));
     } finally {
-      setPending(false);
+      setPending(null);
+      setConfirmando(null);
     }
-  }, [leadConverted, lead.id, onRecorded, recordEvent]);
+  }, [lead.id, onRecorded, setState]);
 
-  const content = (
+  const chip = (
     <span className="inline-flex items-center gap-[7px]">
+      <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: style.color }} />
       <span
-        className="h-[7px] w-[7px] shrink-0 rounded-full"
-        style={{ background: style.color }}
-      />
-      <span
-        className="text-[11px] font-medium"
+        className={`text-[11px] font-medium ${atual === "cancelado" ? "line-through" : ""}`}
         style={{ color: style.color }}
       >
-        {pending ? "…" : style.label}
+        {pending ? "…" : atual ? outcomeLabel(atual, offering) : "sem pedido"}
       </span>
     </span>
   );
 
-  if (!canEdit || locked) {
+  if (!canEdit) {
     return (
       <span
         className="shrink-0 rounded-full px-2.5 py-1"
-        data-outcome={readable}
-        title={
-          lead.lead_converted
-            ? "A lead converteu no primeiro pedido — isso não volta atrás"
-            : !journeyOpen
-              ? "Sem pedido aberto: o próximo contato do cliente inicia o próximo ciclo"
-              : `Lead · ${style.label}`
-        }
+        data-outcome={atual || "nenhum"}
         style={{ background: style.soft }}
       >
-        {content}
+        {chip}
       </span>
     );
   }
 
   return (
-    <span className="shrink-0">
+    <span className="relative shrink-0">
       <button
         type="button"
-        onClick={toggle}
-        disabled={pending}
-        role="switch"
-        aria-checked={leadConverted}
-        aria-label="Conversão da lead"
-        data-outcome={readable}
-        title={leadConverted ? "Desfazer a conversão" : "Marcar como convertido"}
-        className="rounded-full px-2.5 py-1 transition hover:opacity-80 disabled:opacity-50"
+        onClick={() => setAberto((v) => !v)}
+        disabled={pending !== null}
+        aria-haspopup="listbox"
+        aria-expanded={aberto}
+        aria-label="Estado do pedido"
+        data-outcome={atual || "nenhum"}
+        title="Mudar o estado do pedido"
+        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 transition hover:opacity-80 disabled:opacity-50"
         style={{ background: style.soft, border: `1px solid ${style.color}` }}
       >
-        {content}
+        {chip}
+        <span className="text-[9px]" style={{ color: style.color }}>▾</span>
       </button>
-      {error && <p className="mt-1 text-[10px] text-obs-rose">{error}</p>}
-    </span>
-  );
-}
 
-function JourneyActions({
-  lead, outcome, canEdit, onRecorded, recordEvent,
-}: {
-  lead: Lead;
-  outcome: JourneyOutcome | null;
-  canEdit: boolean;
-  onRecorded: () => void | Promise<void>;
-  recordEvent: RecordJourneyEvent;
-}) {
-  const [pending, setPending] = useState<string | null>(null);
-  const [fechando, setFechando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const oferta = OFFERING[offeringKind(lead)];
-
-  const vendido = outcome === "vendido";
-  const entregue = outcome === "entregue";
-  const cancelado = outcome === "cancelado";
-  // Sem jornada corrente o backend levanta `current journey not found` e
-  // devolve 409. Antes o botao ficava clicavel e o clique falhava em silencio:
-  // um pedido concluido deixa `is_current=false` e so o proximo inbound do
-  // cliente abre o pedido seguinte.
-  const semPedidoAberto = lead.journey_is_open === false;
-  const fechado = isJourneySettled(outcome) || semPedidoAberto;
-
-  const registrar = useCallback(async (event: JourneyEventType, key: string) => {
-    setPending(key);
-    setError(null);
-    try {
-      await recordEvent(lead.id, {
-        event_type: event,
-        // Determinística de propósito: dois cliques no mesmo botão da mesma
-        // jornada colidem na chave e o backend devolve deduplicated:true em
-        // vez de gravar o evento duas vezes.
-        idempotency_key: `dashboard:${lead.id}:${event}`,
-        source: "dashboard",
-        occurred_at: new Date().toISOString(),
-        metadata: { recorded_from: "messages" },
-      });
-      await onRecorded();
-    } catch (err) {
-      setError(getErrorMessage(err, "Não foi possível registrar o evento."));
-    } finally {
-      setPending(null);
-      setFechando(false);
-    }
-  }, [lead.id, onRecorded, recordEvent]);
-
-  if (!canEdit) return null;
-
-  // Botão 1 — o pedido nasce aqui: comprado ou agendado.
-  const abertoStyle = OUTCOME_STYLE.vendido;
-  const abertoLigado = vendido || entregue;
-  const abertoBloqueado = fechado || pending !== null;
-
-  // Botão 2 — o terminal. Fecha o pedido, e o próprio botão diz como fechou:
-  // entregue/concluído quando deu certo, cancelado quando não. Cancelar estorna
-  // o passo 1, então o botão de venda volta a aparecer desligado.
-  const terminalStyle = cancelado ? OUTCOME_STYLE.cancelado : OUTCOME_STYLE.entregue;
-  const terminalLabel = entregue
-    ? oferta.concluido.label
-    : cancelado
-      ? "Cancelado"
-      : "Fechar pedido";
-  const terminalLigado = fechado;
-  const terminalBloqueado = fechado || pending !== null || !outcome;
-
-  function botaoStyle(ligado: boolean, bloqueado: boolean, style: { color: string; soft: string }) {
-    return {
-      background: ligado ? style.soft : "rgb(var(--obs-text) / 0.03)",
-      borderColor: ligado ? style.color : "var(--border-glass)",
-      color: ligado ? style.color : bloqueado ? "rgb(var(--obs-faint))" : "rgb(var(--obs-subtle))",
-      opacity: bloqueado && !ligado ? 0.45 : 1,
-    };
-  }
-
-  return (
-    <div className="shrink-0 px-4 pb-4">
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          disabled={abertoBloqueado || abertoLigado}
-          onClick={() => registrar(oferta.aberto.event, "aberto")}
-          title={
-            abertoLigado
-              ? `Já registrado · ${oferta.aberto.label.toLowerCase()}`
-              : semPedidoAberto
-                ? "Sem pedido aberto: o próximo contato do cliente inicia o próximo ciclo"
-                : fechado
-                  ? "O pedido já foi fechado"
-                  : oferta.aberto.label
-          }
-          className="flex items-center gap-2 rounded-[10px] border px-3 py-2.5 text-xs font-medium transition disabled:cursor-not-allowed"
-          style={botaoStyle(abertoLigado, abertoBloqueado, abertoStyle)}
-        >
+      {aberto && (
+        <>
+          {/* Scrim próprio: fechar clicando fora sem prender o foco. */}
+          <span className="fixed inset-0 z-40" onClick={() => setAberto(false)} aria-hidden="true" />
           <span
-            className="h-[9px] w-[9px] shrink-0 rounded-full"
-            style={
-              abertoLigado
-                ? { background: abertoStyle.color }
-                : { border: "1.5px solid rgb(var(--obs-faint))" }
-            }
-          />
-          <span className="truncate">
-            {pending === "aberto" ? "…" : oferta.aberto.label}
+            role="listbox"
+            className="absolute right-0 z-50 mt-1 block w-60 overflow-hidden rounded-[10px] p-1"
+            style={{
+              background: "rgb(var(--glass-solid-bg) / 1)",
+              border: "1px solid var(--border-glass)",
+              boxShadow: "var(--glass-shadow)",
+            }}
+          >
+            {disponiveis.map((estado) => {
+              const s = OUTCOME_STYLE[estado];
+              const atualEste = estado === atual;
+              const fecha = estado === "entregue" || estado === "cancelado";
+              return (
+                <button
+                  key={estado}
+                  type="button"
+                  role="option"
+                  aria-selected={atualEste}
+                  disabled={atualEste || pending !== null}
+                  onClick={() => (fecha ? setConfirmando(estado) : aplicar(estado))}
+                  className="flex w-full items-start gap-2.5 rounded-[8px] px-2.5 py-2 text-left transition hover:bg-obs-text/5 disabled:cursor-default disabled:opacity-60"
+                >
+                  <span
+                    className="mt-[5px] h-[8px] w-[8px] shrink-0 rounded-full"
+                    style={{ background: s.color }}
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium capitalize text-obs-text">
+                      {outcomeLabel(estado, offering)}
+                      {atualEste && <span className="ml-1.5 text-[10px] text-obs-faint">atual</span>}
+                    </span>
+                    <span className="block text-[11px] leading-snug text-obs-faint">
+                      {DESCRICAO[estado]}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </span>
-        </button>
+        </>
+      )}
 
-        <button
-          type="button"
-          disabled={terminalBloqueado}
-          onClick={() => setFechando(true)}
-          title={
-            semPedidoAberto
-              ? "Sem pedido aberto: o próximo contato do cliente inicia o próximo ciclo"
-              : fechado
-                ? `Pedido fechado · ${terminalLabel.toLowerCase()}`
-                : !outcome
-                  ? "Ainda não há pedido para fechar"
-                  : "Fechar o pedido"
-          }
-          className="flex items-center gap-2 rounded-[10px] border px-3 py-2.5 text-xs font-medium transition disabled:cursor-not-allowed"
-          style={botaoStyle(terminalLigado, terminalBloqueado, terminalStyle)}
-        >
-          <span
-            className="h-[9px] w-[9px] shrink-0 rounded-full"
-            style={
-              terminalLigado
-                ? { background: terminalStyle.color }
-                : { border: "1.5px solid rgb(var(--obs-faint))" }
-            }
-          />
-          <span className={`truncate ${cancelado ? "line-through" : ""}`}>
-            {pending && pending !== "aberto" ? "…" : terminalLabel}
-          </span>
-        </button>
-      </div>
-      {error && <p className="mt-2 text-[11px] text-obs-rose">{error}</p>}
+      {error && (
+        <span className="absolute right-0 top-full z-50 mt-1 block w-60 rounded-[8px] px-2 py-1.5 text-[10px] leading-snug text-obs-rose"
+          style={{ background: "rgb(var(--glass-solid-bg) / 1)", border: "1px solid var(--border-glass)" }}>
+          {error}
+        </span>
+      )}
 
       {/* Sem window.confirm: um diálogo nativo trava a sessão do navegador. */}
-      {fechando && (
+      {confirmando && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true">
-          <div className="absolute inset-0" style={{ background: "rgb(0 0 0 / 0.45)" }} onClick={() => setFechando(false)} />
+          <div className="absolute inset-0" style={{ background: "rgb(0 0 0 / 0.45)" }} onClick={() => setConfirmando(null)} />
           <div className="modal-content relative w-full max-w-sm p-5">
-            <p className="text-sm font-semibold text-obs-text">Fechar pedido</p>
-            <p className="mt-2 text-xs leading-relaxed text-obs-subtle">
-              Fechar encerra a jornada. A próxima mensagem do cliente abre um pedido
-              novo e o agente recomeça o ciclo.
+            <p className="text-sm font-semibold capitalize text-obs-text">
+              {outcomeLabel(confirmando, offering)}
             </p>
-            <div className="mt-4 space-y-2">
-              <button
-                type="button"
-                disabled={!vendido || pending !== null}
-                onClick={() => registrar(oferta.concluido.event, "concluido")}
-                className="flex w-full items-start gap-3 rounded-[10px] border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45"
-                style={{ borderColor: "var(--border-glass)" }}
-              >
-                <span
-                  className="mt-[3px] h-[9px] w-[9px] shrink-0 rounded-full"
-                  style={{ background: OUTCOME_STYLE.entregue.color }}
-                />
-                <span className="min-w-0">
-                  <span className="block text-xs font-medium text-obs-text">
-                    {oferta.concluido.label}
-                  </span>
-                  <span className="block text-[11px] text-obs-faint">
-                    {vendido
-                      ? "O pedido foi cumprido."
-                      : `Registre ${oferta.aberto.label.toLowerCase()} antes de concluir.`}
-                  </span>
-                </span>
-              </button>
-              <button
-                type="button"
-                disabled={pending !== null}
-                onClick={() => registrar("cancelled", "cancelado")}
-                className="flex w-full items-start gap-3 rounded-[10px] border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45"
-                style={{ borderColor: "var(--border-glass)" }}
-              >
-                <span
-                  className="mt-[3px] h-[9px] w-[9px] shrink-0 rounded-full"
-                  style={{ background: OUTCOME_STYLE.cancelado.color }}
-                />
-                <span className="min-w-0">
-                  <span className="block text-xs font-medium text-obs-text">Cancelado</span>
-                  <span className="block text-[11px] text-obs-faint">
-                    {vendido
-                      ? `Estorna ${oferta.aberto.label.toLowerCase()}. A conversão do lead é preservada.`
-                      : "O pedido não seguiu adiante."}
-                  </span>
-                </span>
-              </button>
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button type="button" className="lg-btn lg-btn-secondary" onClick={() => setFechando(false)}>
+            <p className="mt-2 text-xs leading-relaxed text-obs-subtle">
+              Isto fecha o pedido e devolve a conversa para a IA. O próximo contato do
+              cliente inicia o ciclo seguinte, com o serviço em branco.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="lg-btn lg-btn-secondary" onClick={() => setConfirmando(null)}>
                 Voltar
+              </button>
+              <button
+                type="button"
+                className="lg-btn lg-btn-primary"
+                disabled={pending !== null}
+                onClick={() => aplicar(confirmando)}
+              >
+                {pending ? "Aplicando…" : "Confirmar"}
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </span>
   );
 }
 
@@ -1913,11 +1809,11 @@ export function MessagesLayout({
   // `/portal/*` para contas `client`, e a rota admin responde 403 antes de
   // chegar ao backend. A rota do portal ainda confirma que a lead pertence a
   // persona da URL, checagem que a de `/agents` nao faz.
-  const recordJourneyEvent = useCallback<RecordJourneyEvent>(
+  const setJourneyState = useCallback<SetJourneyState>(
     (leadRef, body) =>
       isPortal
-        ? api.portalRecordJourneyEvent(portalSlug!, leadRef, body)
-        : api.recordJourneyEvent(leadRef, body),
+        ? api.portalSetJourneyState(portalSlug!, leadRef, body)
+        : api.setJourneyState(leadRef, body),
     [isPortal, portalSlug],
   );
 
@@ -2335,7 +2231,9 @@ export function MessagesLayout({
                   {/* O desfecho toma o lugar do estágio nesta linha: 300px não
                       comportam os dois eixos. O estágio completo continua no
                       perfil do rail direito, onde há espaço para os dois. */}
-                  {outcome ? <OutcomeMark outcome={outcome} /> : <StageBadge stage={lead.stage} />}
+                  {outcome
+                    ? <OutcomeMark outcome={outcome} offering={offeringKind(lead)} />
+                    : <StageBadge stage={lead.stage} />}
                   {lastTs && <span>{relativeTs(lastTs)}</span>}
                   {/* Score e sinais de qualificação saíram desta linha: são
                       vocabulário interno do scoring ("Primeiro contato",
@@ -2501,7 +2399,7 @@ export function MessagesLayout({
                   estágio do funil. Os dois juntos repetiam a mesma palavra —
                   "qualificado" aparecia duas vezes no mesmo header. */}
               {selectedOutcome
-                ? <OutcomeMark outcome={selectedOutcome} />
+                ? <OutcomeMark outcome={selectedOutcome} offering={offeringKind(selectedLead)} />
                 : <StageBadge stage={selectedLead.stage} />}
               {selectedLead.telefone && (
                 <span className="text-[10px] text-obs-faint">{selectedLead.telefone}</span>
@@ -2722,12 +2620,12 @@ export function MessagesLayout({
                 <p className="min-w-0 flex-1 truncate text-xs font-semibold text-obs-text">
                   {selectedLead.interesse_produto || "Pedido sem produto definido"}
                 </p>
-                <ToggleConversao
+                <SeletorEstadoPedido
                   lead={selectedLead}
                   outcome={selectedOutcome}
                   canEdit={canEdit}
                   onRecorded={() => refreshSelectedLead(selectedLead.id)}
-                  recordEvent={recordJourneyEvent}
+                  setState={setJourneyState}
                 />
               </div>
             </div>
@@ -2772,14 +2670,9 @@ export function MessagesLayout({
               lê o que foi combinado e decide na mesma leitura. */}
           {selectedLead && (
             <div className="shrink-0" style={{ borderBottom: "1px solid var(--border-glass)" }}>
+              {/* Só as notas: o estado do pedido vive no seletor do topo, e
+                  repetir o controle aqui era a duplicação reportada. */}
               <PedidoBlock lead={selectedLead} />
-              <JourneyActions
-                lead={selectedLead}
-                outcome={selectedOutcome}
-                canEdit={canEdit}
-                onRecorded={() => refreshSelectedLead(selectedLead.id)}
-                recordEvent={recordJourneyEvent}
-              />
             </div>
           )}
 

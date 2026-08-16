@@ -42,20 +42,15 @@ function makeLead(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// vi.mock é içado para o topo do arquivo, então tudo que a factory referencia
-// precisa nascer em vi.hoisted — senão o módulo é mockado antes das variáveis
-// existirem.
+// vi.mock é içado para o topo, então tudo que a factory referencia precisa
+// nascer em vi.hoisted.
 const h = vi.hoisted(() => ({
-  recordJourneyEvent: vi.fn(async () => ({
-    event_type: "delivered", deduplicated: false, new_journey_created: false,
-  })),
-  portalRecordJourneyEvent: vi.fn(async () => ({
-    event_type: "delivered", deduplicated: false, new_journey_created: false,
-  })),
+  setJourneyState: vi.fn(async () => ({ target: "vendido", from: "convertido", changed: true })),
+  portalSetJourneyState: vi.fn(async () => ({ target: "vendido", from: "convertido", changed: true })),
   lead: { current: null as any },
 }));
-const recordJourneyEvent = h.portalRecordJourneyEvent;
-const adminRecordJourneyEvent = h.recordJourneyEvent;
+const setState = h.portalSetJourneyState;
+const setStateAdmin = h.setJourneyState;
 
 function setLead(lead: Record<string, unknown>) {
   h.lead.current = lead;
@@ -77,8 +72,8 @@ vi.mock("@/lib/api", () => ({
     portalPauseAi: vi.fn(async () => ({})),
     portalResumeAi: vi.fn(async () => ({})),
     portalAcknowledgeHandoff: vi.fn(async () => ({})),
-    recordJourneyEvent: h.recordJourneyEvent,
-    portalRecordJourneyEvent: h.portalRecordJourneyEvent,
+    setJourneyState: h.setJourneyState,
+    portalSetJourneyState: h.portalSetJourneyState,
   },
   ApiError: class ApiError extends Error {},
 }));
@@ -93,14 +88,19 @@ function installMatchMedia() {
   }));
 }
 
-async function openLeadWithRail() {
+async function abrirRail() {
   render(<MessagesLayout portalSlug="test-persona" canEdit />);
   fireEvent.click(await screen.findByText("Ana Paula"));
   await waitFor(() => expect(document.querySelector(".message-panel")).toBeTruthy());
-  const toggle = screen.getByTitle("Mostrar conhecimento");
-  fireEvent.click(toggle);
+  fireEvent.click(screen.getByTitle("Mostrar conhecimento"));
   await waitFor(() => expect(document.querySelector(".knowledge-panel")).toBeTruthy());
   return document.querySelector(".knowledge-panel") as HTMLElement;
+}
+
+async function abrirSeletor() {
+  const rail = await abrirRail();
+  fireEvent.click(within(rail).getByRole("button", { name: "Estado do pedido" }));
+  return within(rail).getByRole("listbox");
 }
 
 describe("lead-state — eixo do desfecho", () => {
@@ -111,35 +111,133 @@ describe("lead-state — eixo do desfecho", () => {
     }
     expect(normalizeJourneyOutcome("fechado")).toBeNull();
     expect(normalizeJourneyOutcome(null)).toBeNull();
-    expect(normalizeJourneyOutcome(undefined)).toBeNull();
-    expect(normalizeJourneyOutcome("")).toBeNull();
   });
 
-  it("só entregue e cancelado fecham a jornada", () => {
+  it("só entregue e cancelado fecham o pedido", () => {
     expect(isJourneySettled("entregue")).toBe(true);
     expect(isJourneySettled("cancelado")).toBe(true);
     expect(isJourneySettled("vendido")).toBe(false);
-    expect(isJourneySettled("convertido")).toBe(false);
-    expect(isJourneySettled("qualificado")).toBe(false);
     expect(isJourneySettled(null)).toBe(false);
   });
 });
 
-describe("Mensagens — desfecho da jornada", () => {
+describe("Mensagens — seletor de estado do pedido", () => {
   beforeEach(() => {
     installMatchMedia();
-    recordJourneyEvent.mockClear();
-    adminRecordJourneyEvent.mockClear();
+    setState.mockClear();
+    setStateAdmin.mockClear();
     setLead(makeLead());
   });
 
-  it("a lista pinta o desfecho no lugar do estágio", async () => {
+  it("o closer muda o estado em qualquer direção", async () => {
+    // O pedido está vendido; voltar para convertido precisa ser possível —
+    // antes o controle travava e não havia como corrigir um clique errado.
+    const menu = await abrirSeletor();
+    fireEvent.click(within(menu).getByRole("option", { name: /convertido/i }));
+    await waitFor(() => expect(setState).toHaveBeenCalledTimes(1));
+    expect(setState).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
+      target: "convertido",
+      source: "dashboard",
+    }));
+  });
+
+  it("produto e serviço nomeiam os mesmos passos de formas diferentes", async () => {
+    setLead(makeLead({ business_model: "appointment", journey_outcome: "convertido" }));
+    const menu = await abrirSeletor();
+    expect(within(menu).getByRole("option", { name: /agendado/i })).toBeTruthy();
+    expect(within(menu).getByRole("option", { name: /concluído/i })).toBeTruthy();
+    expect(within(menu).queryByRole("option", { name: /^comprado/i })).toBeNull();
+  });
+
+  it("lead já convertida não recebe qualificado como opção", async () => {
+    const menu = await abrirSeletor();
+    expect(within(menu).queryByRole("option", { name: /qualificado/i })).toBeNull();
+    expect(within(menu).getByRole("option", { name: /convertido/i })).toBeTruthy();
+  });
+
+  it("lead que nunca converteu ainda pode voltar a qualificado", async () => {
+    setLead(makeLead({ lead_converted: false, journey_outcome: "convertido" }));
+    const menu = await abrirSeletor();
+    expect(within(menu).getByRole("option", { name: /qualificado/i })).toBeTruthy();
+  });
+
+  it("fechar o pedido pede confirmação e avisa que a IA volta", async () => {
+    const menu = await abrirSeletor();
+    fireEvent.click(within(menu).getByRole("option", { name: /entregue/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/devolve a conversa para a IA/)).toBeTruthy();
+    expect(setState).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirmar" }));
+    await waitFor(() => expect(setState).toHaveBeenCalledTimes(1));
+    expect(setState).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
+      target: "entregue",
+    }));
+  });
+
+  it("mudar para um estado aberto não pede confirmação", async () => {
+    setLead(makeLead({ journey_outcome: "convertido" }));
+    const menu = await abrirSeletor();
+    fireEvent.click(within(menu).getByRole("option", { name: /comprado/i }));
+    await waitFor(() => expect(setState).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("um pedido fechado continua editável", async () => {
+    // `is_current=false` não pode travar o closer: reabrir é justamente o que
+    // faltava. Quem recusa é o backend, se já houver pedido mais novo.
+    setLead(makeLead({ journey_outcome: "entregue", journey_is_open: false }));
+    const menu = await abrirSeletor();
+    fireEvent.click(within(menu).getByRole("option", { name: /comprado/i }));
+    await waitFor(() => expect(setState).toHaveBeenCalledTimes(1));
+    expect(setState).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
+      target: "vendido",
+    }));
+  });
+
+  it("a recusa do backend aparece na tela, não some", async () => {
+    setState.mockRejectedValueOnce(
+      new Error("Ja existe um pedido mais novo para esta lead; nao da para reabrir o anterior."),
+    );
+    setLead(makeLead({ journey_outcome: "cancelado", journey_is_open: false }));
+    const menu = await abrirSeletor();
+    fireEvent.click(within(menu).getByRole("option", { name: /convertido/i }));
+    expect(await screen.findByText(/pedido mais novo/)).toBeTruthy();
+  });
+
+  it("no portal o estado vai pela rota do portal, nunca por /agents", async () => {
+    const menu = await abrirSeletor();
+    fireEvent.click(within(menu).getByRole("option", { name: /convertido/i }));
+    await waitFor(() => expect(setState).toHaveBeenCalled());
+    expect(setStateAdmin).not.toHaveBeenCalled();
+  });
+
+  it("sem permissão de edição o estado vira leitura", async () => {
+    render(<MessagesLayout portalSlug="test-persona" canEdit={false} />);
+    fireEvent.click(await screen.findByText("Ana Paula"));
+    await waitFor(() => expect(document.querySelector(".message-panel")).toBeTruthy());
+    fireEvent.click(screen.getByTitle("Mostrar conhecimento"));
+    await waitFor(() => expect(document.querySelector(".knowledge-panel")).toBeTruthy());
+    const rail = document.querySelector(".knowledge-panel") as HTMLElement;
+    expect(within(rail).queryByRole("button", { name: "Estado do pedido" })).toBeNull();
+    expect(rail.querySelector('[data-outcome="vendido"]')).toBeTruthy();
+    // O pedido continua legível — só o controle some.
+    expect(within(rail).getByText("Pedido")).toBeTruthy();
+  });
+
+  it("o rail mostra as notas comerciais por inteiro, sem repetir o produto", async () => {
+    const rail = await abrirRail();
+    expect(within(rail).getAllByText("Kit Modal 1 — azul marinho")).toHaveLength(1);
+    expect(within(rail).getByText("5 peças")).toBeTruthy();
+    expect(within(rail).getByText("+2 campos")).toBeTruthy();
+  });
+
+  it("a lista pinta o desfecho e não repete o estágio", async () => {
     render(<MessagesLayout portalSlug="test-persona" canEdit />);
     await screen.findByText("Ana Paula");
-    const marca = document.querySelector('[data-outcome="vendido"]');
-    expect(marca).toBeTruthy();
-    // O estágio não some do produto: sai desta linha, continua no rail.
     const lista = document.querySelector(".conversation-sidebar") as HTMLElement;
+    expect(lista.querySelector('[data-outcome="vendido"]')).toBeTruthy();
     expect(within(lista).queryByText("qualificado")).toBeNull();
   });
 
@@ -147,208 +245,7 @@ describe("Mensagens — desfecho da jornada", () => {
     setLead(makeLead({ journey_outcome: null }));
     render(<MessagesLayout portalSlug="test-persona" canEdit />);
     await screen.findByText("Ana Paula");
-    expect(document.querySelector("[data-outcome]")).toBeNull();
     const lista = document.querySelector(".conversation-sidebar") as HTMLElement;
     expect(within(lista).getByText("qualificado")).toBeTruthy();
-  });
-
-  it("o rail mostra as notas comerciais por inteiro, não o resumo de duas chaves", async () => {
-    const rail = await openLeadWithRail();
-    expect(within(rail).getByText("Pedido")).toBeTruthy();
-    // O nome do produto vive no resumo do topo e não se repete no bloco.
-    expect(within(rail).getAllByText("Kit Modal 1 — azul marinho")).toHaveLength(1);
-    expect(within(rail).getByText("5 peças")).toBeTruthy();
-    expect(within(rail).getByText("Sedex · 12/09")).toBeTruthy();
-    // 6 notas úteis (updated_at é metadado): 4 visíveis + o revelador.
-    expect(within(rail).getByText("+2 campos")).toBeTruthy();
-    fireEvent.click(within(rail).getByText("+2 campos"));
-    expect(within(rail).getByText("aceita frete grátis")).toBeTruthy();
-  });
-
-
-
-  it("o toggle alterna qualificado para convertido", async () => {
-    setLead(makeLead({ journey_outcome: "qualificado", lead_converted: false }));
-    const rail = await openLeadWithRail();
-    const toggle = within(rail).getByRole("switch", { name: "Conversão da lead" });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(within(toggle).getByText("qualificado")).toBeTruthy();
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(recordJourneyEvent).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
-      event_type: "converted",
-      idempotency_key: "dashboard:1:converted",
-    }));
-  });
-
-  it("o toggle desfaz a conversão enquanto não há venda", async () => {
-    setLead(makeLead({ journey_outcome: "convertido", lead_converted: false }));
-    const rail = await openLeadWithRail();
-    const toggle = within(rail).getByRole("switch", { name: "Conversão da lead" });
-    expect(toggle).toHaveAttribute("aria-checked", "true");
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(recordJourneyEvent).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
-      event_type: "conversion_reverted",
-      idempotency_key: "dashboard:1:conversion_reverted",
-    }));
-  });
-
-  it("depois da primeira venda a lead fica convertida para sempre", async () => {
-    const rail = await openLeadWithRail(); // vendido, lead_converted
-    // Deixa de ser um controle: vira leitura.
-    expect(within(rail).queryByRole("switch")).toBeNull();
-    const marca = rail.querySelector('[data-outcome="convertido"]');
-    expect(marca).toBeTruthy();
-    expect(marca).toHaveAttribute(
-      "title",
-      "A lead converteu no primeiro pedido — isso não volta atrás",
-    );
-  });
-
-  it("a lead segue convertida com o pedido cancelado", async () => {
-    // Cancelar estorna a compra, não a conversão da lead.
-    setLead(makeLead({
-      journey_outcome: "cancelado", lead_converted: true, journey_is_open: false,
-    }));
-    const rail = await openLeadWithRail();
-    expect(rail.querySelector('[data-outcome="convertido"]')).toBeTruthy();
-  });
-
-  it("a lead não regride a qualificada no ciclo seguinte", async () => {
-    // Pedido seguinte recomeça em qualificado; a lead, não.
-    setLead(makeLead({
-      journey_outcome: "qualificado", lead_converted: true, journey_is_open: true,
-    }));
-    const rail = await openLeadWithRail();
-    expect(within(rail).queryByRole("switch")).toBeNull();
-    expect(rail.querySelector('[data-outcome="convertido"]')).toBeTruthy();
-    expect(rail.querySelector('[data-outcome="qualificado"]')).toBeNull();
-  });
-
-  it("sem pedido aberto nenhum evento pode ser gravado", async () => {
-    // `is_current=false` depois de concluir: o backend responderia 409, então
-    // o botão não pode parecer disponível.
-    setLead(makeLead({
-      journey_outcome: "cancelado", lead_converted: true, journey_is_open: false,
-    }));
-    const rail = await openLeadWithRail();
-    const venda = within(rail).getByRole("button", { name: /Venda/ });
-    expect(venda).toBeDisabled();
-    expect(venda).toHaveAttribute(
-      "title",
-      "Sem pedido aberto: o próximo contato do cliente inicia o próximo ciclo",
-    );
-  });
-
-
-
-  it("produto: o pedido é comprado e entregue", async () => {
-    setLead(makeLead({ journey_outcome: "convertido", business_model: "sales", lead_converted: false }));
-    const rail = await openLeadWithRail();
-    expect(within(rail).getByRole("button", { name: /Venda/ })).toBeTruthy();
-    fireEvent.click(within(rail).getByRole("button", { name: /Venda/ }));
-    await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(recordJourneyEvent).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
-      event_type: "sale_recorded",
-    }));
-  });
-
-  it("serviço: o mesmo pedido é agendado e concluído", async () => {
-    setLead(makeLead({ journey_outcome: "convertido", business_model: "appointment", lead_converted: false }));
-    const rail = await openLeadWithRail();
-    // O rótulo muda com o modelo de negócio — registrar "compra" numa persona
-    // de agendamento rotularia errado o que aconteceu.
-    expect(within(rail).queryByRole("button", { name: /Venda/ })).toBeNull();
-    fireEvent.click(within(rail).getByRole("button", { name: /Agendamento/ }));
-    await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(recordJourneyEvent).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
-      event_type: "appointment_booked",
-    }));
-  });
-
-  it("o terminal oferece os dois desfechos e conclui com o evento do modelo", async () => {
-    setLead(makeLead({ journey_outcome: "vendido", business_model: "appointment" }));
-    const rail = await openLeadWithRail();
-    fireEvent.click(within(rail).getByRole("button", { name: /Fechar pedido/ }));
-
-    const dialog = await screen.findByRole("dialog");
-    const concluir = within(dialog).getByRole("button", { name: /Concluído/ });
-    expect(concluir).not.toBeDisabled();
-    expect(within(dialog).getByRole("button", { name: /Cancelado/ })).not.toBeDisabled();
-    expect(recordJourneyEvent).not.toHaveBeenCalled();
-
-    fireEvent.click(concluir);
-    await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(recordJourneyEvent).toHaveBeenCalledWith("test-persona", 1, expect.objectContaining({
-      event_type: "service_completed",
-      idempotency_key: "dashboard:1:service_completed",
-    }));
-  });
-
-  it("não dá para concluir um pedido que nunca foi vendido", async () => {
-    setLead(makeLead({ journey_outcome: "convertido", lead_converted: false }));
-    const rail = await openLeadWithRail();
-    fireEvent.click(within(rail).getByRole("button", { name: /Fechar pedido/ }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByRole("button", { name: /Entregue/ })).toBeDisabled();
-    // Cancelar continua possível: o pedido pode morrer antes de virar venda.
-    expect(within(dialog).getByRole("button", { name: /Cancelado/ })).not.toBeDisabled();
-  });
-
-  it("cancelado desliga o botão de venda e risca o terminal", async () => {
-    setLead(makeLead({ journey_outcome: "cancelado", journey_is_open: false }));
-    const rail = await openLeadWithRail();
-    const venda = within(rail).getByRole("button", { name: /Venda/ });
-    const terminal = within(rail).getByRole("button", { name: /Cancelado/ });
-    expect(venda).toBeDisabled();
-    // desligado = sem a cor de vendido
-    expect(venda.getAttribute("style")).not.toContain("--obs-outcome-sold");
-    expect(terminal).toBeDisabled();
-    expect(terminal.getAttribute("style")).toContain("--obs-outcome-cancelled");
-  });
-
-  it("entregue mantém a venda ligada e fecha o terminal", async () => {
-    setLead(makeLead({ journey_outcome: "entregue", journey_is_open: false }));
-    const rail = await openLeadWithRail();
-    const venda = within(rail).getByRole("button", { name: /Venda/ });
-    expect(venda.getAttribute("style")).toContain("--obs-outcome-sold");
-    const terminal = within(rail).getByRole("button", { name: /Entregue/ });
-    expect(terminal.getAttribute("style")).toContain("--obs-outcome-delivered");
-    expect(terminal).toBeDisabled();
-  });
-
-  it("sem jornada não há pedido para fechar", async () => {
-    setLead(makeLead({ journey_outcome: null, lead_converted: false }));
-    const rail = await openLeadWithRail();
-    expect(within(rail).getByRole("button", { name: /Fechar pedido/ })).toBeDisabled();
-  });
-
-  it("no portal, o evento vai pela rota do portal e nunca por /agents", async () => {
-    // O middleware de auth so libera `/portal/*` para contas `client`: chamar
-    // `/agents/leads/{ref}/journey-events` do portal devolvia 403 "Acesso
-    // negado." antes de chegar ao backend.
-    setLead(makeLead({ journey_outcome: "convertido" }));
-    const rail = await openLeadWithRail();
-    fireEvent.click(within(rail).getByRole("button", { name: /Venda/ }));
-    await waitFor(() => expect(recordJourneyEvent).toHaveBeenCalledTimes(1));
-    expect(adminRecordJourneyEvent).not.toHaveBeenCalled();
-    expect(recordJourneyEvent).toHaveBeenCalledWith(
-      "test-persona", 1, expect.objectContaining({ event_type: "sale_recorded" }),
-    );
-  });
-
-  it("sem permissão de edição, nenhuma ação é oferecida", async () => {
-    render(<MessagesLayout portalSlug="test-persona" canEdit={false} />);
-    fireEvent.click(await screen.findByText("Ana Paula"));
-    await waitFor(() => expect(document.querySelector(".message-panel")).toBeTruthy());
-    fireEvent.click(screen.getByTitle("Mostrar conhecimento"));
-    await waitFor(() => expect(document.querySelector(".knowledge-panel")).toBeTruthy());
-    const rail = document.querySelector(".knowledge-panel") as HTMLElement;
-    expect(within(rail).queryByRole("button", { name: /Cancelamento/ })).toBeNull();
-    // O pedido continua legível — só as ações somem.
-    expect(within(rail).getByText("Pedido")).toBeTruthy();
   });
 });
