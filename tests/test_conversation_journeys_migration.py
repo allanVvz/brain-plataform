@@ -5,6 +5,8 @@ SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
        "118_conversation_journeys_and_sales_conversions.sql").read_text(encoding="utf-8")
 STATE_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
              "121_sdr_journey_state_machine.sql").read_text(encoding="utf-8")
+POST_HANDOFF_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
+                    "122_preserve_post_handoff_journey.sql").read_text(encoding="utf-8")
 
 
 def test_journeys_are_current_once_and_ledgers_are_scoped():
@@ -98,3 +100,16 @@ def test_context_batch_and_cas_repair_are_current_journey_scoped():
     assert "p_expected_revision" in STATE_SQL
     assert "p_apply boolean DEFAULT false" in STATE_SQL
     assert "clear_active_branch_only" in STATE_SQL
+
+
+def test_post_handoff_support_proof_preserves_the_terminal_journey():
+    assert "v_confirmation_state='post_qualification_support'" in POST_HANDOFF_SQL
+    assert "THEN state ELSE 'handed_off' END" in POST_HANDOFF_SQL
+    support = POST_HANDOFF_SQL[
+        POST_HANDOFF_SQL.index("v_confirmation_state='post_qualification_support'"):
+        POST_HANDOFF_SQL.index("IF jsonb_typeof(v_missing)")
+    ]
+    assert "'awaiting_confirmation'" not in support
+    assert "RETURN NEW" in support
+    assert "CREATE TABLE" not in POST_HANDOFF_SQL
+    assert "DELETE FROM" not in POST_HANDOFF_SQL

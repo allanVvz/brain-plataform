@@ -51,7 +51,8 @@ where filename in (
   '118_conversation_journeys_and_sales_conversions.sql',
   '119_whatsapp_media_ingest.sql',
   '120_graphrag_faq_projection_v1.sql',
-  '121_sdr_journey_state_machine.sql'
+  '121_sdr_journey_state_machine.sql',
+  '122_preserve_post_handoff_journey.sql'
 ) order by filename;
 
 select 'unsafe_table_grants' metric, count(*)::text value
@@ -100,8 +101,9 @@ begin
       '118_conversation_journeys_and_sales_conversions.sql',
       '119_whatsapp_media_ingest.sql',
       '120_graphrag_faq_projection_v1.sql',
-      '121_sdr_journey_state_machine.sql')) <> 10 then
-    raise exception 'release migrations 112-121 are incomplete';
+      '121_sdr_journey_state_machine.sql',
+      '122_preserve_post_handoff_journey.sql')) <> 11 then
+    raise exception 'release migrations 112-122 are incomplete';
   end if;
   if exists (
     select 1 from information_schema.role_table_grants
