@@ -225,6 +225,7 @@ jobs:
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
           REQUESTED_TAG: ${{ inputs.action == 'rollback' && inputs.image_tag || needs.publish.outputs.image_tag }}
+          KEEP_WORKERS_PAUSED: "true"
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -235,7 +236,7 @@ jobs:
           # which can terminate a healthy rollout after migrations but before
           # the worker and post-deploy audits are restored.
           command_timeout: 30m
-          envs: GHCR_USERNAME,GHCR_TOKEN,VPS_APP_DIR,DEPLOY_ACTION,REQUESTED_TAG
+          envs: GHCR_USERNAME,GHCR_TOKEN,VPS_APP_DIR,DEPLOY_ACTION,REQUESTED_TAG,KEEP_WORKERS_PAUSED
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"

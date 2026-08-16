@@ -1913,47 +1913,13 @@ def _handoff_branch_reset_facts(
     branch_facts: dict[str, Any],
     correlation_id: str,
 ) -> list[dict[str, Any]]:
-    """One-time-incident branch facts to invalidate once a handoff completes.
+    """Handoff is a journey transition, never a fact-destruction event.
 
-    Confirmed live 2026-08-09 (leads 116/118, Aurora `sdr_qualificacao_carro`):
-    `handoff_level` only encodes whether the lead's minimum registration
-    (name + service) is *known* (see its computation above, in `commit()`)
-    -- it says nothing about whether a handoff actually happened this turn.
-    That condition alone reaches "full" as early as the second turn of any
-    completely ordinary appointment conversation (the moment the customer's
-    name is captured, right after they already named the service in turn
-    one), long before any handoff is requested. Gating this reset on
-    `handoff_level == "full"` alone -- without also requiring
-    `handoff_required` -- fired the reset on that ordinary turn 2 and wiped
-    the just-selected "servico" fact back to invalid/null (the DB is the
-    proof: `conversation_facts` revision 2 for "servico", status "invalid",
-    value null, timestamped to the exact same commit as the "nome_cliente"
-    turn), even though no complaint/handoff was ever requested. That is the
-    direct mechanism behind the "asks which service 2-3 times" symptom: the
-    branch had already been correctly selected in turn one, then silently
-    un-resolved one turn later. Requiring `handoff_required` restores the
-    comment's actual, original intent -- reset one-time incident data (a
-    complaint's `relato`, for example) only when its handoff has genuinely
-    just completed, not merely whenever the lead happens to already have a
-    name and a service on file.
+    Branch-specific facts are invalidated only by an explicit incompatible
+    branch switch during policy reconciliation. Keeping them here preserves
+    the qualified request for human takeover and post-qualification support.
     """
-    if not (handoff_required and handoff_level == "full" and active_branch):
-        return []
-    return [
-        {
-            "field_key": field["key"],
-            "owner_node_id": active_branch,
-            "status": "invalid",
-            "value": None,
-            "source_message_id": f"handoff-reset:{correlation_id}",
-            "evidence_span": "",
-            "confidence": 0.0,
-        }
-        for field in branch_contract.get("fields") or []
-        if field.get("owner_node_id") == active_branch
-        and isinstance(branch_facts.get(field.get("key")), dict)
-        and branch_facts[field["key"]].get("status") == "known"
-    ]
+    return []
 
 
 def commit(

@@ -56,6 +56,16 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
     assert "active_branch_node_ids: context.active_branch_node_ids" in initial
     assert "facts_by_key: context.cart && context.cart.facts_by_key" in initial
     assert "known_facts: context.known_facts" in initial
+    for field in (
+        "journey: { id: context.journey_id",
+        "pending_field_key: context.pending_field_key",
+        "pending_question_node_id: context.pending_question_node_id",
+        "last_handoff: context.last_handoff",
+        "pending_reconfirmation: context.pending_reconfirmation",
+        "time_since_last_client_message: context.time_since_last_client_message",
+        "operational_mode: context.operational_mode",
+    ):
+        assert field in initial
 
 
 def test_completed_commit_uses_the_status_key_consumed_by_the_claim_rpc():

@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "greeting_after_handoff_oi",
+      "message": "Oi",
+      "initial_journey_state": "handed_off",
+      "pending_reconfirmation": true,
+      "expected_intent": "greeting",
+      "expected_operational_mode": "post_qualification_support",
+      "must_not_extract": ["servico"],
+      "must_not_handoff": true,
+      "must_not_ask_service": true
+    },
+    {
+      "id": "greeting_after_handoff_oii",
+      "message": "Oii",
+      "initial_journey_state": "handed_off",
+      "pending_reconfirmation": true,
+      "expected_intent": "greeting",
+      "expected_operational_mode": "post_qualification_support",
+      "must_not_extract": ["servico"],
+      "must_not_handoff": true,
+      "must_not_ask_service": true
+    },
+    {
+      "id": "greeting_with_service",
+      "message": "Oi, quero vitrificação",
+      "expected_intent": "greeting_and_service",
+      "expected_service_phrase": "vitrificação",
+      "must_not_handoff": true
+    },
+    {
+      "id": "social_reply_is_not_service",
+      "message": "Obrigado",
+      "must_not_extract": ["servico"]
+    },
+    {
+      "id": "number_is_not_service",
+      "message": "2",
+      "must_not_extract": ["servico"]
+    },
+    {
+      "id": "explicit_confirmation",
+      "message": "Sim",
+      "initial_journey_state": "awaiting_confirmation",
+      "expected_intent": "qualification_confirmed",
+      "expected_route": "HUMAN",
+      "expected_handoff": true
+    },
+    {
+      "id": "confirmation_rejected",
+      "message": "Não",
+      "initial_journey_state": "awaiting_confirmation",
+      "expected_intent": "qualification_correction_requested",
+      "expected_route": "SDR",
+      "must_not_handoff": true
+    },
+    {
+      "id": "faq_during_confirmation",
+      "message": "Antes de confirmar, como funciona a garantia?",
+      "initial_journey_state": "awaiting_confirmation",
+      "expected_intent": "faq_then_resume_confirmation",
+      "must_not_handoff": true
+    },
+    {
+      "id": "explicit_service_switch",
+      "message": "Na verdade, quero vitrificação",
+      "expected_intent": "service_switch",
+      "preserve_common_facts": true
+    },
+    {
+      "id": "duplicate_terminal",
+      "message": "Obrigado",
+      "initial_journey_state": "handed_off",
+      "expected_repetition_action": "suppressed_duplicate_terminal",
+      "max_outbounds": 0
+    }
+  ]
+}

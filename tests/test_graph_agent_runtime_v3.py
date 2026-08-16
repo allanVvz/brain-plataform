@@ -434,6 +434,7 @@ def test_invalid_model_fallback_cannot_leave_terminal_state_on_sdr():
             "question_repetition": {"max_attempts": 1},
             "qualification": {
                 "summary_template": "Known: {informed_fields}.",
+                "confirmation_question": "Is this correct?",
                 "completion_message": "The team will continue.",
                 "incomplete_handoff_template": "Missing: {missing_fields}.",
             },
@@ -455,10 +456,11 @@ def test_invalid_model_fallback_cannot_leave_terminal_state_on_sdr():
         context, {"invalid": True}, ["proposal_schema_invalid"],
     )
 
-    assert decision.intent == "qualification_complete"
-    assert decision.route.value == "HUMAN"
-    assert response.handoff_required is True
-    assert response.reply_text == "Known: name: Beatriz.\n\nThe team will continue."
+    assert decision.intent == "awaiting_confirmation"
+    assert decision.route.value == "SDR"
+    assert response.handoff_required is False
+    assert response.cart_state["sdr_state"] == "awaiting_confirmation"
+    assert response.reply_text == "Known: name: Beatriz.\n\nIs this correct?"
 
 
 def test_greeting_recognizer_covers_how_people_actually_type():
@@ -1296,15 +1298,17 @@ def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypat
         ],
         "cart": second_response.cart_state,
     })
-    with pytest.raises(RuntimeError, match="terminal_repetition"):
-        graph_agent_runtime_v3.decide(
-            terminal_context,
-            model_observation={"proposal": {
-                **second_proposal,
-                "next_question_node_id": None,
-                "reply": "The team will take it from here.",
-            }},
-        )
+    duplicate_decision, duplicate_response = graph_agent_runtime_v3.decide(
+        terminal_context,
+        model_observation={"proposal": {
+            **second_proposal,
+            "next_question_node_id": None,
+            "reply": "The team will take it from here.",
+        }},
+    )
+    assert duplicate_decision.intent == "qualification_incomplete"
+    assert duplicate_response.reply_text is None
+    assert duplicate_response.proof["repetition_action"] == "suppressed_duplicate_terminal"
 
 
 def test_pending_condition_answer_does_not_change_branch_from_service_word():
@@ -1580,25 +1584,123 @@ def test_ambiguous_alias_resolves_to_the_strictly_more_specific_match():
     assert [row["branch_anchor_node_id"] for row in matches] == ["branch:glass"]
 
 
-def test_already_engaged_is_false_before_any_agent_reply():
-    assert graph_agent_runtime_v3._already_engaged([
-        {"role": "user", "texto": "oi"},
-    ]) is False
+def test_greeting_intent_is_transversal_and_has_no_history_gate():
+    assert not hasattr(graph_agent_runtime_v3, "_already_engaged")
+    for message in ("Oi", "Oii", "oi, tudo bem?"):
+        assert graph_agent_runtime_v3._is_greeting(message)
 
 
-def test_already_engaged_is_true_once_the_agent_has_replied():
-    assert graph_agent_runtime_v3._already_engaged([
-        {"role": "user", "texto": "oi"},
-        {"role": "assistant", "texto": "Olá! Que bom falar com você."},
-        {"role": "user", "texto": "oi, tudo bem?"},
-    ]) is True
+def test_legacy_converted_journey_is_a_post_qualification_state():
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test", messages=[], cart={}, rag_nodes=[], rag_paths=[],
+        journey_state="converted", operational_mode="post_qualification_support",
+    )
+    assert context.journey_state.value == "converted"
+    assert graph_agent_runtime_v3._journey_operational_mode("converted") == (
+        "post_qualification_support"
+    )
 
 
-def test_already_engaged_recognizes_sender_type_rows_without_a_role():
-    assert graph_agent_runtime_v3._already_engaged([
-        {"sender_type": "lead", "texto": "oi"},
-        {"sender_type": "agent", "texto": "Olá!"},
-    ]) is True
+@pytest.mark.parametrize("message", ["Oi", "Oii"])
+def test_reactivated_handoff_greeting_stays_in_support_without_restarting_service(message):
+    service = {
+        "field_key": "servico", "status": "known", "value": "service-alpha",
+        "owner_node_id": "branch:a",
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[
+            {"role": "assistant", "content": "A equipe seguirá com seu pedido."},
+            {"message_id": "msg:greeting", "role": "user", "content": message},
+        ],
+        cart={
+            "facts": {"servico": service},
+            "facts_by_key": {"servico": [service]},
+            "asked_question_node_ids": ["question:old"],
+        },
+        rag_nodes=[], rag_paths=[], graph_contract={},
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        available_services=[{"slug": "service-alpha", "label": "Service Alpha"}],
+        journey_state="handed_off", pending_reconfirmation=True,
+        operational_mode="post_qualification_support",
+        retrieval_trace={
+            "deterministic_intent": "greeting",
+            "deterministic_reply": "Olá! Como posso ajudar com seu pedido?",
+            "missing_fields": [],
+        },
+    )
+
+    decision, response = graph_agent_runtime_v3.decide(context, model_observation=None)
+
+    assert decision.intent == "greeting"
+    assert decision.route.value == "SDR"
+    assert response.handoff_required is False
+    assert response.cart_state["sdr_state"] == "handed_off"
+    assert response.cart_state["facts"]["servico"]["value"] == "service-alpha"
+    assert response.proof["intent_audit"]["greeting"] is True
+    assert response.proof["service_resolution"]["rejected_non_service_value"] is True
+    assert response.proof["service_resolution"]["resolved"] is True
+
+
+def test_social_message_cannot_become_referential_service_fact():
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"message_id": "msg:oii", "role": "user", "content": "Oii"}],
+        cart={}, rag_nodes=[], rag_paths=[],
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        retrieval_trace={"branch_candidates": [{"branch_anchor_node_id": "branch:a"}]},
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="checksum:a", branch_evidence_span="Oii",
+        extracted_facts=[ExtractedFact(
+            field_key="servico", value="Oii", owner_node_id="branch:a",
+            source_message_id="msg:oii", evidence_span="Oii", confidence=1,
+        )],
+    )
+    normalized = graph_agent_runtime_v3._normalize_referential_service_fact(
+        proposal, context, {
+            "branch_anchors": ["branch:a"],
+            "node_by_id": {"branch:a": {"slug": "service-alpha", "title": "Service Alpha"}},
+            "coordinates": {"branch:a": {"path_checksum": "checksum:a"}},
+        },
+    )
+    assert all(fact.field_key != "servico" for fact in normalized.extracted_facts)
+
+
+@pytest.mark.parametrize(
+    ("message", "intent", "route", "handoff"),
+    [
+        ("Sim", "qualification_confirmed", "HUMAN", True),
+        ("Não", "qualification_correction_requested", "SDR", False),
+    ],
+)
+def test_published_confirmation_requires_an_explicit_followup_turn(
+    message, intent, route, handoff,
+):
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"message_id": "msg:confirmation", "role": "user", "content": message}],
+        cart={"facts": {"name": {"status": "known", "value": "Beatriz"}}},
+        rag_nodes=[], rag_paths=[], journey_state="awaiting_confirmation",
+        operational_mode="confirmation",
+        graph_contract={"conversation_policy": {"qualification": {
+            "completion_message": "Obrigada. A equipe continuará o atendimento.",
+            "correction_prompt": "Diga qual informação precisa ser corrigida.",
+        }}},
+    )
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"contract_probe": True},
+    )
+    assert decision.intent == intent
+    assert decision.route.value == route
+    assert response.handoff_required is handoff
+    assert response.cart_state["facts"]["name"]["value"] == "Beatriz"
+    assert response.proof["explicit_confirmation"] is (message == "Sim")
 
 
 def test_previously_mentioned_service_titles_is_empty_before_any_pitch():
@@ -2083,7 +2185,15 @@ def test_decide_fallback_uses_the_published_closing_text_instead_of_silence(monk
     published handoff-rule text (qualification_complete condition) must be
     used instead of empty in exactly this situation.
     """
-    root = node(1, "persona:generic")
+    root = node(1, "persona:generic", parent_type="persona", data={
+        "conversation_policy": {
+            "qualification": {
+                "summary_template": "Resumo: {informed_fields}.",
+                "confirmation_question": "Os dados estão corretos?",
+                "completion_message": "A equipe continuará o atendimento.",
+            },
+        },
+    })
     branch_a = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
     q_a = node(4, "question:a", parent_type="faq", data={"question": "Qual é a metragem?"})
     closing_rule = node(5, "rule:closing", parent_type="rule", data={"handoff_rule": {
@@ -2137,10 +2247,10 @@ def test_decide_fallback_uses_the_published_closing_text_instead_of_silence(monk
     decision, response = graph_agent_runtime_v3.decide(
         context, model_observation={"proposal": stale_proposal},
     )
-    assert decision.intent == "qualification_complete"
-    assert decision.route.value == "HUMAN"
-    assert response.handoff_required is True
-    assert response.reply_text == "Perfeito! Anotei tudo, a equipe vai te chamar em breve."
+    assert decision.intent == "awaiting_confirmation"
+    assert decision.route.value == "SDR"
+    assert response.handoff_required is False
+    assert response.reply_text == "Resumo: metragem: 20.\n\nOs dados estão corretos?"
 
 
 def test_keep_without_an_active_branch_cannot_silently_establish_one():

@@ -206,11 +206,11 @@ def _invalid_proposal_fallback(
         *_unknown_fields(contract.get("fields") or [], facts_by_key),
     ])
     terminal_intent = None
+    confirmation_pending = False
     if context.active_branch_node_id and contract.get("fields") and not pending:
-        terminal_intent = (
-            "qualification_complete" if not unconfirmed else "qualification_incomplete"
-        )
-    if terminal_intent:
+        confirmation_pending = not unconfirmed
+        terminal_intent = "qualification_incomplete" if unconfirmed else None
+    if terminal_intent or confirmation_pending:
         document = {
             "branch_contracts": {context.active_branch_node_id: contract},
             "node_by_id": {},
@@ -247,10 +247,10 @@ def _invalid_proposal_fallback(
             ((context.cart.get("terminal_handoff") or {}).get("intent") or "")
         ) or None,
     )
+    repetition_action = "allowed"
     if not repetition["passed"]:
-        raise RuntimeError(
-            "conversation repetition blocked: " + ",".join(repetition["failures"])
-        )
+        reply = ""
+        repetition_action = "suppressed_duplicate_outbound"
     proof = {
         "valid": False,
         "errors": list(dict.fromkeys(errors)),
@@ -261,10 +261,20 @@ def _invalid_proposal_fallback(
         "qualification_complete": not unconfirmed,
         "qualification_incomplete": bool(unconfirmed and not pending),
         "repetition_audit": repetition,
+        "repetition_action": repetition_action,
+        "explicit_confirmation": False,
+        "confirmation_state": (
+            "awaiting_confirmation" if confirmation_pending
+            else "handed_off" if terminal_intent else "collecting"
+        ),
     }
     route = ConversationRoute.HUMAN if terminal_intent else ConversationRoute.SDR
     state = {
         **context.cart,
+        "sdr_state": (
+            "awaiting_confirmation" if confirmation_pending
+            else "handed_off" if terminal_intent else "collecting"
+        ),
         "asked_question_node_ids": [
             *(context.cart.get("asked_question_node_ids") or []),
             *([question_id] if question_id else []),
@@ -275,7 +285,10 @@ def _invalid_proposal_fallback(
     }
     return (
         ConversationDecision(
-            classifier="graph_proof_checker_v3", intent=terminal_intent or "published_fallback",
+            classifier="graph_proof_checker_v3",
+            intent=terminal_intent or (
+                "awaiting_confirmation" if confirmation_pending else "published_fallback"
+            ),
             route=route, confidence=0,
             lead_stage=str(context.cart.get("_lead_stage") or "novo"),
             handoff_reason="graph_terminal_qualification" if terminal_intent else None,
@@ -925,6 +938,54 @@ def _apply_authoritative_branch_resolution(
     })
 
 
+def _normalize_referential_service_fact(
+    proposal: ConversationProposal,
+    context: ConversationContext,
+    document: dict[str, Any],
+) -> ConversationProposal:
+    """Bind ``servico`` to one published branch; arbitrary strings never qualify."""
+    service_facts = [fact for fact in proposal.extracted_facts if fact.field_key == "servico"]
+    if not service_facts:
+        return proposal
+    message = _latest_user_message(context)
+    anchor = str(proposal.branch_anchor_node_id or "")
+    branch = (document.get("node_by_id") or {}).get(anchor) or {}
+    coordinate = ((document.get("coordinates") or {}).get(anchor) or {})
+    deterministic = (
+        (context.retrieval_trace.get("deterministic_branch_resolution") or {})
+        .get("branch_anchor_node_id") == anchor
+    )
+    candidate_ids = {
+        str(item.get("branch_anchor_node_id") or "")
+        for item in context.retrieval_trace.get("branch_candidates") or []
+    }
+    switching = proposal.branch_action.value in {"select", "switch", "add"}
+    evidence = str(proposal.branch_evidence_span or "").strip()
+    evidence_is_literal = bool(evidence and _literal_phrase_span(message, evidence))
+    valid = bool(
+        branch
+        and anchor in set(document.get("branch_anchors") or [])
+        and proposal.branch_path_checksum == str(coordinate.get("path_checksum") or "")
+        and not _is_social_or_non_service_value(message)
+        and (
+            deterministic
+            or (switching and anchor in candidate_ids and evidence_is_literal)
+        )
+    )
+    kept = [fact for fact in proposal.extracted_facts if fact.field_key != "servico"]
+    if valid:
+        kept.append(ExtractedFact(
+            field_key="servico",
+            value=str(branch.get("slug") or branch.get("title") or anchor),
+            status="known",
+            source_message_id=_source_message_id(context.messages),
+            owner_node_id=anchor,
+            evidence_span=evidence,
+            confidence=1.0,
+        ))
+    return proposal.model_copy(update={"extracted_facts": kept})
+
+
 def _normalize_next_question_to_first_missing(
     proposal: ConversationProposal,
     contract: dict[str, Any],
@@ -1474,7 +1535,7 @@ def _terminal_reply(
     if qualification_complete:
         parts = [
             render(qualification.get("summary_template")),
-            render(qualification.get("completion_message")),
+            render(qualification.get("confirmation_question")),
         ]
         reply = "\n\n".join(part for part in parts if part)
     else:
@@ -1685,24 +1746,87 @@ def _is_bare_greeting(message: str) -> bool:
     return _is_greeting(message) and not _greeting_remainder(message)
 
 
+_EXPLICIT_CONFIRMATIONS = {
+    "sim", "isso", "isso mesmo", "correto", "esta correto", "estao corretos",
+    "confirmo", "pode seguir", "pode prosseguir", "tudo certo", "ok pode seguir",
+}
+_EXPLICIT_REJECTIONS = {
+    "nao", "nao esta correto", "nao estao corretos", "tem algo errado",
+    "quero corrigir", "preciso corrigir",
+}
+_SOCIAL_RESPONSES = {
+    "obrigado", "obrigada", "valeu", "agradeco", "tchau", "ate mais",
+    "beleza", "ok", "certo",
+}
+
+
+def _is_explicit_confirmation(message: str) -> bool:
+    """Accept only an unequivocal confirmation of the published summary."""
+    normalized = _normalized_phrase(message)
+    return normalized in _EXPLICIT_CONFIRMATIONS
+
+
+def _is_explicit_rejection(message: str) -> bool:
+    return _normalized_phrase(message) in _EXPLICIT_REJECTIONS
+
+
+def _is_social_or_non_service_value(message: str) -> bool:
+    normalized = _normalized_phrase(message)
+    return bool(
+        not normalized
+        or _is_bare_greeting(message)
+        or _is_explicit_confirmation(message)
+        or _is_explicit_rejection(message)
+        or normalized in _SOCIAL_RESPONSES
+        or re.fullmatch(r"\d+(?:[.,]\d+)?", normalized)
+    )
+
+
+def _explicit_change_requested(message: str) -> bool:
+    normalized = _normalized_phrase(message)
+    return bool(
+        _message_explicitly_changes_service(message)
+        or re.search(r"\b(?:corrig|alter|muda|troca|ajusta|na verdade|quis dizer)\w*\b", normalized)
+    )
+
+
+def _qualification_copy(contract: dict[str, Any]) -> dict[str, Any]:
+    return ((contract.get("conversation_policy") or {}).get("qualification") or {})
+
+
+def _render_qualification_template(
+    template: Any,
+    *,
+    informed_fields: str = "",
+    missing_fields: str = "",
+) -> str:
+    rendered = str(template or "").strip()
+    return (
+        rendered.replace("{informed_fields}", informed_fields)
+        .replace("{missing_fields}", missing_fields)
+        .strip()
+    )
+
+
+def _completion_reply(contract: dict[str, Any]) -> str:
+    reply = str(_qualification_copy(contract).get("completion_message") or "").strip()
+    if not reply:
+        raise RuntimeError("published graph missing qualification completion_message")
+    return reply
+
+
+def _correction_prompt(contract: dict[str, Any]) -> str:
+    reply = str(_qualification_copy(contract).get("correction_prompt") or "").strip()
+    if not reply:
+        raise RuntimeError("published graph missing qualification correction_prompt")
+    return reply
+
+
 def _is_agent_message(row: dict[str, Any]) -> bool:
     return (
         str(row.get("role") or "") == "assistant"
         or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
     )
-
-
-def _already_engaged(messages: list[dict[str, Any]]) -> bool:
-    """True once the agent has already replied at least once in this window.
-
-    A mid-conversation message that happens to start with "oi"/"olá" (very
-    natural in PT-BR -- "oi, e sobre os faróis?") must not re-trigger the
-    canned greeting. `messages` is the same recent-history window already
-    used by `_repeats_recent_outbound`/`_repeated_pending_question_is_allowed`,
-    so this adds no new state or persistence -- it only asks a question that
-    window can already answer: has the agent said anything here before?
-    """
-    return any(_is_agent_message(row) for row in messages)
 
 
 def _persona_node(document: dict[str, Any]) -> dict[str, Any]:
@@ -1896,10 +2020,23 @@ SYSTEM_PROMPT = (
     "silenciosamente que uma informação antiga ainda vale (o veículo "
     "pode ter mudado, o interesse pode ser outro). Isso vale ainda mais "
     "quando reconfirmacao_pendente for true (a IA acabou de ser "
-    "reativada por um humano): a primeira resposta deve confirmar "
-    "explicitamente os dados relevantes já conhecidos antes de "
-    "prosseguir."
+    "reativada por um humano). Em operational_mode "
+    "post_qualification_support, use esses fatos apenas para apoiar o pedido "
+    "atual: responda saudação e dúvidas sem reiniciar o roteiro, sem perguntar "
+    "serviço novamente e sem pedir reconfirmação por conta própria. Só altere "
+    "o pedido quando a mensagem atual solicitar uma correção ou troca de forma "
+    "explícita. Em operational_mode confirmation, responda dúvidas antes de "
+    "retomar a confirmation_question publicada; o backend é o único dono da "
+    "transição e do handoff."
 )
+
+
+def _journey_operational_mode(journey_state: str) -> str:
+    if journey_state == "awaiting_confirmation":
+        return "confirmation"
+    if journey_state in {"qualified_confirmed", "handed_off", "converted"}:
+        return "post_qualification_support"
+    return "collection"
 
 
 def build_context(
@@ -1938,6 +2075,30 @@ def build_context(
         "graph_checksum": publication["checksum"], "revision": 0,
         "asked_question_node_ids": [], "facts": {}, "facts_by_key": {},
     }
+    journey = batch.get("journey") or supabase_client.get_current_conversation_journey(
+        str(persona["id"]), lead_ref,
+    ) or {}
+    if not journey:
+        latest_journey = supabase_client.get_latest_conversation_journey(
+            str(persona["id"]), lead_ref,
+        ) or {}
+        if latest_journey and latest_journey.get("is_current") is False:
+            journey = {
+                "id": None,
+                "sequence": int(latest_journey.get("sequence") or 0) + 1,
+                "state": "collecting",
+                "opening_reason": "new_demand_after_closed_request",
+                "previous_journey_id": latest_journey.get("id"),
+                "metadata": {},
+            }
+    lead_conversation_state = ((lead.get("metadata") or {}).get("conversation_state") or {})
+    journey_state = str(
+        journey.get("state") or lead_conversation_state.get("sdr_state") or "collecting"
+    )
+    pending_reconfirmation = bool(
+        (lead.get("metadata") or {}).get("pending_reconfirmation")
+    )
+    operational_mode = _journey_operational_mode(journey_state)
     publication_changed = str(ledger.get("publication_id")) != str(publication["id"])
     active_branch = str(ledger.get("active_branch_node_id") or "") or None
     if active_branch not in set(document.get("branch_anchors") or []):
@@ -1982,7 +2143,11 @@ def build_context(
         ledger["asked_question_node_ids"] = []
         ledger["publication_id"] = publication["id"]
         ledger["graph_checksum"] = publication["checksum"]
+    pending_fields = graph_proof_checker_v3.askable_pending_fields(
+        active_contract, ledger.get("facts") or {},
+    )
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(active_contract, ledger.get("facts") or {})]
+    pending_field = pending_fields[0] if pending_fields else {}
     active_path = ((document.get("coordinates") or {}).get(active_branch) or {}).get("path_node_ids") or []
     # A direct answer to the last published non-service question can contain a
     # service title as part of the value (for example, a vehicle condition).
@@ -1998,11 +2163,21 @@ def build_context(
         [] if pending_field_answer
         else _deterministic_branch_candidates(document, message)
     )
-    greeting_eligible = _is_greeting(message) and not _already_engaged(messages)
+    # Greeting is a transversal current-turn intent. Historical replies,
+    # handoffs and long pauses must never suppress it.
+    greeting_eligible = _is_greeting(message)
     greeting_prefix = _greeting_policy(
         document, contract=active_contract, facts=ledger.get("facts") or {},
         lead_ref=lead_ref,
     ) if greeting_eligible else None
+    if greeting_prefix and operational_mode == "post_qualification_support":
+        greeting_prefix = {
+            **greeting_prefix,
+            "question": "",
+            "question_node_id": None,
+            "asked_field_key": None,
+            "missing_fields": [],
+        }
     # Only a greeting that asks nothing and names no service skips the model.
     # Anything else -- a doubt, a service, both -- has to be answered, with
     # the greeting riding along as a prefix instead.
@@ -2029,6 +2204,9 @@ def build_context(
             "asked_field_key": greeting.get("asked_field_key"),
             "next_question_node_id": greeting.get("question_node_id"),
             "missing_fields": greeting.get("missing_fields") or [],
+            "journey_state": journey_state,
+            "journey_sequence": int(journey.get("sequence") or 1),
+            "operational_mode": operational_mode,
             "context_batch_ms": context_batch_ms,
             "embedding_ms": 0, "branch_rank_ms": 0, "branch_package_ms": 0,
             "latency_ms": round((time.perf_counter() - started) * 1000, 3),
@@ -2045,7 +2223,10 @@ def build_context(
                   "asked_question_node_ids": ledger.get("asked_question_node_ids") or [],
                   "_ledger_revision": ledger.get("revision") or 0},
             rag_nodes=[persona_node] if persona_node else [], rag_paths=[], rag_chunks=[],
-            context_cards=[], system_prompt="", available_services=[],
+            context_cards=[], system_prompt="", available_services=[{
+                "slug": document["node_by_id"][anchor]["slug"],
+                "label": document["node_by_id"][anchor]["title"],
+            } for anchor in document.get("branch_anchors") or []],
             active_branch_node_id=active_branch, active_branch_node_ids=active_branches,
             active_path_checksum=((document.get("coordinates") or {}).get(active_branch) or {}).get("path_checksum"),
             branch_node_ids=active_contract.get("closure_node_ids") or [],
@@ -2056,6 +2237,17 @@ def build_context(
             ),
             time_since_last_client_message=_time_since_last_client_message(messages, message_id),
             pending_reconfirmation=bool((lead.get("metadata") or {}).get("pending_reconfirmation")),
+            journey_id=str(journey.get("id") or "") or None,
+            journey_sequence=int(journey.get("sequence") or 1),
+            journey_state=journey_state,
+            pending_field_key=str(pending_field.get("key") or "") or None,
+            pending_question_node_id=str(pending_field.get("question_node_id") or "") or None,
+            last_handoff={
+                "at": journey.get("handed_off_at"),
+                "reason": (journey.get("metadata") or {}).get("handoff_reason")
+                or (lead.get("metadata") or {}).get("handoff_reason"),
+            },
+            operational_mode=operational_mode,
         )
     embedding_started = time.perf_counter()
     embedding = None if deterministic_candidates else graph_compiler_v3.query_embeddings([message])[0]
@@ -2222,6 +2414,9 @@ def build_context(
         "faq_deferral_reason": faq_selection_method if interrogative_clause and not selected_faq_chunk else None,
         "branch_candidates": _evidenced_branch_candidates(candidates),
         "possible_switches": possible_switches,
+        "journey_state": journey_state,
+        "journey_sequence": int(journey.get("sequence") or 1),
+        "operational_mode": operational_mode,
         "context_batch_ms": context_batch_ms,
         "embedding_ms": embedding_ms,
         "branch_rank_ms": branch_rank_ms,
@@ -2270,17 +2465,188 @@ def build_context(
         ),
         time_since_last_client_message=_time_since_last_client_message(messages, message_id),
         pending_reconfirmation=bool((lead.get("metadata") or {}).get("pending_reconfirmation")),
+        journey_id=str(journey.get("id") or "") or None,
+        journey_sequence=int(journey.get("sequence") or 1),
+        journey_state=journey_state,
+        pending_field_key=str(pending_field.get("key") or "") or None,
+        pending_question_node_id=str(pending_field.get("question_node_id") or "") or None,
+        last_handoff={
+            "at": journey.get("handed_off_at"),
+            "reason": (journey.get("metadata") or {}).get("handoff_reason")
+            or (lead.get("metadata") or {}).get("handoff_reason"),
+        },
+        operational_mode=operational_mode,
     )
+
+
+def _deterministic_confirmation_decision(
+    context: ConversationContext,
+) -> tuple[ConversationDecision, AgentResponse] | None:
+    if str(context.operational_mode) != "confirmation":
+        return None
+    message = _latest_user_message(context)
+    if _is_explicit_confirmation(message):
+        reply = _completion_reply(context.graph_contract)
+        state = {
+            **context.cart,
+            "sdr_state": "handed_off",
+            "terminal_handoff": {
+                "intent": "qualification_confirmed",
+                "emitted": True,
+            },
+        }
+        proof = {
+            "valid": True,
+            "errors": [],
+            "mode": "deterministic_confirmation",
+            "explicit_confirmation": True,
+            "missing_fields": [],
+            "qualification_complete": True,
+            "qualification_incomplete": False,
+            "accepted_facts": [],
+            "confirmation_state": "qualified_confirmed",
+            "model_calls": 0,
+        }
+        return (
+            ConversationDecision(
+                classifier="graph_confirmation_v1",
+                intent="qualification_confirmed",
+                route=ConversationRoute.HUMAN,
+                confidence=1,
+                lead_stage="qualificado",
+                handoff_reason="graph_qualification_confirmed",
+            ),
+            AgentResponse(
+                reply_text=reply,
+                role=ConversationRoute.HUMAN,
+                cart_state=state,
+                handoff_required=True,
+                proof=proof,
+                token_usage={
+                    "model_calls": 0, "repair_calls": 0, "prompt_tokens": 0,
+                    "completion_tokens": 0, "total_tokens": 0,
+                },
+            ),
+        )
+    if _is_explicit_rejection(message):
+        state = {**context.cart, "sdr_state": "collecting"}
+        return (
+            ConversationDecision(
+                classifier="graph_confirmation_v1",
+                intent="qualification_correction_requested",
+                route=ConversationRoute.SDR,
+                confidence=1,
+                lead_stage=str(context.cart.get("_lead_stage") or "engajado"),
+            ),
+            AgentResponse(
+                reply_text=_correction_prompt(context.graph_contract),
+                role=ConversationRoute.SDR,
+                cart_state=state,
+                handoff_required=False,
+                proof={
+                    "valid": True,
+                    "errors": [],
+                    "mode": "deterministic_confirmation_rejection",
+                    "explicit_confirmation": False,
+                    "missing_fields": [],
+                    "accepted_facts": [],
+                    "confirmation_state": "correction_requested",
+                    "model_calls": 0,
+                },
+                token_usage={
+                    "model_calls": 0, "repair_calls": 0, "prompt_tokens": 0,
+                    "completion_tokens": 0, "total_tokens": 0,
+                },
+            ),
+        )
+    return None
+
+
+def _with_structural_proof_audit(
+    context: ConversationContext,
+    decision: ConversationDecision,
+    response: AgentResponse,
+) -> AgentResponse:
+    message = _latest_user_message(context)
+    state = response.cart_state
+    active_branch = str(state.get("active_branch_node_id") or "") or None
+    service_fact = (state.get("facts") or {}).get("servico") or {}
+    referential_service_values = {
+        _normalized_phrase(value)
+        for service in context.available_services
+        for value in (service.get("slug"), service.get("label"))
+        if value
+    } | ({_normalized_phrase(active_branch)} if active_branch else set())
+    service_is_referential = bool(
+        _normalized_phrase(service_fact.get("value")) in referential_service_values
+    )
+    repetition = response.proof.get("repetition_audit") or {}
+    repetition_action = response.proof.get("repetition_action") or (
+        "allowed" if repetition.get("passed", True) else "quality_failure_recorded"
+    )
+    next_state = str(
+        state.get("sdr_state")
+        or ("handed_off" if response.handoff_required else context.journey_state)
+    )
+    proof = {
+        **response.proof,
+        "intent_audit": {
+            "greeting": _is_greeting(message),
+            "bare_greeting": _is_bare_greeting(message),
+            "explicit_confirmation": _is_explicit_confirmation(message),
+            "explicit_change": _explicit_change_requested(message),
+            "resolved_intent": decision.intent,
+        },
+        "service_resolution": {
+            "resolved": bool(
+                active_branch
+                and service_fact.get("status") == "known"
+                and str(service_fact.get("owner_node_id") or "") == active_branch
+                and service_is_referential
+            ),
+            "branch_anchor_node_id": active_branch,
+            "value": service_fact.get("value"),
+            "path_checksum": (
+                response.proposal.branch_path_checksum
+                if response.proposal else context.active_path_checksum
+            ),
+            "method": (
+                "deterministic_graph_match"
+                if context.retrieval_trace.get("deterministic_branch_resolution")
+                else "semantic_graph_match"
+                if context.retrieval_trace.get("branch_candidates")
+                else "retained_graph_fact"
+                if service_fact else "none"
+            ),
+            "rejected_non_service_value": bool(
+                _is_social_or_non_service_value(message)
+                and not context.retrieval_trace.get("deterministic_branch_resolution")
+            ),
+        },
+        "journey_transition": {
+            "journey_id": context.journey_id,
+            "sequence": context.journey_sequence,
+            "from": str(context.journey_state),
+            "to": next_state,
+            "operational_mode": str(context.operational_mode),
+        },
+        "confirmation_state": response.proof.get("confirmation_state") or next_state,
+        "repetition_action": repetition_action,
+    }
+    return response.model_copy(update={"proof": proof})
 
 
 def decide(
     context: ConversationContext, *, model_observation: dict[str, Any] | None
 ) -> tuple[ConversationDecision, AgentResponse]:
-    decision, response = _decide(context, model_observation=model_observation)
+    deterministic = _deterministic_confirmation_decision(context)
+    decision, response = deterministic or _decide(
+        context, model_observation=model_observation,
+    )
     token_usage = (model_observation or {}).get("token_usage")
     if token_usage:
         response = response.model_copy(update={"token_usage": token_usage})
-    return decision, response
+    return decision, _with_structural_proof_audit(context, decision, response)
 
 
 def _decide(
@@ -2297,6 +2663,11 @@ def _decide(
             "asked_question_node_ids": asked,
             "active_branch_node_id": context.active_branch_node_id,
             "active_branch_node_ids": list(context.active_branch_node_ids),
+            "sdr_state": (
+                "handed_off"
+                if str(context.operational_mode) == "post_qualification_support"
+                else str(context.journey_state)
+            ),
         }
         proof = {
             "valid": True,
@@ -2306,6 +2677,7 @@ def _decide(
             "missing_fields": context.retrieval_trace.get("missing_fields") or [],
             "asked_field_key": context.retrieval_trace.get("asked_field_key"),
             "model_calls": 0,
+            "confirmation_state": str(context.journey_state),
         }
         return (
             ConversationDecision(
@@ -2352,6 +2724,7 @@ def _decide(
         _facts_for_contract(contract, grouped_facts)
         if grouped_facts else context.cart.get("facts") or {}
     )
+    proposal = _normalize_referential_service_fact(proposal, context, document)
     proposal = _normalize_servico_owner(proposal, contract)
     proposal = _normalize_fact_source_message_ids(proposal, context)
     proposal = _drop_premature_unknown_for_pending_question(
@@ -2629,13 +3002,12 @@ def _decide(
         qualification_incomplete = bool(
             terminal_unconfirmed and not aggregate_askable and not discovery_only
         )
-        terminal_intent = (
-            "qualification_complete"
-            if qualification_complete
-            else "qualification_incomplete"
-            if qualification_incomplete
-            else None
+        post_support = bool(
+            str(context.operational_mode) == "post_qualification_support"
+            and not _explicit_change_requested(_latest_user_message(context))
         )
+        confirmation_pending = bool(qualification_complete and not post_support)
+        terminal_intent = "qualification_incomplete" if qualification_incomplete else None
         reply_seed = str((doubt or {}).get("text") or proposal.reply)
         if (
             not accepted_facts
@@ -2645,7 +3017,7 @@ def _decide(
             and len(_latest_user_message(context).split()) <= 3
         ):
             reply_seed = ""
-        if terminal_intent:
+        if terminal_intent or confirmation_pending:
             reply = _terminal_reply(
                 document=document,
                 contract=contract,
@@ -2654,6 +3026,8 @@ def _decide(
                 missing_fields=terminal_unconfirmed,
                 qualification_complete=qualification_complete,
             )
+        elif post_support:
+            reply = reply_seed
         else:
             reply = graph_proof_checker_v3.compose_published_question(
                 reply=reply_seed,
@@ -2697,9 +3071,16 @@ def _decide(
                 ((context.cart.get("terminal_handoff") or {}).get("intent") or "")
             ) or None,
         )
+        repetition_action = "allowed"
         if not repetition["passed"]:
-            raise RuntimeError(
-                "conversation repetition blocked: " + ",".join(repetition["failures"])
+            # Quality gates still observe the semantic failure through proof,
+            # but production commits accepted facts and suppresses only the
+            # unsafe duplicate outbound.
+            reply = ""
+            repetition_action = (
+                "suppressed_duplicate_terminal"
+                if "terminal_repetition" in repetition["failures"]
+                else "suppressed_duplicate_outbound"
             )
 
         facts = _facts_for_contract(
@@ -2713,6 +3094,12 @@ def _decide(
                       *(context.cart.get("asked_question_node_ids") or []),
                       *([next_question_id] if next_question_id else []),
                   ],
+                 "sdr_state": (
+                     "handed_off" if terminal_intent
+                     else "awaiting_confirmation" if confirmation_pending
+                     else "handed_off" if post_support
+                     else "collecting"
+                 ),
                  **({
                      "terminal_handoff": {
                          "intent": terminal_intent,
@@ -2720,6 +3107,12 @@ def _decide(
                      }
                  } if terminal_intent else {})}
         route = ConversationRoute.HUMAN if terminal_intent else ConversationRoute.SDR
+        resolved_intent = (
+            terminal_intent
+            or ("awaiting_confirmation" if confirmation_pending else None)
+            or ("post_qualification_support" if post_support else None)
+            or "collect_graph_fields"
+        )
         proof = {
             **proof,
             "missing_fields": [field.get("key") for field in terminal_unconfirmed],
@@ -2732,8 +3125,16 @@ def _decide(
             ),
             "qualification_complete": qualification_complete,
             "qualification_incomplete": qualification_incomplete,
+            "explicit_confirmation": False,
+            "confirmation_state": (
+                "awaiting_confirmation" if confirmation_pending
+                else "handed_off" if terminal_intent
+                else "post_qualification_support" if post_support
+                else "collecting"
+            ),
             "accepted_facts": accepted_facts,
             "repetition_audit": repetition,
+            "repetition_action": repetition_action,
             "fallback_used": False,
             **(doubt or {}),
         }
@@ -2743,11 +3144,11 @@ def _decide(
         ]))
         return (
             ConversationDecision(classifier="graph_proof_checker_v3",
-                                 intent=terminal_intent or "collect_graph_fields",
+                                 intent=resolved_intent,
                                  route=route, confidence=1, lead_stage="qualificado" if qualification_complete else "engajado",
                                  handoff_reason="graph_terminal_qualification" if terminal_intent else None,
                                  evidence_node_ids=evidence_node_ids),
-            AgentResponse(reply_text=reply, role=route, evidence_node_ids=evidence_node_ids,
+            AgentResponse(reply_text=reply or None, role=route, evidence_node_ids=evidence_node_ids,
                           cart_state=state,
                           handoff_required=bool(terminal_intent),
                           proposal=proposal, proof=proof),
@@ -2789,14 +3190,12 @@ def _decide(
     fallback_complete = not fallback_unconfirmed
     fallback_incomplete = bool(fallback_unconfirmed and not fallback_askable)
 
+    fallback_post_support = str(context.operational_mode) == "post_qualification_support"
+    fallback_confirmation_pending = fallback_complete and not fallback_post_support
     fallback_terminal_intent = (
-        "qualification_complete"
-        if fallback_complete
-        else "qualification_incomplete"
-        if fallback_incomplete
-        else None
+        "qualification_incomplete" if fallback_incomplete else None
     )
-    if fallback_terminal_intent:
+    if fallback_terminal_intent or fallback_confirmation_pending:
         fallback = _terminal_reply(
             document=document,
             contract=contract,
@@ -2806,6 +3205,8 @@ def _decide(
             missing_fields=fallback_unconfirmed,
             qualification_complete=fallback_complete,
         )
+    elif fallback_post_support:
+        fallback = ""
     else:
         fallback = graph_proof_checker_v3.compose_published_question(
             reply="", next_question_node_id=fallback_id, contract=contract
@@ -2823,6 +3224,13 @@ def _decide(
         "aggregate_missing_fields": fallback_unconfirmed,
         "qualification_complete": fallback_complete,
         "qualification_incomplete": fallback_incomplete,
+        "explicit_confirmation": False,
+        "confirmation_state": (
+            "awaiting_confirmation" if fallback_confirmation_pending
+            else "handed_off" if fallback_terminal_intent
+            else "post_qualification_support" if fallback_post_support
+            else "collecting"
+        ),
     }
     fallback_facts = dict(context.cart.get("facts") or {})
     for fact in proof.get("accepted_facts") or []:
@@ -2847,6 +3255,11 @@ def _decide(
         "facts_by_key": fallback_grouped,
         "active_branch_node_id": fallback_branch,
         "active_branch_node_ids": fallback_active_branches,
+        "sdr_state": (
+            "awaiting_confirmation" if fallback_confirmation_pending
+            else "handed_off" if fallback_terminal_intent or fallback_post_support
+            else "collecting"
+        ),
         "asked_question_node_ids": [
             *(context.cart.get("asked_question_node_ids") or []),
             *([fallback_id] if fallback_id else []),
@@ -2881,16 +3294,26 @@ def _decide(
     )
     fallback_proof["repetition_audit"] = fallback_repetition
     if not fallback_repetition["passed"]:
-        raise RuntimeError(
-            "conversation repetition blocked: "
-            + ",".join(fallback_repetition["failures"])
+        fallback = ""
+        fallback_proof["repetition_action"] = (
+            "suppressed_duplicate_terminal"
+            if "terminal_repetition" in fallback_repetition["failures"]
+            else "suppressed_duplicate_outbound"
         )
+    else:
+        fallback_proof["repetition_action"] = "allowed"
     fallback_route = (
         ConversationRoute.HUMAN if fallback_terminal_intent else ConversationRoute.SDR
     )
     return (
         ConversationDecision(classifier="graph_proof_checker_v3",
-                             intent=fallback_terminal_intent or "published_fallback",
+                             intent=fallback_terminal_intent or (
+                                 "awaiting_confirmation"
+                                 if fallback_confirmation_pending
+                                 else "post_qualification_support"
+                                 if fallback_post_support
+                                 else "published_fallback"
+                             ),
                              route=fallback_route, confidence=0,
                              lead_stage=str(context.cart.get("_lead_stage") or "novo"),
                              handoff_reason="graph_terminal_qualification" if fallback_terminal_intent else None,

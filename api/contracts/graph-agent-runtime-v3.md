@@ -78,3 +78,31 @@ Uma resposta HTTP perdida depois do commit não autoriza replay. A reconciliaç�
 operacional só encerra o inbound quando encontra exatamente uma prova válida,
 um outbound único e sua mensagem persistida; ela não chama retrieval, modelo
 ou transporte.
+
+## Máquina de estados SDR
+
+- `collecting` resolve um serviço publicado e coleta somente o primeiro field
+  realmente pendente.
+- Campos completos produzem o resumo e a `confirmation_question` publicada,
+  transitando para `awaiting_confirmation` sem handoff.
+- Somente uma confirmação explícita em turno posterior produz
+  `qualified_confirmed`, `route=HUMAN` e handoff no mesmo commit.
+- Negação ou correção volta à coleta sem apagar fatos; uma dúvida é respondida
+  com FAQ aprovada antes de retomar a confirmação.
+- Handoff incompleto registra os fields não confirmados e preserva todos os
+  fatos para o humano.
+- Depois de reativação, `post_qualification_support` responde saudação e FAQ
+  sem reiniciar o roteiro. Uma nova confirmação só é exigida após alteração
+  explícita do pedido.
+
+Saudação é intenção transversal do turno atual e nunca preenche field. O field
+`servico` é referencial: seu valor, owner, anchor e path checksum precisam
+resolver para uma branch da publicação por título, slug, alias ou evidência
+semântica segura. Saudações, confirmações, respostas sociais e números isolados
+nunca são serviço.
+
+A proteção antirrepetição não lança exceção em produção: fatos aceitos são
+commitados e o outbound duplicado é suprimido. CI e Validator continuam
+reprovando o critério semântico pelo proof. Todo proof expõe `intent_audit`,
+`service_resolution`, `journey_transition`, `confirmation_state` e
+`repetition_action`.
