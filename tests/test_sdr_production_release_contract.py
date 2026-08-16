@@ -26,8 +26,8 @@ def test_production_deploy_leaves_workers_paused_for_controlled_validation():
 
 
 def test_release_validator_requires_this_release_migration_and_exact_sha():
-    assert "121_sdr_journey_state_machine.sql" in VALIDATOR
-    assert "release migrations 112-121 are incomplete" in VALIDATOR
+    assert "122_preserve_post_handoff_journey.sql" in VALIDATOR
+    assert "release migrations 112-122 are incomplete" in VALIDATOR
     assert "EXPECTED_RELEASE_SHA" in VALIDATOR
     assert "release_source_identity" in VALIDATOR
 
