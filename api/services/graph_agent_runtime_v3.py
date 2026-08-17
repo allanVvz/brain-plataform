@@ -2043,6 +2043,37 @@ def _doubt_resolution(
     }
 
 
+def _doubt_policy_feedback(
+    *, doubt: dict[str, Any], errors: list[str], contract: dict[str, Any], facts: dict[str, Any]
+) -> dict[str, Any]:
+    """Give one bounded correction turn enough deterministic context.
+
+    This is advisory input to the model, never an authorization for a claim.
+    The proof checker remains the sole authority on facts and the next field.
+    """
+    pending = graph_proof_checker_v3.askable_pending_fields(contract, facts)
+    return {
+        "kind": "claim_not_authorized",
+        "validation_errors": errors,
+        "customer_doubt_detected": True,
+        "instruction": (
+            "Responda primeiro a duvida usando somente a FAQ aprovada indicada; "
+            "depois faca apenas a pergunta do primeiro campo pendente. "
+            "Nao repita nem invente claims."
+        ),
+        "approved_faq": {
+            "node_id": doubt.get("faq_node_id"),
+            "chunk_ids": doubt.get("doubt_chunk_ids") or [],
+            "answer": doubt.get("text"),
+        },
+        "faq_candidates": doubt.get("faq_candidates") or [],
+        "pending_field": (pending[0].get("key") if pending else None),
+        "pending_question_node_id": (
+            pending[0].get("question_node_id") if pending else None
+        ),
+    }
+
+
 def _reconcile_direct_answer_to_pending_field(
     proposal: ConversationProposal,
     context: ConversationContext,
@@ -4573,17 +4604,43 @@ def _decide(
                 "claim_chunk_evidence_outside_package:",
                 "claim_evidence_not_authorized:",
             ))
+            and error != "keep_without_active_branch"
         ]
-        if not non_claim_errors:
-            proof.update({
-                "valid": True,
-                "errors": [],
-                "repair_required": False,
-                "repair_requirements": [],
-                "model_proposal_errors": original_errors,
-                "fallback_used": False,
-                **doubt,
-            })
+        if any(error.startswith("claim_") for error in original_errors) and not non_claim_errors:
+            # A factual FAQ may be perfectly grounded even when the model put
+            # an unauthorized claim type beside it.  On the first pass, make
+            # that validation result visible to the model and allow exactly
+            # one correction.  After that correction, preserve the published
+            # FAQ rather than falling silent or trusting the bad claim.
+            correction_attempt = int(observation.get("repair_attempt") or 0)
+            feedback = _doubt_policy_feedback(
+                doubt=doubt, errors=original_errors, contract=contract,
+                facts=contract_facts,
+            )
+            if correction_attempt < 1:
+                proof.update({
+                    "valid": False,
+                    "repair_required": True,
+                    "repair_requirements": [],
+                    "policy_feedback": feedback,
+                    "model_proposal_errors": original_errors,
+                    "fallback_used": False,
+                    "model_attempts": 1,
+                    **doubt,
+                })
+            else:
+                proof.update({
+                    "valid": True,
+                    "errors": [],
+                    "repair_required": False,
+                    "repair_requirements": [],
+                    "policy_feedback": feedback,
+                    "model_proposal_errors": original_errors,
+                    "fallback_used": True,
+                    "fallback_applied": "published_faq_after_invalid_correction",
+                    "model_attempts": 2,
+                    **doubt,
+                })
     # An explicit switch/add is only a Phase-A decision on the first pass.
     # Force one directed Phase-B retrieval for the selected branch before
     # any reply or fact can be committed, even if an anchor snippet
@@ -4618,23 +4675,24 @@ def _decide(
             proposal.branch_anchor_node_id, proof.get("errors"),
         )
         proof["repair_contract"] = contract
-        rows = supabase_client.get_graph_rag_repair_chunks(
-            publication_id=publication["id"], branch_node_id=proposal.branch_anchor_node_id,
-            requirements=proof["repair_requirements"],
-        )
-        repair_chunks = _repair_chunks(rows, proof["repair_requirements"])
-        if len(repair_chunks) > RAG_CHUNK_LIMIT:
-            raise RuntimeError(
-                "required graph repair package exceeds the 12-chunk prompt limit"
+        requirements = proof["repair_requirements"]
+        if requirements:
+            rows = supabase_client.get_graph_rag_repair_chunks(
+                publication_id=publication["id"], branch_node_id=proposal.branch_anchor_node_id,
+                requirements=requirements,
             )
-        rows = repair_chunks
-        sources: dict[str, list[dict[str, Any]]] = {}
-        for row in rows:
-            sources.setdefault(str(row.get("source_graph_node_id") or ""), []).append(row)
-        repair_cards = [
-            _card(publication, document["node_by_id"][node_id], chunks, index).model_dump(mode="json")
-            for index, (node_id, chunks) in enumerate(sources.items()) if node_id in document.get("node_by_id", {})
-        ]
+            repair_chunks = _repair_chunks(rows, requirements)
+            if len(repair_chunks) > RAG_CHUNK_LIMIT:
+                raise RuntimeError(
+                    "required graph repair package exceeds the 12-chunk prompt limit"
+                )
+            sources: dict[str, list[dict[str, Any]]] = {}
+            for row in repair_chunks:
+                sources.setdefault(str(row.get("source_graph_node_id") or ""), []).append(row)
+            repair_cards = [
+                _card(publication, document["node_by_id"][node_id], chunks, index).model_dump(mode="json")
+                for index, (node_id, chunks) in enumerate(sources.items()) if node_id in document.get("node_by_id", {})
+            ]
         response = AgentResponse(reply_text=None, role=ConversationRoute.SDR, cart_state=context.cart,
                                  proposal=proposal, proof=proof, repair_context_cards=repair_cards)
         return ConversationDecision(classifier="graph_proof_checker_v3", intent="repair_retrieval",
@@ -5095,7 +5153,7 @@ def _decide(
             ),
             "repetition_audit": repetition,
             "repetition_action": repetition_action,
-            "fallback_used": False,
+            "fallback_used": bool(proof.get("fallback_used")),
             **(doubt or {}),
         }
         evidence_node_ids = list(dict.fromkeys([
@@ -5171,6 +5229,12 @@ def _decide(
         fallback = graph_proof_checker_v3.compose_published_question(
             reply="", next_question_node_id=fallback_id, contract=contract
         )
+    # A rejected proposal must not erase the deterministic answer to the
+    # customer's interruption.  Only the qualification question is subject
+    # to duplicate suppression below.
+    doubt_text = str((doubt or {}).get("text") or "").strip()
+    if doubt_text:
+        fallback = "\n\n".join(part for part in (doubt_text, fallback) if part)
     deterministic_fallback_valid = bool(fallback)
     fallback_proof = {
         **proof,
@@ -5254,10 +5318,22 @@ def _decide(
     )
     fallback_proof["repetition_audit"] = fallback_repetition
     if not fallback_repetition["passed"]:
-        fallback = ""
+        remainder = "" if "terminal_repetition" in fallback_repetition["failures"] else _statements_only(fallback)
+        if remainder and any(
+            conversation_repetition.is_semantic_repetition(previous, remainder)
+            for previous in [
+                str(row.get("content") or row.get("texto") or "")
+                for row in context.messages
+                if str(row.get("role") or "") == "assistant"
+                or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
+            ][-4:]
+        ):
+            remainder = ""
+        fallback = remainder
         fallback_proof["repetition_action"] = (
             "suppressed_duplicate_terminal"
             if "terminal_repetition" in fallback_repetition["failures"]
+            else "suppressed_duplicate_question" if remainder
             else "suppressed_duplicate_outbound"
         )
     else:

@@ -262,6 +262,50 @@ def test_pergunta_suprimida_nao_conta_como_feita(monkeypatch):
     assert asked.count("q:servico") == 2, asked
 
 
+def test_claim_nao_autorizada_da_duvida_pede_uma_correcao_com_feedback(monkeypatch):
+    document, pub = _fixture(monkeypatch)
+    proposal = _proposal(document)
+    proposal["claims"] = [{
+        "claim_type": "other",
+        "value": {},
+        "evidence_node_ids": ["faq:not-authorized"],
+        "evidence_chunk_ids": [],
+    }]
+    _decision, response = graph_agent_runtime_v3.decide(
+        _context(document, pub, message_id="msg:feedback", asked=[]),
+        model_observation={"proposal": proposal},
+    )
+
+    assert response.reply_text is None, response.proof.get("model_proposal_errors")
+    assert response.proof["repair_required"] is True
+    assert response.proof["policy_feedback"]["kind"] == "claim_not_authorized"
+    assert response.proof["policy_feedback"]["approved_faq"]["node_id"] == "faq:ppf-how"
+    assert response.proof["model_attempts"] == 1
+
+
+def test_segunda_proposta_invalida_ainda_entrega_faq_publicada(monkeypatch):
+    document, pub = _fixture(monkeypatch)
+    proposal = _proposal(document)
+    proposal["claims"] = [{
+        "claim_type": "other",
+        "value": {},
+        "evidence_node_ids": ["faq:not-authorized"],
+        "evidence_chunk_ids": [],
+    }]
+    _decision, response = graph_agent_runtime_v3.decide(
+        _context(
+            document, pub, message_id="msg:feedback-2", asked=["q:servico"],
+            history=[{"role": "assistant", "content": "Qual servico te interessa?"}],
+        ),
+        model_observation={"proposal": proposal, "repair_attempt": 1},
+    )
+
+    assert ANSWER in (response.reply_text or "")
+    assert response.proof["fallback_applied"] == "published_faq_after_invalid_correction"
+    assert response.proof["model_attempts"] == 2
+    assert response.proof["repetition_action"] != "suppressed_duplicate_outbound"
+
+
 def test_o_contrato_comum_nunca_autoriza_mais_que_um_galho(monkeypatch):
     """A invariante de seguranca desta mudanca.
 
