@@ -22,6 +22,7 @@ from schemas.conversation import (
     ConversationRoute,
     ExtractedFact,
     ServiceOperation,
+    ServiceOperationAction,
 )
 from services import (
     conversation_repetition,
@@ -40,6 +41,43 @@ SERVICE_MAX_EDIT_DISTANCE = 3
 SERVICE_TEXT_MIN_SIMILARITY = 0.80
 SERVICE_SEMANTIC_MIN_SCORE = 0.78
 SERVICE_SEMANTIC_MIN_MARGIN = 0.08
+
+
+def _normalize_initial_service_keep(
+    proposal: ConversationProposal,
+    *,
+    context: ConversationContext,
+) -> ConversationProposal:
+    """Convert a literal first-service ``keep`` into a proven selection.
+
+    A model can answer a service FAQ correctly while emitting ``keep`` even
+    though no branch is active yet. The proof checker must reject an
+    unsupported guess, but it should not reject a literal customer service
+    answer and discard its grounded reply. Normalize only when the service
+    evidence is present verbatim in this turn.
+    """
+    if context.active_branch_node_id or proposal.branch_action is not BranchAction.KEEP:
+        return proposal
+    message = _latest_user_message(context)
+    matching = [
+        operation
+        for operation in proposal.service_operations
+        if operation.action.value == "keep"
+        and operation.branch_anchor_node_id == proposal.branch_anchor_node_id
+        and graph_proof_checker_v3._literal_span(message, operation.evidence_span)
+    ]
+    branch_span = proposal.branch_evidence_span or (matching[0].evidence_span if matching else "")
+    if not branch_span or not graph_proof_checker_v3._literal_span(message, branch_span):
+        return proposal
+    return proposal.model_copy(update={
+        "branch_action": BranchAction.SELECT,
+        "branch_evidence_span": branch_span,
+        "service_operations": [
+            operation.model_copy(update={"action": ServiceOperationAction.ADD})
+            if operation in matching else operation
+            for operation in proposal.service_operations
+        ],
+    })
 
 
 def _normalize_servico_owner(
@@ -4355,6 +4393,7 @@ def _decide(
             "slug": str(node.get("slug") or anchor),
         }
     proposal = _apply_authoritative_branch_resolution(proposal, context, document)
+    proposal = _normalize_initial_service_keep(proposal, context=context)
     contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
     if not context.active_branch_node_id and not (
         (context.retrieval_trace.get("service_resolution") or {}).get("operations")
