@@ -22,6 +22,7 @@ from schemas.conversation import (
     ConversationRoute,
     ExtractedFact,
     ServiceOperation,
+    ServiceOperationAction,
 )
 from services import graph_compiler_v3, graph_proof_checker_v3, supabase_client
 
@@ -30,6 +31,50 @@ logger = logging.getLogger("graph_agent_runtime_v3")
 
 RUNTIME_VERSION = "graph_agent_runtime_v3"
 MAX_PENDING_QUESTION_ATTEMPTS = 2
+
+
+def _normalize_initial_service_keep(
+    proposal: ConversationProposal,
+    *,
+    context: ConversationContext,
+) -> ConversationProposal:
+    """Treat an explicit first-service answer as a selection, not a keep.
+
+    Models occasionally describe a service correctly and draft a grounded
+    answer, but emit ``keep`` for both the branch and its service operation.
+    With no active branch, the proof checker rejects that shape and the whole
+    positive response is lost.  Only normalize when the model supplied a
+    literal service span present in the current customer message; retrieval
+    guesses without customer evidence remain rejected.
+    """
+    if context.active_branch_node_id or proposal.branch_action is not BranchAction.KEEP:
+        return proposal
+    message = _latest_user_message(context)
+    operations = list(proposal.service_operations)
+    matching = [
+        operation
+        for operation in operations
+        if operation.action.value == "keep"
+        and operation.branch_anchor_node_id == proposal.branch_anchor_node_id
+        and graph_proof_checker_v3._literal_span(message, operation.evidence_span)
+    ]
+    branch_span = proposal.branch_evidence_span
+    if not branch_span:
+        branch_span = matching[0].evidence_span if matching else ""
+    if not branch_span or not graph_proof_checker_v3._literal_span(message, branch_span):
+        return proposal
+    normalized_operations = [
+        operation.model_copy(update={"action": ServiceOperationAction.ADD})
+        if operation in matching else operation
+        for operation in operations
+    ]
+    return proposal.model_copy(
+        update={
+            "branch_action": BranchAction.SELECT,
+            "branch_evidence_span": branch_span,
+            "service_operations": normalized_operations,
+        }
+    )
 
 
 def _normalize_servico_owner(
@@ -2475,6 +2520,7 @@ def _decide(
         item.model_dump(mode="json") for item in proposal.service_operations
     ]
     proposal = _apply_authoritative_branch_resolution(proposal, context, document)
+    proposal = _normalize_initial_service_keep(proposal, context=context)
     contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
     grouped_facts = context.cart.get("facts_by_key") or {}
     contract_facts = (
