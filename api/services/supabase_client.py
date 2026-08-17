@@ -4239,8 +4239,10 @@ def get_active_ledger_branches(ledger_id: str) -> list:
         return []
     try:
         rows = _q(
-            get_client().table("conversation_ledger_branches").select("branch_anchor_node_id")
-            .eq("ledger_id", ledger_id).eq("state", "active").limit(100)
+            get_client().table("conversation_ledger_branches")
+            .select("branch_anchor_node_id,added_at")
+            .eq("ledger_id", ledger_id).eq("state", "active")
+            .order("added_at").limit(100)
         )
     except Exception:
         # migration 105 may not be applied yet on a deployment where this

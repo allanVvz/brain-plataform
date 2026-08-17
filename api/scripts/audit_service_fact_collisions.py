@@ -70,6 +70,42 @@ def find_collisions(
     return collisions
 
 
+def find_operation_span_gaps(proofs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return technical identities for historical service mutations without proof spans."""
+    gaps: list[dict[str, Any]] = []
+    for proof_row in proofs:
+        proof = proof_row.get("proof_result") or {}
+        operations = (
+            proof.get("applied_service_operations")
+            if isinstance(proof.get("applied_service_operations"), list)
+            else proof.get("service_operations") or []
+        )
+        consumed = {
+            _fold(span.get("text"))
+            for span in proof.get("consumed_service_spans") or []
+            if _fold(span.get("text"))
+        }
+        missing = [
+            {
+                "action": operation.get("action"),
+                "branch_anchor_node_id": operation.get("branch_anchor_node_id"),
+                "branch_path_checksum": operation.get("branch_path_checksum"),
+                "evidence_span": operation.get("evidence_span"),
+            }
+            for operation in operations
+            if _fold(operation.get("evidence_span")) not in consumed
+        ]
+        if missing:
+            gaps.append({
+                "proof_id": proof_row.get("id"),
+                "ledger_id": proof_row.get("ledger_id"),
+                "canonical_inbound_id": proof_row.get("canonical_inbound_id"),
+                "created_at": proof_row.get("created_at"),
+                "operations_without_consumed_span": missing,
+            })
+    return gaps
+
+
 def audit(*, persona_slug: str | None, lead_ref: int | None) -> dict[str, Any]:
     client = supabase_client.get_client()
     persona = supabase_client.get_persona(persona_slug) if persona_slug else None
@@ -84,11 +120,23 @@ def audit(*, persona_slug: str | None, lead_ref: int | None) -> dict[str, Any]:
     ledgers = ledger_query.execute().data or []
     ledger_ids = [str(row["id"]) for row in ledgers if row.get("id")]
     if not ledger_ids:
-        return {"dry_run": True, "ledger_count": 0, "collision_count": 0, "collisions": []}
+        return {
+            "dry_run": True, "ledger_count": 0,
+            "collision_count": 0, "collisions": [],
+            "service_operation_span_gap_count": 0,
+            "service_operation_span_gaps": [], "mutation_performed": False,
+        }
 
     facts = (
         client.table("conversation_facts")
         .select("id,ledger_id,field_key,owner_node_id,status,value_json,source_message_id,revision,created_at")
+        .in_("ledger_id", ledger_ids)
+        .execute().data
+        or []
+    )
+    proofs = (
+        client.table("conversation_turn_proofs")
+        .select("id,ledger_id,canonical_inbound_id,proof_result,created_at")
         .in_("ledger_id", ledger_ids)
         .execute().data
         or []
@@ -126,6 +174,7 @@ def audit(*, persona_slug: str | None, lead_ref: int | None) -> dict[str, Any]:
                 "graph_checksum": publication.get("checksum"),
             })
         all_collisions.extend(found)
+    operation_span_gaps = find_operation_span_gaps(proofs)
     return {
         "dry_run": True,
         "persona_slug": persona_slug,
@@ -134,6 +183,8 @@ def audit(*, persona_slug: str | None, lead_ref: int | None) -> dict[str, Any]:
         "fact_count": len(facts),
         "collision_count": len(all_collisions),
         "collisions": all_collisions,
+        "service_operation_span_gap_count": len(operation_span_gaps),
+        "service_operation_span_gaps": operation_span_gaps,
         "mutation_performed": False,
     }
 

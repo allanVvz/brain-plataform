@@ -3,6 +3,8 @@ from pathlib import Path
 
 SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
        "118_conversation_journeys_and_sales_conversions.sql").read_text(encoding="utf-8")
+RUNTIME_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
+               "120_conversation_journey_carry_over_and_runtime_audit.sql").read_text(encoding="utf-8")
 
 
 def test_journeys_are_current_once_and_ledgers_are_scoped():
@@ -66,3 +68,18 @@ def test_trigger_functions_are_not_publicly_executable():
         "REVOKE ALL ON FUNCTION public.project_conversation_journey_from_proof_v1() "
         "FROM PUBLIC,anon,authenticated;"
     ) in SQL
+
+
+def test_next_journey_carries_only_explicit_graph_fields_and_resets_service_focus():
+    assert "common_field->>'carry_over'" in RUNTIME_SQL
+    assert "active_branch_node_id,publication_id" in RUNTIME_SQL
+    assert "v_next.persona_id,v_next.lead_ref,NULL" in RUNTIME_SQL
+    assert "carry_over_fact_count" in RUNTIME_SQL
+    assert "INSERT INTO public.conversation_ledger_branches" not in RUNTIME_SQL
+
+
+def test_runtime_batch_is_scoped_to_current_journey_and_audits_one_terminal():
+    assert "WHERE persona_id=p_persona_id AND lead_ref=p_lead_ref AND is_current" in RUNTIME_SQL
+    assert "JOIN journey j ON j.id=l.journey_id" in RUNTIME_SQL
+    assert "'journey',(SELECT to_jsonb(journey) FROM journey)" in RUNTIME_SQL
+    assert "'terminal_count'" in RUNTIME_SQL

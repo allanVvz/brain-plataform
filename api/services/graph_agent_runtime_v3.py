@@ -630,6 +630,24 @@ def _facts_for_contract(
     return scoped
 
 
+def _safe_active_focus(
+    active_branch_node_id: str | None,
+    persisted_active_branch_node_ids: list[str],
+) -> tuple[str | None, list[str], bool]:
+    """Reconcile the legacy singular focus with the authoritative set in memory."""
+    persisted = list(dict.fromkeys(
+        str(value) for value in persisted_active_branch_node_ids if value
+    ))
+    focus = str(active_branch_node_id or "") or None
+    active = persisted if persisted else ([focus] if focus else [])
+    derived = bool(active and focus not in set(active))
+    if derived:
+        focus = active[-1]
+    if not active:
+        focus = None
+    return focus, active, derived
+
+
 def _literal_phrase_span(message: str, phrase: Any) -> str:
     """Return the exact customer substring matching a normalized graph phrase."""
     target = _normalized_phrase(phrase)
@@ -735,7 +753,10 @@ def _literal_service_resolution(
 
     selected.sort(key=lambda item: item["start"])
     consumed = [
-        {"text": item["span"], "start": item["start"], "end": item["end"]}
+        {
+            "text": item["span"], "start": item["start"], "end": item["end"],
+            "branch_anchor_node_id": item["branch_anchor_node_id"],
+        }
         for item in selected
     ]
     return {
@@ -842,11 +863,26 @@ def _resolve_service_operations(
         )
     ]
     focus = focus_candidates[-1] if focus_candidates else (after[-1] if after else None)
+    consumed = list(base.get("consumed_spans") or [])
+    for operation in operations:
+        evidence = str(operation.get("evidence_span") or "")
+        if not evidence or any(span.get("text") == evidence for span in consumed):
+            continue
+        start = str(message or "").find(evidence)
+        if start >= 0:
+            consumed.append({
+                "text": evidence,
+                "start": start,
+                "end": start + len(evidence),
+                "branch_anchor_node_id": operation.get("branch_anchor_node_id"),
+                "operation_marker": True,
+            })
     return {
         **base,
         "operations": operations,
         "next_active_branch_node_ids": after,
         "focused_branch_node_id": focus,
+        "consumed_spans": consumed,
     }
 
 
@@ -920,18 +956,15 @@ def _apply_authoritative_branch_resolution(
             or ""
         )
     elif active:
-        proposed_anchor = str(proposal.branch_anchor_node_id or "")
-        if (
-            proposal.branch_action.value in {"switch", "add"}
-            and proposed_anchor in set(context.retrieval_trace.get("possible_switches") or [])
-            and proposal.branch_evidence_span
-        ):
-            return proposal
         anchor = active
         action = "keep"
         evidence_span = ""
     else:
-        return proposal
+        anchor = str(context.retrieval_trace.get("retrieval_branch_node_id") or "")
+        if anchor not in set(document.get("branch_anchors") or []):
+            anchor = str(proposal.branch_anchor_node_id or "")
+        action = "keep"
+        evidence_span = ""
 
     coordinate = ((document.get("coordinates") or {}).get(anchor) or {})
     extracted = [fact for fact in proposal.extracted_facts if fact.field_key != "servico"]
@@ -988,12 +1021,13 @@ def _fact_consumes_service_evidence(
     if normalized_value and normalized_value in service_phrases:
         return True
     evidence = str(fact.evidence_span or "")
-    start = str(message or "").find(evidence) if evidence else -1
-    if start < 0:
+    occurrences = _literal_phrase_occurrences(message, evidence) if evidence else []
+    if not occurrences:
         return False
-    end = start + len(evidence)
     return any(
-        start >= int(span.get("start") or 0) and end <= int(span.get("end") or 0)
+        occurrence["start"] < int(span.get("end") or 0)
+        and int(span.get("start") or 0) < occurrence["end"]
+        for occurrence in occurrences
         for span in service_resolution.get("consumed_spans") or []
     )
 
@@ -2037,6 +2071,7 @@ def build_context(
     if not publication:
         raise RuntimeError("active GraphRAG v3 publication not found")
     document = publication.get("document_json") or {}
+    journey = batch.get("journey") or {}
     messages = batch.get("messages") or supabase_client.get_messages(str(lead_ref), limit=8) or []
     # The buffer can canonically coalesce several physical messages. Use that
     # ordered text for this decision/proof without rewriting persisted history
@@ -2071,11 +2106,17 @@ def build_context(
         ]
         if ledger.get("id") else []
     )
-    active_branches = list(dict.fromkeys([
-        *([active_branch] if active_branch else []),
-        *persisted_active_branches,
-    ]))
-    active_contract = (document.get("branch_contracts") or {}).get(active_branch) or {}
+    # Legacy ledgers could persist the set before the singular focus was
+    # introduced. Derive a safe focus for this turn only; a persistent repair
+    # remains a separate CAS-authorized operation.
+    active_branch, active_branches, focus_derived_in_memory = _safe_active_focus(
+        active_branch, persisted_active_branches,
+    )
+    common_contract = document.get("common_contract") or {}
+    active_contract = (
+        (document.get("branch_contracts") or {}).get(active_branch) or {}
+        if active_branch else common_contract
+    )
     facts_by_key = ledger.get("facts_by_key") or _facts_by_key(
         list((ledger.get("facts") or {}).values())
     )
@@ -2138,6 +2179,11 @@ def build_context(
             "ledger_revision": int(ledger.get("revision") or 0),
             "publication_changed": publication_changed,
             "invalidated_fact_keys": invalidated_fact_keys,
+            "focus_derived_in_memory": focus_derived_in_memory,
+            "journey_id": journey.get("id"),
+            "journey_sequence": journey.get("sequence"),
+            "previous_journey_id": journey.get("previous_journey_id"),
+            "journey_state": journey.get("state"),
             "deterministic_intent": "greeting",
             "deterministic_reply": reply,
             "asked_field_key": greeting.get("asked_field_key"),
@@ -2258,6 +2304,21 @@ def build_context(
         "ledger_revision": int(ledger.get("revision") or 0),
         "publication_changed": publication_changed,
         "invalidated_fact_keys": invalidated_fact_keys,
+        "focus_derived_in_memory": focus_derived_in_memory,
+        "journey_id": journey.get("id"),
+        "journey_sequence": journey.get("sequence"),
+        "previous_journey_id": journey.get("previous_journey_id"),
+        "journey_state": journey.get("state"),
+        "common_contract": common_contract,
+        "pending_field": next(iter(
+            graph_proof_checker_v3.askable_pending_fields(
+                active_contract if active_contract else contract,
+                _facts_for_contract(
+                    active_contract if active_contract else contract,
+                    facts_by_key,
+                ),
+            )
+        ), None),
         "short_expected_answer": short_expected_answer,
         "pending_field_branch_resolution_suppressed": pending_field_answer,
         "global_branch_search_executed": not suppress_global_branch_search,
@@ -2410,6 +2471,9 @@ def _decide(
     if str(publication.get("id")) != str(context.publication_id) or publication.get("checksum") != context.graph_checksum:
         raise RuntimeError("GraphRAG publication changed during turn")
     document = publication.get("document_json") or {}
+    model_proposed_service_operations = [
+        item.model_dump(mode="json") for item in proposal.service_operations
+    ]
     proposal = _apply_authoritative_branch_resolution(proposal, context, document)
     contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
     grouped_facts = context.cart.get("facts_by_key") or {}
@@ -2499,6 +2563,10 @@ def _decide(
         message=_latest_user_message(context),
         operations=service_operations,
         active_branch_node_ids=before_services,
+        consumed_service_spans=(
+            (context.retrieval_trace.get("service_resolution") or {})
+            .get("consumed_spans") or []
+        ),
     )
     if service_operations and not service_proof["valid"]:
         proof["errors"] = [*proof.get("errors", []), *service_proof["errors"]]
@@ -2507,6 +2575,12 @@ def _decide(
     proof.update({
         "service_resolution": context.retrieval_trace.get("service_resolution") or {},
         "service_operations": service_operations,
+        "model_proposed_service_operations": model_proposed_service_operations,
+        "applied_service_operations": service_operations,
+        "service_operation_rejection_reason": (
+            "model_operations_replaced_by_deterministic_resolution"
+            if model_proposed_service_operations != service_operations else None
+        ),
         "service_operation_proof": service_proof,
         "consumed_service_spans": (
             (context.retrieval_trace.get("service_resolution") or {})
@@ -2610,7 +2684,7 @@ def _decide(
         and context.active_branch_node_id is None
         and proposal.branch_action.value == "keep"
         and proof.get("errors") == ["keep_without_active_branch"]
-        and not context.retrieval_trace.get("branch_candidates")
+        and not service_operations
     )
     if proof["valid"] or discovery_only:
         if discovery_only:
@@ -2707,16 +2781,33 @@ def _decide(
             if service_operations
             else (context.active_branch_node_id if discovery_only else proposal.branch_anchor_node_id)
         )
+        if active_branch_ids and committed_branch not in set(active_branch_ids):
+            committed_branch = active_branch_ids[-1]
+        if not active_branch_ids:
+            committed_branch = None
 
-        aggregate_missing = graph_proof_checker_v3.aggregate_missing_fields(
-            document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
-        ) if active_branch_ids else []
-        aggregate_askable = graph_proof_checker_v3.aggregate_askable_fields(
-            document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
-        ) if active_branch_ids else []
-        aggregate_required_count = graph_proof_checker_v3.aggregate_required_field_count(
-            document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
-        ) if active_branch_ids else 0
+        if active_branch_ids:
+            aggregate_missing = graph_proof_checker_v3.aggregate_missing_fields(
+                document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
+            )
+            aggregate_askable = graph_proof_checker_v3.aggregate_askable_fields(
+                document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
+            )
+            aggregate_required_count = graph_proof_checker_v3.aggregate_required_field_count(
+                document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
+            )
+        else:
+            preselection_contract = document.get("common_contract") or contract
+            preselection_facts = _facts_for_contract(preselection_contract, next_grouped)
+            aggregate_missing = graph_proof_checker_v3.pending_fields(
+                preselection_contract, preselection_facts,
+            )
+            aggregate_askable = graph_proof_checker_v3.askable_pending_fields(
+                preselection_contract, preselection_facts,
+            )
+            aggregate_required_count = graph_proof_checker_v3.required_field_count(
+                preselection_contract, preselection_facts,
+            )
         next_question_id = next(
             (field.get("question_node_id") for field in aggregate_askable if field.get("question_node_id")),
             None,
@@ -2729,6 +2820,11 @@ def _decide(
             contract,
         )
         reply_seed = str((doubt or {}).get("text") or proposal.reply)
+        if model_proposed_service_operations != service_operations and not doubt:
+            # A reply derived from rejected service mutations may acknowledge
+            # a service the customer never selected. Keep only backend-owned
+            # acknowledgement/question copy for that turn.
+            reply_seed = ""
         service_ack = _service_operation_acknowledgement(
             document, service_operations,
         )
@@ -2784,10 +2880,12 @@ def _decide(
         ):
             raise RuntimeError("semantic reply repetition blocked by recent outbound proof")
 
-        facts = _facts_for_contract(
-            (document.get("branch_contracts") or {}).get(committed_branch) or {},
-            next_grouped,
+        projection_contract = (
+            (document.get("branch_contracts") or {}).get(committed_branch)
+            or document.get("common_contract")
+            or contract
         )
+        facts = _facts_for_contract(projection_contract, next_grouped)
         state = {
             **context.cart,
             "facts": facts,
@@ -2854,6 +2952,12 @@ def _decide(
             "field_validation": proof.get("field_validation") or [],
             "previous_active_branch_node_ids": before_services,
             "next_active_branch_node_ids": active_branch_ids,
+            "previous_active_branch_node_id": context.active_branch_node_id,
+            "next_active_branch_node_id": committed_branch,
+            "branch_focus_invariant": (
+                (not active_branch_ids and committed_branch is None)
+                or committed_branch in set(active_branch_ids)
+            ),
             "fallback_used": False,
             **(doubt or {}),
         }

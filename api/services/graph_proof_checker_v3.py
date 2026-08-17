@@ -332,6 +332,7 @@ def check_service_operations(
     message: str,
     operations: list[dict[str, Any]],
     active_branch_node_ids: list[str],
+    consumed_service_spans: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Prove a first-class service-set transition independently of fields."""
     anchors = set(document.get("branch_anchors") or [])
@@ -339,6 +340,11 @@ def check_service_operations(
     errors: list[str] = []
     applied: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
+    consumed_evidence = {
+        _fold(str(span.get("text") or ""))
+        for span in consumed_service_spans or []
+        if str(span.get("text") or "").strip()
+    }
     for operation in operations:
         action = str(operation.get("action") or "")
         anchor = str(operation.get("branch_anchor_node_id") or "")
@@ -361,6 +367,8 @@ def check_service_operations(
             errors.append(f"service_path_checksum_mismatch:{anchor}")
         if not _literal_span(message, operation.get("evidence_span")):
             errors.append(f"service_evidence_not_literal:{anchor}")
+        if _fold(str(operation.get("evidence_span") or "")) not in consumed_evidence:
+            errors.append(f"service_evidence_not_consumed:{anchor}")
         if action == "add":
             if anchor in after:
                 errors.append(f"service_add_duplicate:{anchor}")

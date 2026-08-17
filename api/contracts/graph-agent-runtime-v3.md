@@ -2,7 +2,7 @@
 
 Contract-ID: `graph-agent-runtime-v3`
 
-Compiler: `graph-compiler-v3.3.0`
+Compiler: `graph-compiler-v3.4.0`
 
 Este Markdown faz parte da proveniência de cada publicação. O compilador grava
 seu caminho e checksum no Graph JSON; qualquer alteração deliberada neste
@@ -37,7 +37,7 @@ quando declara `capabilities.branch_anchor=true`.
 
 ```text
 inbound canônico
-→ resolução literal/semântica de todos os serviços
+→ resolução literal determinística de todos os serviços
 → consumo dos spans de serviço
 → retrieval híbrido dentro da membership
 → proposta JSON estrita do modelo
@@ -48,16 +48,19 @@ inbound canônico
 → outbox idempotente
 ```
 
-`service_operations[]` é o contrato autoritativo do conjunto de serviços. Cada
-operação contém `add`, `keep` ou `drop`, anchor publicado, checksum do caminho e
-evidência literal. Um novo serviço é adicionado por padrão; somente linguagem
-explícita de troca ou remoção gera `drop`. Repetição só muda o foco. Seleção
-ambígua não altera ledger nem branches.
+`service_operations[]` é derivado integralmente pelo backend a partir de
+títulos, slugs e aliases literais publicados. A proposta do modelo é apenas
+observação; busca semântica pode orientar desambiguação e retrieval, mas nunca
+autoriza mutação. Cada operação aplicada contém `add`, `keep` ou `drop`, anchor
+publicado, checksum do caminho e um span registrado em
+`consumed_service_spans`. Resolução vazia sempre aplica uma lista vazia.
 
 Um span consumido como serviço nunca pode validar outro field. O
 `active_branch_node_id` representa o foco e `active_branch_node_ids` representa
-o conjunto autoritativo. Os campos singulares continuam apenas como adaptador
-de compatibilidade.
+o conjunto autoritativo; foco não vazio deve pertencer ao conjunto. Ledgers
+legados com conjunto e foco nulo recebem foco apenas em memória. O contrato
+comum da persona valida campos compartilhados e resolve a pergunta publicada
+mesmo antes da seleção do primeiro serviço.
 
 Na primeira resposta incompatível, nenhum fato é persistido e a pergunta
 publicada é repetida. Na segunda, o field recebe `status=unknown`, `value=null`
@@ -77,8 +80,9 @@ continuam refletindo o serviço em foco por compatibilidade.
 
 `canonical_inbound_id` é único em `conversation_turn_proofs`. Fatos preservam
 mensagem, evidence span, confiança, revisão e supersessão. O proof expõe a
-resolução de serviços, operações, spans consumidos, conjunto anterior/posterior
-e resultado de validação de cada field.
+resolução determinística, operações propostas e aplicadas, motivo de rejeição,
+spans consumidos, conjunto anterior/posterior, foco e resultado de validação de
+cada field.
 
 Uma resposta HTTP perdida depois do commit não autoriza replay. A reconciliação
 operacional só encerra o inbound quando encontra uma prova válida, no máximo um

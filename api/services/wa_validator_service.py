@@ -1592,6 +1592,8 @@ def _active_validator_contract(
     graph_document: dict, active_branch_node_ids: list[str],
 ) -> dict:
     """Project the published field/question contract for every active branch."""
+    if not [value for value in active_branch_node_ids if value]:
+        return graph_document.get("common_contract") or {}
     fields: list[dict] = []
     seen_fields: set[tuple[str, str]] = set()
     questions: dict[str, dict] = {}
@@ -1714,6 +1716,60 @@ def _semantic_turn_audit(
         )
         for fact in proof.get("accepted_facts") or []
     )
+    resolved_operations = (
+        (proof.get("service_resolution") or {}).get("operations") or []
+    )
+    applied_operations = (
+        proof.get("applied_service_operations")
+        if isinstance(proof.get("applied_service_operations"), list)
+        else proof.get("service_operations") or []
+    )
+
+    def operation_signature(operation: dict) -> tuple[str, str, str, str]:
+        return (
+            str(operation.get("action") or ""),
+            str(operation.get("branch_anchor_node_id") or ""),
+            str(operation.get("branch_path_checksum") or ""),
+            _semantic_fold(str(operation.get("evidence_span") or "")),
+        )
+
+    resolved_signatures = [operation_signature(item) for item in resolved_operations]
+    applied_signatures = [operation_signature(item) for item in applied_operations]
+    operations_match_resolution = applied_signatures == resolved_signatures
+    operations_have_consumed_spans = all(
+        _semantic_fold(str(operation.get("evidence_span") or ""))
+        in consumed_service_values
+        for operation in applied_operations
+    )
+    customer_text = str(customer_step.get("text") or "")
+    consumed_intervals = [
+        (int(span.get("start") or 0), int(span.get("end") or 0))
+        for span in proof.get("consumed_service_spans") or []
+        if int(span.get("end") or 0) > int(span.get("start") or 0)
+    ]
+    field_evidence_disjoint = True
+    for fact in proof.get("accepted_facts") or []:
+        if str(fact.get("field_key") or "") == "servico":
+            continue
+        evidence = str(fact.get("evidence_span") or "")
+        if not evidence:
+            continue
+        starts = [match.start() for match in re.finditer(re.escape(evidence), customer_text)]
+        if any(
+            start < service_end and service_start < start + len(evidence)
+            for start in starts
+            for service_start, service_end in consumed_intervals
+        ):
+            field_evidence_disjoint = False
+            break
+    focused_id = str(ledger_after.get("active_branch_node_id") or "") or None
+    active_ids = [str(value) for value in ledger_after.get("active_branch_node_ids") or [] if value]
+    if not active_ids and focused_id:
+        active_ids = [focused_id]
+    branch_focus_invariant = (
+        (not active_ids and focused_id is None)
+        or focused_id in set(active_ids)
+    )
     handoff_observed = bool(
         turn.get("handoff")
         or proof.get("handoff_requested")
@@ -1732,6 +1788,10 @@ def _semantic_turn_audit(
         ),
         "all_intended_facts_extracted": accepted_all,
         "service_value_not_reused_as_field": service_value_not_reused_as_field,
+        "service_operations_match_resolution": operations_match_resolution,
+        "service_operations_have_consumed_spans": operations_have_consumed_spans,
+        "service_field_evidence_disjoint": field_evidence_disjoint,
+        "branch_focus_invariant": branch_focus_invariant,
         "received_content_acknowledged": not intended or bool(declarative_parts),
         "first_missing_field_only": (
             (not missing and question_id is None)
@@ -2283,11 +2343,12 @@ async def run_session_direct(
                         for key, expected in (
                             ("inbound_count", 1), ("decision_count", 1),
                             ("proof_count", 1), ("valid_proof_count", 1),
+                            ("outbound_count", 1),
                         ):
                             if int(audit.get(key) or 0) != expected:
                                 invariant_errors.append(f"{key}={audit.get(key)}")
-                        if int(audit.get("outbound_count") or 0) > 1:
-                            invariant_errors.append(f"outbound_count={audit.get('outbound_count')}")
+                        if "terminal_count" in audit and int(audit.get("terminal_count") or 0) != 1:
+                            invariant_errors.append(f"terminal_count={audit.get('terminal_count')}")
                         if audit.get("outbound_released_after_proof") is not True:
                             invariant_errors.append("outbound_released_before_proof")
                         if audit.get("commit_state") != "completed":

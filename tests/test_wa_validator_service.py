@@ -424,6 +424,41 @@ def _semantic_audit_inputs():
     }
 
 
+def test_semantic_turn_audit_fails_when_applied_services_diverge_from_resolver():
+    inputs = _semantic_audit_inputs()
+    proof = inputs["proof_record"]["proof_result"]
+    proof["service_resolution"] = {"operations": []}
+    proof["applied_service_operations"] = [{
+        "action": "add", "branch_anchor_node_id": "branch:two",
+        "branch_path_checksum": "sha256:two", "evidence_span": "Service Two",
+    }]
+    proof["consumed_service_spans"] = [{
+        "text": "Service Two", "start": 0, "end": 11,
+    }]
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert "service_operations_match_resolution" in audit["failures"]
+
+
+def test_semantic_turn_audit_fails_on_service_span_or_focus_invariant():
+    inputs = _semantic_audit_inputs()
+    proof = inputs["proof_record"]["proof_result"]
+    operation = {
+        "action": "keep", "branch_anchor_node_id": "branch:one",
+        "branch_path_checksum": "sha256:one", "evidence_span": "Service One",
+    }
+    proof["service_resolution"] = {"operations": [operation]}
+    proof["applied_service_operations"] = [operation]
+    proof["consumed_service_spans"] = []
+    inputs["ledger_after"]["active_branch_node_ids"] = ["branch:two"]
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert "service_operations_have_consumed_spans" in audit["failures"]
+    assert "branch_focus_invariant" in audit["failures"]
+
+
 def test_semantic_turn_audit_accepts_acknowledgement_and_first_missing_question():
     audit = wv._semantic_turn_audit(**_semantic_audit_inputs())
     assert audit["passed"] is True

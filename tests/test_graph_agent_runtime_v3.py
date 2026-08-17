@@ -117,6 +117,45 @@ def test_compiler_uses_capability_and_keeps_branches_isolated():
     assert document["compiler_contract"]["path"].endswith("graph-agent-runtime-v3.md")
 
 
+def test_compiler_projects_common_fields_and_branch_selector_before_service_focus():
+    root = node(1, "persona:generic", parent_type="persona")
+    root["metadata"]["appointment_policy"] = {
+        "identity_field": "customer_name",
+        "required_fields": ["customer_name", "requested_service"],
+    }
+    q_name = node(2, "question:name", parent_type="faq", data={"question": "Seu nome?"})
+    q_service = node(3, "question:service", parent_type="faq", data={"question": "Qual serviÃ§o?"})
+    root["metadata"]["qualification"] = {"fields": [{
+        "key": "customer_name", "owner_node_id": "persona:generic",
+        "scope": "persona", "question_node_id": "question:name",
+        "carry_over": True, "value_schema": {"type": "string"},
+    }]}
+    branch_a = node(4, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    branch_b = node(5, "branch:b", data={"capabilities": {"branch_anchor": True}})
+    for branch in (branch_a, branch_b):
+        branch["metadata"]["qualification"] = {"fields": [{
+            "key": "requested_service", "owner_node_id": branch["metadata"]["graph_json_node_id"],
+            "scope": "branch", "question_node_id": "question:service",
+            "value_schema": {"type": "string"},
+        }]}
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=[root, q_name, q_service, branch_a, branch_b],
+        edge_rows=[
+            edge(1, root, q_name), edge(2, root, q_service),
+            edge(3, root, branch_a), edge(4, root, branch_b),
+        ],
+    )
+
+    common = document["common_contract"]
+    assert [field["key"] for field in common["fields"]] == [
+        "customer_name", "requested_service",
+    ]
+    assert common["fields"][0]["carry_over"] is True
+    assert common["fields"][1]["branch_selection_field"] is True
+    assert common["questions"]["question:service"]["text"] == "Qual serviÃ§o?"
+
+
 def test_embedding_provider_auto_selects_real_local_or_openai(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("GRAPH_RAG_EMBEDDING_PROVIDER", "auto")
@@ -379,7 +418,7 @@ def test_greeting_recognizer_covers_how_people_actually_type():
     """WhatsApp openings stretch letters and chain forms; typos must not pass."""
     for message in (
         "oi", "oii", "Oiii!", "Olá", "olaa", "opa", "Alô", "salve", "e aí",
-        "eai", "eae", "eaee", "E aee!", "ei", "Bom dia", "bom diaa", "Boa tarde", "boa noite", "boa",
+        "eai", "eae", "e ae", "eaee", "E aee!", "ei", "Bom dia", "bom diaa", "Boa tarde", "boa noite", "boa",
         "tudo bem?", "Tudo bom", "beleza", "blz", "hey", "hello",
         "Oi, tudo bem? Queria saber quais serviços vocês fazem",
     ):
@@ -1389,6 +1428,20 @@ def test_contract_fact_scope_does_not_compare_service_from_another_owner():
     assert scoped["name"]["value"] == "Allan"
 
 
+def test_legacy_active_set_derives_focus_in_memory_without_resurrecting_old_focus():
+    focus, active, derived = graph_agent_runtime_v3._safe_active_focus(
+        None, ["branch:a", "branch:b"],
+    )
+    assert (focus, active, derived) == (
+        "branch:b", ["branch:a", "branch:b"], True,
+    )
+
+    focus, active, derived = graph_agent_runtime_v3._safe_active_focus(
+        "branch:stale", ["branch:a"],
+    )
+    assert (focus, active, derived) == ("branch:a", ["branch:a"], True)
+
+
 def test_active_branch_forces_keep_when_message_has_no_explicit_graph_alias():
     document = {
         "node_by_id": {"branch:a": {"title": "Service Alpha", "slug": "service-alpha"}},
@@ -1645,6 +1698,38 @@ def test_service_evidence_cannot_be_reused_as_objective_value():
         extracted_facts=[ExtractedFact(
             field_key="objective", owner_node_id="persona:aurora",
             value="Vitrificação", evidence_span="Vitrificação",
+        )],
+    )
+
+    cleaned, validation = graph_agent_runtime_v3._remove_consumed_service_facts(
+        proposal, context=context, document=document,
+    )
+
+    assert cleaned.extracted_facts == []
+    assert validation[0]["errors"] == ["service_evidence_consumed"]
+
+
+def test_field_evidence_cannot_wrap_a_consumed_service_span():
+    document = {
+        "branch_anchors": ["branch:vitrification"],
+        "node_by_id": {"branch:vitrification": {
+            "title": "VitrificaÃ§Ã£o", "slug": "vitrificacao", "data": {},
+        }},
+    }
+    message = "Quero VitrificaÃ§Ã£o hoje"
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"message_id": "msg-1", "role": "user", "content": message}],
+        cart={}, rag_nodes=[], rag_paths=[], retrieval_trace={"service_resolution": {
+            "consumed_spans": [{"text": "VitrificaÃ§Ã£o", "start": 6, "end": 18}],
+        }},
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:vitrification",
+        branch_path_checksum="checksum", extracted_facts=[ExtractedFact(
+            field_key="objective", owner_node_id="persona:aurora",
+            value=message, evidence_span=message,
         )],
     )
 
@@ -2033,15 +2118,8 @@ def test_normalize_stale_next_question_after_branch_change_is_a_noop_when_alread
     ) is keeping
 
 
-def test_decide_add_action_grows_active_branch_node_ids_without_dropping_the_current_one(monkeypatch):
-    """End-to-end regression for multi-service support (branch_action "add").
-
-    A customer asking for an additional service (e.g. "e também quero
-    quantidade") must keep the branch already in progress active *and* add
-    the new one -- unlike "switch", which replaces. This exercises the real
-    accumulation logic in decide()'s success path, not just check()'s
-    validation of the "add" action in isolation.
-    """
+def test_model_only_add_cannot_grow_the_active_service_set(monkeypatch):
+    """A model-only add is observation and cannot mutate the service set."""
     document = compiled_fixture()
     persona_row = {**PERSONA, "config": {}}
     pub = publication(document)
@@ -2083,9 +2161,10 @@ def test_decide_add_action_grows_active_branch_node_ids_without_dropping_the_cur
         context, model_observation={"proposal": add_proposal},
     )
     assert response.proof.get("valid"), response.proof.get("errors")
-    assert response.cart_state["active_branch_node_ids"] == ["branch:a", "branch:b"]
-    # Dialogue focus moves to the branch just added, but the list keeps both.
-    assert response.cart_state["active_branch_node_id"] == "branch:b"
+    assert response.cart_state["active_branch_node_ids"] == ["branch:a"]
+    assert response.cart_state["active_branch_node_id"] == "branch:a"
+    assert response.proof["model_proposed_service_operations"] == []
+    assert response.proof["applied_service_operations"] == []
 
 
 def test_jose_service_turn_adds_vitrification_without_filling_pending_objective(monkeypatch):
@@ -2412,8 +2491,123 @@ def test_discovery_keep_uses_model_reply_without_committing_fallback_branch(monk
     assert response.proof["valid"] is True
     assert response.proof["mode"] == "discovery"
     assert response.cart_state["active_branch_node_id"] is None
-    assert response.reply_text.startswith("Oi!")
+    assert response.reply_text.endswith("quantidade?")
     assert decision.intent == "collect_graph_fields"
+
+
+def test_name_turn_rejects_semantic_service_proposal_and_asks_published_service(monkeypatch):
+    """Literal regression: `e ae` -> name question -> `Allan Rodrigues`."""
+    bodywork = "aurora-product-bodywork"
+    document = {
+        "branch_anchors": [bodywork],
+        "coordinates": {bodywork: {"path_checksum": "sha256:bodywork"}},
+        "node_by_id": {
+            bodywork: {
+                "id": bodywork, "node_type": "product", "slug": "chapeacao",
+                "title": "ChapeaÃ§Ã£o", "data": {"aliases": ["chapeaÃ§Ã£o"]},
+            },
+        },
+        "branch_contracts": {bodywork: {
+            "branch_path_checksum": "sha256:bodywork",
+            "closure_node_ids": [bodywork, "q:name", "q:service", "persona:aurora"],
+            "fields": [
+                {
+                    "key": "nome_cliente", "owner_node_id": "persona:aurora",
+                    "required": True, "accepted_statuses": ["known"],
+                    "question_node_id": "q:name", "value_schema": {"type": "string"},
+                    "validation": {"mode": "semantic", "semantic_type": "human_name",
+                                   "description": "Nome humano", "examples": ["Ana"]},
+                    "overwrite_policy": "explicit_correction",
+                },
+                {
+                    "key": "servico", "owner_node_id": bodywork,
+                    "required": True, "accepted_statuses": ["known"],
+                    "question_node_id": "q:service", "value_schema": {"type": "string"},
+                    "validation": {"mode": "schema"},
+                    "overwrite_policy": "explicit_correction",
+                },
+            ],
+            "questions": {
+                "q:name": {"field_key": "nome_cliente", "text": "Como vocÃª se chama?", "depends_on": []},
+                "q:service": {"field_key": "servico", "text": "Qual serviÃ§o te interessa?", "depends_on": []},
+            },
+            "claims": [], "handoff_rules": [],
+        }},
+    }
+    document["checksum"] = graph_compiler_v3.canonical_checksum(document)
+    pub = publication(document)
+    pub["checksum"] = document["checksum"]
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_persona",
+        lambda _slug: {**PERSONA, "config": {}},
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
+        lambda _persona_id: pub,
+    )
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"],
+        messages=[{"message_id": "msg-name", "role": "user", "content": "Allan Rodrigues"}],
+        cart={"facts": {}, "facts_by_key": {}, "asked_question_node_ids": ["q:name"]},
+        rag_nodes=[], rag_paths=[], rag_chunks=[], context_cards=[],
+        graph_contract=document["branch_contracts"][bodywork],
+        active_branch_node_id=None, active_branch_node_ids=[], branch_node_ids=[],
+        publication_id=pub["id"], runtime_version="graph_agent_runtime_v3",
+        retrieval_trace={
+            "retrieval_branch_node_id": bodywork,
+            "branch_candidates": [{"branch_anchor_node_id": bodywork, "score": 0.209762}],
+            "possible_switches": [bodywork], "ledger_revision": 0,
+            "service_resolution": {
+                "status": "none", "matches": [], "operations": [],
+                "consumed_spans": [], "focused_branch_node_id": None,
+            },
+        },
+    )
+    model_proposal = {
+        "branch_action": "select", "branch_anchor_node_id": bodywork,
+        "branch_path_checksum": "sha256:bodywork",
+        "branch_evidence_span": "Allan Rodrigues",
+        "service_operations": [{
+            "action": "add", "branch_anchor_node_id": bodywork,
+            "branch_path_checksum": "sha256:bodywork", "evidence_span": "Allan Rodrigues",
+        }],
+        "extracted_facts": [
+            {
+                "field_key": "nome_cliente", "owner_node_id": "persona:aurora",
+                "status": "known", "value": "Allan Rodrigues",
+                "source_message_id": "msg-name", "evidence_span": "Allan Rodrigues",
+                "confidence": 1,
+            },
+            {
+                "field_key": "servico", "owner_node_id": bodywork,
+                "status": "known", "value": "chapeacao",
+                "source_message_id": "msg-name", "evidence_span": "Allan Rodrigues",
+                "confidence": 0.21,
+            },
+        ],
+        "claims": [], "next_question_node_id": "q:service",
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "reply": "Prazer, Allan. Vamos seguir com ChapeaÃ§Ã£o. Qual serviÃ§o te interessa?",
+        "qualification_complete": False, "handoff_requested": False,
+    }
+
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": model_proposal},
+    )
+
+    assert decision.intent == "collect_graph_fields"
+    assert response.proof["valid"] is True
+    assert response.proof["mode"] == "discovery"
+    assert response.proof["model_proposed_service_operations"]
+    assert response.proof["applied_service_operations"] == []
+    assert response.cart_state["active_branch_node_ids"] == []
+    assert response.cart_state["active_branch_node_id"] is None
+    assert response.cart_state["facts"]["nome_cliente"]["value"] == "Allan Rodrigues"
+    assert "servico" not in response.cart_state["facts"]
+    assert response.proof["next_question_node_id"] == "q:service"
+    assert response.reply_text.endswith("Qual serviÃ§o te interessa?")
+    assert "ChapeaÃ§Ã£o" not in response.reply_text
 
 
 def test_publication_change_preserves_compatible_persona_fact_without_active_branch():

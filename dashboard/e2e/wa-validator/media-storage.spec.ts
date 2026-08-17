@@ -62,7 +62,9 @@ async function selectPersona(page: Page) {
 async function openValidationWorkspace(page: Page) {
   await page.goto(`/settings?tab=messaging&sub=validacoes&persona=${encodeURIComponent(PERSONA_SLUG)}`);
   await selectPersona(page);
-  const flowSelect = page.getByText("Fluxo a testar", { exact: true }).locator("..").locator("select");
+  const flowSelect = page.locator("select").filter({
+    has: page.locator('option[value="saudacao_despedida"]'),
+  }).first();
   await expect(flowSelect).toBeEnabled({ timeout: API_TIMEOUT });
   await expect.poll(async () => flowSelect.inputValue()).not.toBe("");
   await expect(page.getByRole("button", { name: "Gerar Script de Teste" })).toBeEnabled({
@@ -99,7 +101,15 @@ test("armazena e reabre PNG/PDF no WA Validator sem outbound real", async ({ bro
   expect(sessionId).not.toBe("");
 
   await expect(page.getByRole("button", { name: /Executar Direto/ })).toBeEnabled({ timeout: API_TIMEOUT });
+  const runDirectResponsePromise = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api-brain/wa-validator/run-direct"
+      && response.request().method() === "POST",
+    { timeout: API_TIMEOUT },
+  );
   await page.getByRole("button", { name: /Executar Direto/ }).click();
+  const runDirectResponse = await runDirectResponsePromise;
+  expect(runDirectResponse.ok(), await runDirectResponse.text()).toBe(true);
   await expect.poll(async () => {
     const response = await page.request.get(`/api-brain/wa-validator/sessions/${sessionId}`);
     if (!response.ok()) return `http-${response.status()}`;
@@ -181,7 +191,10 @@ test("armazena e reabre PNG/PDF no WA Validator sem outbound real", async ({ bro
   for (const item of fixtures.filter((entry) => entry.mimeType.startsWith("image/"))) {
     const image = page.getByRole("img", { name: item.name });
     await expect(image).toBeVisible({ timeout: API_TIMEOUT });
-    expect(await image.evaluate((node: HTMLImageElement) => node.naturalWidth)).toBeGreaterThan(0);
+    await expect.poll(
+      async () => image.evaluate((node: HTMLImageElement) => node.naturalWidth),
+      { timeout: API_TIMEOUT },
+    ).toBeGreaterThan(0);
   }
   await expect(page.getByRole("link", { name: /teste 1\.pdf/ })).toBeVisible({ timeout: API_TIMEOUT });
   await page.screenshot({ path: testInfo.outputPath("media-stored-and-visible.png"), fullPage: true });
@@ -192,8 +205,14 @@ test("armazena e reabre PNG/PDF no WA Validator sem outbound real", async ({ bro
   await selectPersona(page);
   await expect(page.getByText(leadLabel, { exact: true }).first()).toBeVisible({ timeout: API_TIMEOUT });
   await page.getByText(leadLabel, { exact: true }).first().click();
-  await expect(page.getByRole("img", { name: "ex 1.png" })).toBeVisible({ timeout: API_TIMEOUT });
-  await expect(page.getByRole("img", { name: "ex 2.png" })).toBeVisible({ timeout: API_TIMEOUT });
+  for (const name of ["ex 1.png", "ex 2.png"]) {
+    const image = page.getByRole("img", { name });
+    await expect(image).toBeVisible({ timeout: API_TIMEOUT });
+    await expect.poll(
+      async () => image.evaluate((node: HTMLImageElement) => node.naturalWidth),
+      { timeout: API_TIMEOUT },
+    ).toBeGreaterThan(0);
+  }
   await expect(page.getByRole("link", { name: /teste 1\.pdf/ })).toBeVisible({ timeout: API_TIMEOUT });
 
   expect(pageErrors, "uncaught browser errors").toEqual([]);

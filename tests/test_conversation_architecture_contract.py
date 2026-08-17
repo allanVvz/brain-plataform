@@ -62,6 +62,10 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
     assert "active_branch_node_ids: context.active_branch_node_ids" in initial
     assert "facts_by_key: context.cart && context.cart.facts_by_key" in initial
     assert "known_facts: context.known_facts" in initial
+    assert "service_resolution: serviceResolution" in initial
+    assert "consumed_service_spans: serviceResolution.consumed_spans" in initial
+    assert "pending_field: trace.pending_field" in initial
+    assert "common_contract: trace.common_contract" in initial
 
 
 def test_completed_commit_uses_the_status_key_consumed_by_the_claim_rpc():

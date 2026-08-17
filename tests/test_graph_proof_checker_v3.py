@@ -330,6 +330,44 @@ def test_add_action_requires_literal_evidence():
     assert "branch_evidence_not_literal" in proof["errors"]
 
 
+def test_service_operation_requires_a_registered_consumed_span():
+    document = {
+        "branch_anchors": ["branch:a"],
+        "coordinates": {"branch:a": {"path_checksum": "checksum:a"}},
+    }
+    operation = {
+        "action": "add", "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": "checksum:a", "evidence_span": "Allan Rodrigues",
+    }
+
+    proof = graph_proof_checker_v3.check_service_operations(
+        document=document, message="Allan Rodrigues", operations=[operation],
+        active_branch_node_ids=[], consumed_service_spans=[],
+    )
+
+    assert "service_evidence_not_consumed:branch:a" in proof["errors"]
+
+
+def test_service_operation_accepts_the_exact_deterministic_span():
+    document = {
+        "branch_anchors": ["branch:a"],
+        "coordinates": {"branch:a": {"path_checksum": "checksum:a"}},
+    }
+    operation = {
+        "action": "add", "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": "checksum:a", "evidence_span": "VitrificaÃ§Ã£o",
+    }
+
+    proof = graph_proof_checker_v3.check_service_operations(
+        document=document, message="Quero VitrificaÃ§Ã£o", operations=[operation],
+        active_branch_node_ids=[], consumed_service_spans=[{
+            "text": "VitrificaÃ§Ã£o", "start": 6, "end": 18,
+        }],
+    )
+
+    assert proof["valid"] is True
+
+
 def test_add_action_falls_back_to_singular_active_branch_when_list_not_given():
     """Callers that don't pass active_branch_node_ids (not yet using
     multi-service) still get correct "add" validation from the singular
