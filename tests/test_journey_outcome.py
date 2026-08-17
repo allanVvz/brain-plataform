@@ -487,3 +487,128 @@ def test_recusas_da_rpc_viram_mensagem_legivel():
     assert "ja converteu" in agents._state_conflict_detail(
         Exception("lead already converted: qualificado is no longer available"))
     assert agents._state_conflict_detail(Exception("boom")) == "Journey state could not be changed"
+
+
+# ── segundo ciclo do SDR: o que atravessa o fim de um pedido ─────────────────
+
+def test_contrato_marca_identidade_como_carry_over_e_pedido_nao():
+    """Sem lista de nomes no codigo: o default vem da origem do field.
+
+    Qualificacao da persona e o que o cliente E (nome), entao atravessa.
+    `appointment_policy.required_fields` e o que ESTE pedido tem (data, janela)
+    -- carregar "12/09" para o pedido seguinte seria errado.
+    """
+    from schemas.graph_json_v2 import GraphJson
+    from services import graph_conversation_contract as contrato
+
+    grafo = GraphJson.model_validate({
+        "schema_version": "2.0", "graph_id": "g", "tenant": "t", "persona_slug": "p",
+        "nodes": [
+            {"id": "persona", "node_type": "persona", "slug": "p", "title": "P",
+             "data": {
+                 "qualification": {"fields": [{"key": "nome_cliente"}]},
+                 "appointment_policy": {"required_fields": ["data"]},
+             }},
+            {"id": "ramo", "node_type": "product", "slug": "vitrificacao",
+             "title": "Vitrificacao", "data": {
+                 "qualification": {"fields": [{"key": "porte"}]},
+             }},
+        ],
+        "edges": [{"id": "e1", "source": "persona", "target": "ramo",
+                   "relation_type": "has_product", "primary_tree": True}],
+    })
+    campos = {
+        f["key"]: f
+        for f in contrato.compile_branch_contract(grafo, "ramo")["fields"]
+    }
+    assert campos["nome_cliente"]["carry_over"] is True
+    assert campos["data"]["carry_over"] is False
+    assert campos["porte"]["carry_over"] is False
+
+
+def test_grafo_pode_sobrescrever_o_default_do_campo():
+    from schemas.graph_json_v2 import GraphJson
+    from services import graph_conversation_contract as contrato
+
+    grafo = GraphJson.model_validate({
+        "schema_version": "2.0", "graph_id": "g", "tenant": "t", "persona_slug": "p",
+        "nodes": [{"id": "persona", "node_type": "persona", "slug": "p", "title": "P",
+                   "data": {"qualification": {"fields": [
+                       {"key": "nome_cliente"},
+                       {"key": "humor_do_dia", "carry_over": False},
+                   ]}}}],
+        "edges": [],
+    })
+    campos = {f["key"]: f for f in contrato.compile_branch_contract(grafo, None)["fields"]}
+    assert campos["nome_cliente"]["carry_over"] is True
+    assert campos["humor_do_dia"]["carry_over"] is False
+
+
+def _documento(carry, nao_carry):
+    return {"branch_contracts": {"ramo": {"fields": [
+        {"key": carry, "carry_over": True},
+        {"key": nao_carry, "carry_over": False},
+    ]}}}
+
+
+def test_ciclo_novo_herda_identidade_e_esquece_o_servico(monkeypatch):
+    from services import graph_agent_runtime_v3 as runtime
+
+    monkeypatch.setattr(runtime.supabase_client, "get_journey_ledger_facts",
+                        lambda _jid: [
+                            {"field_key": "nome_cliente", "status": "known",
+                             "value_json": "Ana", "id": "f1"},
+                            {"field_key": "servico", "status": "known",
+                             "value_json": "vitrificacao", "id": "f2"},
+                        ])
+    ledger = runtime._seed_carried_facts(
+        {"facts": {}, "facts_by_key": {}},
+        _documento("nome_cliente", "servico"),
+        {"id": "jornada-1"},
+    )
+    assert ledger["facts"]["nome_cliente"]["value"] == "Ana"
+    assert ledger["facts"]["nome_cliente"]["carried_from_journey"] == "jornada-1"
+    assert "servico" not in ledger["facts"]
+
+
+def test_fato_herdado_nunca_sobrescreve_o_do_ciclo_atual(monkeypatch):
+    """Se o cliente ja corrigiu o nome neste pedido, o valor novo vence."""
+    from services import graph_agent_runtime_v3 as runtime
+
+    monkeypatch.setattr(runtime.supabase_client, "get_journey_ledger_facts",
+                        lambda _jid: [{"field_key": "nome_cliente", "status": "known",
+                                       "value_json": "Ana", "id": "f1"}])
+    atual = {"facts": {"nome_cliente": {"value": "Ana Paula"}},
+             "facts_by_key": {"nome_cliente": [{"value": "Ana Paula"}]}}
+    ledger = runtime._seed_carried_facts(
+        atual, _documento("nome_cliente", "servico"), {"id": "jornada-1"},
+    )
+    # Ledger com fato proprio nao e semeado de forma alguma.
+    assert ledger["facts"]["nome_cliente"]["value"] == "Ana Paula"
+
+
+def test_fato_incerto_nao_atravessa(monkeypatch):
+    """`unknown` (o `ignored_twice`) nao vira verdade no ciclo seguinte."""
+    from services import graph_agent_runtime_v3 as runtime
+
+    monkeypatch.setattr(runtime.supabase_client, "get_journey_ledger_facts",
+                        lambda _jid: [{"field_key": "nome_cliente", "status": "unknown",
+                                       "value_json": None, "id": "f1"}])
+    ledger = runtime._seed_carried_facts(
+        {"facts": {}, "facts_by_key": {}},
+        _documento("nome_cliente", "servico"), {"id": "jornada-1"},
+    )
+    assert ledger["facts"] == {}
+
+
+def test_falha_ao_herdar_nao_derruba_o_turno(monkeypatch):
+    from services import graph_agent_runtime_v3 as runtime
+
+    def explode(_jid):
+        raise RuntimeError("banco fora")
+    monkeypatch.setattr(runtime.supabase_client, "get_journey_ledger_facts", explode)
+    ledger = runtime._seed_carried_facts(
+        {"facts": {}, "facts_by_key": {}},
+        _documento("nome_cliente", "servico"), {"id": "jornada-1"},
+    )
+    assert ledger["facts"] == {}

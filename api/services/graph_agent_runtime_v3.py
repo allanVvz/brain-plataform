@@ -2586,6 +2586,60 @@ SYSTEM_PROMPT = (
 )
 
 
+
+def _carry_over_field_keys(document: dict) -> set[str]:
+    """Fields que atravessam o fim de um pedido, segundo o contrato compilado.
+
+    Sem lista de nomes no codigo: quem decide e o `carry_over` que o compilador
+    grava por origem do field (identidade da persona atravessa, dado do pedido
+    nao) e que o grafo pode sobrescrever campo a campo.
+    """
+    keys: set[str] = set()
+    for contract in (document.get("branch_contracts") or {}).values():
+        for field in (contract or {}).get("fields") or []:
+            if isinstance(field, dict) and field.get("carry_over"):
+                key = str(field.get("key") or "").strip()
+                if key:
+                    keys.add(key)
+    return keys
+
+
+def _seed_carried_facts(ledger: dict, document: dict, previous_journey: dict) -> dict:
+    """Semeia no ledger vazio do ciclo novo os fatos herdados do anterior.
+
+    Eles entram com `carried_from_journey`, entao `_known_facts_payload` os
+    rotula como `origem: "anterior"` e o prompt ja manda confirmar antes de
+    usar -- e a diferenca entre reperguntar o nome e conferi-lo.
+    """
+    keys = _carry_over_field_keys(document)
+    previous_id = str(previous_journey.get("id") or "")
+    if not keys or not previous_id or (ledger.get("facts") or {}):
+        return ledger
+    try:
+        rows = supabase_client.get_journey_ledger_facts(previous_id)
+    except Exception:
+        # Herdar e uma melhoria de conversa, nunca um bloqueio de turno.
+        return ledger
+    carried = {}
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        key = str(row.get("field_key") or "")
+        if key not in keys or str(row.get("status") or "") != "known":
+            continue
+        fact = {
+            **row, "value": row.get("value_json"), "fact_id": row.get("id"),
+            "carried_from_journey": previous_id,
+        }
+        carried.setdefault(key, fact)
+        grouped.setdefault(key, []).append(fact)
+    if not carried:
+        return ledger
+    seeded = dict(ledger)
+    seeded["facts"] = {**carried, **(ledger.get("facts") or {})}
+    seeded["facts_by_key"] = {**grouped, **(ledger.get("facts_by_key") or {})}
+    return seeded
+
+
 def _journey_operational_mode(journey_state: str) -> str:
     if journey_state == "awaiting_confirmation":
         return "confirmation"
@@ -2646,6 +2700,11 @@ def build_context(
                 "previous_journey_id": latest_journey.get("id"),
                 "metadata": {},
             }
+            # O pedido seguinte nasce com ledger proprio e zero fatos, entao o
+            # SDR reperguntaria o nome a cada ciclo. Os fields que o contrato
+            # marca como `carry_over` atravessam; servico e campos do galho nao
+            # -- o pedido novo comeca em branco de proposito.
+            ledger = _seed_carried_facts(ledger, document, latest_journey)
     lead_conversation_state = ((lead.get("metadata") or {}).get("conversation_state") or {})
     journey_state = str(
         journey.get("state") or lead_conversation_state.get("sdr_state") or "collecting"
