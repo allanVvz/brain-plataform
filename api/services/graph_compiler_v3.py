@@ -322,7 +322,6 @@ def branch_selection_field_key(
     """
     if not contracts or not persona_node:
         return None
-    anchors = list(contracts)
     by_anchor = {
         anchor: {
             str(field.get("key") or ""): field
@@ -335,12 +334,19 @@ def branch_selection_field_key(
         key = str(value or "")
         if not key:
             continue
-        declarations = [by_anchor[anchor].get(key) for anchor in anchors]
-        if not all(declarations):
+        # Nem todo galho e um servico de catalogo: atendimento humano e
+        # reclamacao existem no grafo mas nao sao escolhidos dizendo um nome de
+        # servico. Exigir declaracao em *todos* os anchors fazia o seletor sumir
+        # e derrubava junto o contrato comum -- entao o criterio e "onde e
+        # declarado, pertence ao proprio galho", com pelo menos dois galhos.
+        declarantes = {
+            anchor: campos[key] for anchor, campos in by_anchor.items() if key in campos
+        }
+        if len(declarantes) < 2:
             continue
         if all(
             str(field.get("owner_node_id") or "") == anchor
-            for anchor, field in zip(anchors, declarations, strict=True)
+            for anchor, field in declarantes.items()
         ):
             return key
     return None
@@ -363,6 +369,18 @@ def _with_confirmable_status(field: dict[str, Any]) -> dict[str, Any]:
         **field,
         "accepted_statuses": list(dict.fromkeys([*accepted, "needs_confirmation"])),
     }
+
+
+
+def _selector_shared_field(field: dict[str, Any], persona_id: str) -> dict[str, Any]:
+    """O campo de servico visto de fora de qualquer galho."""
+    return _with_confirmable_status({
+        **field,
+        "owner_node_id": persona_id,
+        "scope": "persona",
+        "branch_selection_field": True,
+        "overwrite_policy": "never",
+    })
 
 
 def _common_persona_contract(
@@ -400,13 +418,21 @@ def _common_persona_contract(
         ):
             shared.append(dict(field))
         elif key == selector_key:
-            shared.append(_with_confirmable_status({
-                **field,
-                "owner_node_id": persona_id,
-                "scope": "persona",
-                "branch_selection_field": True,
-                "overwrite_policy": "never",
-            }))
+            shared.append(_selector_shared_field(field, persona_id))
+
+    # O seletor pode nao existir no anchor varrido acima (galhos de suporte nao
+    # o declaram). Sem isto, o campo de servico ficava fora do contrato comum e
+    # a qualificacao parecia completa so com o nome.
+    if selector_key and not any(
+        str(field.get("key") or "") == selector_key for field in shared
+    ):
+        declarado = next(
+            (campos[selector_key] for campos in by_anchor.values()
+             if selector_key in campos),
+            None,
+        )
+        if declarado:
+            shared.append(_selector_shared_field(declarado, persona_id))
 
     order = {key: index for index, key in enumerate(preferred)}
     shared.sort(key=lambda field: (

@@ -148,3 +148,66 @@ def test_campo_comum_que_nao_seleciona_galho_nao_ganha_o_status():
     nome = _campo_por_chave(_grafo_aurora()["common_contract"]["fields"], "nome_cliente")
     assert nome is not None
     assert nome["accepted_statuses"] == ["known"]
+
+
+def _grafo_com_galho_de_suporte():
+    """A forma real da Aurora: 15 servicos de catalogo declaram `servico`,
+    `atendimento-humano` e `reclamacao` nao -- eles nao sao escolhidos dizendo
+    um nome de servico."""
+    root = node(1, "persona:aurora", parent_type="persona", data={
+        "appointment_policy": {"required_fields": ["nome_cliente", "servico"]},
+    })
+    ppf = node(2, "product:ppf", parent_type="product",
+               data={"capabilities": {"branch_anchor": True}})
+    chapeacao = node(3, "product:chapeacao", parent_type="product",
+                     data={"capabilities": {"branch_anchor": True}})
+    suporte = node(6, "service:atendimento-humano", parent_type="service",
+                   data={"capabilities": {"branch_anchor": True}})
+    q_nome = node(4, "question:nome", parent_type="faq",
+                  data={"question": "Qual e o seu nome e sobrenome?"})
+    q_servico = node(5, "question:servico", parent_type="faq",
+                     data={"question": "Qual servico te interessa?"})
+
+    for galho in (ppf, chapeacao):
+        galho["metadata"]["qualification"] = {"fields": [
+            _campo("nome_cliente", "question:nome", "persona:aurora"),
+            _campo("servico", "question:servico",
+                   galho["metadata"]["graph_json_node_id"], scope="branch"),
+        ]}
+    # o galho de suporte so pede o nome
+    suporte["metadata"]["qualification"] = {"fields": [
+        _campo("nome_cliente", "question:nome", "persona:aurora"),
+    ]}
+
+    rows = [root, ppf, chapeacao, suporte, q_nome, q_servico]
+    edges = [
+        edge(1, root, ppf), edge(2, root, chapeacao), edge(5, root, suporte),
+        edge(3, root, q_nome), edge(4, root, q_servico),
+    ]
+    return graph_compiler_v3.compile_graph(
+        persona=PERSONA, node_rows=rows, edge_rows=edges,
+    )
+
+
+def test_galho_de_suporte_sem_servico_nao_apaga_o_seletor():
+    """Exigir que TODOS os galhos declarem o campo fazia o seletor sumir na
+    Aurora real (15 de 17 declaram) -- e com ele sumia o campo de servico do
+    contrato comum, deixando a qualificacao "completa" so com o nome."""
+    documento = _grafo_com_galho_de_suporte()
+    comum = documento["common_contract"]
+    servico = _campo_por_chave(comum["fields"], "servico")
+    assert servico is not None, [f.get("key") for f in comum["fields"]]
+    assert servico.get("branch_selection_field") is True
+    assert "needs_confirmation" in servico["accepted_statuses"]
+    assert "servico" in comum["required_fields"]
+
+
+def test_galho_de_suporte_nao_recebe_campo_de_servico():
+    """Quem nao declara o servico continua sem ele -- o contrato de cada galho
+    seve so o que aquele galho pede."""
+    documento = _grafo_com_galho_de_suporte()
+    suporte = next(
+        contrato for anchor, contrato in documento["branch_contracts"].items()
+        if "atendimento" in anchor
+    )
+    assert _campo_por_chave(suporte["fields"], "servico") is None
