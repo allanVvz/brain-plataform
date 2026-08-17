@@ -466,6 +466,40 @@ def test_estado_aberto_nao_religa_a_ia(monkeypatch):
     agents.set_journey_state(21, _corpo("vendido"), "user:1")
 
 
+def test_qualificar_manualmente_pausa_a_ia(monkeypatch):
+    """O SDR e a unica agente do lead: selecionar "qualificado" no rail deve
+    pausar a IA do mesmo jeito que o SDR faz sozinho ao confirmar a
+    qualificacao (conversation_runtime.commit -> handoff_level='full')."""
+    from routes import agents
+
+    monkeypatch.setattr(agents.supabase_client, "get_lead_by_ref",
+                        lambda _ref: {"id": 21, "persona_id": "p"})
+    monkeypatch.setattr(agents.supabase_client, "set_conversation_journey_state",
+                        lambda **_kw: {"changed": True, "journey_closed": False, "target": "qualificado"})
+    chamados = []
+    monkeypatch.setattr(agents.agents_service, "pause_lead",
+                        lambda ref: chamados.append(ref) or True)
+    monkeypatch.setattr(agents.event_emitter, "emit", lambda *a, **k: None)
+
+    resultado = agents.set_journey_state(21, _corpo("qualificado"), "user:1")
+    assert chamados == [21]
+    assert resultado["ai_paused"] is True
+
+
+def test_qualificar_repetido_nao_pausa_de_novo(monkeypatch):
+    from routes import agents
+
+    monkeypatch.setattr(agents.supabase_client, "get_lead_by_ref",
+                        lambda _ref: {"id": 21, "persona_id": "p"})
+    monkeypatch.setattr(agents.supabase_client, "set_conversation_journey_state",
+                        lambda **_kw: {"changed": False, "journey_closed": False, "target": "qualificado"})
+    def explode(_ref):
+        raise AssertionError("alvo repetido nao muda nada")
+    monkeypatch.setattr(agents.agents_service, "pause_lead", explode)
+
+    agents.set_journey_state(21, _corpo("qualificado"), "user:1")
+
+
 def test_alvo_repetido_nao_religa_nem_grava(monkeypatch):
     from routes import agents
 

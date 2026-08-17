@@ -1667,6 +1667,17 @@ export function MessagesLayout({
     }
   }, [messages]);
 
+  const refreshSelectedLead = useCallback(async (id: number) => {
+    try {
+      const fresh = isPortal
+        ? await api.portalLead(portalSlug!, id)
+        : await api.lead(String(id));
+      setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...fresh } : l)));
+    } catch {
+      /* lead lookup is best-effort */
+    }
+  }, [isPortal, portalSlug]);
+
   // Same-origin polling keeps the browser behind the Brain API authorization
   // boundary. The portal SSE endpoint can later replace this without exposing
   // Supabase credentials to the browser.
@@ -1693,6 +1704,12 @@ export function MessagesLayout({
         setMessages((current) => sortMessages(Array.from(new Map(
           [...current, ...(page.items || [])].map((item) => [String(item.id), item]),
         ).values())));
+        // handoff_level/journey_outcome can change server-side without any
+        // new message (the SDR pausing itself on qualification, another
+        // operator acting on the same lead) -- refetch the single lead row
+        // every tick so the IA toggle and rail state never go stale between
+        // manual actions. Cheap: one row, not the whole list.
+        void refreshSelectedLead(id);
         // The selected thread needs a short poll, but the entire seven-day
         // conversation index does not. Refreshing both every five seconds
         // multiplied the expensive list endpoint (and its former lead N+1)
@@ -1722,7 +1739,7 @@ export function MessagesLayout({
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", visibleRefresh);
     };
-  }, [isPortal, selectedId, personaFilterId, portalSlug, validationScope]);
+  }, [isPortal, selectedId, personaFilterId, portalSlug, validationScope, refreshSelectedLead]);
 
   const openLead = useCallback((lead: Lead) => {
     // Ir para a thread é sempre a intenção de tocar um lead, independente
@@ -1942,17 +1959,6 @@ export function MessagesLayout({
       });
     return () => { cancelled = true; };
   }, [isPortal, portalSlug, selectedId, selectedLead?.id, lastClientText, latestEvidenceResponseId, selectedLeadInterest, selectedLeadPersonaId, selectedResponseMessageId, knowledgeRefreshKey]);
-
-  const refreshSelectedLead = useCallback(async (id: number) => {
-    try {
-      const fresh = isPortal
-        ? await api.portalLead(portalSlug!, id)
-        : await api.lead(String(id));
-      setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...fresh } : l)));
-    } catch {
-      /* lead lookup is best-effort */
-    }
-  }, [isPortal, portalSlug]);
 
   const onSend = useCallback(async () => {
     if (!selectedId || !draft.trim() || sending) return;

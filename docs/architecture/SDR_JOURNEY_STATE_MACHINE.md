@@ -101,8 +101,11 @@ O grafo sobrescreve campo a campo declarando `carry_over` no próprio field.
 
 Quando a jornada seguinte nasce, `_seed_carried_facts` semeia no ledger vazio os
 fatos `known` cujo field carrega, marcados com `carried_from_journey`. Daí
-`_known_facts_payload` os rotula como `origem: "anterior"` e o prompt já manda
-**confirmar antes de usar** — é a diferença entre reperguntar o nome e conferi-lo.
+`_known_facts_payload` os rotula como `origem: "anterior"` **e**
+`carregado_do_pedido_anterior: true`, e o prompt manda **usar direto, sem
+perguntar nem confirmar** — é identidade do cliente, não dado deste pedido. Só
+os demais fatos `"anterior"` (sem esse carimbo — veículo, data, janela do
+pedido anterior) continuam exigindo confirmação antes de uso.
 
 `servico` não é semeado: cada ciclo escolhe o seu.
 

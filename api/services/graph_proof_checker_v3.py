@@ -829,3 +829,25 @@ def compose_published_question(
         if sentence.strip() and "?" not in sentence
     ).strip()
     return f"{declarative}\n\n{question}".strip()
+
+
+def validate_natural_summary(reply: str, *, informed_values: list[str]) -> bool:
+    """Accept a model-written qualification summary only if it stays grounded.
+
+    Every collected value must appear in the reply (accent/case-insensitive
+    substring match -- the model can still phrase the surrounding sentence
+    freely), the reply must carry exactly one confirmation question, and it
+    may not use vocabulary implying the order is already final (that word
+    choice is reserved for the turn after the customer actually confirms).
+    """
+    text = str(reply or "").strip()
+    if not text or text.count("?") != 1:
+        return False
+    if _FINAL_CONFIRMATION.search(text):
+        return False
+    folded = _fold(text)
+    for value in informed_values:
+        candidate = _fold(str(value or ""))
+        if candidate and candidate not in folded:
+            return False
+    return True

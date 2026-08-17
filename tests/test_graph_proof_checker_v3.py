@@ -397,3 +397,45 @@ def test_service_operation_requires_authorized_consumed_evidence():
     )
     assert accepted["valid"], accepted["errors"]
     assert accepted["next_active_branch_node_ids"] == ["branch:a"]
+
+
+# ── validate_natural_summary: grounding guard for the model-written summary ──
+
+def test_natural_summary_accepted_when_every_value_is_mentioned():
+    assert graph_proof_checker_v3.validate_natural_summary(
+        "Boa, Cintia! Então fechamos assim: vitrificação no seu Civic 2021. "
+        "Confere pra mim se está certo?",
+        informed_values=["Cintia", "Vitrificação", "Civic", "2021"],
+    ) is True
+
+
+def test_natural_summary_rejected_when_a_collected_value_is_missing():
+    assert graph_proof_checker_v3.validate_natural_summary(
+        "Boa! Então fechamos assim: vitrificação no seu carro. Confere?",
+        informed_values=["Cintia", "Vitrificação", "Civic", "2021"],
+    ) is False
+
+
+def test_natural_summary_rejected_without_exactly_one_question():
+    grounded = "Fechamos vitrificação no seu Civic 2021."
+    assert graph_proof_checker_v3.validate_natural_summary(
+        grounded, informed_values=["Vitrificação", "Civic", "2021"],
+    ) is False
+    assert graph_proof_checker_v3.validate_natural_summary(
+        grounded + " Confere? Posso seguir?",
+        informed_values=["Vitrificação", "Civic", "2021"],
+    ) is False
+
+
+def test_natural_summary_rejected_when_it_claims_the_order_is_already_closed():
+    assert graph_proof_checker_v3.validate_natural_summary(
+        "Prontinho, vitrificação confirmada pro seu Civic 2021. Combinado?",
+        informed_values=["Vitrificação", "Civic", "2021"],
+    ) is False
+
+
+def test_natural_summary_match_is_accent_and_case_insensitive():
+    assert graph_proof_checker_v3.validate_natural_summary(
+        "entao ficou assim: VITRIFICACAO no seu carro. ta certo?",
+        informed_values=["Vitrificação"],
+    ) is True
