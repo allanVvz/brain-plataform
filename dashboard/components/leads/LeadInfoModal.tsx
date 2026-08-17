@@ -36,6 +36,36 @@ function noteRowsFromLead(lead: any): NoteRow[] {
     .map(([key, value]) => ({ key, value: String(value ?? "") }));
 }
 
+type OfferingGroup = { id: string; title: string; rows: NoteRow[] };
+
+// commercial_note (above) is a flat snapshot of whatever branch was focused
+// in the customer's most recent turn -- fine for a single-item pedido, but
+// it collapses a multi-item one (several services/products confirmed in the
+// same still-open conversation) down to just one of them. The backend
+// always keeps commercial_note_projection in sync with every active branch
+// (api/services/graph_agent_runtime_v3.py::_commercial_note_projection),
+// generic across service and product graphs alike, so prefer it whenever
+// it's present; commercial_note stays the fallback for leads from before
+// that projection existed.
+function offeringGroupsFromLead(lead: any): OfferingGroup[] {
+  const projection = lead?.metadata?.commercial_note_projection;
+  const services = projection?.services as Record<string, any> | undefined;
+  if (!services || typeof services !== "object") return [];
+  return Object.entries(services)
+    .map(([branchId, offering]) => {
+      const facts = (offering?.facts || {}) as Record<string, unknown>;
+      const rows = Object.entries(facts).map(([key, value]) => ({
+        key, value: String(value ?? ""),
+      }));
+      return {
+        id: branchId,
+        title: String(offering?.title || offering?.slug || branchId),
+        rows,
+      };
+    })
+    .filter((group) => group.rows.length > 0);
+}
+
 export type LeadInfoUpdateBody = {
   nome: string;
   interesse_produto: string;
@@ -64,6 +94,7 @@ export function LeadInfoModal({
   const [error, setError] = useState<string | null>(null);
 
   const viewNotes = useMemo(() => noteRowsFromLead(lead), [lead]);
+  const offeringGroups = useMemo(() => offeringGroupsFromLead(lead), [lead]);
 
   const phone = useMemo(() => lead?.telefone || lead?.lead_id || "", [lead]);
 
@@ -157,7 +188,31 @@ export function LeadInfoModal({
 
             <div className="flex flex-col gap-2">
               <span className="text-xs text-obs-subtle">Nota comercial</span>
-              {viewNotes.length === 0 ? (
+              {offeringGroups.length > 0 ? (
+                <div className="flex flex-col gap-3">
+                  {offeringGroups.map((group) => (
+                    <div key={group.id} className="flex flex-col gap-2">
+                      {offeringGroups.length > 1 && (
+                        <span className="text-[11px] font-semibold text-obs-text">{group.title}</span>
+                      )}
+                      <div className="flex flex-col gap-2">
+                        {group.rows.map((row, index) => (
+                          <div
+                            key={index}
+                            className="rounded-xl p-2.5"
+                            style={{ border: "1px solid var(--border-glass)" }}
+                          >
+                            <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-obs-violet">
+                              {humanizeFieldKey(row.key)}
+                            </span>
+                            <p className="mt-1 text-sm font-medium text-obs-text">{row.value || "—"}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : viewNotes.length === 0 ? (
                 <p className="text-[11px] text-obs-faint">Nenhuma informação registrada ainda.</p>
               ) : (
                 <div className="flex flex-col gap-2">

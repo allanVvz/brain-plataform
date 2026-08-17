@@ -556,8 +556,20 @@ este pedido". Sao contratos distintos e nenhum dos dois substitui o outro.
 - Uma unica jornada e corrente por `(persona, lead)`. Venda nao abre jornada
   nova: a seguinte nasce no proximo inbound depois de entrega, conclusao ou
   cancelamento.
+- Uma jornada corrente pode conter mais de um servico/produto confirmado (um
+  pedido com varios itens): cada galho ativo (`active_branch_node_ids`) tem
+  seu proprio ciclo de confirmacao, rastreado por
+  `conversation_ledger_branches.state` (`active` -> `completed`), e so entra
+  em `post_qualification_support` quando TODOS os galhos ativos ja estao
+  `completed`. Um galho ainda `active` e nao `completed` reabre a coleta e a
+  confirmacao so para ele, mesmo com a jornada ja tendo confirmado um item
+  antes. Nenhum nome de campo e hardcoded (`servico`, `produto`, ...) -- o
+  campo seletor de galho e resolvido via `branch_selection_field` no
+  contrato compilado.
 - Desfecho registrado por humano nao pode ser regredido por proof do SDR. Um
-  inbound depois da venda e suporte ao pedido, nao uma nova coleta.
+  inbound depois da venda e suporte ao pedido, nao uma nova coleta -- exceto
+  para um galho ainda `active`/nao `completed`, que continua pedindo sua
+  propria confirmacao (ponto acima).
 - `journey_outcome` e eixo independente de `stage`. `stage` continua sendo o
   funil manual do pipeline; os dois valores sao verdadeiros ao mesmo tempo e
   nenhum reescreve o outro.

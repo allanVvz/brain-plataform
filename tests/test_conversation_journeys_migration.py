@@ -7,6 +7,8 @@ STATE_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
              "121_sdr_journey_state_machine.sql").read_text(encoding="utf-8")
 POST_HANDOFF_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
                     "122_preserve_post_handoff_journey.sql").read_text(encoding="utf-8")
+BRANCH_CONFIRM_SQL = (Path(__file__).parents[1] / "supabase" / "migrations" /
+                      "128_confirm_branch_offering_within_journey.sql").read_text(encoding="utf-8")
 
 
 def test_journeys_are_current_once_and_ledgers_are_scoped():
@@ -113,3 +115,25 @@ def test_post_handoff_support_proof_preserves_the_terminal_journey():
     assert "RETURN NEW" in support
     assert "CREATE TABLE" not in POST_HANDOFF_SQL
     assert "DELETE FROM" not in POST_HANDOFF_SQL
+
+
+def test_branch_confirmation_marks_completed_without_reopening_a_new_journey():
+    assert "CREATE TABLE" not in BRANCH_CONFIRM_SQL
+    assert "DELETE FROM" not in BRANCH_CONFIRM_SQL
+    assert "INSERT INTO public.conversation_journeys" not in BRANCH_CONFIRM_SQL
+    # Confirmed branches are stamped 'completed', not reset to 'active' just
+    # because the reconciliation loop above still sees them in this turn's
+    # active set (i.e. the customer is still chatting post-confirmation).
+    assert "confirmed_branch_node_ids" in BRANCH_CONFIRM_SQL
+    assert "state='completed'" in BRANCH_CONFIRM_SQL
+    upsert = BRANCH_CONFIRM_SQL[
+        BRANCH_CONFIRM_SQL.index("FOREACH v_branch IN ARRAY v_active_branches"):
+        BRANCH_CONFIRM_SQL.index("v_confirmed_branches := ARRAY(")
+    ]
+    assert "WHERE public.conversation_ledger_branches.state <> 'completed'" in upsert
+    # The confirmed-branch write must run after the active/dropped
+    # reconciliation loop so it is the authoritative state for the turn, not
+    # something the loop can immediately clobber.
+    assert BRANCH_CONFIRM_SQL.index("v_confirmed_branches := ARRAY(") > BRANCH_CONFIRM_SQL.index(
+        "FOREACH v_branch IN ARRAY v_active_branches"
+    )
