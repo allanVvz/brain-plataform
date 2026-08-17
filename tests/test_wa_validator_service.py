@@ -108,7 +108,7 @@ def test_semantic_script_known_name_is_state_not_a_scripted_message():
         initial_state="known_name",
     )
     assert script["driver"]["initial_known_fields"] == ["nome_cliente"]
-    assert script["expected_dialogue"]["known_name"] == "Beatriz"
+    assert script["expected_dialogue"]["known_name"] == "Beatriz Souza"
     assert all(
         "Beatriz" not in str(step.get("text") or "")
         for step in script["steps"]

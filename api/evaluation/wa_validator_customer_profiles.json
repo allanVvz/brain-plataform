@@ -1,7 +1,7 @@
 {
   "appointment": {
     "answers": {
-      "nome_cliente": {"text": "Beatriz", "value": "Beatriz"},
+      "nome_cliente": {"text": "Beatriz Souza", "value": "Beatriz Souza"},
       "objective": {
         "text": "Quero continuar com o veículo e cuidar bem dele",
         "value": "continuar_cuidar_proteger"
