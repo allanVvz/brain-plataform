@@ -629,6 +629,20 @@ def _normalized_phrase(value: Any) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
 
 
+def _statements_only(text: Any) -> str:
+    """Drop the interrogative sentences, keep what the turn actually says.
+
+    Used when a reply may not carry its question -- either the field was just
+    given up on, or the question would be an unsafe duplicate. The statements
+    are still owned by the graph; only the ask is withheld.
+    """
+    return " ".join(
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(text or ""))
+        if sentence.strip() and "?" not in sentence
+    ).strip()
+
+
 def _interrogative_clause(message: str) -> str:
     """Isolate the customer's doubt from a compound qualification answer."""
     raw = str(message or "").strip()
@@ -922,7 +936,15 @@ def _preselection_contract(
         ),
         "field_labels": common.get("field_labels") or branch.get("field_labels") or {},
         "handoff": {}, "handoff_rule_node_ids": [], "handoff_rules": [],
-        "claims": [],
+        # As claims do contrato comum sao exatamente as que TODOS os galhos
+        # autorizam -- as FAQs projetadas de `global_context`. Elas nao dependem
+        # de qual servico o cliente vai escolher, entao valem antes da escolha.
+        # Zerar a lista aqui deixava o agente sem poder afirmar nada durante a
+        # descoberta: quem perguntava "como funciona o PPF?" recebia
+        # `claim_not_authorized` e o turno caia em `published_fallback`. Preco e
+        # regra de um servico especifico continuam de fora -- so um galho os
+        # declara, entao nunca entram no comum.
+        "claims": list(common.get("claims") or []),
     }
 
 
@@ -2037,7 +2059,7 @@ def _unanswered_fact_after_question_limit(
     ledger_facts: dict[str, Any],
     proposal: ConversationProposal,
     max_attempts: int = 1,
-    incompatible: bool = True,
+    doubt_answered: bool = False,
 ) -> dict[str, Any] | None:
     """Mark an unanswered field unknown after initial ask plus allowed retries."""
     pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
@@ -2091,6 +2113,13 @@ def _unanswered_fact_after_question_limit(
         not explicit_unknown
         and max(asked.count(question_id), observed_attempts) < allowed_emissions
     ):
+        return None
+    # The budget counts question emissions, not customer stonewalling, and the
+    # contract asks the agent to answer a doubt *and* resume the question. So a
+    # customer who asks two legitimate questions about the catalog exhausts the
+    # budget without ever having refused to answer, and the field is given up
+    # on. A turn that carried an answered doubt is not a non-answer.
+    if not explicit_unknown and doubt_answered:
         return None
     return {
         "field_key": key,
@@ -4684,7 +4713,12 @@ def _decide(
             ledger_facts=contract_facts,
             proposal=proposal,
             max_attempts=_question_repetition_max_attempts(contract),
-            incompatible=incompatible_pending,
+            # Only a doubt the graph actually answered. A deferred doubt gave
+            # the customer nothing, so it stays a spent attempt and the
+            # conversation still escalates to a human.
+            doubt_answered=bool(
+                doubt and str(doubt.get("doubt_resolution") or "") == "answered"
+            ),
         )
         if unanswered_fact:
             accepted_facts = [
@@ -4841,7 +4875,17 @@ def _decide(
             # A confirmation candidate is the only authoritative outcome for
             # this turn. Do not leak a model acknowledgement or a validation
             # error for a different pending field into the confirmation copy.
-            reply = confirmation_text
+            #
+            # The published doubt answer is the exception: a customer who asks
+            # "como funciona o PPF?" names a service and raises a question in
+            # the same breath. Replacing the answer with the confirmation
+            # question leaves that customer with a question instead of an
+            # answer -- and when the same template was already sent, the
+            # duplicate suppression turns it into silence.
+            doubt_text = str((doubt or {}).get("text") or "").strip()
+            reply = " ".join(
+                part for part in (doubt_text, confirmation_text) if part
+            )
             next_question_id = None
             confirmation_pending = False
             qualification_complete = False
@@ -4877,11 +4921,7 @@ def _decide(
         ):
             reply = "\n\n".join(part for part in (greeting_response, reply) if part)
         if unanswered_fact and not next_question_id and not terminal_intent:
-            reply = " ".join(
-                sentence.strip()
-                for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", reply_seed)
-                if sentence.strip() and "?" not in sentence
-            ).strip()
+            reply = _statements_only(reply_seed)
         recent_replies = [
             str(row.get("content") or row.get("texto") or "")
             for row in context.messages
@@ -4913,10 +4953,22 @@ def _decide(
             # Quality gates still observe the semantic failure through proof,
             # but production commits accepted facts and suppresses only the
             # unsafe duplicate outbound.
-            reply = ""
+            terminal_duplicate = "terminal_repetition" in repetition["failures"]
+            # A repeated question is not a reason to say nothing at all. When
+            # the turn carried its own content -- a doubt answered, a service
+            # acknowledged -- withhold the duplicated ask and still deliver
+            # that content. Silence is reserved for a turn with nothing new,
+            # and a repeated terminal handoff genuinely has nothing new.
+            remainder = "" if terminal_duplicate else _statements_only(reply)
+            if remainder and any(
+                conversation_repetition.is_semantic_repetition(previous, remainder)
+                for previous in recent_replies
+            ):
+                remainder = ""
+            reply = remainder
             repetition_action = (
-                "suppressed_duplicate_terminal"
-                if "terminal_repetition" in repetition["failures"]
+                "suppressed_duplicate_terminal" if terminal_duplicate
+                else "suppressed_duplicate_question" if remainder
                 else "suppressed_duplicate_outbound"
             )
 
@@ -4940,7 +4992,14 @@ def _decide(
             ),
             "asked_question_node_ids": [
                 *(context.cart.get("asked_question_node_ids") or []),
-                *([next_question_id] if next_question_id else []),
+                # Only a question the customer actually received counts against
+                # the repetition budget. Recording a suppressed ask spends an
+                # emission on an outbound that was never sent.
+                *(
+                    [next_question_id]
+                    if next_question_id and repetition_action == "allowed"
+                    else []
+                ),
             ],
             "sdr_state": (
                 "handed_off" if terminal_intent

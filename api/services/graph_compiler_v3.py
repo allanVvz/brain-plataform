@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.4.0"
+COMPILER_VERSION = "graph-compiler-v3.5.0"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -450,10 +450,40 @@ def _common_persona_contract(
             question = (contract.get("questions") or {}).get(question_id)
             if question:
                 questions[question_id] = question
+    # Uma claim autorizada por TODOS os galhos nao depende de qual galho o
+    # cliente escolher -- e o caso das FAQs projetadas de `global_context`.
+    # Sem isto o contrato comum publicava `claims: []`, e o cliente que compra
+    # perguntando ("como funciona o PPF?") recebia
+    # `claim_not_authorized`/`claim_evidence_not_authorized`: a proposta do
+    # modelo era descartada inteira e o turno caia em `published_fallback`
+    # antes de qualquer servico poder ser escolhido. Precos e regras de um
+    # servico especifico continuam de fora -- so um galho os declara.
+    shared_claims = [
+        claim for claim in first.get("claims") or []
+        if all(
+            any(
+                canonical_checksum(candidate) == canonical_checksum(claim)
+                for candidate in contract.get("claims") or []
+            )
+            for contract in contracts.values()
+        )
+    ]
+    shared_closure = set.intersection(*(
+        {str(value) for value in contract.get("closure_node_ids") or []}
+        for contract in contracts.values()
+    )) if contracts else set()
+    # A evidencia de uma claim compartilhada precisa estar dentro do closure
+    # comum, senao o checker rejeita por `claim_node_evidence_outside_package`.
+    claim_evidence = {
+        str(value)
+        for claim in shared_claims
+        for value in claim.get("evidence_node_ids") or []
+    }
     closure = list(dict.fromkeys([
         persona_id,
         *[str(field.get("owner_node_id") or "") for field in shared],
         *question_ids,
+        *sorted(shared_closure & claim_evidence),
     ]))
     required = [
         str(field.get("key") or "")
@@ -467,7 +497,7 @@ def _common_persona_contract(
         "fields": shared,
         "required_fields": required,
         "questions": questions,
-        "claims": [],
+        "claims": shared_claims,
         "completion": {"required_fields": required},
         "conversation_policy": dict(first.get("conversation_policy") or {}),
         "field_labels": dict(first.get("field_labels") or {}),
