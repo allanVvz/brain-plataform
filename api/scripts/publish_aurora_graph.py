@@ -112,9 +112,9 @@ def build_graph() -> GraphJson:
             return {"mode": "schema", "invalid_response": invalid_response}
         semantic = {
             "nome_cliente": {
-                "semantic_type": "human_name",
-                "description": "Nome humano pelo qual o cliente quer ser chamado.",
-                "examples": ["Beatriz", "José", "Ana Paula"],
+                "semantic_type": "human_full_name",
+                "description": "Nome e sobrenome completos informados pelo cliente.",
+                "examples": ["Beatriz Souza", "José da Silva", "Ana Paula Lima"],
             },
             "modelo_veiculo": {
                 "description": "Modelo ou identificação comercial do veículo.",
@@ -192,6 +192,7 @@ def build_graph() -> GraphJson:
                 "condition": None,
                 "priority": 1.0 if field_key in {"servico", "modelo_veiculo"} else 0.7,
                 "overwrite_policy": "explicit_correction",
+                "carry_over": field_key == appointment_policy.get("identity_field"),
             } for field_key in required]}
             data["qualification"]["fields"].extend(
                 field for key, field in authored_fields.items() if key not in required

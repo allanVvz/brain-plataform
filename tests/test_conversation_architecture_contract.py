@@ -59,6 +59,9 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
     assert "'service_operations'" in initial
     assert "'service_operations'" in initial_validator
     assert "'service_operations'" in repair_validator
+    assert "'service_observations'" in initial
+    assert "'service_observations'" in initial_validator
+    assert "'service_observations'" in repair_validator
     assert "active_branch_node_ids: context.active_branch_node_ids" in initial
     assert "facts_by_key: context.cart && context.cart.facts_by_key" in initial
     assert "known_facts: context.known_facts" in initial
@@ -70,6 +73,15 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
         "pending_reconfirmation: context.pending_reconfirmation",
         "time_since_last_client_message: context.time_since_last_client_message",
         "operational_mode: context.operational_mode",
+        "service_catalog: context.available_services",
+        "service_resolution: context.retrieval_trace",
+        "semantic_score_min: 0.78",
+        "semantic_margin_min: 0.08",
+        "consumed_service_spans:",
+        "reserved_spans:",
+        "common_contract:",
+        "pending_confirmation:",
+        "confirmation_templates:",
     ):
         assert field in initial
 

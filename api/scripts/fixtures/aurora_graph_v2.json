@@ -111,7 +111,7 @@
             ]
           },
           "field_questions": {
-            "nome_cliente": "Antes de tudo, como você se chama?",
+            "nome_cliente": "Antes de tudo, qual é o seu nome e sobrenome?",
             "servico": "Qual serviço te interessa: lavagem técnica detalhada, higienização interna, polimento, vitrificação, PPF, polimento de vidros, chapeação ou pintura?",
             "objective": "Você pretende vender o carro em breve ou vai continuar com ele e quer investir em cuidado e proteção?",
             "can_visit_in_person": "Você consegue trazer o carro aqui na Aurora para uma avaliação rápida, ou prefere seguir tudo por aqui mesmo?",
@@ -131,6 +131,20 @@
             "vehicle_color": "cor do veículo",
             "condicao": "condição do veículo",
             "reclamacao_relato": "relato"
+          },
+          "confirmation_templates": {
+            "name": "Entendi. {candidate} é o seu nome completo?",
+            "service_selection": "Você quer seguir com {candidate}?",
+            "service_addition": "Você quer adicionar {candidate} aos serviços do pedido?",
+            "service_switch": "Você quer trocar o serviço atual por {candidate}?",
+            "service_removal": "Você quer remover {candidate} do pedido?",
+            "service_disambiguation": "Encontrei mais de uma opção possível: {options}. Qual delas você quer?"
+          },
+          "service_resolution": {
+            "max_edit_distance": 3,
+            "min_text_similarity": 0.8,
+            "min_semantic_score": 0.78,
+            "min_semantic_margin": 0.08
           },
           "texts": {
             "cabecalho_servicos": "Serviços da Aurora:",

@@ -3,7 +3,7 @@
 | Gate | Required evidence |
 |---|---|
 | Identity | Full source SHA, installed artifact checksum, configured image and running image ID/digest |
-| Database | Migrations 112–115 present; no unsafe public grants; RLS enabled |
+| Database | Migrations 112–127 present; no unsafe public grants; RLS enabled |
 | Stability | Zero CAS conflicts for 15 minutes; no orphan processing/proof work |
 | Conversation | No branch/fact checksum divergence; no unproved outbound |
 | Resources | PostgreSQL below 70% CPU and PostgREST below 20% at rest; disk below 35% after separately approved cleanup |

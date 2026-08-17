@@ -232,6 +232,33 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
             errors.append(
                 f"appointment_policy.field_questions.{identity_field} must be non-empty"
             )
+        templates = raw_policy.get("confirmation_templates")
+        if not isinstance(templates, dict):
+            errors.append("appointment_policy.confirmation_templates must be an object")
+            templates = {}
+        for key in (
+            "name", "service_selection", "service_addition", "service_switch",
+            "service_removal", "service_disambiguation",
+        ):
+            if not str(templates.get(key) or "").strip():
+                errors.append(
+                    f"appointment_policy.confirmation_templates.{key} must be non-empty"
+                )
+        service_resolution = raw_policy.get("service_resolution")
+        expected_resolution = {
+            "max_edit_distance": 3,
+            "min_text_similarity": 0.8,
+            "min_semantic_score": 0.78,
+            "min_semantic_margin": 0.08,
+        }
+        if not isinstance(service_resolution, dict):
+            errors.append("appointment_policy.service_resolution must be an object")
+        else:
+            for key, expected in expected_resolution.items():
+                if service_resolution.get(key) != expected:
+                    errors.append(
+                        f"appointment_policy.service_resolution.{key} must equal {expected}"
+                    )
 
     for node in nodes:
         if getattr(node, "node_type", None) not in {"product", "service"}:

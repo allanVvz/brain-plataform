@@ -23,7 +23,7 @@ On the production host, run:
 bash ops/vps/validate-production-release.sh
 ```
 
-The script checks the installed release artifact, migrations 112–115,
+The script checks the installed release artifact, migrations 112–127,
 privileges/RLS, recent CAS conflicts, orphan processing/proof rows, graph
 checksums, Docker resource snapshots, disk use, backup age and last isolated
 restore proof.

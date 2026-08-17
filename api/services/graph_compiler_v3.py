@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.3.0"
+COMPILER_VERSION = "graph-compiler-v3.4.0"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -213,9 +213,12 @@ def _field_declarations(
         key = str(item.get("key") or "").strip()
         if not key:
             continue
+        validation = _compiled_field_validation(item)
         accepted = item.get("accepted_statuses")
         if not isinstance(accepted, list) or not accepted:
             accepted = ["known", *(["unknown"] if item.get("accepts_unknown") else [])]
+        if validation.get("semantic_type") == "human_full_name":
+            accepted = [*accepted, "needs_confirmation", "invalid"]
         result.append({
             **item,
             "key": key,
@@ -229,7 +232,7 @@ def _field_declarations(
             "required": item.get("required", True) is True,
             "accepted_statuses": list(dict.fromkeys(str(value) for value in accepted)),
             "value_schema": item.get("value_schema") if isinstance(item.get("value_schema"), dict) else {},
-            "validation": _compiled_field_validation(item),
+            "validation": validation,
             "normalization": item.get("normalization") or item.get("normalization_hint"),
             "depends_on": [str(value) for value in item.get("depends_on") or [] if value],
             "condition": item.get("condition"),
@@ -306,6 +309,104 @@ def _topological_fields(
     cyclic = sorted(key for key, dependencies in incoming.items() if dependencies)
     errors.extend(f"field_dependency_cycle:{key}" for key in cyclic)
     return ordered, errors
+
+
+def _common_persona_contract(
+    contracts: dict[str, dict[str, Any]], persona_node: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Compile fields that are safe to collect before selecting a service."""
+    if not contracts or not persona_node:
+        return {}
+    anchors = list(contracts)
+    first = contracts[anchors[0]]
+    by_anchor = {
+        anchor: {
+            str(field.get("key") or ""): field
+            for field in contract.get("fields") or []
+        }
+        for anchor, contract in contracts.items()
+    }
+    persona_id = str(persona_node.get("id") or "")
+    persona_policy = (persona_node.get("data") or {}).get("appointment_policy") or {}
+    preferred = [
+        str(value) for value in persona_policy.get("required_fields") or [] if value
+    ]
+
+    selector_key: str | None = None
+    for key in preferred:
+        declarations = [by_anchor[anchor].get(key) for anchor in anchors]
+        if not all(declarations):
+            continue
+        if all(
+            str(field.get("owner_node_id") or "") == anchor
+            for anchor, field in zip(anchors, declarations, strict=True)
+        ):
+            selector_key = key
+            break
+
+    shared: list[dict[str, Any]] = []
+    for field in first.get("fields") or []:
+        key = str(field.get("key") or "")
+        declarations = [by_anchor[anchor].get(key) for anchor in anchors]
+        if not key or not all(declarations):
+            continue
+        if all(
+            str(item.get("owner_node_id") or "") == persona_id
+            for item in declarations
+        ):
+            shared.append(dict(field))
+        elif key == selector_key:
+            shared.append({
+                **field,
+                "owner_node_id": persona_id,
+                "scope": "persona",
+                "branch_selection_field": True,
+                "overwrite_policy": "never",
+            })
+
+    order = {key: index for index, key in enumerate(preferred)}
+    shared.sort(key=lambda field: (
+        order.get(str(field.get("key") or ""), len(order)),
+        -float(field.get("priority") or 0),
+        str(field.get("key") or ""),
+    ))
+    question_ids = {
+        str(field.get("question_node_id") or "")
+        for field in shared if field.get("question_node_id")
+    }
+    questions: dict[str, dict[str, Any]] = {}
+    for contract in contracts.values():
+        for question_id in question_ids:
+            question = (contract.get("questions") or {}).get(question_id)
+            if question:
+                questions[question_id] = question
+    closure = list(dict.fromkeys([
+        persona_id,
+        *[str(field.get("owner_node_id") or "") for field in shared],
+        *question_ids,
+    ]))
+    required = [
+        str(field.get("key") or "")
+        for field in shared if field.get("required", True)
+    ]
+    return {
+        "branch_anchor_node_id": None,
+        "branch_path_checksum": "",
+        "closure_checksum": canonical_checksum(closure),
+        "closure_node_ids": [value for value in closure if value],
+        "fields": shared,
+        "required_fields": required,
+        "questions": questions,
+        "claims": [],
+        "completion": {"required_fields": required},
+        "conversation_policy": dict(first.get("conversation_policy") or {}),
+        "field_labels": dict(first.get("field_labels") or {}),
+        "handoff": {},
+        "handoff_rule_node_ids": [],
+        "handoff_rules": [],
+        "collection_policy": dict(first.get("collection_policy") or {}),
+        "compiler_version": COMPILER_VERSION,
+    }
 
 
 def compile_graph(
@@ -754,6 +855,23 @@ def compile_graph(
         node_id for node_id in eligible_faq_ids
         if any(node_id in members for members in memberships.values())
     )
+    common_contract = _common_persona_contract(contracts, persona_node)
+    confirmation_templates = appointment_policy.get("confirmation_templates")
+    confirmation_templates = (
+        dict(confirmation_templates)
+        if isinstance(confirmation_templates, dict) else {}
+    )
+    service_resolution_policy = appointment_policy.get("service_resolution")
+    service_resolution_policy = (
+        dict(service_resolution_policy)
+        if isinstance(service_resolution_policy, dict)
+        else {
+            "max_edit_distance": 3,
+            "min_text_similarity": 0.80,
+            "min_semantic_score": 0.78,
+            "min_semantic_margin": 0.08,
+        }
+    )
     document = {
         "schema_version": "3.0",
         "compiler_version": COMPILER_VERSION,
@@ -771,6 +889,9 @@ def compile_graph(
         "branch_anchors": anchors,
         "branch_memberships": memberships,
         "branch_contracts": contracts,
+        "common_contract": common_contract,
+        "confirmation_templates": confirmation_templates,
+        "service_resolution_policy": service_resolution_policy,
         "faq_projection_contract": FAQ_PROJECTION_CONTRACT,
         "eligible_faq_node_ids": projected_eligible_faq_ids,
         "projection_manifest": projection_manifest,

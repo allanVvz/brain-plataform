@@ -99,6 +99,25 @@ class ServiceOperation(StrictModel):
     branch_anchor_node_id: str = Field(min_length=1)
     branch_path_checksum: str = Field(min_length=1)
     evidence_span: str = Field(min_length=1)
+    evidence_type: str = Field(
+        default="exact_catalog",
+        pattern="^(exact_catalog|confirmed_candidate)$",
+    )
+    resolution_method: str = "exact_catalog"
+    score: float | None = Field(default=None, ge=0, le=1)
+    margin: float | None = Field(default=None, ge=0, le=1)
+
+
+class ServiceObservation(StrictModel):
+    """Non-authoritative service signal observed by the model."""
+
+    branch_anchor_node_id: str = Field(min_length=1)
+    evidence_span: str = Field(min_length=1)
+    observed_intent: str = Field(
+        default="mention",
+        pattern="^(mention|select|add|switch|remove|question)$",
+    )
+    confidence: float = Field(default=0.0, ge=0, le=1)
 
 
 class ExtractedFact(StrictModel):
@@ -109,6 +128,7 @@ class ExtractedFact(StrictModel):
     owner_node_id: str = Field(min_length=1)
     evidence_span: str = ""
     confidence: float = Field(default=0.0, ge=0, le=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CommercialClaim(StrictModel):
@@ -125,6 +145,7 @@ class ConversationProposal(StrictModel):
     branch_anchor_node_id: str
     branch_path_checksum: str
     branch_evidence_span: str = ""
+    service_observations: list[ServiceObservation] = Field(default_factory=list)
     service_operations: list[ServiceOperation] = Field(default_factory=list)
     extracted_facts: list[ExtractedFact] = Field(default_factory=list)
     claims: list[CommercialClaim] = Field(default_factory=list)

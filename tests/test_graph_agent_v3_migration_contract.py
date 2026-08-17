@@ -14,6 +14,7 @@ SQL = "\n".join(
         "099_recover_unsent_committed_outbound.sql",
         "100_reconcile_committed_graph_inbound.sql",
         "120_graphrag_faq_projection_v1.sql",
+        "127_sdr_name_service_confirmation.sql",
     )
 )
 
@@ -95,3 +96,21 @@ def test_committed_inbound_reconciliation_never_replays_model_or_transport():
     assert "outbound_message_is_not_unique" in SQL
     assert "conversation.committed_inbound_reconciled" in SQL
     assert "status = 'sent'" in SQL
+
+
+def test_name_and_service_confirmation_migration_is_metadata_and_cas_safe():
+    assert "add column if not exists metadata jsonb" in SQL
+    assert "coalesce(v_fact->'metadata','{}'::jsonb)" in SQL
+    assert "graph_service_rank_v3" in SQL
+    assert "c.source_graph_node_id=c.branch_anchor_node_id" in SQL
+    assert "c.projection_status in ('ready','published')" in SQL
+    assert "conversation_carry_over_facts_v1" in SQL
+    assert "f.status='known'" in SQL
+    assert "repair_sdr_false_service_fact_v1" in SQL
+    assert "p_apply boolean default false" in SQL
+    assert "ledger revision conflict" in SQL
+    assert "authorized_service_evidence" in SQL
+    assert "sdr_false_service_fact_repaired" in SQL
+    assert "p_proof_result->'next_active_branch_node_ids'" in SQL
+    assert "branch focus invariant failed" in SQL
+    assert "branch_anchor_node_id<>all(v_proven_active)" in SQL
