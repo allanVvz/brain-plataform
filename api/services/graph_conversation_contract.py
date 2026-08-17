@@ -310,7 +310,16 @@ def _qualification_question_nodes(graph: GraphJson) -> dict[tuple[str, str], Nod
     return result
 
 
-def _field_specs(value: Any, owner_node_id: str) -> dict[str, dict[str, Any]]:
+def _field_specs(
+    value: Any, owner_node_id: str, *, carry_over: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Compila specs de field preservando o que o grafo declarou.
+
+    `carry_over` diz se o field atravessa o fim de um pedido. E o default por
+    origem, nunca uma lista de nomes: identidade do cliente atravessa, dado do
+    pedido nao. O grafo pode declarar `carry_over` no proprio field e vencer o
+    default -- `spec = dict(item)` preserva a chave.
+    """
     result: dict[str, dict[str, Any]] = {}
     if not isinstance(value, list):
         return result
@@ -329,6 +338,7 @@ def _field_specs(value: Any, owner_node_id: str) -> dict[str, dict[str, Any]]:
         spec.setdefault("required", True)
         spec.setdefault("accepts_unknown", False)
         spec.setdefault("owner_node_id", owner_node_id)
+        spec["carry_over"] = bool(spec.get("carry_over", carry_over))
         result[key] = spec
     return result
 
@@ -361,7 +371,11 @@ def compile_branch_contract(
     persona_owner = persona.id if persona else ""
     persona_qualification = persona_data.get("qualification")
     persona_qualification = persona_qualification if isinstance(persona_qualification, dict) else {}
-    fields.update(_field_specs(persona_qualification.get("fields"), persona_owner))
+    # Qualificacao da persona e o que o cliente e, nao o que este pedido e:
+    # nome e afins seguem valendo no pedido seguinte.
+    fields.update(_field_specs(
+        persona_qualification.get("fields"), persona_owner, carry_over=True,
+    ))
     for key in policy.get("required_fields") or []:
         normalized = str(key).strip()
         if normalized:
@@ -370,6 +384,9 @@ def compile_branch_contract(
                 "required": True,
                 "accepts_unknown": False,
                 "owner_node_id": persona_owner,
+                # Data e janela pertencem ao pedido: carregar "12/09" para o
+                # pedido seguinte seria errado.
+                "carry_over": False,
             })
 
     branch = by_id.get(str(branch_anchor_node_id or ""))
@@ -390,6 +407,7 @@ def compile_branch_contract(
                     "required": True,
                     "accepts_unknown": False,
                     "owner_node_id": branch.id,
+                    "carry_over": False,
                 })
 
         conditional = policy.get("conditional_fields")
@@ -405,6 +423,7 @@ def compile_branch_contract(
                 "required": True,
                 "accepts_unknown": False,
                 "owner_node_id": branch.id,
+                "carry_over": False,
             })
 
     ordered: list[dict[str, Any]] = []

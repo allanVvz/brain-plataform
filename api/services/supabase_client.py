@@ -4233,6 +4233,28 @@ def get_conversation_ledger(persona_id: str, lead_ref: int) -> Optional[dict]:
     return ledger
 
 
+def get_journey_ledger_facts(journey_id: str) -> list[dict]:
+    """Fatos correntes do ledger de uma jornada especifica.
+
+    Usado para atravessar o fim de um pedido: a jornada seguinte nasce com
+    ledger proprio e zero fatos, entao a identidade do cliente (nome e o que o
+    grafo marcar como `carry_over`) precisa vir do ledger anterior. O servico e
+    os campos do galho ficam para tras de proposito.
+    """
+    if not journey_id:
+        return []
+    ledger = _one(
+        get_client().table("conversation_ledgers").select("id")
+        .eq("journey_id", journey_id).maybe_single()
+    )
+    if not ledger:
+        return []
+    return _q(
+        get_client().table("conversation_facts").select("*")
+        .eq("ledger_id", ledger["id"]).eq("is_current", True).limit(1000)
+    )
+
+
 def get_current_conversation_journey(persona_id: str, lead_ref: int) -> Optional[dict]:
     if not persona_id or not lead_ref:
         return None

@@ -83,6 +83,33 @@ seguinte. Ele vira o **piso** do seletor: uma lead já convertida não recebe
 
 Não use `converted_at` para isso — o seletor pode limpá-lo ao voltar um estado.
 
+### O segundo ciclo do SDR
+
+Fechar o pedido reinicia o ciclo agêntico com **ledger novo e sem fatos**. Sem
+mais nada, o SDR reperguntaria o nome a cada pedido.
+
+O contrato compilado marca cada field com `carry_over`, e o default vem da
+**origem do field** — nunca de uma lista de nomes no código:
+
+| Origem | `carry_over` | Por quê |
+|---|---|---|
+| `persona.data.qualification.fields` | `true` | é o que o cliente **é** (nome) |
+| `persona.data.appointment_policy.required_fields` | `false` | data e janela são **deste** pedido |
+| campos do galho e `booking.required_fields` | `false` | pertencem ao serviço escolhido |
+
+O grafo sobrescreve campo a campo declarando `carry_over` no próprio field.
+
+Quando a jornada seguinte nasce, `_seed_carried_facts` semeia no ledger vazio os
+fatos `known` cujo field carrega, marcados com `carried_from_journey`. Daí
+`_known_facts_payload` os rotula como `origem: "anterior"` e o prompt já manda
+**confirmar antes de usar** — é a diferença entre reperguntar o nome e conferi-lo.
+
+`servico` não é semeado: cada ciclo escolhe o seu.
+
+⚠️ `carry_over` entra em `branch_contracts`, que é compilado **no publish**
+(`graph_compiler_v3.py`). Uma publicação anterior à migration não tem o atributo,
+e nada atravessa até o grafo ser republicado.
+
 ### Precedência: desfecho comercial vence proof
 
 `project_conversation_journey_from_proof_v1` **nunca regride** uma jornada em
