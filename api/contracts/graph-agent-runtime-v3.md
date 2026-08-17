@@ -2,7 +2,7 @@
 
 Contract-ID: `graph-agent-runtime-v3`
 
-Compiler: `graph-compiler-v3.4.0`
+Compiler: `graph-compiler-v3.5.0`
 
 Este Markdown faz parte da proveniência de cada publicação. O compilador grava
 seu caminho e checksum no Graph JSON; qualquer alteração deliberada neste
@@ -118,15 +118,31 @@ semântica segura. Saudações, confirmações, respostas sociais e números iso
 nunca são serviço.
 
 A proteção antirrepetição não lança exceção em produção: fatos aceitos são
-commitados e o outbound duplicado é suprimido. CI e Validator continuam
-reprovando o critério semântico pelo proof. Todo proof expõe `intent_audit`,
+commitados e o outbound duplicado é suprimido. A supressão retém a pergunta
+repetida, não o turno: quando o turno tem conteúdo próprio — dúvida respondida,
+serviço reconhecido — esse conteúdo é entregue sem a pergunta e
+`repetition_action` é `suppressed_duplicate_question`. Só um turno sem nada
+novo, ou um handoff terminal repetido, resulta em silêncio. Uma pergunta
+suprimida não entra em `asked_question_node_ids`, porque o orçamento conta
+emissões entregues. Uma dúvida respondida pelo grafo não é uma não-resposta e
+não consome tentativa; uma dúvida apenas adiada consome. CI e Validator
+continuam reprovando o critério semântico pelo proof. Todo proof expõe `intent_audit`,
 `service_resolution`, `journey_transition`, `confirmation_state` e
 `repetition_action`.
 
 ## Nome completo e confirmação de serviço
 
 O Graph JSON publica `common_contract` para os fields compartilhados antes da
-seleção do primeiro serviço. Um field com
+seleção do primeiro serviço. Ele também publica em `claims` as políticas que
+**todos** os branch contracts autorizam — na prática as FAQs projetadas de
+`global_context` — junto com os nodes de evidência correspondentes no closure.
+Uma claim autorizada por todo galho não depende de qual serviço será escolhido,
+então vale durante a descoberta: o cliente que compra perguntando recebe a
+resposta publicada antes de escolher. Preço, agenda e regra de um serviço
+específico ficam de fora, porque um único galho os declara. O contrato de
+pré-seleção do runtime herda exatamente essa lista.
+
+Um field com
 `validation.semantic_type=human_full_name` aceita de dois a seis tokens
 Unicode, partículas, hífen e apóstrofo. Ele só vira `known` diretamente quando
 a pergunta publicada de nome foi a imediatamente anterior e a resposta inteira
