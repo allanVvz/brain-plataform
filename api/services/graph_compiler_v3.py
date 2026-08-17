@@ -311,6 +311,60 @@ def _topological_fields(
     return ordered, errors
 
 
+def branch_selection_field_key(
+    contracts: dict[str, dict[str, Any]], persona_node: dict[str, Any] | None,
+) -> str | None:
+    """O field referencial que escolhe o galho, sem hardcode de nome.
+
+    E o unico campo que **todo** galho declara e que pertence ao proprio galho
+    -- por construcao, o campo de servico. Derivar assim mantem o gate
+    anti-hardcode: nenhum nome de campo entra no codigo.
+    """
+    if not contracts or not persona_node:
+        return None
+    anchors = list(contracts)
+    by_anchor = {
+        anchor: {
+            str(field.get("key") or ""): field
+            for field in contract.get("fields") or []
+        }
+        for anchor, contract in contracts.items()
+    }
+    persona_policy = (persona_node.get("data") or {}).get("appointment_policy") or {}
+    for value in persona_policy.get("required_fields") or []:
+        key = str(value or "")
+        if not key:
+            continue
+        declarations = [by_anchor[anchor].get(key) for anchor in anchors]
+        if not all(declarations):
+            continue
+        if all(
+            str(field.get("owner_node_id") or "") == anchor
+            for anchor, field in zip(anchors, declarations, strict=True)
+        ):
+            return key
+    return None
+
+
+def _with_confirmable_status(field: dict[str, Any]) -> dict[str, Any]:
+    """Autoriza `needs_confirmation` no campo de selecao de galho.
+
+    O runtime so promove o servico a `known` com evidencia exata; uma resolucao
+    aproximada vira `needs_confirmation` ate o cliente confirmar -- e o
+    contrato precisa aceitar esse estado intermediario, senao o fato fica num
+    limbo que trava a conversa: nao e `known` (nenhum galho ativo, toda
+    proposta com `keep` rejeitada) e nao esta faltando (a qualificacao parece
+    completa). Mesmo tratamento que `human_full_name` ja recebe.
+    """
+    accepted = [
+        str(value) for value in field.get("accepted_statuses") or [] if value
+    ] or ["known"]
+    return {
+        **field,
+        "accepted_statuses": list(dict.fromkeys([*accepted, "needs_confirmation"])),
+    }
+
+
 def _common_persona_contract(
     contracts: dict[str, dict[str, Any]], persona_node: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -332,17 +386,7 @@ def _common_persona_contract(
         str(value) for value in persona_policy.get("required_fields") or [] if value
     ]
 
-    selector_key: str | None = None
-    for key in preferred:
-        declarations = [by_anchor[anchor].get(key) for anchor in anchors]
-        if not all(declarations):
-            continue
-        if all(
-            str(field.get("owner_node_id") or "") == anchor
-            for anchor, field in zip(anchors, declarations, strict=True)
-        ):
-            selector_key = key
-            break
+    selector_key = branch_selection_field_key(contracts, persona_node)
 
     shared: list[dict[str, Any]] = []
     for field in first.get("fields") or []:
@@ -356,13 +400,13 @@ def _common_persona_contract(
         ):
             shared.append(dict(field))
         elif key == selector_key:
-            shared.append({
+            shared.append(_with_confirmable_status({
                 **field,
                 "owner_node_id": persona_id,
                 "scope": "persona",
                 "branch_selection_field": True,
                 "overwrite_policy": "never",
-            })
+            }))
 
     order = {key: index for index, key in enumerate(preferred)}
     shared.sort(key=lambda field: (
@@ -855,6 +899,16 @@ def compile_graph(
         node_id for node_id in eligible_faq_ids
         if any(node_id in members for members in memberships.values())
     )
+    # O fato de servico e escrito com o galho como dono, entao o contrato de
+    # galho tambem precisa aceitar o estado intermediario -- nao so o comum.
+    selection_key = branch_selection_field_key(contracts, persona_node)
+    if selection_key:
+        for contract in contracts.values():
+            contract["fields"] = [
+                _with_confirmable_status(field)
+                if str(field.get("key") or "") == selection_key else field
+                for field in contract.get("fields") or []
+            ]
     common_contract = _common_persona_contract(contracts, persona_node)
     confirmation_templates = appointment_policy.get("confirmation_templates")
     confirmation_templates = (
