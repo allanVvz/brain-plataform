@@ -953,6 +953,31 @@ def _facts_for_contract(
     return scoped
 
 
+# Uma claim declarada por um unico galho vale na descoberta -- menos quando o
+# assunto e comercial. Preco e regra de pagamento continuam exigindo que o
+# cliente tenha escolhido o servico, e para a Aurora tambem continuam passando
+# por `price_disclosure: human_only` no commit. O agente pode explicar o que um
+# servico e; quanto custa segue sendo assunto de gente.
+DISCOVERY_BLOCKED_CLAIM_TYPES = frozenset({"price", "payment_policy"})
+
+
+def _discovery_claims(
+    common: dict[str, Any], branch: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Claims que valem antes de o cliente escolher um servico."""
+    claims: list[dict[str, Any]] = list(common.get("claims") or [])
+    seen = {graph_compiler_v3.canonical_checksum(claim) for claim in claims}
+    for claim in branch.get("claims") or []:
+        if str(claim.get("claim_type") or "") in DISCOVERY_BLOCKED_CLAIM_TYPES:
+            continue
+        checksum = graph_compiler_v3.canonical_checksum(claim)
+        if checksum in seen:
+            continue
+        seen.add(checksum)
+        claims.append(claim)
+    return claims
+
+
 def _preselection_contract(
     document: dict[str, Any], retrieval_branch_node_id: str,
 ) -> dict[str, Any]:
@@ -977,12 +1002,24 @@ def _preselection_contract(
         # As claims do contrato comum sao exatamente as que TODOS os galhos
         # autorizam -- as FAQs projetadas de `global_context`. Elas nao dependem
         # de qual servico o cliente vai escolher, entao valem antes da escolha.
-        # Zerar a lista aqui deixava o agente sem poder afirmar nada durante a
-        # descoberta: quem perguntava "como funciona o PPF?" recebia
-        # `claim_not_authorized` e o turno caia em `published_fallback`. Preco e
-        # regra de um servico especifico continuam de fora -- so um galho os
-        # declara, entao nunca entram no comum.
-        "claims": list(common.get("claims") or []),
+        #
+        # Isso sozinho nao basta. Confirmado em producao 2026-08-17 (lead 12):
+        # a FAQ de um servico pendura no proprio servico, entao ela vive em 1
+        # dos 17 contratos de galho da Aurora e nunca no comum. O cliente que
+        # perguntava "como funciona o ppf?" antes de escolher recebia
+        # `claim_not_authorized`/`claim_evidence_not_authorized`, a proposta
+        # inteira era descartada e o turno caia em `published_fallback` -- ou
+        # em silencio, quando o fallback repetia a pergunta anterior. Ou seja:
+        # para perguntar sobre um servico o cliente precisava ja te-lo
+        # escolhido, o inverso de como uma venda consultiva funciona.
+        #
+        # Por isso o galho de recuperacao tambem autoriza durante a descoberta.
+        # A regua de evidencia nao muda: `check()` continua exigindo que todo
+        # `evidence_node_id` esteja em `package_node_ids & closure_node_ids`,
+        # entao o agente so pode afirmar o que o RAG trouxe para este turno --
+        # nao o catalogo inteiro. O que muda e so quando a autoridade passa a
+        # valer, nao o que ela cobre.
+        "claims": _discovery_claims(common, branch),
     }
 
 
@@ -4697,12 +4734,17 @@ def _decide(
                                  proposal=proposal, proof=proof, repair_context_cards=repair_cards)
         return ConversationDecision(classifier="graph_proof_checker_v3", intent="repair_retrieval",
                                     route=ConversationRoute.SDR, confidence=0, lead_stage=str(context.cart.get("_lead_stage") or "novo")), response
+    # Nao existe verbo para "estou so conversando sobre isto". Sem galho ativo e
+    # sem nenhuma operacao para aplicar, `keep` e a escolha honesta do modelo, e
+    # nao um defeito -- entao ele nao pode, sozinho, custar o turno. Comparar a
+    # lista inteira por igualdade tornava a recuperacao refem da ordem e de
+    # duplicatas; o que importa e nao sobrar nenhum outro erro.
     discovery_only = (
         not proof["valid"]
         and context.active_branch_node_id is None
         and proposal.branch_action.value == "keep"
-        and proof.get("errors") == ["keep_without_active_branch"]
         and not service_operations
+        and set(proof.get("errors") or []) == {"keep_without_active_branch"}
     )
     if proof["valid"] or discovery_only:
         if discovery_only:
