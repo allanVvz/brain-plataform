@@ -944,7 +944,9 @@ def test_next_field_question_reads_from_the_graph():
         "business_model": "appointment",
         "missing_fields": ["nome_cliente", "modelo_veiculo"],
     }
-    assert conversation_runtime._next_field_question(cart_state, context) == "Antes de tudo, como você se chama?"
+    assert conversation_runtime._next_field_question(cart_state, context) == (
+        "Antes de tudo, qual é o seu nome e sobrenome?"
+    )
 
 
 def test_next_field_question_is_none_without_missing_fields():
@@ -981,7 +983,7 @@ def test_ensure_trailing_question_appends_the_next_graph_question():
     )
     assert result == (
         "Polimento técnico leva cerca de 4 horas e parte de R$ 650,00. "
-        "Antes de tudo, como você se chama?"
+        "Antes de tudo, qual é o seu nome e sobrenome?"
     )
 
 

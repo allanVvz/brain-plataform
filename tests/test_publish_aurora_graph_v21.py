@@ -104,11 +104,11 @@ def test_full_qualification_walk_never_asks_the_same_published_question_twice() 
             seen[qid] = key
 
 
-def test_all_aurora_factual_faqs_receive_v33_projection_membership() -> None:
+def test_all_aurora_factual_faqs_receive_v34_projection_membership() -> None:
     graph = graph_markdown.canonicalize_graph(build_graph())
     document = _compile(graph)
 
-    assert document["compiler_version"] == "graph-compiler-v3.3.0"
+    assert document["compiler_version"] == "graph-compiler-v3.4.0"
     assert document["faq_projection_contract"] == "v1"
     assert len(document["eligible_faq_node_ids"]) == 30
     # Thirteen portfolio/global FAQs are available in every branch; a branch

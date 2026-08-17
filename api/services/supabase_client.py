@@ -4243,6 +4243,14 @@ def get_journey_ledger_facts(journey_id: str) -> list[dict]:
     """
     if not journey_id:
         return []
+    try:
+        result = get_client().rpc(
+            "conversation_carry_over_facts_v1", {"p_journey_id": journey_id},
+        ).execute()
+        return result.data or []
+    except Exception:
+        # Rolling-deploy compatibility until migration 127 is applied.
+        pass
     ledger = _one(
         get_client().table("conversation_ledgers").select("id")
         .eq("journey_id", journey_id).maybe_single()
@@ -4251,7 +4259,8 @@ def get_journey_ledger_facts(journey_id: str) -> list[dict]:
         return []
     return _q(
         get_client().table("conversation_facts").select("*")
-        .eq("ledger_id", ledger["id"]).eq("is_current", True).limit(1000)
+        .eq("ledger_id", ledger["id"]).eq("is_current", True)
+        .eq("status", "known").limit(1000)
     )
 
 
@@ -4532,6 +4541,28 @@ def rank_graph_branches_v3(
             "p_persona_id": persona_id,
             "p_publication_id": publication_id,
             "p_query": query,
+            "p_query_embedding": query_embedding,
+            "p_limit": max(1, min(int(limit), 32)),
+        },
+    ).execute()
+    return result.data or []
+
+
+def rank_graph_services_v3(
+    *,
+    persona_id: str,
+    publication_id: str,
+    query_embedding: list[float] | None,
+    limit: int = 8,
+) -> list[dict]:
+    """Rank only chunks owned by published service anchors."""
+    if query_embedding is None:
+        return []
+    result = get_client().rpc(
+        "graph_service_rank_v3",
+        {
+            "p_persona_id": persona_id,
+            "p_publication_id": publication_id,
             "p_query_embedding": query_embedding,
             "p_limit": max(1, min(int(limit), 32)),
         },

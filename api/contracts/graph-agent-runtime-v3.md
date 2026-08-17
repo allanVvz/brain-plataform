@@ -2,7 +2,7 @@
 
 Contract-ID: `graph-agent-runtime-v3`
 
-Compiler: `graph-compiler-v3.3.0`
+Compiler: `graph-compiler-v3.4.0`
 
 Este Markdown faz parte da proveniência de cada publicação. O compilador grava
 seu caminho e checksum no Graph JSON; qualquer alteração deliberada neste
@@ -122,6 +122,31 @@ commitados e o outbound duplicado é suprimido. CI e Validator continuam
 reprovando o critério semântico pelo proof. Todo proof expõe `intent_audit`,
 `service_resolution`, `journey_transition`, `confirmation_state` e
 `repetition_action`.
+
+## Nome completo e confirmação de serviço
+
+O Graph JSON publica `common_contract` para os fields compartilhados antes da
+seleção do primeiro serviço. Um field com
+`validation.semantic_type=human_full_name` aceita de dois a seis tokens
+Unicode, partículas, hífen e apóstrofo. Ele só vira `known` diretamente quando
+a pergunta publicada de nome foi a imediatamente anterior e a resposta inteira
+contém apenas o nome completo. Extração em mensagem composta vira
+`needs_confirmation`; candidato e proveniência ficam em
+`conversation_facts.metadata.confirmation`.
+
+`service_observations[]` é não autoritativo. O backend é o único produtor das
+operações aplicadas em `service_operations[]`, e cada operação exige evidência
+consumida `exact_catalog` ou `confirmed_candidate`. Exato significa igualdade
+depois de normalizar caixa, acentos e pontuação de título, slug ou alias
+publicado. Menção exata em dúvida informativa não altera branches.
+
+Resolução textual usa distância Levenshtein máxima `3`, similaridade mínima
+`0.80` e candidato único. Resolução semântica consulta somente chunks dos
+anchors de serviço e exige cosseno `>=0.78`, margem `>=0.08`, coincidência do
+modelo com o ranking do backend e span literal não reservado. Aproximações
+produzem apenas `needs_confirmation`; empate usa o template publicado de
+desambiguação. Confirmações de nome ou serviço são consumidas antes da
+confirmação final da jornada.
 
 ## Desfecho comercial
 

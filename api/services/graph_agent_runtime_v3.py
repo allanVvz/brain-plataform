@@ -17,6 +17,7 @@ from schemas.conversation import (
     ContextCard,
     ConversationContext,
     ConversationDecision,
+    ConversationFactStatus,
     ConversationProposal,
     ConversationRoute,
     ExtractedFact,
@@ -35,6 +36,10 @@ logger = logging.getLogger("graph_agent_runtime_v3")
 RUNTIME_VERSION = "graph_agent_runtime_v3"
 FAQ_SEMANTIC_MIN_SCORE = 0.18
 FAQ_SEMANTIC_MIN_MARGIN = 0.03
+SERVICE_MAX_EDIT_DISTANCE = 3
+SERVICE_TEXT_MIN_SIMILARITY = 0.80
+SERVICE_SEMANTIC_MIN_SCORE = 0.78
+SERVICE_SEMANTIC_MIN_MARGIN = 0.08
 
 
 def _normalize_servico_owner(
@@ -724,6 +729,12 @@ _SERVICE_DROP_MARKER = re.compile(
     re.IGNORECASE,
 )
 
+_SERVICE_SELECT_MARKER = re.compile(
+    r"\b(?:quero|queria|gostaria|preciso|tenho\s+interesse|fazer|contratar|"
+    r"selecion\w*|escolh\w*|adicion\w*|inclu\w*|coloc\w*)\b",
+    re.IGNORECASE,
+)
+
 
 def _latest_user_message(context: ConversationContext) -> str:
     return next(
@@ -743,6 +754,49 @@ def _message_requests_additional_service(message: str) -> bool:
 
 def _message_explicitly_changes_service(message: str) -> bool:
     return bool(_SERVICE_CHANGE_MARKER.search(message or ""))
+
+
+def _service_selection_field(contract: dict[str, Any]) -> dict[str, Any] | None:
+    return next(
+        (
+            field for field in contract.get("fields") or []
+            if field.get("branch_selection_field") is True
+            or str(field.get("key") or "") == "servico"
+        ),
+        None,
+    )
+
+
+def _is_direct_answer_to_service_question(
+    contract: dict[str, Any], asked_question_node_ids: list[str], message: str,
+) -> bool:
+    field = _service_selection_field(contract)
+    return bool(
+        field
+        and asked_question_node_ids
+        and field.get("question_node_id")
+        and str(asked_question_node_ids[-1]) == str(field["question_node_id"])
+        and not _looks_like_customer_question(message)
+    )
+
+
+def _safe_active_focus(
+    active_branch_node_id: str | None,
+    persisted_active_branch_node_ids: list[str],
+) -> tuple[str | None, list[str], bool]:
+    """Repair scalar/set drift for this turn without mutating production state."""
+    active = list(dict.fromkeys(
+        str(value) for value in persisted_active_branch_node_ids if value
+    ))
+    focus = str(active_branch_node_id or "") or None
+    if not active and focus:
+        active = [focus]
+    derived = bool(active and focus not in set(active))
+    if derived:
+        focus = active[-1]
+    if not active:
+        focus = None
+    return focus, active, derived
 
 
 def _is_direct_answer_to_pending_non_service_field(
@@ -786,6 +840,36 @@ def _is_direct_answer_to_pending_non_service_field(
     )
 
 
+def _has_explicit_service_intent(message: str) -> bool:
+    return bool(
+        _SERVICE_SELECT_MARKER.search(message or "")
+        or _SERVICE_CHANGE_MARKER.search(message or "")
+        or _SERVICE_DROP_MARKER.search(message or "")
+        or _ADDITIVE_SERVICE_MARKER.search(message or "")
+    )
+
+
+def _reserve_message_for_pending_field(
+    resolution: dict[str, Any], *, pending_field_answer: bool, message: str,
+    active_branch_node_id: str | None, active_branch_node_ids: list[str],
+) -> dict[str, Any]:
+    if not pending_field_answer or _has_explicit_service_intent(message):
+        return resolution
+    return {
+        "status": "none",
+        "matches": [],
+        "ambiguities": [],
+        "consumed_spans": [],
+        "reserved_spans": [],
+        "previous_active_branch_node_ids": list(active_branch_node_ids),
+        "next_active_branch_node_ids": list(active_branch_node_ids),
+        "focused_branch_node_id": active_branch_node_id,
+        "operations": [],
+        "resolution_method": "suppressed_for_pending_non_service_field",
+        "rejection_reason": "evidence_reserved_for_pending_field",
+    }
+
+
 def _facts_by_key(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
@@ -815,6 +899,31 @@ def _facts_for_contract(
         if match is not None:
             scoped[key] = match
     return scoped
+
+
+def _preselection_contract(
+    document: dict[str, Any], retrieval_branch_node_id: str,
+) -> dict[str, Any]:
+    """Bind common fields to a real retrieval branch for proof coordinates."""
+    branch = (
+        (document.get("branch_contracts") or {}).get(retrieval_branch_node_id) or {}
+    )
+    common = document.get("common_contract") or {}
+    if not common:
+        return branch
+    return {
+        **branch,
+        "fields": list(common.get("fields") or []),
+        "required_fields": list(common.get("required_fields") or []),
+        "questions": dict(common.get("questions") or {}),
+        "completion": dict(common.get("completion") or {}),
+        "conversation_policy": (
+            common.get("conversation_policy") or branch.get("conversation_policy") or {}
+        ),
+        "field_labels": common.get("field_labels") or branch.get("field_labels") or {},
+        "handoff": {}, "handoff_rule_node_ids": [], "handoff_rules": [],
+        "claims": [],
+    }
 
 
 def _literal_phrase_span(message: str, phrase: Any) -> str:
@@ -922,7 +1031,11 @@ def _literal_service_resolution(
 
     selected.sort(key=lambda item: item["start"])
     consumed = [
-        {"text": item["span"], "start": item["start"], "end": item["end"]}
+        {
+            "text": item["span"], "start": item["start"], "end": item["end"],
+            "branch_anchor_node_id": item["branch_anchor_node_id"],
+            "evidence_type": "exact_catalog",
+        }
         for item in selected
     ]
     return {
@@ -954,10 +1067,92 @@ def _deterministic_branch_candidates(
     } for item in resolution["matches"]]
 
 
+def _levenshtein_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, start=1):
+        current = [left_index]
+        for right_index, right_char in enumerate(right, start=1):
+            current.append(min(
+                current[-1] + 1,
+                previous[right_index] + 1,
+                previous[right_index - 1] + (left_char != right_char),
+            ))
+        previous = current
+    return previous[-1]
+
+
+def _textual_service_candidates(
+    document: dict[str, Any], message: str,
+) -> list[dict[str, Any]]:
+    """Return unique conservative typo candidates from published catalog text."""
+    raw = str(message or "")
+    message_tokens = list(re.finditer(r"\w+", raw, flags=re.UNICODE))
+    candidates: dict[str, dict[str, Any]] = {}
+    for anchor in document.get("branch_anchors") or []:
+        node = (document.get("node_by_id") or {}).get(anchor) or {}
+        phrases = [
+            node.get("title"), node.get("slug"),
+            *((node.get("data") or {}).get("aliases") or []),
+        ]
+        best: dict[str, Any] | None = None
+        for phrase in phrases:
+            normalized_phrase = _normalized_phrase(phrase)
+            if len(normalized_phrase) < 4:
+                continue
+            width = len(normalized_phrase.split())
+            for index in range(0, len(message_tokens) - width + 1):
+                start = message_tokens[index].start()
+                end = message_tokens[index + width - 1].end()
+                span = raw[start:end]
+                normalized_span = _normalized_phrase(span)
+                distance = _levenshtein_distance(normalized_span, normalized_phrase)
+                similarity = 1 - distance / max(len(normalized_span), len(normalized_phrase), 1)
+                if distance == 0 or distance > SERVICE_MAX_EDIT_DISTANCE:
+                    continue
+                if similarity < SERVICE_TEXT_MIN_SIMILARITY:
+                    continue
+                candidate = {
+                    "branch_anchor_node_id": anchor,
+                    "branch_path_checksum": (
+                        ((document.get("coordinates") or {}).get(anchor) or {})
+                        .get("path_checksum")
+                    ),
+                    "title": node.get("title"),
+                    "slug": node.get("slug"),
+                    "evidence_span": span,
+                    "start": start,
+                    "end": end,
+                    "edit_distance": distance,
+                    "text_similarity": round(similarity, 6),
+                    "resolution_method": "textual_similarity",
+                }
+                if best is None or (
+                    candidate["edit_distance"], -candidate["text_similarity"]
+                ) < (best["edit_distance"], -best["text_similarity"]):
+                    best = candidate
+        if best:
+            candidates[anchor] = best
+    return sorted(
+        candidates.values(),
+        key=lambda item: (
+            item["edit_distance"], -item["text_similarity"],
+            item["branch_anchor_node_id"],
+        ),
+    )
+
+
 def _resolve_service_operations(
     document: dict[str, Any], message: str, *,
     active_branch_node_id: str | None,
     active_branch_node_ids: list[str],
+    contract: dict[str, Any] | None = None,
+    asked_question_node_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     literal = _literal_service_resolution(document, message)
     before = list(dict.fromkeys([
@@ -971,8 +1166,76 @@ def _resolve_service_operations(
         "focused_branch_node_id": active_branch_node_id,
         "operations": [],
     }
+    direct_answer = _is_direct_answer_to_service_question(
+        contract or {}, asked_question_node_ids or [], message,
+    )
+    explicit_selection = bool(
+        _has_explicit_service_intent(message)
+        and not _looks_like_customer_question(message)
+    )
     if literal["status"] != "resolved" or not literal["matches"]:
-        return base
+        if literal["status"] == "ambiguous":
+            return {**base, "resolution_method": "exact_catalog", "confirmation": {
+                "kind": "service_disambiguation",
+                "options": literal.get("ambiguities") or [],
+            }}
+        textual = _textual_service_candidates(document, message)
+        if not textual:
+            return {**base, "resolution_method": "none"}
+        best = textual[0]
+        tied = [
+            item for item in textual
+            if item["edit_distance"] == best["edit_distance"]
+            and item["text_similarity"] == best["text_similarity"]
+        ]
+        if len(tied) != 1:
+            return {
+                **base, "status": "ambiguous", "resolution_method": "textual_similarity",
+                "textual_candidates": textual,
+                "confirmation": {"kind": "service_disambiguation", "options": tied},
+            }
+        action = (
+            "drop" if _SERVICE_DROP_MARKER.search(message or "")
+            else "switch" if (
+                _SERVICE_CHANGE_MARKER.search(message or "")
+                and active_branch_node_id
+                and best["branch_anchor_node_id"] != active_branch_node_id
+            )
+            else "keep" if best["branch_anchor_node_id"] in before else "add"
+        )
+        candidate = {
+            **best, "action": action,
+            "replace_branch_node_id": (
+                active_branch_node_id if action == "switch" else None
+            ),
+        }
+        return {
+            **base, "status": "needs_confirmation",
+            "resolution_method": "textual_similarity",
+            "textual_candidates": textual,
+            "candidate": candidate,
+            "reserved_spans": [{
+                "text": best["evidence_span"], "start": best["start"], "end": best["end"],
+                "branch_anchor_node_id": best["branch_anchor_node_id"],
+                "evidence_type": "candidate",
+            }],
+            "confirmation": {"kind": "service", "candidate": candidate},
+        }
+
+    if not (direct_answer or explicit_selection):
+        candidate = literal["matches"][-1]
+        action = "keep" if candidate["branch_anchor_node_id"] in before else "add"
+        return {
+            **base, "status": "needs_confirmation",
+            "consumed_spans": [],
+            "reserved_spans": literal.get("consumed_spans") or [],
+            "resolution_method": "exact_catalog_informative_mention",
+            "candidate": {**candidate, "evidence_span": candidate["span"], "action": action},
+            "confirmation": {
+                "kind": "service",
+                "candidate": {**candidate, "evidence_span": candidate["span"], "action": action},
+            },
+        }
 
     matches = literal["matches"]
     mentioned = [item["branch_anchor_node_id"] for item in matches]
@@ -991,6 +1254,8 @@ def _resolve_service_operations(
             "branch_anchor_node_id": anchor,
             "branch_path_checksum": checksum,
             "evidence_span": evidence,
+            "evidence_type": "exact_catalog",
+            "resolution_method": "exact_catalog",
         })
 
     if explicit_drop and not explicit_change:
@@ -1031,6 +1296,9 @@ def _resolve_service_operations(
     focus = focus_candidates[-1] if focus_candidates else (after[-1] if after else None)
     return {
         **base,
+        "resolution_method": "exact_catalog",
+        "direct_answer_to_service_question": direct_answer,
+        "explicit_service_intent": explicit_selection,
         "operations": operations,
         "next_active_branch_node_ids": after,
         "focused_branch_node_id": focus,
@@ -1071,11 +1339,9 @@ def _apply_authoritative_branch_resolution(
     """Make graph/backend state authoritative over model branch routing."""
     service_resolution = context.retrieval_trace.get("service_resolution") or {}
     operations = service_resolution.get("operations") or []
-    resolved = context.retrieval_trace.get("deterministic_branch_resolution") or {}
     active = str(context.active_branch_node_id or "") or None
     resolved_anchor = str(
         service_resolution.get("focused_branch_node_id")
-        or resolved.get("branch_anchor_node_id")
         or ""
     ) or None
     if resolved_anchor:
@@ -1102,23 +1368,18 @@ def _apply_authoritative_branch_resolution(
         )
         evidence_span = str(
             focused_operation.get("evidence_span")
-            or resolved.get("branch_evidence_span")
-            or resolved.get("snippet")
             or ""
         )
     elif active:
-        proposed_anchor = str(proposal.branch_anchor_node_id or "")
-        if (
-            proposal.branch_action.value in {"switch", "add"}
-            and proposed_anchor in set(context.retrieval_trace.get("possible_switches") or [])
-            and proposal.branch_evidence_span
-        ):
-            return proposal
         anchor = active
         action = "keep"
         evidence_span = ""
     else:
-        return proposal
+        anchor = str(context.retrieval_trace.get("retrieval_branch_node_id") or "")
+        if anchor not in set(document.get("branch_anchors") or []):
+            anchor = str(proposal.branch_anchor_node_id or "")
+        action = "keep"
+        evidence_span = ""
 
     coordinate = ((document.get("coordinates") or {}).get(anchor) or {})
     extracted = [fact for fact in proposal.extracted_facts if fact.field_key != "servico"]
@@ -1337,6 +1598,10 @@ def _service_facts_for_operations(
             "metadata": {
                 "source": "service_resolution",
                 "operation": action,
+                "evidence_type": operation.get("evidence_type"),
+                "resolution_method": operation.get("resolution_method"),
+                "score": operation.get("score"),
+                "margin": operation.get("margin"),
                 "branch_path_checksum": operation.get("branch_path_checksum"),
             },
         })
@@ -1346,26 +1611,49 @@ def _service_facts_for_operations(
 def _service_disambiguation_response(
     context: ConversationContext,
 ) -> tuple[ConversationDecision, AgentResponse]:
-    contract = context.graph_contract or {}
+    contract = (
+        context.retrieval_trace.get("common_contract")
+        or context.graph_contract or {}
+    )
     service_field = next(
         (field for field in contract.get("fields") or [] if field.get("key") == "servico"),
         None,
     )
     question_id = str((service_field or {}).get("question_node_id") or "") or None
+    resolution = context.retrieval_trace.get("service_resolution") or {}
+    candidate_options = (
+        (resolution.get("confirmation") or {}).get("options") or []
+    )
+    option_ids = list(dict.fromkeys(
+        str(anchor)
+        for ambiguity in [*(resolution.get("ambiguities") or []), *candidate_options]
+        for anchor in (
+            ambiguity.get("candidate_branch_node_ids")
+            or [ambiguity.get("branch_anchor_node_id")]
+        )
+        if anchor
+    ))
+    labels = {
+        str(item.get("branch_anchor_node_id") or item.get("slug") or ""):
+        str(item.get("label") or "")
+        for item in context.available_services
+    }
+    options = ", ".join(labels.get(anchor, anchor) for anchor in option_ids)
+    disambiguation_template = str(
+        (context.retrieval_trace.get("confirmation_templates") or {})
+        .get("service_disambiguation") or ""
+    ).strip()
+    if not disambiguation_template:
+        raise RuntimeError("published graph missing service_disambiguation template")
     validation = (service_field or {}).get("validation") or {}
     invalid_text = str(
         validation.get("invalid_response")
         or "Não consegui identificar exatamente qual serviço você quis dizer."
     ).strip()
-    reply = graph_proof_checker_v3.compose_published_question(
-        reply=invalid_text,
-        next_question_node_id=question_id,
-        contract=contract,
-    )
+    reply = disambiguation_template.replace("{options}", options)
     asked = list(context.cart.get("asked_question_node_ids") or [])
     if question_id:
         asked.append(question_id)
-    resolution = context.retrieval_trace.get("service_resolution") or {}
     proof = {
         "valid": True,
         "errors": [],
@@ -1583,7 +1871,7 @@ def _looks_like_customer_question(message: str) -> bool:
         "como ", "quando ", "onde ", "qual ", "quais ", "quanto ",
         "por que ", "porque ", "posso ", "podem ", "poderia ",
         "voces oferecem ", "voces fazem ", "voces tem ", "tem como ",
-        "gostaria de saber ", "queria saber ", "sera que ",
+        "gostaria de saber ", "queria saber ", "quero saber ", "sera que ",
     )
     return normalized.startswith(question_prefixes)
 
@@ -2470,24 +2758,21 @@ def _greeting_policy(
 
 
 SYSTEM_PROMPT = (
-    "Resolva serviços antes de qualquer outro campo. Preencha service_operations "
-    "para todo serviço literal reconhecido, inclusive vários na mesma mensagem: "
-    "add acrescenta sem remover os ativos, keep apenas muda o foco e drop exige "
-    "linguagem explícita de remoção ou troca. Nunca reutilize o trecho consumido "
-    "por um serviço como evidence_span ou valor de outro campo. O backend é a "
-    "autoridade final dessas operações e rejeita seleção ambígua.\n\n"
+    "Observe serviços antes de qualquer outro campo. Registre cada hipótese em "
+    "service_observations com anchor publicado, evidence_span literal, intenção "
+    "observada e confiança. service_operations existe apenas por compatibilidade "
+    "e nunca autoriza mutação: somente o resolvedor do backend aplica operações. "
+    "Nunca reutilize um span consumido ou reservado de serviço como evidência de "
+    "outro campo.\n\n"
 
     "Você propõe a conversa; o backend apenas prova o GraphRAG publicado. "
     "Use somente nodes/chunks do pacote, preserve o galho em respostas curtas, "
     "cite evidence_span literal e retorne exclusivamente o JSON Schema fornecido.\n\n"
 
-    "branch_action é um adaptador singular temporário. Use \"select\" quando "
-    "active_branch_node_id vazio indicar que ainda não há serviço ativo. Nunca "
-    "proponha \"keep\" nesse momento; use \"keep\" apenas para manter o foco; "
-    "use \"add\" quando um novo serviço "
-    "válido aparecer, mesmo sem a palavra também; e \"switch\" somente para uma "
-    "troca explicitamente solicitada. service_operations é o contrato "
-    "autoritativo do conjunto de serviços.\n\n"
+    "branch_action e service_operations são observações não autoritativas de "
+    "compatibilidade. Preserve o foco informado no contexto e descreva seleção, "
+    "adição, troca ou remoção apenas quando a intenção estiver literalmente "
+    "presente; o backend substitui essas propostas pela resolução comprovada.\n\n"
 
     "Leia a mensagem inteira do cliente antes de responder. Capture em "
     "extracted_facts todo campo reconhecível mencionado nela, mesmo que não seja "
@@ -2622,9 +2907,25 @@ def _seed_carried_facts(ledger: dict, document: dict, previous_journey: dict) ->
         return ledger
     carried = {}
     grouped: dict[str, list[dict]] = {}
+    carry_fields = {
+        str(field.get("key") or ""): field
+        for contract in [
+            document.get("common_contract") or {},
+            *((document.get("branch_contracts") or {}).values()),
+        ]
+        for field in contract.get("fields") or []
+        if field.get("carry_over")
+    }
     for row in rows:
         key = str(row.get("field_key") or "")
         if key not in keys or str(row.get("status") or "") != "known":
+            continue
+        field = carry_fields.get(key) or {}
+        semantic_type = str((field.get("validation") or {}).get("semantic_type") or "")
+        if (
+            semantic_type == "human_full_name"
+            and not graph_proof_checker_v3.is_human_full_name(row.get("value_json"))
+        ):
             continue
         fact = {
             **row, "value": row.get("value_json"), "fact_id": row.get("id"),
@@ -2734,11 +3035,14 @@ def build_context(
         ]
         if ledger.get("id") else []
     )
-    active_branches = list(dict.fromkeys([
-        *([active_branch] if active_branch else []),
-        *persisted_active_branches,
-    ]))
-    active_contract = (document.get("branch_contracts") or {}).get(active_branch) or {}
+    active_branch, active_branches, focus_derived_in_memory = _safe_active_focus(
+        active_branch, persisted_active_branches,
+    )
+    common_contract = document.get("common_contract") or {}
+    active_contract = (
+        (document.get("branch_contracts") or {}).get(active_branch) or {}
+        if active_branch else common_contract
+    )
     facts_by_key = ledger.get("facts_by_key") or _facts_by_key(
         list((ledger.get("facts") or {}).values())
     )
@@ -2776,6 +3080,13 @@ def build_context(
     service_resolution = _resolve_service_operations(
         document, message,
         active_branch_node_id=active_branch,
+        active_branch_node_ids=active_branches,
+        contract=active_contract,
+        asked_question_node_ids=ledger.get("asked_question_node_ids") or [],
+    )
+    service_resolution = _reserve_message_for_pending_field(
+        service_resolution, pending_field_answer=pending_field_answer,
+        message=message, active_branch_node_id=active_branch,
         active_branch_node_ids=active_branches,
     )
     # Greeting is a transversal current-turn intent. Historical replies,
@@ -2815,6 +3126,11 @@ def build_context(
             "ledger_revision": int(ledger.get("revision") or 0),
             "publication_changed": publication_changed,
             "invalidated_fact_keys": invalidated_fact_keys,
+            "focus_derived_in_memory": focus_derived_in_memory,
+            "common_contract": common_contract,
+            "pending_field": pending_field or None,
+            "confirmation_templates": document.get("confirmation_templates") or {},
+            "service_resolution_policy": document.get("service_resolution_policy") or {},
             "deterministic_intent": "greeting",
             "deterministic_reply": reply,
             "asked_field_key": greeting.get("asked_field_key"),
@@ -2840,6 +3156,7 @@ def build_context(
                   "_ledger_revision": ledger.get("revision") or 0},
             rag_nodes=[persona_node] if persona_node else [], rag_paths=[], rag_chunks=[],
             context_cards=[], system_prompt="", available_services=[{
+                "branch_anchor_node_id": anchor,
                 "slug": document["node_by_id"][anchor]["slug"],
                 "label": document["node_by_id"][anchor]["title"],
             } for anchor in document.get("branch_anchors") or []],
@@ -2868,6 +3185,50 @@ def build_context(
     embedding_started = time.perf_counter()
     embedding = None if deterministic_candidates else graph_compiler_v3.query_embeddings([message])[0]
     embedding_ms = round((time.perf_counter() - embedding_started) * 1000, 3)
+    if (
+        service_resolution.get("resolution_method") == "none"
+        and embedding is not None
+        and not pending_field_answer
+        and not _is_social_or_non_service_value(message)
+    ):
+        semantic_rows = supabase_client.rank_graph_services_v3(
+            persona_id=str(persona["id"]),
+            publication_id=str(publication["id"]),
+            query_embedding=embedding,
+            limit=8,
+        )
+        semantic_ranking = [
+            {
+                "branch_anchor_node_id": str(row.get("branch_anchor_node_id") or ""),
+                "chunk_id": str(row.get("chunk_id") or ""),
+                "score": round(float(row.get("score") or 0), 6),
+                "snippet": str(row.get("snippet") or "")[:240],
+            }
+            for row in semantic_rows
+            if row.get("branch_anchor_node_id")
+        ]
+        service_resolution = {
+            **service_resolution,
+            "semantic_ranking": semantic_ranking,
+            "semantic_threshold": SERVICE_SEMANTIC_MIN_SCORE,
+            "semantic_margin_threshold": SERVICE_SEMANTIC_MIN_MARGIN,
+        }
+        if (
+            len(semantic_ranking) >= 2
+            and semantic_ranking[0]["score"] >= SERVICE_SEMANTIC_MIN_SCORE
+            and semantic_ranking[1]["score"] >= SERVICE_SEMANTIC_MIN_SCORE
+            and semantic_ranking[0]["score"] - semantic_ranking[1]["score"]
+            < SERVICE_SEMANTIC_MIN_MARGIN
+        ):
+            service_resolution = {
+                **service_resolution,
+                "status": "ambiguous",
+                "resolution_method": "semantic_anchor_ranking",
+                "confirmation": {
+                    "kind": "service_disambiguation",
+                    "options": semantic_ranking[:2],
+                },
+            }
     short_expected_answer = bool(
         active_branch
         and missing
@@ -3002,6 +3363,11 @@ def build_context(
         "ledger_revision": int(ledger.get("revision") or 0),
         "publication_changed": publication_changed,
         "invalidated_fact_keys": invalidated_fact_keys,
+        "focus_derived_in_memory": focus_derived_in_memory,
+        "common_contract": common_contract,
+        "pending_field": pending_field or None,
+        "confirmation_templates": document.get("confirmation_templates") or {},
+        "service_resolution_policy": document.get("service_resolution_policy") or {},
         "short_expected_answer": short_expected_answer,
         "pending_field_branch_resolution_suppressed": pending_field_answer,
         "global_branch_search_executed": not suppress_global_branch_search,
@@ -3076,6 +3442,7 @@ def build_context(
         rag_chunks=[_compact_prompt_chunk(row) for row in package],
         context_cards=cards,
         system_prompt=prompt, available_services=[{
+            "branch_anchor_node_id": anchor,
             "slug": document["node_by_id"][anchor]["slug"], "label": document["node_by_id"][anchor]["title"]
         } for anchor in document.get("branch_anchors") or []],
         active_branch_node_id=active_branch,
@@ -3185,12 +3552,380 @@ def _deterministic_confirmation_decision(
     return None
 
 
+def _pending_confirmation_fact(context: ConversationContext) -> dict[str, Any] | None:
+    for rows in (context.cart.get("facts_by_key") or {}).values():
+        for fact in rows if isinstance(rows, list) else []:
+            confirmation = (fact.get("metadata") or {}).get("confirmation")
+            if fact.get("status") == "needs_confirmation" and isinstance(confirmation, dict):
+                return fact
+    return None
+
+
+def _confirmation_prompt_for_fact(
+    document: dict[str, Any], fact: dict[str, Any],
+    active_branch_node_ids: list[str],
+) -> tuple[str, dict[str, Any]]:
+    """Render only graph-published copy for one persisted candidate."""
+    confirmation = dict((fact.get("metadata") or {}).get("confirmation") or {})
+    kind = str(confirmation.get("kind") or "")
+    if kind == "name":
+        return _confirmation_template(
+            document, "name",
+            candidate=str(confirmation.get("candidate") or ""),
+        ), confirmation
+    if kind == "service":
+        return _confirmation_template(
+            document,
+            _service_candidate_template_key(confirmation, active_branch_node_ids),
+            candidate=str(
+                confirmation.get("candidate_title")
+                or confirmation.get("candidate") or ""
+            ),
+        ), confirmation
+    raise RuntimeError("unsupported persisted confirmation candidate")
+
+
+def _aggregate_confirmation_state(
+    document: dict[str, Any], active: list[str], grouped: dict[str, list[dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, dict[str, Any]]:
+    if active:
+        missing = graph_proof_checker_v3.aggregate_missing_fields(
+            document.get("branch_contracts") or {}, active, grouped,
+        )
+        askable = graph_proof_checker_v3.aggregate_askable_fields(
+            document.get("branch_contracts") or {}, active, grouped,
+        )
+        required = graph_proof_checker_v3.aggregate_required_field_count(
+            document.get("branch_contracts") or {}, active, grouped,
+        )
+        question_contract = next(
+            (
+                contract for contract in (document.get("branch_contracts") or {}).values()
+                if any(
+                    field.get("question_node_id") == (askable[0].get("question_node_id") if askable else None)
+                    for field in contract.get("fields") or []
+                )
+            ),
+            (document.get("branch_contracts") or {}).get(active[-1]) or {},
+        )
+        return missing, askable, required, question_contract
+    contract = document.get("common_contract") or {}
+    scoped = _facts_for_contract(contract, grouped)
+    return (
+        graph_proof_checker_v3.pending_fields(contract, scoped),
+        graph_proof_checker_v3.askable_pending_fields(contract, scoped),
+        graph_proof_checker_v3.required_field_count(contract, scoped),
+        contract,
+    )
+
+
+def _deterministic_pending_fact_confirmation(
+    context: ConversationContext,
+) -> tuple[ConversationDecision, AgentResponse] | None:
+    pending = _pending_confirmation_fact(context)
+    message = _latest_user_message(context)
+    accepted_confirmation = _is_explicit_confirmation(message)
+    rejected_confirmation = _is_explicit_rejection(message)
+    if not pending or not (accepted_confirmation or rejected_confirmation):
+        return None
+
+    persona = supabase_client.get_persona(context.persona_slug) or {}
+    publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
+    if (
+        str(publication.get("id") or "") != str(context.publication_id or "")
+        or str(publication.get("checksum") or "") != str(context.graph_checksum)
+    ):
+        raise RuntimeError("GraphRAG publication changed during pending confirmation")
+    document = publication.get("document_json") or {}
+    confirmation = dict((pending.get("metadata") or {}).get("confirmation") or {})
+    kind = str(confirmation.get("kind") or "")
+    source_message_id = _source_message_id(context.messages)
+    grouped = {
+        str(key): list(values)
+        for key, values in (context.cart.get("facts_by_key") or {}).items()
+    }
+    previous_active = list(dict.fromkeys([
+        *([context.active_branch_node_id] if context.active_branch_node_id else []),
+        *context.active_branch_node_ids,
+    ]))
+    active = list(previous_active)
+    focus = context.active_branch_node_id
+    accepted_facts: list[dict[str, Any]] = []
+    operations: list[dict[str, Any]] = []
+    consumed_spans: list[dict[str, Any]] = []
+
+    def replace_fact(fact: dict[str, Any]) -> None:
+        key = str(fact.get("field_key") or "")
+        owner = str(fact.get("owner_node_id") or "")
+        grouped[key] = [
+            current for current in grouped.get(key, [])
+            if str(current.get("owner_node_id") or "") != owner
+        ] + [fact]
+        accepted_facts.append(fact)
+
+    if kind == "name":
+        fact = {
+            "field_key": str(confirmation.get("field_key") or pending.get("field_key") or ""),
+            "owner_node_id": str(confirmation.get("owner_node_id") or pending.get("owner_node_id") or ""),
+            "status": "known" if accepted_confirmation else "invalid",
+            "value": str(confirmation.get("candidate") or "") if accepted_confirmation else None,
+            "source_message_id": source_message_id,
+            "evidence_span": message.strip(),
+            "confidence": 1.0,
+            "metadata": {
+                "confirmation": {
+                    **confirmation,
+                    "transition": "confirmed" if accepted_confirmation else "rejected",
+                    "confirmed_by_message_id": source_message_id,
+                },
+            },
+        }
+        replace_fact(fact)
+    elif kind == "service":
+        anchor = str(confirmation.get("branch_anchor_node_id") or pending.get("owner_node_id") or "")
+        action = str(confirmation.get("action") or "add")
+        if accepted_confirmation:
+            if action == "add" and anchor in active:
+                action = "keep"
+            replace_anchor = str(
+                confirmation.get("replace_branch_node_id")
+                or (focus if action == "switch" else "") or ""
+            )
+
+            def confirmed_operation(operation_action: str, operation_anchor: str) -> dict[str, Any]:
+                return {
+                    "action": operation_action,
+                    "branch_anchor_node_id": operation_anchor,
+                    "branch_path_checksum": str(
+                        ((document.get("coordinates") or {}).get(operation_anchor) or {})
+                        .get("path_checksum") or ""
+                    ),
+                    "evidence_span": message.strip(),
+                    "evidence_type": "confirmed_candidate",
+                    "resolution_method": str(
+                        confirmation.get("method") or "confirmed_candidate"
+                    ),
+                    "score": confirmation.get("score"),
+                    "margin": confirmation.get("margin"),
+                }
+
+            if action == "switch":
+                if not replace_anchor or replace_anchor not in active:
+                    raise RuntimeError("confirmed service switch has stale previous focus")
+                operations = [
+                    confirmed_operation("drop", replace_anchor),
+                    confirmed_operation("add", anchor),
+                ]
+            else:
+                operations = [confirmed_operation(action, anchor)]
+            consumed_spans = [
+                {
+                    "text": message.strip(), "start": 0, "end": len(message.strip()),
+                    "branch_anchor_node_id": operation["branch_anchor_node_id"],
+                    "evidence_type": "confirmed_candidate",
+                }
+                for operation in operations
+            ]
+            service_proof = graph_proof_checker_v3.check_service_operations(
+                document=document,
+                message=message,
+                operations=operations,
+                active_branch_node_ids=active,
+                consumed_service_spans=consumed_spans,
+            )
+            if not service_proof["valid"]:
+                raise RuntimeError("confirmed service candidate failed backend proof")
+            active = list(service_proof["next_active_branch_node_ids"])
+            focus = anchor if action in {"add", "keep", "switch"} else (
+                active[-1] if active else None
+            )
+            if action in {"add", "keep", "switch"}:
+                if action == "switch":
+                    replace_fact({
+                        "field_key": "servico", "owner_node_id": replace_anchor,
+                        "status": "invalid", "value": None,
+                        "source_message_id": source_message_id,
+                        "evidence_span": message.strip(), "confidence": 1.0,
+                        "metadata": {"confirmation": {
+                            **confirmation, "transition": "confirmed_switch_drop",
+                        }},
+                    })
+                node = (document.get("node_by_id") or {}).get(anchor) or {}
+                replace_fact({
+                    "field_key": "servico", "owner_node_id": anchor,
+                    "status": "known",
+                    "value": str(node.get("slug") or node.get("title") or anchor),
+                    "source_message_id": source_message_id,
+                    "evidence_span": message.strip(), "confidence": 1.0,
+                    "metadata": {
+                        "source": "service_confirmation",
+                        "confirmation": {**confirmation, "transition": "confirmed"},
+                    },
+                })
+            else:
+                replace_fact({
+                    "field_key": "servico", "owner_node_id": anchor,
+                    "status": "invalid", "value": None,
+                    "source_message_id": source_message_id,
+                    "evidence_span": message.strip(), "confidence": 1.0,
+                    "metadata": {"confirmation": {**confirmation, "transition": "confirmed_removal"}},
+                })
+        else:
+            previous_fact = confirmation.get("previous_fact")
+            if isinstance(previous_fact, dict) and previous_fact.get("status") == "known":
+                replace_fact({
+                    **previous_fact,
+                    "field_key": "servico", "owner_node_id": anchor,
+                    "source_message_id": source_message_id,
+                    "evidence_span": message.strip(), "confidence": 1.0,
+                    "metadata": {
+                        **(previous_fact.get("metadata") or {}),
+                        "confirmation": {**confirmation, "transition": "rejected"},
+                    },
+                })
+            else:
+                replace_fact({
+                    "field_key": "servico", "owner_node_id": anchor,
+                    "status": "invalid", "value": None,
+                    "source_message_id": source_message_id,
+                    "evidence_span": message.strip(), "confidence": 1.0,
+                    "metadata": {"confirmation": {**confirmation, "transition": "rejected"}},
+                })
+    else:
+        return None
+
+    remaining_pending = next(
+        (
+            fact
+            for rows in grouped.values()
+            for fact in rows
+            if fact.get("status") == "needs_confirmation"
+            and isinstance((fact.get("metadata") or {}).get("confirmation"), dict)
+        ),
+        None,
+    )
+    next_confirmation: dict[str, Any] = {}
+
+    missing, askable, required_count, question_contract = _aggregate_confirmation_state(
+        document, active, grouped,
+    )
+    next_question_id = str((askable[0] if askable else {}).get("question_node_id") or "") or None
+    if rejected_confirmation:
+        if kind == "name":
+            next_question_id = str(
+                next(
+                    (
+                        field.get("question_node_id")
+                        for field in (document.get("common_contract") or {}).get("fields") or []
+                        if str(field.get("key") or "") == str(pending.get("field_key") or "")
+                    ),
+                    "",
+                ) or ""
+            ) or None
+            question_contract = document.get("common_contract") or question_contract
+        else:
+            selection_field = _service_selection_field(document.get("common_contract") or {})
+            next_question_id = str((selection_field or {}).get("question_node_id") or "") or None
+            question_contract = document.get("common_contract") or question_contract
+    complete = bool(active and not missing and not remaining_pending)
+    final_confirmation_pending = complete and accepted_confirmation
+    if remaining_pending:
+        reply, next_confirmation = _confirmation_prompt_for_fact(
+            document, remaining_pending, active,
+        )
+        next_question_id = None
+    elif final_confirmation_pending:
+        reply = _terminal_reply(
+            document=document,
+            contract=(document.get("branch_contracts") or {}).get(focus) or question_contract,
+            active_branch_ids=active,
+            facts_by_key=grouped,
+            missing_fields=[],
+            qualification_complete=True,
+        )
+    else:
+        reply = graph_proof_checker_v3.compose_published_question(
+            reply="", next_question_node_id=next_question_id, contract=question_contract,
+        )
+    asked = list(context.cart.get("asked_question_node_ids") or [])
+    if next_question_id:
+        asked.append(next_question_id)
+    projection = (
+        (document.get("branch_contracts") or {}).get(focus)
+        or document.get("common_contract") or {}
+    )
+    state = {
+        **context.cart,
+        "facts": _facts_for_contract(projection, grouped),
+        "facts_by_key": grouped,
+        "active_branch_node_id": focus,
+        "active_branch_node_ids": active,
+        "asked_question_node_ids": asked,
+        "sdr_state": "awaiting_confirmation" if final_confirmation_pending else "collecting",
+    }
+    proof = {
+        "valid": True, "errors": [], "mode": "deterministic_field_confirmation",
+        "explicit_confirmation": False,
+        "field_confirmation_transition": "confirmed" if accepted_confirmation else "rejected",
+        "resolved_confirmation": confirmation,
+        "pending_confirmation": next_confirmation or None,
+        "accepted_facts": accepted_facts,
+        "missing_fields": [str(field.get("key") or "") for field in missing],
+        "required_field_count": required_count,
+        "next_question_node_id": next_question_id,
+        "qualification_complete": complete,
+        "collection_complete": complete,
+        "confirmation_state": (
+            "field_confirmation" if remaining_pending
+            else "awaiting_confirmation" if final_confirmation_pending
+            else "collecting"
+        ),
+        "service_operations": operations,
+        "applied_service_operations": operations,
+        "service_operation_proof": (
+            graph_proof_checker_v3.check_service_operations(
+                document=document, message=message, operations=operations,
+                active_branch_node_ids=previous_active,
+                consumed_service_spans=consumed_spans,
+            ) if operations else {"valid": True, "errors": [], "operations": []}
+        ),
+        "consumed_service_spans": consumed_spans,
+        "previous_active_branch_node_ids": previous_active,
+        "next_active_branch_node_ids": active,
+        "previous_active_branch_node_id": context.active_branch_node_id,
+        "next_active_branch_node_id": focus,
+        "branch_focus_invariant": (not active and focus is None) or focus in set(active),
+        "model_calls": 0,
+    }
+    return (
+        ConversationDecision(
+            classifier="graph_field_confirmation_v1",
+            intent="field_confirmation_resolved",
+            route=ConversationRoute.SDR,
+            confidence=1,
+            lead_stage="engajado",
+        ),
+        AgentResponse(
+            reply_text=reply or None,
+            role=ConversationRoute.SDR,
+            cart_state=state,
+            handoff_required=False,
+            proof=proof,
+            token_usage={
+                "model_calls": 0, "repair_calls": 0, "prompt_tokens": 0,
+                "completion_tokens": 0, "total_tokens": 0,
+            },
+        ),
+    )
+
+
 def _with_structural_proof_audit(
     context: ConversationContext,
     decision: ConversationDecision,
     response: AgentResponse,
 ) -> AgentResponse:
     message = _latest_user_message(context)
+    resolver = context.retrieval_trace.get("service_resolution") or {}
     state = response.cart_state
     active_branch = str(state.get("active_branch_node_id") or "") or None
     service_fact = (state.get("facts") or {}).get("servico") or {}
@@ -3221,6 +3956,7 @@ def _with_structural_proof_audit(
             "resolved_intent": decision.intent,
         },
         "service_resolution": {
+            **resolver,
             "resolved": bool(
                 active_branch
                 and service_fact.get("status") == "known"
@@ -3234,10 +3970,8 @@ def _with_structural_proof_audit(
                 if response.proposal else context.active_path_checksum
             ),
             "method": (
-                "deterministic_graph_match"
-                if context.retrieval_trace.get("deterministic_branch_resolution")
-                else "semantic_graph_match"
-                if context.retrieval_trace.get("branch_candidates")
+                str(resolver.get("resolution_method"))
+                if resolver.get("resolution_method")
                 else "retained_graph_fact"
                 if service_fact else "none"
             ),
@@ -3262,7 +3996,10 @@ def _with_structural_proof_audit(
 def decide(
     context: ConversationContext, *, model_observation: dict[str, Any] | None
 ) -> tuple[ConversationDecision, AgentResponse]:
-    deterministic = _deterministic_confirmation_decision(context)
+    deterministic = (
+        _deterministic_pending_fact_confirmation(context)
+        or _deterministic_confirmation_decision(context)
+    )
     decision, response = deterministic or _decide(
         context, model_observation=model_observation,
     )
@@ -3290,6 +4027,205 @@ def _sanitize_untrusted_service_operations(raw: Any) -> Any:
         or str(operation.get("evidence_span") or "").strip()
     ]
     return {**raw, "service_operations": operations}
+
+
+def _fact_span_interval(message: str, span: Any) -> tuple[int, int] | None:
+    evidence = str(span or "")
+    start = str(message or "").find(evidence) if evidence else -1
+    return (start, start + len(evidence)) if start >= 0 else None
+
+
+def _overlaps_any(
+    interval: tuple[int, int] | None, spans: list[dict[str, Any]],
+) -> bool:
+    return bool(interval and any(
+        interval[0] < int(span.get("end") or 0)
+        and int(span.get("start") or 0) < interval[1]
+        for span in spans
+    ))
+
+
+def _reconcile_human_full_name_facts(
+    proposal: ConversationProposal,
+    *,
+    context: ConversationContext,
+    contract: dict[str, Any],
+) -> tuple[ConversationProposal, list[dict[str, Any]]]:
+    """Make name acceptance contextual and keep composite extraction pending."""
+    message = _latest_user_message(context)
+    asked = context.cart.get("asked_question_node_ids") or []
+    service_spans = list(
+        (context.retrieval_trace.get("service_resolution") or {})
+        .get("consumed_spans") or []
+    )
+    kept: list[ExtractedFact] = []
+    validation: list[dict[str, Any]] = []
+    fields = {str(field.get("key") or ""): field for field in contract.get("fields") or []}
+    for fact in proposal.extracted_facts:
+        field = fields.get(fact.field_key) or {}
+        semantic_type = str((field.get("validation") or {}).get("semantic_type") or "")
+        if semantic_type != "human_full_name":
+            kept.append(fact)
+            continue
+        candidate = str(fact.value or "").strip()
+        if not graph_proof_checker_v3.is_human_full_name(candidate):
+            validation.append({
+                "field_key": fact.field_key,
+                "owner_node_id": fact.owner_node_id,
+                "valid": False,
+                "errors": ["human_full_name_invalid"],
+            })
+            continue
+        evidence = str(fact.evidence_span or "").strip()
+        interval = _fact_span_interval(message, evidence)
+        if _overlaps_any(interval, service_spans):
+            validation.append({
+                "field_key": fact.field_key,
+                "owner_node_id": fact.owner_node_id,
+                "valid": False,
+                "errors": ["human_full_name_overlaps_service_evidence"],
+                "evidence_span": evidence,
+            })
+            continue
+        direct_question = bool(
+            asked
+            and field.get("question_node_id")
+            and str(asked[-1]) == str(field["question_node_id"])
+        )
+        whole_response = bool(
+            message.strip() == candidate
+            and evidence == candidate
+        )
+        if direct_question and whole_response:
+            kept.append(fact.model_copy(update={
+                "status": ConversationFactStatus.KNOWN,
+                "value": candidate,
+                "metadata": {
+                    **fact.metadata,
+                    "validation_method": "direct_published_name_answer",
+                },
+            }))
+            continue
+        kept.append(fact.model_copy(update={
+            "status": ConversationFactStatus.NEEDS_CONFIRMATION,
+            "value": None,
+            "metadata": {
+                **fact.metadata,
+                "confirmation": {
+                    "kind": "name",
+                    "candidate": candidate,
+                    "field_key": fact.field_key,
+                    "owner_node_id": fact.owner_node_id,
+                    "evidence_span": evidence,
+                    "method": "composite_or_unsolicited_name",
+                },
+            },
+        }))
+    return proposal.model_copy(update={"extracted_facts": kept}), validation
+
+
+def _semantic_service_candidate(
+    context: ConversationContext,
+    proposal: ConversationProposal,
+) -> tuple[dict[str, Any] | None, str | None]:
+    resolution = context.retrieval_trace.get("service_resolution") or {}
+    if resolution.get("candidate"):
+        candidate = dict(resolution["candidate"])
+        message = _latest_user_message(context)
+        interval = _fact_span_interval(message, candidate.get("evidence_span"))
+        reserved = [
+            other
+            for fact in proposal.extracted_facts
+            if fact.field_key != "servico"
+            if (other := _fact_span_interval(message, fact.evidence_span)) is not None
+        ]
+        if interval is None or any(
+            interval[0] < other[1] and other[0] < interval[1] for other in reserved
+        ):
+            return None, "service_evidence_reserved_or_non_literal"
+        return candidate, None
+    ranking = resolution.get("semantic_ranking") or []
+    if not ranking:
+        return None, "no_service_candidate"
+    top = ranking[0]
+    top_score = float(top.get("score") or 0)
+    second_score = float(ranking[1].get("score") or 0) if len(ranking) > 1 else 0.0
+    margin = top_score - second_score
+    if top_score < SERVICE_SEMANTIC_MIN_SCORE:
+        return None, "semantic_score_below_threshold"
+    if margin < SERVICE_SEMANTIC_MIN_MARGIN:
+        return None, "semantic_margin_ambiguous"
+    matching = [
+        observation for observation in proposal.service_observations
+        if observation.branch_anchor_node_id == top.get("branch_anchor_node_id")
+    ]
+    if len(matching) != 1:
+        return None, "model_backend_service_mismatch"
+    observation = matching[0]
+    message = _latest_user_message(context)
+    interval = _fact_span_interval(message, observation.evidence_span)
+    reserved = [
+        candidate
+        for fact in proposal.extracted_facts
+        if fact.field_key != "servico"
+        if (candidate := _fact_span_interval(message, fact.evidence_span)) is not None
+    ]
+    if interval is None or any(
+        interval[0] < other[1] and other[0] < interval[1] for other in reserved
+    ):
+        return None, "service_evidence_reserved_or_non_literal"
+    active = set(context.active_branch_node_ids)
+    if context.active_branch_node_id:
+        active.add(context.active_branch_node_id)
+    intent = observation.observed_intent
+    action = (
+        "drop" if intent == "remove"
+        else "switch" if (
+            intent == "switch" and context.active_branch_node_id
+            and observation.branch_anchor_node_id != context.active_branch_node_id
+        )
+        else "keep" if observation.branch_anchor_node_id in active
+        else "add"
+    )
+    return {
+        "branch_anchor_node_id": observation.branch_anchor_node_id,
+        "branch_path_checksum": "",
+        "evidence_span": observation.evidence_span,
+        "start": interval[0],
+        "end": interval[1],
+        "action": action,
+        "replace_branch_node_id": (
+            context.active_branch_node_id if action == "switch" else None
+        ),
+        "resolution_method": "semantic_anchor_ranking",
+        "semantic_score": round(top_score, 6),
+        "semantic_margin": round(margin, 6),
+        "model_confidence": observation.confidence,
+    }, None
+
+
+def _confirmation_template(
+    document: dict[str, Any], key: str, *, candidate: str = "", options: str = "",
+) -> str:
+    template = str((document.get("confirmation_templates") or {}).get(key) or "").strip()
+    if not template:
+        raise RuntimeError(f"published graph missing confirmation template: {key}")
+    return template.replace("{candidate}", candidate).replace("{options}", options)
+
+
+def _service_candidate_template_key(
+    candidate: dict[str, Any], active_branch_node_ids: list[str],
+) -> str:
+    action = str(candidate.get("action") or "add")
+    if action == "drop":
+        return "service_removal"
+    if action == "switch":
+        return "service_switch"
+    if action == "keep":
+        return "service_selection"
+    if active_branch_node_ids:
+        return "service_addition"
+    return "service_selection"
 
 
 def _decide(
@@ -3370,8 +4306,31 @@ def _decide(
     if str(publication.get("id")) != str(context.publication_id) or publication.get("checksum") != context.graph_checksum:
         raise RuntimeError("GraphRAG publication changed during turn")
     document = publication.get("document_json") or {}
+    model_proposed_service_operations = [
+        item.model_dump(mode="json") for item in proposal.service_operations
+    ]
+    model_service_observations = [
+        item.model_dump(mode="json") for item in proposal.service_observations
+    ]
+    service_candidate, service_candidate_rejection = _semantic_service_candidate(
+        context, proposal,
+    )
+    if service_candidate:
+        anchor = str(service_candidate.get("branch_anchor_node_id") or "")
+        node = (document.get("node_by_id") or {}).get(anchor) or {}
+        coordinate = ((document.get("coordinates") or {}).get(anchor) or {})
+        service_candidate = {
+            **service_candidate,
+            "branch_path_checksum": str(coordinate.get("path_checksum") or ""),
+            "title": str(node.get("title") or anchor),
+            "slug": str(node.get("slug") or anchor),
+        }
     proposal = _apply_authoritative_branch_resolution(proposal, context, document)
     contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
+    if not context.active_branch_node_id and not (
+        (context.retrieval_trace.get("service_resolution") or {}).get("operations")
+    ):
+        contract = _preselection_contract(document, proposal.branch_anchor_node_id)
     grouped_facts = context.cart.get("facts_by_key") or {}
     contract_facts = (
         _facts_for_contract(contract, grouped_facts)
@@ -3380,6 +4339,9 @@ def _decide(
     proposal = _normalize_referential_service_fact(proposal, context, document)
     proposal = _normalize_servico_owner(proposal, contract)
     proposal = _normalize_fact_source_message_ids(proposal, context)
+    proposal, name_field_validation = _reconcile_human_full_name_facts(
+        proposal, context=context, contract=contract,
+    )
     proposal, consumed_field_validation = _remove_consumed_service_facts(
         proposal, context=context, document=document,
     )
@@ -3387,6 +4349,7 @@ def _decide(
         proposal, contract,
     )
     rejected_field_validation = [
+        *name_field_validation,
         *consumed_field_validation,
         *invalid_field_validation,
     ]
@@ -3489,6 +4452,10 @@ def _decide(
         message=_latest_user_message(context),
         operations=service_operations,
         active_branch_node_ids=before_services,
+        consumed_service_spans=(
+            (context.retrieval_trace.get("service_resolution") or {})
+            .get("consumed_spans") or []
+        ),
     )
     if service_operations and not service_proof["valid"]:
         proof["errors"] = [*proof.get("errors", []), *service_proof["errors"]]
@@ -3497,6 +4464,15 @@ def _decide(
     proof.update({
         "service_resolution": context.retrieval_trace.get("service_resolution") or {},
         "service_operations": service_operations,
+        "model_proposed_service_operations": model_proposed_service_operations,
+        "model_service_observations": model_service_observations,
+        "applied_service_operations": service_operations,
+        "service_operation_rejection_reason": (
+            "model_operations_replaced_by_backend_resolver"
+            if model_proposed_service_operations != service_operations else None
+        ),
+        "service_candidate": service_candidate,
+        "service_candidate_rejection_reason": service_candidate_rejection,
         "service_operation_proof": service_proof,
         "consumed_service_spans": (
             (context.retrieval_trace.get("service_resolution") or {})
@@ -3600,7 +4576,7 @@ def _decide(
         and context.active_branch_node_id is None
         and proposal.branch_action.value == "keep"
         and proof.get("errors") == ["keep_without_active_branch"]
-        and not context.retrieval_trace.get("branch_candidates")
+        and not service_operations
     )
     if proof["valid"] or discovery_only:
         if discovery_only:
@@ -3618,6 +4594,56 @@ def _decide(
             grouped_facts=grouped_facts,
             source_message_id=_source_message_id(context.messages),
         ))
+        if service_candidate and not service_operations:
+            previous_service_fact = next(
+                (
+                    fact for fact in grouped_facts.get("servico", [])
+                    if str(fact.get("owner_node_id") or "")
+                    == str(service_candidate["branch_anchor_node_id"])
+                    and fact.get("status") == "known"
+                ),
+                None,
+            )
+            accepted_facts.append({
+                "field_key": "servico",
+                "owner_node_id": service_candidate["branch_anchor_node_id"],
+                "status": "needs_confirmation",
+                "value": None,
+                "source_message_id": _source_message_id(context.messages),
+                "evidence_span": service_candidate["evidence_span"],
+                "confidence": float(
+                    service_candidate.get("semantic_score")
+                    or service_candidate.get("text_similarity") or 1
+                ),
+                "metadata": {
+                    "confirmation": {
+                        "kind": "service",
+                        "candidate": service_candidate.get("slug"),
+                        "candidate_title": service_candidate.get("title"),
+                        "branch_anchor_node_id": service_candidate["branch_anchor_node_id"],
+                        "branch_path_checksum": service_candidate["branch_path_checksum"],
+                        "action": service_candidate.get("action") or "add",
+                        "replace_branch_node_id": service_candidate.get("replace_branch_node_id"),
+                        "previous_active_branch_node_id": context.active_branch_node_id,
+                        "previous_active_branch_node_ids": before_services,
+                        "previous_fact": (
+                            {
+                                "field_key": previous_service_fact.get("field_key"),
+                                "owner_node_id": previous_service_fact.get("owner_node_id"),
+                                "status": previous_service_fact.get("status"),
+                                "value": previous_service_fact.get("value"),
+                                "metadata": previous_service_fact.get("metadata") or {},
+                            }
+                            if previous_service_fact else None
+                        ),
+                        "evidence_span": service_candidate["evidence_span"],
+                        "method": service_candidate.get("resolution_method"),
+                        "score": service_candidate.get("semantic_score")
+                        or service_candidate.get("text_similarity"),
+                        "margin": service_candidate.get("semantic_margin"),
+                    },
+                },
+            })
         accepted_facts = list({
             (str(fact.get("field_key") or ""), str(fact.get("owner_node_id") or "")): fact
             for fact in accepted_facts
@@ -3694,40 +4720,43 @@ def _decide(
         ]))
         if service_operations:
             active_branch_ids = list(service_proof["next_active_branch_node_ids"])
-        elif not discovery_only:
-            action = proposal.branch_action.value
-            anchor = proposal.branch_anchor_node_id
-            if action == "select":
-                active_branch_ids = [anchor]
-            elif action == "add" and anchor not in active_branch_ids:
-                active_branch_ids.append(anchor)
-            elif action == "switch":
-                active_branch_ids = [
-                    item for item in active_branch_ids
-                    if item != context.active_branch_node_id
-                ]
-                if anchor not in active_branch_ids:
-                    active_branch_ids.append(anchor)
         committed_branch = (
             (context.retrieval_trace.get("service_resolution") or {}).get("focused_branch_node_id")
             if service_operations
-            else (context.active_branch_node_id if discovery_only else proposal.branch_anchor_node_id)
+            else context.active_branch_node_id
         )
+        if active_branch_ids and committed_branch not in set(active_branch_ids):
+            committed_branch = active_branch_ids[-1]
+        if not active_branch_ids:
+            committed_branch = None
 
-        aggregate_missing = graph_proof_checker_v3.aggregate_missing_fields(
-            document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
-        ) if active_branch_ids else []
-        aggregate_askable = graph_proof_checker_v3.aggregate_askable_fields(
-            document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
-        ) if active_branch_ids else []
+        if active_branch_ids:
+            aggregate_missing = graph_proof_checker_v3.aggregate_missing_fields(
+                document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
+            )
+            aggregate_askable = graph_proof_checker_v3.aggregate_askable_fields(
+                document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
+            )
+            aggregate_required_count = graph_proof_checker_v3.aggregate_required_field_count(
+                document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
+            )
+        else:
+            preselection_contract = document.get("common_contract") or contract
+            preselection_facts = _facts_for_contract(preselection_contract, next_grouped)
+            aggregate_missing = graph_proof_checker_v3.pending_fields(
+                preselection_contract, preselection_facts,
+            )
+            aggregate_askable = graph_proof_checker_v3.askable_pending_fields(
+                preselection_contract, preselection_facts,
+            )
+            aggregate_required_count = graph_proof_checker_v3.required_field_count(
+                preselection_contract, preselection_facts,
+            )
         active_fields = _active_contract_fields(document, active_branch_ids, contract)
         terminal_unconfirmed = _dedupe_fields([
             *aggregate_missing,
             *_unknown_fields(active_fields, next_grouped),
         ])
-        aggregate_required_count = graph_proof_checker_v3.aggregate_required_field_count(
-            document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
-        ) if active_branch_ids else 0
         next_question_id = next(
             (field.get("question_node_id") for field in aggregate_askable if field.get("question_node_id")),
             None,
@@ -3751,6 +4780,8 @@ def _decide(
         confirmation_pending = bool(qualification_complete and not post_support)
         terminal_intent = "qualification_incomplete" if qualification_incomplete else None
         reply_seed = str((doubt or {}).get("text") or proposal.reply)
+        if model_proposed_service_operations != service_operations and not doubt:
+            reply_seed = ""
         service_ack = _service_operation_acknowledgement(
             document, service_operations,
         )
@@ -3779,7 +4810,45 @@ def _decide(
             and len(_latest_user_message(context).split()) <= 3
         ):
             reply_seed = ""
-        if terminal_intent or confirmation_pending:
+        pending_confirmation_fact = next(
+            (
+                fact for fact in accepted_facts
+                if str(fact.get("status") or "") == "needs_confirmation"
+                and isinstance((fact.get("metadata") or {}).get("confirmation"), dict)
+            ),
+            None,
+        )
+        field_confirmation = (
+            ((pending_confirmation_fact or {}).get("metadata") or {}).get("confirmation")
+            or {}
+        )
+        if pending_confirmation_fact:
+            confirmation_kind = str(field_confirmation.get("kind") or "")
+            if confirmation_kind == "name":
+                confirmation_text = _confirmation_template(
+                    document, "name",
+                    candidate=str(field_confirmation.get("candidate") or ""),
+                )
+            else:
+                confirmation_text = _confirmation_template(
+                    document,
+                    _service_candidate_template_key(service_candidate or {}, before_services),
+                    candidate=str(
+                        field_confirmation.get("candidate_title")
+                        or field_confirmation.get("candidate") or ""
+                    ),
+                )
+            # A confirmation candidate is the only authoritative outcome for
+            # this turn. Do not leak a model acknowledgement or a validation
+            # error for a different pending field into the confirmation copy.
+            reply = confirmation_text
+            next_question_id = None
+            confirmation_pending = False
+            qualification_complete = False
+            qualification_incomplete = False
+            collection_complete = False
+            terminal_intent = None
+        elif terminal_intent or confirmation_pending:
             reply = _terminal_reply(
                 document=document,
                 contract=contract,
@@ -3851,10 +4920,12 @@ def _decide(
                 else "suppressed_duplicate_outbound"
             )
 
-        facts = _facts_for_contract(
-            (document.get("branch_contracts") or {}).get(committed_branch) or {},
-            next_grouped,
+        projection_contract = (
+            (document.get("branch_contracts") or {}).get(committed_branch)
+            or document.get("common_contract")
+            or contract
         )
+        facts = _facts_for_contract(projection_contract, next_grouped)
         state = {
             **context.cart,
             "facts": facts,
@@ -3907,15 +4978,23 @@ def _decide(
             "collection_complete": collection_complete,
             "explicit_confirmation": False,
             "confirmation_state": (
-                "awaiting_confirmation" if confirmation_pending
+                "field_confirmation" if pending_confirmation_fact
+                else "awaiting_confirmation" if confirmation_pending
                 else "handed_off" if terminal_intent
                 else "post_qualification_support" if post_support
                 else "collecting"
             ),
             "accepted_facts": accepted_facts,
+            "pending_confirmation": field_confirmation or None,
             "field_validation": proof.get("field_validation") or [],
             "previous_active_branch_node_ids": before_services,
             "next_active_branch_node_ids": active_branch_ids,
+            "previous_active_branch_node_id": context.active_branch_node_id,
+            "next_active_branch_node_id": committed_branch,
+            "branch_focus_invariant": (
+                (not active_branch_ids and committed_branch is None)
+                or committed_branch in set(active_branch_ids)
+            ),
             "repetition_audit": repetition,
             "repetition_action": repetition_action,
             "fallback_used": False,

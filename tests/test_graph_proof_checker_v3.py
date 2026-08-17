@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 API_ROOT = Path(__file__).resolve().parents[1] / "api"
 if str(API_ROOT) not in sys.path:
@@ -338,3 +340,60 @@ def test_add_action_falls_back_to_singular_active_branch_when_list_not_given():
     kwargs = _base_check_kwargs(active_branch_node_ids=None)
     proof = graph_proof_checker_v3.check(**kwargs)
     assert proof["valid"], proof["errors"]
+
+
+@pytest.mark.parametrize("value", [
+    "Ana Silva",
+    "Jo\u00e3o da Silva",
+    "Anne-Marie O'Neill",
+    "Anne-Marie O\u2019Neill",
+])
+def test_human_full_name_accepts_unicode_particles_hyphen_and_apostrophe(value):
+    assert graph_proof_checker_v3.is_human_full_name(value)
+
+
+@pytest.mark.parametrize("value", [
+    "Ana", "bom dia", "e ae", "Ana 123", "https://example.com Ana",
+    "Ana_Silva", "Ana Silva Pereira Souza Costa Oliveira Santos",
+])
+def test_human_full_name_rejects_incomplete_or_non_name_values(value):
+    assert not graph_proof_checker_v3.is_human_full_name(value)
+
+
+def test_pending_name_confirmation_never_resolves_a_required_field():
+    field = {
+        "accepted_statuses": ["known", "needs_confirmation", "invalid"],
+    }
+    assert not graph_proof_checker_v3.field_resolved(
+        field, {"status": "needs_confirmation", "value": None},
+    )
+    assert not graph_proof_checker_v3.field_resolved(
+        field, {"status": "invalid", "value": None},
+    )
+
+
+def test_service_operation_requires_authorized_consumed_evidence():
+    document = {
+        "branch_anchors": ["branch:a"],
+        "coordinates": {"branch:a": {"path_checksum": "checksum:a"}},
+    }
+    operation = {
+        "action": "add", "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": "checksum:a", "evidence_span": "Vitrifica\u00e7\u00e3o",
+        "evidence_type": "exact_catalog", "resolution_method": "exact_catalog",
+    }
+    rejected = graph_proof_checker_v3.check_service_operations(
+        document=document, message="Quero Vitrifica\u00e7\u00e3o", operations=[operation],
+        active_branch_node_ids=[], consumed_service_spans=[],
+    )
+    assert "service_evidence_not_consumed:branch:a" in rejected["errors"]
+
+    accepted = graph_proof_checker_v3.check_service_operations(
+        document=document, message="Quero Vitrifica\u00e7\u00e3o", operations=[operation],
+        active_branch_node_ids=[], consumed_service_spans=[{
+            "text": "Vitrifica\u00e7\u00e3o", "start": 6, "end": 18,
+            "branch_anchor_node_id": "branch:a", "evidence_type": "exact_catalog",
+        }],
+    )
+    assert accepted["valid"], accepted["errors"]
+    assert accepted["next_active_branch_node_ids"] == ["branch:a"]

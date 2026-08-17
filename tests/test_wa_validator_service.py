@@ -469,6 +469,65 @@ def test_semantic_turn_audit_accepts_acknowledgement_and_first_missing_question(
     assert audit["asked_field"] == "nome_cliente"
 
 
+def _authorized_service_operation():
+    return {
+        "action": "add", "branch_anchor_node_id": "branch:two",
+        "branch_path_checksum": "checksum:two", "evidence_span": "Service Two",
+        "evidence_type": "exact_catalog",
+    }
+
+
+def test_semantic_turn_audit_rejects_resolver_operation_divergence():
+    inputs = _semantic_audit_inputs()
+    operation = _authorized_service_operation()
+    proof = inputs["proof_record"]["proof_result"]
+    proof["service_resolution"] = {"operations": [operation]}
+    proof["applied_service_operations"] = []
+    audit = wv._semantic_turn_audit(**inputs)
+    assert "service_operations_match_resolution" in audit["failures"]
+
+
+def test_semantic_turn_audit_rejects_operation_without_consumed_evidence():
+    inputs = _semantic_audit_inputs()
+    operation = _authorized_service_operation()
+    proof = inputs["proof_record"]["proof_result"]
+    proof["service_resolution"] = {"operations": [operation]}
+    proof["applied_service_operations"] = [operation]
+    proof["consumed_service_spans"] = []
+    audit = wv._semantic_turn_audit(**inputs)
+    assert "service_operations_have_authorized_evidence" in audit["failures"]
+
+
+def test_semantic_turn_audit_rejects_overlapping_service_and_field_spans():
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"]["text"] = "Quero Service Two"
+    proof = inputs["proof_record"]["proof_result"]
+    proof["consumed_service_spans"] = [{
+        "text": "Service Two", "start": 6, "end": 17,
+        "branch_anchor_node_id": "branch:two", "evidence_type": "exact_catalog",
+    }]
+    proof["accepted_facts"][0]["evidence_span"] = "Service Two"
+    audit = wv._semantic_turn_audit(**inputs)
+    assert "service_field_evidence_disjoint" in audit["failures"]
+
+
+def test_semantic_turn_audit_rejects_inconsistent_branch_focus():
+    inputs = _semantic_audit_inputs()
+    inputs["ledger_after"]["active_branch_node_id"] = "branch:two"
+    inputs["ledger_after"]["active_branch_node_ids"] = ["branch:one"]
+    audit = wv._semantic_turn_audit(**inputs)
+    assert "branch_focus_invariant" in audit["failures"]
+
+
+def test_semantic_turn_audit_rejects_final_confirmation_while_field_confirmation_pending():
+    inputs = _semantic_audit_inputs()
+    proof = inputs["proof_record"]["proof_result"]
+    proof["pending_confirmation"] = {"kind": "name", "candidate": "Ana Silva"}
+    proof["explicit_confirmation"] = True
+    audit = wv._semantic_turn_audit(**inputs)
+    assert "field_confirmation_precedes_final_confirmation" in audit["failures"]
+
+
 def test_semantic_turn_audit_rejects_a_later_field_before_first_missing():
     """The validator must enforce the same graph-owned order as proof."""
     inputs = _semantic_audit_inputs()

@@ -26,6 +26,11 @@ _FINAL_CONFIRMATION = re.compile(
     r"\b(confirmad[oa]|reservad[oa]|agendad[oa]|fechad[oa]|booked|confirmed)\b",
     re.IGNORECASE,
 )
+_NAME_SEPARATORS = {"-", "'", "’"}
+_NON_NAME_PHRASES = {
+    "oi", "ola", "bom dia", "boa tarde", "boa noite", "tudo bem",
+    "e ai", "e ae", "eai", "eae",
+}
 
 
 def _literal_span(message: str, span: Any) -> bool:
@@ -35,6 +40,32 @@ def _literal_span(message: str, span: Any) -> bool:
     value = re.sub(r"\s+", " ", str(span or "")).strip()
     canonical = re.sub(r"\s+", " ", str(message or "")).strip()
     return bool(value and value in canonical)
+
+
+def is_human_full_name(value: Any) -> bool:
+    """Validate a complete human name without assuming a language or fixture."""
+    text = unicodedata.normalize("NFC", str(value or "")).strip()
+    if not text or re.search(r"(?:https?://|www\.|@)", text, re.IGNORECASE):
+        return False
+    if _fold(text) in _NON_NAME_PHRASES:
+        return False
+    tokens = text.split()
+    if not 2 <= len(tokens) <= 6:
+        return False
+    for token in tokens:
+        if not token or token[0] in _NAME_SEPARATORS or token[-1] in _NAME_SEPARATORS:
+            return False
+        previous_separator = False
+        for char in token:
+            if char in _NAME_SEPARATORS:
+                if previous_separator:
+                    return False
+                previous_separator = True
+                continue
+            if not unicodedata.category(char).startswith("L"):
+                return False
+            previous_separator = False
+    return True
 
 
 def _condition_matches(condition: Any, facts: dict[str, Any]) -> bool:
@@ -76,6 +107,8 @@ def field_resolved(field: dict[str, Any], fact: dict[str, Any] | None) -> bool:
     if not fact:
         return False
     status = str(fact.get("status") or "")
+    if status in {"needs_confirmation", "invalid"}:
+        return False
     if status not in set(field.get("accepted_statuses") or ["known"]):
         return False
     return status != "known" or fact.get("value") not in (None, "")
@@ -316,7 +349,10 @@ def _canonical_field_value(
         if not isinstance(value, str) or not value.strip():
             return value, "semantic value must be non-empty text"
         semantic_type = str(validation.get("semantic_type") or "")
-        if semantic_type == "human_name":
+        if semantic_type == "human_full_name":
+            if not is_human_full_name(value):
+                return value, "value is not a valid human full name"
+        elif semantic_type == "human_name":
             folded = _fold(value)
             tokens = folded.split()
             if not (1 <= len(tokens) <= 6) or any(any(char.isdigit() for char in token) for token in tokens):
@@ -332,6 +368,7 @@ def check_service_operations(
     message: str,
     operations: list[dict[str, Any]],
     active_branch_node_ids: list[str],
+    consumed_service_spans: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Prove a first-class service-set transition independently of fields."""
     anchors = set(document.get("branch_anchors") or [])
@@ -361,6 +398,21 @@ def check_service_operations(
             errors.append(f"service_path_checksum_mismatch:{anchor}")
         if not _literal_span(message, operation.get("evidence_span")):
             errors.append(f"service_evidence_not_literal:{anchor}")
+        evidence_type = str(operation.get("evidence_type") or "")
+        if evidence_type not in {"exact_catalog", "confirmed_candidate"}:
+            errors.append(f"service_evidence_type_not_authorized:{anchor}")
+        registered = next(
+            (
+                span for span in consumed_service_spans or []
+                if _fold(str(span.get("text") or ""))
+                == _fold(str(operation.get("evidence_span") or ""))
+                and str(span.get("branch_anchor_node_id") or anchor) == anchor
+                and str(span.get("evidence_type") or "exact_catalog") == evidence_type
+            ),
+            None,
+        )
+        if registered is None:
+            errors.append(f"service_evidence_not_consumed:{anchor}")
         if action == "add":
             if anchor in after:
                 errors.append(f"service_add_duplicate:{anchor}")

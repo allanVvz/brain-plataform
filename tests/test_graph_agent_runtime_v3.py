@@ -1543,12 +1543,13 @@ def test_explicit_service_change_is_not_hidden_by_pending_field_guard():
         ) is False
 
 
-def test_deterministic_branch_resolution_overrides_model_routing_and_derives_service():
+def test_backend_exact_resolution_overrides_model_routing_and_derives_service():
     document = {
         "node_by_id": {
             "branch:a": {"title": "Service Alpha", "slug": "service-alpha"},
             "branch:b": {"title": "Service Beta", "slug": "service-beta"},
         },
+        "branch_anchors": ["branch:a", "branch:b"],
         "coordinates": {
             "branch:a": {"path_checksum": "checksum:a"},
             "branch:b": {"path_checksum": "checksum:b"},
@@ -1560,10 +1561,10 @@ def test_deterministic_branch_resolution_overrides_model_routing_and_derives_ser
         messages=[{"message_id": "msg-1", "role": "user", "content": "Quero Service Alpha"}],
         cart={"facts": {}}, rag_nodes=[], rag_paths=[], graph_contract={},
         active_branch_node_id=None, branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
-        retrieval_trace={"deterministic_branch_resolution": {
-            "branch_anchor_node_id": "branch:a",
-            "branch_evidence_span": "Service Alpha",
-        }},
+        retrieval_trace={"service_resolution": graph_agent_runtime_v3._resolve_service_operations(
+            document, "Quero Service Alpha", active_branch_node_id=None,
+            active_branch_node_ids=[],
+        )},
     )
     model = ConversationProposal(
         branch_action="keep", branch_anchor_node_id="branch:b",
@@ -1585,12 +1586,13 @@ def test_deterministic_branch_resolution_overrides_model_routing_and_derives_ser
     ]
 
 
-def test_deterministic_additive_service_keeps_existing_branch_and_appends_new_one():
+def test_backend_exact_additive_service_keeps_existing_branch_and_appends_new_one():
     document = {
         "node_by_id": {
             "branch:a": {"title": "Service Alpha", "slug": "service-alpha"},
             "branch:b": {"title": "Service Beta", "slug": "service-beta"},
         },
+        "branch_anchors": ["branch:a", "branch:b"],
         "coordinates": {"branch:b": {"path_checksum": "checksum:b"}},
     }
     context = ConversationContext(
@@ -1601,10 +1603,10 @@ def test_deterministic_additive_service_keeps_existing_branch_and_appends_new_on
         cart={"facts": {}}, rag_nodes=[], rag_paths=[], graph_contract={},
         active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
         branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
-        retrieval_trace={"deterministic_branch_resolution": {
-            "branch_anchor_node_id": "branch:b",
-            "branch_evidence_span": "Service Beta",
-        }},
+        retrieval_trace={"service_resolution": graph_agent_runtime_v3._resolve_service_operations(
+            document, "TambÃ©m quero Service Beta", active_branch_node_id="branch:a",
+            active_branch_node_ids=["branch:a"],
+        )},
     )
     model = ConversationProposal(
         branch_action="switch", branch_anchor_node_id="branch:b",
@@ -1623,27 +1625,13 @@ def test_deterministic_additive_service_keeps_existing_branch_and_appends_new_on
     assert resolved.extracted_facts[0].owner_node_id == "branch:b"
 
 
-def test_system_prompt_explains_when_to_select_vs_keep():
-    """Regression test for the "keep sem branch ativa" loop (2026-08-14).
-
-    Confirmed live: the model proposed branch_action="keep" instead of
-    "select" on the very turn that should have established the first
-    branch, with an otherwise-perfect proposal (right branch, right
-    extracted fact, natural reply). graph_proof_checker_v3.check() rejects
-    "keep" without an active branch unconditionally, with no recovery path
-    when there was real evidence -- the whole good proposal gets discarded
-    and the turn falls back to the raw published question, repeating
-    forever. Root cause: the prompt never explained the branch_action verbs
-    in natural language, only the bare JSON Schema enum. This asserts the
-    explanation exists and actually distinguishes "select" (first branch,
-    no active branch yet) from "keep" (already-established branch only).
-    """
+def test_system_prompt_marks_model_service_routing_as_observation_only():
     prompt = graph_agent_runtime_v3.SYSTEM_PROMPT
     assert "branch_action" in prompt
-    for verb in ('"select"', '"keep"', '"switch"', '"add"'):
-        assert verb in prompt
-    assert "active_branch_node_id vazio" in prompt
-    assert "Nunca proponha \"keep\" nesse momento" in prompt
+    assert "service_observations" in prompt
+    assert "service_operations existe apenas por compatibilidade" in prompt
+    assert "nunca autoriza mutação" in prompt
+    assert "somente o resolvedor do backend aplica operações" in prompt
 
 
 def test_system_prompt_still_has_anti_repetition_instruction():
@@ -1936,7 +1924,7 @@ def test_previously_mentioned_service_titles_ignores_the_customers_own_message()
     assert graph_agent_runtime_v3._previously_mentioned_service_titles(document, messages) == []
 
 
-def test_new_service_is_added_by_default_even_while_another_field_is_pending():
+def test_bare_exact_service_mention_requires_confirmation_when_another_field_is_pending():
     document = {
         "branch_anchors": ["aurora-product-polish-localized", "aurora-product-vitrification"],
         "node_by_id": {
@@ -1958,13 +1946,581 @@ def test_new_service_is_added_by_default_even_while_another_field_is_pending():
         active_branch_node_id="aurora-product-polish-localized",
         active_branch_node_ids=["aurora-product-polish-localized"],
     )
+    assert resolution["status"] == "needs_confirmation"
+    assert resolution["operations"] == []
+    assert resolution["candidate"]["branch_anchor_node_id"] == "aurora-product-vitrification"
+    assert resolution["next_active_branch_node_ids"] == ["aurora-product-polish-localized"]
+    assert resolution["focused_branch_node_id"] == "aurora-product-polish-localized"
 
-    assert resolution["status"] == "resolved"
-    assert [item["action"] for item in resolution["operations"]] == ["add"]
-    assert resolution["next_active_branch_node_ids"] == [
-        "aurora-product-polish-localized", "aurora-product-vitrification",
+
+def _service_resolution_document():
+    return {
+        "branch_anchors": ["branch:vitrification", "branch:polish"],
+        "node_by_id": {
+            "branch:vitrification": {
+                "title": "Vitrifica\u00e7\u00e3o", "slug": "vitrificacao",
+                "data": {"aliases": ["prote\u00e7\u00e3o cer\u00e2mica"]},
+            },
+            "branch:polish": {
+                "title": "Polimento", "slug": "polimento", "data": {"aliases": []},
+            },
+        },
+        "coordinates": {
+            "branch:vitrification": {"path_checksum": "checksum:v"},
+            "branch:polish": {"path_checksum": "checksum:p"},
+        },
+    }
+
+
+def test_exact_service_applies_only_with_intent_or_direct_published_question():
+    document = _service_resolution_document()
+    for message in (
+        "Quanto custa Vitrifica\u00e7\u00e3o?",
+        "Quero saber quanto custa Vitrifica\u00e7\u00e3o?",
+    ):
+        informative = graph_agent_runtime_v3._resolve_service_operations(
+            document, message, active_branch_node_id=None, active_branch_node_ids=[],
+        )
+        assert informative["status"] == "needs_confirmation"
+        assert informative["operations"] == []
+
+    explicit = graph_agent_runtime_v3._resolve_service_operations(
+        document, "Quero VITRIFICA\u00c7\u00c3O!",
+        active_branch_node_id=None, active_branch_node_ids=[],
+    )
+    assert explicit["status"] == "resolved"
+    assert explicit["operations"][0]["evidence_type"] == "exact_catalog"
+
+    direct = graph_agent_runtime_v3._resolve_service_operations(
+        document, "vitrifica\u00e7\u00e3o.", active_branch_node_id=None,
+        active_branch_node_ids=[],
+        contract={"fields": [{
+            "key": "servico", "branch_selection_field": True,
+            "question_node_id": "q:service",
+        }]},
+        asked_question_node_ids=["q:service"],
+    )
+    assert direct["status"] == "resolved"
+    assert direct["operations"][0]["action"] == "add"
+
+
+def test_textual_service_similarity_only_creates_candidate_and_handles_limits():
+    document = _service_resolution_document()
+    typo = graph_agent_runtime_v3._resolve_service_operations(
+        document, "Quero vitrificasao", active_branch_node_id=None,
+        active_branch_node_ids=[],
+    )
+    assert typo["status"] == "needs_confirmation"
+    assert typo["operations"] == []
+    assert typo["candidate"]["resolution_method"] == "textual_similarity"
+    assert typo["candidate"]["edit_distance"] <= 3
+    assert typo["candidate"]["text_similarity"] >= 0.8
+
+    switch_typo = graph_agent_runtime_v3._resolve_service_operations(
+        document, "Quero trocar para vitrificasao",
+        active_branch_node_id="branch:polish",
+        active_branch_node_ids=["branch:polish"],
+    )
+    assert switch_typo["candidate"]["action"] == "switch"
+    assert switch_typo["candidate"]["replace_branch_node_id"] == "branch:polish"
+
+    unrelated = graph_agent_runtime_v3._resolve_service_operations(
+        document, "Quero lavagem completa", active_branch_node_id=None,
+        active_branch_node_ids=[],
+    )
+    assert unrelated["status"] == "none"
+    assert unrelated["operations"] == []
+
+    ambiguous_document = {
+        "branch_anchors": ["a", "b"],
+        "node_by_id": {
+            "a": {"title": "Polimento", "slug": "polimento", "data": {}},
+            "b": {"title": "Polimenta", "slug": "polimenta", "data": {}},
+        },
+        "coordinates": {"a": {}, "b": {}},
+    }
+    ambiguous = graph_agent_runtime_v3._resolve_service_operations(
+        ambiguous_document, "polimentx", active_branch_node_id=None,
+        active_branch_node_ids=[],
+    )
+    assert ambiguous["status"] == "ambiguous"
+    assert len(ambiguous["confirmation"]["options"]) == 2
+
+
+def test_name_is_known_only_as_whole_direct_answer_and_composite_needs_confirmation():
+    contract = {"fields": [{
+        "key": "nome", "owner_node_id": "persona:generic",
+        "question_node_id": "q:name",
+        "validation": {"semantic_type": "human_full_name"},
+    }]}
+
+    def reconcile(message, value, evidence, *, service_spans=None):
+        context = ConversationContext(
+            persona_slug="generic", agent_slug="agent", graph_version=1,
+            graph_checksum="sha256:x",
+            messages=[{"message_id": "msg-name", "role": "user", "content": message}],
+            cart={"asked_question_node_ids": ["q:name"]}, rag_nodes=[], rag_paths=[],
+            graph_contract=contract, branch_node_ids=[],
+            retrieval_trace={"service_resolution": {
+                "consumed_spans": service_spans or [],
+            }},
+        )
+        proposal = ConversationProposal(
+            branch_action="keep", branch_anchor_node_id="branch:a",
+            branch_path_checksum="checksum:a", extracted_facts=[ExtractedFact(
+                field_key="nome", owner_node_id="persona:generic", status="known",
+                value=value, source_message_id="msg-name", evidence_span=evidence,
+                confidence=1,
+            )],
+        )
+        return graph_agent_runtime_v3._reconcile_human_full_name_facts(
+            proposal, context=context, contract=contract,
+        )
+
+    direct, errors = reconcile("Ana Silva", "Ana Silva", "Ana Silva")
+    assert not errors
+    assert direct.extracted_facts[0].status == "known"
+
+    composite_message = "Ana Silva, tamb\u00e9m quero Vitrifica\u00e7\u00e3o"
+    service_resolution = graph_agent_runtime_v3._resolve_service_operations(
+        _service_resolution_document(), composite_message,
+        active_branch_node_id=None, active_branch_node_ids=[],
+    )
+    assert service_resolution["operations"][0]["action"] == "add"
+    assert service_resolution["operations"][0]["evidence_type"] == "exact_catalog"
+
+    composite, errors = reconcile(
+        composite_message,
+        "Ana Silva", "Ana Silva",
+        service_spans=service_resolution["consumed_spans"],
+    )
+    assert not errors
+    fact = composite.extracted_facts[0]
+    assert fact.status == "needs_confirmation"
+    assert fact.value is None
+    assert fact.metadata["confirmation"]["candidate"] == "Ana Silva"
+
+    overlapping, errors = reconcile(
+        "Quero Vitrifica\u00e7\u00e3o", "Quero Vitrifica\u00e7\u00e3o",
+        "Quero Vitrifica\u00e7\u00e3o",
+        service_spans=[{
+            "text": "Vitrifica\u00e7\u00e3o", "start": 6, "end": 18,
+            "branch_anchor_node_id": "branch:v", "evidence_type": "exact_catalog",
+        }],
+    )
+    assert overlapping.extracted_facts == []
+    assert errors[0]["errors"] == ["human_full_name_overlaps_service_evidence"]
+
+
+def test_semantic_service_candidate_requires_score_margin_model_match_and_free_literal_span():
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:x",
+        messages=[{"message_id": "msg-sem", "role": "user",
+                   "content": "quero proteger a pintura"}],
+        cart={}, rag_nodes=[], rag_paths=[], graph_contract={}, branch_node_ids=[],
+        retrieval_trace={"service_resolution": {"semantic_ranking": [
+            {"branch_anchor_node_id": "branch:v", "score": 0.86},
+            {"branch_anchor_node_id": "branch:p", "score": 0.75},
+        ]}},
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:v",
+        branch_path_checksum="checksum:v", service_observations=[{
+            "branch_anchor_node_id": "branch:v",
+            "evidence_span": "proteger a pintura", "observed_intent": "select",
+            "confidence": 0.9,
+        }],
+    )
+    candidate, rejection = graph_agent_runtime_v3._semantic_service_candidate(
+        context, proposal,
+    )
+    assert rejection is None
+    assert candidate["resolution_method"] == "semantic_anchor_ranking"
+    assert candidate["semantic_score"] == 0.86
+    assert candidate["semantic_margin"] == pytest.approx(0.11)
+
+    ambiguous = context.model_copy(update={"retrieval_trace": {
+        "service_resolution": {"semantic_ranking": [
+            {"branch_anchor_node_id": "branch:v", "score": 0.86},
+            {"branch_anchor_node_id": "branch:p", "score": 0.80},
+        ]},
+    }})
+    assert graph_agent_runtime_v3._semantic_service_candidate(
+        ambiguous, proposal,
+    )[1] == "semantic_margin_ambiguous"
+
+    reserved = proposal.model_copy(update={"extracted_facts": [ExtractedFact(
+        field_key="nome", owner_node_id="persona:generic", status="known",
+        value="proteger a pintura", source_message_id="msg-sem",
+        evidence_span="proteger a pintura", confidence=1,
+    )]})
+    assert graph_agent_runtime_v3._semantic_service_candidate(
+        context, reserved,
+    )[1] == "service_evidence_reserved_or_non_literal"
+
+    textual_context = context.model_copy(update={"retrieval_trace": {
+        "service_resolution": {"candidate": {
+            "branch_anchor_node_id": "branch:v",
+            "evidence_span": "proteger a pintura",
+            "resolution_method": "textual_similarity",
+        }},
+    }})
+    assert graph_agent_runtime_v3._semantic_service_candidate(
+        textual_context, reserved,
+    )[1] == "service_evidence_reserved_or_non_literal"
+
+
+def _pending_confirmation_document():
+    common = {
+        "fields": [
+            {
+                "key": "nome", "owner_node_id": "persona:generic",
+                "question_node_id": "q:name", "required": True,
+                "accepted_statuses": ["known", "needs_confirmation", "invalid"],
+                "validation": {"semantic_type": "human_full_name"},
+            },
+            {
+                "key": "servico", "owner_node_id": "persona:generic",
+                "question_node_id": "q:service", "required": True,
+                "accepted_statuses": ["known"], "branch_selection_field": True,
+            },
+        ],
+        "questions": {
+            "q:name": {"field_key": "nome", "text": "Qual \u00e9 seu nome e sobrenome?"},
+            "q:service": {"field_key": "servico", "text": "Qual servi\u00e7o voc\u00ea quer?"},
+        },
+    }
+    branch = {
+        "branch_anchor_node_id": "branch:v", "branch_path_checksum": "checksum:v",
+        "fields": [
+            {
+                "key": "nome", "owner_node_id": "persona:generic", "required": True,
+                "accepted_statuses": ["known"], "question_node_id": "q:name",
+            },
+            {
+                "key": "servico", "owner_node_id": "branch:v", "required": True,
+                "accepted_statuses": ["known"], "question_node_id": "q:service",
+            },
+            {
+                "key": "objetivo", "owner_node_id": "branch:v", "required": True,
+                "accepted_statuses": ["known"], "question_node_id": "q:objective",
+            },
+        ],
+        "questions": {
+            "q:name": {"field_key": "nome", "text": "Qual \u00e9 seu nome e sobrenome?"},
+            "q:service": {"field_key": "servico", "text": "Qual servi\u00e7o voc\u00ea quer?"},
+            "q:objective": {"field_key": "objetivo", "text": "Qual \u00e9 seu objetivo?"},
+        },
+    }
+    return {
+        "checksum": "sha256:confirmation", "common_contract": common,
+        "branch_anchors": ["branch:v"], "branch_contracts": {"branch:v": branch},
+        "node_by_id": {"branch:v": {"title": "Vitrifica\u00e7\u00e3o", "slug": "vitrificacao"}},
+        "coordinates": {"branch:v": {"path_checksum": "checksum:v"}},
+    }
+
+
+@pytest.mark.parametrize("answer,expected_status,expected_question", [
+    ("sim", "known", "q:service"),
+    ("n\u00e3o", "invalid", "q:name"),
+])
+def test_name_candidate_confirmation_is_resolved_before_final_confirmation(
+    monkeypatch, answer, expected_status, expected_question,
+):
+    document = _pending_confirmation_document()
+    pub = publication(document)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_persona",
+        lambda _slug: {**PERSONA, "config": {}},
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
+        lambda _persona_id: pub,
+    )
+    pending = {
+        "field_key": "nome", "owner_node_id": "persona:generic",
+        "status": "needs_confirmation", "value": None,
+        "metadata": {"confirmation": {
+            "kind": "name", "candidate": "Ana Silva", "field_key": "nome",
+            "owner_node_id": "persona:generic", "transition": "pending",
+        }},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], publication_id=pub["id"],
+        messages=[{"message_id": "msg-confirm", "role": "user", "content": answer}],
+        cart={"facts": {"nome": pending}, "facts_by_key": {"nome": [pending]},
+              "asked_question_node_ids": ["q:name"]},
+        rag_nodes=[], rag_paths=[], graph_contract=document["common_contract"],
+        branch_node_ids=[], active_branch_node_ids=[],
+    )
+    _decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation=None,
+    )
+    fact = response.proof["accepted_facts"][0]
+    assert fact["status"] == expected_status
+    assert response.proof["mode"] == "deterministic_field_confirmation"
+    assert response.proof["explicit_confirmation"] is False
+    assert response.proof["next_question_node_id"] == expected_question
+    assert response.proof["qualification_complete"] is False
+
+
+def test_resolving_name_candidate_asks_next_persisted_service_confirmation(monkeypatch):
+    document = _pending_confirmation_document()
+    document["confirmation_templates"] = {
+        "name": "Seu nome completo é {candidate}?",
+        "service_selection": "Você quer selecionar {candidate}?",
+        "service_addition": "Você quer adicionar {candidate}?",
+        "service_switch": "Você quer trocar para {candidate}?",
+        "service_removal": "Você quer remover {candidate}?",
+    }
+    pub = publication(document)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_persona",
+        lambda _slug: {**PERSONA, "config": {}},
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
+        lambda _persona_id: pub,
+    )
+    pending_name = {
+        "field_key": "nome", "owner_node_id": "persona:generic",
+        "status": "needs_confirmation", "value": None,
+        "metadata": {"confirmation": {
+            "kind": "name", "candidate": "Ana Silva", "field_key": "nome",
+            "owner_node_id": "persona:generic", "transition": "pending",
+        }},
+    }
+    pending_service = {
+        "field_key": "servico", "owner_node_id": "branch:v",
+        "status": "needs_confirmation", "value": None,
+        "metadata": {"confirmation": {
+            "kind": "service", "candidate": "vitrificacao",
+            "candidate_title": "Vitrificação",
+            "branch_anchor_node_id": "branch:v", "action": "add",
+            "transition": "pending",
+        }},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], publication_id=pub["id"],
+        messages=[{"message_id": "msg-confirm-name", "role": "user", "content": "sim"}],
+        cart={
+            "facts": {"nome": pending_name, "servico": pending_service},
+            "facts_by_key": {
+                "nome": [pending_name], "servico": [pending_service],
+            },
+            "asked_question_node_ids": ["q:name"],
+        },
+        rag_nodes=[], rag_paths=[], graph_contract=document["common_contract"],
+        branch_node_ids=[], active_branch_node_ids=[],
+    )
+    _decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation=None,
+    )
+    assert response.reply_text == "Você quer selecionar Vitrificação?"
+    assert response.proof["confirmation_state"] == "field_confirmation"
+    assert response.proof["pending_confirmation"]["kind"] == "service"
+    assert response.proof["next_question_node_id"] is None
+    assert response.proof["qualification_complete"] is False
+
+
+def test_positive_service_candidate_confirmation_applies_bound_operation_only(monkeypatch):
+    document = _pending_confirmation_document()
+    pub = publication(document)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_persona",
+        lambda _slug: {**PERSONA, "config": {}},
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
+        lambda _persona_id: pub,
+    )
+    name = {
+        "field_key": "nome", "owner_node_id": "persona:generic",
+        "status": "known", "value": "Ana Silva",
+    }
+    pending = {
+        "field_key": "servico", "owner_node_id": "branch:v",
+        "status": "needs_confirmation", "value": None,
+        "metadata": {"confirmation": {
+            "kind": "service", "candidate": "vitrificacao",
+            "branch_anchor_node_id": "branch:v",
+            "branch_path_checksum": "checksum:v", "action": "add",
+            "method": "textual_similarity", "transition": "pending",
+        }},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], publication_id=pub["id"],
+        messages=[{"message_id": "msg-service-confirm", "role": "user", "content": "sim"}],
+        cart={"facts": {"nome": name, "servico": pending},
+              "facts_by_key": {"nome": [name], "servico": [pending]},
+              "asked_question_node_ids": ["q:service"]},
+        rag_nodes=[], rag_paths=[], graph_contract=document["common_contract"],
+        branch_node_ids=[], active_branch_node_ids=[],
+    )
+    _decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation=None,
+    )
+    assert response.cart_state["active_branch_node_ids"] == ["branch:v"]
+    assert response.cart_state["active_branch_node_id"] == "branch:v"
+    operation = response.proof["applied_service_operations"][0]
+    assert operation["action"] == "add"
+    assert operation["evidence_type"] == "confirmed_candidate"
+    assert response.proof["service_operation_proof"]["valid"]
+    assert response.proof["next_question_node_id"] == "q:objective"
+    assert response.proof["explicit_confirmation"] is False
+
+
+def test_confirmed_switch_drops_previous_service_and_negative_preserves_it(monkeypatch):
+    document = _pending_confirmation_document()
+    document["branch_anchors"].append("branch:p")
+    document["node_by_id"]["branch:p"] = {
+        "title": "Polimento", "slug": "polimento",
+    }
+    document["coordinates"]["branch:p"] = {"path_checksum": "checksum:p"}
+    document["branch_contracts"]["branch:p"] = copy.deepcopy(
+        document["branch_contracts"]["branch:v"]
+    )
+    pub = publication(document)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_persona",
+        lambda _slug: {**PERSONA, "config": {}},
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
+        lambda _persona_id: pub,
+    )
+    old_service = {
+        "field_key": "servico", "owner_node_id": "branch:p",
+        "status": "known", "value": "polimento",
+    }
+    pending = {
+        "field_key": "servico", "owner_node_id": "branch:v",
+        "status": "needs_confirmation", "value": None,
+        "metadata": {"confirmation": {
+            "kind": "service", "candidate": "vitrificacao",
+            "branch_anchor_node_id": "branch:v", "action": "switch",
+            "replace_branch_node_id": "branch:p", "method": "textual_similarity",
+            "transition": "pending",
+        }},
+    }
+
+    def context(answer):
+        return ConversationContext(
+            persona_slug="generic", agent_slug="agent", graph_version=1,
+            graph_checksum=document["checksum"], publication_id=pub["id"],
+            messages=[{"message_id": f"msg-{answer}", "role": "user", "content": answer}],
+            cart={"facts": {"servico": old_service},
+                  "facts_by_key": {"servico": [old_service, pending]},
+                  "asked_question_node_ids": ["q:service"]},
+            rag_nodes=[], rag_paths=[], graph_contract=document["common_contract"],
+            branch_node_ids=[], active_branch_node_id="branch:p",
+            active_branch_node_ids=["branch:p"],
+        )
+
+    _decision, accepted = graph_agent_runtime_v3.decide(
+        context("sim"), model_observation=None,
+    )
+    assert [item["action"] for item in accepted.proof["applied_service_operations"]] == [
+        "drop", "add",
     ]
-    assert resolution["focused_branch_node_id"] == "aurora-product-vitrification"
+    assert accepted.cart_state["active_branch_node_ids"] == ["branch:v"]
+    assert accepted.cart_state["active_branch_node_id"] == "branch:v"
+
+    _decision, rejected = graph_agent_runtime_v3.decide(
+        context("n\u00e3o"), model_observation=None,
+    )
+    assert rejected.proof["applied_service_operations"] == []
+    assert rejected.cart_state["active_branch_node_ids"] == ["branch:p"]
+    assert rejected.cart_state["active_branch_node_id"] == "branch:p"
+
+
+def test_rejected_confirmation_of_active_service_restores_previous_known_fact(monkeypatch):
+    document = _pending_confirmation_document()
+    pub = publication(document)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_persona",
+        lambda _slug: {**PERSONA, "config": {}},
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
+        lambda _persona_id: pub,
+    )
+    pending = {
+        "field_key": "servico", "owner_node_id": "branch:v",
+        "status": "needs_confirmation", "value": None,
+        "metadata": {"confirmation": {
+            "kind": "service", "candidate": "vitrificacao",
+            "branch_anchor_node_id": "branch:v", "action": "keep",
+            "transition": "pending", "previous_fact": {
+                "field_key": "servico", "owner_node_id": "branch:v",
+                "status": "known", "value": "vitrificacao", "metadata": {},
+            },
+        }},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], publication_id=pub["id"],
+        messages=[{"message_id": "msg-no", "role": "user", "content": "n\u00e3o"}],
+        cart={"facts": {"servico": pending},
+              "facts_by_key": {"servico": [pending]},
+              "asked_question_node_ids": ["q:service"]},
+        rag_nodes=[], rag_paths=[], graph_contract=document["branch_contracts"]["branch:v"],
+        branch_node_ids=[], active_branch_node_id="branch:v",
+        active_branch_node_ids=["branch:v"],
+    )
+    _decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation=None,
+    )
+    restored = response.cart_state["facts_by_key"]["servico"][0]
+    assert restored["status"] == "known"
+    assert restored["value"] == "vitrificacao"
+    assert restored["metadata"]["confirmation"]["transition"] == "rejected"
+    assert response.cart_state["active_branch_node_ids"] == ["branch:v"]
+    assert response.cart_state["active_branch_node_id"] == "branch:v"
+
+
+def test_literal_e_ae_then_allan_rodrigues_leaves_only_service_question_pending():
+    document = _pending_confirmation_document()
+    assert graph_agent_runtime_v3._is_bare_greeting("e ae")
+    assert graph_agent_runtime_v3._resolve_service_operations(
+        document, "Allan Rodrigues", active_branch_node_id=None,
+        active_branch_node_ids=[], contract=document["common_contract"],
+        asked_question_node_ids=["q:name"],
+    )["operations"] == []
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"],
+        messages=[{"message_id": "msg-name", "role": "user",
+                   "content": "Allan Rodrigues"}],
+        cart={"asked_question_node_ids": ["q:name"]}, rag_nodes=[], rag_paths=[],
+        graph_contract=document["common_contract"], branch_node_ids=[],
+        retrieval_trace={"service_resolution": {"consumed_spans": []}},
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:v",
+        branch_path_checksum="checksum:v", extracted_facts=[ExtractedFact(
+            field_key="nome", owner_node_id="persona:generic", status="known",
+            value="Allan Rodrigues", source_message_id="msg-name",
+            evidence_span="Allan Rodrigues", confidence=1,
+        )],
+    )
+    reconciled, errors = graph_agent_runtime_v3._reconcile_human_full_name_facts(
+        proposal, context=context, contract=document["common_contract"],
+    )
+    assert not errors
+    name = reconciled.extracted_facts[0].model_dump(mode="json")
+    missing, askable, _required, _contract = (
+        graph_agent_runtime_v3._aggregate_confirmation_state(
+            document, [], {"nome": [name]},
+        )
+    )
+    assert name["status"] == "known"
+    assert [field["key"] for field in missing] == ["servico"]
+    assert askable[0]["question_node_id"] == "q:service"
 
 
 def test_two_services_in_one_message_are_both_added_without_additive_word():
@@ -2450,7 +3006,7 @@ def test_normalize_stale_next_question_after_branch_change_is_a_noop_when_alread
     ) is keeping
 
 
-def test_decide_add_action_grows_active_branch_node_ids_without_dropping_the_current_one(monkeypatch):
+def test_decide_does_not_apply_model_only_add_without_backend_evidence(monkeypatch):
     """End-to-end regression for multi-service support (branch_action "add").
 
     A customer asking for an additional service (e.g. "e também quero
@@ -2500,12 +3056,12 @@ def test_decide_add_action_grows_active_branch_node_ids_without_dropping_the_cur
         context, model_observation={"proposal": add_proposal},
     )
     assert response.proof.get("valid"), response.proof.get("errors")
-    assert response.cart_state["active_branch_node_ids"] == ["branch:a", "branch:b"]
-    # Dialogue focus moves to the branch just added, but the list keeps both.
-    assert response.cart_state["active_branch_node_id"] == "branch:b"
+    assert response.cart_state["active_branch_node_ids"] == ["branch:a"]
+    assert response.cart_state["active_branch_node_id"] == "branch:a"
+    assert response.proof["applied_service_operations"] == []
 
 
-def test_jose_service_turn_adds_vitrification_without_filling_pending_objective(monkeypatch):
+def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatch):
     persona_node = node(1, "persona:aurora", parent_type="persona")
     polish = node(2, "aurora-product-polish-localized", parent_type="product", data={
         "capabilities": {"branch_anchor": True}, "aliases": ["polimento localizado"],
@@ -2558,6 +3114,9 @@ def test_jose_service_turn_adds_vitrification_without_filling_pending_objective(
             edge(3, persona_node, q_service), edge(4, persona_node, q_objective),
         ],
     )
+    document["confirmation_templates"] = {
+        "service_addition": "Voc\u00ea quer adicionar {candidate}?",
+    }
     pub = publication(document)
     monkeypatch.setattr(
         graph_agent_runtime_v3.supabase_client, "get_persona",
@@ -2569,6 +3128,11 @@ def test_jose_service_turn_adds_vitrification_without_filling_pending_objective(
     )
     resolution = graph_agent_runtime_v3._resolve_service_operations(
         document, "Vitrificação",
+        active_branch_node_id="aurora-product-polish-localized",
+        active_branch_node_ids=["aurora-product-polish-localized"],
+    )
+    resolution = graph_agent_runtime_v3._reserve_message_for_pending_field(
+        resolution, pending_field_answer=True, message="Vitrificação",
         active_branch_node_id="aurora-product-polish-localized",
         active_branch_node_ids=["aurora-product-polish-localized"],
     )
@@ -2619,25 +3183,17 @@ def test_jose_service_turn_adds_vitrification_without_filling_pending_objective(
 
     assert response.proof["valid"], response.proof["errors"]
     assert response.cart_state["active_branch_node_ids"] == [
-        "aurora-product-polish-localized", "aurora-product-vitrification",
+        "aurora-product-polish-localized",
     ]
     service_facts = response.cart_state["facts_by_key"]["servico"]
     assert {fact["owner_node_id"] for fact in service_facts} == {
-        "aurora-product-polish-localized", "aurora-product-vitrification",
+        "aurora-product-polish-localized",
     }
     assert "objective" not in response.cart_state["facts_by_key"]
     assert response.proof["next_question_node_id"] == "q:objective"
-    assert response.proof["service_operations"][0]["action"] == "add"
-    assert any(
-        item["field_key"] == "objective"
-        and item["errors"] == ["service_evidence_consumed"]
-        for item in response.proof["field_validation"]
-    )
-    assert "Adicionei Vitrificação" in response.reply_text
-    assert "Não consegui identificar seu objetivo." in response.reply_text
-    assert response.reply_text.endswith(
-        "Você pretende vender o carro ou continuar cuidando dele?"
-    )
+    assert response.proof["service_operations"] == []
+    assert response.proof["service_candidate"] is None
+    assert response.proof["service_candidate_rejection_reason"] == "no_service_candidate"
 
 
 def test_decide_fallback_uses_the_published_closing_text_instead_of_silence(monkeypatch):
@@ -2839,7 +3395,7 @@ def test_discovery_keep_uses_model_reply_without_committing_fallback_branch(monk
     assert response.proof["valid"] is True
     assert response.proof["mode"] == "discovery"
     assert response.cart_state["active_branch_node_id"] is None
-    assert response.reply_text.startswith("Oi!")
+    assert response.reply_text.endswith("quantidade?")
     assert decision.intent == "collect_graph_fields"
 
 
