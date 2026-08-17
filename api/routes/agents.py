@@ -149,6 +149,20 @@ def set_journey_state(
                 payload={"ai_paused": False, "by": "journey_closed",
                          "target": body.target},
             )
+    elif result.get("changed") and body.target == "qualificado":
+        # Selecionar "qualificado" manualmente e o mesmo desfecho que o SDR
+        # atinge sozinho ao confirmar a qualificacao -- e o SDR e a unica
+        # agente do lead, entao os dois caminhos devem pausar a IA do mesmo
+        # jeito. O caminho automatico ja grava handoff_level='full' em
+        # conversation_runtime.commit(); aqui cobrimos so a correcao manual.
+        paused = agents_service.pause_lead(lead_ref)
+        result["ai_paused"] = bool(paused)
+        if paused:
+            event_emitter.emit(
+                "lead.ai_paused", lead_ref=lead_ref,
+                payload={"ai_paused": True, "by": "journey_qualified",
+                         "target": body.target},
+            )
     return result
 
 

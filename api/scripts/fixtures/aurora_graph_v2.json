@@ -53,8 +53,8 @@
             ]
           },
           "qualification": {
-            "summary_template": "Resumo para a Equipe Aurora: {informed_fields}.",
-            "confirmation_question": "Esses dados estão corretos?",
+            "summary_template": "Então ficou assim: {informed_fields}.",
+            "confirmation_question": "Tá tudo certo?",
             "correction_prompt": "Diga qual informação precisa ser corrigida.",
             "completion_message": "Obrigada. Vou encaminhar agora para a Equipe Aurora continuar o atendimento e confirmar os próximos passos.",
             "incomplete_handoff_template": "Vou encaminhar agora para a Equipe Aurora. Dados informados: {informed_fields}. Dados não confirmados: {missing_fields}."

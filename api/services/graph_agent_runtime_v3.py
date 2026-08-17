@@ -456,6 +456,11 @@ def _known_facts_payload(
                 "valor": fact.get("value", fact.get("value_json")),
                 "owner_node_id": fact.get("owner_node_id"),
                 "origem": origem,
+                # Only ever set by _seed_carried_facts, which only seeds
+                # fields the compiled contract marked carry_over=true (see
+                # _carry_over_field_keys) -- i.e. this is never a
+                # this-order fact, always customer identity.
+                "carregado_do_pedido_anterior": bool(fact.get("carried_from_journey")),
             })
     return payload
 
@@ -2462,20 +2467,20 @@ def _render_fact_value(value: Any) -> str:
     return str(value)
 
 
-def _terminal_reply(
-    *,
+def _collected_field_facts(
     document: dict[str, Any],
-    contract: dict[str, Any],
     active_branch_ids: list[str],
+    contract: dict[str, Any],
     facts_by_key: dict[str, list[dict[str, Any]]],
-    missing_fields: list[dict[str, Any]],
-    qualification_complete: bool,
-) -> str:
-    """Render terminal copy exclusively from the published graph contract."""
-    conversation_policy, labels = _published_conversation_policies(document, contract)
-    qualification = conversation_policy.get("qualification") or {}
+) -> list[tuple[str, str]]:
+    """(label, rendered value) for every required field already known.
+
+    Shared by the deterministic terminal summary and the natural-summary
+    grounding guard so both agree on exactly what counts as "collected".
+    """
+    _, labels = _published_conversation_policies(document, contract)
     fields = _active_contract_fields(document, active_branch_ids, contract)
-    informed: list[str] = []
+    collected: list[tuple[str, str]] = []
     for field in fields:
         key = str(field.get("key") or "")
         owner = str(field.get("owner_node_id") or "")
@@ -2489,9 +2494,26 @@ def _terminal_reply(
             None,
         )
         if fact:
-            informed.append(
-                f"{str(labels.get(key) or key)}: {_render_fact_value(fact.get('value'))}"
+            collected.append(
+                (str(labels.get(key) or key), _render_fact_value(fact.get("value")))
             )
+    return collected
+
+
+def _terminal_reply(
+    *,
+    document: dict[str, Any],
+    contract: dict[str, Any],
+    active_branch_ids: list[str],
+    facts_by_key: dict[str, list[dict[str, Any]]],
+    missing_fields: list[dict[str, Any]],
+    qualification_complete: bool,
+) -> str:
+    """Render terminal copy exclusively from the published graph contract."""
+    conversation_policy, labels = _published_conversation_policies(document, contract)
+    qualification = conversation_policy.get("qualification") or {}
+    collected = _collected_field_facts(document, active_branch_ids, contract, facts_by_key)
+    informed = [f"{label}: {value}" for label, value in collected]
     missing_labels = list(dict.fromkeys(
         str(labels.get(str(field.get("key") or "")) or field.get("key") or "")
         for field in missing_fields
@@ -2988,21 +3010,39 @@ SYSTEM_PROMPT = (
 
     "fatos_conhecidos lista tudo que já se sabe sobre esse cliente, cada "
     "um com origem 'esta_conversa' (extraído agora) ou 'anterior' "
-    "(já registrado de antes). Você pode usar um fato 'anterior' para "
+    "(já registrado de antes). Um fato 'anterior' marcado "
+    "carregado_do_pedido_anterior=true é identidade do cliente (hoje só o "
+    "nome), não deste pedido -- use-o direto, sem perguntar de novo e sem "
+    "pedir confirmação, inclusive para cumprimentar o cliente pelo nome "
+    "com naturalidade. Qualquer outro fato 'anterior' (veículo, data, "
+    "janela -- dados deste pedido, não do cliente) você pode usar para "
     "personalizar a conversa (ex.: perguntar se uma reclamação tem a ver "
-    "com o serviço que ele já fez), mas sempre confirme esse fato com o "
-    "cliente antes de seguir em frente com base nele -- nunca assuma "
+    "com o serviço que ele já fez), mas sempre confirme com o cliente "
+    "antes de seguir em frente com base nele -- nunca assuma "
     "silenciosamente que uma informação antiga ainda vale (o veículo "
     "pode ter mudado, o interesse pode ser outro). Isso vale ainda mais "
     "quando reconfirmacao_pendente for true (a IA acabou de ser "
-    "reativada por um humano). Em operational_mode "
+    "reativada por um humano) -- de novo, exceto para fatos "
+    "carregado_do_pedido_anterior=true, que seguem dispensando "
+    "confirmação mesmo nesse caso. Em operational_mode "
     "post_qualification_support, use esses fatos apenas para apoiar o pedido "
     "atual: responda saudação e dúvidas sem reiniciar o roteiro, sem perguntar "
     "serviço novamente e sem pedir reconfirmação por conta própria. Só altere "
     "o pedido quando a mensagem atual solicitar uma correção ou troca de forma "
     "explícita. Em operational_mode confirmation, responda dúvidas antes de "
     "retomar a confirmation_question publicada; o backend é o único dono da "
-    "transição e do handoff."
+    "transição e do handoff.\n\n"
+
+    "Quando todos os campos obrigatórios já são conhecidos e chegou a hora "
+    "de confirmar o pedido com o cliente, escreva você mesma o resumo, com "
+    "suas próprias palavras -- não existe um texto fixo para copiar. Mencione "
+    "naturalmente cada dado já coletado (sem rótulos tipo \"Nome:\" nem lista "
+    "separada por ponto e vírgula, como faria numa mensagem de WhatsApp de "
+    "verdade) e termine com uma pergunta curta e leve pedindo confirmação. "
+    "Não use palavras como \"confirmado\", \"agendado\" ou \"fechado\" nesse "
+    "resumo -- o pedido só fecha depois que o cliente responder que sim. "
+    "Varie a formulação a cada vez; nunca repita a mesma frase do turno "
+    "anterior."
 )
 
 
@@ -5032,7 +5072,22 @@ def _decide(
             collection_complete = False
             terminal_intent = None
         elif terminal_intent or confirmation_pending:
-            reply = _terminal_reply(
+            natural_summary = ""
+            if confirmation_pending:
+                # Let the model write the qualification summary in its own
+                # words -- the published template is a fallback, not the
+                # only voice. Grounding guard: every collected value must
+                # actually appear in the model's text, or we fall back to
+                # the deterministic template unchanged.
+                collected = _collected_field_facts(
+                    document, active_branch_ids, contract, next_grouped,
+                )
+                candidate = str(proposal.reply or "").strip()
+                if candidate and graph_proof_checker_v3.validate_natural_summary(
+                    candidate, informed_values=[value for _, value in collected],
+                ):
+                    natural_summary = candidate
+            reply = natural_summary or _terminal_reply(
                 document=document,
                 contract=contract,
                 active_branch_ids=active_branch_ids,
