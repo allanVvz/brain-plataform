@@ -110,6 +110,7 @@ def test_name_and_service_confirmation_migration_is_metadata_and_cas_safe():
     assert "p_apply boolean default false" in SQL
     assert "ledger revision conflict" in SQL
     assert "authorized_service_evidence" in SQL
+    assert "deterministic_graph_match" in SQL
     assert "sdr_false_service_fact_repaired" in SQL
     assert "p_proof_result->'next_active_branch_node_ids'" in SQL
     assert "branch focus invariant failed" in SQL

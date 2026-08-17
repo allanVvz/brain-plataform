@@ -209,11 +209,33 @@ BEGIN
      AND field_key='servico' FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'current service fact not found' USING ERRCODE='P0002'; END IF;
   SELECT EXISTS (
-    SELECT 1 FROM public.conversation_turn_proofs proof,
-      jsonb_array_elements(coalesce(proof.proof_result->'applied_service_operations','[]'::jsonb)) operation
+    SELECT 1 FROM public.conversation_turn_proofs proof
      WHERE proof.ledger_id=p_ledger_id
-       AND operation->>'branch_anchor_node_id'=v_fact.owner_node_id
-       AND operation->>'evidence_type' IN ('exact_catalog','confirmed_candidate')
+       AND (
+         EXISTS (
+           SELECT 1 FROM jsonb_array_elements(
+             coalesce(proof.proof_result->'applied_service_operations','[]'::jsonb)
+           ) operation
+            WHERE operation->>'branch_anchor_node_id'=v_fact.owner_node_id
+              AND operation->>'evidence_type' IN ('exact_catalog','confirmed_candidate')
+         )
+         OR (
+           coalesce(
+             proof.proof_result->'service_resolution'->>'method',
+             proof.proof_result->'service_resolution'->>'resolution_method',
+             proof.retrieval_trace->'service_resolution'->>'resolution_method',
+             ''
+           ) IN ('deterministic_graph_match','exact_catalog')
+           AND EXISTS (
+             SELECT 1 FROM jsonb_array_elements(
+               coalesce(proof.proof_result->'accepted_facts','[]'::jsonb)
+             ) accepted
+              WHERE accepted->>'field_key'='servico'
+                AND accepted->>'owner_node_id'=v_fact.owner_node_id
+                AND accepted->>'source_message_id'=v_fact.source_message_id
+           )
+         )
+       )
   ) INTO v_authorized;
   IF v_authorized THEN
     RETURN jsonb_build_object('changed',false,'apply',p_apply,'ledger_id',p_ledger_id,
