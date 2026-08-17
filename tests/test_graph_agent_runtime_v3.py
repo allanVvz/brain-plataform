@@ -3701,8 +3701,14 @@ def test_decide_reconciles_faq_answer_before_exact_next_question_without_fallbac
         cited_chunk_ids=["chunk:detail"], reply="Resposta inventada do modelo.",
     )
 
-    decision, response = graph_agent_runtime_v3.decide(
+    first_decision, first_response = graph_agent_runtime_v3.decide(
         context, model_observation={"proposal": proposed},
+    )
+    assert first_decision.intent == "repair_retrieval"
+    assert first_response.proof["policy_feedback"]["kind"] == "claim_not_authorized"
+
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": proposed, "repair_attempt": 1},
     )
 
     assert decision.intent == "collect_graph_fields"
@@ -3714,7 +3720,7 @@ def test_decide_reconciles_faq_answer_before_exact_next_question_without_fallbac
     assert response.proof["next_question_node_id"] == "q:name"
     assert response.proof["asked_field_key"] == "name"
     assert "claim_not_authorized:other" in response.proof["model_proposal_errors"]
-    assert response.proof["fallback_used"] is False
+    assert response.proof["fallback_used"] is True
 
 
 def test_direct_reconciliation_rejects_question_without_question_mark():
