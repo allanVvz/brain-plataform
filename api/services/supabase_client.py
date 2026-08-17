@@ -4355,6 +4355,59 @@ def get_active_ledger_branches(ledger_id: str) -> list:
     return [str(row["branch_anchor_node_id"]) for row in rows]
 
 
+def get_ledger_branch_states(ledger_id: str) -> dict:
+    """branch_anchor_node_id -> state, every branch ever tracked for this ledger.
+
+    Unlike get_active_ledger_branches (state='active' only -- what every turn
+    uses to seed active_branch_node_ids), this also surfaces 'completed'
+    branches, so the runtime can tell "still needs its own confirmation cycle"
+    apart from "already confirmed, just still open for support" once a
+    journey has more than one active branch (product or service -- nothing
+    here is offering-specific). Same migration-not-applied-yet tolerance as
+    get_active_ledger_branches.
+    """
+    if not ledger_id:
+        return {}
+    try:
+        rows = _q(
+            get_client().table("conversation_ledger_branches")
+            .select("branch_anchor_node_id,state")
+            .eq("ledger_id", ledger_id).limit(200)
+        )
+    except Exception:
+        return {}
+    return {
+        str(row.get("branch_anchor_node_id") or ""): str(row.get("state") or "")
+        for row in rows or []
+    }
+
+
+def mark_ledger_branches_completed(ledger_id: str, branch_anchor_node_ids: list) -> None:
+    """One-time grandfather write: see build_context's use in
+    graph_agent_runtime_v3.py. A journey already in post_qualification_support
+    the first time this code runs against it has no 'completed' row yet
+    (migration 128 shipped after it was handed off); without this, every one
+    of its already-confirmed branches would look indistinguishable from a
+    brand new, never-confirmed one. Best-effort and idempotent (upsert), same
+    tolerance as the other optional writes to this table.
+    """
+    if not ledger_id or not branch_anchor_node_ids:
+        return
+    try:
+        get_client().table("conversation_ledger_branches").upsert(
+            [
+                {
+                    "ledger_id": ledger_id, "branch_anchor_node_id": anchor,
+                    "state": "completed", "completed_at": datetime.now(timezone.utc).isoformat(),
+                }
+                for anchor in dict.fromkeys(branch_anchor_node_ids)
+            ],
+            on_conflict="ledger_id,branch_anchor_node_id",
+        ).execute()
+    except Exception:
+        pass
+
+
 def add_ledger_branch(ledger_id: str, branch_anchor_node_id: str) -> None:
     """Record an additional simultaneously-active branch for a ledger.
 

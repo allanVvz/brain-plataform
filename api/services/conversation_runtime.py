@@ -2383,7 +2383,29 @@ def commit(
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
         facts = response.cart_state.get("facts") or {}
         customer_name = (facts.get("nome_cliente") or {}).get("value")
-        service_interest = (facts.get("servico") or {}).get("value")
+        # No hardcoded "servico": the selector field key is whatever the
+        # compiled contract flags as branch_selection_field (product,
+        # service, catalog item -- all the same mechanism). facts (above) is
+        # scoped to a single currently-focused branch, so a lead with more
+        # than one confirmed offering active at once (a multi-item pedido)
+        # would collapse back to just one of them here -- aggregate over
+        # every active branch's own fact instead, same source
+        # commercial_note_projection already uses.
+        selection_key = graph_agent_runtime_v3.branch_selection_field_key(v3_document)
+        active_branch_ids = list(dict.fromkeys([
+            *([active_branch] if active_branch else []),
+            *(response.cart_state.get("active_branch_node_ids") or []),
+        ]))
+        offering_titles = (
+            graph_agent_runtime_v3.active_offering_titles(
+                v3_document, active_branch_ids, response.cart_state.get("facts_by_key") or {},
+            )
+            if v3_document and active_branch_ids else []
+        )
+        service_interest = (
+            ", ".join(offering_titles) if offering_titles
+            else (facts.get(selection_key) or {}).get("value")
+        )
 
         def _is_known(fact: Any) -> bool:
             return (
@@ -2402,7 +2424,7 @@ def commit(
         # complain but hasn't given their name yet.
         handoff_level = (
             "full"
-            if (_is_known(facts.get("nome_cliente")) and _is_known(facts.get("servico")))
+            if (_is_known(facts.get("nome_cliente")) and _is_known(facts.get(selection_key)))
             else "partial"
         )
     else:
@@ -2583,6 +2605,7 @@ def commit(
             "graph_checksum": context.graph_checksum,
             "active_branch_node_id": response.cart_state.get("active_branch_node_id"),
             "active_branch_node_ids": response.cart_state.get("active_branch_node_ids") or [],
+            "confirmed_branch_node_ids": response.proof.get("confirmed_branch_node_ids") or [],
             "asked_question_node_ids": response.cart_state.get("asked_question_node_ids") or [],
             "expected_revision": int(context.retrieval_trace.get("ledger_revision") or 0),
             "facts": [

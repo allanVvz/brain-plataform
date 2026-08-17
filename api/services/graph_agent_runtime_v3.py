@@ -824,6 +824,18 @@ def _service_selection_field(contract: dict[str, Any]) -> dict[str, Any] | None:
     )
 
 
+def branch_selection_field_key(document: dict[str, Any]) -> str:
+    """The field key that selects a branch (service, product, whatever the
+    persona sells) -- resolved from the compiled contract's
+    branch_selection_field flag (graph_compiler_v3.branch_selection_field_key),
+    falling back to the legacy literal "servico" only when a publication
+    predates that flag. Public so other modules (e.g. conversation_runtime's
+    lead projection) never need to hardcode the field name either.
+    """
+    field = _service_selection_field(document.get("common_contract") or {})
+    return str(field.get("key")) if field else "servico"
+
+
 def _is_direct_answer_to_service_question(
     contract: dict[str, Any], asked_question_node_ids: list[str], message: str,
 ) -> bool:
@@ -1820,22 +1832,49 @@ def _service_operation_acknowledgement(
     return " ".join(parts)
 
 
+def active_offering_titles(
+    document: dict[str, Any],
+    active_branch_ids: list[str],
+    facts_by_key: dict[str, list[dict[str, Any]]],
+) -> list[str]:
+    """Titles of every active branch whose selection fact is known.
+
+    Generic across service/product graphs and across "one" vs "many" active
+    offerings: the selector field key is resolved from the compiled contract
+    (branch_selection_field, see _service_selection_field) instead of
+    assuming the literal key "servico", so a persona selling products (or a
+    catalog of many products) works the same way.
+    """
+    selection_key = branch_selection_field_key(document)
+    node_by_id = document.get("node_by_id") or {}
+    owners = {
+        str(fact.get("owner_node_id") or "")
+        for fact in facts_by_key.get(selection_key) or []
+        if fact.get("status") == "known"
+    }
+    return [
+        str((node_by_id.get(anchor) or {}).get("title") or anchor)
+        for anchor in active_branch_ids if anchor in owners
+    ]
+
+
 def _active_service_summary(
     document: dict[str, Any],
     active_branch_ids: list[str],
     facts_by_key: dict[str, list[dict[str, Any]]],
 ) -> str:
-    node_by_id = document.get("node_by_id") or {}
-    service_owners = {
-        str(fact.get("owner_node_id") or "")
-        for fact in facts_by_key.get("servico") or []
-        if fact.get("status") == "known"
-    }
-    titles = [
-        str((node_by_id.get(anchor) or {}).get("title") or anchor)
-        for anchor in active_branch_ids if anchor in service_owners
-    ]
-    return "Serviços ativos: " + ", ".join(titles) + "." if titles else ""
+    """Deterministic fallback second paragraph, only for >1 active offering.
+
+    With a single active offering this would just restate the summary that
+    already ran through the natural-language guard, so it's skipped -- the
+    only time it earns its place is a multi-item cart, where it is genuinely
+    new information. No fixed label like "Serviços ativos" -- neutral phrasing
+    that reads the same for a service or a product.
+    """
+    titles = active_offering_titles(document, active_branch_ids, facts_by_key)
+    if len(titles) < 2:
+        return ""
+    return "Também no seu pedido: " + ", ".join(titles) + "."
 
 
 def _commercial_note_projection(
@@ -2467,6 +2506,17 @@ def _render_fact_value(value: Any) -> str:
     return str(value)
 
 
+def _humanize_field_key(key: str) -> str:
+    """Fallback label when a field has no entry in the published field_labels.
+
+    Never let the raw snake_case key (e.g. "modelo_veiculo") reach the
+    customer with an underscore in it -- "Modelo veiculo" reads like copy
+    instead of a variable name.
+    """
+    words = [word for word in str(key or "").replace("_", " ").split() if word]
+    return " ".join(words).capitalize()
+
+
 def _collected_field_facts(
     document: dict[str, Any],
     active_branch_ids: list[str],
@@ -2494,9 +2544,8 @@ def _collected_field_facts(
             None,
         )
         if fact:
-            collected.append(
-                (str(labels.get(key) or key), _render_fact_value(fact.get("value")))
-            )
+            label = str(labels.get(key) or "") or _humanize_field_key(key)
+            collected.append((label, _render_fact_value(fact.get("value"))))
     return collected
 
 
@@ -2515,7 +2564,8 @@ def _terminal_reply(
     collected = _collected_field_facts(document, active_branch_ids, contract, facts_by_key)
     informed = [f"{label}: {value}" for label, value in collected]
     missing_labels = list(dict.fromkeys(
-        str(labels.get(str(field.get("key") or "")) or field.get("key") or "")
+        str(labels.get(str(field.get("key") or "")) or "")
+        or _humanize_field_key(str(field.get("key") or ""))
         for field in missing_fields
         if str(field.get("key") or "")
     ))
@@ -3213,6 +3263,25 @@ def build_context(
     active_branch, active_branches, focus_derived_in_memory = _safe_active_focus(
         active_branch, persisted_active_branches,
     )
+    ledger_id = str(ledger.get("id") or "")
+    completed_branch_node_ids: list[str] = []
+    if ledger_id and operational_mode == "post_qualification_support":
+        branch_states = supabase_client.get_ledger_branch_states(ledger_id)
+        completed_branch_node_ids = [
+            anchor for anchor, state in branch_states.items() if state == "completed"
+        ]
+        if not completed_branch_node_ids and persisted_active_branches:
+            # Grandfather: this journey was already handed off before
+            # per-branch confirmation tracking existed (migration 128), so
+            # nothing is marked 'completed' yet. Whatever was active coming
+            # into this turn is what the customer already confirmed -- only
+            # an offering added from here on should ask for its own
+            # confirmation. One-time; idempotent on every later turn once the
+            # rows exist.
+            supabase_client.mark_ledger_branches_completed(
+                ledger_id, persisted_active_branches,
+            )
+            completed_branch_node_ids = list(persisted_active_branches)
     common_contract = document.get("common_contract") or {}
     active_contract = (
         (document.get("branch_contracts") or {}).get(active_branch) or {}
@@ -3336,6 +3405,7 @@ def build_context(
                 "label": document["node_by_id"][anchor]["title"],
             } for anchor in document.get("branch_anchors") or []],
             active_branch_node_id=active_branch, active_branch_node_ids=active_branches,
+            completed_branch_node_ids=completed_branch_node_ids, ledger_id=ledger_id or None,
             active_path_checksum=((document.get("coordinates") or {}).get(active_branch) or {}).get("path_checksum"),
             branch_node_ids=active_contract.get("closure_node_ids") or [],
             graph_contract=active_contract, publication_id=publication["id"],
@@ -3622,6 +3692,7 @@ def build_context(
         } for anchor in document.get("branch_anchors") or []],
         active_branch_node_id=active_branch,
         active_branch_node_ids=active_branches,
+        completed_branch_node_ids=completed_branch_node_ids, ledger_id=ledger_id or None,
         active_path_checksum=((document.get("coordinates") or {}).get(active_branch) or {}).get("path_checksum"),
         branch_node_ids=contract.get("closure_node_ids") or [], graph_contract=contract,
         publication_id=publication["id"], runtime_version=RUNTIME_VERSION, retrieval_trace=trace,
@@ -3671,6 +3742,15 @@ def _deterministic_confirmation_decision(
             "accepted_facts": [],
             "confirmation_state": "qualified_confirmed",
             "model_calls": 0,
+            # Every offering (service or product) active on this ledger just
+            # had its confirmation cycle accepted -- stamped 'completed' by
+            # commit_graph_turn_and_outbox_v3 (migration 128) so a later
+            # support turn about the same item never re-opens confirmation,
+            # while a genuinely new offering added afterward still can.
+            "confirmed_branch_node_ids": list(dict.fromkeys([
+                *([context.active_branch_node_id] if context.active_branch_node_id else []),
+                *context.active_branch_node_ids,
+            ])),
         }
         return (
             ConversationDecision(
@@ -4986,9 +5066,21 @@ def _decide(
             terminal_unconfirmed and not aggregate_askable and not discovery_only
         )
         collection_complete = not aggregate_askable and not discovery_only
+        # An active branch (offering -- service or product, no distinction
+        # here) this ledger has never marked 'completed' still needs its own
+        # confirmation cycle, even while the journey overall is already
+        # post_qualification_support for whatever was confirmed first. This
+        # is what lets a customer name and confirm a second/third offering in
+        # the same still-open conversation instead of it being silently
+        # absorbed as generic support chat (see graph_agent_runtime_v3.py's
+        # plan doc / commit message for the incident this fixes).
+        pending_branch_confirmation = bool(
+            set(active_branch_ids) - set(context.completed_branch_node_ids)
+        )
         post_support = bool(
             str(context.operational_mode) == "post_qualification_support"
             and not _explicit_change_requested(_latest_user_message(context))
+            and not pending_branch_confirmation
         )
         confirmation_pending = bool(qualification_complete and not post_support)
         terminal_intent = "qualification_incomplete" if qualification_incomplete else None

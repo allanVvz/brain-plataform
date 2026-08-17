@@ -172,6 +172,14 @@ class ConversationContext(StrictModel):
     available_services: list[dict[str, str]] = Field(default_factory=list)
     active_branch_node_id: str | None = None
     active_branch_node_ids: list[str] = Field(default_factory=list)
+    # Branches (any offering -- service or product) already confirmed in this
+    # ledger, per conversation_ledger_branches.state='completed'. Lets the
+    # backend tell "this active branch already had its own confirmation
+    # cycle" apart from "this one is new and still needs one" once a journey
+    # has more than one active branch. See _decide's post_qualification_support
+    # gate in graph_agent_runtime_v3.py.
+    completed_branch_node_ids: list[str] = Field(default_factory=list)
+    ledger_id: str | None = None
     active_path_checksum: str | None = None
     branch_node_ids: list[str] = Field(default_factory=list)
     graph_contract: dict[str, Any] = Field(default_factory=dict)

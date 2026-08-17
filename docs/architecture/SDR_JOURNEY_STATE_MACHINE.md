@@ -7,7 +7,8 @@ pelo modelo.
 
 Migrations relevantes: `118` (tabelas), `121` (máquina de estados),
 `122` (suporte pós-handoff), `123` (desfecho comercial), `124` (conversão
-reversível), `125` (cancelar estorna a compra), `126` (seletor de estado).
+reversível), `125` (cancelar estorna a compra), `126` (seletor de estado),
+`128` (confirmação por galho dentro da mesma jornada).
 
 ## Estados
 
@@ -112,6 +113,42 @@ pedido anterior) continuam exigindo confirmação antes de uso.
 ⚠️ `carry_over` entra em `branch_contracts`, que é compilado **no publish**
 (`graph_compiler_v3.py`). Uma publicação anterior à migration não tem o atributo,
 e nada atravessa até o grafo ser republicado.
+
+### Confirmação por galho, não por jornada
+
+`post_qualification_support` é o modo que a jornada assume depois da primeira
+confirmação explícita — e por design ele não deveria travar um segundo
+serviço/produto que o cliente confirma na mesma conversa ainda aberta.
+Migration 105 já suporta múltiplos galhos ativos simultâneos
+(`conversation_ledger_branches`, um fato por `(field_key, owner_node_id)`),
+mas nada gravava o estado `completed` até a migration 128: o galho só
+alternava entre `active` e `dropped`, então não havia como distinguir "este
+galho ativo já foi confirmado" de "este é novo e ainda precisa da própria
+confirmação".
+
+- `graph_agent_runtime_v3.py::build_context` busca
+  `conversation_ledger_branches.state` do ledger e monta
+  `ConversationContext.completed_branch_node_ids`. Uma jornada já em
+  `post_qualification_support` sem nenhum registro `completed` ainda (i.e.
+  publicada antes da migration 128) faz um *grandfather* único: tudo que já
+  estava ativo no início do turno vira `completed` — só um galho novo, a
+  partir daí, pede confirmação própria.
+- `_decide` calcula `pending_branch_confirmation = active_branch_ids -
+  completed_branch_node_ids`. Enquanto não vazio, o lock de
+  `post_qualification_support` não se aplica: a coleta e a confirmação
+  seguem normalmente para aquele galho, mesmo com a jornada já tendo
+  confirmado outro antes.
+- Ao aceitar um "sim" explícito, `_deterministic_confirmation_decision`
+  grava `confirmed_branch_node_ids` (todo `active_branch_node_id` +
+  `active_branch_node_ids` do context) no `proof`; o turno chega em
+  `commit_graph_turn_and_outbox_v3` (migration 128) que faz
+  `UPDATE conversation_ledger_branches SET state='completed'` para esses
+  galhos, na mesma transação do resto do commit.
+- Nenhum nome de campo é hardcoded: o seletor de galho vem de
+  `branch_selection_field_key(document)`, que lê o field marcado
+  `branch_selection_field` no contrato compilado (fallback `"servico"` só
+  para publicações anteriores a esse flag) — o mesmo mecanismo vale para uma
+  persona de produto ou catálogo de vários produtos.
 
 ### Precedência: desfecho comercial vence proof
 

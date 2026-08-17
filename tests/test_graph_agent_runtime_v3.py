@@ -3061,6 +3061,182 @@ def test_decide_does_not_apply_model_only_add_without_backend_evidence(monkeypat
     assert response.proof["applied_service_operations"] == []
 
 
+def test_active_offering_titles_has_no_hardcoded_selection_key():
+    """Generic across service and product graphs: the selector field key
+    comes from branch_selection_field on the compiled contract, never the
+    literal "servico" -- a persona selling products must work identically."""
+    document = {
+        "common_contract": {"fields": [{"key": "produto", "branch_selection_field": True}]},
+        "node_by_id": {
+            "branch:x": {"title": "Camiseta"},
+            "branch:y": {"title": "Boné"},
+        },
+    }
+    facts_by_key = {"produto": [
+        {"status": "known", "owner_node_id": "branch:x"},
+        {"status": "known", "owner_node_id": "branch:y"},
+    ]}
+    titles = graph_agent_runtime_v3.active_offering_titles(
+        document, ["branch:x", "branch:y"], facts_by_key,
+    )
+    assert titles == ["Camiseta", "Boné"]
+
+
+def test_active_service_summary_has_no_fixed_label_and_needs_two_offerings():
+    document = {
+        "common_contract": {"fields": []},
+        "node_by_id": {
+            "branch:a": {"title": "Vitrificação"}, "branch:b": {"title": "Polimento"},
+        },
+    }
+    facts_by_key = {"servico": [{"status": "known", "owner_node_id": "branch:a"}]}
+    # A single active offering: the deterministic fallback paragraph would
+    # only restate what the natural summary already said, so it stays empty.
+    assert graph_agent_runtime_v3._active_service_summary(
+        document, ["branch:a"], facts_by_key,
+    ) == ""
+    facts_by_key["servico"].append({"status": "known", "owner_node_id": "branch:b"})
+    summary = graph_agent_runtime_v3._active_service_summary(
+        document, ["branch:a", "branch:b"], facts_by_key,
+    )
+    assert "Serviços ativos" not in summary
+    assert "Vitrificação" in summary and "Polimento" in summary
+
+
+def test_confirmed_branch_node_ids_covers_every_active_branch(monkeypatch):
+    """The branches marked 'completed' on an explicit "sim" must be every
+    branch active on the ledger, not just the turn's focused one -- otherwise
+    a second confirmed offering would get dropped to 'dropped' by the SQL
+    reconciliation instead of durably marked 'completed' (migration 128)."""
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"message_id": "msg:sim", "role": "user", "texto": "sim"}],
+        cart={}, rag_nodes=[], rag_paths=[], graph_contract={
+            "conversation_policy": {"qualification": {
+                "completion_message": "Perfeito, obrigada! A equipe segue com você.",
+            }},
+        },
+        active_branch_node_id="branch:b", active_branch_node_ids=["branch:a", "branch:b"],
+        journey_state="awaiting_confirmation", operational_mode="confirmation",
+    )
+    decision, response = graph_agent_runtime_v3.decide(context, model_observation=None)
+    assert decision.intent == "qualification_confirmed"
+    assert set(response.proof["confirmed_branch_node_ids"]) == {"branch:a", "branch:b"}
+
+
+def test_pending_branch_confirmation_reopens_post_qualification_support(monkeypatch):
+    """Root-cause regression: a customer confirming a first offering, then a
+    second one in the same still-open conversation, must not have the second
+    one silently swallowed as generic post-order support chat.
+
+    branch:a is already confirmed (completed_branch_node_ids). branch:b --
+    already active from an earlier turn, as if the customer had already
+    named it -- finishes collecting its own required field on this turn.
+    Even though the journey overall is still post_qualification_support
+    (from branch:a's earlier confirmation), the lock must lift for branch:b
+    specifically so a fresh confirmation is offered, instead of the reply
+    falling back to raw, un-graph-checked model text forever (the bug).
+    """
+    document = compiled_fixture()
+    persona_row = {**PERSONA, "config": {}}
+    pub = publication(document)
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: persona_row)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub
+    )
+    contract_b = document["branch_contracts"]["branch:b"]
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], messages=[{
+            "message_id": "msg:qtd", "role": "user", "texto": "são 5 unidades",
+        }],
+        cart={
+            "facts": {"metragem": {"status": "known", "value": 20, "owner_node_id": "branch:a"}},
+            "facts_by_key": {"metragem": [
+                {"status": "known", "value": 20, "owner_node_id": "branch:a"},
+            ]},
+        },
+        rag_nodes=[], rag_paths=[],
+        graph_contract=contract_b,
+        active_branch_node_id="branch:b", active_branch_node_ids=["branch:a", "branch:b"],
+        completed_branch_node_ids=["branch:a"],
+        branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+        publication_id=pub["id"],
+        journey_state="handed_off", operational_mode="post_qualification_support",
+        retrieval_trace={"retrieval_branch_node_id": "branch:b"},
+    )
+    proposal = {
+        "branch_action": "keep", "branch_anchor_node_id": "branch:b",
+        "branch_path_checksum": contract_b["branch_path_checksum"],
+        "branch_evidence_span": "5 unidades",
+        "extracted_facts": [{
+            "field_key": "quantidade", "owner_node_id": "branch:b",
+            "status": "known", "value": 5, "source_message_id": "msg:qtd",
+            "evidence_span": "5 unidades", "confidence": 1,
+        }],
+        "claims": [], "next_question_node_id": None,
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "reply": "Perfeito, ficam 20 e 5 no pedido. Posso confirmar?",
+        "qualification_complete": True, "handoff_requested": False,
+    }
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": proposal},
+    )
+    assert response.proof.get("valid"), response.proof.get("errors")
+    # Without the fix this stays "post_qualification_support" forever and
+    # branch:b's confirmation never gets a chance to run.
+    assert response.proof["confirmation_state"] == "awaiting_confirmation"
+    assert set(response.cart_state["active_branch_node_ids"]) == {"branch:a", "branch:b"}
+
+
+def test_no_pending_branch_confirmation_stays_locked_in_support(monkeypatch):
+    """Companion to the regression above: once every active branch is
+    already 'completed', ordinary post-order support chat must stay locked
+    (commit 66c0cbe's whole point) -- ruling out a fix that just deletes the
+    lock instead of scoping it per branch."""
+    document = compiled_fixture()
+    persona_row = {**PERSONA, "config": {}}
+    pub = publication(document)
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: persona_row)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub
+    )
+    contract_b = document["branch_contracts"]["branch:b"]
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], messages=[{
+            "message_id": "msg:thanks", "role": "user", "texto": "obrigado!",
+        }],
+        cart={"facts": {
+            "metragem": {"status": "known", "value": 20, "owner_node_id": "branch:a"},
+            "quantidade": {"status": "known", "value": 5, "owner_node_id": "branch:b"},
+        }},
+        rag_nodes=[], rag_paths=[],
+        graph_contract=contract_b,
+        active_branch_node_id="branch:b", active_branch_node_ids=["branch:a", "branch:b"],
+        completed_branch_node_ids=["branch:a", "branch:b"],
+        branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+        publication_id=pub["id"],
+        journey_state="handed_off", operational_mode="post_qualification_support",
+        retrieval_trace={"retrieval_branch_node_id": "branch:b"},
+    )
+    proposal = {
+        "branch_action": "keep", "branch_anchor_node_id": "branch:b",
+        "branch_path_checksum": contract_b["branch_path_checksum"],
+        "branch_evidence_span": "", "extracted_facts": [], "claims": [],
+        "next_question_node_id": None,
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "reply": "Por nada! Qualquer coisa é só chamar.",
+        "qualification_complete": True, "handoff_requested": False,
+    }
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": proposal},
+    )
+    assert response.proof.get("valid"), response.proof.get("errors")
+    assert response.proof["confirmation_state"] == "post_qualification_support"
+
+
 def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatch):
     persona_node = node(1, "persona:aurora", parent_type="persona")
     polish = node(2, "aurora-product-polish-localized", parent_type="product", data={
@@ -3276,7 +3452,9 @@ def test_decide_fallback_uses_the_published_closing_text_instead_of_silence(monk
     assert decision.intent == "awaiting_confirmation"
     assert decision.route.value == "SDR"
     assert response.handoff_required is False
-    assert response.reply_text == "Resumo: metragem: 20.\n\nOs dados estão corretos?"
+    # No field_labels entry for "metragem" in this fixture -- the fallback
+    # humanizes the raw key instead of leaking snake_case with underscores.
+    assert response.reply_text == "Resumo: Metragem: 20.\n\nOs dados estão corretos?"
 
 
 def test_keep_without_an_active_branch_cannot_silently_establish_one():
