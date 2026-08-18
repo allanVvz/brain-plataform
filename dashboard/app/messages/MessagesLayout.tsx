@@ -595,16 +595,20 @@ type OfferingChip = { id: string; label: string; value: string };
 // same still-open conversation) down to just one of them. The backend keeps
 // commercial_note_projection in sync with every active branch
 // (api/services/graph_agent_runtime_v3.py::_commercial_note_projection),
-// generic across service and product graphs alike, so prefer it whenever
-// present; commercial_note stays the fallback for leads from before that
-// projection existed.
+// generic across service and product graphs alike, so prefer it whenever it
+// actually has something to show. But the projection's `services` map is
+// only populated once a branch is active -- before that (or for any lead
+// predating the projection) it comes back as `{}`, which used to make the
+// chips disappear entirely even though the flat commercial_note still had
+// data. Fall back to commercial_note whenever the projection is empty, not
+// just when it's absent.
 function offeringChipEntries(lead: any): OfferingChip[] {
   const services = lead?.metadata?.commercial_note_projection?.services as
     Record<string, any> | undefined;
   if (services && typeof services === "object") {
     const offerings = Object.entries(services);
     const multi = offerings.length > 1;
-    return offerings.flatMap(([branchId, offering]) => {
+    const chips = offerings.flatMap(([branchId, offering]) => {
       const facts = (offering?.facts || {}) as Record<string, unknown>;
       const title = String(offering?.title || offering?.slug || "");
       return Object.entries(facts)
@@ -615,6 +619,7 @@ function offeringChipEntries(lead: any): OfferingChip[] {
           value: String(value),
         }));
     });
+    if (chips.length > 0) return chips;
   }
   return commercialNoteEntries(lead?.metadata?.commercial_note).map(([key, value]) => ({
     id: key, label: key.replace(/_/g, " "), value,
@@ -2383,7 +2388,16 @@ export function MessagesLayout({
                 )}
 
                 {/* Toggle de IA — rótulo de uma palavra só; o detalhe
-                    completo (motivo do handoff etc.) permanece no title. */}
+                    completo (motivo do handoff etc.) permanece no title.
+                    "partial" (a IA teve uma primeira dúvida/handoff sem
+                    registro completo ainda) usa a mesma cor/ícone de pausa
+                    que "full" -- não o amarelo de atenção -- porque para o
+                    operador olhando o header os dois se leem como "a IA
+                    parou de tocar sozinha aqui", mesmo quando o backend
+                    ainda mantém o lead_buffer fluindo por baixo. O
+                    desligamento manual (toggle) sempre prevalece: é o
+                    próprio selectedHandoffLevel="full" que esse botão
+                    dispara. */}
                 <button
                   type="button"
                   onClick={togglePause}
@@ -2392,27 +2406,23 @@ export function MessagesLayout({
                     selectedHandoffLevel === "full"
                       ? "IA pausada — clique para retomar"
                       : selectedHandoffLevel === "partial"
-                      ? `IA ainda respondendo — precisa de atenção${selectedLead.metadata?.handoff_reason ? ` (${selectedLead.metadata.handoff_reason})` : ""}. Clique para confirmar.`
+                      ? `IA pausada — precisa de atenção${selectedLead.metadata?.handoff_reason ? ` (${selectedLead.metadata.handoff_reason})` : ""}. Clique para confirmar.`
                       : "IA ativa — clique para pausar"
                   }
                   className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full shrink-0 border transition disabled:opacity-50 ${
-                    selectedHandoffLevel === "full"
+                    selectedHandoffLevel === "full" || selectedHandoffLevel === "partial"
                       ? "border-red-400/60 bg-red-500/15 text-red-300 hover:bg-red-500/25"
-                      : selectedHandoffLevel === "partial"
-                      ? "border-amber-400/60 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
                       : "border-emerald-400/50 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
                   }`}
                 >
                   <span
                     className={`inline-block w-1.5 h-1.5 rounded-full ${
-                      selectedHandoffLevel === "full"
+                      selectedHandoffLevel === "full" || selectedHandoffLevel === "partial"
                         ? "bg-red-400"
-                        : selectedHandoffLevel === "partial"
-                        ? "bg-amber-400"
                         : "bg-emerald-400"
                     }`}
                   />
-                  {selectedHandoffLevel === "full" ? "Pausada" : selectedHandoffLevel === "partial" ? "Atenção" : "Ativa"}
+                  {selectedHandoffLevel === "full" || selectedHandoffLevel === "partial" ? "Pausada" : "Ativa"}
                 </button>
 
                 {/* Toggle the right-hand knowledge sidebar. */}
@@ -2444,11 +2454,9 @@ export function MessagesLayout({
               {selectedLead.telefone && (
                 <span className="text-[10px] text-obs-faint">{selectedLead.telefone}</span>
               )}
-              {selectedLead.interesse_produto && (
-                <span className="text-[10px] text-obs-subtle truncate max-w-[10rem]">
-                  {selectedLead.interesse_produto}
-                </span>
-              )}
+              {/* interesse_produto used to have its own span here, duplicating
+                  the offering already shown by the commercial-note chips
+                  below (offeringChipEntries) -- removed instead of repeated. */}
               <span className="text-[10px] text-obs-faint ml-auto">
                 {messages.length} msgs
               </span>
@@ -2594,7 +2602,7 @@ export function MessagesLayout({
                   ) : selectedHandoffLevel === "full" ? (
                     <span className="text-amber-300/80">IA pausada — só você responde até retomar.</span>
                   ) : selectedHandoffLevel === "partial" ? (
-                    <span className="text-amber-300/80">IA ainda respondendo — sinalizado para atenção humana.</span>
+                    <span className="text-amber-300/80">IA pausada — precisa de atenção antes de confirmar.</span>
                   ) : isPortal ? (
                     <span>A IA está ativa e pode responder antes de você.</span>
                   ) : (

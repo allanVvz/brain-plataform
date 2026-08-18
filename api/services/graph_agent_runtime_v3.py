@@ -255,14 +255,39 @@ def _invalid_proposal_fallback(
         confirmation_pending = not unconfirmed
         terminal_intent = "qualification_incomplete" if unconfirmed else None
     if terminal_intent or confirmation_pending:
-        document = {
-            "branch_contracts": {context.active_branch_node_id: contract},
-            "node_by_id": {},
-        }
+        # A malformed/unparseable model proposal must not collapse a
+        # multi-service pedido back down to whichever single branch
+        # happens to be focused this turn -- every other active branch's
+        # already-confirmed facts would silently drop out of the summary.
+        # Same active-branch union every other _terminal_reply call site
+        # in this module already uses (e.g. the check_proposal-rejection
+        # fallback below).
+        active_branch_ids = list(dict.fromkeys([
+            *([context.active_branch_node_id] if context.active_branch_node_id else []),
+            *context.active_branch_node_ids,
+        ]))
+        if len(active_branch_ids) > 1:
+            persona = supabase_client.get_persona(context.persona_slug) or {}
+            publication = supabase_client.get_active_graph_publication(
+                str(persona.get("id") or "")
+            ) or {}
+            document = publication.get("document_json") or {}
+            document = {
+                **document,
+                "branch_contracts": {
+                    **(document.get("branch_contracts") or {}),
+                    context.active_branch_node_id: contract,
+                },
+            }
+        else:
+            document = {
+                "branch_contracts": {context.active_branch_node_id: contract},
+                "node_by_id": {},
+            }
         reply = _terminal_reply(
             document=document,
             contract=contract,
-            active_branch_ids=[context.active_branch_node_id],
+            active_branch_ids=active_branch_ids or [context.active_branch_node_id],
             facts_by_key=facts_by_key,
             missing_fields=unconfirmed,
             qualification_complete=not unconfirmed,
@@ -293,8 +318,13 @@ def _invalid_proposal_fallback(
     )
     repetition_action = "allowed"
     if not repetition["passed"]:
-        reply = ""
-        repetition_action = "suppressed_duplicate_outbound"
+        # Never go fully silent here: this fallback already means the
+        # model's own proposal was unusable this turn, so repeating the
+        # pending question is strictly better than zero outbound messages.
+        # Confirmed live 2026-08-17: blanking `reply` on a plain duplicate
+        # (not even a terminal handoff repeat) left two separate customers
+        # with no reply at all on the exact turn they needed one.
+        repetition_action = "allowed_never_silent"
     proof = {
         "valid": False,
         "errors": list(dict.fromkeys(errors)),
@@ -1850,7 +1880,14 @@ def active_offering_titles(
     owners = {
         str(fact.get("owner_node_id") or "")
         for fact in facts_by_key.get(selection_key) or []
-        if fact.get("status") == "known"
+        # graph_compiler_v3._with_confirmable_status always authorizes
+        # "needs_confirmation" on the branch selector field -- a service
+        # resolved by approximate match stays in that state until the
+        # customer confirms, but the branch is already active and its
+        # other collected facts already count toward qualification. Titles
+        # gated on "known" only silently dropped that branch's name from
+        # every summary/interest projection while it was still pending.
+        if fact.get("status") in ("known", "needs_confirmation")
     }
     return [
         str((node_by_id.get(anchor) or {}).get("title") or anchor)
@@ -2573,11 +2610,19 @@ def _collected_field_facts(
     for field in fields:
         key = str(field.get("key") or "")
         owner = str(field.get("owner_node_id") or "")
+        # Match the same "already answered" bar _unanswered_fact_after_-
+        # question_limit uses (accepted_statuses, not a hardcoded "known")
+        # so a field the contract explicitly lets settle at
+        # "needs_confirmation" (the branch selector) still surfaces in the
+        # summary instead of vanishing from it while qualification is
+        # already considered complete.
+        accepted_statuses = set(field.get("accepted_statuses") or ["known"])
         fact = next(
             (
                 row for row in facts_by_key.get(key) or []
                 if str(row.get("owner_node_id") or "") == owner
-                and row.get("status") == "known"
+                and row.get("status") in accepted_statuses
+                and row.get("status") != "unknown"
                 and row.get("value") not in (None, "")
             ),
             None,
@@ -3059,6 +3104,34 @@ SYSTEM_PROMPT = (
     "verdade faria (\"Entendi, temos algumas opções de polimento -- qual "
     "encaixa melhor: X ou Y?\"), nunca dando a entender que ele foi confuso "
     "ou impreciso (evite \"não entendi\" ou \"pode ser mais específico?\").\n\n"
+
+    "A mesma lógica vale para qualquer dado que o cliente informar, não só "
+    "a escolha de serviço: quando ele escrever um valor abreviado, colado "
+    "ou informal (por exemplo \"fordka\" para \"Ford Ka\", ou uma marca e "
+    "modelo sem espaço ou maiúscula), interprete com a mesma inteligência "
+    "que uma pessoa teria numa conversa de WhatsApp -- se a leitura mais "
+    "provável for razoavelmente clara, extraia o fato normalmente com essa "
+    "interpretação, sem parar a conversa para confirmar o óbvio. Só faça "
+    "uma pergunta quando sobrar dúvida real (duas leituras plausíveis, ou "
+    "o termo não bater com nada do domínio conhecido) -- e mesmo assim "
+    "pergunte com naturalidade, do jeito que a pessoa realmente falaria "
+    "(\"Fordka é Ford Ka, certo?\" ou \"Fordka é o modelo do carro, é "
+    "isso?\"), nunca em silêncio nem devolvendo a mesma pergunta genérica "
+    "de novo.\n\n"
+
+    "Você tem liberdade para usar seu próprio critério dentro do que o "
+    "grafo autoriza -- não existe um roteiro rígido de frases prontas nem "
+    "obrigação de soar formal. Toda mensagem do cliente merece uma "
+    "resposta com conteúdo real neste turno: nunca devolva silêncio, e "
+    "nunca repita a pergunta anterior sem acrescentar nada quando o "
+    "cliente já deu sinal de estar confuso, de ter corrigido algo ou de "
+    "esperar que você tivesse entendido mais do que entendeu. Se você não "
+    "tiver certeza do que ele quis dizer -- uma correção que não ficou "
+    "clara, uma mensagem que parece contradizer o que já foi registrado, "
+    "uma palavra que pode significar mais de uma coisa -- pergunte de "
+    "forma direta e natural, como um vendedor esperto faria ao pedir uma "
+    "segunda confirmação, em vez de travar ou insistir na mesma pergunta "
+    "com as mesmas palavras.\n\n"
 
     "conversation_policy.question_repetition.max_attempts informa quantas "
     "retomadas são permitidas além da pergunta inicial (somente zero ou uma). "
@@ -5301,12 +5374,19 @@ def _decide(
                 for previous in recent_replies
             ):
                 remainder = ""
-            reply = remainder
-            repetition_action = (
-                "suppressed_duplicate_terminal" if terminal_duplicate
-                else "suppressed_duplicate_question" if remainder
-                else "suppressed_duplicate_outbound"
-            )
+            if terminal_duplicate:
+                reply = remainder
+                repetition_action = "suppressed_duplicate_terminal"
+            elif remainder:
+                reply = remainder
+                repetition_action = "suppressed_duplicate_question"
+            else:
+                # A repeated non-terminal question is still not a reason to
+                # say nothing: keep the original (un-suppressed) reply
+                # rather than go silent. Full silence stays reserved for a
+                # genuinely repeated terminal handoff, which has nothing
+                # new to say by definition.
+                repetition_action = "allowed_never_silent"
 
         projection_contract = (
             (document.get("branch_contracts") or {}).get(committed_branch)
@@ -5447,7 +5527,22 @@ def _decide(
     fallback_complete = not fallback_unconfirmed
     fallback_incomplete = bool(fallback_unconfirmed and not fallback_askable)
 
-    fallback_post_support = str(context.operational_mode) == "post_qualification_support"
+    # Mirror the pending_branch_confirmation guard the accepted-proposal path
+    # uses above (search this file for that name): a rejected proposal must
+    # reopen confirmation for any active branch this ledger hasn't marked
+    # completed too, not just blank out to "" whenever the journey is
+    # already post_qualification_support for whatever was confirmed first.
+    # Confirmed live 2026-08-17/18: a customer's correction to a multi-
+    # service confirmation landed here (model proposal rejected, journey
+    # already post_qualification_support) and got zero outbound reply.
+    fallback_pending_branch_confirmation = bool(
+        set(context.active_branch_node_ids) - set(context.completed_branch_node_ids)
+    )
+    fallback_post_support = bool(
+        str(context.operational_mode) == "post_qualification_support"
+        and not _explicit_change_requested(_latest_user_message(context))
+        and not fallback_pending_branch_confirmation
+    )
     fallback_confirmation_pending = fallback_complete and not fallback_post_support
     fallback_terminal_intent = (
         "qualification_incomplete" if fallback_incomplete else None
@@ -5557,7 +5652,8 @@ def _decide(
     )
     fallback_proof["repetition_audit"] = fallback_repetition
     if not fallback_repetition["passed"]:
-        remainder = "" if "terminal_repetition" in fallback_repetition["failures"] else _statements_only(fallback)
+        fallback_terminal_duplicate = "terminal_repetition" in fallback_repetition["failures"]
+        remainder = "" if fallback_terminal_duplicate else _statements_only(fallback)
         if remainder and any(
             conversation_repetition.is_semantic_repetition(previous, remainder)
             for previous in [
@@ -5568,13 +5664,17 @@ def _decide(
             ][-4:]
         ):
             remainder = ""
-        fallback = remainder
-        fallback_proof["repetition_action"] = (
-            "suppressed_duplicate_terminal"
-            if "terminal_repetition" in fallback_repetition["failures"]
-            else "suppressed_duplicate_question" if remainder
-            else "suppressed_duplicate_outbound"
-        )
+        if fallback_terminal_duplicate:
+            fallback = remainder
+            fallback_proof["repetition_action"] = "suppressed_duplicate_terminal"
+        elif remainder:
+            fallback = remainder
+            fallback_proof["repetition_action"] = "suppressed_duplicate_question"
+        else:
+            # Same never-go-silent floor as the other repetition gates in
+            # this module: a repeated non-terminal question is not a
+            # reason to withhold the reply entirely.
+            fallback_proof["repetition_action"] = "allowed_never_silent"
     else:
         fallback_proof["repetition_action"] = "allowed"
     fallback_route = (

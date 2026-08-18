@@ -189,6 +189,65 @@ def test_loose_later_answer_can_replace_unknown_without_correction_marker():
     assert proof["accepted_facts"][0]["value"] == "Beatriz"
 
 
+def test_add_action_can_resolve_a_pending_selection_confirmation_without_correction_marker():
+    """Regression (live 2026-08-18): the branch selector field is the only
+    one whose accepted_statuses graph_compiler_v3._with_confirmable_status
+    widens to include "needs_confirmation" -- an approximate service match
+    stays pending until the customer confirms. Settling that candidate into
+    "known" once the customer answers ("pedi chapeacao tambem", no "na
+    verdade"/"corrigindo" language) is confirmation, not correction, and
+    must not require the explicit-correction marker the overwrite policy
+    otherwise demands. Before this fix it failed as
+    fact_correction_not_explicit:servico, discarding the whole proposal and
+    leaving the customer's clarification unanswered."""
+    contract = {
+        "branch_path_checksum": "checksum:chapeacao",
+        "closure_node_ids": ["branch:chapeacao"],
+        "fields": [{
+            "key": "servico", "owner_node_id": "branch:chapeacao", "required": True,
+            "accepted_statuses": ["known", "needs_confirmation"],
+            "value_schema": {"type": "string", "minLength": 1},
+            "overwrite_policy": "explicit_correction",
+        }],
+        "questions": {},
+    }
+    proof = graph_proof_checker_v3.check(
+        publication={
+            "status": "active", "checksum": "sha256:x",
+            "document_json": {"branch_anchors": ["branch:chapeacao", "branch:lavagem"]},
+        },
+        contract=contract,
+        ledger={
+            "graph_checksum": "sha256:x",
+            "facts": {"servico": {
+                "status": "needs_confirmation", "value": "Chapeação",
+                "owner_node_id": "branch:chapeacao",
+            }},
+        },
+        proposal={
+            "branch_action": "add", "branch_anchor_node_id": "branch:chapeacao",
+            "branch_path_checksum": "checksum:chapeacao",
+            "branch_evidence_span": "chapeacao",
+            "extracted_facts": [{
+                "field_key": "servico", "owner_node_id": "branch:chapeacao",
+                "status": "known", "value": "Chapeação", "source_message_id": "msg-3",
+                "evidence_span": "chapeacao", "confidence": 1,
+            }],
+            "claims": [], "next_question_node_id": None,
+            "cited_node_ids": [], "cited_chunk_ids": [], "reply": "Anotado, chapeação também.",
+            "qualification_complete": True, "handoff_requested": False,
+        },
+        message="pedi chapeacao tambem", source_message_id="msg-3",
+        package_node_ids={"branch:chapeacao"}, package_chunk_ids=set(),
+        active_branch_node_id="branch:lavagem",
+        active_branch_node_ids=["branch:lavagem"],
+        branch_selection_allowed=False, branch_switch_allowed=True,
+    )
+
+    assert proof["valid"] is True, proof["errors"]
+    assert proof["accepted_facts"][0]["value"] == "Chapeação"
+
+
 def _single_fact_proof(*, message: str, value: str, evidence_span: str) -> dict:
     contract = {
         "branch_path_checksum": "checksum:a",
