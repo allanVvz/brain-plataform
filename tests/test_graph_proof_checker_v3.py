@@ -248,6 +248,177 @@ def test_add_action_can_resolve_a_pending_selection_confirmation_without_correct
     assert proof["accepted_facts"][0]["value"] == "Chapeação"
 
 
+def _two_branch_fixture():
+    """branch:a is this turn's focused contract; branch:b is a second
+    already-active branch whose own field only becomes visible via
+    additional_fields (the union of every active branch's own fields)."""
+    contract_a = {
+        "branch_path_checksum": "checksum:a",
+        "closure_node_ids": ["branch:a"],
+        # required=False: these tests are about whether a fact validates,
+        # not about full qualification/pending-question mechanics.
+        "fields": [{
+            "key": "servico", "owner_node_id": "branch:a", "required": False,
+            "accepted_statuses": ["known"], "value_schema": {"type": "string", "minLength": 1},
+        }],
+        "questions": {},
+    }
+    branch_b_field = {
+        "key": "servico", "owner_node_id": "branch:b", "required": False,
+        "accepted_statuses": ["known"], "value_schema": {"type": "string", "minLength": 1},
+    }
+    publication = {
+        "status": "active", "checksum": "sha256:x",
+        "document_json": {"branch_anchors": ["branch:a", "branch:b"]},
+    }
+    ledger = {"graph_checksum": "sha256:x", "facts": {}}
+    return contract_a, branch_b_field, publication, ledger
+
+
+def test_check_accepts_a_fact_for_a_second_active_branch_via_additional_fields():
+    """Regression for Claim 3 (branch-scoped extracted_facts asymmetry): a
+    customer naming two services in the same message, with the model's
+    branch_anchor_node_id focused on branch:a this turn, must not have
+    branch:b's own fact rejected as undeclared purely because this turn's
+    contract only covers branch:a. additional_fields carries branch:b's own
+    declared fields so its fact validates too."""
+    contract_a, branch_b_field, publication, ledger = _two_branch_fixture()
+    proof = graph_proof_checker_v3.check(
+        publication=publication, contract=contract_a, ledger=ledger,
+        proposal={
+            "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+            "branch_path_checksum": "checksum:a", "branch_evidence_span": "servico a",
+            "extracted_facts": [{
+                "field_key": "servico", "owner_node_id": "branch:b",
+                "status": "known", "value": "PPF", "source_message_id": "msg-1",
+                "evidence_span": "ppf", "confidence": 1,
+            }],
+            "claims": [], "next_question_node_id": None,
+            "cited_node_ids": [], "cited_chunk_ids": [], "reply": "Anotado.",
+            "qualification_complete": False, "handoff_requested": False,
+        },
+        message="quero servico a e ppf", source_message_id="msg-1",
+        package_node_ids={"branch:a"}, package_chunk_ids=set(),
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a", "branch:b"],
+        branch_selection_allowed=False, branch_switch_allowed=True,
+        additional_fields=[branch_b_field],
+    )
+    assert proof["valid"] is True, proof["errors"]
+    assert proof["accepted_facts"][0]["value"] == "PPF"
+    assert proof["accepted_facts"][0]["owner_node_id"] == "branch:b"
+
+
+def test_check_without_additional_fields_still_rejects_a_foreign_branch_fact():
+    """Backward-compat guard: omitting additional_fields keeps today's
+    behavior -- a fact for a branch outside the focused contract is
+    rejected, not silently accepted."""
+    contract_a, _branch_b_field, publication, ledger = _two_branch_fixture()
+    proof = graph_proof_checker_v3.check(
+        publication=publication, contract=contract_a, ledger=ledger,
+        proposal={
+            "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+            "branch_path_checksum": "checksum:a", "branch_evidence_span": "servico a",
+            "extracted_facts": [{
+                "field_key": "servico", "owner_node_id": "branch:b",
+                "status": "known", "value": "PPF", "source_message_id": "msg-1",
+                "evidence_span": "ppf", "confidence": 1,
+            }],
+            "claims": [], "next_question_node_id": None,
+            "cited_node_ids": [], "cited_chunk_ids": [], "reply": "Anotado.",
+            "qualification_complete": False, "handoff_requested": False,
+        },
+        message="quero servico a e ppf", source_message_id="msg-1",
+        package_node_ids={"branch:a"}, package_chunk_ids=set(),
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a", "branch:b"],
+        branch_selection_allowed=False, branch_switch_allowed=True,
+    )
+    assert proof["valid"] is False
+    # Matches pre-existing behavior: contract_a already declares "servico"
+    # (for branch:a), so the key isn't unknown -- it's an owner mismatch,
+    # not undeclared. additional_fields only adds NEW (key, owner) pairs;
+    # it doesn't change this outcome for a key the focused contract already
+    # declares under a different owner.
+    assert "field_owner_mismatch:servico" in proof["errors"]
+
+
+def test_check_field_owner_mismatch_still_distinguished_from_undeclared_field():
+    """A fact whose key is declared (for a DIFFERENT owner) in
+    additional_fields, but whose own declared owner doesn't match any known
+    (key, owner) pair, must still be field_owner_mismatch, not
+    undeclared_field -- the two error codes mean different things
+    downstream."""
+    contract_a, branch_b_field, publication, ledger = _two_branch_fixture()
+    proof = graph_proof_checker_v3.check(
+        publication=publication, contract=contract_a, ledger=ledger,
+        proposal={
+            "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+            "branch_path_checksum": "checksum:a", "branch_evidence_span": "servico a",
+            "extracted_facts": [{
+                "field_key": "servico", "owner_node_id": "branch:c",
+                "status": "known", "value": "Pintura", "source_message_id": "msg-1",
+                "evidence_span": "pintura", "confidence": 1,
+            }],
+            "claims": [], "next_question_node_id": None,
+            "cited_node_ids": [], "cited_chunk_ids": [], "reply": "Anotado.",
+            "qualification_complete": False, "handoff_requested": False,
+        },
+        message="quero servico a e pintura", source_message_id="msg-1",
+        package_node_ids={"branch:a"}, package_chunk_ids=set(),
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a", "branch:b"],
+        branch_selection_allowed=False, branch_switch_allowed=True,
+        additional_fields=[branch_b_field],
+    )
+    assert proof["valid"] is False
+    assert "field_owner_mismatch:servico" in proof["errors"]
+    assert "undeclared_field:servico" not in proof["errors"]
+
+
+def test_field_validation_entries_are_attributed_to_the_owning_branch():
+    """Foundation for the Claim-4 error-partitioning fix: each
+    field_validation row must carry the owner_node_id of the fact that
+    produced it, so a caller can tell a non-focused branch's own error apart
+    from the focused branch's. Uses a fact that IS declared (via
+    additional_fields) but fails a later per-fact check (evidence not
+    literal in the message) -- unlike undeclared_field/field_owner_mismatch,
+    which bail out before ever reaching field_validation."""
+    contract_a, _branch_b_field, publication, ledger = _two_branch_fixture()
+    branch_b_extra_field = {
+        "key": "outro_campo", "owner_node_id": "branch:b", "required": False,
+        "accepted_statuses": ["known"], "value_schema": {"type": "string", "minLength": 1},
+    }
+    proof = graph_proof_checker_v3.check(
+        publication=publication, contract=contract_a, ledger=ledger,
+        proposal={
+            "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+            "branch_path_checksum": "checksum:a", "branch_evidence_span": "servico a",
+            "extracted_facts": [
+                {
+                    "field_key": "servico", "owner_node_id": "branch:a",
+                    "status": "known", "value": "Servico A", "source_message_id": "msg-1",
+                    "evidence_span": "servico a", "confidence": 1,
+                },
+                {
+                    "field_key": "outro_campo", "owner_node_id": "branch:b",
+                    "status": "known", "value": "PPF", "source_message_id": "msg-1",
+                    "evidence_span": "essa frase nao esta na mensagem", "confidence": 1,
+                },
+            ],
+            "claims": [], "next_question_node_id": None,
+            "cited_node_ids": [], "cited_chunk_ids": [], "reply": "Anotado.",
+            "qualification_complete": False, "handoff_requested": False,
+        },
+        message="quero servico a e ppf", source_message_id="msg-1",
+        package_node_ids={"branch:a"}, package_chunk_ids=set(),
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a", "branch:b"],
+        branch_selection_allowed=False, branch_switch_allowed=True,
+        additional_fields=[branch_b_extra_field],
+    )
+    invalid_rows = [row for row in proof["field_validation"] if not row["valid"]]
+    assert len(invalid_rows) == 1
+    assert invalid_rows[0]["owner_node_id"] == "branch:b"
+    assert "fact_evidence_not_literal:outro_campo" in invalid_rows[0]["errors"]
+
+
 def _single_fact_proof(*, message: str, value: str, evidence_span: str) -> dict:
     contract = {
         "branch_path_checksum": "checksum:a",

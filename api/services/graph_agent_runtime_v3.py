@@ -1895,25 +1895,6 @@ def active_offering_titles(
     ]
 
 
-def _active_service_summary(
-    document: dict[str, Any],
-    active_branch_ids: list[str],
-    facts_by_key: dict[str, list[dict[str, Any]]],
-) -> str:
-    """Deterministic fallback second paragraph, only for >1 active offering.
-
-    With a single active offering this would just restate the summary that
-    already ran through the natural-language guard, so it's skipped -- the
-    only time it earns its place is a multi-item cart, where it is genuinely
-    new information. No fixed label like "Serviços ativos" -- neutral phrasing
-    that reads the same for a service or a product.
-    """
-    titles = active_offering_titles(document, active_branch_ids, facts_by_key)
-    if len(titles) < 2:
-        return ""
-    return "Também no seu pedido: " + ", ".join(titles) + "."
-
-
 def _commercial_note_projection(
     *,
     document: dict[str, Any],
@@ -1924,6 +1905,7 @@ def _commercial_note_projection(
     """Project shared and service-owned facts without flattening the ledger."""
     contracts = document.get("branch_contracts") or {}
     active = list(dict.fromkeys(str(anchor) for anchor in active_branch_ids if anchor))
+    selection_key = branch_selection_field_key(document)
 
     def fact_for(key: str, owner: str) -> dict[str, Any] | None:
         return next(
@@ -1934,20 +1916,12 @@ def _commercial_note_projection(
             None,
         )
 
-    declarations: dict[tuple[str, str], set[str]] = {}
-    for anchor in active:
-        for field in (contracts.get(anchor) or {}).get("fields") or []:
-            identity = (
-                str(field.get("key") or ""),
-                str(field.get("owner_node_id") or ""),
-            )
-            declarations.setdefault(identity, set()).add(anchor)
-
     common: dict[str, Any] = {}
     services: dict[str, Any] = {}
     node_by_id = document.get("node_by_id") or {}
     for anchor in active:
         service_facts: dict[str, Any] = {}
+        selector_entry: tuple[str, Any] | None = None
         for field in (contracts.get(anchor) or {}).get("fields") or []:
             key = str(field.get("key") or "")
             owner = str(field.get("owner_node_id") or "")
@@ -1955,10 +1929,33 @@ def _commercial_note_projection(
             if not fact or fact.get("status") not in {"known", "unknown", "declined"}:
                 continue
             value = fact.get("value") if fact.get("status") == "known" else "desconhecido"
-            if len(declarations.get((key, owner), set())) == len(active) and owner not in active:
+            if key == selection_key and owner == anchor:
+                # This branch's own selector fact just restates identity the
+                # group's `title` (below) already conveys -- surfacing it as
+                # a normal fact produced a noisy raw-slug chip ("chapeacao")
+                # duplicating the branch's own title in the header. Held back
+                # as a fallback-only entry so an offering whose only known
+                # fact IS the selector still shows up in the header instead
+                # of silently disappearing.
+                if fact.get("status") == "known":
+                    value = _render_field_value(field, fact.get("value"))
+                selector_entry = (key, value)
+                continue
+            # A field whose owner is not one of the currently active branches
+            # is persona-scoped by construction (every field in a branch's
+            # own contract is owned either by that branch or by the persona,
+            # never by some other/dropped branch) -- shared regardless of
+            # whether every other active branch's contract also happens to
+            # redeclare it. Requiring that redeclaration made a real vehicle
+            # field (vehicle_color) misfile as owned by only one of two
+            # active branches purely because the other branch's own catalog
+            # contract was missing that declaration.
+            if owner not in active:
                 common[key] = value
             else:
                 service_facts[key] = value
+        if not service_facts and selector_entry:
+            service_facts[selector_entry[0]] = selector_entry[1]
         node = node_by_id.get(anchor) or {}
         services[anchor] = {
             "slug": node.get("slug"),
@@ -2598,18 +2595,41 @@ def _collected_field_facts(
     active_branch_ids: list[str],
     contract: dict[str, Any],
     facts_by_key: dict[str, list[dict[str, Any]]],
+    *,
+    merge_selector: bool = False,
 ) -> list[tuple[str, str]]:
     """(label, rendered value) for every required field already known.
 
     Shared by the deterministic terminal summary and the natural-summary
     grounding guard so both agree on exactly what counts as "collected".
+
+    ``merge_selector`` is opt-in and only used by the deterministic terminal
+    summary. The branch-selection field (e.g. "servico") is declared once per
+    active branch by construction -- with 2+ active branches this loop would
+    otherwise emit one ("Serviço", value) tuple per branch, which is what
+    produced two disjoint "serviço:" clauses in the same confirmation
+    sentence instead of one that treats every active offering as equally
+    fundamental. The natural-summary grounding guard (validate_natural_summary)
+    must keep seeing each title as its own independent substring, so it calls
+    this with the default False.
     """
     _, labels = _published_conversation_policies(document, contract)
     fields = _active_contract_fields(document, active_branch_ids, contract)
+    selection_key = branch_selection_field_key(document) if merge_selector else ""
     collected: list[tuple[str, str]] = []
+    selector_emitted = False
     for field in fields:
         key = str(field.get("key") or "")
         owner = str(field.get("owner_node_id") or "")
+        if merge_selector and key == selection_key and owner in active_branch_ids:
+            if selector_emitted:
+                continue
+            titles = active_offering_titles(document, active_branch_ids, facts_by_key)
+            if len(titles) >= 2:
+                selector_emitted = True
+                label = str(labels.get(key) or "") or _humanize_field_key(key)
+                collected.append((label, ", ".join(titles)))
+                continue
         # Match the same "already answered" bar _unanswered_fact_after_-
         # question_limit uses (accepted_statuses, not a hardcoded "known")
         # so a field the contract explicitly lets settle at
@@ -2645,7 +2665,9 @@ def _terminal_reply(
     """Render terminal copy exclusively from the published graph contract."""
     conversation_policy, labels = _published_conversation_policies(document, contract)
     qualification = conversation_policy.get("qualification") or {}
-    collected = _collected_field_facts(document, active_branch_ids, contract, facts_by_key)
+    collected = _collected_field_facts(
+        document, active_branch_ids, contract, facts_by_key, merge_selector=True,
+    )
     informed = [f"{label}: {value}" for label, value in collected]
     missing_labels = list(dict.fromkeys(
         str(labels.get(str(field.get("key") or "")) or "")
@@ -4796,6 +4818,19 @@ def _decide(
     # repair round-trip that left the customer without a reply.
     persona_root_id = str((_persona_node(document) or {}).get("id") or "") or None
     persona_root_ids = {persona_root_id} if persona_root_id else set()
+    active_ids_for_fields = context.active_branch_node_ids or (
+        [context.active_branch_node_id] if context.active_branch_node_id else []
+    )
+    # Union of every currently active branch's own fields, not just the
+    # turn's focused contract -- a customer naming two services in the same
+    # message otherwise has the second one's extracted_facts rejected as
+    # undeclared/owner-mismatched purely because this turn's contract is
+    # scoped to whichever branch the model focused on. _active_contract_fields
+    # already does the (key, owner_node_id)-deduped union this needs; claims
+    # authorization deliberately stays read only from `contract` (unchanged
+    # below) -- that's a different, intentional pre-selection/hallucination
+    # gate, not a scoping bug.
+    additional_fields = _active_contract_fields(document, active_ids_for_fields, contract)
     proof = graph_proof_checker_v3.check(
         publication=publication, contract=contract, ledger=ledger,
         proposal=proposal.model_dump(mode="json"), message=next(
@@ -4814,9 +4849,8 @@ def _decide(
         },
         branch_switch_allowed=proposal.branch_anchor_node_id in set(context.retrieval_trace.get("possible_switches") or []),
         package_chunk_sources=chunk_sources,
-        active_branch_node_ids=context.active_branch_node_ids or (
-            [context.active_branch_node_id] if context.active_branch_node_id else []
-        ),
+        active_branch_node_ids=active_ids_for_fields,
+        additional_fields=additional_fields,
     )
     service_operations = [
         item.model_dump(mode="json")
@@ -4989,7 +5023,27 @@ def _decide(
         and not service_operations
         and set(proof.get("errors") or []) == {"keep_without_active_branch"}
     )
-    if proof["valid"] or discovery_only:
+    # A fact error belonging to a currently active branch OTHER than the one
+    # the model focused on this turn must not, by itself, discard the whole
+    # turn's natural/accepted-proposal path -- only the focused branch's own
+    # errors (and any non-fact error: branch-action authorization, citation,
+    # claims) still gate it exactly as before. proof["valid"]/proof["errors"]
+    # stay the true, complete validation result for anyone else consuming
+    # them (logging, audits); this is a local view used only for this one
+    # routing decision. field_validation already carries each fact's
+    # owner_node_id, so this reuses data check() already computed.
+    focused_anchor = str(proposal.branch_anchor_node_id or "")
+    non_focused_active = set(active_ids_for_fields) - {focused_anchor}
+    deferrable_errors = {
+        error
+        for entry in proof.get("field_validation") or []
+        if not entry.get("valid")
+        and str(entry.get("owner_node_id") or "") in non_focused_active
+        for error in entry.get("errors") or []
+    }
+    gating_errors = [error for error in proof.get("errors") or [] if error not in deferrable_errors]
+    proof_gates_turn = bool(gating_errors)
+    if not proof_gates_turn or discovery_only:
         if discovery_only:
             proof = {
                 **proof,
@@ -5318,12 +5372,6 @@ def _decide(
                 next_question_node_id=next_question_id,
                 contract=question_contract,
             )
-        if collection_complete:
-            service_summary = _active_service_summary(
-                document, active_branch_ids, next_grouped,
-            )
-            if service_summary and service_summary not in reply:
-                reply = "\n\n".join(part for part in (reply, service_summary) if part)
         greeting_response = str(context.retrieval_trace.get("greeting_response") or "").strip()
         if greeting_response and not _normalized_phrase(reply).startswith(
             _normalized_phrase(greeting_response)

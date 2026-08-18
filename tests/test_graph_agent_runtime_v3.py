@@ -1513,6 +1513,79 @@ def test_commercial_projection_separates_common_and_per_service_facts():
     assert projection["focused_service_id"] == "branch:b"
 
 
+def test_commercial_projection_humanizes_selector_fact_when_it_is_the_only_fact():
+    """Regression (live 2026-08-18): a branch whose only known fact is its
+    own selector field used to surface the raw graph slug ("chapeacao")
+    verbatim in the header instead of the humanized title ("Chapeação"),
+    and even that raw entry must not disappear -- the offering would go
+    invisible in the header if it had zero facts at all."""
+    document = {
+        "node_by_id": {"branch:a": {"slug": "chapeacao", "title": "Chapeação"}},
+        "branch_contracts": {"branch:a": {"fields": [{
+            "key": "servico", "owner_node_id": "branch:a",
+            "validation": {"mode": "enum", "values": [
+                {"value": "chapeacao", "aliases": ["Chapeação"]},
+            ]},
+        }]}},
+    }
+    projection = graph_agent_runtime_v3._commercial_note_projection(
+        document=document, active_branch_ids=["branch:a"], focused_branch_id="branch:a",
+        facts_by_key={"servico": [
+            {"owner_node_id": "branch:a", "status": "known", "value": "chapeacao"},
+        ]},
+    )
+    assert projection["services"]["branch:a"]["facts"] == {"servico": "Chapeação"}
+
+
+def test_commercial_projection_drops_redundant_selector_fact_when_other_facts_exist():
+    document = {
+        "node_by_id": {"branch:a": {"slug": "chapeacao", "title": "Chapeação"}},
+        "branch_contracts": {"branch:a": {"fields": [
+            {
+                "key": "servico", "owner_node_id": "branch:a",
+                "validation": {"mode": "enum", "values": [
+                    {"value": "chapeacao", "aliases": ["Chapeação"]},
+                ]},
+            },
+            {"key": "vehicle_color", "owner_node_id": "branch:a"},
+        ]}},
+    }
+    projection = graph_agent_runtime_v3._commercial_note_projection(
+        document=document, active_branch_ids=["branch:a"], focused_branch_id="branch:a",
+        facts_by_key={
+            "servico": [{"owner_node_id": "branch:a", "status": "known", "value": "chapeacao"}],
+            "vehicle_color": [{"owner_node_id": "branch:a", "status": "known", "value": "branco"}],
+        },
+    )
+    assert projection["services"]["branch:a"]["facts"] == {"vehicle_color": "branco"}
+
+
+def test_commercial_projection_treats_persona_field_as_common_even_when_one_active_branch_omits_it():
+    """Regression for the exact live catalog gap: branch:a's contract
+    declares vehicle_color (persona-owned), branch:b's contract -- also
+    active -- does not declare it at all. It must still project as a shared
+    common fact, not get misfiled as owned by branch:a alone just because
+    branch:b's own field list happens to omit it."""
+    document = {
+        "node_by_id": {
+            "branch:a": {"slug": "chapeacao", "title": "Chapeação"},
+            "branch:b": {"slug": "ppf", "title": "PPF"},
+        },
+        "branch_contracts": {
+            "branch:a": {"fields": [{"key": "vehicle_color", "owner_node_id": "persona"}]},
+            "branch:b": {"fields": []},
+        },
+    }
+    projection = graph_agent_runtime_v3._commercial_note_projection(
+        document=document, active_branch_ids=["branch:a", "branch:b"], focused_branch_id="branch:a",
+        facts_by_key={
+            "vehicle_color": [{"owner_node_id": "persona", "status": "known", "value": "branco"}],
+        },
+    )
+    assert projection["common_facts"] == {"vehicle_color": "branco"}
+    assert "vehicle_color" not in projection["services"]["branch:a"]["facts"]
+
+
 def test_drop_only_service_operation_does_not_invent_focus_evidence():
     document = {
         "node_by_id": {
@@ -3295,25 +3368,95 @@ def test_collected_field_facts_includes_a_field_pending_selection_confirmation()
     assert collected == [("Servico", "Chapeação")]
 
 
-def test_active_service_summary_has_no_fixed_label_and_needs_two_offerings():
+def test_terminal_reply_confirmation_lists_two_services_in_one_clause_not_a_bolt_on():
+    """End-to-end regression for the live 2026-08-18 bug: the final
+    confirmation sentence for a 2-service pedido must name both services in
+    ONE "Serviço:" clause and must never contain the old "Também no seu
+    pedido" bolt-on paragraph (function removed entirely -- this asserts the
+    observable behavior, not just that the dead code is gone)."""
+    document = {
+        "common_contract": {"fields": []},
+        "node_by_id": {
+            "branch:a": {"title": "Chapeação"},
+            "branch:b": {"title": "PPF (película de proteção física)"},
+        },
+    }
+    contract = {
+        "conversation_policy": {
+            "qualification": {
+                "summary_template": "Então ficou assim: {informed_fields}.",
+                "confirmation_question": "Tá tudo certo?",
+            },
+        },
+        "field_labels": {},
+        "fields": [
+            {"key": "servico", "owner_node_id": "branch:a", "accepted_statuses": ["known"]},
+            {"key": "servico", "owner_node_id": "branch:b", "accepted_statuses": ["known"]},
+        ],
+    }
+    facts_by_key = {"servico": [
+        {"status": "known", "owner_node_id": "branch:a", "value": "chapeacao"},
+        {"status": "known", "owner_node_id": "branch:b", "value": "ppf"},
+    ]}
+    reply = graph_agent_runtime_v3._terminal_reply(
+        document=document, contract=contract,
+        active_branch_ids=["branch:a", "branch:b"],
+        facts_by_key=facts_by_key, missing_fields=[], qualification_complete=True,
+    )
+    assert reply.count("Servico:") == 1
+    assert "Chapeação, PPF (película de proteção física)" in reply
+    assert "Também no seu pedido" not in reply
+
+
+def test_collected_field_facts_merges_two_active_offerings_into_one_selector_clause():
+    """Regression (live 2026-08-18): with 2+ active branches, the selector
+    field ("servico") used to surface as one ("Serviço", value) tuple per
+    branch, so the terminal confirmation sentence came out with two disjoint
+    "serviço:" clauses instead of one that treats every active offering as
+    equally fundamental. merge_selector=True collapses them into a single
+    tuple with a joined value, using the same active_offering_titles() the
+    old (now-removed) _active_service_summary bolt-on paragraph used."""
     document = {
         "common_contract": {"fields": []},
         "node_by_id": {
             "branch:a": {"title": "Vitrificação"}, "branch:b": {"title": "Polimento"},
         },
     }
-    facts_by_key = {"servico": [{"status": "known", "owner_node_id": "branch:a"}]}
-    # A single active offering: the deterministic fallback paragraph would
-    # only restate what the natural summary already said, so it stays empty.
-    assert graph_agent_runtime_v3._active_service_summary(
-        document, ["branch:a"], facts_by_key,
-    ) == ""
-    facts_by_key["servico"].append({"status": "known", "owner_node_id": "branch:b"})
-    summary = graph_agent_runtime_v3._active_service_summary(
-        document, ["branch:a", "branch:b"], facts_by_key,
+    contract = {
+        "conversation_policy": {}, "field_labels": {},
+        "fields": [
+            {"key": "servico", "owner_node_id": "branch:a", "accepted_statuses": ["known"]},
+            {"key": "servico", "owner_node_id": "branch:b", "accepted_statuses": ["known"]},
+        ],
+    }
+    facts_by_key = {"servico": [
+        {"status": "known", "owner_node_id": "branch:a", "value": "vitrificacao"},
+        {"status": "known", "owner_node_id": "branch:b", "value": "polimento"},
+    ]}
+    collected = graph_agent_runtime_v3._collected_field_facts(
+        document, ["branch:a", "branch:b"], contract, facts_by_key, merge_selector=True,
     )
-    assert "Serviços ativos" not in summary
-    assert "Vitrificação" in summary and "Polimento" in summary
+    assert collected == [("Servico", "Vitrificação, Polimento")]
+
+
+def test_collected_field_facts_merge_selector_falls_back_with_one_offering():
+    """Companion to the merge test: a single active branch must keep today's
+    unmerged per-field rendering (guards the len(titles) < 2 fallthrough)."""
+    document = {
+        "common_contract": {"fields": []},
+        "node_by_id": {"branch:a": {"title": "Vitrificação"}},
+    }
+    contract = {
+        "conversation_policy": {}, "field_labels": {},
+        "fields": [{"key": "servico", "owner_node_id": "branch:a", "accepted_statuses": ["known"]}],
+    }
+    facts_by_key = {"servico": [
+        {"status": "known", "owner_node_id": "branch:a", "value": "vitrificacao"},
+    ]}
+    collected = graph_agent_runtime_v3._collected_field_facts(
+        document, ["branch:a"], contract, facts_by_key, merge_selector=True,
+    )
+    assert collected == [("Servico", "vitrificacao")]
 
 
 def test_confirmed_branch_node_ids_covers_every_active_branch(monkeypatch):
@@ -3448,6 +3591,154 @@ def test_no_pending_branch_confirmation_stays_locked_in_support(monkeypatch):
     )
     assert response.proof.get("valid"), response.proof.get("errors")
     assert response.proof["confirmation_state"] == "post_qualification_support"
+
+
+def _two_active_branches_context(monkeypatch, *, focused_branch, extra_context_kwargs=None):
+    document = compiled_fixture()
+    persona_row = {**PERSONA, "config": {}}
+    pub = publication(document)
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: persona_row)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub
+    )
+    contract = document["branch_contracts"][focused_branch]
+    # compiled_fixture() has no qualification copy configured; several of
+    # these tests can legitimately reach a "qualification complete" state
+    # (e.g. the negative-case gating test, where the only required field is
+    # already known) and _terminal_reply raises without templates.
+    contract.setdefault("conversation_policy", {})["qualification"] = {
+        "summary_template": "Então ficou assim: {informed_fields}.",
+        "confirmation_question": "Tá tudo certo?",
+        "incomplete_handoff_template": "Faltou: {missing_fields}.",
+    }
+    base_kwargs: dict = {
+        "persona_slug": "generic", "agent_slug": "agent", "graph_version": 1,
+        "graph_checksum": document["checksum"], "messages": [{
+            "message_id": "msg:both", "role": "user", "texto": "são 20 metros e 5 unidades",
+        }],
+        "cart": {}, "rag_nodes": [], "rag_paths": [],
+        "graph_contract": contract,
+        "active_branch_node_id": focused_branch, "active_branch_node_ids": ["branch:a", "branch:b"],
+        "branch_node_ids": [], "runtime_version": "graph_agent_runtime_v3",
+        "publication_id": pub["id"],
+        "retrieval_trace": {"retrieval_branch_node_id": focused_branch},
+    }
+    base_kwargs.update(extra_context_kwargs or {})
+    context = ConversationContext(**base_kwargs)
+    return document, contract, context
+
+
+def test_decide_accepts_same_message_facts_for_two_active_branches(monkeypatch):
+    """Regression for Claim 3 (branch-scoped extracted_facts asymmetry): a
+    customer naming a fact for a second already-active branch (not the one
+    the model happened to focus on this turn) must have it accepted, not
+    rejected as undeclared/owner-mismatched purely because this turn's
+    contract is scoped to the focused branch. branch:a's own required field
+    is deliberately left unanswered so qualification never completes,
+    keeping this test isolated to the acceptance question."""
+    _document, contract_a, context = _two_active_branches_context(monkeypatch, focused_branch="branch:a")
+    proposal = {
+        "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": contract_a["branch_path_checksum"],
+        "branch_evidence_span": "",
+        "extracted_facts": [{
+            "field_key": "quantidade", "owner_node_id": "branch:b",
+            "status": "known", "value": 5, "source_message_id": "msg:both",
+            "evidence_span": "5 unidades", "confidence": 1,
+        }],
+        "claims": [], "next_question_node_id": None,
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "reply": "Perfeito, 5 unidades anotadas.",
+        "qualification_complete": False, "handoff_requested": False,
+    }
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": proposal},
+    )
+    assert response.proof.get("valid"), response.proof.get("errors")
+    accepted = {
+        (fact["field_key"], fact["owner_node_id"])
+        for fact in response.proof.get("accepted_facts") or []
+    }
+    assert ("quantidade", "branch:b") in accepted
+
+
+def test_decide_defers_non_focused_branch_fact_error_but_still_answers_naturally(monkeypatch):
+    """Claim 4 mitigation: branch:b's own fact fails validation (evidence
+    not literal in the message) while branch:a's (focused) fact is clean --
+    the turn must still take the natural/accepted-facts path instead of the
+    fully deterministic fallback. proof["valid"] stays the true, complete
+    result (False, since branch:b's fact really did fail); what matters is
+    the turn isn't silently reduced to the generic deterministic reply."""
+    _document, contract_a, context = _two_active_branches_context(monkeypatch, focused_branch="branch:a")
+    proposal = {
+        "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": contract_a["branch_path_checksum"],
+        "branch_evidence_span": "",
+        "extracted_facts": [
+            {
+                "field_key": "metragem", "owner_node_id": "branch:a",
+                "status": "known", "value": 20, "source_message_id": "msg:both",
+                "evidence_span": "20 metros", "confidence": 1,
+            },
+            {
+                "field_key": "quantidade", "owner_node_id": "branch:b",
+                "status": "known", "value": 5, "source_message_id": "msg:both",
+                # Not literally in the message -- forces this one fact to fail.
+                "evidence_span": "essa frase nao esta na mensagem", "confidence": 1,
+            },
+        ],
+        "claims": [], "next_question_node_id": None,
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "reply": "Perfeito, 20 metros anotados.",
+        "qualification_complete": False, "handoff_requested": False,
+    }
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": proposal},
+    )
+    assert response.proof.get("valid") is False
+    assert response.proof.get("mode") != "published_fallback"
+    accepted = {
+        (fact["field_key"], fact["owner_node_id"])
+        for fact in response.proof.get("accepted_facts") or []
+    }
+    assert ("metragem", "branch:a") in accepted
+    assert ("quantidade", "branch:b") not in accepted
+
+
+def test_seed_carried_facts_carries_vehicle_not_just_name(monkeypatch):
+    """Regression (live 2026-08-18): a new journey/appointment cycle after a
+    previous one closed only seeded nome_cliente -- the fixture's
+    carry_over generalization (publish_aurora_graph.py) is what actually
+    fixes the live bug, but _seed_carried_facts/_carry_over_field_keys
+    themselves must already correctly seed EVERY field the compiled
+    contract flags carry_over=True for, not just identity. This pins that
+    behavior directly against the runtime function, independent of which
+    fields a given graph's publish script happens to flag."""
+    document = {
+        "common_contract": {"fields": []},
+        "branch_contracts": {"branch:a": {"fields": [
+            {"key": "nome_cliente", "owner_node_id": "persona", "carry_over": True},
+            {"key": "modelo_veiculo", "owner_node_id": "persona", "carry_over": True},
+            {"key": "vehicle_color", "owner_node_id": "persona", "carry_over": True},
+            {"key": "servico", "owner_node_id": "branch:a", "carry_over": False},
+        ]}},
+    }
+    rows = [
+        {"id": "f1", "field_key": "nome_cliente", "status": "known", "value_json": "Allan Rodrigues"},
+        {"id": "f2", "field_key": "modelo_veiculo", "status": "known", "value_json": "Ford Ka"},
+        {"id": "f3", "field_key": "vehicle_color", "status": "known", "value_json": "branco"},
+        {"id": "f4", "field_key": "servico", "status": "known", "value_json": "chapeacao"},
+    ]
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_journey_ledger_facts", lambda journey_id: rows,
+    )
+    seeded = graph_agent_runtime_v3._seed_carried_facts(
+        {"facts": {}, "facts_by_key": {}}, document, {"id": "journey-prev"},
+    )
+    assert set(seeded["facts"].keys()) == {"nome_cliente", "modelo_veiculo", "vehicle_color"}
+    assert seeded["facts"]["modelo_veiculo"]["value"] == "Ford Ka"
+    assert seeded["facts"]["vehicle_color"]["value"] == "branco"
+    assert "servico" not in seeded["facts"]
 
 
 def test_rejected_proposal_reopens_pending_branch_confirmation_instead_of_silence(monkeypatch):
