@@ -479,6 +479,125 @@ def test_invalid_model_fallback_cannot_leave_terminal_state_on_sdr():
     assert response.reply_text == "Known: name: Beatriz.\n\nIs this correct?"
 
 
+def test_invalid_model_fallback_never_goes_silent_on_a_non_terminal_repeat():
+    """Regression test for the 2026-08-17 live silence bug: a schema-invalid
+    model proposal whose deterministic fallback reply happened to match a
+    recent assistant message got the anti-repetition gate to blank it to
+    "" outright, leaving the customer with literally no reply on that turn
+    (`repetition_action: suppressed_duplicate_outbound`). Silence must stay
+    reserved for a genuinely repeated *terminal* handoff -- an ordinary
+    repeated confirmation still has to say something.
+    """
+    contract = {
+        "branch_anchor_node_id": "branch:a",
+        "fields": [{
+            "key": "name", "owner_node_id": "branch:a", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:name",
+        }],
+        "questions": {"q:name": {"field_key": "name", "text": "What is your name?"}},
+        "conversation_policy": {
+            "question_repetition": {"max_attempts": 1},
+            "qualification": {
+                "summary_template": "Known: {informed_fields}.",
+                "confirmation_question": "Is this correct?",
+                "completion_message": "The team will continue.",
+                "incomplete_handoff_template": "Missing: {missing_fields}.",
+            },
+        },
+        "field_labels": {"name": "name"},
+    }
+    known = {
+        "status": "known", "value": "Beatriz", "owner_node_id": "branch:a",
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test", messages=[
+            {"role": "user", "content": "Beatriz"},
+            # Same text the fallback is about to compute again -- forces
+            # semantic_repetition without this being a terminal handoff.
+            {"role": "assistant", "content": "Known: name: Beatriz.\n\nIs this correct?"},
+        ],
+        cart={"facts": {"name": known}, "facts_by_key": {"name": [known]}},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+
+    decision, response = graph_agent_runtime_v3._invalid_proposal_fallback(
+        context, {"invalid": True}, ["proposal_schema_invalid"],
+    )
+
+    assert response.proof["repetition_action"] != "suppressed_duplicate_outbound"
+    assert response.reply_text == "Known: name: Beatriz.\n\nIs this correct?"
+
+
+def test_invalid_proposal_fallback_confirms_every_active_branch_not_just_the_focused_one(monkeypatch):
+    """Regression test: a schema-invalid model proposal used to fall back to
+    a hand-built document containing only the focused branch's own
+    contract, so a customer with two confirmed services in the same pedido
+    saw the confirmation summary collapse down to just whichever branch
+    happened to be in focus this turn -- the other service silently
+    dropped from the text. Confirmed live 2026-08-17: lead confirmed two
+    services, got a summary naming only one.
+    """
+    root = node(1, "persona:generic", parent_type="persona", data={
+        "conversation_policy": {
+            "qualification": {
+                "summary_template": "Resumo: {informed_fields}.",
+                "confirmation_question": "Os dados estão corretos?",
+                "completion_message": "A equipe continuará o atendimento.",
+            },
+        },
+    })
+    branch_a = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    branch_b = node(3, "branch:b", data={"capabilities": {"branch_anchor": True}})
+    q_a = node(4, "question:a", parent_type="faq", data={"question": "Qual o serviço A?"})
+    q_b = node(5, "question:b", parent_type="faq", data={"question": "Qual o serviço B?"})
+    branch_a["metadata"]["qualification"] = {"fields": [{
+        "key": "campo_a", "question_node_id": "question:a", "required": True,
+        "accepted_statuses": ["known"], "value_schema": {"type": "string"},
+    }]}
+    branch_b["metadata"]["qualification"] = {"fields": [{
+        "key": "campo_b", "question_node_id": "question:b", "required": True,
+        "accepted_statuses": ["known"], "value_schema": {"type": "string"},
+    }]}
+    rows = [root, branch_a, branch_b, q_a, q_b]
+    edges = [
+        edge(1, root, branch_a), edge(2, root, branch_b),
+        edge(3, branch_a, q_a), edge(4, branch_b, q_b),
+    ]
+    document = graph_compiler_v3.compile_graph(persona=PERSONA, node_rows=rows, edge_rows=edges)
+    contract_a = document["branch_contracts"]["branch:a"]
+
+    pub = publication(document)
+    persona_row = {**PERSONA, "config": {}}
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: persona_row)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub
+    )
+
+    fact_a = {"status": "known", "value": "Polimento", "owner_node_id": "branch:a"}
+    fact_b = {"status": "known", "value": "Vitrificação", "owner_node_id": "branch:b"}
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"],
+        messages=[{"role": "user", "content": "confirma"}],
+        cart={
+            "facts": {"campo_a": fact_a, "campo_b": fact_b},
+            "facts_by_key": {"campo_a": [fact_a], "campo_b": [fact_b]},
+        },
+        rag_nodes=[], rag_paths=[], graph_contract=contract_a,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a", "branch:b"],
+        publication_id=pub["id"],
+    )
+
+    decision, response = graph_agent_runtime_v3._invalid_proposal_fallback(
+        context, {"invalid": True}, ["proposal_schema_invalid"],
+    )
+
+    assert "Polimento" in response.reply_text
+    assert "Vitrificação" in response.reply_text
+
+
 def test_greeting_recognizer_covers_how_people_actually_type():
     """WhatsApp openings stretch letters and chain forms; typos must not pass."""
     for message in (
@@ -3127,6 +3246,55 @@ def test_active_offering_titles_has_no_hardcoded_selection_key():
     assert titles == ["Camiseta", "Boné"]
 
 
+def test_active_offering_titles_includes_a_branch_pending_selection_confirmation():
+    """Regression (live 2026-08-18): graph_compiler_v3._with_confirmable_status
+    always authorizes "needs_confirmation" on the branch selector field --
+    an approximate service match stays in that state until the customer
+    confirms, but the branch is already active and its other collected
+    facts already count toward qualification. Gating this on "known" only
+    silently dropped that branch's title from the confirmation summary and
+    from the lead's interesse_produto projection (conversation_runtime.py)
+    the moment a composite reply moved focus to a different active branch."""
+    document = {
+        "common_contract": {"fields": [{"key": "servico", "branch_selection_field": True}]},
+        "node_by_id": {
+            "branch:chapeacao": {"title": "Chapeação"},
+            "branch:lavagem": {"title": "Lavagem detalhada"},
+        },
+    }
+    facts_by_key = {"servico": [
+        {"status": "needs_confirmation", "owner_node_id": "branch:chapeacao"},
+        {"status": "known", "owner_node_id": "branch:lavagem"},
+    ]}
+    titles = graph_agent_runtime_v3.active_offering_titles(
+        document, ["branch:chapeacao", "branch:lavagem"], facts_by_key,
+    )
+    assert titles == ["Chapeação", "Lavagem detalhada"]
+
+
+def test_collected_field_facts_includes_a_field_pending_selection_confirmation():
+    """Same regression as active_offering_titles, for the confirmation
+    summary's field-by-field listing: a field whose accepted_statuses the
+    contract explicitly widens beyond "known" (the branch selector) must
+    not require "known" specifically to be counted as collected."""
+    document = {"branch_contracts": {}, "node_by_id": {}}
+    contract = {
+        "conversation_policy": {}, "field_labels": {},
+        "fields": [{
+            "key": "servico", "owner_node_id": "branch:chapeacao",
+            "accepted_statuses": ["known", "needs_confirmation"],
+        }],
+    }
+    facts_by_key = {"servico": [{
+        "owner_node_id": "branch:chapeacao", "status": "needs_confirmation",
+        "value": "Chapeação",
+    }]}
+    collected = graph_agent_runtime_v3._collected_field_facts(
+        document, ["branch:chapeacao"], contract, facts_by_key,
+    )
+    assert collected == [("Servico", "Chapeação")]
+
+
 def test_active_service_summary_has_no_fixed_label_and_needs_two_offerings():
     document = {
         "common_contract": {"fields": []},
@@ -3280,6 +3448,87 @@ def test_no_pending_branch_confirmation_stays_locked_in_support(monkeypatch):
     )
     assert response.proof.get("valid"), response.proof.get("errors")
     assert response.proof["confirmation_state"] == "post_qualification_support"
+
+
+def test_rejected_proposal_reopens_pending_branch_confirmation_instead_of_silence(monkeypatch):
+    """Regression: the *fallback* path (model proposal rejected by check())
+    computed fallback_post_support without the pending_branch_confirmation /
+    _explicit_change_requested guard that the accepted-proposal path above
+    already uses, so a customer's correction to a multi-service confirmation
+    -- landing while the journey was already post_qualification_support from
+    an earlier branch's confirmation, and whose proposal check() rejects for
+    any reason -- fell straight into `fallback = ""` with no further floor
+    catching it: zero outbound reply. Confirmed live 2026-08-17/18.
+    """
+    document = compiled_fixture()
+    persona_row = {**PERSONA, "config": {}}
+    pub = publication(document)
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: persona_row)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub
+    )
+    # The proposal below would otherwise be accepted outright by check() --
+    # what matters for this regression is exclusively what _decide does
+    # once check() rejects a proposal while post_qualification_support and
+    # a branch is still pending confirmation, not which real-world defect
+    # trips check() up. Force the rejection deterministically instead of
+    # relying on an incidental validation failure elsewhere.
+    real_check = graph_proof_checker_v3.check
+
+    def _rejecting_check(*args, **kwargs):
+        result = dict(real_check(*args, **kwargs))
+        result["valid"] = False
+        result["errors"] = [*(result.get("errors") or []), "forced_test_rejection"]
+        return result
+
+    monkeypatch.setattr(graph_agent_runtime_v3.graph_proof_checker_v3, "check", _rejecting_check)
+
+    contract_b = document["branch_contracts"]["branch:b"]
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], messages=[{
+            "message_id": "msg:correction", "role": "user", "texto": "não, eu pedi os dois servicos",
+        }],
+        cart={
+            "facts": {"metragem": {"status": "known", "value": 20, "owner_node_id": "branch:a"}},
+            "facts_by_key": {"metragem": [
+                {"status": "known", "value": 20, "owner_node_id": "branch:a"},
+            ]},
+        },
+        rag_nodes=[], rag_paths=[],
+        graph_contract=contract_b,
+        active_branch_node_id="branch:b", active_branch_node_ids=["branch:a", "branch:b"],
+        completed_branch_node_ids=["branch:a"],
+        branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+        publication_id=pub["id"],
+        journey_state="handed_off", operational_mode="post_qualification_support",
+        retrieval_trace={"retrieval_branch_node_id": "branch:b"},
+    )
+    proposal = {
+        "branch_action": "keep", "branch_anchor_node_id": "branch:b",
+        "branch_path_checksum": contract_b["branch_path_checksum"],
+        "branch_evidence_span": "5 unidades",
+        "extracted_facts": [{
+            "field_key": "quantidade", "owner_node_id": "branch:b",
+            "status": "known", "value": 5, "source_message_id": "msg:correction",
+            "evidence_span": "5 unidades", "confidence": 1,
+        }],
+        "claims": [], "next_question_node_id": None,
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "reply": "Perfeito, ficam 20 e 5 no pedido. Posso confirmar?",
+        "qualification_complete": True, "handoff_requested": False,
+    }
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": proposal},
+    )
+    # Without the fix, fallback_post_support stayed True regardless of the
+    # pending branch:b confirmation, so `fallback` (and therefore reply_text)
+    # was forced to "" here -- proof["valid"] reflects "did the fallback
+    # produce text", not "did check() accept the proposal", so it stays True
+    # once text comes back; what matters is that text comes back at all.
+    assert response.proof.get("model_proposal_errors")
+    assert response.reply_text, "must never go fully silent on a pending branch correction"
+    assert response.proof["confirmation_state"] != "post_qualification_support"
 
 
 def test_qualification_complete_turn_citing_persona_root_is_not_rejected(monkeypatch):

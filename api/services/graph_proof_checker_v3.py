@@ -600,7 +600,22 @@ def check(
                     and fact.get("owner_node_id") == branch
                     and bool(_literal_span(message, fact.get("evidence_span")))
                 )
-                if not graph_explicit_switch:
+                # Settling a candidate the graph itself left at
+                # "needs_confirmation" (e.g. the branch selector field,
+                # which graph_compiler_v3._with_confirmable_status always
+                # authorizes for that intermediate state) into "known" is
+                # confirmation, not correction -- the customer is finally
+                # answering something that was never actually settled, not
+                # overwriting a fact they previously stated. Requiring
+                # "na verdade"/"corrigindo" language here blocked exactly
+                # that resolution once the branch focus had moved on to
+                # another active service (confirmed live: an "add" that
+                # should have closed a pending servico candidate instead
+                # failed as an unauthorized overwrite).
+                resolving_pending_confirmation = (
+                    previous.get("status") == "needs_confirmation" and status == "known"
+                )
+                if not graph_explicit_switch and not resolving_pending_confirmation:
                     errors.append(f"fact_correction_not_explicit:{key}")
             elif policy == "higher_confidence" and float(fact.get("confidence") or 0) <= float(previous.get("confidence") or 0):
                 errors.append(f"fact_overwrite_confidence_too_low:{key}")
