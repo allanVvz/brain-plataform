@@ -1218,6 +1218,26 @@
               "aurora-product-glass-polish",
               "aurora-copy-glass-polish"
             ]
+          },
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-glass-polish"
+            ],
+            "source_node_id": "aurora-product-glass-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-glass-polish",
+              "aurora-copy-glass-polish"
+            ]
           }
         ]
       }
@@ -2233,6 +2253,26 @@
               "aurora-product-polish-commercial",
               "aurora-copy-polish-commercial"
             ]
+          },
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-commercial"
+            ],
+            "source_node_id": "aurora-product-polish-commercial",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-commercial",
+              "aurora-copy-polish-commercial"
+            ]
           }
         ]
       }
@@ -2315,6 +2355,26 @@
         "claims": [
           {
             "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-one-step"
+            ],
+            "source_node_id": "aurora-product-polish-one-step",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-one-step",
+              "aurora-copy-polish-one-step"
+            ]
+          },
+          {
+            "claim_type": "service_detail",
             "policy": {
               "mode": "informational"
             },
@@ -2431,6 +2491,26 @@
               "aurora-product-polish-multi-step",
               "aurora-copy-polish-multi-step"
             ]
+          },
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-multi-step"
+            ],
+            "source_node_id": "aurora-product-polish-multi-step",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-multi-step",
+              "aurora-copy-polish-multi-step"
+            ]
           }
         ]
       }
@@ -2513,6 +2593,26 @@
         "claims": [
           {
             "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-localized"
+            ],
+            "source_node_id": "aurora-product-polish-localized",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-localized",
+              "aurora-copy-polish-localized"
+            ]
+          },
+          {
+            "claim_type": "service_detail",
             "policy": {
               "mode": "informational"
             },
@@ -2629,6 +2729,26 @@
               "aurora-product-polish-finish",
               "aurora-copy-polish-finish"
             ]
+          },
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-finish"
+            ],
+            "source_node_id": "aurora-product-polish-finish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-finish",
+              "aurora-copy-polish-finish"
+            ]
           }
         ]
       }
@@ -2714,6 +2834,26 @@
         "claims": [
           {
             "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polish-headlight"
+            ],
+            "source_node_id": "aurora-product-polish-headlight",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-headlight",
+              "aurora-copy-polish-headlight"
+            ]
+          },
+          {
+            "claim_type": "service_detail",
             "policy": {
               "mode": "informational"
             },

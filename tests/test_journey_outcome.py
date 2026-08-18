@@ -634,8 +634,8 @@ def _documento(carry, nao_carry):
 def test_ciclo_novo_herda_identidade_e_esquece_o_servico(monkeypatch):
     from services import graph_agent_runtime_v3 as runtime
 
-    monkeypatch.setattr(runtime.supabase_client, "get_journey_ledger_facts",
-                        lambda _jid: [
+    monkeypatch.setattr(runtime.supabase_client, "get_lead_carry_over_facts",
+                        lambda _persona_id, _lead_ref, _keys: [
                             {"field_key": "nome_cliente", "status": "known",
                              "value_json": "Ana", "id": "f1"},
                             {"field_key": "servico", "status": "known",
@@ -651,13 +651,48 @@ def test_ciclo_novo_herda_identidade_e_esquece_o_servico(monkeypatch):
     assert "servico" not in ledger["facts"]
 
 
+def test_herda_do_historico_completo_do_lead_nao_so_da_jornada_anterior(monkeypatch):
+    """Regressao (ao vivo 2026-08-18): duas jornadas fechadas em sequencia
+    perdiam o nome porque a busca antiga so olhava a jornada imediatamente
+    anterior, que nunca teve o fato persistido. _seed_carried_facts agora
+    chama get_lead_carry_over_facts(persona_id, lead_ref, ...) -- escopado
+    pelo lead inteiro, nao por um journey_id -- entao encontra o fato
+    mesmo que ele venha de uma jornada bem mais antiga que a imediatamente
+    anterior (simulado aqui: o mock devolve o fato independente de qual
+    jornada intermediaria existiu)."""
+    from services import graph_agent_runtime_v3 as runtime
+
+    calls = []
+
+    def fake_get_lead_carry_over_facts(persona_id, lead_ref, field_keys):
+        calls.append((persona_id, lead_ref, tuple(sorted(field_keys))))
+        return [{"field_key": "nome_cliente", "status": "known",
+                 "value_json": "Allan Rodrigues", "id": "f1"}]
+
+    monkeypatch.setattr(
+        runtime.supabase_client, "get_lead_carry_over_facts", fake_get_lead_carry_over_facts,
+    )
+    ledger = runtime._seed_carried_facts(
+        {"facts": {}, "facts_by_key": {}},
+        _documento("nome_cliente", "servico"),
+        # A jornada imediatamente anterior (a "segunda", intermediaria) --
+        # o fato real veio de uma jornada bem mais antiga, mas quem decide
+        # isso agora e o histórico completo do lead, nao este id.
+        {"id": "jornada-intermediaria-sem-fatos"},
+        persona_id="persona-1", lead_ref=42,
+    )
+    assert ledger["facts"]["nome_cliente"]["value"] == "Allan Rodrigues"
+    assert calls == [("persona-1", 42, ("nome_cliente",))]
+
+
 def test_fato_herdado_nunca_sobrescreve_o_do_ciclo_atual(monkeypatch):
     """Se o cliente ja corrigiu o nome neste pedido, o valor novo vence."""
     from services import graph_agent_runtime_v3 as runtime
 
-    monkeypatch.setattr(runtime.supabase_client, "get_journey_ledger_facts",
-                        lambda _jid: [{"field_key": "nome_cliente", "status": "known",
-                                       "value_json": "Ana", "id": "f1"}])
+    monkeypatch.setattr(runtime.supabase_client, "get_lead_carry_over_facts",
+                        lambda _persona_id, _lead_ref, _keys: [
+                            {"field_key": "nome_cliente", "status": "known",
+                             "value_json": "Ana", "id": "f1"}])
     atual = {"facts": {"nome_cliente": {"value": "Ana Paula"}},
              "facts_by_key": {"nome_cliente": [{"value": "Ana Paula"}]}}
     ledger = runtime._seed_carried_facts(
@@ -671,9 +706,10 @@ def test_fato_incerto_nao_atravessa(monkeypatch):
     """`unknown` (o `ignored_twice`) nao vira verdade no ciclo seguinte."""
     from services import graph_agent_runtime_v3 as runtime
 
-    monkeypatch.setattr(runtime.supabase_client, "get_journey_ledger_facts",
-                        lambda _jid: [{"field_key": "nome_cliente", "status": "unknown",
-                                       "value_json": None, "id": "f1"}])
+    monkeypatch.setattr(runtime.supabase_client, "get_lead_carry_over_facts",
+                        lambda _persona_id, _lead_ref, _keys: [
+                            {"field_key": "nome_cliente", "status": "unknown",
+                             "value_json": None, "id": "f1"}])
     ledger = runtime._seed_carried_facts(
         {"facts": {}, "facts_by_key": {}},
         _documento("nome_cliente", "servico"), {"id": "jornada-1"},
@@ -684,9 +720,9 @@ def test_fato_incerto_nao_atravessa(monkeypatch):
 def test_falha_ao_herdar_nao_derruba_o_turno(monkeypatch):
     from services import graph_agent_runtime_v3 as runtime
 
-    def explode(_jid):
+    def explode(_persona_id, _lead_ref, _keys):
         raise RuntimeError("banco fora")
-    monkeypatch.setattr(runtime.supabase_client, "get_journey_ledger_facts", explode)
+    monkeypatch.setattr(runtime.supabase_client, "get_lead_carry_over_facts", explode)
     ledger = runtime._seed_carried_facts(
         {"facts": {}, "facts_by_key": {}},
         _documento("nome_cliente", "servico"), {"id": "jornada-1"},

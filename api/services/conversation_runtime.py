@@ -1981,6 +1981,35 @@ def _handoff_branch_reset_facts(
     return []
 
 
+def _ensure_reply_text_or_log(
+    response: AgentResponse, *, lead_ref: Any, correlation_id: str,
+) -> AgentResponse:
+    """Last-resort floor against total silence.
+
+    commit() had no guard at all on an empty reply_text -- it committed the
+    graph turn/ledger/proof and returned {"ok": True, "message_id": None,
+    ...} with no outbound message and no alert. The doubt/claim repair
+    branch that caused this live (2026-08-18) is now fixed at the source
+    (graph_agent_runtime_v3 resolves it immediately instead of returning
+    reply_text=None), but this stays as a generic safety net for any other
+    path (e.g. the genuinely-needs-fetching selected_branch_requires_-
+    phase_b repair, which still depends on a real round trip) that might
+    end up here with nothing to say. Never invents text that didn't come
+    from the graph -- proof["text"] is graph-approved content (the doubt
+    resolution's answer) when present, nothing else.
+    """
+    if response.reply_text:
+        return response
+    if response.proof.get("text"):
+        return response.model_copy(update={"reply_text": response.proof["text"]})
+    logger.error(
+        "conversation turn committed with no reply_text lead_ref=%s "
+        "correlation_id=%s proof_mode=%s",
+        lead_ref, correlation_id, response.proof.get("mode"),
+    )
+    return response
+
+
 def commit(
     *,
     lead_ref: int,
@@ -2480,6 +2509,10 @@ def commit(
                 "qualification": qualification,
             },
         }
+    )
+
+    response = _ensure_reply_text_or_log(
+        response, lead_ref=lead_ref, correlation_id=correlation_id,
     )
 
     buffer = None

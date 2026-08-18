@@ -4233,6 +4233,50 @@ def get_conversation_ledger(persona_id: str, lead_ref: int) -> Optional[dict]:
     return ledger
 
 
+def get_lead_carry_over_facts(
+    persona_id: str, lead_ref: int, field_keys: list[str],
+) -> list[dict]:
+    """O valor `known` mais recente de cada campo, em qualquer jornada do lead.
+
+    Diferente de get_journey_ledger_facts (uma jornada so): jornadas/pedidos
+    ja registrados sao a fonte de verdade da identidade do cliente, entao a
+    busca cobre o historico inteiro do lead, nao so a jornada anterior
+    imediata -- um ponteiro de uma jornada so perdia o fato assim que uma
+    segunda jornada fechasse antes do campo ser respondido de novo
+    (confirmado ao vivo 2026-08-18).
+    """
+    if not persona_id or not lead_ref or not field_keys:
+        return []
+    try:
+        result = get_client().rpc(
+            "conversation_carry_over_facts_by_lead_v1",
+            {"p_persona_id": persona_id, "p_lead_ref": lead_ref, "p_field_keys": field_keys},
+        ).execute()
+        return result.data or []
+    except Exception:
+        # Rolling-deploy compatibility until migration 129 is applied.
+        pass
+    ledgers = _q(
+        get_client().table("conversation_ledgers").select("id")
+        .eq("persona_id", persona_id).eq("lead_ref", lead_ref).limit(200)
+    )
+    ledger_ids = [row["id"] for row in ledgers if row.get("id")]
+    if not ledger_ids:
+        return []
+    rows = _q(
+        get_client().table("conversation_facts").select("*")
+        .in_("ledger_id", ledger_ids).in_("field_key", field_keys)
+        .eq("is_current", True).eq("status", "known")
+        .order("created_at", desc=True).limit(1000)
+    )
+    latest_by_key: dict[str, dict] = {}
+    for row in rows:
+        key = str(row.get("field_key") or "")
+        if key and key not in latest_by_key:
+            latest_by_key[key] = row
+    return list(latest_by_key.values())
+
+
 def get_journey_ledger_facts(journey_id: str) -> list[dict]:
     """Fatos correntes do ledger de uma jornada especifica.
 

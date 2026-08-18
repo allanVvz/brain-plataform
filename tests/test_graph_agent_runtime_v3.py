@@ -3628,6 +3628,51 @@ def _two_active_branches_context(monkeypatch, *, focused_branch, extra_context_k
     return document, contract, context
 
 
+def test_decide_persists_carried_facts_into_accepted_facts_on_new_journey(monkeypatch):
+    """Regression (live 2026-08-18): a carried fact (_seed_carried_facts)
+    only ever lived in context.cart["facts"] for one turn's in-memory
+    processing -- never folded into accepted_facts, the only thing
+    actually persisted. decide() now writes it into accepted_facts
+    whenever context.journey_id is None (exactly the turn build_context
+    creates a new journey's placeholder), so it survives durably instead
+    of evaporating the moment a second journey closes before the field is
+    independently restated."""
+    _document, contract_a, context = _two_active_branches_context(
+        monkeypatch, focused_branch="branch:a",
+        extra_context_kwargs={
+            "journey_id": None,
+            "cart": {
+                "facts": {"nome_cliente": {
+                    "status": "known", "value": "Allan Rodrigues",
+                    "owner_node_id": "persona", "source_message_id": "msg:old",
+                    "evidence_span": "Allan Rodrigues", "confidence": 1,
+                    "carried_from_journey": "journey-anterior",
+                }},
+                "facts_by_key": {},
+            },
+        },
+    )
+    proposal = {
+        "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": contract_a["branch_path_checksum"],
+        "branch_evidence_span": "", "extracted_facts": [],
+        "claims": [], "next_question_node_id": None,
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "reply": "Perfeito.",
+        "qualification_complete": False, "handoff_requested": False,
+    }
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": proposal},
+    )
+    carried = [
+        fact for fact in response.proof.get("accepted_facts") or []
+        if fact.get("field_key") == "nome_cliente"
+    ]
+    assert len(carried) == 1
+    assert carried[0]["value"] == "Allan Rodrigues"
+    assert carried[0]["owner_node_id"] == "persona"
+
+
 def test_decide_accepts_same_message_facts_for_two_active_branches(monkeypatch):
     """Regression for Claim 3 (branch-scoped extracted_facts asymmetry): a
     customer naming a fact for a second already-active branch (not the one
@@ -3730,7 +3775,8 @@ def test_seed_carried_facts_carries_vehicle_not_just_name(monkeypatch):
         {"id": "f4", "field_key": "servico", "status": "known", "value_json": "chapeacao"},
     ]
     monkeypatch.setattr(
-        graph_agent_runtime_v3.supabase_client, "get_journey_ledger_facts", lambda journey_id: rows,
+        graph_agent_runtime_v3.supabase_client, "get_lead_carry_over_facts",
+        lambda persona_id, lead_ref, field_keys: rows,
     )
     seeded = graph_agent_runtime_v3._seed_carried_facts(
         {"facts": {}, "facts_by_key": {}}, document, {"id": "journey-prev"},
@@ -4538,15 +4584,17 @@ def test_decide_reconciles_faq_answer_before_exact_next_question_without_fallbac
         cited_chunk_ids=["chunk:detail"], reply="Resposta inventada do modelo.",
     )
 
-    first_decision, first_response = graph_agent_runtime_v3.decide(
+    # Regression (live 2026-08-18): this used to require a second call with
+    # repair_attempt=1 (a real round trip orchestrated outside Python by
+    # n8n) before resolving -- the FIRST call returned intent=
+    # "repair_retrieval" with reply_text=None, and that round trip could
+    # simply never complete, leaving the customer with total silence
+    # despite the graph already having computed the correct answer with
+    # zero model calls. The very first call must now resolve immediately.
+    decision, response = graph_agent_runtime_v3.decide(
         context, model_observation={"proposal": proposed},
     )
-    assert first_decision.intent == "repair_retrieval"
-    assert first_response.proof["policy_feedback"]["kind"] == "claim_not_authorized"
-
-    decision, response = graph_agent_runtime_v3.decide(
-        context, model_observation={"proposal": proposed, "repair_attempt": 1},
-    )
+    assert response.proof["policy_feedback"]["kind"] == "claim_not_authorized"
 
     assert decision.intent == "collect_graph_fields"
     assert response.reply_text == "Inclui a etapa aprovada.\n\nComo você se chama?"

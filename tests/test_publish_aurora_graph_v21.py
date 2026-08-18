@@ -187,6 +187,33 @@ def test_carry_over_generalizes_beyond_the_single_identity_field() -> None:
     assert carry_over_by_key["can_visit_in_person"] is False
 
 
+def test_explanatory_polish_faqs_authorize_service_detail_claims() -> None:
+    """Regression (live 2026-08-18): Aurora already knew the approved
+    answer to "como funciona o polimento de vidros?" (a graph-computed
+    doubt resolution, zero model calls) but the turn still got rejected
+    with claim_evidence_not_authorized:service_detail -- the FAQ's own
+    answer explains mechanism ("reduz manchas minerais...") but the graph
+    only declared an "availability" claim for it, not "service_detail".
+    Same gap confirmed on 6 sibling polish FAQs. Fixed by adding a
+    service_detail claim alongside the existing availability one (both are
+    true: the answer confirms availability AND explains how it works) --
+    this pins that every one of those 7 FAQs authorizes both claim types
+    without dropping the original availability authorization."""
+    graph = build_graph()
+    faq_ids = {
+        "aurora-faq-glass-polish", "aurora-faq-polish-commercial",
+        "aurora-faq-polish-one-step", "aurora-faq-polish-multi-step",
+        "aurora-faq-polish-localized", "aurora-faq-polish-finish",
+        "aurora-faq-polish-headlight",
+    }
+    faqs = {node.id: node for node in graph.nodes if node.id in faq_ids}
+    assert set(faqs) == faq_ids
+    for faq_id, node in faqs.items():
+        claim_types = {claim["claim_type"] for claim in (node.data or {}).get("claims", [])}
+        assert "availability" in claim_types, f"{faq_id} lost its availability claim"
+        assert "service_detail" in claim_types, f"{faq_id} still missing service_detail"
+
+
 def test_aurora_conversation_contract_rejects_blank_message_cleanly() -> None:
     from pydantic import ValidationError
 

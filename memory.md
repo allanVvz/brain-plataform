@@ -100,14 +100,77 @@ de outra mudança de código, com `objective`/`can_visit_in_person` como
 exceções explícitas (intenção daquele atendimento específico, não
 identidade estável do cliente/veículo). **Só faz efeito depois de
 republicar o grafo em produção** (`api/scripts/publish_aurora_graph.py`
-contra o Supabase de produção) — deploy de código sozinho não resolve; não
-publicado ainda nesta rodada, aguardando confirmação separada do usuário
-(mesmo padrão de risco de `project_aurora_graph_rewrite`).
+contra o Supabase de produção) — deploy de código sozinho não resolve.
+Publicado ainda em 2026-08-18 (publicação v3 → versão 62).
 
 Sem cobertura ainda para a persona de roupas (`vzlupas_catalog.json` não
 tem `appointment_policy`/qualificação estruturada) — quando essa persona
 ganhar um grafo próprio, precisa do mesmo tratamento de `carry_over` para
 o campo de tamanho de roupa.
+
+## Memória durável entre jornadas + silêncio no reparo de dúvida (2026-08-18, rodada 2)
+
+Duas horas depois do deploy da correção acima, dois testes ao vivo novos
+(mesmo dia) reproduziram bugs mais fundos que a primeira rodada não cobriu
+— o `carry_over` genérico funciona, mas só sobrevive a **um** fechamento
+de jornada; e um caminho de "reparo" separado (dúvida do cliente antes de
+escolher serviço) não tinha nenhum piso contra silêncio total.
+
+**Memória não sobrevivia a dois fechamentos de jornada seguidos.**
+`_seed_carried_facts` só emprestava o fato herdado pro turno atual em
+memória — nunca gravava isso como fato real da jornada nova
+(`accepted_facts`, a única coisa que `commit_graph_turn_v3` persiste). Ao
+vivo, você mesmo fechou duas jornadas em sequência pelo dashboard
+(confirmado no `metadata` da própria `conversation_journeys`,
+`"source": "dashboard"` — fluxo normal de operação, não bug de
+auto-fechamento). Na segunda troca, a busca por `get_latest_conversation_-
+journey` (só a jornada imediatamente anterior) não achava nada, porque
+essa jornada intermediária nunca teve o nome persistido de verdade.
+Corrigido em duas frentes:
+1. `graph_agent_runtime_v3.decide()` agora grava o fato herdado em
+   `accepted_facts` sempre que `context.journey_id is None` (o turno exato
+   em que a jornada nova está sendo criada) — persistência durável a cada
+   troca, não só empréstimo de um turno.
+2. Nova função `conversation_carry_over_facts_by_lead_v1` (migration 129)
+   busca o valor `known` mais recente de cada campo `carry_over` em
+   **qualquer** jornada do lead, não só a anterior imediata — jornadas já
+   registradas viram a fonte de verdade completa, por pedido explícito do
+   usuário ("temos uma tabela compras, jornadas, tudo deve estar
+   registrado e deve ser a fonte de verdade"). Precisa da migration 129
+   aplicada em produção pra valer (passo `migrate` do deploy, separado do
+   deploy de código e da republicação de grafo).
+
+**Aurora ficava muda mesmo já sabendo a resposta certa.** Cliente
+perguntou "como funciona o polimento de vidros?" antes de escolher
+serviço. O grafo já tinha resolvido a dúvida deterministicamente
+(`doubt_resolution: "answered"`, zero chamadas ao modelo) mas só
+autorizava aquela FAQ pra `claim_type: "availability"`, não
+`service_detail` — mesmo a resposta aprovada sendo uma explicação de como
+funciona. Isso caía no bloco de reparo por dúvida/claim em `_decide`
+(`graph_agent_runtime_v3.py`), que — só na primeira tentativa — devolvia
+`reply_text=None` esperando uma segunda chamada ao modelo orquestrada
+fora do Python, pelo n8n. Essa segunda chamada não completou: silêncio
+total, mesmo com o texto certo já calculado. Corrigido em três frentes:
+1. Conteúdo do grafo: 7 FAQs da família de polimento (`aurora-faq-glass-
+   polish` e mais 6 `aurora-faq-polish-*`) ganharam um segundo claim
+   `service_detail` além do `availability` já existente — mesmo padrão de
+   `aurora-faq-ppf`, que já tinha os dois. Gap era editorial (`claim_type`
+   é digitado à mão por FAQ, sem validação de conteúdo), não de código;
+   provavelmente existem outros gaps do tipo em FAQs futuras — vale
+   auditoria manual quando surgir sintoma parecido.
+2. `_decide` (bloco de dúvida/claim, ~linha 4979): já que
+   `repair_requirements` é sempre vazio nesse ramo (nunca há nada de fato
+   pra buscar), removida a distinção `correction_attempt < 1` vs `>= 1` —
+   resolve imediatamente com o texto aprovado do grafo desde a primeira
+   tentativa, sem esperar o round-trip do n8n.
+3. Rede de segurança em Python (`conversation_runtime._ensure_reply_text_-
+   or_log`, chamada no início de `commit()`): se `reply_text` sair vazio e
+   `proof["text"]` tiver conteúdo aprovado pelo grafo, usa isso como
+   última instância; se nem isso existir, loga erro em vez de completar
+   como sucesso silencioso. **Não cobre o workflow n8n** (`Align reply
+   with qualification state` continua sem checar `reply_text` vazio) — só
+   o lado Python; editar o workflow n8n é um tipo de risco à parte, fica
+   como pendência conhecida pra próxima rodada.
 
 ## Handoff atual — WA Validator em produção
 

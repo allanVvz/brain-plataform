@@ -3248,19 +3248,32 @@ def _carry_over_field_keys(document: dict) -> set[str]:
     return keys
 
 
-def _seed_carried_facts(ledger: dict, document: dict, previous_journey: dict) -> dict:
-    """Semeia no ledger vazio do ciclo novo os fatos herdados do anterior.
+def _seed_carried_facts(
+    ledger: dict, document: dict, previous_journey: dict,
+    *, persona_id: str = "", lead_ref: int = 0,
+) -> dict:
+    """Semeia no ledger vazio do ciclo novo os fatos herdados do lead.
 
     Eles entram com `carried_from_journey`, entao `_known_facts_payload` os
     rotula como `origem: "anterior"` e o prompt ja manda confirmar antes de
     usar -- e a diferenca entre reperguntar o nome e conferi-lo.
+
+    A busca cobre o historico completo do lead (toda jornada/pedido ja
+    registrado), nao so a jornada anterior imediata -- um ponteiro de uma
+    jornada so perdia o fato assim que uma segunda jornada fechasse antes
+    do campo ser respondido de novo (confirmado ao vivo 2026-08-18: nome
+    do cliente sumiu na terceira jornada do mesmo dia). Jornadas/pedidos
+    ja registrados sao a fonte de verdade -- ver
+    conversation_carry_over_facts_by_lead_v1.
     """
     keys = _carry_over_field_keys(document)
     previous_id = str(previous_journey.get("id") or "")
     if not keys or not previous_id or (ledger.get("facts") or {}):
         return ledger
     try:
-        rows = supabase_client.get_journey_ledger_facts(previous_id)
+        rows = supabase_client.get_lead_carry_over_facts(
+            persona_id, lead_ref, sorted(keys),
+        )
     except Exception:
         # Herdar e uma melhoria de conversa, nunca um bloqueio de turno.
         return ledger
@@ -3364,7 +3377,10 @@ def build_context(
             # SDR reperguntaria o nome a cada ciclo. Os fields que o contrato
             # marca como `carry_over` atravessam; servico e campos do galho nao
             # -- o pedido novo comeca em branco de proposito.
-            ledger = _seed_carried_facts(ledger, document, latest_journey)
+            ledger = _seed_carried_facts(
+                ledger, document, latest_journey,
+                persona_id=str(persona["id"]), lead_ref=lead_ref,
+            )
     lead_conversation_state = ((lead.get("metadata") or {}).get("conversation_state") or {})
     journey_state = str(
         journey.get("state") or lead_conversation_state.get("sdr_state") or "collecting"
@@ -4395,6 +4411,46 @@ def decide(
     token_usage = (model_observation or {}).get("token_usage")
     if token_usage:
         response = response.model_copy(update={"token_usage": token_usage})
+    # A carried-over fact (_seed_carried_facts) only ever lived in
+    # context.cart["facts"] for this one turn's in-memory processing -- it
+    # was never folded into accepted_facts, the only thing commit_graph_-
+    # turn_v3 persists. So it survived exactly one journey-close-then-
+    # reopen hop "for free" and then vanished the moment a SECOND journey
+    # closed before the customer independently restated it (confirmed
+    # live 2026-08-18: nome_cliente asked again on the third journey).
+    # context.journey_id is None precisely on the turn build_context
+    # creates the new journey's in-memory placeholder (before the DB
+    # trigger assigns a real id) -- write the carried facts into this
+    # turn's accepted_facts exactly then, so they land durably in the new
+    # journey's own ledger in the same commit transaction that creates it.
+    if context.journey_id is None:
+        already_accepted = {
+            str(fact.get("field_key") or "")
+            for fact in response.proof.get("accepted_facts") or []
+        }
+        carried = [
+            {
+                "field_key": key,
+                "owner_node_id": fact.get("owner_node_id"),
+                "status": fact.get("status"),
+                "value": fact.get("value"),
+                "source_message_id": fact.get("source_message_id"),
+                "evidence_span": fact.get("evidence_span"),
+                "confidence": fact.get("confidence"),
+                "metadata": fact.get("metadata"),
+            }
+            for key, fact in (context.cart.get("facts") or {}).items()
+            if fact.get("carried_from_journey") and key not in already_accepted
+        ]
+        if carried:
+            response = response.model_copy(update={
+                "proof": {
+                    **response.proof,
+                    "accepted_facts": [
+                        *(response.proof.get("accepted_facts") or []), *carried,
+                    ],
+                },
+            })
     return decision, _with_structural_proof_audit(context, decision, response)
 
 
@@ -4922,39 +4978,35 @@ def _decide(
         ]
         if any(error.startswith("claim_") for error in original_errors) and not non_claim_errors:
             # A factual FAQ may be perfectly grounded even when the model put
-            # an unauthorized claim type beside it.  On the first pass, make
-            # that validation result visible to the model and allow exactly
-            # one correction.  After that correction, preserve the published
-            # FAQ rather than falling silent or trusting the bad claim.
-            correction_attempt = int(observation.get("repair_attempt") or 0)
+            # an unauthorized claim type beside it. repair_requirements is
+            # always empty in this branch -- there's never anything to fetch,
+            # since the graph's own doubt resolution already computed the
+            # approved answer with zero model calls (doubt["text"]). This
+            # used to wait for a second model call (repair_attempt>=1,
+            # orchestrated outside Python by n8n) before resolving, returning
+            # reply_text=None in the meantime -- confirmed live 2026-08-18
+            # that round trip can simply not complete, leaving the customer
+            # with total silence despite the correct answer already being in
+            # hand. Resolve immediately with the graph-approved text instead;
+            # this is the exact same terminal state the code already forced
+            # on a hypothetical second attempt, just without the avoidable,
+            # silently-failure-prone round trip in between.
             feedback = _doubt_policy_feedback(
                 doubt=doubt, errors=original_errors, contract=contract,
                 facts=contract_facts,
             )
-            if correction_attempt < 1:
-                proof.update({
-                    "valid": False,
-                    "repair_required": True,
-                    "repair_requirements": [],
-                    "policy_feedback": feedback,
-                    "model_proposal_errors": original_errors,
-                    "fallback_used": False,
-                    "model_attempts": 1,
-                    **doubt,
-                })
-            else:
-                proof.update({
-                    "valid": True,
-                    "errors": [],
-                    "repair_required": False,
-                    "repair_requirements": [],
-                    "policy_feedback": feedback,
-                    "model_proposal_errors": original_errors,
-                    "fallback_used": True,
-                    "fallback_applied": "published_faq_after_invalid_correction",
-                    "model_attempts": 2,
-                    **doubt,
-                })
+            proof.update({
+                "valid": True,
+                "errors": [],
+                "repair_required": False,
+                "repair_requirements": [],
+                "policy_feedback": feedback,
+                "model_proposal_errors": original_errors,
+                "fallback_used": True,
+                "fallback_applied": "published_faq_immediate",
+                "model_attempts": 1,
+                **doubt,
+            })
     # An explicit switch/add is only a Phase-A decision on the first pass.
     # Force one directed Phase-B retrieval for the selected branch before
     # any reply or fact can be committed, even if an anchor snippet
