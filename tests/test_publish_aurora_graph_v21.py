@@ -155,6 +155,38 @@ def test_shared_qualification_fields_share_one_owner_across_products() -> None:
         assert owners == {persona.id}, f"{key} has per-branch owners: {owners}"
 
 
+def test_carry_over_generalizes_beyond_the_single_identity_field() -> None:
+    """Regression (live 2026-08-18): a lead reopening a new journey/
+    appointment after a previous one closed only had nome_cliente carried
+    over -- the literal single field appointment_policy.identity_field
+    named -- even though modelo_veiculo/vehicle_color/vehicle_year/condicao
+    are all scope="persona" (customer-owned, not tied to one pedido) and
+    had to be repeated from scratch. carry_over now defaults to every
+    persona-scoped field except objective/can_visit_in_person (per-visit
+    intent, not stable identity), so a future persona-scoped field carries
+    over automatically without another code change."""
+    graph = build_graph()
+    products = [node for node in graph.nodes if node.node_type == "product"]
+    assert len(products) >= 2
+    # Not every product declares every field (e.g. one product's contract is
+    # missing vehicle_color entirely -- a separate, real catalog-authoring
+    # gap, unrelated to this fix), so union carry_over across every product
+    # instead of reading just one.
+    carry_over_by_key: dict[str, bool] = {}
+    for product in products:
+        for field in (product.data or {}).get("qualification", {}).get("fields", []):
+            carry_over_by_key.setdefault(field["key"], field["carry_over"])
+
+    assert carry_over_by_key["nome_cliente"] is True
+    for key in ("modelo_veiculo", "vehicle_color", "vehicle_year", "condicao"):
+        assert key in carry_over_by_key  # sanity: fixture still declares it
+        assert carry_over_by_key[key] is True, f"{key} should carry over across journeys"
+
+    assert carry_over_by_key["servico"] is False
+    assert carry_over_by_key["objective"] is False
+    assert carry_over_by_key["can_visit_in_person"] is False
+
+
 def test_aurora_conversation_contract_rejects_blank_message_cleanly() -> None:
     from pydantic import ValidationError
 

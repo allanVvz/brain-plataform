@@ -105,6 +105,28 @@ describe("Mensagens — cabeçalho da conversa", () => {
     expect(within(header).getByText("5 peças")).toBeTruthy();
   });
 
+  it("renderiza o fato do seletor de serviço já humanizado, sem slug cru", async () => {
+    // O backend (graph_agent_runtime_v3._commercial_note_projection) agora
+    // manda o valor do campo seletor já humanizado ("Chapeação"), não o
+    // slug cru ("chapeacao") -- este teste garante que offeringChipEntries
+    // segue fielmente o que a projeção manda, sem reintroduzir o slug cru
+    // em algum humanizer só do frontend.
+    setLead(makeLead({
+      metadata: {
+        commercial_note_projection: {
+          version: 1, focused_service_id: "branch:a", active_service_ids: ["branch:a"],
+          common_facts: {},
+          services: {
+            "branch:a": { slug: "chapeacao", title: "Chapeação", facts: { servico: "Chapeação" } },
+          },
+        },
+      },
+    }));
+    const header = await abrirConversa();
+    expect(within(header).queryByText(/chapeacao/i)).toBeNull();
+    expect(within(header).getByText(/Chapeação/)).toBeTruthy();
+  });
+
   it("usa o selo de pausa (não o de atenção) quando handoff_level é partial", async () => {
     // handoff_level="partial" é a IA sinalizando uma primeira dúvida/handoff
     // sem qualificação completa -- para o operador olhando o header isso lê

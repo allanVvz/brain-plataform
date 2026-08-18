@@ -450,6 +450,7 @@ def check(
     branch_switch_allowed: bool,
     package_chunk_sources: dict[str, str] | None = None,
     active_branch_node_ids: list[str] | None = None,
+    additional_fields: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     repair: list[dict[str, Any]] = []
@@ -534,7 +535,26 @@ def check(
 
     next_ledger = deepcopy(ledger)
     facts = next_ledger.setdefault("facts", {})
-    fields = {field["key"]: field for field in contract.get("fields") or []}
+    # Keyed by (key, owner_node_id), not just key: the branch-selector field
+    # is deliberately declared once per branch, same key ("servico"),
+    # different owner -- a plain-key merge would let one branch's field
+    # object clobber another's. `additional_fields` (the union of every
+    # currently active branch's own fields, not just the turn's focused
+    # contract) is what lets a second active branch's own fact validate at
+    # all instead of failing as undeclared/owner-mismatched purely because
+    # this turn's contract is scoped to whichever branch is focused.
+    fields_by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+    fields_by_key_any_owner: dict[str, dict[str, Any]] = {}
+    field_order_keys: list[str] = []
+    for declared_field in [*(contract.get("fields") or []), *(additional_fields or [])]:
+        field_key = str(declared_field.get("key") or "")
+        field_owner = str(declared_field.get("owner_node_id") or "")
+        if not field_key:
+            continue
+        fields_by_identity.setdefault((field_key, field_owner), declared_field)
+        fields_by_key_any_owner.setdefault(field_key, declared_field)
+        if field_key not in field_order_keys:
+            field_order_keys.append(field_key)
     accepted_facts: list[dict[str, Any]] = []
     field_validation: list[dict[str, Any]] = []
     proposal_facts = proposal.get("extracted_facts") or []
@@ -546,7 +566,7 @@ def check(
         ) > 1
     }
     errors.extend(f"duplicate_extracted_fact:{key}" for key in sorted(duplicate_keys) if key)
-    field_order = {key: index for index, key in enumerate(fields)}
+    field_order = {key: index for index, key in enumerate(field_order_keys)}
     for fact in sorted(
         proposal_facts,
         key=lambda value: field_order.get(str(value.get("field_key") or ""), len(field_order)),
@@ -555,12 +575,13 @@ def check(
         if key in duplicate_keys:
             continue
         fact_error_count = len(errors)
-        field = fields.get(key)
+        owner_for_lookup = str(fact.get("owner_node_id") or "")
+        field = fields_by_identity.get((key, owner_for_lookup))
         if not field:
-            errors.append(f"undeclared_field:{key}")
-            continue
-        if fact.get("owner_node_id") != field.get("owner_node_id"):
-            errors.append(f"field_owner_mismatch:{key}")
+            if key in fields_by_key_any_owner:
+                errors.append(f"field_owner_mismatch:{key}")
+            else:
+                errors.append(f"undeclared_field:{key}")
             continue
         if fact.get("source_message_id") != source_message_id:
             errors.append(f"fact_source_message_mismatch:{key}")
@@ -620,7 +641,7 @@ def check(
             elif policy == "higher_confidence" and float(fact.get("confidence") or 0) <= float(previous.get("confidence") or 0):
                 errors.append(f"fact_overwrite_confidence_too_low:{key}")
         for dependency in field.get("depends_on") or []:
-            dependency_field = fields.get(dependency) or {}
+            dependency_field = fields_by_key_any_owner.get(dependency) or {}
             if not _resolved_for_field_owner(dependency_field, facts.get(dependency)):
                 errors.append(f"fact_dependency_unsatisfied:{key}:{dependency}")
         if not _condition_matches(field.get("condition"), facts):

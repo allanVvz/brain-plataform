@@ -1,6 +1,113 @@
 # Brain Platform Memory
 
-Updated: 2026-08-12
+Updated: 2026-08-18
+
+> A seção "Handoff atual — WA Validator em produção" abaixo é de 2026-08-12 e
+> descreve uma fase anterior do projeto (Aurora pausada, só WA Validator
+> ativo). Não confie nela para o estado atual — desde então Aurora foi
+> religada em produção no número estável da VZ Lupas (ver memória
+> `project_aurora_whatsapp_disconnected` do auto-memory) e passou por várias
+> rodadas de correção ao vivo, incluindo as descritas abaixo.
+
+## Correção de multi-serviço e perda de memória entre ciclos (2026-08-18)
+
+Dois bugs reportados ao vivo (lead "Allan Rodrigues", produção) na mesma
+sessão de teste, corrigidos juntos porque o segundo apareceu investigando o
+primeiro.
+
+### Bug 1 — confirmação/header tratavam o 2º serviço como apêndice
+
+Sintoma: ao pedir dois serviços (Chapeação + PPF), a confirmação final saía
+como duas cláusulas `serviço:` separadas mais um parágrafo redundante
+"Também no seu pedido: ...", e o header do dashboard mostrava `chapeacao`
+(slug cru) e `Chapeação · servico` duplicando o próprio título do grupo.
+
+**Causa raiz real (não é o que parecia):** investigação direta em
+`conversation_turn_proofs` de produção provou que o modelo e a camada de
+galhos (`service_operations`, ativação de galho) já funcionavam
+corretamente — os dois serviços eram ativados como galhos concorrentes
+válidos, com fatos distintos persistidos (`proof["valid"]=True`,
+`service_operation_proof["valid"]=True`). O bug estava inteiramente na
+camada de renderização determinística:
+
+1. `_collected_field_facts` (`api/services/graph_agent_runtime_v3.py`)
+   iterava cada galho ativo e gerava uma tupla `("Serviço", valor)` por
+   galho, porque o campo seletor (`servico`) é declarado propositalmente
+   uma vez por galho, dono = o próprio galho. Corrigido com um parâmetro
+   opcional `merge_selector` que funde os títulos de todos os galhos ativos
+   numa única cláusula, reusando `active_offering_titles` (já existente).
+2. `_active_service_summary` (função inteira removida, junto com sua
+   chamada em `_decide`) sempre acrescentava o parágrafo "Também no seu
+   pedido" quando havia ≥2 ofertas — em *todo* turno pós-qualificação, não
+   só na confirmação — e seu guard de duplicata só pegava repetição
+   literal, então era sempre redundante depois do fix acima.
+3. `_commercial_note_projection` escrevia o fato do seletor com o slug cru
+   (`"chapeacao"`) em vez do título humanizado, e a condição que separa
+   fato comum de fato por-serviço exigia que **todo** galho ativo
+   redeclarasse o mesmo campo antes de tratá-lo como comum — por isso
+   `vehicle_color` (persona-scoped) ficou preso só ao galho de Chapeação
+   quando o contrato do galho PPF simplesmente não declarava esse campo
+   (gap de catálogo, não de código). Corrigido excluindo o fato do seletor
+   dos "facts" normais (mantido só como fallback humanizado se for o único
+   fato do galho) e simplificando a condição para `owner not in active`.
+
+**Pontos de rigidez avaliados** (4 itens que o usuário pediu para checar
+contra este bug específico): dos quatro, dois eram causa raiz real e
+relevante e foram corrigidos junto — a validação de `extracted_facts` em
+`check()` era escopada a um único contrato de galho por turno (um fato do
+2º serviço na mesma mensagem virava `undeclared_field`/
+`field_owner_mismatch` mesmo com a ativação do galho aceita), e um erro de
+fato isolado em qualquer lugar derrubava `proof["valid"]` pro turno
+inteiro, forçando o caminho 100% determinístico mesmo com o resto da
+proposta correto. Corrigido com `additional_fields` em `check()` (união
+dedupada por `(key, owner_node_id)` de todo galho ativo, não só o focado)
+e particionamento de erros em `_decide` (erro de fato de um galho
+não-focado não gateia mais o turno; erro do galho focado continua
+gateando, sem afrouxar a validação de claims). Os outros dois pontos (um
+mecanismo de "terceiro estado"/`needs_confirmation` ainda hardcoded por
+`kind` em vez de genérico, e um caminho de fallback residual —
+`_invalid_proposal_fallback`, disparado só quando o JSON do modelo falha
+schema — que ainda não reabre confirmação pendente por galho) eram reais
+mas não causalmente ligados a este bug específico (afetam tipos de campo
+hipotéticos futuros / um gatilho raro); ficaram só anotados, não corrigidos
+nesta rodada.
+
+### Bug 2 — novo ciclo/appointment perdia o veículo, só lembrava o nome
+
+Sintoma: depois que um atendimento fecha (evento comercial `delivered`/
+`service_completed`/`cancelled`) e o cliente escreve de novo, a Aurora abre
+uma jornada nova e repergunta modelo/cor do veículo do zero — só o nome
+sobrevive.
+
+**Causa raiz:** `carry_over` (o que semeia a jornada nova a partir da
+anterior, `_seed_carried_facts`/`_carry_over_field_keys` em
+`graph_agent_runtime_v3.py`) era calculado em
+`api/scripts/publish_aurora_graph.py` como
+`field_key == appointment_policy.get("identity_field")` — só
+`nome_cliente`, um único campo literal — mesmo com os campos de veículo já
+corretamente marcados `scope: "persona"` (deveriam sobreviver a troca de
+galho *dentro* de uma jornada; carry_over decide sobrevivência *entre*
+jornadas, os dois mecanismos estavam desconectados). O compilador genérico
+em `graph_conversation_contract.py` já usa `scope=="persona"` como default
+de `carry_over` para campos de persona-qualification — só o script de
+publish da Aurora não seguia essa convenção (já documentada em
+`docs/architecture/SDR_JOURNEY_STATE_MACHINE.md`).
+
+**Correção:** `carry_over` passou a ser `scope=="persona" and field_key not
+in {"objective", "can_visit_in_person"}` — híbrido escolhido com o usuário:
+qualquer campo persona-scoped futuro carrega automaticamente sem precisar
+de outra mudança de código, com `objective`/`can_visit_in_person` como
+exceções explícitas (intenção daquele atendimento específico, não
+identidade estável do cliente/veículo). **Só faz efeito depois de
+republicar o grafo em produção** (`api/scripts/publish_aurora_graph.py`
+contra o Supabase de produção) — deploy de código sozinho não resolve; não
+publicado ainda nesta rodada, aguardando confirmação separada do usuário
+(mesmo padrão de risco de `project_aurora_graph_rewrite`).
+
+Sem cobertura ainda para a persona de roupas (`vzlupas_catalog.json` não
+tem `appointment_policy`/qualificação estruturada) — quando essa persona
+ganhar um grafo próprio, precisa do mesmo tratamento de `carry_over` para
+o campo de tamanho de roupa.
 
 ## Handoff atual — WA Validator em produção
 

@@ -192,7 +192,27 @@ def build_graph() -> GraphJson:
                 "condition": None,
                 "priority": 1.0 if field_key in {"servico", "modelo_veiculo"} else 0.7,
                 "overwrite_policy": "explicit_correction",
-                "carry_over": field_key == appointment_policy.get("identity_field"),
+                # Confirmed live 2026-08-18: only nome_cliente (the literal
+                # appointment_policy.identity_field) survived into a new
+                # journey/appointment cycle -- every other persona-scoped
+                # fact (vehicle model/color/year/condition) was silently
+                # dropped even though scope="persona" already marks them as
+                # customer-owned, not tied to one specific pedido. A
+                # returning customer had to restate the whole vehicle from
+                # scratch, only the service should ever need reconfirming.
+                # docs/architecture/SDR_JOURNEY_STATE_MACHINE.md's own
+                # documented default is "persona.data.qualification.fields
+                # -> carry_over: true"; this now matches it, generalizing
+                # to any future persona-scoped field automatically instead
+                # of requiring a one-off code change. objective and
+                # can_visit_in_person are the deliberate exceptions -- they
+                # describe intent for THIS visit (why the customer is here,
+                # whether they can come in person), not stable customer/
+                # vehicle identity, so they still get reconfirmed each cycle.
+                "carry_over": (
+                    field_key != "servico"
+                    and field_key not in {"objective", "can_visit_in_person"}
+                ),
             } for field_key in required]}
             data["qualification"]["fields"].extend(
                 field for key, field in authored_fields.items() if key not in required
