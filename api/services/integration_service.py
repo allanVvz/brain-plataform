@@ -86,6 +86,14 @@ CATALOG: list[dict[str, Any]] = [
         "requires_credentials": True,
         "user_managed": True,
     },
+    {
+        "service": "meta_whatsapp",
+        "label": "Meta WhatsApp",
+        "description": "Token de mensageria (Graph API) usado para vincular o numero WhatsApp.",
+        "scope": "persona",
+        "requires_credentials": True,
+        "user_managed": True,
+    },
 ]
 
 CATALOG_BY_SERVICE = {item["service"]: item for item in CATALOG}
@@ -157,6 +165,14 @@ def _normalize_meta_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any
     return access_token, {"business_id": business_id or None, "catalog_id": catalog_id}
 
 
+def _normalize_meta_whatsapp_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    access_token = (payload.get("access_token") or "").strip()
+    business_id = (payload.get("business_id") or "").strip()
+    if not access_token:
+        raise IntegrationValidationError("access_token is required.")
+    return access_token, {"business_id": business_id or None}
+
+
 def _normalize_llm_api_key_payload(service: str, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     api_key = (payload.get("api_key") or "").strip()
     if not api_key:
@@ -204,6 +220,8 @@ def normalize_credentials(service: str, payload: Optional[dict[str, Any]]) -> tu
         return _normalize_llm_api_key_payload(service, body)
     if service == "meta":
         return _normalize_meta_payload(body)
+    if service == "meta_whatsapp":
+        return _normalize_meta_whatsapp_payload(body)
     return None, {}
 
 
@@ -271,6 +289,41 @@ def validate_meta(
                 response = client.get(
                     f"https://graph.facebook.com/v19.0/{catalog_id}/products",
                     params={"access_token": access_token, "limit": 1},
+                )
+                if response.status_code in {401, 403}:
+                    raise IntegrationValidationError("Meta rejected the credentials.")
+                if response.status_code != 200:
+                    raise IntegrationValidationError(f"Meta validation failed with HTTP {response.status_code}.")
+        latency_ms = int((time.monotonic() - started) * 1000)
+        return "healthy", None, latency_ms
+    except IntegrationValidationError:
+        raise
+    except Exception as exc:
+        raise IntegrationValidationError(f"Meta validation failed: {exc}") from exc
+
+
+def validate_meta_whatsapp(
+    access_token: str,
+    business_id: Optional[str] = None,
+    *,
+    fetch: Optional[Any] = None,
+) -> tuple[str, Optional[str], Optional[int]]:
+    """Validate a Meta WhatsApp messaging token, independent of any catalog.
+
+    `fetch(access_token, business_id)` is injectable so tests run offline.
+    Returns ("healthy", None, latency) on success.
+    """
+    if (access_token or "").strip().lower() in _PLACEHOLDER_MARKERS:
+        raise IntegrationValidationError("Meta access token is a placeholder.")
+    started = time.monotonic()
+    try:
+        if fetch is not None:
+            fetch(access_token, business_id)
+        else:
+            with _http_client(timeout=8.0) as client:
+                response = client.get(
+                    "https://graph.facebook.com/v21.0/me",
+                    params={"access_token": access_token},
                 )
                 if response.status_code in {401, 403}:
                     raise IntegrationValidationError("Meta rejected the credentials.")
@@ -353,6 +406,8 @@ def validate_credentials(service: str, *, secret_value: str, config_json: Option
         status, error, latency = validate_deepseek(secret_value)
     elif service == "meta":
         status, error, latency = validate_meta(secret_value, str(config.get("catalog_id") or ""))
+    elif service == "meta_whatsapp":
+        status, error, latency = validate_meta_whatsapp(secret_value, config.get("business_id"))
     else:
         raise IntegrationValidationError(f"Unsupported user-managed service: {service}")
     return {

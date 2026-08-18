@@ -18,6 +18,7 @@ import { useGlobalPersona } from "@/lib/useGlobalPersona";
 
 const KEY_SERVICES = [
   { service: "meta", label: "Meta", description: "Catálogo e APIs da Meta", field: "access_token" },
+  { service: "meta_whatsapp", label: "Meta WhatsApp", description: "Token de mensageria usado para vincular o número no Canal", field: "access_token" },
   { service: "openai", label: "ChatGPT / OpenAI", description: "Chat, modelos e embeddings", field: "api_key" },
   { service: "anthropic", label: "Claude", description: "Modelos Claude da persona", field: "api_key" },
   { service: "deepseek", label: "DeepSeek", description: "Modelo usado nas automações n8n", field: "api_key" },
@@ -87,6 +88,7 @@ export default function ToolsPage() {
         enabled: true,
         [field]: value,
         ...(service === "meta" ? { catalog_id: drafts.meta_catalog_id || "" } : {}),
+        ...(service === "meta_whatsapp" ? { business_id: drafts.meta_whatsapp_business_id || "" } : {}),
       });
       setDrafts((current) => ({ ...current, [service]: "" }));
       setMessage(`Credencial ${service} salva no vault da persona.`);
@@ -167,6 +169,14 @@ export default function ToolsPage() {
                     value={drafts.meta_catalog_id || ""}
                     onChange={(event) => setDrafts((current) => ({ ...current, meta_catalog_id: event.target.value }))}
                     placeholder="Catalog ID"
+                    className="mt-4 w-full rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text"
+                  />
+                )}
+                {definition.service === "meta_whatsapp" && (
+                  <input
+                    value={drafts.meta_whatsapp_business_id || ""}
+                    onChange={(event) => setDrafts((current) => ({ ...current, meta_whatsapp_business_id: event.target.value }))}
+                    placeholder="Business ID (opcional)"
                     className="mt-4 w-full rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text"
                   />
                 )}
