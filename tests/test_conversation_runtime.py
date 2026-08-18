@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "api"))
 
-from schemas.conversation import ConversationContext, ConversationRoute
+from schemas.conversation import AgentResponse, ConversationContext, ConversationRoute
 from services import conversation_runtime
 from services.sdr_documents import compile_persona_documents
 
@@ -307,6 +307,50 @@ def test_handoff_branch_reset_facts_requires_an_actual_handoff():
         branch_contract=branch_contract, branch_facts=branch_facts,
         correlation_id="corr-3",
     ) == []
+
+
+def test_ensure_reply_text_or_log_falls_back_to_proof_text(caplog):
+    """Regression (live 2026-08-18): commit() had no guard on an empty
+    reply_text -- a turn could complete as {"ok": True, "message_id": None}
+    with no outbound message and no alert, even when the graph had already
+    computed a valid answer (proof["text"], set by the doubt-resolution
+    merge). Last-resort floor: use that text instead of staying silent."""
+    response = AgentResponse(
+        reply_text=None, role=ConversationRoute.SDR, cart_state={},
+        proof={"text": "Fazemos, sim — explica o mecanismo aqui.", "mode": "collect_graph_fields"},
+    )
+    result = conversation_runtime._ensure_reply_text_or_log(
+        response, lead_ref=42, correlation_id="corr-1",
+    )
+    assert result.reply_text == "Fazemos, sim — explica o mecanismo aqui."
+
+
+def test_ensure_reply_text_or_log_leaves_a_real_reply_untouched():
+    response = AgentResponse(
+        reply_text="Já tenho essa resposta.", role=ConversationRoute.SDR, cart_state={},
+        proof={"text": "Outro texto qualquer, nao deve ser usado."},
+    )
+    result = conversation_runtime._ensure_reply_text_or_log(
+        response, lead_ref=42, correlation_id="corr-2",
+    )
+    assert result.reply_text == "Já tenho essa resposta."
+
+
+def test_ensure_reply_text_or_log_alerts_when_nothing_is_available(caplog):
+    """No proof["text"] to fall back to (e.g. a genuinely-needs-fetching
+    repair, like selected_branch_requires_phase_b, whose round trip failed)
+    -- stays silent (never invents text), but must become an observable,
+    alertable signal instead of a silent "successful" turn."""
+    response = AgentResponse(
+        reply_text=None, role=ConversationRoute.SDR, cart_state={},
+        proof={"mode": "repair_retrieval"},
+    )
+    with caplog.at_level("ERROR", logger="conversation_runtime"):
+        result = conversation_runtime._ensure_reply_text_or_log(
+            response, lead_ref=42, correlation_id="corr-3",
+        )
+    assert result.reply_text is None
+    assert any("no reply_text" in record.message for record in caplog.records)
 
 
 def test_only_canonical_validator_lead_can_bypass_paused_transport_gate():

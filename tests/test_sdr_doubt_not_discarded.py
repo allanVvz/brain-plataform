@@ -276,8 +276,14 @@ def test_claim_nao_autorizada_da_duvida_pede_uma_correcao_com_feedback(monkeypat
         model_observation={"proposal": proposal},
     )
 
-    assert response.reply_text is None, response.proof.get("model_proposal_errors")
-    assert response.proof["repair_required"] is True
+    # Regression (live 2026-08-18): this branch never had anything to fetch
+    # (repair_requirements is always empty here -- the graph-approved
+    # answer is already fully computed) so waiting on a repair round trip
+    # before replying just risked total silence if that round trip never
+    # completed. The very first attempt now resolves immediately with the
+    # approved answer instead of returning reply_text=None.
+    assert ANSWER in (response.reply_text or ""), response.proof.get("model_proposal_errors")
+    assert response.proof["repair_required"] is False
     assert response.proof["policy_feedback"]["kind"] == "claim_not_authorized"
     assert response.proof["policy_feedback"]["approved_faq"]["node_id"] == "faq:ppf-how"
     assert response.proof["model_attempts"] == 1
@@ -301,8 +307,12 @@ def test_segunda_proposta_invalida_ainda_entrega_faq_publicada(monkeypatch):
     )
 
     assert ANSWER in (response.reply_text or "")
-    assert response.proof["fallback_applied"] == "published_faq_after_invalid_correction"
-    assert response.proof["model_attempts"] == 2
+    # This branch no longer distinguishes repair_attempt=0 from >=1 -- it
+    # always resolves immediately (see the sibling regression test above),
+    # so this now also happens to be the first-attempt outcome/label even
+    # though this specific call passed repair_attempt=1.
+    assert response.proof["fallback_applied"] == "published_faq_immediate"
+    assert response.proof["model_attempts"] == 1
     assert response.proof["repetition_action"] != "suppressed_duplicate_outbound"
 
 
