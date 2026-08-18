@@ -500,6 +500,52 @@ def test_qualificar_repetido_nao_pausa_de_novo(monkeypatch):
     agents.set_journey_state(21, _corpo("qualificado"), "user:1")
 
 
+def test_qualificar_manualmente_emite_evento_com_kwargs_validos(monkeypatch):
+    """Regressao: event_emitter.emit(lead_ref=...) nao existe na assinatura
+    real (entity_type/entity_id/persona_id/payload/level/source) e derrubava
+    a resposta HTTP inteira com TypeError mesmo a mutacao de estado tendo
+    sido aplicada (visto ao vivo em producao). Nao mockar emit() aqui -- o
+    objetivo e exercitar a funcao de verdade e travar se o kwarg errado
+    voltar; so a chamada a Postgres por baixo (insert_event) e mockada."""
+    from routes import agents
+    from services import supabase_client as real_supabase_client
+
+    monkeypatch.setattr(agents.supabase_client, "get_lead_by_ref",
+                        lambda _ref: {"id": 21, "persona_id": "p"})
+    monkeypatch.setattr(agents.supabase_client, "set_conversation_journey_state",
+                        lambda **_kw: {"changed": True, "journey_closed": False, "target": "qualificado"})
+    monkeypatch.setattr(agents.agents_service, "pause_lead", lambda ref: True)
+    eventos = []
+    monkeypatch.setattr(real_supabase_client, "insert_event",
+                        lambda payload, **_kw: eventos.append(payload))
+
+    resultado = agents.set_journey_state(21, _corpo("qualificado"), "user:1")
+
+    assert resultado["ai_paused"] is True
+    assert eventos and eventos[0]["event_type"] == "lead.ai_paused"
+    assert eventos[0]["entity_id"] == "21"
+
+
+def test_fechar_pedido_religa_ia_emite_evento_com_kwargs_validos(monkeypatch):
+    from routes import agents
+    from services import supabase_client as real_supabase_client
+
+    monkeypatch.setattr(agents.supabase_client, "get_lead_by_ref",
+                        lambda _ref: {"id": 21, "persona_id": "p"})
+    monkeypatch.setattr(agents.supabase_client, "set_conversation_journey_state",
+                        lambda **_kw: {"changed": True, "journey_closed": True})
+    monkeypatch.setattr(agents.agents_service, "resume_lead", lambda ref: True)
+    eventos = []
+    monkeypatch.setattr(real_supabase_client, "insert_event",
+                        lambda payload, **_kw: eventos.append(payload))
+
+    resultado = agents.set_journey_state(21, _corpo("entregue"), "user:1")
+
+    assert resultado["ai_resumed"] is True
+    assert eventos and eventos[0]["event_type"] == "lead.ai_resumed"
+    assert eventos[0]["entity_id"] == "21"
+
+
 def test_alvo_repetido_nao_religa_nem_grava(monkeypatch):
     from routes import agents
 

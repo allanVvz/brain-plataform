@@ -3061,6 +3061,51 @@ def test_decide_does_not_apply_model_only_add_without_backend_evidence(monkeypat
     assert response.proof["applied_service_operations"] == []
 
 
+def test_collected_field_facts_uses_enum_alias_not_raw_slug():
+    """Regression: an enum field's stored value is the internal matching
+    slug (e.g. Aurora's objective="continuar_cuidar_proteger"), never meant
+    to reach the customer verbatim -- it must render as the published
+    alias, not leak snake_case with underscores into the confirmation."""
+    document = {"branch_contracts": {}, "node_by_id": {}}
+    contract = {
+        "conversation_policy": {}, "field_labels": {},
+        "fields": [{
+            "key": "objective", "owner_node_id": "persona:aurora",
+            "validation": {"mode": "enum", "values": [
+                {
+                    "value": "continuar_cuidar_proteger",
+                    "aliases": ["continuar com o veículo e cuidar bem dele"],
+                },
+            ]},
+        }],
+    }
+    facts_by_key = {"objective": [{
+        "owner_node_id": "persona:aurora", "status": "known",
+        "value": "continuar_cuidar_proteger",
+    }]}
+    collected = graph_agent_runtime_v3._collected_field_facts(
+        document, ["persona:aurora"], contract, facts_by_key,
+    )
+    assert collected == [
+        ("Objective", "continuar com o veículo e cuidar bem dele"),
+    ]
+
+
+def test_collected_field_facts_non_enum_field_is_unaffected():
+    document = {"branch_contracts": {}, "node_by_id": {}}
+    contract = {
+        "conversation_policy": {}, "field_labels": {},
+        "fields": [{"key": "nome_cliente", "owner_node_id": "persona:aurora"}],
+    }
+    facts_by_key = {"nome_cliente": [{
+        "owner_node_id": "persona:aurora", "status": "known", "value": "Cíntia",
+    }]}
+    collected = graph_agent_runtime_v3._collected_field_facts(
+        document, ["persona:aurora"], contract, facts_by_key,
+    )
+    assert collected == [("Nome cliente", "Cíntia")]
+
+
 def test_active_offering_titles_has_no_hardcoded_selection_key():
     """Generic across service and product graphs: the selector field key
     comes from branch_selection_field on the compiled contract, never the
@@ -3235,6 +3280,80 @@ def test_no_pending_branch_confirmation_stays_locked_in_support(monkeypatch):
     )
     assert response.proof.get("valid"), response.proof.get("errors")
     assert response.proof["confirmation_state"] == "post_qualification_support"
+
+
+def test_qualification_complete_turn_citing_persona_root_is_not_rejected(monkeypatch):
+    """Regression for José's silence: the persona root node is
+    unconditionally in every branch's closure (it owns identity-level
+    facts like nome_cliente) but typically has no indexed RAG chunk of its
+    own, so it never earns a context card and never lands in
+    package_node_ids. The model naturally cites it while restating
+    already-known facts on the turn qualification completes -- without the
+    fix that legitimate citation was rejected as
+    cited_node_outside_package, forcing a repair round-trip that, live in
+    production, left the customer with no reply at all."""
+    root = node(1, "persona:aurora", parent_type="persona")
+    branch_a = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    q_a = node(3, "question:a", parent_type="faq", data={"question": "Qual é a metragem?"})
+    closing_rule = node(4, "rule:closing", parent_type="rule", data={"handoff_rule": {
+        "condition": "qualification_complete",
+        "text": "Perfeito! Anotei tudo, a equipe vai te chamar em breve.",
+    }})
+    branch_a["metadata"]["qualification"] = {"fields": [{
+        "key": "metragem", "question_node_id": "question:a", "required": True,
+        "accepted_statuses": ["known"], "value_schema": {"type": "number", "minimum": 0},
+    }]}
+    rows = [root, branch_a, q_a, closing_rule]
+    edges = [
+        edge(1, root, branch_a), edge(2, branch_a, q_a), edge(3, branch_a, closing_rule),
+    ]
+    document = graph_compiler_v3.compile_graph(persona=PERSONA, node_rows=rows, edge_rows=edges)
+    contract = document["branch_contracts"]["branch:a"]
+    persona_id = "persona:aurora"
+    assert persona_id in (contract.get("closure_node_ids") or []), (
+        "fixture must have the persona root in the branch closure to exercise this path"
+    )
+
+    pub = publication(document)
+    persona_row = {**PERSONA, "config": {}}
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: persona_row)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub
+    )
+
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], messages=[{
+            "role": "user", "texto": "20",
+        }], cart={"facts": {
+            "metragem": {"status": "known", "value": 20, "owner_node_id": "branch:a"},
+        }}, rag_nodes=[], rag_paths=[], graph_contract=contract,
+        # No context_cards this turn -- the persona node has no indexed
+        # prose chunk of its own, matching production.
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+        publication_id=pub["id"],
+        retrieval_trace={"retrieval_branch_node_id": "branch:a"},
+    )
+    proposal = {
+        "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": contract["branch_path_checksum"],
+        "branch_evidence_span": "", "extracted_facts": [], "claims": [],
+        "next_question_node_id": None,
+        "cited_node_ids": [persona_id],
+        "cited_chunk_ids": [],
+        "reply": "Perfeito, ficam 20 no pedido. Posso confirmar?",
+        "qualification_complete": True, "handoff_requested": False,
+    }
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": proposal},
+    )
+    assert response.proof.get("valid"), response.proof.get("errors")
+    assert not any(
+        str(err).startswith("cited_node_outside_package")
+        for err in (response.proof.get("errors") or [])
+    )
+    assert response.reply_text
 
 
 def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatch):

@@ -587,6 +587,40 @@ function commercialNoteTitle(note: Record<string, string> | null | undefined): s
     .join("\n");
 }
 
+type OfferingChip = { id: string; label: string; value: string };
+
+// commercial_note (above) is a flat snapshot of whatever branch was focused
+// in the customer's most recent turn -- fine for a single-item pedido, but
+// it collapses a multi-item one (several services/products confirmed in the
+// same still-open conversation) down to just one of them. The backend keeps
+// commercial_note_projection in sync with every active branch
+// (api/services/graph_agent_runtime_v3.py::_commercial_note_projection),
+// generic across service and product graphs alike, so prefer it whenever
+// present; commercial_note stays the fallback for leads from before that
+// projection existed.
+function offeringChipEntries(lead: any): OfferingChip[] {
+  const services = lead?.metadata?.commercial_note_projection?.services as
+    Record<string, any> | undefined;
+  if (services && typeof services === "object") {
+    const offerings = Object.entries(services);
+    const multi = offerings.length > 1;
+    return offerings.flatMap(([branchId, offering]) => {
+      const facts = (offering?.facts || {}) as Record<string, unknown>;
+      const title = String(offering?.title || offering?.slug || "");
+      return Object.entries(facts)
+        .filter(([, value]) => value !== null && value !== undefined && value !== "")
+        .map(([key, value]) => ({
+          id: `${branchId}:${key}`,
+          label: multi && title ? `${title} · ${key.replace(/_/g, " ")}` : key.replace(/_/g, " "),
+          value: String(value),
+        }));
+    });
+  }
+  return commercialNoteEntries(lead?.metadata?.commercial_note).map(([key, value]) => ({
+    id: key, label: key.replace(/_/g, " "), value,
+  }));
+}
+
 function displayName(lead: Lead | null, msg?: Message): string {
   return (
     (lead?.nome?.trim()) ||
@@ -2425,27 +2459,27 @@ export function MessagesLayout({
               invisível no toque e não aparece em leitor de tela como conteúdo:
               cada nota vira um chip legível, truncado por chip e não pela
               string inteira. */}
-          {selectedLead && commercialNoteEntries(selectedLead.metadata?.commercial_note).length > 0 && (
+          {selectedLead && offeringChipEntries(selectedLead).length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 pl-[2.5rem]">
-              {commercialNoteEntries(selectedLead.metadata?.commercial_note).slice(0, 3).map(([key, value]) => (
+              {offeringChipEntries(selectedLead).slice(0, 3).map((chip) => (
                 <span
-                  key={key}
+                  key={chip.id}
                   className="inline-flex max-w-[13rem] items-baseline gap-1.5 rounded-full border px-2 py-0.5"
                   style={{ borderColor: "var(--border-glass)", background: "rgb(var(--obs-text) / 0.03)" }}
                 >
                   <span className="shrink-0 text-[9px] uppercase tracking-wide text-obs-faint">
-                    {key.replace(/_/g, " ")}
+                    {chip.label}
                   </span>
-                  <span className="truncate text-[11px] font-medium text-obs-text">{value}</span>
+                  <span className="truncate text-[11px] font-medium text-obs-text">{chip.value}</span>
                 </span>
               ))}
-              {commercialNoteEntries(selectedLead.metadata?.commercial_note).length > 3 && (
+              {offeringChipEntries(selectedLead).length > 3 && (
                 <button
                   type="button"
                   onClick={() => setShowLeadInfo(true)}
                   className="text-[11px] font-medium text-obs-subtle transition hover:text-obs-text"
                 >
-                  +{commercialNoteEntries(selectedLead.metadata?.commercial_note).length - 3} notas
+                  +{offeringChipEntries(selectedLead).length - 3} notas
                 </button>
               )}
             </div>

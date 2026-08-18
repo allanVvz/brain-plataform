@@ -2517,6 +2517,45 @@ def _humanize_field_key(key: str) -> str:
     return " ".join(words).capitalize()
 
 
+def _enum_option_label(field: dict[str, Any], value: Any) -> str | None:
+    """Human alias for a field's declared enum option value.
+
+    graph_compiler_v3._compiled_field_validation preserves
+    validation.values = [{value, aliases}] for mode="enum" fields (e.g.
+    Aurora's "objective": {"value": "continuar_cuidar_proteger", "aliases":
+    ["continuar com o veículo e cuidar bem dele", ...]}). None when the
+    field isn't an enum, the value doesn't match a declared option, or the
+    matching option has no alias -- callers fall back on their own.
+    """
+    validation = field.get("validation") or {}
+    if str(validation.get("mode") or "").lower() != "enum":
+        return None
+    for option in validation.get("values") or []:
+        if option.get("value") == value:
+            aliases = option.get("aliases") or []
+            return str(aliases[0]) if aliases else None
+    return None
+
+
+def _render_field_value(field: dict[str, Any], value: Any) -> str:
+    """Customer-facing rendering of a fact's value for this field.
+
+    An enum field's stored value is the internal slug used for matching
+    (e.g. "continuar_cuidar_proteger"), never meant to be shown verbatim --
+    the grounding guard for the natural summary
+    (graph_proof_checker_v3.validate_natural_summary) would otherwise force
+    the model to literally write that slug to pass validation. Prefer the
+    published alias; if an enum value somehow has none, humanize the slug
+    like any other field key rather than leak the underscore.
+    """
+    alias = _enum_option_label(field, value)
+    if alias is not None:
+        return alias
+    if isinstance(value, str) and str((field.get("validation") or {}).get("mode") or "").lower() == "enum":
+        return _humanize_field_key(value)
+    return _render_fact_value(value)
+
+
 def _collected_field_facts(
     document: dict[str, Any],
     active_branch_ids: list[str],
@@ -2545,7 +2584,7 @@ def _collected_field_facts(
         )
         if fact:
             label = str(labels.get(key) or "") or _humanize_field_key(key)
-            collected.append((label, _render_fact_value(fact.get("value"))))
+            collected.append((label, _render_field_value(field, fact.get("value"))))
     return collected
 
 
@@ -4673,6 +4712,17 @@ def _decide(
         "facts": contract_facts,
         "asked_question_node_ids": context.cart.get("asked_question_node_ids") or [],
     }
+    # The persona root is unconditionally in every branch's closure/path (it
+    # owns identity-level facts like nome_cliente) -- always in scope by
+    # construction, not by retrieval. It typically has no indexed prose
+    # chunk of its own, so it never earns a context card and, without this,
+    # never lands in package_node_ids on ANY turn. The model naturally cites
+    # it while restating already-known facts on the turn qualification
+    # completes -- that legitimate citation was rejected as
+    # cited_node_outside_package, forcing an unnecessary (and, live, stuck)
+    # repair round-trip that left the customer without a reply.
+    persona_root_id = str((_persona_node(document) or {}).get("id") or "") or None
+    persona_root_ids = {persona_root_id} if persona_root_id else set()
     proof = graph_proof_checker_v3.check(
         publication=publication, contract=contract, ledger=ledger,
         proposal=proposal.model_dump(mode="json"), message=next(
@@ -4681,7 +4731,7 @@ def _decide(
         ), source_message_id=_source_message_id(context.messages),
         package_node_ids={card.id for card in context.context_cards} | {
             str(value) for value in observation.get("repair_context_node_ids") or [] if value
-        },
+        } | persona_root_ids,
         package_chunk_ids={str(row.get("chunk_id") or row.get("id")) for row in context.rag_chunks} | {
             str(value) for value in observation.get("repair_context_chunk_ids") or [] if value
         },
@@ -4741,7 +4791,7 @@ def _decide(
     })
     package_node_ids = {card.id for card in context.context_cards} | {
         str(value) for value in observation.get("repair_context_node_ids") or [] if value
-    }
+    } | persona_root_ids
     doubt = _doubt_resolution(
         context=context,
         document=document,

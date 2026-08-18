@@ -145,7 +145,7 @@ def set_journey_state(
             # A origem precisa ser auditavel: isto nao foi um humano clicando
             # em "retomar", foi o fechamento do pedido religando o ciclo.
             event_emitter.emit(
-                "lead.ai_resumed", lead_ref=lead_ref,
+                "lead.ai_resumed", entity_type="lead", entity_id=str(lead_ref),
                 payload={"ai_paused": False, "by": "journey_closed",
                          "target": body.target},
             )
@@ -159,7 +159,7 @@ def set_journey_state(
         result["ai_paused"] = bool(paused)
         if paused:
             event_emitter.emit(
-                "lead.ai_paused", lead_ref=lead_ref,
+                "lead.ai_paused", entity_type="lead", entity_id=str(lead_ref),
                 payload={"ai_paused": True, "by": "journey_qualified",
                          "target": body.target},
             )
