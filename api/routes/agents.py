@@ -149,6 +149,9 @@ def set_journey_state(
                 payload={"ai_paused": False, "by": "journey_closed",
                          "target": body.target},
             )
+            result["notice"] = agents_service.reactivation_notice(
+                lead_ref, reason="journey_closed"
+            )
     elif result.get("changed") and body.target == "qualificado":
         # Selecionar "qualificado" manualmente e o mesmo desfecho que o SDR
         # atinge sozinho ao confirmar a qualificacao -- e o SDR e a unica

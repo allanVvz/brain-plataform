@@ -648,22 +648,45 @@ def test_canonical_burst_overlays_the_latest_physical_message_for_proof():
     assert messages[1]["content"] == "Dolphin"
 
 
-def test_greeting_responses_rotate_per_lead_without_new_state():
+def test_greeting_never_reuses_a_phrase_this_conversation_already_heard():
+    """Rotating by lead_ref kept one lead on one phrase forever.
+
+    That is stable *across* leads and maximally repetitive *inside* a single
+    conversation -- the exact opposite of what anti-repetition needs. The
+    variant is now chosen by excluding what the agent already said here.
+    """
     responses = ["Olá! A.", "Oi! B.", "Olá! C.", "Oi! D."]
     document = greeting_document(responses=responses)
-    seen = {
-        graph_agent_runtime_v3._greeting_policy(
-            document, contract={}, facts={}, lead_ref=lead_ref,
-        )["response"]
-        for lead_ref in range(4)
-    }
-    assert seen == set(responses)
-    assert all(
-        graph_agent_runtime_v3._greeting_policy(
-            document, contract={}, facts={}, lead_ref=87,
-        )["response"] == responses[87 % 4]
-        for _ in range(3)
+
+    def policy(recent):
+        return graph_agent_runtime_v3._greeting_policy(
+            document, contract={}, facts={}, lead_ref=87, recent_replies=recent,
+        )
+
+    assert policy([])["response"] == responses[0]
+    assert policy([responses[0]])["response"] == responses[1]
+    assert policy([responses[0], responses[1]])["response"] == responses[2]
+    # Every variant spent: no deterministic greeting at all, so the turn falls
+    # through to the model instead of replaying a phrase. Silence is not an
+    # option here -- the model still owes this turn a reply.
+    assert policy(responses) is None
+
+
+def test_greeting_does_not_reintroduce_a_customer_already_known():
+    document = greeting_document(responses=["Oi! Eu sou a Lia, do atendimento."])
+    persona = graph_agent_runtime_v3._persona_node(document)
+    persona["data"]["conversation_policy"]["intents"]["greeting"][
+        "responses_returning"
+    ] = ["Oi de novo! Aqui é a Lia."]
+
+    first_contact = graph_agent_runtime_v3._greeting_policy(
+        document, contract={}, facts={},
     )
+    returning = graph_agent_runtime_v3._greeting_policy(
+        document, contract={}, facts={"nome_cliente": {"status": "known"}},
+    )
+    assert "eu sou a lia" in first_contact["response"].casefold()
+    assert returning["response"] == "Oi de novo! Aqui é a Lia."
 
 
 def test_greeting_resolves_the_published_name_question_without_a_contract():
@@ -1917,9 +1940,11 @@ def test_system_prompt_marks_model_service_routing_as_observation_only():
     prompt = graph_agent_runtime_v3.SYSTEM_PROMPT
     assert "branch_action" in prompt
     assert "service_observations" in prompt
-    assert "service_operations existe apenas por compatibilidade" in prompt
-    assert "nunca autoriza mutação" in prompt
-    assert "somente o resolvedor do backend aplica operações" in prompt
+    # Assert the contract, not the copy: this text is tuned for tone and
+    # length, and pinning exact sentences made every prompt edit a red build.
+    assert "por compatibilidade" in prompt
+    assert "nunca autorizam mutação" in prompt
+    assert "resolvedor do backend" in prompt
 
 
 def test_system_prompt_still_has_anti_repetition_instruction():
@@ -1932,9 +1957,13 @@ def test_system_prompt_still_has_anti_repetition_instruction():
     anti-repetition instruction.
     """
     prompt = graph_agent_runtime_v3.SYSTEM_PROMPT
-    assert "nunca repita a pergunta ou frase do turno anterior" in prompt
+    assert "Nunca repita uma frase que você já disse" in prompt
     assert "handoff_requested só pode ser true" in prompt
     assert "fatos_conhecidos lista tudo" in prompt
+    # The 2026-08-19 rewrite folded six scattered anti-repetition clauses into
+    # one canonical block plus the ladder. Both have to survive.
+    assert "siga esta ordem" in prompt
+    assert "não devolva silêncio" in prompt
 
 
 def test_contract_fact_scope_does_not_compare_service_from_another_owner():
@@ -4755,3 +4784,112 @@ def test_topological_fields_preserves_graph_required_field_order():
     assert [field["key"] for field in ordered] == [
         "nome_cliente", "servico", "can_visit_in_person",
     ]
+
+
+def repetition_contract(paraphrases=None, invalid_response=None):
+    """A one-field contract whose question the conversation already heard."""
+    return {
+        "questions": {
+            "q:nome": {
+                "field_key": "nome_cliente",
+                "text": "Como você se chama?",
+                "paraphrases": paraphrases or [],
+            },
+        },
+        "fields": [{
+            "key": "nome_cliente",
+            "question_node_id": "q:nome",
+            "validation": (
+                {"invalid_response": invalid_response} if invalid_response else {}
+            ),
+        }],
+    }
+
+
+def test_repetition_ladder_prefers_another_published_wording():
+    reply, action = graph_agent_runtime_v3._repetition_ladder(
+        reply="Como você se chama?",
+        recent_replies=["Como você se chama?"],
+        contract=repetition_contract(
+            paraphrases=["Como você se chama?", "Me diz seu nome, por favor."],
+            invalid_response="Não consegui entender.",
+        ),
+        question_node_id="q:nome",
+    )
+    # The first paraphrase is itself what was already said, so it is skipped.
+    assert reply == "Me diz seu nome, por favor."
+    assert action == "adapted_variant"
+
+
+def test_repetition_ladder_admits_it_did_not_understand_when_wordings_run_out():
+    reply, action = graph_agent_runtime_v3._repetition_ladder(
+        reply="Como você se chama?",
+        recent_replies=["Como você se chama?", "Me diz seu nome, por favor."],
+        contract=repetition_contract(
+            paraphrases=["Me diz seu nome, por favor."],
+            invalid_response="Não consegui entender essa informação.",
+        ),
+        question_node_id="q:nome",
+    )
+    assert reply == "Não consegui entender essa informação."
+    assert action == "admitted_not_understood"
+
+
+def test_repetition_ladder_stops_instead_of_repeating_when_nothing_is_left():
+    reply, action = graph_agent_runtime_v3._repetition_ladder(
+        reply="Como você se chama?",
+        recent_replies=["Como você se chama?", "Não consegui entender."],
+        contract=repetition_contract(invalid_response="Não consegui entender."),
+        question_node_id="q:nome",
+    )
+    assert reply == ""
+    assert action == "stopped_last_resort"
+
+
+def test_repetition_ladder_keeps_new_content_as_the_prefix():
+    """The old path dropped the question with the duplicate, abandoning the field."""
+    reply, action = graph_agent_runtime_v3._repetition_ladder(
+        reply="Fazemos PPF sim. Como você se chama?",
+        recent_replies=["Como você se chama?"],
+        contract=repetition_contract(paraphrases=["Me diz seu nome, por favor."]),
+        question_node_id="q:nome",
+        prefix="Fazemos PPF sim.",
+    )
+    assert reply == "Fazemos PPF sim. Me diz seu nome, por favor."
+    assert action == "adapted_variant"
+
+
+def test_repetition_ladder_never_invents_copy_without_a_graph():
+    """A persona that published no alternatives gets no runtime-authored text."""
+    reply, action = graph_agent_runtime_v3._repetition_ladder(
+        reply="Como você se chama?",
+        recent_replies=["Como você se chama?"],
+        contract=repetition_contract(),
+        question_node_id="q:nome",
+    )
+    assert reply == ""
+    assert action == "stopped_last_resort"
+
+
+def test_agent_identity_comes_from_the_graph_never_from_code():
+    """The model must know its own name, and the name must not live in Python."""
+    document = greeting_document()
+    persona = graph_agent_runtime_v3._persona_node(document)
+    assert graph_agent_runtime_v3._agent_identity_prompt(document) == ""
+
+    persona["data"]["agent_identity"] = {
+        "name": "Lia", "role": "agente de atendimento",
+        "company": "Aurora Estética Automotiva", "company_short": "Aurora",
+    }
+    identity = graph_agent_runtime_v3._agent_identity_prompt(document)
+    assert "Você se chama Lia" in identity
+    assert "Aurora Estética Automotiva" in identity
+    # The agent is the person, not the business.
+    assert "Você não é a empresa" in identity
+
+
+def test_system_prompt_carries_no_persona_copy():
+    """AGENTS.md 26: production code must not branch on a client or brand."""
+    prompt = graph_agent_runtime_v3.SYSTEM_PROMPT
+    for forbidden in ("Lia", "Aurora", "Tock", "Vitória"):
+        assert forbidden not in prompt

@@ -259,6 +259,21 @@ def _question_text(node: dict[str, Any]) -> str:
     return str(content.get("question") or data.get("question") or node.get("title") or "").strip()
 
 
+def _question_paraphrases(node: dict[str, Any]) -> list[str]:
+    """Alternative published wordings for the same question.
+
+    The runtime may need to ask one field more than once. Without published
+    alternatives its only options are the identical sentence or silence, so
+    the graph -- never the code -- owns every other way of asking.
+    """
+    data = node.get("data") or {}
+    content = data.get("content") if isinstance(data.get("content"), dict) else {}
+    values = content.get("paraphrases") or data.get("paraphrases") or []
+    if not isinstance(values, list):
+        return []
+    return [text for value in values if isinstance(value, str) and (text := value.strip())]
+
+
 def _faq_question_answer(node: dict[str, Any]) -> tuple[str, str]:
     """Return only explicit FAQ fields; a display title is not a FAQ question."""
     data = node.get("data") or {}
@@ -887,6 +902,7 @@ def compile_graph(
                 field["question_node_id"]: {
                     "field_key": field["key"],
                     "text": _question_text(node_by_id[field["question_node_id"]]),
+                    "paraphrases": _question_paraphrases(node_by_id[field["question_node_id"]]),
                     "depends_on": field["depends_on"],
                     "condition": field.get("condition"),
                 }

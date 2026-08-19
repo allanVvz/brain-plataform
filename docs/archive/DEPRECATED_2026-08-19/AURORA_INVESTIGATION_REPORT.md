@@ -1,3 +1,7 @@
+> **DEPRECIADO em 2026-08-19 — SUPERSEDED BY `docs/roadmaps/AGENT_ROADMAP.md`.**
+> Não usar como fonte de verdade. Mantido apenas como histórico.
+> Motivo: diagnóstico de 2026-08-10 sobre a trava de HANDOFF, já resolvida; não descreve a trava atual de memória do ciclo SDR.
+
 # Relatório de Investigação: Aurora Não Responde para Allan
 
 **Data da Investigação:** 2026-08-10  

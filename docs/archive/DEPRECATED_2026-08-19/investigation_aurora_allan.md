@@ -1,3 +1,7 @@
+> **DEPRECIADO em 2026-08-19 — SUPERSEDED BY `docs/roadmaps/AGENT_ROADMAP.md`.**
+> Não usar como fonte de verdade. Mantido apenas como histórico.
+> Motivo: checklist de 2026-08-10 que terminou em "aguardando dados"; nunca foi concluído.
+
 # Investigação Completa: Aurora não responde para Allan
 
 **Data:** 2026-08-10  
