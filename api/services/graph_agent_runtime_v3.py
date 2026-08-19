@@ -1987,6 +1987,23 @@ _EXPLICIT_UNKNOWN = re.compile(
 )
 
 
+def _explicitly_defers_pending_field(message: str) -> bool:
+    """Recognize a deictic request to continue without the pending answer.
+
+    This is deliberately field- and persona-neutral.  A phrase such as
+    ``podemos seguir sem essa informação?`` refers to the question the
+    runtime just published; it is not an informational FAQ merely because it
+    ends in a question mark.
+    """
+    normalized = _normalized_phrase(message)
+    return bool(re.fullmatch(
+        r"(?:podemos|pode|posso|vamos|quero|prefiro)\s+"
+        r"(?:seguir|continuar|prosseguir)\s+sem\s+"
+        r"(?:essa|esta|a)\s+(?:informacao|resposta|dado)(?:\s+agora)?",
+        normalized,
+    ))
+
+
 def _normalize_next_question_to_first_missing(
     proposal: ConversationProposal,
     contract: dict[str, Any],
@@ -2074,6 +2091,8 @@ def _doubt_resolution(
     chunk_sources: dict[str, str], package_node_ids: set[str],
 ) -> dict[str, Any] | None:
     message = _latest_user_message(context)
+    if _explicitly_defers_pending_field(message):
+        return None
     closure = set(contract.get("closure_node_ids") or [])
     selected_faq_node_id = str(
         context.retrieval_trace.get("selected_faq_node_id") or ""
@@ -2282,7 +2301,10 @@ def _unanswered_fact_after_question_limit(
         _latest_user_message(context),
         context.retrieval_trace.get("service_resolution") or {},
     ).strip()
-    explicit_unknown = bool(_EXPLICIT_UNKNOWN.fullmatch(message))
+    explicit_unknown = bool(
+        _EXPLICIT_UNKNOWN.fullmatch(message)
+        or _explicitly_defers_pending_field(message)
+    )
     asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
     question_text = str(
         ((contract.get("questions") or {}).get(question_id) or {}).get("text") or ""
