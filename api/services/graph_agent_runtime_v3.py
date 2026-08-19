@@ -46,6 +46,14 @@ SERVICE_MAX_EDIT_DISTANCE = 3
 SERVICE_TEXT_MIN_SIMILARITY = 0.80
 SERVICE_SEMANTIC_MIN_SCORE = 0.78
 SERVICE_SEMANTIC_MIN_MARGIN = 0.08
+# How sure the model has to be before its own reading of a semantic field
+# stands without a confirmation turn. Generic default; the graph overrides
+# it per field with `validation.model_confidence_min`.
+MODEL_FACT_CONFIDENCE_MIN = 0.90
+# How long after the customer's last unanswered message the agent may still
+# speak when the AI is switched back on. Past it the agent waits for the
+# customer to start. Overridden by the persona graph.
+RESUME_ANSWER_WINDOW_SECONDS = 36000
 
 
 def _normalize_initial_service_keep(
@@ -2485,6 +2493,21 @@ def _pending_field_for_question(
     )
 
 
+def _confirmation_is_last_resort(
+    contract: dict[str, Any], confirmation: dict[str, Any],
+) -> bool:
+    """Whether the graph asks for this field to be confirmed only as a last resort."""
+    key = str(confirmation.get("field_key") or "")
+    if not key:
+        return False
+    return any(
+        str((field.get("validation") or {}).get("confirmation_policy") or "")
+        == "last_resort"
+        for field in contract.get("fields") or []
+        if str(field.get("key") or "") == key
+    )
+
+
 def _repetition_ladder(
     *,
     reply: str,
@@ -3201,6 +3224,15 @@ def _greeting_policy(
 
 
 SYSTEM_PROMPT = (
+    "Três camadas, e cada uma manda no que é dela. VOCÊ entende: o que o "
+    "cliente quis dizer, tudo o que ele informou de uma vez, com que "
+    "confiança, e em que voz responder. O BACKEND prova: evidência "
+    "literal, escopo do galho, idempotência e segurança -- ele valida a "
+    "sua proposta contra a publicação e substitui o que não puder provar. "
+    "O GRAFO manda no conteúdo: serviços, perguntas, regras, identidade e "
+    "copy. Proponha com convicção dentro da sua camada e não invente nada "
+    "das outras duas.\n\n"
+
     "Antes de propor qualquer mutação, descreva a interação atual em "
     "interaction_observation: continue_current, new_demand, "
     "post_completion_question, courtesy_close, post_sale_operation ou "
@@ -3221,11 +3253,6 @@ SYSTEM_PROMPT = (
     "resolução comprovada. Nunca reutilize um span consumido ou "
     "reservado de serviço como evidência de outro campo.\n\n"
 
-    "Você propõe a conversa; o backend apenas prova o GraphRAG "
-    "publicado. Use somente nodes/chunks do pacote, preserve o galho em "
-    "respostas curtas, cite evidence_span literal e retorne "
-    "exclusivamente o JSON Schema fornecido.\n\n"
-
     "Leia a mensagem inteira do cliente antes de responder. Capture em "
     "extracted_facts todo campo reconhecível mencionado nela, mesmo que "
     "não seja o campo que você acabou de perguntar -- um cliente "
@@ -3236,6 +3263,47 @@ SYSTEM_PROMPT = (
     "WhatsApp: se a leitura mais provável for razoavelmente clara, "
     "extraia o fato com essa interpretação, sem parar a conversa para "
     "confirmar o óbvio.\n\n"
+
+    "Em evidence_span, recorte exatamente o trecho da mensagem que "
+    "sustenta o fato -- as mesmas palavras, na mesma ordem, sem "
+    "reescrever, traduzir nem recapitalizar. O valor em value pode ser a "
+    "sua leitura normalizada; o span é a prova, e o backend precisa "
+    "reencontrá-lo na mensagem original. Em confidence, publique o "
+    "quanto você realmente acredita naquela leitura: acima do piso do "
+    "campo o backend grava direto e a conversa segue; abaixo dele o "
+    "cliente terá de confirmar antes. Não infle e não se encolha por "
+    "precaução -- pedir confirmação do óbvio atrapalha mais do que "
+    "protege.\n\n"
+
+    "Nunca pergunte o que você já sabe. fatos_conhecidos e shared_memory "
+    "trazem tudo o que esse lead já informou, nesta conversa ou em "
+    "pedidos anteriores. Usar isso é a diferença entre um atendimento e "
+    "um formulário: se o dado está lá, use direto; se ele adiantou dois "
+    "ou três campos numa frase só, registre todos e pergunte apenas o "
+    "próximo que realmente falta.\n\n"
+
+    "Respeite o tempo do cliente. Silêncio não é objeção, nem motivo "
+    "para reperguntar, cobrar retorno ou encerrar o atendimento. Uma "
+    "informação pendente por mensagem, e só depois que ele responder. "
+    "Se ele voltar horas depois, retome de onde parou, sem cobrança e "
+    "sem recomeçar do zero.\n\n"
+
+    "Ao primeiro sinal mínimo de intenção -- uma dúvida solta, um "
+    "serviço citado de passagem, um incômodo relatado -- responda esse "
+    "sinal: resolva a dúvida com o que o grafo publica, ou pergunte o "
+    "que ele quer conhecer ou melhorar. Nunca devolva um turno sem "
+    "conteúdo e nunca deixe a conversa parada esperando que o cliente se "
+    "explique melhor sozinho.\n\n"
+
+    "Você propõe a conversa; o backend apenas prova o GraphRAG "
+    "publicado. Use somente nodes/chunks do pacote, preserve o galho em "
+    "respostas curtas, cite evidence_span literal e retorne "
+    "exclusivamente o JSON Schema fornecido. Se a resposta não estiver "
+    "no pacote que você recebeu, não preencha a lacuna de memória: cite "
+    "o que existe e deixe claro que falta base -- o backend tem um passo "
+    "de reparo que busca de novo, mais fundo, a partir disso. Se nem "
+    "assim houver fonte, pergunte ao cliente, com uma pergunta curta e "
+    "específica, em vez de escolher no achismo.\n\n"
 
     "Você é um SDR de verdade conversando por WhatsApp, não um "
     "formulário. Sempre que extrair um campo diferente do que estava "
@@ -3262,11 +3330,13 @@ SYSTEM_PROMPT = (
     "Nunca repita uma frase que você já disse neste atendimento -- nem "
     "literal, nem quase palavra por palavra, nem a mesma construção "
     "turno após turno. Isso vale para perguntas, para reconhecimentos "
-    "('entendi', 'perfeito') e para o resumo de confirmação. Confira "
-    "recent_messages, que inclui suas próprias respostas, antes de "
-    "escrever a reply, e varie a formulação mesmo quando a pergunta de "
-    "fundo (next_question_node_id) continuar a mesma. Um prefixo vazio "
-    "como 'Certo' não conta como variação.\n\n"
+    "('entendi', 'perfeito'), para pedidos de confirmação e para o "
+    "resumo final. Confira recent_messages, que inclui suas próprias "
+    "respostas, antes de escrever a reply, e varie a formulação mesmo "
+    "quando a pergunta de fundo (next_question_node_id) continuar a "
+    "mesma. Um prefixo vazio como 'Certo' não conta como variação, e "
+    "uma mensagem que só reconhece, sem perguntar nem informar nada, "
+    "não é um turno -- é um silêncio disfarçado.\n\n"
 
     "Quando precisar retomar algo já dito, siga esta ordem. Primeiro, "
     "diga de outro jeito: outra formulação da mesma pergunta, "
@@ -3313,6 +3383,14 @@ SYSTEM_PROMPT = (
     "mensagem como início de conversa nova quando o intervalo passar de "
     "~3-4 horas, e mesmo assim não assuma que o assunto ou a urgência "
     "de antes ainda valem.\n\n"
+
+    "journey traz sequence e state. sequence maior que 1 significa que "
+    "este cliente já foi atendido antes: você não está descobrindo, "
+    "está continuando. Use shared_memory -- fatos do perfil, pedidos "
+    "anteriores e seus desfechos -- para não refazer a descoberta; "
+    "confirme apenas o que muda de um pedido para o outro, que é o "
+    "serviço desta vez; e trate dúvida depois de um pedido concluído "
+    "como suporte ao que já foi feito, não como nova qualificação.\n\n"
 
     "fatos_conhecidos lista tudo que já se sabe sobre esse cliente, "
     "cada um com origem 'esta_conversa' ou 'anterior'. Um fato "
@@ -4172,6 +4250,27 @@ def _deterministic_confirmation_decision(
     return None
 
 
+def _restates_pending_candidate(message: str, fact: dict[str, Any]) -> bool:
+    """The customer repeating the value is confirming it.
+
+    Asking "Allan Rodrigues is your full name?" and getting "allan
+    rodrigues" back is agreement in any human reading of the exchange. The
+    runtime used to accept only a short list of literal confirmation
+    phrases, so a customer restating the exact value read as a non-answer
+    and the same question came back turn after turn.
+    """
+    confirmation = (fact.get("metadata") or {}).get("confirmation") or {}
+    candidate = _normalized_phrase(
+        confirmation.get("candidate_title") or confirmation.get("candidate")
+    )
+    if not candidate:
+        return False
+    normalized = _normalized_phrase(message)
+    return normalized == candidate or any(
+        normalized == f"{token} {candidate}" for token in _EXPLICIT_CONFIRMATIONS
+    )
+
+
 def _pending_confirmation_fact(context: ConversationContext) -> dict[str, Any] | None:
     for rows in (context.cart.get("facts_by_key") or {}).values():
         for fact in rows if isinstance(rows, list) else []:
@@ -4184,6 +4283,7 @@ def _pending_confirmation_fact(context: ConversationContext) -> dict[str, Any] |
 def _confirmation_prompt_for_fact(
     document: dict[str, Any], fact: dict[str, Any],
     active_branch_node_ids: list[str],
+    recent_replies: Sequence[str] = (),
 ) -> tuple[str, dict[str, Any]]:
     """Render only graph-published copy for one persisted candidate."""
     confirmation = dict((fact.get("metadata") or {}).get("confirmation") or {})
@@ -4195,6 +4295,7 @@ def _confirmation_prompt_for_fact(
                 or ("name" if capability == "name" else "fact")
             ),
             candidate=str(confirmation.get("candidate") or ""),
+            recent_replies=recent_replies,
         ), confirmation
     if capability in {"service", "branch_selector"}:
         return _confirmation_template(
@@ -4204,6 +4305,7 @@ def _confirmation_prompt_for_fact(
                 confirmation.get("candidate_title")
                 or confirmation.get("candidate") or ""
             ),
+            recent_replies=recent_replies,
         ), confirmation
     raise RuntimeError("unsupported persisted confirmation candidate")
 
@@ -4253,8 +4355,14 @@ def _deterministic_pending_fact_confirmation(
 ) -> tuple[ConversationDecision, AgentResponse] | None:
     pending = _pending_confirmation_fact(context)
     message = _latest_user_message(context)
-    accepted_confirmation = _is_explicit_confirmation(message)
     rejected_confirmation = _is_explicit_rejection(message)
+    accepted_confirmation = bool(
+        not rejected_confirmation
+        and (
+            _is_explicit_confirmation(message)
+            or (pending and _restates_pending_candidate(message, pending))
+        )
+    )
     if not pending or not (accepted_confirmation or rejected_confirmation):
         return None
 
@@ -4462,6 +4570,7 @@ def _deterministic_pending_fact_confirmation(
     if remaining_pending:
         reply, next_confirmation = _confirmation_prompt_for_fact(
             document, remaining_pending, active,
+            _assistant_replies(context.messages),
         )
         next_question_id = None
     elif final_confirmation_pending:
@@ -4943,10 +5052,38 @@ def _sanitize_untrusted_service_operations(raw: Any) -> Any:
     return {**raw, "service_operations": operations}
 
 
+def _folded_with_origin(text: Any) -> tuple[str, list[int]]:
+    """Case/accent-folded text plus the raw offset each folded char came from."""
+    folded: list[str] = []
+    origin: list[int] = []
+    for index, char in enumerate(str(text or "")):
+        for part in unicodedata.normalize("NFKD", char.casefold()):
+            if unicodedata.combining(part):
+                continue
+            folded.append(part)
+            origin.append(index)
+    return "".join(folded), origin
+
+
 def _fact_span_interval(message: str, span: Any) -> tuple[int, int] | None:
-    evidence = str(span or "")
-    start = str(message or "").find(evidence) if evidence else -1
-    return (start, start + len(evidence)) if start >= 0 else None
+    """Locate the evidence inside the message, ignoring case and accents.
+
+    A model routinely echoes a span in its own capitalization ("Allan
+    Rodrigues" for a message that reads "allan rodrigues"). A case-sensitive
+    `find` reported that evidence as absent, so a perfectly grounded fact
+    lost its only proof of literalness. Folding both sides keeps the
+    comparison literal in the sense that matters -- same characters, same
+    order, same position -- without pretending the customer types like a
+    form.
+    """
+    folded_span, _ = _folded_with_origin(span)
+    if not folded_span:
+        return None
+    folded_message, origin = _folded_with_origin(message)
+    start = folded_message.find(folded_span)
+    if start < 0:
+        return None
+    return origin[start], origin[start + len(folded_span) - 1] + 1
 
 
 def _overlaps_any(
@@ -4959,30 +5096,60 @@ def _overlaps_any(
     ))
 
 
+def _model_confidence_floor(validation: Any) -> float:
+    """Confidence the graph demands before a model reading stands on its own."""
+    published = validation if isinstance(validation, dict) else {}
+    try:
+        floor = float(published.get("model_confidence_min"))
+    except (TypeError, ValueError):
+        return MODEL_FACT_CONFIDENCE_MIN
+    return floor if 0.0 <= floor <= 1.0 else MODEL_FACT_CONFIDENCE_MIN
+
+
 def _reconcile_human_full_name_facts(
     proposal: ConversationProposal,
     *,
     context: ConversationContext,
     contract: dict[str, Any],
 ) -> tuple[ConversationProposal, list[dict[str, Any]]]:
-    """Make name acceptance contextual and keep composite extraction pending."""
+    """Trust the model's reading of a name; make the backend prove it.
+
+    Until 2026-08-19 a name only became `known` when the raw message was
+    byte-identical to the extracted value. A customer typing "allan
+    rodrigues" against a model answering "Allan Rodrigues" failed that
+    equality, so a correct, high-confidence extraction was demoted to
+    `needs_confirmation` -- and that confirmation could only be resolved by
+    one of a handful of literal confirmation phrases, which is how the live
+    conversation deadlocked repeating the same template.
+
+    The division of labour is now the one the contract states: the model
+    owns the semantics (what the customer meant, with a calibrated
+    confidence), the backend owns the proof (the span is literally in the
+    message, the shape is a name, and it does not steal a span already
+    consumed as a service). Confirmation is the last resort, not the
+    default.
+    """
     message = _latest_user_message(context)
     asked = context.cart.get("asked_question_node_ids") or []
-    service_spans = list(
-        (context.retrieval_trace.get("service_resolution") or {})
-        .get("consumed_spans") or []
+    resolution = context.retrieval_trace.get("service_resolution") or {}
+    service_spans = list(resolution.get("consumed_spans") or [])
+    residual = _normalized_phrase(
+        _message_without_consumed_services(message, resolution)
     )
     kept: list[ExtractedFact] = []
     validation: list[dict[str, Any]] = []
     fields = {str(field.get("key") or ""): field for field in contract.get("fields") or []}
     for fact in proposal.extracted_facts:
         field = fields.get(fact.field_key) or {}
-        semantic_type = str((field.get("validation") or {}).get("semantic_type") or "")
-        if semantic_type != "human_full_name":
+        rules = field.get("validation") or {}
+        if str(rules.get("semantic_type") or "") != "human_full_name":
             kept.append(fact)
             continue
         candidate = str(fact.value or "").strip()
-        if not graph_proof_checker_v3.is_human_full_name(candidate):
+        minimum, maximum = graph_proof_checker_v3.name_token_bounds(rules)
+        if not graph_proof_checker_v3.is_human_full_name(
+            candidate, min_tokens=minimum, max_tokens=maximum,
+        ):
             validation.append({
                 "field_key": fact.field_key,
                 "owner_node_id": fact.owner_node_id,
@@ -4990,7 +5157,7 @@ def _reconcile_human_full_name_facts(
                 "errors": ["human_full_name_invalid"],
             })
             continue
-        evidence = str(fact.evidence_span or "").strip()
+        evidence = str(fact.evidence_span or "").strip() or candidate
         interval = _fact_span_interval(message, evidence)
         if _overlaps_any(interval, service_spans):
             validation.append({
@@ -5001,28 +5168,39 @@ def _reconcile_human_full_name_facts(
                 "evidence_span": evidence,
             })
             continue
-        direct_question = bool(
+        # The persisted evidence is the customer own slice of text, never the
+        # model re-cased echo -- that is what a later audit has to be able to
+        # find again in the original message.
+        literal_evidence = message[interval[0]:interval[1]] if interval else ""
+        confident = float(fact.confidence or 0) >= _model_confidence_floor(rules)
+        # Low-confidence fallback, with no language-specific phrasing:
+        # everything the customer wrote (minus spans already consumed as a
+        # service) is the name, and the published name question was the last
+        # thing asked.
+        direct_answer = bool(
             asked
             and field.get("question_node_id")
             and str(asked[-1]) == str(field["question_node_id"])
+            and residual == _normalized_phrase(candidate)
         )
-        whole_response = bool(
-            message.strip() == candidate
-            and evidence == candidate
-        )
-        if direct_question and whole_response:
+        if literal_evidence and (confident or direct_answer):
             kept.append(fact.model_copy(update={
                 "status": ConversationFactStatus.KNOWN,
                 "value": candidate,
+                "evidence_span": literal_evidence,
                 "metadata": {
                     **fact.metadata,
-                    "validation_method": "direct_published_name_answer",
+                    "validation_method": (
+                        "model_confidence" if confident
+                        else "direct_published_name_answer"
+                    ),
                 },
             }))
             continue
         kept.append(fact.model_copy(update={
             "status": ConversationFactStatus.NEEDS_CONFIRMATION,
             "value": None,
+            "evidence_span": literal_evidence or evidence,
             "metadata": {
                 **fact.metadata,
                 "confirmation": {
@@ -5032,8 +5210,11 @@ def _reconcile_human_full_name_facts(
                     "candidate": candidate,
                     "field_key": fact.field_key,
                     "owner_node_id": fact.owner_node_id,
-                    "evidence_span": evidence,
-                    "method": "composite_or_unsolicited_name",
+                    "evidence_span": literal_evidence or evidence,
+                    "method": (
+                        "unproven_evidence" if not literal_evidence
+                        else "low_model_confidence"
+                    ),
                 },
             },
         }))
@@ -5122,11 +5303,26 @@ def _semantic_service_candidate(
 
 def _confirmation_template(
     document: dict[str, Any], key: str, *, candidate: str = "", options: str = "",
+    recent_replies: Sequence[str] = (),
 ) -> str:
-    template = str((document.get("confirmation_templates") or {}).get(key) or "").strip()
-    if not template:
+    """Published confirmation copy, in a wording this conversation has not heard.
+
+    A persona may publish one string or a list of equivalent phrasings. The
+    list matters because a confirmation that comes back word for word is
+    exactly what a customer reads as a stuck agent -- and the repetition
+    guard, seeing a duplicate, would otherwise strip the question and leave
+    only the acknowledgement.
+    """
+    published = (document.get("confirmation_templates") or {}).get(key)
+    variants = published if isinstance(published, list) else [published]
+    rendered = [
+        text.replace("{candidate}", candidate).replace("{options}", options)
+        for value in variants
+        if (text := str(value or "").strip())
+    ]
+    if not rendered:
         raise RuntimeError(f"published graph missing confirmation template: {key}")
-    return template.replace("{candidate}", candidate).replace("{options}", options)
+    return _unrepeated_variant(rendered, recent_replies) or rendered[0]
 
 
 def _service_candidate_template_key(
@@ -5796,7 +5992,11 @@ def _decide(
         terminal_intent = "qualification_incomplete" if qualification_incomplete else None
         reply_seed = str((doubt or {}).get("text") or proposal.reply)
         if model_proposed_service_operations != service_operations and not doubt:
-            reply_seed = ""
+            # A rejected branch mutation invalidates the mutation, not the
+            # turn. Keep what the model actually said -- an answer, an
+            # acknowledgement, a useful observation -- and drop only the
+            # interrogative part, whose routing belongs to the graph.
+            reply_seed = _statements_only(reply_seed)
         service_ack = _service_operation_acknowledgement(
             document, service_operations,
         )
@@ -5839,10 +6039,12 @@ def _decide(
         )
         if pending_confirmation_fact:
             confirmation_kind = str(field_confirmation.get("kind") or "")
+            already_said = _assistant_replies(context.messages)
             if confirmation_kind == "name":
                 confirmation_text = _confirmation_template(
                     document, "name",
                     candidate=str(field_confirmation.get("candidate") or ""),
+                    recent_replies=already_said,
                 )
             else:
                 confirmation_text = _confirmation_template(
@@ -5852,6 +6054,7 @@ def _decide(
                         field_confirmation.get("candidate_title")
                         or field_confirmation.get("candidate") or ""
                     ),
+                    recent_replies=already_said,
                 )
             # A confirmation candidate is the only authoritative outcome for
             # this turn. Do not leak a model acknowledgement or a validation
@@ -5864,8 +6067,14 @@ def _decide(
             # answer -- and when the same template was already sent, the
             # duplicate suppression turns it into silence.
             doubt_text = str((doubt or {}).get("text") or "").strip()
+            lead = [doubt_text, service_ack or ""]
+            if _confirmation_is_last_resort(contract, field_confirmation):
+                # `last_resort` lets the model's own statements lead too, so a
+                # turn that genuinely answered something never reaches the
+                # customer as a bare confirmation question.
+                lead.append(_statements_only(proposal.reply))
             reply = " ".join(
-                part for part in (doubt_text, confirmation_text) if part
+                part for part in (*lead, confirmation_text) if part
             )
             next_question_id = None
             confirmation_pending = False
@@ -5975,6 +6184,40 @@ def _decide(
                 # new to say by definition.
                 repetition_action = "allowed_never_silent"
 
+        # And a collection turn never ends as a bare acknowledgement. The
+        # ladder's last rung emits only its prefix, which is how a suppressed
+        # confirmation reached the customer as "Entendi." and nothing else
+        # (live 2026-08-19): indistinguishable from a broken agent, with
+        # nothing to answer. While a field is still askable, the published
+        # question comes back instead.
+        # A doubt answered by the graph is content: that turn gave the customer
+        # something, and re-appending the ask it just suppressed would spend an
+        # emission the budget deliberately withheld.
+        if (
+            not terminal_intent
+            and not post_support
+            and not doubt
+            and aggregate_askable
+            and "?" not in reply
+        ):
+            recovery_question_id = next_question_id or next(
+                (
+                    field.get("question_node_id")
+                    for field in aggregate_askable
+                    if field.get("question_node_id")
+                ),
+                None,
+            )
+            recovered = graph_proof_checker_v3.compose_published_question(
+                reply=reply,
+                next_question_node_id=recovery_question_id,
+                contract=question_contract,
+            ).strip()
+            if recovered and recovered != reply.strip():
+                reply = recovered
+                next_question_id = recovery_question_id
+                repetition_action = "repaired_never_acknowledge_only"
+
         projection_contract = (
             (document.get("branch_contracts") or {}).get(committed_branch)
             or document.get("common_contract")
@@ -6000,7 +6243,9 @@ def _decide(
                 # emission on an outbound that was never sent.
                 *(
                     [next_question_id]
-                    if next_question_id and repetition_action == "allowed"
+                    if next_question_id and repetition_action in {
+                        "allowed", "repaired_never_acknowledge_only",
+                    }
                     else []
                 ),
             ],

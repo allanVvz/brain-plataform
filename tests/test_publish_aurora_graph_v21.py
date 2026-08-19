@@ -47,8 +47,11 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
 
     assert valid, errors
     assert graph.schema_version == "2.1"
-    assert len(graph.nodes) == 87
-    assert len(graph.edges) == 168
+    # 88 desde 2026-08-19: aurora-faq-why-name fechou a unica duvida de
+    # qualificacao sem resposta publicada, e ela cai justamente no primeiro
+    # campo do roteiro.
+    assert len(graph.nodes) == 88
+    assert len(graph.edges) == 170
 
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
     assert embedded.action is not None
@@ -61,7 +64,7 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
         and edge.relation_type == "publishes_to"
         and edge.lifecycle.status == "active"
     ]
-    assert len(grants) == 84
+    assert len(grants) == 85
     assert {edge.source for edge in grants} == {
         node.id
         for node in graph.nodes
@@ -110,7 +113,7 @@ def test_all_aurora_factual_faqs_receive_v34_projection_membership() -> None:
 
     assert document["compiler_version"] == "graph-compiler-v3.5.0"
     assert document["faq_projection_contract"] == "v1"
-    assert len(document["eligible_faq_node_ids"]) == 30
+    assert len(document["eligible_faq_node_ids"]) == 31
     # Thirteen portfolio/global FAQs are available in every branch; a branch
     # may additionally own service-specific FAQs.
     assert all(

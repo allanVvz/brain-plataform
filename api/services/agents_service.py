@@ -13,9 +13,11 @@ either runs the resolved agent or pauses the AI for human handoff.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from services import graph_agent_runtime_v3, supabase_client
+from services.graph_agent_runtime_v3 import RESUME_ANSWER_WINDOW_SECONDS
 
 logger = logging.getLogger("agents_service")
 
@@ -275,6 +277,20 @@ def resume_lead(lead_ref: int) -> bool:
     except Exception as exc:
         logger.warning("resume_lead failed: %s", exc)
         return False
+    # Respect the customer's own timing. An inbound that has been parked
+    # longer than the published window is not a conversation waiting to be
+    # continued -- answering it hours later reads as an agent talking to
+    # itself. The buffer rows stay exactly where they are; the next message
+    # the customer sends starts the conversation again.
+    window = resume_answer_window(lead or {})
+    _LAST_RESUME_WINDOW[lead_ref] = window
+    if not window.get("may_speak"):
+        _LAST_REQUEUED.pop(lead_ref, None)
+        logger.info(
+            "resume_lead stays silent lead_ref=%s reason=%s",
+            lead_ref, window.get("reason"),
+        )
+        return True
     try:
         requeued = supabase_client.requeue_waiting_human_whatsapp_buffer(lead_ref)
         if requeued:
@@ -295,6 +311,102 @@ def resume_lead(lead_ref: int) -> bool:
 # outbounds for one resume is exactly the duplication AGENTS.md 26 forbids.
 _LAST_REQUEUED: dict[int, int] = {}
 
+# What the last resume decided about speaking at all, per lead, so the notice
+# does not have to reload the published graph to reach the same conclusion.
+_LAST_RESUME_WINDOW: dict[int, dict] = {}
+
+
+def _seconds_since_unanswered_customer_message(lead: dict) -> float | None:
+    """Age of the customer's last message, or None if it was already answered.
+
+    Only the tail matters: if the newest row is inbound, the customer spoke
+    last and is still waiting. If it is outbound, there is nothing pending
+    and the agent has no standing to open the conversation on its own.
+    """
+    try:
+        rows = supabase_client.get_messages(str(lead.get("id")), limit=5) or []
+    except Exception as exc:
+        logger.warning("resume window message lookup failed: %s", exc)
+        return None
+    if not rows or str(rows[-1].get("direction") or "") != "inbound":
+        return None
+    raw = str(rows[-1].get("created_at") or "").strip()
+    if not raw:
+        return None
+    try:
+        sent_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - sent_at).total_seconds()
+
+
+def resume_answer_window(lead: dict) -> dict:
+    """Whether a resumed agent may still speak, per the published window.
+
+    The agent speaks on a resume only while the customer's own unanswered
+    message is recent enough to make a reply feel like a continuation of the
+    same conversation. Past that, the turn belongs to the customer: the agent
+    waits to be addressed. A campaign dispatch or a brand-new conversation is
+    a different door and is unaffected by this.
+    """
+    if not lead:
+        return {"may_speak": False, "reason": "lead_unavailable"}
+    published = _reactivation_policy(lead)
+    try:
+        window = int(
+            published.get("answer_pending_inbound_within_seconds")
+            or RESUME_ANSWER_WINDOW_SECONDS
+        )
+    except (TypeError, ValueError):
+        window = RESUME_ANSWER_WINDOW_SECONDS
+    age = _seconds_since_unanswered_customer_message(lead)
+    if age is None:
+        return {
+            "may_speak": False,
+            "reason": "no_unanswered_customer_message",
+            "window_seconds": window,
+        }
+    if age > window:
+        return {
+            "may_speak": False,
+            "reason": "resume_window_expired",
+            "window_seconds": window,
+            "age_seconds": round(age),
+        }
+    return {
+        "may_speak": True,
+        "reason": "unanswered_customer_message_within_window",
+        "window_seconds": window,
+        "age_seconds": round(age),
+    }
+
+
+def _reactivation_policy(lead: dict) -> dict:
+    """The persona's published reactivation block: copy and timing, one place."""
+    from services import context_cards, graph_agent_runtime_v3
+
+    persona_slug = str(lead.get("persona_slug") or "")
+    if not persona_slug:
+        try:
+            persona = supabase_client.get_persona_by_id(str(lead.get("persona_id") or ""))
+        except Exception as exc:
+            logger.warning("reactivation policy persona lookup failed: %s", exc)
+            return {}
+        persona_slug = str((persona or {}).get("slug") or "")
+    if not persona_slug:
+        return {}
+    try:
+        _version, _checksum, graph = context_cards.current_graph(persona_slug)
+    except Exception as exc:
+        logger.warning("reactivation policy graph load failed: %s", exc)
+        return {}
+    document = {"nodes": [node.model_dump(mode="json") for node in graph.nodes]}
+    persona_node = graph_agent_runtime_v3._persona_node(document) or {}
+    policy = ((persona_node.get("data") or {}).get("conversation_policy") or {})
+    return policy.get("reactivation") or {}
+
 
 def reactivation_notice(lead_ref: int, *, reason: str) -> dict:
     """Announce, once, that the AI is back — when nothing else will speak.
@@ -306,6 +418,7 @@ def reactivation_notice(lead_ref: int, *, reason: str) -> dict:
     """
     from services import whatsapp_outbox
 
+    window = _LAST_RESUME_WINDOW.pop(lead_ref, None)
     if _LAST_REQUEUED.pop(lead_ref, 0):
         return {"sent": False, "skipped": "pending_inbound_will_be_answered"}
     try:
@@ -319,6 +432,16 @@ def reactivation_notice(lead_ref: int, *, reason: str) -> dict:
         return {"sent": False, "skipped": "lead_not_found"}
     if str(lead.get("handoff_level") or "none") != "none":
         return {"sent": False, "skipped": "human_owns_the_conversation"}
+    # The same window the resume itself obeyed: reusing the decision avoids a
+    # second graph load, and recomputing it covers a notice that did not come
+    # straight from a resume.
+    if window is None:
+        window = resume_answer_window(lead)
+    if not window.get("may_speak"):
+        return {
+            "sent": False,
+            "skipped": str(window.get("reason") or "resume_window_expired"),
+        }
 
     try:
         text = _reactivation_text(lead, reason=reason)
@@ -347,23 +470,9 @@ def reactivation_notice(lead_ref: int, *, reason: str) -> dict:
 
 def _reactivation_text(lead: dict, *, reason: str) -> str:
     """Pick the published opening that matches why the AI came back."""
-    from services import context_cards, graph_agent_runtime_v3
+    from services import graph_agent_runtime_v3
 
-    persona_slug = str(lead.get("persona_slug") or "")
-    if not persona_slug:
-        persona = supabase_client.get_persona_by_id(str(lead.get("persona_id") or ""))
-        persona_slug = str((persona or {}).get("slug") or "")
-    if not persona_slug:
-        return ""
-    try:
-        _version, _checksum, graph = context_cards.current_graph(persona_slug)
-    except Exception as exc:
-        logger.warning("reactivation_notice graph load failed: %s", exc)
-        return ""
-    document = {"nodes": [node.model_dump(mode="json") for node in graph.nodes]}
-    persona_node = graph_agent_runtime_v3._persona_node(document) or {}
-    policy = ((persona_node.get("data") or {}).get("conversation_policy") or {})
-    published = policy.get("reactivation") or {}
+    published = _reactivation_policy(lead)
     variants = published.get(_reactivation_key(lead, reason=reason)) or []
     return graph_agent_runtime_v3._unrepeated_variant(
         [str(value) for value in variants], _recent_agent_texts(lead)
