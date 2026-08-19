@@ -48,6 +48,15 @@ def test_model_prompt_is_compact_and_budgeted_before_both_calls():
     assert "Math.ceil(text.length / 4)" in repair
     assert "TextEncoder" not in initial and "TextEncoder" not in repair
     assert "recent_messages" in initial
+    assert "agent_behavior: context.system_prompt" not in initial
+    assert "graph_and_cards: { graph_contract:" not in initial
+    assert (
+        "graph_and_cards: 'top_level_graph_contract_approved_nodes_approved_chunks', "
+        "memory: boundedMemory"
+    ) not in initial
+    assert "agent_behavior: 'system_message'" in initial
+    assert "graph_and_cards: 'top_level_graph_contract_approved_nodes_approved_chunks'" in initial
+    assert "memory: 'top_level_shared_memory'" in initial
 
 
 def test_model_prompt_receives_complete_multi_service_memory_contract():
