@@ -257,7 +257,7 @@ def get_whatsapp_binding(slug: str, request: Request):
         b for b in supabase_client.get_workflow_bindings(persona["id"])
         if b.get("provider") == "meta_cloud"
     ), None)
-    connection = supabase_client.get_persona_integration_connection(persona["id"], "meta") or {}
+    connection = supabase_client.get_persona_integration_connection(persona["id"], "meta_whatsapp") or {}
     return {"persona": {"id": persona["id"], "slug": persona["slug"]}, "binding": _public_binding(binding), "meta_configured": bool(connection.get("secret_ciphertext"))}
 
 
@@ -277,7 +277,7 @@ def put_whatsapp_binding(slug: str, body: WhatsAppBindingBody, request: Request)
     ):
         raise HTTPException(400, "Mensageria direta nao aceita n8n_adapter ou webhooks n8n.")
     connection = (
-        supabase_client.get_persona_integration_connection(persona["id"], "meta")
+        supabase_client.get_persona_integration_connection(persona["id"], "meta_whatsapp")
         or {}
     )
     provider_secret_ciphertext = connection.get("secret_ciphertext")
