@@ -75,7 +75,7 @@ paralelo seguro.
 
 | # | Item | Estado | Agente |
 |---|---|---|---|
-| P0 | Destravar a Aurora SDR (ciclo com memória travado) | **em aberto — bloqueia tudo** | `aurora-unblock` |
+| P0 | Destravar a Aurora SDR (ciclo com memória travado) | **evidência coletada 2026-08-19 — nenhuma das 5 hipóteses reproduziu contra tráfego real; falta sessão de prova formal via WA Validator antes de marcar concluído** | `aurora-unblock` |
 | 0 | Higiene do repositório e precedência de documentos | **concluído 2026-08-19** | `deprecation-sweeper` |
 | 1 | Publisher genérico, PublicationPlan, embeddings incrementais | a fazer | `bundle-migrator`, `graph-publisher`, `release-gate` |
 | 2 | Cards editáveis alteram o agente de verdade | a fazer | `card-editor` |
@@ -99,6 +99,15 @@ HANDOFF **anterior e já resolvida**. Foram arquivados em
 diagnóstico corrente. Não usar.
 
 **Nenhuma etapa da refatoração começa antes deste item fechar.**
+
+**Atualização 2026-08-19:** evidência read-only coletada em produção contra
+lead real ativo (`aurora`, lead_ref 32) — ver
+`docs/evidence/AURORA_STUCK_2026-08-19/findings.md`. Nenhuma das 5 hipóteses
+abaixo reproduziu; os dois sinais que pareciam confirmar bug (carry-over
+vazio, `reply_text` vazio) eram falsos positivos do script de diagnóstico,
+não do runtime — a memória sobreviveu ao fechamento de jornada e o outbound
+real teve texto correto. Falta a sessão de prova formal via WA Validator
+(`POST /wa-validator/run-direct`) para marcar este item como concluído.
 
 ### Evidência obrigatória (read-only, produção)
 

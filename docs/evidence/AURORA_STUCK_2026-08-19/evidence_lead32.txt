@@ -1,0 +1,113 @@
+Pager usage is off.
+BEGIN
+=== [1/8] HIPOTESE 1: migrations 129 e 130 aplicadas? ===
+                 proname                  |                             args                              |  status  
+------------------------------------------+---------------------------------------------------------------+----------
+ activate_graph_publication_v3            | p_publication_id uuid                                         | PRESENTE
+ conversation_carry_over_facts_by_lead_v1 | p_persona_id uuid, p_lead_ref bigint, p_field_keys text[]     | PRESENTE
+ graph_turn_context_batch_v3              | p_persona_id uuid, p_lead_ref bigint, p_message_limit integer | PRESENTE
+ graph_turn_context_batch_v4              | p_persona_id uuid, p_lead_ref bigint, p_message_limit integer | PRESENTE
+(4 rows)
+
+=== [2/8] publicacao ativa vs checksum guardado no ledger ===
+--- HIPOTESE 4: divergencia aqui invalida fatos a cada turno
+ version |                          publication_checksum                           | status |   compiler_version    |          created_at           |                             ledger_checksum                             | checksum_bate | revision |    active_branch_node_id    
+---------+-------------------------------------------------------------------------+--------+-----------------------+-------------------------------+-------------------------------------------------------------------------+---------------+----------+-----------------------------
+      66 | sha256:f2010106aec0788c3610c8b3be643a31c6a7d9bb3c7f1cd1633b9e175535dcc0 | active | graph-compiler-v3.5.0 | 2026-08-19 15:54:55.348235+00 | sha256:f2010106aec0788c3610c8b3be643a31c6a7d9bb3c7f1cd1633b9e175535dcc0 | t             |       10 | aurora-product-wash
+      66 | sha256:f2010106aec0788c3610c8b3be643a31c6a7d9bb3c7f1cd1633b9e175535dcc0 | active | graph-compiler-v3.5.0 | 2026-08-19 15:54:55.348235+00 | sha256:f2010106aec0788c3610c8b3be643a31c6a7d9bb3c7f1cd1633b9e175535dcc0 | t             |        5 | aurora-product-glass-polish
+(2 rows)
+
+=== [3/8] ultimas 5 publicacoes (a v ativa mudou recentemente?) ===
+ version |   status    |   compiler_version    |                                checksum                                 |          created_at           
+---------+-------------+-----------------------+-------------------------------------------------------------------------+-------------------------------
+      66 | active      | graph-compiler-v3.5.0 | sha256:f2010106aec0788c3610c8b3be643a31c6a7d9bb3c7f1cd1633b9e175535dcc0 | 2026-08-19 15:54:55.348235+00
+      65 | rolled_back | graph-compiler-v3.5.0 | sha256:2a0817bfd37f6cfd0153c601dcd08b9c6757b5219b0d8824479a2e40f2c1d259 | 2026-08-19 09:44:47.509217+00
+      64 | rolled_back | graph-compiler-v3.5.0 | sha256:e33a3a5155d1bae9d5da91b307c538d13319453f8905a94e79c1109f6a29fe4c | 2026-08-19 03:26:56.062838+00
+      63 | rolled_back | graph-compiler-v3.5.0 | sha256:4ff19f0cbdcf92fec2422d9b7786d82f86c42abc88fa877f466ea21dcd175857 | 2026-08-18 18:22:31.184591+00
+      62 | rolled_back | graph-compiler-v3.5.0 | sha256:91d7d3782d5505be210e9a9e7f2e1b4f5eccedee349bfa228ab2d0b1be0fd543 | 2026-08-18 07:45:20.696587+00
+(5 rows)
+
+=== [4/8] HIPOTESE 2: turnos com proof valido e reply_text vazio ===
+--- silencio total: o texto certo foi calculado e nunca saiu
+          created_at           |         canonical_inbound_id         | proof_valid | reply_text |             outbound_id              | sem_outbound | journey_action 
+-------------------------------+--------------------------------------+-------------+------------+--------------------------------------+--------------+----------------
+ 2026-08-19 18:04:24.702465+00 | fde13fb5-80bb-49dd-bf4f-5fb0d885eda5 | t           | <<VAZIO>>  | 8c6a9f6c-05ad-4959-8a14-9ce9e61e4b9d | f            | 
+ 2026-08-19 18:03:39.474654+00 | f8f6203a-1dec-45cd-91f4-8deb301b0f03 | t           | <<VAZIO>>  | 5faf1452-3b21-4202-8cf0-a72e9827f545 | f            | 
+ 2026-08-19 18:03:02.608889+00 | b187260a-f665-4419-9364-d28c78449121 | t           | <<VAZIO>>  | 3dfc6c22-8ff1-48d7-aaa6-b4ed3f02caff | f            | 
+ 2026-08-19 18:00:05.056743+00 | f2cd0e02-2aee-4128-823b-776dfc0d846d | t           | <<VAZIO>>  | 812d9427-1615-4b7d-b68a-e4203e7b47a0 | f            | 
+ 2026-08-19 17:59:17.96411+00  | 2e683392-2693-4a3e-a7cc-a3dd6fd835a8 | t           | <<VAZIO>>  | a03f0f10-23d4-4745-8f07-2323c5209cb1 | f            | 
+ 2026-08-19 17:43:08.869488+00 | a19e6a63-fad1-4e10-bd08-22db7ebb3b91 | t           | <<VAZIO>>  | 5c8d3ce9-0bde-4b2b-8609-feba0e7b41e3 | f            | 
+ 2026-08-19 17:42:27.098274+00 | a98f418e-b8c4-48c1-ae83-af416429da19 | t           | <<VAZIO>>  | 8a689a67-3c55-40c1-a120-0e161179fd40 | f            | 
+ 2026-08-19 17:39:53.945619+00 | 60fc03a5-d440-4238-9091-e584800090ab | t           | <<VAZIO>>  | 068330f9-026b-41b7-9b40-f4d8dce2f9df | f            | 
+ 2026-08-19 17:39:18.825709+00 | 2c53e8ad-a4f2-4058-b7af-143025891688 | t           | <<VAZIO>>  | f296ca90-3a47-4ecf-9df7-fa433f309acb | f            | 
+ 2026-08-19 17:38:32.143041+00 | edf7ac2d-ddaa-4e60-8a03-6d265188baaf | t           | <<VAZIO>>  | 8b6d88e9-f815-4c95-80e3-25196de4670d | f            | 
+ 2026-08-19 17:38:02.394891+00 | 145d5a08-6d64-4ad4-937b-6ce4c527de9b | t           | <<VAZIO>>  | 9032c1bd-3760-4c5f-b2aa-5cdde24ef3ca | f            | 
+ 2026-08-19 17:37:32.547542+00 | 611843e8-eac7-4eb8-a6ea-7f16c8bd03f5 | f           | <<VAZIO>>  |                                      | t            | 
+ 2026-08-19 17:37:13.868042+00 | aaff2f86-5a6f-4afc-ab91-e208a604fcff | t           | <<VAZIO>>  | 48ca75d7-2a6b-414d-8544-5af91a92ca71 | f            | 
+ 2026-08-19 17:36:30.590165+00 | dd7a5fc9-ce4d-4c8f-beed-89e9fb75e328 | t           | <<VAZIO>>  | beaf4820-c441-421f-8998-ce7d6a280b46 | f            | 
+ 2026-08-19 17:35:44.042395+00 | 7bc2d740-3d86-4482-9b45-6e6a3c3826eb | t           | <<VAZIO>>  | 8e68570d-4e7f-4d6e-914b-dd68890a0a35 | f            | 
+(15 rows)
+
+=== [5/8] ultimos 30 turnos: trace de invalidacao e publicacao ===
+          created_at           | proof_valid | pub_version | pub_changed | invalidated_count |     journey_state     |    pending_field    |       faq_deferral        | reply_preview 
+-------------------------------+-------------+-------------+-------------+-------------------+-----------------------+---------------------+---------------------------+---------------
+ 2026-08-19 18:04:24.702465+00 | t           | 66          | f           |                 0 | awaiting_confirmation |                     |                           | 
+ 2026-08-19 18:03:39.474654+00 | t           | 66          | f           |                 0 | collecting            | vehicle_color       |                           | 
+ 2026-08-19 18:03:02.608889+00 | t           | 66          | f           |                 0 | collecting            | can_visit_in_person |                           | 
+ 2026-08-19 18:00:05.056743+00 | t           | 66          | f           |                 0 | collecting            | objective           | semantic_ambiguous_margin | 
+ 2026-08-19 17:59:17.96411+00  | t           | 66          | f           |                 0 | collecting            | servico             |                           | 
+ 2026-08-19 17:43:08.869488+00 | t           | 66          | f           |                 0 | awaiting_confirmation |                     |                           | 
+ 2026-08-19 17:42:27.098274+00 | t           | 66          | f           |                 0 | collecting            | modelo_veiculo      |                           | 
+ 2026-08-19 17:39:53.945619+00 | t           | 66          | f           |                 0 | collecting            | can_visit_in_person |                           | 
+ 2026-08-19 17:39:18.825709+00 | t           | 66          | f           |                 0 | collecting            | objective           |                           | 
+ 2026-08-19 17:38:32.143041+00 | t           | 66          | f           |                 0 | collecting            | servico             |                           | 
+ 2026-08-19 17:38:02.394891+00 | t           | 66          | f           |                 0 | collecting            | nome_cliente        |                           | 
+ 2026-08-19 17:37:32.547542+00 | f           | 66          | f           |                 0 | collecting            | nome_cliente        | semantic_ambiguous_margin | 
+ 2026-08-19 17:37:13.868042+00 | t           | 66          | f           |                 0 | collecting            | nome_cliente        |                           | 
+ 2026-08-19 17:36:30.590165+00 | t           | 66          | f           |                 0 | collecting            | nome_cliente        |                           | 
+ 2026-08-19 17:35:44.042395+00 | t           | 66          | f           |                 0 | collecting            | nome_cliente        |                           | 
+(15 rows)
+
+=== [6/8] HIPOTESE 5: fatos por campo — quais viraram unknown ===
+      field_key      | status | is_current |        owner_node_id        |           valor           | revision |          created_at           |              journey_id              
+---------------------+--------+------------+-----------------------------+---------------------------+----------+-------------------------------+--------------------------------------
+ can_visit_in_person | known  | t          | aurora-persona              | false                     |        1 | 2026-08-19 18:03:02.608889+00 | 258f6511-08f1-4d10-8227-e0fc6588bae7
+ can_visit_in_person | known  | t          | aurora-persona              | false                     |        1 | 2026-08-19 17:39:53.945619+00 | 299414ad-ba4f-4d68-837d-907c9774ceb8
+ condicao            | known  | t          | aurora-persona              | limpeza pós viagem        |        1 | 2026-08-19 17:59:17.96411+00  | 258f6511-08f1-4d10-8227-e0fc6588bae7
+ condicao            | known  | t          | aurora-persona              | limpeza pós viagem        |        1 | 2026-08-19 17:39:18.825709+00 | 299414ad-ba4f-4d68-837d-907c9774ceb8
+ modelo_veiculo      | known  | t          | aurora-persona              | Chevette                  |        1 | 2026-08-19 17:59:17.96411+00  | 258f6511-08f1-4d10-8227-e0fc6588bae7
+ modelo_veiculo      | known  | t          | aurora-persona              | Chevette                  |        1 | 2026-08-19 17:42:27.098274+00 | 299414ad-ba4f-4d68-837d-907c9774ceb8
+ nome_cliente        | known  | t          | aurora-persona              | Luiza Camargo             |        1 | 2026-08-19 17:38:02.394891+00 | 299414ad-ba4f-4d68-837d-907c9774ceb8
+ nome_cliente        | known  | t          | aurora-persona              | Luiza Camargo             |        1 | 2026-08-19 17:59:17.96411+00  | 258f6511-08f1-4d10-8227-e0fc6588bae7
+ objective           | known  | t          | aurora-persona              | continuar_cuidar_proteger |        1 | 2026-08-19 17:39:18.825709+00 | 299414ad-ba4f-4d68-837d-907c9774ceb8
+ objective           | known  | t          | aurora-persona              | continuar_cuidar_proteger |        1 | 2026-08-19 18:00:05.056743+00 | 258f6511-08f1-4d10-8227-e0fc6588bae7
+ servico             | known  | t          | aurora-product-polish       | polimento-tecnico         |        3 | 2026-08-19 18:04:24.702465+00 | 258f6511-08f1-4d10-8227-e0fc6588bae7
+ servico             | known  | t          | aurora-product-glass-polish | polimento-de-vidros       |        2 | 2026-08-19 18:04:24.702465+00 | 258f6511-08f1-4d10-8227-e0fc6588bae7
+ servico             | known  | t          | aurora-product-wash         | lavagem-detalhada         |        1 | 2026-08-19 17:38:32.143041+00 | 299414ad-ba4f-4d68-837d-907c9774ceb8
+ servico             | known  | t          | aurora-product-paint        | pintura                   |        1 | 2026-08-19 17:59:17.96411+00  | 258f6511-08f1-4d10-8227-e0fc6588bae7
+ vehicle_color       | known  | t          | aurora-persona              | vermelho                  |        1 | 2026-08-19 18:03:39.474654+00 | 258f6511-08f1-4d10-8227-e0fc6588bae7
+ vehicle_year        | known  | t          | aurora-persona              | 1989                      |        1 | 2026-08-19 17:59:17.96411+00  | 258f6511-08f1-4d10-8227-e0fc6588bae7
+ vehicle_year        | known  | t          | aurora-persona              | 1989                      |        1 | 2026-08-19 17:42:27.098274+00 | 299414ad-ba4f-4d68-837d-907c9774ceb8
+(17 rows)
+
+=== [7/8] jornadas: memoria sobrevive a dois fechamentos? ===
+ sequence |         state         | is_current |   opening_reason    | source |  qualification_confirmed_at   |         handed_off_at         |       converted_at        |         closed_at          |          created_at           
+----------+-----------------------+------------+---------------------+--------+-------------------------------+-------------------------------+---------------------------+----------------------------+-------------------------------
+        1 | closed                | f          | semantic_new_demand |        | 2026-08-19 17:43:08.869488+00 | 2026-08-19 17:43:08.869488+00 | 2026-08-19 17:50:39.79+00 | 2026-08-19 17:57:44.919+00 | 2026-08-19 17:35:44.042395+00
+        2 | awaiting_confirmation | t          | semantic_new_demand |        |                               |                               |                           |                            | 2026-08-19 17:59:17.96411+00
+(2 rows)
+
+=== [8/8] carry_over: o que a migration 129 realmente devolve ===
+--- vazio aqui com jornadas fechadas acima = memoria nao persistiu
+ carry_over_facts 
+------------------
+(0 rows)
+
+=== perguntas ja feitas (repeticao indevida?) ===
+                                                                                                        asked_question_node_ids                                                                                                         | revision |          updated_at           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------+-------------------------------
+ {faq:qualification:aurora:nome_cliente,faq:qualification:aurora:nome_cliente,faq:qualification:aurora:servico,faq:qualification:aurora:objective,faq:qualification:aurora:can_visit_in_person,faq:qualification:aurora:modelo_veiculo} |       10 | 2026-08-19 17:43:08.869488+00
+ {faq:qualification:aurora:objective,faq:qualification:aurora:can_visit_in_person,faq:qualification:aurora:vehicle_color}                                                                                                               |        5 | 2026-08-19 18:04:24.702465+00
+(2 rows)
+
+COMMIT

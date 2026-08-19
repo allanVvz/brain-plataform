@@ -1,10 +1,43 @@
 # Brain Platform Memory
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 > Estado corrente: Aurora religada em produção no número estável da VZ Lupas,
 > após várias rodadas de correção ao vivo (descritas abaixo). O handoff antigo
 > do WA Validator foi arquivado — ver "Histórico arquivado" no fim deste arquivo.
+
+## P0 — evidência de produção não reproduziu o travamento (2026-08-19)
+
+Rodada de evidência read-only (`aurora-unblock`, item P0 do roadmap) contra
+lead real ativo (`aurora`, lead_ref 32, publicação v66). Detalhe completo em
+`docs/evidence/AURORA_STUCK_2026-08-19/findings.md`.
+
+**Causa raiz real: não há bug ativo reproduzível hoje.** As 5 hipóteses
+ordenadas do roadmap foram testadas contra a evidência e nenhuma reproduziu.
+Dois sinais que pareciam confirmar bug eram falsos positivos do próprio
+script de diagnóstico, não do runtime: (1) `conversation_carry_over_facts_-
+by_lead_v1(persona_id, lead_ref, null)` sempre devolve 0 linhas quando
+`p_field_keys` é `null`, porque `field_key = ANY(null)` nunca é verdadeiro em
+SQL — o runtime real nunca chama a função com `null`, sempre passa a lista de
+`carry_over` do documento compilado (`_carry_over_field_keys` em
+`graph_agent_runtime_v3.py:3429`); (2) `final_decision->>'reply_text'` estava
+vazio nos 15 últimos turnos, mas o outbound real
+(`lead_buffer.payload->>'text'`) tinha o texto correto e completo — o texto
+sai por `proof_result->>'text'` (rede de segurança `_ensure_reply_text_or_-
+log`), não pela chave que o script de evidência checava.
+
+**Achado positivo:** a memória sobreviveu a um fechamento de jornada real —
+jornada 2 herdou `nome_cliente`, `modelo_veiculo`, `vehicle_year`, `condicao`
+no instante exato da criação, reconfirmando só `servico`. Os fixes de
+2026-08-18/19 (`3153c8c`, `fd9e20b`, `40d89e6`) parecem estar funcionando na
+prática.
+
+**O que não foi coberto:** não rodei a sessão de prova formal pelo WA
+Validator interno (`POST /wa-validator/run-direct`) — a evidência veio de
+tráfego orgânico real, não de uma sessão sintética controlada. A pendência
+antiga do node n8n `Align reply with qualification state` (não checa
+`reply_text` vazio) continua aberta, mas não bloqueia porque a rede de
+segurança em Python já cobre o caso observado.
 
 ## Correção de multi-serviço e perda de memória entre ciclos (2026-08-18)
 
