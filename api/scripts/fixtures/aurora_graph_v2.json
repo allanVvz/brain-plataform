@@ -29,6 +29,8 @@
           "janela_horario"
         ],
         "conversation_policy": {
+          "no_journey_fallback_reply": "Obrigada pelo contato. Se surgir uma nova necessidade, é só me dizer como posso ajudar.",
+          "post_sale_operation_route": "HUMAN",
           "intents": {
             "greeting": {
               "responses": [
@@ -104,8 +106,6 @@
           ],
           "conditional_fields": {
             "vehicle_color": [
-              "polimento-tecnico",
-              "vitrificacao",
               "chapeacao",
               "pintura"
             ]
@@ -133,6 +133,7 @@
             "reclamacao_relato": "relato"
           },
           "confirmation_templates": {
+            "fact": "Entendi {candidate}. Está correto?",
             "name": "Entendi. {candidate} é o seu nome completo?",
             "service_selection": "Você quer seguir com {candidate}?",
             "service_addition": "Você quer adicionar {candidate} aos serviços do pedido?",
@@ -785,6 +786,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "aliases": [
+          "polimento",
           "polimento técnico",
           "polimento do carro",
           "polimento da carroceria",
@@ -797,6 +799,9 @@
           "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
+          "field_guidance": {
+            "condicao": "Para polimento, descreva os defeitos e a condição da pintura; a cor não bloqueia a avaliação."
+          },
           "required_fields": [
             "nome_cliente",
             "servico",
@@ -896,6 +901,9 @@
           "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
+          "field_guidance": {
+            "condicao": "Para vitrificação, descreva a preparação e a condição da superfície; a cor não bloqueia o serviço."
+          },
           "required_fields": [
             "nome_cliente",
             "servico",
@@ -1261,6 +1269,9 @@
           "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
+          "field_guidance": {
+            "vehicle_color": "A cor ajuda a preparar a avaliação técnica e a correspondência da pintura."
+          },
           "required_fields": [
             "nome_cliente",
             "servico",
@@ -1362,6 +1373,9 @@
           "capacity": 5,
           "confirmation_required": true,
           "provider": "manual",
+          "field_guidance": {
+            "vehicle_color": "A cor ajuda a preparar a avaliação técnica e a correspondência da pintura."
+          },
           "required_fields": [
             "nome_cliente",
             "servico",

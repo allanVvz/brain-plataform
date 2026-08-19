@@ -29,7 +29,10 @@ def test_release_validator_requires_this_release_migration_and_exact_sha():
     assert "122_preserve_post_handoff_journey.sql" in VALIDATOR
     assert "126_journey_state_selector.sql" in VALIDATOR
     assert "127_sdr_name_service_confirmation.sql" in VALIDATOR
-    assert "release migrations 112-127 are incomplete" in VALIDATOR
+    assert "128_confirm_branch_offering_within_journey.sql" in VALIDATOR
+    assert "129_carry_over_facts_by_lead.sql" in VALIDATOR
+    assert "130_shared_lead_memory_and_journey_commit_v4.sql" in VALIDATOR
+    assert "release migrations 112-130 are incomplete" in VALIDATOR
     assert "EXPECTED_RELEASE_SHA" in VALIDATOR
     assert "release_source_identity" in VALIDATOR
 

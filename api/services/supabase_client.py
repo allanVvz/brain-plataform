@@ -4161,6 +4161,31 @@ def get_graph_turn_context_batch_v3(
     return value if isinstance(value, dict) else {}
 
 
+def get_graph_turn_context_batch_v4(
+    *, persona_id: str, lead_ref: int, message_limit: int = 8,
+) -> dict:
+    """Fetch v4 shared memory, falling back during a rolling deployment."""
+    try:
+        result = get_client().rpc(
+            "graph_turn_context_batch_v4",
+            {
+                "p_persona_id": persona_id,
+                "p_lead_ref": lead_ref,
+                "p_message_limit": max(1, min(int(message_limit), 20)),
+            },
+        ).execute()
+        value = getattr(result, "data", None)
+        if isinstance(value, list):
+            value = value[0] if value else {}
+        if isinstance(value, dict):
+            return value
+    except Exception:
+        pass
+    return get_graph_turn_context_batch_v3(
+        persona_id=persona_id, lead_ref=lead_ref, message_limit=message_limit,
+    )
+
+
 def get_graph_branch_package_v3(
     *, publication_id: str, branch_node_id: str,
     chunk_ids: list[str] | None = None, node_ids: list[str] | None = None,
@@ -4720,6 +4745,35 @@ def commit_graph_turn_and_outbox_v3(
     if isinstance(value, list):
         value = value[0] if value else {}
     return value if isinstance(value, dict) else {}
+
+
+def commit_graph_turn_and_outbox_v4(
+    *, turn: dict, outbound_buffer: dict | None,
+    outbound_message: dict | None, result_payload: dict,
+) -> dict:
+    """Atomic journey-aware commit with temporary v3 rolling fallback."""
+    payload = {
+        "p_turn": turn,
+        "p_outbound_buffer": outbound_buffer,
+        "p_outbound_message": outbound_message,
+        "p_result": result_payload,
+    }
+    try:
+        result = get_client().rpc("commit_graph_turn_and_outbox_v4", payload).execute()
+        value = getattr(result, "data", None)
+        if isinstance(value, list):
+            value = value[0] if value else {}
+        if isinstance(value, dict):
+            return value
+    except Exception:
+        # A v3 fallback is safe only for a real journey.  Falling back for
+        # journey_action=none would recreate the exact phantom-journey bug.
+        if str(turn.get("journey_action") or "continue") == "none":
+            raise
+    return commit_graph_turn_and_outbox_v3(
+        turn=turn, outbound_buffer=outbound_buffer,
+        outbound_message=outbound_message, result_payload=result_payload,
+    )
 
 
 def audit_conversation_turn_v3(inbound_buffer_id: str) -> dict:

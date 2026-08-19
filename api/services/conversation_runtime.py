@@ -149,16 +149,16 @@ def _commit_graph_turn_and_outbox_or_raise(
     *, inbound_id: str | None, correlation_id: str, **payload: Any,
 ) -> dict:
     try:
-        return supabase_client.commit_graph_turn_and_outbox_v3(**payload)
+        return supabase_client.commit_graph_turn_and_outbox_v4(**payload)
     except Exception as exc:
         logger.exception(
-            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v3 "
+            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v4 "
             "inbound_id=%s correlation_id=%s",
             inbound_id,
             correlation_id,
         )
         raise ConversationCommitFailed(
-            failed_step="commit_graph_turn_and_outbox_v3",
+            failed_step="commit_graph_turn_and_outbox_v4",
             inbound_id=inbound_id,
             correlation_id=correlation_id,
             cause=exc,
@@ -2639,6 +2639,10 @@ def commit(
             "active_branch_node_id": response.cart_state.get("active_branch_node_id"),
             "active_branch_node_ids": response.cart_state.get("active_branch_node_ids") or [],
             "confirmed_branch_node_ids": response.proof.get("confirmed_branch_node_ids") or [],
+            "journey_action": response.proof.get("journey_action") or "continue",
+            "agent_slug": context.agent_slug,
+            "agent_role": response.role.value,
+            "policy_version": response.proof.get("policy_version"),
             "asked_question_node_ids": response.cart_state.get("asked_question_node_ids") or [],
             "expected_revision": int(context.retrieval_trace.get("ledger_revision") or 0),
             "facts": [
@@ -2693,7 +2697,9 @@ def commit(
                 "status": atomic_commit.get("outbound_status"),
             }
         # Projection only: ledger/facts/proof/outbox above are already durable.
-        if response.handoff_required:
+        if response.proof.get("journey_action") == "none":
+            pass
+        elif response.handoff_required:
             supabase_client.handoff_whatsapp_lead_state(
                 lead_ref, metadata=metadata, stage=qualified_stage, level=handoff_level,
             )

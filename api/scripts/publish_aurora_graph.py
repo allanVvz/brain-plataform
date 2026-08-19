@@ -145,6 +145,10 @@ def build_graph() -> GraphJson:
         if node.node_type == "product":
             capabilities["branch_anchor"] = True
             booking = data.get("booking") if isinstance(data.get("booking"), dict) else {}
+            field_guidance = (
+                booking.get("field_guidance")
+                if isinstance(booking.get("field_guidance"), dict) else {}
+            )
             required = [str(field) for field in booking.get("required_fields") or [] if field]
             for field_key, branch_slugs in conditional_fields.items():
                 if node.slug in (branch_slugs or []) and field_key not in required:
@@ -192,6 +196,7 @@ def build_graph() -> GraphJson:
                 "condition": None,
                 "priority": 1.0 if field_key in {"servico", "modelo_veiculo"} else 0.7,
                 "overwrite_policy": "explicit_correction",
+                "context_guidance": str(field_guidance.get(field_key) or ""),
                 # Confirmed live 2026-08-18: only nome_cliente (the literal
                 # appointment_policy.identity_field) survived into a new
                 # journey/appointment cycle -- every other persona-scoped

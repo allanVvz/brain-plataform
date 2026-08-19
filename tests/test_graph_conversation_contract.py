@@ -333,10 +333,11 @@ def test_explicit_branch_switch_drops_incompatible_historical_facts(monkeypatch)
         "_current_graph",
         lambda _slug: (7, "aurora-proof-checksum", graph),
     )
-    old_contract = contract_service.compile_branch_contract(graph, "aurora-product-polish")
+    old_branch_id = "aurora-product-paint"
+    old_contract = contract_service.compile_branch_contract(graph, old_branch_id)
     old_color = next(field for field in old_contract["fields"] if field["key"] == "vehicle_color")
     state = {
-        "active_branch_node_id": "aurora-product-polish",
+        "active_branch_node_id": old_branch_id,
         "active_path_checksum": old_contract["branch_path_checksum"],
         "facts": {
             "vehicle_color": {

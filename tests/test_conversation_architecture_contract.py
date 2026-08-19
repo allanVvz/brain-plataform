@@ -54,7 +54,7 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
     initial = _node("Build graph grounded agent request")["parameters"]["jsCode"]
     initial_validator = _node("Validate agent response")["parameters"]["jsCode"]
     repair_validator = _node("Validate repaired agent response")["parameters"]["jsCode"]
-    assert "['keep','select','switch','add']" in initial
+    assert "['none','keep','select','switch','add']" in initial
     assert "required: ['action','branch_anchor_node_id','branch_path_checksum','evidence_span']" in initial
     assert "'service_operations'" in initial
     assert "'service_operations'" in initial_validator

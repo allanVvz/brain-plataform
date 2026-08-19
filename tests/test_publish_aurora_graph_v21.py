@@ -187,6 +187,25 @@ def test_carry_over_generalizes_beyond_the_single_identity_field() -> None:
     assert carry_over_by_key["can_visit_in_person"] is False
 
 
+def test_color_is_required_only_for_paint_and_bodywork_and_polish_has_simple_alias() -> None:
+    graph = build_graph()
+    by_slug = {node.slug: node for node in graph.nodes}
+    assert "polimento" in (by_slug["polimento-tecnico"].data or {}).get("aliases", [])
+
+    compiled = _compile(graph)
+    fields = {
+        (compiled["node_by_id"][anchor]["slug"], field["key"]): field
+        for anchor, contract in compiled["branch_contracts"].items()
+        for field in contract.get("fields") or []
+    }
+    assert ("pintura", "vehicle_color") in fields
+    assert ("chapeacao", "vehicle_color") in fields
+    assert ("polimento-tecnico", "vehicle_color") not in fields
+    assert ("vitrificacao", "vehicle_color") not in fields
+    assert "correspondência" in fields[("pintura", "vehicle_color")]["context_guidance"]
+    assert "correspondência" in fields[("chapeacao", "vehicle_color")]["context_guidance"]
+
+
 def test_explanatory_polish_faqs_authorize_service_detail_claims() -> None:
     """Regression (live 2026-08-18): Aurora already knew the approved
     answer to "como funciona o polimento de vidros?" (a graph-computed
