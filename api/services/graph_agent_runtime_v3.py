@@ -4769,6 +4769,12 @@ def _apply_journey_policy(
     response: AgentResponse,
     *, model_observation: dict[str, Any] | None,
 ) -> tuple[ConversationDecision, AgentResponse]:
+    deterministic_intent = str(
+        context.retrieval_trace.get("deterministic_intent") or ""
+    ).strip()
+    deterministic_classifier = decision.classifier
+    deterministic_cart_state = response.cart_state
+    deterministic_confirmation_state = response.proof.get("confirmation_state")
     kind, evidence_span, confidence = _interaction_observation(
         context, model_observation,
     )
@@ -4783,15 +4789,42 @@ def _apply_journey_policy(
         )
         rejected_components.extend(rejected)
         accepted_components.append({"component": "reply", "policy": "no_journey"})
-    proof = {
-        **response.proof,
-        "journey_action": action.value,
-        "interaction_observation": {
+    # A graph-owned deterministic decision is already stronger evidence than
+    # the model interaction observation. In particular, a greeting after a
+    # terminal journey legitimately uses journey_action=none, but the generic
+    # no-journey policy used to overwrite only final_decision.intent with
+    # ``unclear``. The proof still said deterministic_greeting/greeting, so
+    # the durable envelope contradicted itself. Preserve the authoritative
+    # decision while still applying the no-journey mutation guard.
+    if deterministic_intent:
+        decision = decision.model_copy(update={
+            "classifier": deterministic_classifier,
+            "intent": deterministic_intent,
+        })
+        response = response.model_copy(update={
+            "cart_state": deterministic_cart_state,
+            "proof": {
+                **response.proof,
+                "confirmation_state": deterministic_confirmation_state,
+            },
+        })
+        interaction_observation = {
+            "kind": deterministic_intent,
+            "evidence_span": _latest_user_message(context),
+            "confidence": 1,
+            "authority": "deterministic_graph_policy",
+        }
+    else:
+        interaction_observation = {
             "kind": kind.value,
             "evidence_span": evidence_span,
             "confidence": confidence,
             "authority": "model_observation_backend_reconciled",
-        },
+        }
+    proof = {
+        **response.proof,
+        "journey_action": action.value,
+        "interaction_observation": interaction_observation,
         "accepted_components": accepted_components,
         "rejected_components": rejected_components,
         "agent_slug": context.agent_slug,
