@@ -2125,6 +2125,7 @@ def test_reactivated_handoff_greeting_stays_in_support_without_restarting_servic
         available_services=[{"slug": "service-alpha", "label": "Service Alpha"}],
         journey_state="handed_off", pending_reconfirmation=True,
         operational_mode="post_qualification_support",
+        post_completion_state={"has_terminal_journey": True},
         retrieval_trace={
             "deterministic_intent": "greeting",
             "deterministic_reply": "Olá! Como posso ajudar com seu pedido?",
@@ -2143,6 +2144,14 @@ def test_reactivated_handoff_greeting_stays_in_support_without_restarting_servic
     assert response.proof["service_resolution"]["rejected_non_service_value"] is True
     assert response.proof["service_resolution"]["resolved"] is True
     assert response.proof["confirmation_state"] == "post_qualification_support"
+    assert response.proof["journey_action"] == "none"
+    assert response.proof["interaction_observation"] == {
+        "kind": "greeting",
+        "evidence_span": message,
+        "confidence": 1,
+        "authority": "deterministic_graph_policy",
+    }
+    assert response.proof["intent_audit"]["resolved_intent"] == decision.intent
     assert response.proof["journey_transition"]["from"] == "handed_off"
     assert response.proof["journey_transition"]["to"] == "handed_off"
 
