@@ -16,7 +16,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "business_model": "appointment",
-        "greeting": "Olá! Aqui é o atendimento da Aurora Estética Automotiva. Como você se chama? E me conta: qual é o modelo do seu carro e o que você gostaria de melhorar nele?",
+        "greeting": "Oi! Eu sou a Lia, do atendimento da Aurora Estética Automotiva. Como você se chama? E me conta: qual é o modelo do seu carro e o que você gostaria de melhorar nele?",
         "summary": "Atendimento da Aurora para tirar dúvidas, fazer orçamento, agendar serviços e coletar informações para um atendente humano.",
         "commercial_note_fields": [
           "modelo_veiculo",
@@ -28,16 +28,48 @@
           "data_desejada",
           "janela_horario"
         ],
+        "agent_identity": {
+          "name": "Lia",
+          "role": "agente de atendimento",
+          "company": "Aurora Estética Automotiva",
+          "company_short": "Aurora"
+        },
         "conversation_policy": {
           "no_journey_fallback_reply": "Obrigada pelo contato. Se surgir uma nova necessidade, é só me dizer como posso ajudar.",
+          "field_feedback": {
+            "invalid_fallback": "Não consegui validar essa resposta.",
+            "recorded_unknown": "Registrei esse dado como desconhecido."
+          },
+          "reactivation": {
+            "manual": [
+              "Oii, sou a Lia de novo! Se precisar de qualquer coisa, estarei por aqui.",
+              "Oi! A Lia voltou. Qualquer coisa que precisar, é só chamar.",
+              "Oii! Aqui é a Lia outra vez. Fico à disposição."
+            ],
+            "journey_completed": [
+              "Oii! Aqui é a Lia. Passei só pra agradecer por ter confiado o seu carro à Aurora. Espero que tenha ficado do jeito que você queria!",
+              "Oi! A Lia por aqui. Obrigada por deixar o seu carro com a gente. Se precisar de mais alguma coisa, é só chamar.",
+              "Oii! É a Lia de novo. Foi um prazer cuidar do seu carro aqui na Aurora. Qualquer coisa, estou por aqui."
+            ],
+            "journey_cancelled": [
+              "Oii, aqui é a Lia. Vi que esse atendimento não seguiu. Se quiser retomar ou olhar outra opção, é só me chamar.",
+              "Oi! A Lia por aqui. Fico à disposição caso queira retomar quando fizer sentido pra você."
+            ]
+          },
           "post_sale_operation_route": "HUMAN",
           "intents": {
             "greeting": {
               "responses": [
-                "Olá! Que bom falar com você.",
-                "Oi! Seja bem-vindo à Aurora.",
-                "Olá! Obrigada por chamar a gente.",
-                "Oi! Bom ter você por aqui."
+                "Oi! Eu sou a Lia, do atendimento da Aurora.",
+                "Olá! Aqui é a Lia, da Aurora Estética Automotiva.",
+                "Oi! Meu nome é Lia e eu cuido do atendimento aqui na Aurora.",
+                "Olá! Sou a Lia, da Aurora. Que bom falar com você."
+              ],
+              "responses_returning": [
+                "Oi de novo! Aqui é a Lia.",
+                "Olá! A Lia por aqui outra vez.",
+                "Oi! Que bom te ver de volta.",
+                "Olá de novo! Fico feliz que tenha voltado."
               ],
               "always_acknowledge": true
             }
@@ -108,6 +140,44 @@
             "vehicle_color": [
               "chapeacao",
               "pintura"
+            ]
+          },
+                    "field_question_paraphrases": {
+            "nome_cliente": [
+              "Como você prefere que eu te chame?",
+              "Me diz seu nome completo, por favor."
+            ],
+            "servico": [
+              "Qual desses serviços faz mais sentido pra você agora?",
+              "Me conta o que você está buscando pro carro."
+            ],
+            "objective": [
+              "Só pra eu entender melhor: a ideia é preparar o carro pra venda ou é pra manter ele bem cuidado?",
+              "Esse cuidado é pensando em vender ou em continuar com ele por um bom tempo?"
+            ],
+            "can_visit_in_person": [
+              "Fica fácil pra você passar aqui na Aurora, ou prefere resolver por aqui mesmo?",
+              "Consegue trazer o carro pra gente dar uma olhada de perto?"
+            ],
+            "modelo_veiculo": [
+              "Me diz qual é o carro, por favor.",
+              "Qual modelo você tem aí?"
+            ],
+            "vehicle_year": [
+              "De que ano ele é?",
+              "Me confirma o ano do carro."
+            ],
+            "vehicle_color": [
+              "De que cor ele é?",
+              "Me confirma a cor do carro."
+            ],
+            "condicao": [
+              "Me conta o que você gostaria de melhorar nele.",
+              "O que te motivou a procurar a gente agora?"
+            ],
+            "reclamacao_relato": [
+              "Me conta com suas palavras o que houve, por favor.",
+              "Pode me descrever o que aconteceu?"
             ]
           },
           "field_questions": {

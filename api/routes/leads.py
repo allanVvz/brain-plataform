@@ -1115,7 +1115,8 @@ def resume_ai(lead_ref: int, request: Request):
         payload={"ai_paused": False, "by": "manual"},
         source="leads.resume_ai",
     )
-    return {"ok": True, "lead_ref": lead_ref, "ai_paused": False}
+    notice = agents_service.reactivation_notice(lead_ref, reason="manual")
+    return {"ok": True, "lead_ref": lead_ref, "ai_paused": False, "notice": notice}
 
 
 @router.post("/{lead_ref}/acknowledge-handoff")

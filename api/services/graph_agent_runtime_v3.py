@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import unicodedata
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any
 
@@ -300,14 +301,10 @@ def _invalid_proposal_fallback(
         reply = graph_proof_checker_v3.compose_published_question(
             reply="", next_question_node_id=question_id, contract=contract
         )
+    recent_replies = _assistant_replies(context.messages)
     repetition = conversation_repetition.assess_repetition(
         current_reply=reply,
-        recent_replies=[
-            str(row.get("content") or row.get("texto") or "")
-            for row in context.messages
-            if str(row.get("role") or "") == "assistant"
-            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
-        ][-4:],
+        recent_replies=recent_replies,
         question_node_id=question_id,
         question_text=str(
             ((contract.get("questions") or {}).get(question_id or "") or {}).get("text") or ""
@@ -322,13 +319,24 @@ def _invalid_proposal_fallback(
     )
     repetition_action = "allowed"
     if not repetition["passed"]:
-        # Never go fully silent here: this fallback already means the
-        # model's own proposal was unusable this turn, so repeating the
-        # pending question is strictly better than zero outbound messages.
+        # This fallback already means the model's own proposal was unusable,
+        # so the reply here is the published question itself -- exactly the
+        # sentence the customer just read. Climb the ladder for another
+        # published wording, then for the field's own "I did not catch that",
+        # before considering saying nothing.
+        laddered, repetition_action = _repetition_ladder(
+            reply=reply, recent_replies=recent_replies, contract=contract,
+            question_node_id=question_id,
+        )
         # Confirmed live 2026-08-17: blanking `reply` on a plain duplicate
         # (not even a terminal handoff repeat) left two separate customers
-        # with no reply at all on the exact turn they needed one.
-        repetition_action = "allowed_never_silent"
+        # with no reply at all on the exact turn they needed one. Silence is
+        # still the last resort, never the first -- so an exhausted ladder
+        # keeps the original text rather than dropping the turn.
+        if laddered:
+            reply = laddered
+        else:
+            repetition_action = "allowed_never_silent"
     proof = {
         "valid": False,
         "errors": list(dict.fromkeys(errors)),
@@ -2452,6 +2460,95 @@ def _question_repetition_max_attempts(contract: dict[str, Any]) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value in {0, 1} else 1
 
 
+def _assistant_replies(messages: Sequence[dict[str, Any]], limit: int = 4) -> list[str]:
+    """The agent's own recent turns, the only baseline repetition compares to."""
+    return [
+        text
+        for row in messages
+        if str(row.get("role") or "") == "assistant"
+        or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
+        if (text := str(row.get("content") or row.get("texto") or "").strip())
+    ][-limit:]
+
+
+def _pending_field_for_question(
+    contract: dict[str, Any], question_node_id: str | None
+) -> dict[str, Any]:
+    if not question_node_id:
+        return {}
+    return next(
+        (
+            field for field in contract.get("fields") or []
+            if str(field.get("question_node_id") or "") == str(question_node_id)
+        ),
+        {},
+    )
+
+
+def _repetition_ladder(
+    *,
+    reply: str,
+    recent_replies: Sequence[str],
+    contract: dict[str, Any],
+    question_node_id: str | None,
+    prefix: str = "",
+) -> tuple[str, str]:
+    """Resolve a turn whose reply would repeat something already said.
+
+    Returns ``(reply, repetition_action)``. Until 2026-08-19 this decision was
+    binary -- emit the duplicate verbatim (``allowed_never_silent``) or say
+    nothing -- because blanking the reply on 2026-08-17 left two customers
+    with no answer at all. Repeating verbatim is what a customer experiences
+    as a broken agent, so the choice is now a ladder of published material:
+
+    1. adapt: another wording this conversation has not heard yet;
+    2. admit: the field's own published ``invalid_response``;
+    3. stop: emit nothing here and let the caller close the turn.
+
+    Every rung is authored in the graph. The runtime never writes copy, so a
+    persona with no alternatives published simply falls to the next rung.
+    """
+    question = (contract.get("questions") or {}).get(str(question_node_id or "")) or {}
+    adapted = _unrepeated_variant(question.get("paraphrases") or [], recent_replies)
+    if adapted:
+        return " ".join(part for part in (prefix, adapted) if part).strip(), "adapted_variant"
+
+    field = _pending_field_for_question(contract, question_node_id)
+    admission = str((field.get("validation") or {}).get("invalid_response") or "").strip()
+    if admission and not any(
+        conversation_repetition.is_semantic_repetition(previous, admission)
+        for previous in recent_replies
+    ):
+        return (
+            " ".join(part for part in (prefix, admission) if part).strip(),
+            "admitted_not_understood",
+        )
+
+    return prefix.strip(), "stopped_last_resort"
+
+
+def _unrepeated_variant(
+    variants: Sequence[str], recent_replies: Sequence[str] = ()
+) -> str:
+    """First published phrasing this conversation has not already heard.
+
+    Step one of the repetition ladder. The graph is the sole author of every
+    candidate, so adapting never invents copy -- it only declines to reuse a
+    phrasing the customer just read. Rotating by lead_ref (the previous
+    behaviour) kept a lead on one stable phrase forever, which is precisely
+    what repeats inside a single conversation. Returns "" when every variant
+    was already used, handing the turn to the next step of the ladder.
+    """
+    approved = [text for value in variants if (text := str(value or "").strip())]
+    for candidate in approved:
+        if not any(
+            conversation_repetition.is_semantic_repetition(previous, candidate)
+            for previous in recent_replies
+        ):
+            return candidate
+    return ""
+
+
 def _repeated_pending_question_is_allowed(
     *,
     next_question_node_id: str | None,
@@ -3048,22 +3145,25 @@ def _qualification_question_node_id(document: dict[str, Any], field_key: str) ->
 
 def _greeting_policy(
     document: dict[str, Any], *, contract: dict[str, Any], facts: dict[str, Any],
-    lead_ref: int = 0,
+    lead_ref: int = 0, recent_replies: Sequence[str] = (),
 ) -> dict[str, Any] | None:
     persona = _persona_node(document)
     data = persona.get("data") or {}
     policy = data.get("conversation_policy") or {}
     greeting = ((policy.get("intents") or {}).get("greeting") or {})
+    # A customer the agent already knows must not be introduced from scratch
+    # again. The graph publishes the two sets separately; when it only
+    # publishes the first-contact set, that one keeps serving both cases.
+    returning = bool(facts) and bool(greeting.get("responses_returning"))
     responses = [
-        text for value in (greeting.get("responses") or [])
+        text
+        for value in (
+            greeting.get("responses_returning") if returning else greeting.get("responses")
+        ) or []
         if isinstance(value, str) and (text := value.strip())
     ]
-    # The graph may publish several openings. Rotating by lead_ref keeps every
-    # lead on a stable phrase across their own turns while spreading the
-    # variants across leads, and needs no extra persisted state to do it.
-    response = (
-        responses[int(lead_ref) % len(responses)] if responses
-        else str(greeting.get("response") or "").strip()
+    response = _unrepeated_variant(responses, recent_replies) or (
+        str(greeting.get("response") or "").strip()
     )
     if not response:
         return None
@@ -3103,170 +3203,147 @@ def _greeting_policy(
 SYSTEM_PROMPT = (
     "Antes de propor qualquer mutação, descreva a interação atual em "
     "interaction_observation: continue_current, new_demand, "
-    "post_completion_question, courtesy_close, post_sale_operation ou unclear. "
-    "Inclua evidence_span literal e confiança. Isso é apenas observação: o "
-    "backend reconcilia com a jornada persistida e decide journey_action. "
-    "Agradecimento, encerramento e dúvida depois da conclusão não são nova "
-    "demanda; pedido operacional de pós-venda também não abre jornada.\n\n"
+    "post_completion_question, courtesy_close, post_sale_operation ou "
+    "unclear. Inclua evidence_span literal e confiança. Isso é apenas "
+    "observação: o backend reconcilia com a jornada persistida e decide "
+    "journey_action. Agradecimento, encerramento e dúvida depois da "
+    "conclusão não são nova demanda; pedido operacional de pós-venda "
+    "também não abre jornada.\n\n"
 
-    "Observe serviços antes de qualquer outro campo. Registre cada hipótese em "
-    "service_observations com anchor publicado, evidence_span literal, intenção "
-    "observada e confiança. service_operations existe apenas por compatibilidade "
-    "e nunca autoriza mutação: somente o resolvedor do backend aplica operações. "
-    "Nunca reutilize um span consumido ou reservado de serviço como evidência de "
-    "outro campo.\n\n"
+    "Observe serviços antes de qualquer outro campo. Registre cada "
+    "hipótese em service_observations com anchor publicado, "
+    "evidence_span literal, intenção observada e confiança. "
+    "service_operations e branch_action existem apenas por "
+    "compatibilidade e nunca autorizam mutação: descreva seleção, "
+    "adição, troca ou remoção somente quando a intenção estiver "
+    "literalmente presente, preserve o foco informado no contexto, e "
+    "saiba que o resolvedor do backend substitui essas propostas pela "
+    "resolução comprovada. Nunca reutilize um span consumido ou "
+    "reservado de serviço como evidência de outro campo.\n\n"
 
-    "Você propõe a conversa; o backend apenas prova o GraphRAG publicado. "
-    "Use somente nodes/chunks do pacote, preserve o galho em respostas curtas, "
-    "cite evidence_span literal e retorne exclusivamente o JSON Schema fornecido.\n\n"
-
-    "branch_action e service_operations são observações não autoritativas de "
-    "compatibilidade. Preserve o foco informado no contexto e descreva seleção, "
-    "adição, troca ou remoção apenas quando a intenção estiver literalmente "
-    "presente; o backend substitui essas propostas pela resolução comprovada.\n\n"
+    "Você propõe a conversa; o backend apenas prova o GraphRAG "
+    "publicado. Use somente nodes/chunks do pacote, preserve o galho em "
+    "respostas curtas, cite evidence_span literal e retorne "
+    "exclusivamente o JSON Schema fornecido.\n\n"
 
     "Leia a mensagem inteira do cliente antes de responder. Capture em "
-    "extracted_facts todo campo reconhecível mencionado nela, mesmo que não seja "
-    "o campo que você acabou de perguntar -- um cliente frequentemente responde "
-    "algo diferente do que foi pedido, ou adianta mais de uma informação na "
-    "mesma mensagem.\n\n"
+    "extracted_facts todo campo reconhecível mencionado nela, mesmo que "
+    "não seja o campo que você acabou de perguntar -- um cliente "
+    "frequentemente responde algo diferente do que foi pedido, ou "
+    "adianta mais de uma informação na mesma mensagem. Quando ele "
+    "escrever um valor abreviado, colado ou informal (\"fordka\" para "
+    "\"Ford Ka\"), interprete com a inteligência que uma pessoa teria no "
+    "WhatsApp: se a leitura mais provável for razoavelmente clara, "
+    "extraia o fato com essa interpretação, sem parar a conversa para "
+    "confirmar o óbvio.\n\n"
 
-    "Você é um SDR de verdade conversando por WhatsApp, não um formulário. "
-    "Sempre que extrair um campo diferente do que você estava perguntando, "
-    "reconheça esse dado com suas próprias palavras antes de retomar a "
-    "pergunta pendente -- como uma pessoa faria ao perceber que o cliente já "
-    "respondeu algo que ela ainda nem tinha perguntado. Nunca ignore "
-    "silenciosamente um dado que o cliente acabou de dar. Mas nunca recorra "
-    "à mesma palavra ou fórmula de reconhecimento em toda mensagem (nunca "
-    "sempre a mesma expressão, tipo sempre começar ou terminar com a mesma "
-    "palavrinha) -- isso soa repetitivo e robótico. Reconheça de um jeito "
-    "diferente a cada vez, exatamente como uma pessoa varia a forma de dizer "
-    "que entendeu numa conversa real -- às vezes só emenda a próxima "
-    "pergunta sem nenhuma palavra de reconhecimento isolada, às vezes "
-    "comenta algo específico sobre o que foi dito. Evite as palavras "
-    "'confirmado', 'reservado', 'agendado' e 'fechado' fora do encerramento "
-    "real da qualificação, pois indicam conclusão do atendimento. Só "
-    "reconheça um dado que realmente esteja em extracted_facts deste turno "
-    "ou já conhecido em factual_ledger -- nunca finja ter entendido algo que "
-    "não foi de fato extraído.\n\n"
+    "Você é um SDR de verdade conversando por WhatsApp, não um "
+    "formulário. Sempre que extrair um campo diferente do que estava "
+    "perguntando, reconheça esse dado com suas próprias palavras antes "
+    "de retomar a pergunta pendente. Nunca ignore silenciosamente um "
+    "dado que o cliente acabou de dar, e só reconheça o que realmente "
+    "esteja em extracted_facts deste turno ou já conhecido em "
+    "factual_ledger -- nunca finja ter entendido algo que não foi "
+    "extraído. Evite as palavras 'confirmado', 'reservado', 'agendado' "
+    "e 'fechado' fora do encerramento real da qualificação, pois "
+    "indicam conclusão do atendimento.\n\n"
 
-    "Prefira respostas curtas, do tamanho de uma mensagem real de WhatsApp -- "
-    "evite parágrafos longos ou explicações que o cliente não pediu. Calibre "
-    "o tamanho pela forma como o próprio cliente escreve: se ele manda "
-    "mensagens curtas e diretas, responda igualmente enxuto; só se estenda "
-    "um pouco mais quando ele mesmo escrever mensagens longas e detalhadas.\n\n"
+    "Prefira respostas curtas, do tamanho de uma mensagem real de "
+    "WhatsApp -- evite parágrafos longos ou explicações que o cliente "
+    "não pediu. Calibre o tamanho pela forma como o próprio cliente "
+    "escreve: se ele manda mensagens curtas e diretas, responda "
+    "igualmente enxuto; só se estenda quando ele mesmo escrever "
+    "mensagens longas e detalhadas. Peça no máximo uma informação "
+    "pendente por mensagem, salvo duas muito relacionadas. Você tem "
+    "liberdade para usar seu próprio critério dentro do que o grafo "
+    "autoriza -- não existe roteiro rígido de frases prontas nem "
+    "obrigação de soar formal.\n\n"
 
-    "Quando a resposta do cliente for genuinamente ambígua entre dois ou "
-    "mais produtos parecidos (por exemplo, um termo que bate em várias "
-    "variações do catálogo), não arrisque escolher um galho no achismo -- "
-    "peça um esclarecimento rápido e natural antes de selecionar. Reconheça "
-    "o que ele disse antes de perguntar, do jeito que um vendedor de "
-    "verdade faria (\"Entendi, temos algumas opções de polimento -- qual "
-    "encaixa melhor: X ou Y?\"), nunca dando a entender que ele foi confuso "
-    "ou impreciso (evite \"não entendi\" ou \"pode ser mais específico?\").\n\n"
+    "Nunca repita uma frase que você já disse neste atendimento -- nem "
+    "literal, nem quase palavra por palavra, nem a mesma construção "
+    "turno após turno. Isso vale para perguntas, para reconhecimentos "
+    "('entendi', 'perfeito') e para o resumo de confirmação. Confira "
+    "recent_messages, que inclui suas próprias respostas, antes de "
+    "escrever a reply, e varie a formulação mesmo quando a pergunta de "
+    "fundo (next_question_node_id) continuar a mesma. Um prefixo vazio "
+    "como 'Certo' não conta como variação.\n\n"
 
-    "A mesma lógica vale para qualquer dado que o cliente informar, não só "
-    "a escolha de serviço: quando ele escrever um valor abreviado, colado "
-    "ou informal (por exemplo \"fordka\" para \"Ford Ka\", ou uma marca e "
-    "modelo sem espaço ou maiúscula), interprete com a mesma inteligência "
-    "que uma pessoa teria numa conversa de WhatsApp -- se a leitura mais "
-    "provável for razoavelmente clara, extraia o fato normalmente com essa "
-    "interpretação, sem parar a conversa para confirmar o óbvio. Só faça "
-    "uma pergunta quando sobrar dúvida real (duas leituras plausíveis, ou "
-    "o termo não bater com nada do domínio conhecido) -- e mesmo assim "
-    "pergunte com naturalidade, do jeito que a pessoa realmente falaria "
-    "(\"Fordka é Ford Ka, certo?\" ou \"Fordka é o modelo do carro, é "
-    "isso?\"), nunca em silêncio nem devolvendo a mesma pergunta genérica "
-    "de novo.\n\n"
+    "Quando precisar retomar algo já dito, siga esta ordem. Primeiro, "
+    "diga de outro jeito: outra formulação da mesma pergunta, "
+    "reconhecendo antes o que o cliente trouxe de novo. Se já tentou de "
+    "outra forma e ainda não deu, assuma com naturalidade que não "
+    "captou e registre o campo como desconhecido, sem culpar o cliente. "
+    "Só em último caso pare de perguntar aquele campo e siga para o "
+    "próximo assunto pendente. Fora dessa terceira situação, toda "
+    "mensagem do cliente merece resposta com conteúdo real neste turno "
+    "-- não devolva silêncio.\n\n"
 
-    "Você tem liberdade para usar seu próprio critério dentro do que o "
-    "grafo autoriza -- não existe um roteiro rígido de frases prontas nem "
-    "obrigação de soar formal. Toda mensagem do cliente merece uma "
-    "resposta com conteúdo real neste turno: nunca devolva silêncio, e "
-    "nunca repita a pergunta anterior sem acrescentar nada quando o "
-    "cliente já deu sinal de estar confuso, de ter corrigido algo ou de "
-    "esperar que você tivesse entendido mais do que entendeu. Se você não "
-    "tiver certeza do que ele quis dizer -- uma correção que não ficou "
-    "clara, uma mensagem que parece contradizer o que já foi registrado, "
-    "uma palavra que pode significar mais de uma coisa -- pergunte de "
-    "forma direta e natural, como um vendedor esperto faria ao pedir uma "
-    "segunda confirmação, em vez de travar ou insistir na mesma pergunta "
-    "com as mesmas palavras.\n\n"
+    "Quando a resposta for genuinamente ambígua entre dois ou mais "
+    "produtos parecidos, ou quando um termo tiver duas leituras "
+    "plausíveis, não escolha no achismo: peça um esclarecimento curto e "
+    "natural, reconhecendo antes o que ele disse (\"Entendi, temos "
+    "algumas opções de polimento -- qual encaixa melhor: X ou Y?\" ou "
+    "\"Fordka é Ford Ka, certo?\"). Nessa situação não dê a entender que "
+    "o cliente foi confuso; a admissão de não ter entendido é para "
+    "quando você realmente falhou em ler o campo, não para ambiguidade "
+    "do catálogo.\n\n"
 
-    "conversation_policy.question_repetition.max_attempts informa quantas "
-    "retomadas são permitidas além da pergunta inicial (somente zero ou uma). "
-    "Na primeira ignorada, reconheça ou responda o conteúdo novo antes de "
-    "retomar a pergunta publicada com uma ponte contextual substantiva. "
-    "Depois que esse orçamento terminar, o backend marca o campo como unknown "
-    "e segue ou encaminha; nunca faça uma terceira emissão. Uma resposta "
-    "explícita de que o cliente não sabe pode gerar unknown imediatamente. Se o "
-    "cliente fornecer esse dado espontaneamente mais tarde, extraia-o "
-    "normalmente como known para substituir unknown. Além disso, "
-    "nunca repita a pergunta ou frase do turno anterior "
-    "quase palavra por palavra, nem a mesma construção turno após turno. "
-    "Confira recent_messages (as últimas mensagens da conversa, incluindo "
-    "suas próprias respostas) antes de escrever a reply e varie a "
-    "formulação a cada turno, mesmo quando a pergunta de fundo "
-    "(next_question_node_id) continuar a mesma. Um prefixo vazio como 'Certo' "
-    "não é ponte contextual. Peça no máximo uma "
-    "informação pendente por mensagem, salvo duas informações muito "
-    "relacionadas.\n\n"
+    "conversation_policy.question_repetition.max_attempts informa "
+    "quantas retomadas são permitidas além da pergunta inicial (somente "
+    "zero ou uma). Na primeira ignorada, reconheça ou responda o "
+    "conteúdo novo antes de retomar a pergunta com uma ponte contextual "
+    "substantiva. Esgotado o orçamento, o backend marca o campo como "
+    "unknown e segue ou encaminha; nunca faça uma terceira emissão. Uma "
+    "resposta explícita de que o cliente não sabe pode gerar unknown "
+    "imediatamente. Se ele fornecer o dado espontaneamente mais tarde, "
+    "extraia normalmente como known para substituir unknown.\n\n"
+
     "handoff_requested só pode ser true quando TODOS os campos "
-    "obrigatórios do galho atual já estão em factual_ledger (nenhum "
-    "campo pendente restante) -- nunca proponha handoff assim que colher "
-    "só o primeiro campo (por exemplo, o nome) se o galho ainda exigir "
-    "outros campos depois dele (por exemplo, o relato de uma "
-    "reclamação). Depois de colher um campo, a próxima ação é sempre "
-    "perguntar o próximo campo pendente do galho -- nunca encerrar o "
-    "turno oferecendo encaminhamento antes disso.\n\n"
+    "obrigatórios do galho atual já estão em factual_ledger -- nunca "
+    "proponha handoff assim que colher só o primeiro campo (por "
+    "exemplo, o nome) se o galho ainda exigir outros depois dele. "
+    "Depois de colher um campo, a próxima ação é sempre perguntar o "
+    "próximo campo pendente do galho, nunca encerrar o turno oferecendo "
+    "encaminhamento antes disso.\n\n"
 
     "tempo_desde_ultima_mensagem indica quanto tempo se passou desde a "
     "última mensagem do cliente. Um intervalo de algumas horas é normal "
-    "numa conversa de WhatsApp -- o cliente pode ter ficado ocupado e "
-    "voltado no mesmo dia, isso não significa que o assunto mudou. Só trate "
-    "a nova mensagem como início de uma conversa nova (não como continuação "
-    "direta) quando o intervalo for mais de ~3-4 horas -- e mesmo assim não "
-    "assuma que o assunto ou a urgência de antes ainda valem, especialmente "
-    "se o assunto mudou (ex.: uma reclamação depois de um agendamento já "
-    "concluído).\n\n"
+    "no WhatsApp -- o cliente pode ter ficado ocupado e voltado no "
+    "mesmo dia, isso não significa que o assunto mudou. Só trate a "
+    "mensagem como início de conversa nova quando o intervalo passar de "
+    "~3-4 horas, e mesmo assim não assuma que o assunto ou a urgência "
+    "de antes ainda valem.\n\n"
 
-    "fatos_conhecidos lista tudo que já se sabe sobre esse cliente, cada "
-    "um com origem 'esta_conversa' (extraído agora) ou 'anterior' "
-    "(já registrado de antes). Um fato 'anterior' marcado "
-    "carregado_do_pedido_anterior=true segue a política carry_over do contrato "
-    "publicado e pertence ao perfil do lead, não só ao pedido anterior -- "
-    "use-o direto, sem perguntar de novo e sem "
-    "pedir confirmação, inclusive para cumprimentar o cliente pelo nome "
-    "com naturalidade. Qualquer outro fato 'anterior' marcado como histórico "
-    "(por exemplo data, janela ou resultado de atendimento anterior) pode "
-    "ser usado para "
-    "personalizar a conversa (ex.: perguntar se uma reclamação tem a ver "
-    "com o serviço que ele já fez), mas sempre confirme com o cliente "
-    "antes de seguir em frente com base nele -- nunca assuma "
-    "silenciosamente que uma informação antiga ainda vale (o veículo "
-    "pode ter mudado, o interesse pode ser outro). Isso vale ainda mais "
-    "quando reconfirmacao_pendente for true (a IA acabou de ser "
-    "reativada por um humano) -- de novo, exceto para fatos "
-    "carregado_do_pedido_anterior=true, que seguem dispensando "
-    "confirmação mesmo nesse caso. Em operational_mode "
-    "post_qualification_support, use esses fatos apenas para apoiar o pedido "
-    "atual: responda saudação e dúvidas sem reiniciar o roteiro, sem perguntar "
-    "serviço novamente e sem pedir reconfirmação por conta própria. Só altere "
-    "o pedido quando a mensagem atual solicitar uma correção ou troca de forma "
-    "explícita. Em operational_mode confirmation, responda dúvidas antes de "
-    "retomar a confirmation_question publicada; o backend é o único dono da "
+    "fatos_conhecidos lista tudo que já se sabe sobre esse cliente, "
+    "cada um com origem 'esta_conversa' ou 'anterior'. Um fato "
+    "'anterior' com carregado_do_pedido_anterior=true segue a política "
+    "carry_over do contrato publicado e pertence ao perfil do lead: use "
+    "direto, sem perguntar de novo e sem pedir confirmação, inclusive "
+    "para chamar o cliente pelo nome. Qualquer outro fato 'anterior' "
+    "(data, janela ou resultado de atendimento passado) pode "
+    "personalizar a conversa, mas sempre confirme antes de seguir com "
+    "base nele -- o veículo pode ter mudado, o interesse pode ser "
+    "outro. Isso vale ainda mais quando reconfirmacao_pendente for true "
+    "(a IA acabou de ser reativada por um humano), exceto para os fatos "
+    "carregado_do_pedido_anterior=true.\n\n"
+
+    "Em operational_mode post_qualification_support, use esses fatos "
+    "apenas para apoiar o pedido atual: responda saudação e dúvidas sem "
+    "reiniciar o roteiro, sem perguntar serviço de novo e sem pedir "
+    "reconfirmação por conta própria. Só altere o pedido quando a "
+    "mensagem atual pedir correção ou troca de forma explícita. Em "
+    "operational_mode confirmation, responda dúvidas antes de retomar a "
+    "confirmation_question publicada; o backend é o único dono da "
     "transição e do handoff.\n\n"
 
-    "Quando todos os campos obrigatórios já são conhecidos e chegou a hora "
-    "de confirmar o pedido com o cliente, escreva você mesma o resumo, com "
-    "suas próprias palavras -- não existe um texto fixo para copiar. Mencione "
-    "naturalmente cada dado já coletado (sem rótulos tipo \"Nome:\" nem lista "
-    "separada por ponto e vírgula, como faria numa mensagem de WhatsApp de "
-    "verdade) e termine com uma pergunta curta e leve pedindo confirmação. "
-    "Não use palavras como \"confirmado\", \"agendado\" ou \"fechado\" nesse "
-    "resumo -- o pedido só fecha depois que o cliente responder que sim. "
-    "Varie a formulação a cada vez; nunca repita a mesma frase do turno "
-    "anterior."
+    "Quando todos os campos obrigatórios já são conhecidos e chega a "
+    "hora de confirmar o pedido, escreva você mesma o resumo, com suas "
+    "palavras -- não existe texto fixo para copiar. Mencione "
+    "naturalmente cada dado coletado (sem rótulos tipo \"Nome:\" nem "
+    "lista com ponto e vírgula) e termine com uma pergunta curta "
+    "pedindo confirmação. Não use \"confirmado\", \"agendado\" ou \"fechado\" "
+    "nesse resumo: o pedido só fecha depois que o cliente responder que "
+    "sim.\n\n"
 )
 
 
@@ -3292,6 +3369,51 @@ def _no_journey_fallback_reply(document: dict[str, Any]) -> str:
     persona = _persona_node(document) or {}
     policy = ((persona.get("data") or {}).get("conversation_policy") or {})
     return str(policy.get("no_journey_fallback_reply") or "").strip()
+
+
+def _agent_identity_prompt(document: dict[str, Any]) -> str:
+    """Who the agent says she is, authored by the persona graph.
+
+    Until 2026-08-19 the name existed only inside the published greeting, so
+    the model itself never knew it: any turn that was not a greeting -- including
+    a customer plainly asking "qual o seu nome?" -- had nothing to answer with.
+    The name stays graph-owned (`AGENTS.md` §26 forbids it in code); this only
+    puts what the graph already publishes in front of the model.
+    """
+    persona = _persona_node(document) or {}
+    identity = ((persona.get("data") or {}).get("agent_identity") or {})
+    name = str(identity.get("name") or "").strip()
+    if not name:
+        return ""
+    role = str(identity.get("role") or "").strip()
+    company = str(identity.get("company") or "").strip()
+    short = str(identity.get("company_short") or "").strip() or company
+    lead = f"Você se chama {name}"
+    if role and company:
+        lead += f" e é {role} da {company}"
+    elif company:
+        lead += f", da {company}"
+    return (
+        f"{lead}. Esse é o seu nome e você o usa quando se apresenta ou quando "
+        f"o cliente pergunta com quem está falando. Você não é a empresa: "
+        f"{short} é o negócio que você atende, você é a pessoa que fala com o "
+        f"cliente. Não repita a apresentação a cada mensagem -- só quando fizer "
+        f"sentido, como numa conversa de verdade."
+    )
+
+
+def _field_feedback(document: dict[str, Any], key: str) -> str:
+    """Published copy for what the agent says when a value does not fit.
+
+    Persona-owned, because it is commercial copy: `AGENTS.md` §26 forbids
+    production code from carrying a sentence a customer will read. A persona
+    that publishes nothing here says nothing extra -- the runtime never
+    invents the wording.
+    """
+    persona = _persona_node(document) or {}
+    policy = ((persona.get("data") or {}).get("conversation_policy") or {})
+    feedback = policy.get("field_feedback") or {}
+    return str(feedback.get(key) or "").strip()
 
 
 def _post_sale_route(document: dict[str, Any]) -> str:
@@ -3551,7 +3673,7 @@ def build_context(
     greeting_eligible = _is_greeting(message)
     greeting_prefix = _greeting_policy(
         document, contract=active_contract, facts=ledger.get("facts") or {},
-        lead_ref=lead_ref,
+        lead_ref=lead_ref, recent_replies=_assistant_replies(messages),
     ) if greeting_eligible else None
     if greeting_prefix and operational_mode == "post_qualification_support":
         greeting_prefix = {
@@ -3890,7 +4012,10 @@ def build_context(
         "source_node_ids": sorted(by_source),
         "latency_ms": round((time.perf_counter() - started) * 1000, 3),
     }
-    prompt = SYSTEM_PROMPT
+    # Identity leads the prompt: the agent has to know who she is before any
+    # rule about how she behaves. Authored by the persona graph, never here.
+    identity = _agent_identity_prompt(document)
+    prompt = f"{identity}\n\n{SYSTEM_PROMPT}" if identity else SYSTEM_PROMPT
     already_mentioned_services = _previously_mentioned_service_titles(document, messages)
     if already_mentioned_services:
         prompt += (
@@ -4539,6 +4664,20 @@ def _resolve_journey_action(
         return JourneyAction.OPEN
     if terminal:
         if kind is InteractionKind.NEW_DEMAND:
+            return JourneyAction.OPEN
+        # Confirmed live 2026-08-19 (lead 26, publication v64): once a journey
+        # closed, every later message came back from the model as `unclear` --
+        # including "quero chapeacao no meu charro" and "Quero pintar o meu
+        # carro" -- so the customer received the same no-journey fallback
+        # sentence eight times in a row and could never start a second order.
+        # Opening a journey must not depend solely on the model's self-report
+        # about its own intent. When the published graph itself resolves the
+        # message to a service branch, that is objective evidence of a new
+        # demand, so honour it. Courtesy closes and post-sale operations still
+        # never open a journey: they carry no branch of their own.
+        if kind is InteractionKind.UNCLEAR and context.retrieval_trace.get(
+            "deterministic_branch_match"
+        ):
             return JourneyAction.OPEN
         return JourneyAction.NONE
     return JourneyAction.CONTINUE
@@ -5633,13 +5772,13 @@ def _decide(
         if incompatible_pending:
             invalid_response = str(
                 (((pending_before_field or {}).get("validation") or {}).get("invalid_response"))
-                or "Não consegui validar essa resposta."
+                or _field_feedback(document, "invalid_fallback")
             ).strip()
             if unanswered_fact:
                 invalid_response = " ".join(
                     part for part in (
                         invalid_response,
-                        "Registrei esse dado como desconhecido.",
+                        _field_feedback(document, "recorded_unknown"),
                     ) if part
                 )
             reply_seed = " ".join(
@@ -5740,12 +5879,7 @@ def _decide(
             reply = "\n\n".join(part for part in (greeting_response, reply) if part)
         if unanswered_fact and not next_question_id and not terminal_intent:
             reply = _statements_only(reply_seed)
-        recent_replies = [
-            str(row.get("content") or row.get("texto") or "")
-            for row in context.messages
-            if str(row.get("role") or "") == "assistant"
-            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
-        ][-4:]
+        recent_replies = _assistant_replies(context.messages)
         question_text = str(
             ((question_contract.get("questions") or {}).get(next_question_id or "") or {}).get("text")
             or ""
@@ -5786,6 +5920,17 @@ def _decide(
             if terminal_duplicate:
                 reply = remainder
                 repetition_action = "suppressed_duplicate_terminal"
+            elif (laddered := _repetition_ladder(
+                reply=reply, recent_replies=recent_replies,
+                contract=question_contract, question_node_id=next_question_id,
+                prefix=remainder,
+            ))[0]:
+                # Dropping the duplicated ask used to drop the question with
+                # it, so a field the customer never answered was silently
+                # abandoned whenever the turn happened to carry other
+                # content. The ladder keeps that content as the prefix and
+                # re-asks in a wording this conversation has not heard.
+                reply, repetition_action = laddered
             elif remainder:
                 reply = remainder
                 repetition_action = "suppressed_duplicate_question"

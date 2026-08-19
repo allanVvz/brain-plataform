@@ -270,3 +270,46 @@ def test_resume_lead_tolerates_v3_ledger_reset_failure(monkeypatch):
 
     assert agents_service.resume_lead(42) is True
     assert calls and calls[0][0] == "update_lead"
+
+
+def test_reactivation_stays_quiet_when_a_pending_inbound_will_be_answered(monkeypatch):
+    """Two outbounds for one resume is the duplication AGENTS.md 26 forbids."""
+    agents_service._LAST_REQUEUED[42] = 2
+    result = agents_service.reactivation_notice(42, reason="manual")
+    assert result == {"sent": False, "skipped": "pending_inbound_will_be_answered"}
+    # The marker is consumed, so a later resume with nothing queued still speaks.
+    assert 42 not in agents_service._LAST_REQUEUED
+
+
+def test_reactivation_stays_quiet_while_a_human_owns_the_conversation(monkeypatch):
+    agents_service._LAST_REQUEUED.pop(42, None)
+    monkeypatch.setattr(
+        agents_service.supabase_client, "get_lead_by_ref",
+        lambda ref: {"id": 42, "handoff_level": "full"},
+    )
+    result = agents_service.reactivation_notice(42, reason="manual")
+    assert result == {"sent": False, "skipped": "human_owns_the_conversation"}
+
+
+def test_reactivation_never_breaks_the_resume_when_lookups_fail(monkeypatch):
+    """It is a courtesy message; the AI is already back either way."""
+    agents_service._LAST_REQUEUED.pop(42, None)
+
+    def boom(_ref):
+        raise RuntimeError("supabase down")
+
+    monkeypatch.setattr(agents_service.supabase_client, "get_lead_by_ref", boom)
+    assert agents_service.reactivation_notice(42, reason="manual") == {
+        "sent": False, "skipped": "lead_lookup_failed",
+    }
+
+
+def test_reactivation_reason_maps_to_the_published_copy_set():
+    lead = {"metadata": {"journey_outcome": "cancelado"}}
+    assert agents_service._reactivation_key(lead, reason="manual") == "manual"
+    assert agents_service._reactivation_key(
+        lead, reason="journey_closed",
+    ) == "journey_cancelled"
+    assert agents_service._reactivation_key(
+        {"metadata": {"journey_outcome": "entregue"}}, reason="journey_closed",
+    ) == "journey_completed"

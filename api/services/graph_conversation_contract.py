@@ -839,13 +839,33 @@ def materialize_qualification_questions(graph: GraphJson) -> GraphJson:
                 for item in qualification.get("fields") or []
                 if str(item.get("key") if isinstance(item, dict) else item).strip()
             )
+    # Alternative wordings for the same question, authored beside the question
+    # itself. The runtime needs them to re-ask a pending field without
+    # repeating one sentence verbatim; copy stays operator-owned either way.
+    paraphrase_policy = policy.get("field_question_paraphrases")
+    if not isinstance(paraphrase_policy, dict):
+        paraphrase_policy = {}
     for raw_key in dict.fromkeys(executable_fields):
         question = str(questions.get(raw_key) or "").strip()
         if not question:
             continue
+        paraphrases = [
+            text for value in (paraphrase_policy.get(raw_key) or [])
+            if isinstance(value, str) and (text := value.strip()) and text != question
+        ]
         node_id = str(mapped.get(raw_key) or f"faq:qualification:{persona.slug}:{raw_key}")
         mapped[raw_key] = node_id
-        if node_id not in by_id:
+        if node_id in by_id:
+            # Re-materializing must keep an already published node in sync,
+            # otherwise newly authored paraphrases would never reach the graph.
+            existing = by_id[node_id]
+            existing_data = dict(existing.data or {})
+            existing_content = dict(existing_data.get("content") or {})
+            existing_data["paraphrases"] = paraphrases
+            existing_content["paraphrases"] = paraphrases
+            existing_data["content"] = existing_content
+            existing.data = existing_data
+        else:
             node = Node(
                 id=node_id,
                 node_type="faq",
@@ -855,7 +875,8 @@ def materialize_qualification_questions(graph: GraphJson) -> GraphJson:
                 parent_id=persona.id,
                 data={
                     "question": question,
-                    "content": {"question": question},
+                    "paraphrases": paraphrases,
+                    "content": {"question": question, "paraphrases": paraphrases},
                     "metadata": {
                         "role": "qualification_question",
                         "field_key": raw_key,

@@ -279,8 +279,112 @@ def resume_lead(lead_ref: int) -> bool:
         requeued = supabase_client.requeue_waiting_human_whatsapp_buffer(lead_ref)
         if requeued:
             logger.info("resume_lead requeued %d waiting_human message(s)", requeued)
+            _LAST_REQUEUED[lead_ref] = int(requeued)
+        else:
+            _LAST_REQUEUED.pop(lead_ref, None)
     except Exception as exc:
         # handoff_level is already cleared; a requeue failure must not be
         # reported as a failed resume, just logged for follow-up.
         logger.warning("resume_lead requeue failed: %s", exc)
     return True
+
+
+# How many inbounds the last resume handed back to the queue, per lead. A
+# resume that requeued something must not also send a proactive notice: the
+# agent is about to answer the customer's own pending message, and two
+# outbounds for one resume is exactly the duplication AGENTS.md 26 forbids.
+_LAST_REQUEUED: dict[int, int] = {}
+
+
+def reactivation_notice(lead_ref: int, *, reason: str) -> dict:
+    """Announce, once, that the AI is back — when nothing else will speak.
+
+    `reason` mirrors the `by` already carried by the `lead.ai_resumed` event
+    ("manual", "journey_closed"). Copy is published in the persona graph under
+    `conversation_policy.reactivation`; a persona that publishes none stays
+    silent instead of receiving runtime-authored text.
+    """
+    from services import whatsapp_outbox
+
+    if _LAST_REQUEUED.pop(lead_ref, 0):
+        return {"sent": False, "skipped": "pending_inbound_will_be_answered"}
+    try:
+        lead = supabase_client.get_lead_by_ref(lead_ref)
+    except Exception as exc:
+        # Courtesy message only. The AI is already resumed and the customer is
+        # not blocked by this, so a lookup failure must never fail the resume.
+        logger.warning("reactivation_notice lead lookup failed: %s", exc)
+        return {"sent": False, "skipped": "lead_lookup_failed"}
+    if not lead:
+        return {"sent": False, "skipped": "lead_not_found"}
+    if str(lead.get("handoff_level") or "none") != "none":
+        return {"sent": False, "skipped": "human_owns_the_conversation"}
+
+    try:
+        text = _reactivation_text(lead, reason=reason)
+    except Exception as exc:
+        logger.warning("reactivation_notice copy lookup failed: %s", exc)
+        return {"sent": False, "skipped": "copy_lookup_failed"}
+    if not text:
+        return {"sent": False, "skipped": "no_published_copy"}
+
+    # One notice per resume, not per click: the key is the resume itself.
+    resumed_at = str(lead.get("updated_at") or "")[:19]
+    message_id = f"reactivation:{lead_ref}:{resumed_at}"
+    try:
+        result = whatsapp_outbox.enqueue_outbound(
+            lead=lead, text=text, sender_type="agent",
+            message_id=message_id, correlation_id=message_id,
+            idempotency_key=message_id,
+            metadata={"reactivation_reason": reason, "automatic": True},
+        )
+    except Exception as exc:
+        # The AI is already resumed and the customer is not blocked by this.
+        logger.warning("reactivation_notice enqueue failed: %s", exc)
+        return {"sent": False, "skipped": "enqueue_failed"}
+    return {"sent": not result.get("deduplicated"), "message_id": message_id}
+
+
+def _reactivation_text(lead: dict, *, reason: str) -> str:
+    """Pick the published opening that matches why the AI came back."""
+    from services import context_cards, graph_agent_runtime_v3
+
+    persona_slug = str(lead.get("persona_slug") or "")
+    if not persona_slug:
+        persona = supabase_client.get_persona_by_id(str(lead.get("persona_id") or ""))
+        persona_slug = str((persona or {}).get("slug") or "")
+    if not persona_slug:
+        return ""
+    try:
+        _version, _checksum, graph = context_cards.current_graph(persona_slug)
+    except Exception as exc:
+        logger.warning("reactivation_notice graph load failed: %s", exc)
+        return ""
+    document = {"nodes": [node.model_dump(mode="json") for node in graph.nodes]}
+    persona_node = graph_agent_runtime_v3._persona_node(document) or {}
+    policy = ((persona_node.get("data") or {}).get("conversation_policy") or {})
+    published = policy.get("reactivation") or {}
+    variants = published.get(_reactivation_key(lead, reason=reason)) or []
+    return graph_agent_runtime_v3._unrepeated_variant(
+        [str(value) for value in variants], _recent_agent_texts(lead)
+    )
+
+
+def _reactivation_key(lead: dict, *, reason: str) -> str:
+    if reason != "journey_closed":
+        return "manual"
+    outcome = str((lead.get("metadata") or {}).get("journey_outcome") or "")
+    return "journey_cancelled" if "cancel" in outcome else "journey_completed"
+
+
+def _recent_agent_texts(lead: dict) -> list[str]:
+    """So a second resume does not replay the first notice word for word."""
+    try:
+        messages = supabase_client.get_messages(str(lead.get("id")), limit=6) or []
+    except Exception:
+        return []
+    return [
+        text for row in messages
+        if str(row.get("direction") or "") == "outbound"
+        if (text := str(row.get("texto") or row.get("content") or "").strip())
+    ]
