@@ -52,9 +52,11 @@
               "Oii! É a Lia de novo. Foi um prazer cuidar do seu carro aqui na Aurora. Qualquer coisa, estou por aqui."
             ],
             "journey_cancelled": [
-              "Oii, aqui é a Lia. Vi que esse atendimento não seguiu. Se quiser retomar ou olhar outra opção, é só me chamar.",
-              "Oi! A Lia por aqui. Fico à disposição caso queira retomar quando fizer sentido pra você."
-            ]
+              "Oii, aqui é a Lia da Aurora. Vi que esse atendimento não seguiu e queria entender: ficou alguma dúvida, ou faltou alguma coisa pra fechar?",
+              "Oi! A Lia por aqui. Esse pedido acabou não andando — me conta o que faltou? Se ficou alguma dúvida, eu resolvo agora.",
+              "Oii! É a Lia, da Aurora. Sobre aquele atendimento que não seguiu: teve algo que não ficou claro, ou faltou algum detalhe pra você decidir?"
+            ],
+            "answer_pending_inbound_within_seconds": 36000
           },
           "post_sale_operation_route": "HUMAN",
           "intents": {
@@ -149,7 +151,8 @@
             ],
             "servico": [
               "Qual desses serviços faz mais sentido pra você agora?",
-              "Me conta o que você está buscando pro carro."
+              "Me conta o que você está buscando pro carro.",
+              "O que você quer conhecer ou melhorar no carro? Com isso eu já te indico o caminho."
             ],
             "objective": [
               "Só pra eu entender melhor: a ideia é preparar o carro pra venda ou é pra manter ele bem cuidado?",
@@ -203,8 +206,16 @@
             "reclamacao_relato": "relato"
           },
           "confirmation_templates": {
-            "fact": "Entendi {candidate}. Está correto?",
-            "name": "Entendi. {candidate} é o seu nome completo?",
+            "fact": [
+              "Entendi {candidate}. Está correto?",
+              "Anotei {candidate}. É isso mesmo?",
+              "Deixa eu confirmar: {candidate}, certo?"
+            ],
+            "name": [
+              "Entendi. {candidate} é o seu nome completo?",
+              "Só pra eu anotar certo: é {candidate} mesmo?",
+              "Anotei {candidate} — escrevi do jeito certo?"
+            ],
             "service_selection": "Você quer seguir com {candidate}?",
             "service_addition": "Você quer adicionar {candidate} aos serviços do pedido?",
             "service_switch": "Você quer trocar o serviço atual por {candidate}?",
@@ -1765,6 +1776,47 @@
             },
             "evidence_node_ids": [
               "aurora-faq-why-objective"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-why-name",
+      "node_type": "faq",
+      "slug": "faq-por-que-pede-o-nome",
+      "label": "Por que vocês precisam do meu nome?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "user_authorized_demo_briefing_2026_07_29",
+        "status": "validated",
+        "question": "Por que vocês precisam do meu nome?",
+        "answer": "Peço o seu nome e sobrenome para registrar o atendimento e para a Equipe Aurora saber com quem está falando quando retomar o contato sobre o seu carro. É só para isso — nada além do necessário para organizar o seu pedido.",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-why-name"
             ],
             "source_node_id": "aurora-rule-operation",
             "branch_path": [
@@ -3899,6 +3951,22 @@
     {
       "id": "aurora-e-polimento-tipos-embedded",
       "source": "aurora-faq-polimento-tipos",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-rule-why-name",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-why-name",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-why-name-embedded",
+      "source": "aurora-faq-why-name",
       "target": "aurora-embedded",
       "relation": "visible_to_agent",
       "primary_tree": false,

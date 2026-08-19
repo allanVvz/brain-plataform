@@ -30,10 +30,15 @@ def test_acknowledge_partial_handoff_writes_handoff_level_none(monkeypatch):
 
 
 def test_resume_lead_requeues_waiting_human_messages(monkeypatch):
+    """Requeue continua sendo o caminho -- enquanto o cliente ainda espera.
+
+    Desde 2026-08-19 a retomada respeita a janela publicada: um inbound velho
+    demais fica onde esta (ver tests/test_agents_resume_window.py).
+    """
     calls = []
     monkeypatch.setattr(
         supabase_client, "get_lead_by_ref",
-        lambda lead_ref: {"metadata": {}},
+        lambda lead_ref: {"id": 42, "metadata": {}},
     )
     monkeypatch.setattr(
         supabase_client, "update_lead",
@@ -42,6 +47,10 @@ def test_resume_lead_requeues_waiting_human_messages(monkeypatch):
     monkeypatch.setattr(
         supabase_client, "requeue_waiting_human_whatsapp_buffer",
         lambda lead_ref: calls.append(("requeue", lead_ref)) or 2,
+    )
+    monkeypatch.setattr(
+        agents_service, "resume_answer_window",
+        lambda lead: {"may_speak": True, "reason": "within_window"},
     )
 
     assert agents_service.resume_lead(42) is True

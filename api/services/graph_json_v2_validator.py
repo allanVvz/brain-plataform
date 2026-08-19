@@ -101,6 +101,17 @@ def _status_of(node: "object") -> str:
     return str(data.get("validation_status") or data.get("status") or "").strip().lower()
 
 
+def _published_variants(value: "object") -> list[str]:
+    """Copy published as one phrasing or as several equivalent ones.
+
+    A list exists so the runtime can avoid saying the same sentence twice in
+    the same conversation; a plain string stays valid because most copy only
+    ever needs one wording.
+    """
+    values = value if isinstance(value, list) else [value]
+    return [text for item in values if (text := str(item or "").strip())]
+
+
 def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> None:
     """Require every appointment question to be authored in the graph.
 
@@ -255,7 +266,7 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
             "name", "service_selection", "service_addition", "service_switch",
             "service_removal", "service_disambiguation",
         ):
-            if not str(templates.get(key) or "").strip():
+            if not _published_variants(templates.get(key)):
                 errors.append(
                     f"appointment_policy.confirmation_templates.{key} must be non-empty"
                 )

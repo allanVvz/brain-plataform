@@ -115,6 +115,17 @@ def build_graph() -> GraphJson:
                 "semantic_type": "human_full_name",
                 "description": "Nome e sobrenome completos informados pelo cliente.",
                 "examples": ["Beatriz Souza", "José da Silva", "Ana Paula Lima"],
+                # The model reads a name far better than any string
+                # comparison can. Above this confidence its reading stands on
+                # its own (evidence and shape are still proved by the
+                # backend), and confirming becomes the last resort instead of
+                # the default -- which is what deadlocked the live flow on
+                # 2026-08-19, when "allan rodrigues" could not match the
+                # model's own "Allan Rodrigues".
+                "model_confidence_min": 0.90,
+                "min_tokens": 2,
+                "max_tokens": 6,
+                "confirmation_policy": "last_resort",
             },
             "modelo_veiculo": {
                 "description": "Modelo ou identificação comercial do veículo.",

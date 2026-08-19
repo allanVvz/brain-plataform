@@ -2373,40 +2373,66 @@ def test_textual_service_similarity_only_creates_candidate_and_handles_limits():
     assert len(ambiguous["confirmation"]["options"]) == 2
 
 
-def test_name_is_known_only_as_whole_direct_answer_and_composite_needs_confirmation():
+def _reconcile_name(message, value, evidence, *, service_spans=None, confidence=1.0,
+                    validation=None, asked=("q:name",)):
     contract = {"fields": [{
         "key": "nome", "owner_node_id": "persona:generic",
         "question_node_id": "q:name",
-        "validation": {"semantic_type": "human_full_name"},
+        "validation": validation or {"semantic_type": "human_full_name"},
     }]}
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:x",
+        messages=[{"message_id": "msg-name", "role": "user", "content": message}],
+        cart={"asked_question_node_ids": list(asked)}, rag_nodes=[], rag_paths=[],
+        graph_contract=contract, branch_node_ids=[],
+        retrieval_trace={"service_resolution": {
+            "consumed_spans": service_spans or [],
+        }},
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="checksum:a", extracted_facts=[ExtractedFact(
+            field_key="nome", owner_node_id="persona:generic", status="known",
+            value=value, source_message_id="msg-name", evidence_span=evidence,
+            confidence=confidence,
+        )],
+    )
+    return graph_agent_runtime_v3._reconcile_human_full_name_facts(
+        proposal, context=context, contract=contract,
+    )
 
-    def reconcile(message, value, evidence, *, service_spans=None):
-        context = ConversationContext(
-            persona_slug="generic", agent_slug="agent", graph_version=1,
-            graph_checksum="sha256:x",
-            messages=[{"message_id": "msg-name", "role": "user", "content": message}],
-            cart={"asked_question_node_ids": ["q:name"]}, rag_nodes=[], rag_paths=[],
-            graph_contract=contract, branch_node_ids=[],
-            retrieval_trace={"service_resolution": {
-                "consumed_spans": service_spans or [],
-            }},
-        )
-        proposal = ConversationProposal(
-            branch_action="keep", branch_anchor_node_id="branch:a",
-            branch_path_checksum="checksum:a", extracted_facts=[ExtractedFact(
-                field_key="nome", owner_node_id="persona:generic", status="known",
-                value=value, source_message_id="msg-name", evidence_span=evidence,
-                confidence=1,
-            )],
-        )
-        return graph_agent_runtime_v3._reconcile_human_full_name_facts(
-            proposal, context=context, contract=contract,
-        )
 
-    direct, errors = reconcile("Ana Silva", "Ana Silva", "Ana Silva")
+def test_name_casing_does_not_decide_whether_the_answer_counts():
+    """The live deadlock of 2026-08-19, in one assertion.
+
+    The customer typed "allan rodrigues"; the model answered with the same
+    name capitalized. A literal `==` between message and value called that a
+    mismatch, demoted a correct high-confidence extraction to
+    `needs_confirmation`, and the confirmation could only be cleared by a
+    handful of literal phrases -- so the same template came back forever.
+    """
+    reconciled, errors = _reconcile_name(
+        "allan rodrigues", "Allan Rodrigues", "allan rodrigues",
+    )
     assert not errors
-    assert direct.extracted_facts[0].status == "known"
+    fact = reconciled.extracted_facts[0]
+    assert fact.status == "known"
+    assert fact.value == "Allan Rodrigues"
+    # The persisted span is the customer's own slice, not the model's echo.
+    assert fact.evidence_span == "allan rodrigues"
+    assert fact.metadata["validation_method"] == "model_confidence"
 
+    # And the model may hand back the span in its own casing too.
+    echoed, errors = _reconcile_name(
+        "allan rodrigues", "Allan Rodrigues", "Allan Rodrigues",
+    )
+    assert not errors
+    assert echoed.extracted_facts[0].status == "known"
+    assert echoed.extracted_facts[0].evidence_span == "allan rodrigues"
+
+
+def test_confident_name_survives_a_composite_message_with_a_service():
     composite_message = "Ana Silva, tamb\u00e9m quero Vitrifica\u00e7\u00e3o"
     service_resolution = graph_agent_runtime_v3._resolve_service_operations(
         _service_resolution_document(), composite_message,
@@ -2415,10 +2441,22 @@ def test_name_is_known_only_as_whole_direct_answer_and_composite_needs_confirmat
     assert service_resolution["operations"][0]["action"] == "add"
     assert service_resolution["operations"][0]["evidence_type"] == "exact_catalog"
 
-    composite, errors = reconcile(
-        composite_message,
-        "Ana Silva", "Ana Silva",
+    composite, errors = _reconcile_name(
+        composite_message, "Ana Silva", "Ana Silva",
         service_spans=service_resolution["consumed_spans"],
+    )
+    assert not errors
+    fact = composite.extracted_facts[0]
+    # Name and service in one breath: both are kept, neither steals the
+    # other's span.
+    assert fact.status == "known"
+    assert fact.value == "Ana Silva"
+
+
+def test_low_confidence_name_outside_a_direct_answer_still_asks():
+    composite, errors = _reconcile_name(
+        "sou Ana Silva e queria uma ideia", "Ana Silva", "Ana Silva",
+        confidence=0.4,
     )
     assert not errors
     fact = composite.extracted_facts[0]
@@ -2426,7 +2464,21 @@ def test_name_is_known_only_as_whole_direct_answer_and_composite_needs_confirmat
     assert fact.value is None
     assert fact.metadata["confirmation"]["candidate"] == "Ana Silva"
 
-    overlapping, errors = reconcile(
+    # The same low confidence, but the whole answer to the published name
+    # question, needs no confirmation at all.
+    direct, errors = _reconcile_name(
+        "ana silva", "Ana Silva", "ana silva", confidence=0.4,
+    )
+    assert not errors
+    assert direct.extracted_facts[0].status == "known"
+    assert (
+        direct.extracted_facts[0].metadata["validation_method"]
+        == "direct_published_name_answer"
+    )
+
+
+def test_name_never_steals_a_span_already_consumed_as_a_service():
+    overlapping, errors = _reconcile_name(
         "Quero Vitrifica\u00e7\u00e3o", "Quero Vitrifica\u00e7\u00e3o",
         "Quero Vitrifica\u00e7\u00e3o",
         service_spans=[{
@@ -2436,6 +2488,32 @@ def test_name_is_known_only_as_whole_direct_answer_and_composite_needs_confirmat
     )
     assert overlapping.extracted_facts == []
     assert errors[0]["errors"] == ["human_full_name_overlaps_service_evidence"]
+
+
+def test_name_token_bounds_come_from_the_published_field():
+    long_name = "Maria da Silva dos Santos Neto"
+    accepted, errors = _reconcile_name(long_name, long_name, long_name)
+    assert not errors
+    assert accepted.extracted_facts[0].status == "known"
+
+    rejected, errors = _reconcile_name(
+        long_name, long_name, long_name,
+        validation={
+            "semantic_type": "human_full_name", "min_tokens": 2, "max_tokens": 5,
+        },
+    )
+    assert rejected.extracted_facts == []
+    assert errors[0]["errors"] == ["human_full_name_invalid"]
+
+
+def test_name_without_literal_evidence_is_never_persisted_as_known():
+    invented, errors = _reconcile_name(
+        "quero um or\u00e7amento", "Ana Silva", "Ana Silva",
+    )
+    assert not errors
+    fact = invented.extracted_facts[0]
+    assert fact.status == "needs_confirmation"
+    assert fact.metadata["confirmation"]["method"] == "unproven_evidence"
 
 
 def test_semantic_service_candidate_requires_score_margin_model_match_and_free_literal_span():

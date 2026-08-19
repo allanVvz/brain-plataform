@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from services import graph_agent_runtime_v3
+from services import graph_agent_runtime_v3, graph_proof_checker_v3
 
 
 CORPUS_PATH = Path(__file__).parents[1] / "api" / "evaluation" / "sdr_flow_cases.json"
@@ -45,3 +45,30 @@ def test_shared_non_service_values_are_rejected():
         assert graph_agent_runtime_v3._is_social_or_non_service_value(
             CASES[case_id]["message"]
         )
+
+
+def test_shared_name_cases_survive_casing_and_prove_their_span():
+    """O caso que travou a producao, escrito uma vez para CI e Validator."""
+    case = CASES["name_lowercase_direct_answer"]
+    assert graph_proof_checker_v3.is_human_full_name(case["model_value"])
+    interval = graph_agent_runtime_v3._fact_span_interval(
+        case["message"], case["model_value"],
+    )
+    assert interval is not None
+    assert case["message"][interval[0]:interval[1]] == case["expected_evidence_span"]
+
+
+def test_shared_restated_candidate_is_a_confirmation():
+    case = CASES["name_candidate_restated_confirms"]
+    fact = {"metadata": {"confirmation": {"candidate": case["pending_candidate"]}}}
+    assert graph_agent_runtime_v3._restates_pending_candidate(case["message"], fact)
+
+
+def test_shared_confidence_does_not_turn_any_text_into_a_name():
+    case = CASES["name_with_digits_is_not_a_name"]
+    assert not graph_proof_checker_v3.is_human_full_name(case["model_value"])
+
+
+def test_shared_acknowledgement_only_reply_carries_no_question():
+    case = CASES["acknowledgement_only_is_not_a_turn"]
+    assert "?" not in graph_agent_runtime_v3._statements_only(case["model_reply"])

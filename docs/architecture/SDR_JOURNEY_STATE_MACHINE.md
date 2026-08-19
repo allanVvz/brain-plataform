@@ -94,11 +94,17 @@ O contrato compilado marca cada field com `carry_over`, e o default vem da
 
 | Origem | `carry_over` | Por quê |
 |---|---|---|
-| `persona.data.qualification.fields` | `true` | é o que o cliente **é** (nome) |
-| `persona.data.appointment_policy.required_fields` | `false` | data e janela são **deste** pedido |
-| campos do galho e `booking.required_fields` | `false` | pertencem ao serviço escolhido |
+| field `scope="persona"` | `true` | é o que o cliente **é** (nome, veículo) |
+| intenção deste atendimento (`objective`, `can_visit_in_person`) | `false` | descreve **esta** visita, não o cliente |
+| seletor de galho (`servico`) | `false` | cada ciclo escolhe o seu |
 
 O grafo sobrescreve campo a campo declarando `carry_over` no próprio field.
+
+O default é derivado do **escopo**, não de uma lista de nomes: qualquer campo
+persona-scoped futuro carrega automaticamente. Antes de 2026-08-18 só o literal
+`appointment_policy.identity_field` atravessava, e um cliente que voltava tinha
+de repetir o veículo inteiro (`api/scripts/publish_aurora_graph.py`, campo
+`carry_over`).
 
 Quando a jornada seguinte nasce, `_seed_carried_facts` semeia no ledger vazio os
 fatos `known` cujo field carrega, marcados com `carried_from_journey`. Daí

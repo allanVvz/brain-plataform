@@ -117,6 +117,25 @@ resolver para uma branch da publicação por título, slug, alias ou evidência
 semântica segura. Saudações, confirmações, respostas sociais e números isolados
 nunca são serviço.
 
+Nenhum turno de coleta é entregue como reconhecimento isolado. Se a supressão
+de repetição retirar a pergunta e ainda houver field perguntável, a pergunta
+publicada volta e `repetition_action` fica
+`repaired_never_acknowledge_only` — a emissão conta no orçamento porque o
+cliente a recebeu. Copy de confirmação pode ser publicada como lista de
+formulações equivalentes; o runtime escolhe uma que esta conversa ainda não
+ouviu.
+
+Uma operação de branch recusada invalida a mutação, não o turno: o conteúdo
+declarativo do modelo e a resposta publicada sobrevivem, apenas a alegação de
+mudança é descartada.
+
+Ao religar a IA, o agente só fala enquanto a última mensagem não respondida do
+cliente for mais recente que
+`conversation_policy.reactivation.answer_pending_inbound_within_seconds`.
+Passada a janela, os inbounds estacionados permanecem estacionados e o próximo
+turno é do cliente. Disparo de campanha e conversa nova são portas distintas e
+não passam por essa janela.
+
 A proteção antirrepetição não lança exceção em produção: fatos aceitos são
 commitados e o outbound duplicado é suprimido. A supressão retém a pergunta
 repetida, não o turno: quando o turno tem conteúdo próprio — dúvida respondida,
@@ -146,13 +165,37 @@ resposta publicada antes de escolher. Preço, agenda e regra de um serviço
 específico ficam de fora, porque um único galho os declara. O contrato de
 pré-seleção do runtime herda exatamente essa lista.
 
-Um field com
-`validation.semantic_type=human_full_name` aceita de dois a seis tokens
-Unicode, partículas, hífen e apóstrofo. Ele só vira `known` diretamente quando
-a pergunta publicada de nome foi a imediatamente anterior e a resposta inteira
-contém apenas o nome completo. Extração em mensagem composta vira
-`needs_confirmation`; candidato e proveniência ficam em
-`conversation_facts.metadata.confirmation`.
+Um field com `validation.semantic_type=human_full_name` aceita de dois a seis
+tokens Unicode por padrão — partículas, hífen e apóstrofo incluídos — e o grafo
+ajusta esses limites por field com `validation.min_tokens` e
+`validation.max_tokens`.
+
+A inferência do modelo é a primeira fonte do valor. O field vira `known`
+quando a confiança publicada alcança `validation.model_confidence_min`
+(default `0.90`), a forma é um nome válido, o `evidence_span` é reencontrável
+na mensagem depois de normalizar caixa, acentos e pontuação, e esse span não
+sobrepõe span reservado de serviço. O span persistido é o recorte literal da
+mensagem do cliente, nunca a reescrita do modelo. Mensagem composta não impede
+nada: o nome é gravado e os demais spans seguem disponíveis para os outros
+fields.
+
+Abaixo do piso de confiança, o fallback determinístico aceita a resposta
+integral à pergunta publicada de nome, comparada de forma normalizada — caixa,
+acento e pontuação não decidem. Só quando modelo e fallback falham é que o
+field vira `needs_confirmation`; candidato e proveniência ficam em
+`conversation_facts.metadata.confirmation`. Com
+`validation.confirmation_policy=last_resort`, o turno entrega primeiro o
+conteúdo útil — dúvida respondida, serviço reconhecido, conteúdo declarativo
+do modelo — e só então anexa a confirmação publicada.
+
+Um candidato pendente é resolvido por confirmação explícita **ou** pela
+repetição do próprio valor: mensagem inteira equivalente ao candidato
+normalizado confirma. Rejeição explícita continua invalidando.
+
+`validation` aceita, opcionalmente, `model_confidence_min` (0..1),
+`min_tokens`, `max_tokens` e `confirmation_policy`
+(`always` | `last_resort`). Declaração inválida reprova a publicação com
+`field_validation_tuning_invalid`.
 
 `service_observations[]` é não autoritativo. O backend é o único produtor das
 operações aplicadas em `service_operations[]`, e cada operação exige evidência

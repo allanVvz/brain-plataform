@@ -166,6 +166,43 @@ def _condition_valid(condition: Any, field_keys: set[str]) -> bool:
     })
 
 
+def _validation_tuning_valid(validation: dict[str, Any]) -> bool:
+    """Optional field-validation tuning must be usable, or absent.
+
+    `model_confidence_min`, `min_tokens`, `max_tokens` and
+    `confirmation_policy` let the graph tell the runtime how much to trust
+    the model on one field. A publication that declares them wrong is worse
+    than one that declares nothing, because the runtime would fall back to
+    its generic default while the operator believes the graph is in charge.
+    So the publish gate refuses it instead.
+    """
+    confidence = validation.get("model_confidence_min")
+    if confidence is not None:
+        try:
+            if not 0.0 <= float(confidence) <= 1.0:
+                return False
+        except (TypeError, ValueError):
+            return False
+    bounds: list[int | None] = []
+    for raw in (validation.get("min_tokens"), validation.get("max_tokens")):
+        if raw is None:
+            bounds.append(None)
+            continue
+        try:
+            bounds.append(int(raw))
+        except (TypeError, ValueError):
+            return False
+    minimum, maximum = bounds
+    if minimum is not None and minimum < 1:
+        return False
+    if maximum is not None and maximum < (minimum or 1):
+        return False
+    policy = validation.get("confirmation_policy")
+    if policy is not None and str(policy) not in {"always", "last_resort"}:
+        return False
+    return True
+
+
 def _compiled_field_validation(item: dict[str, Any]) -> dict[str, Any]:
     raw = item.get("validation")
     validation = dict(raw) if isinstance(raw, dict) else {}
@@ -785,6 +822,8 @@ def compile_graph(
                 )
                 if not description or not definition:
                     errors.append(f"field_semantic_definition_missing:{anchor}:{field['key']}")
+            if not _validation_tuning_valid(validation):
+                errors.append(f"field_validation_tuning_invalid:{anchor}:{field['key']}")
             if not set(field["accepted_statuses"]).issubset(FACT_STATUSES):
                 errors.append(f"invalid_accepted_statuses:{anchor}:{field['key']}")
             if field["overwrite_policy"] not in {"never", "explicit_correction", "higher_confidence", "always"}:

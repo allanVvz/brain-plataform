@@ -27,6 +27,10 @@ _FINAL_CONFIRMATION = re.compile(
     re.IGNORECASE,
 )
 _NAME_SEPARATORS = {"-", "'", "’"}
+# Generic floor/ceiling for a complete human name. The graph overrides them
+# per field via `validation.min_tokens` / `validation.max_tokens`.
+NAME_MIN_TOKENS = 2
+NAME_MAX_TOKENS = 6
 _NON_NAME_PHRASES = {
     "oi", "ola", "bom dia", "boa tarde", "boa noite", "tudo bem",
     "e ai", "e ae", "eai", "eae",
@@ -42,7 +46,29 @@ def _literal_span(message: str, span: Any) -> bool:
     return bool(value and value in canonical)
 
 
-def is_human_full_name(value: Any) -> bool:
+def name_token_bounds(validation: Any) -> tuple[int, int]:
+    """Token limits for a name field, published by the graph.
+
+    The graph owns how long a complete name may be in its own market; the
+    code only carries a generic default so a publication that says nothing
+    keeps working. Invalid or inverted bounds fall back to the default
+    instead of rejecting every name -- the publish gate is what refuses a
+    malformed declaration, not the runtime.
+    """
+    published = validation if isinstance(validation, dict) else {}
+    try:
+        minimum = int(published.get("min_tokens") or NAME_MIN_TOKENS)
+        maximum = int(published.get("max_tokens") or NAME_MAX_TOKENS)
+    except (TypeError, ValueError):
+        return NAME_MIN_TOKENS, NAME_MAX_TOKENS
+    if minimum < 1 or maximum < minimum:
+        return NAME_MIN_TOKENS, NAME_MAX_TOKENS
+    return minimum, maximum
+
+
+def is_human_full_name(
+    value: Any, *, min_tokens: int = NAME_MIN_TOKENS, max_tokens: int = NAME_MAX_TOKENS,
+) -> bool:
     """Validate a complete human name without assuming a language or fixture."""
     text = unicodedata.normalize("NFC", str(value or "")).strip()
     if not text or re.search(r"(?:https?://|www\.|@)", text, re.IGNORECASE):
@@ -50,7 +76,7 @@ def is_human_full_name(value: Any) -> bool:
     if _fold(text) in _NON_NAME_PHRASES:
         return False
     tokens = text.split()
-    if not 2 <= len(tokens) <= 6:
+    if not min_tokens <= len(tokens) <= max_tokens:
         return False
     for token in tokens:
         if not token or token[0] in _NAME_SEPARATORS or token[-1] in _NAME_SEPARATORS:
@@ -350,7 +376,8 @@ def _canonical_field_value(
             return value, "semantic value must be non-empty text"
         semantic_type = str(validation.get("semantic_type") or "")
         if semantic_type == "human_full_name":
-            if not is_human_full_name(value):
+            minimum, maximum = name_token_bounds(validation)
+            if not is_human_full_name(value, min_tokens=minimum, max_tokens=maximum):
                 return value, "value is not a valid human full name"
         elif semantic_type == "human_name":
             folded = _fold(value)

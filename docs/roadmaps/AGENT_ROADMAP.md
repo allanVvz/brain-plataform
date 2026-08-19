@@ -83,6 +83,7 @@ paralelo seguro.
 | 4 | Tock Fatal nasce no pipeline novo | a fazer | `graph-publisher` |
 | 5 | n8n estável e desacoplado do conteúdo | a fazer | — |
 | 6 | Aurora migra para o bundle | a fazer | `bundle-migrator` |
+| 7 | Orquestradores por estágio e campanha por ciclo | a fazer | `graph-publisher`, `card-editor` |
 
 ---
 
@@ -146,6 +147,54 @@ nunca WhatsApp real — regra rígida de `AGENTS.md`.
 - memória sobrevive a **dois** fechamentos de jornada seguidos (modelo, cor e ano
   do veículo preservados; só o serviço reconfirmado)
 - zero turnos com `reply_text` vazio
+
+---
+
+## 7 — Orquestradores por estágio e campanha por ciclo
+
+Estrutura alvo do atendimento, registrada aqui porque **nada dela entra no P0**.
+Hoje a Aurora tem um binding só, e esse binding acumula SDR e CS.
+
+### Um dono por estágio
+
+```
+SDR     -> até `qualificado`
+Closer  -> `convertido` e `agendado`
+CS      -> `concluído`
+```
+
+Os galhos `service` do grafo (`atendimento-humano`, `reclamacao`) já são
+roteiros de atendimento distintos da qualificação comercial: são os primeiros
+candidatos a ganhar dono próprio. Enquanto isso, o SDR responde por eles.
+
+O histórico atravessa todos os estágios sem cópia: `conversation_journeys`
+guarda sequência e desfecho, `carry_over` guarda o que o cliente **é**, e
+`conversation_carry_over_facts_by_lead_v1` (migration 129) busca em qualquer
+jornada do lead. Um orquestrador novo lê a mesma memória — nenhum deles ganha
+armazenamento próprio.
+
+### Campanha muda com o ciclo
+
+Concluir a primeira qualificação move a lead de campanha. Cada campanha tem seu
+público exato ligado à audiência, e pode declarar outros serviços e outros
+appointments:
+
+```
+ativação  ->  CS  ->  reativação  ->  remarketing
+```
+
+O que falta existir: vínculo lead→campanha escrito pelo próprio ciclo (hoje
+`campaign_recipients` só serve a disparo de saída), e o contrato que diz qual
+audiência/serviço/appointment cada campanha publica. Enquanto isso não existe,
+a diferença de comportamento entre o primeiro ciclo e os seguintes é apenas de
+prompt, lendo `journey.sequence` e `shared_memory.journey_outcomes` — que é o
+que o P0 entregou.
+
+### O que o P0 deliberadamente não fez
+
+- Não criou tabela, migration nem vínculo lead→campanha.
+- Não separou bindings por estágio.
+- Não moveu os galhos `service` para outro dono.
 
 ---
 
