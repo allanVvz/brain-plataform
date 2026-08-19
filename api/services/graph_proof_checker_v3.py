@@ -462,15 +462,19 @@ def check(
         errors.append("publication_not_active")
     if publication.get("checksum") != ledger.get("graph_checksum"):
         errors.append("publication_checksum_mismatch")
-    if branch not in anchors:
-        errors.append("branch_not_published")
-    if proposal.get("branch_path_checksum") != contract.get("branch_path_checksum"):
-        errors.append("branch_path_checksum_mismatch")
+    if action != "none":
+        if branch not in anchors:
+            errors.append("branch_not_published")
+        if proposal.get("branch_path_checksum") != contract.get("branch_path_checksum"):
+            errors.append("branch_path_checksum_mismatch")
     branch_span = proposal.get("branch_evidence_span")
     active_set = set(active_branch_node_ids or ([active_branch_node_id] if active_branch_node_id else []))
     if active_branch_node_id:
         active_set.add(active_branch_node_id)
-    if action == "keep":
+    if action == "none":
+        if branch or proposal.get("branch_path_checksum"):
+            errors.append("none_with_branch_anchor")
+    elif action == "keep":
         if not active_set:
             # Confirmed live 2026-08-08: with no active branch yet, "keep"
             # never validated anything (unlike "select"/"switch", which

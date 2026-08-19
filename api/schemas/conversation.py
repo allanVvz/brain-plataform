@@ -80,6 +80,7 @@ class ConversationFactStatus(StrEnum):
 
 
 class BranchAction(StrEnum):
+    NONE = "none"
     KEEP = "keep"
     SELECT = "select"
     SWITCH = "switch"
@@ -120,6 +121,56 @@ class ServiceObservation(StrictModel):
     confidence: float = Field(default=0.0, ge=0, le=1)
 
 
+class InteractionKind(StrEnum):
+    CONTINUE_CURRENT = "continue_current"
+    NEW_DEMAND = "new_demand"
+    POST_COMPLETION_QUESTION = "post_completion_question"
+    COURTESY_CLOSE = "courtesy_close"
+    POST_SALE_OPERATION = "post_sale_operation"
+    UNCLEAR = "unclear"
+
+
+class JourneyAction(StrEnum):
+    CONTINUE = "continue"
+    OPEN = "open"
+    NONE = "none"
+
+
+class InteractionObservation(StrictModel):
+    """Non-authoritative semantic observation reconciled by the backend."""
+
+    kind: InteractionKind = InteractionKind.UNCLEAR
+    evidence_span: str = ""
+    confidence: float = Field(default=0.0, ge=0, le=1)
+
+
+class SharedMemoryFact(StrictModel):
+    key: str = Field(min_length=1)
+    value: Any | None = None
+    owner_node_id: str = Field(min_length=1)
+    status: ConversationFactStatus
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    source: str = "conversation_fact"
+    journey_id: str | None = None
+    recorded_at: str | None = None
+    source_message_id: str | None = None
+    reuse_policy: str = "historical_only"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SharedLeadMemory(StrictModel):
+    """Agent-neutral, complete memory envelope for one persona-scoped lead."""
+
+    profile_facts: list[SharedMemoryFact] = Field(default_factory=list)
+    current_journey: dict[str, Any] | None = None
+    historical_facts: list[SharedMemoryFact] = Field(default_factory=list)
+    journey_outcomes: list[dict[str, Any]] = Field(default_factory=list)
+    pending_items: list[dict[str, Any]] = Field(default_factory=list)
+    recent_messages: list[dict[str, Any]] = Field(default_factory=list)
+    agent_activity: list[dict[str, Any]] = Field(default_factory=list)
+    policy_version: str = "shared_lead_memory_v1"
+
+
 class ExtractedFact(StrictModel):
     field_key: str = Field(min_length=1)
     value: Any | None = None
@@ -141,9 +192,12 @@ class CommercialClaim(StrictModel):
 class ConversationProposal(StrictModel):
     """One model suggestion that must be proved against the graph contract."""
 
-    branch_action: BranchAction = BranchAction.KEEP
-    branch_anchor_node_id: str
-    branch_path_checksum: str
+    interaction_observation: InteractionObservation = Field(
+        default_factory=InteractionObservation
+    )
+    branch_action: BranchAction = BranchAction.NONE
+    branch_anchor_node_id: str | None = None
+    branch_path_checksum: str | None = None
     branch_evidence_span: str = ""
     service_observations: list[ServiceObservation] = Field(default_factory=list)
     service_operations: list[ServiceOperation] = Field(default_factory=list)
@@ -196,6 +250,8 @@ class ConversationContext(StrictModel):
     pending_question_node_id: str | None = None
     last_handoff: dict[str, Any] = Field(default_factory=dict)
     operational_mode: ConversationOperationalMode = ConversationOperationalMode.COLLECTION
+    shared_memory: SharedLeadMemory = Field(default_factory=SharedLeadMemory)
+    post_completion_state: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConversationDecision(StrictModel):

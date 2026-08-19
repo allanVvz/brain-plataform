@@ -39,6 +39,7 @@ ENV PYTHONUNBUFFERED=1 \
 # it every audio message falls back to the "[o cliente enviou um audio]"
 # placeholder instead of a transcription.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 

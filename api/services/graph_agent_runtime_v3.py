@@ -21,6 +21,8 @@ from schemas.conversation import (
     ConversationProposal,
     ConversationRoute,
     ExtractedFact,
+    InteractionKind,
+    JourneyAction,
     ServiceOperation,
     ServiceOperationAction,
 )
@@ -28,6 +30,7 @@ from services import (
     conversation_repetition,
     graph_compiler_v3,
     graph_proof_checker_v3,
+    shared_lead_memory,
     supabase_client,
 )
 
@@ -35,6 +38,7 @@ from services import (
 logger = logging.getLogger("graph_agent_runtime_v3")
 
 RUNTIME_VERSION = "graph_agent_runtime_v3"
+CONTRACT_VERSION = "graph_agent_contract_v4"
 FAQ_SEMANTIC_MIN_SCORE = 0.18
 FAQ_SEMANTIC_MIN_MARGIN = 0.03
 SERVICE_MAX_EDIT_DISTANCE = 3
@@ -1519,24 +1523,28 @@ def _apply_authoritative_branch_resolution(
         action = "keep"
         evidence_span = ""
     else:
-        anchor = str(context.retrieval_trace.get("retrieval_branch_node_id") or "")
-        if anchor not in set(document.get("branch_anchors") or []):
-            anchor = str(proposal.branch_anchor_node_id or "")
-        action = "keep"
+        # Retrieval focus answers content; it is never proof that the customer
+        # selected that offering.  Absence of a resolved branch is explicit.
+        anchor = None
+        action = "none"
         evidence_span = ""
 
     coordinate = ((document.get("coordinates") or {}).get(anchor) or {})
-    extracted = [fact for fact in proposal.extracted_facts if fact.field_key != "servico"]
+    selection_key = branch_selection_field_key(document)
+    extracted = [
+        fact for fact in proposal.extracted_facts
+        if fact.field_key != selection_key
+    ]
     existing_service_fact = any(
         str(fact.get("owner_node_id") or "") == anchor
         and fact.get("status") == "known"
-        for fact in (context.cart.get("facts_by_key") or {}).get("servico", [])
+        for fact in (context.cart.get("facts_by_key") or {}).get(selection_key, [])
         if isinstance(fact, dict)
     )
     if resolved_anchor and evidence_span and not (action == "keep" and existing_service_fact):
         branch_node = (document.get("node_by_id") or {}).get(anchor) or {}
         extracted.append(ExtractedFact(
-            field_key="servico",
+            field_key=selection_key,
             value=str(branch_node.get("slug") or branch_node.get("title") or anchor),
             status="known",
             source_message_id=_source_message_id(context.messages),
@@ -3071,6 +3079,14 @@ def _greeting_policy(
 
 
 SYSTEM_PROMPT = (
+    "Antes de propor qualquer mutação, descreva a interação atual em "
+    "interaction_observation: continue_current, new_demand, "
+    "post_completion_question, courtesy_close, post_sale_operation ou unclear. "
+    "Inclua evidence_span literal e confiança. Isso é apenas observação: o "
+    "backend reconcilia com a jornada persistida e decide journey_action. "
+    "Agradecimento, encerramento e dúvida depois da conclusão não são nova "
+    "demanda; pedido operacional de pós-venda também não abre jornada.\n\n"
+
     "Observe serviços antes de qualquer outro campo. Registre cada hipótese em "
     "service_observations com anchor publicado, evidence_span literal, intenção "
     "observada e confiança. service_operations existe apenas por compatibilidade "
@@ -3195,11 +3211,13 @@ SYSTEM_PROMPT = (
     "fatos_conhecidos lista tudo que já se sabe sobre esse cliente, cada "
     "um com origem 'esta_conversa' (extraído agora) ou 'anterior' "
     "(já registrado de antes). Um fato 'anterior' marcado "
-    "carregado_do_pedido_anterior=true é identidade do cliente (hoje só o "
-    "nome), não deste pedido -- use-o direto, sem perguntar de novo e sem "
+    "carregado_do_pedido_anterior=true segue a política carry_over do contrato "
+    "publicado e pertence ao perfil do lead, não só ao pedido anterior -- "
+    "use-o direto, sem perguntar de novo e sem "
     "pedir confirmação, inclusive para cumprimentar o cliente pelo nome "
-    "com naturalidade. Qualquer outro fato 'anterior' (veículo, data, "
-    "janela -- dados deste pedido, não do cliente) você pode usar para "
+    "com naturalidade. Qualquer outro fato 'anterior' marcado como histórico "
+    "(por exemplo data, janela ou resultado de atendimento anterior) pode "
+    "ser usado para "
     "personalizar a conversa (ex.: perguntar se uma reclamação tem a ver "
     "com o serviço que ele já fez), mas sempre confirme com o cliente "
     "antes de seguir em frente com base nele -- nunca assuma "
@@ -3246,6 +3264,18 @@ def _carry_over_field_keys(document: dict) -> set[str]:
                 if key:
                     keys.add(key)
     return keys
+
+
+def _no_journey_fallback_reply(document: dict[str, Any]) -> str:
+    persona = _persona_node(document) or {}
+    policy = ((persona.get("data") or {}).get("conversation_policy") or {})
+    return str(policy.get("no_journey_fallback_reply") or "").strip()
+
+
+def _post_sale_route(document: dict[str, Any]) -> str:
+    persona = _persona_node(document) or {}
+    policy = ((persona.get("data") or {}).get("conversation_policy") or {})
+    return str(policy.get("post_sale_operation_route") or "HUMAN").upper()
 
 
 def _seed_carried_facts(
@@ -3302,6 +3332,12 @@ def _seed_carried_facts(
         fact = {
             **row, "value": row.get("value_json"), "fact_id": row.get("id"),
             "carried_from_journey": previous_id,
+            "metadata": {
+                **dict(row.get("metadata") or {}),
+                "origin_journey_id": str(row.get("journey_id") or previous_id),
+                "reuse_policy": "carry_over",
+                "policy_version": shared_lead_memory.POLICY_VERSION,
+            },
         }
         carried.setdefault(key, fact)
         grouped.setdefault(key, []).append(fact)
@@ -3333,7 +3369,7 @@ def build_context(
         raise PermissionError("lead does not belong to requested persona")
     context_batch_started = time.perf_counter()
     try:
-        batch = supabase_client.get_graph_turn_context_batch_v3(
+        batch = supabase_client.get_graph_turn_context_batch_v4(
             persona_id=str(persona["id"]), lead_ref=lead_ref, message_limit=8,
         )
     except Exception:
@@ -3349,6 +3385,9 @@ def build_context(
     # ordered text for this decision/proof without rewriting persisted history
     # or changing the canonical inbound identity.
     messages = _overlay_canonical_inbound(messages, message, message_id)
+    shared_memory = shared_lead_memory.project_shared_lead_memory(
+        batch=batch, document=document, messages=messages,
+    )
     ledger = batch.get("ledger") or None
     if ledger:
         ledger["facts_by_key"] = _facts_by_key(batch.get("facts") or [])
@@ -3360,6 +3399,7 @@ def build_context(
     journey = batch.get("journey") or supabase_client.get_current_conversation_journey(
         str(persona["id"]), lead_ref,
     ) or {}
+    latest_journey: dict[str, Any] = {}
     if not journey:
         latest_journey = supabase_client.get_latest_conversation_journey(
             str(persona["id"]), lead_ref,
@@ -3525,6 +3565,8 @@ def build_context(
             "pending_field": pending_field or None,
             "confirmation_templates": document.get("confirmation_templates") or {},
             "service_resolution_policy": document.get("service_resolution_policy") or {},
+            "no_journey_fallback_reply": _no_journey_fallback_reply(document),
+            "post_sale_operation_route": _post_sale_route(document),
             "deterministic_intent": "greeting",
             "deterministic_reply": reply,
             "asked_field_key": greeting.get("asked_field_key"),
@@ -3576,6 +3618,18 @@ def build_context(
                 or (lead.get("metadata") or {}).get("handoff_reason"),
             },
             operational_mode=operational_mode,
+            shared_memory=shared_memory,
+            post_completion_state={
+                "has_terminal_journey": str(
+                    (latest_journey or journey).get("state") or journey_state
+                ) in {
+                    "qualified_confirmed", "handed_off", "converted", "closed"
+                },
+                "latest_journey_sequence": int(journey.get("sequence") or 1),
+                "latest_journey_state": str(
+                    (latest_journey or journey).get("state") or journey_state
+                ),
+            },
         )
     embedding_started = time.perf_counter()
     embedding = None if deterministic_candidates else graph_compiler_v3.query_embeddings([message])[0]
@@ -3763,6 +3817,8 @@ def build_context(
         "pending_field": pending_field or None,
         "confirmation_templates": document.get("confirmation_templates") or {},
         "service_resolution_policy": document.get("service_resolution_policy") or {},
+        "no_journey_fallback_reply": _no_journey_fallback_reply(document),
+        "post_sale_operation_route": _post_sale_route(document),
         "short_expected_answer": short_expected_answer,
         "pending_field_branch_resolution_suppressed": pending_field_answer,
         "global_branch_search_executed": not suppress_global_branch_search,
@@ -3862,6 +3918,18 @@ def build_context(
             or (lead.get("metadata") or {}).get("handoff_reason"),
         },
         operational_mode=operational_mode,
+        shared_memory=shared_memory,
+        post_completion_state={
+            "has_terminal_journey": str(
+                (latest_journey or journey).get("state") or journey_state
+            ) in {
+                "qualified_confirmed", "handed_off", "converted", "closed"
+            },
+            "latest_journey_sequence": int(journey.get("sequence") or 1),
+            "latest_journey_state": str(
+                (latest_journey or journey).get("state") or journey_state
+            ),
+        },
     )
 
 
@@ -3972,13 +4040,16 @@ def _confirmation_prompt_for_fact(
 ) -> tuple[str, dict[str, Any]]:
     """Render only graph-published copy for one persisted candidate."""
     confirmation = dict((fact.get("metadata") or {}).get("confirmation") or {})
-    kind = str(confirmation.get("kind") or "")
-    if kind == "name":
+    capability = _confirmation_capability(confirmation)
+    if capability in {"name", "common_fact"}:
         return _confirmation_template(
-            document, "name",
+            document, str(
+                confirmation.get("template_key")
+                or ("name" if capability == "name" else "fact")
+            ),
             candidate=str(confirmation.get("candidate") or ""),
         ), confirmation
-    if kind == "service":
+    if capability in {"service", "branch_selector"}:
         return _confirmation_template(
             document,
             _service_candidate_template_key(confirmation, active_branch_node_ids),
@@ -3988,6 +4059,12 @@ def _confirmation_prompt_for_fact(
             ),
         ), confirmation
     raise RuntimeError("unsupported persisted confirmation candidate")
+
+
+def _confirmation_capability(confirmation: dict[str, Any]) -> str:
+    return str(
+        confirmation.get("capability") or confirmation.get("kind") or "common_fact"
+    )
 
 
 def _aggregate_confirmation_state(
@@ -4043,7 +4120,8 @@ def _deterministic_pending_fact_confirmation(
         raise RuntimeError("GraphRAG publication changed during pending confirmation")
     document = publication.get("document_json") or {}
     confirmation = dict((pending.get("metadata") or {}).get("confirmation") or {})
-    kind = str(confirmation.get("kind") or "")
+    capability = _confirmation_capability(confirmation)
+    selection_key = branch_selection_field_key(document)
     source_message_id = _source_message_id(context.messages)
     grouped = {
         str(key): list(values)
@@ -4068,7 +4146,7 @@ def _deterministic_pending_fact_confirmation(
         ] + [fact]
         accepted_facts.append(fact)
 
-    if kind == "name":
+    if capability in {"name", "common_fact"}:
         fact = {
             "field_key": str(confirmation.get("field_key") or pending.get("field_key") or ""),
             "owner_node_id": str(confirmation.get("owner_node_id") or pending.get("owner_node_id") or ""),
@@ -4086,7 +4164,7 @@ def _deterministic_pending_fact_confirmation(
             },
         }
         replace_fact(fact)
-    elif kind == "service":
+    elif capability in {"service", "branch_selector"}:
         anchor = str(confirmation.get("branch_anchor_node_id") or pending.get("owner_node_id") or "")
         action = str(confirmation.get("action") or "add")
         if accepted_confirmation:
@@ -4147,7 +4225,7 @@ def _deterministic_pending_fact_confirmation(
             if action in {"add", "keep", "switch"}:
                 if action == "switch":
                     replace_fact({
-                        "field_key": "servico", "owner_node_id": replace_anchor,
+                        "field_key": selection_key, "owner_node_id": replace_anchor,
                         "status": "invalid", "value": None,
                         "source_message_id": source_message_id,
                         "evidence_span": message.strip(), "confidence": 1.0,
@@ -4157,7 +4235,7 @@ def _deterministic_pending_fact_confirmation(
                     })
                 node = (document.get("node_by_id") or {}).get(anchor) or {}
                 replace_fact({
-                    "field_key": "servico", "owner_node_id": anchor,
+                    "field_key": selection_key, "owner_node_id": anchor,
                     "status": "known",
                     "value": str(node.get("slug") or node.get("title") or anchor),
                     "source_message_id": source_message_id,
@@ -4169,7 +4247,7 @@ def _deterministic_pending_fact_confirmation(
                 })
             else:
                 replace_fact({
-                    "field_key": "servico", "owner_node_id": anchor,
+                    "field_key": selection_key, "owner_node_id": anchor,
                     "status": "invalid", "value": None,
                     "source_message_id": source_message_id,
                     "evidence_span": message.strip(), "confidence": 1.0,
@@ -4180,7 +4258,7 @@ def _deterministic_pending_fact_confirmation(
             if isinstance(previous_fact, dict) and previous_fact.get("status") == "known":
                 replace_fact({
                     **previous_fact,
-                    "field_key": "servico", "owner_node_id": anchor,
+                    "field_key": selection_key, "owner_node_id": anchor,
                     "source_message_id": source_message_id,
                     "evidence_span": message.strip(), "confidence": 1.0,
                     "metadata": {
@@ -4190,7 +4268,7 @@ def _deterministic_pending_fact_confirmation(
                 })
             else:
                 replace_fact({
-                    "field_key": "servico", "owner_node_id": anchor,
+                    "field_key": selection_key, "owner_node_id": anchor,
                     "status": "invalid", "value": None,
                     "source_message_id": source_message_id,
                     "evidence_span": message.strip(), "confidence": 1.0,
@@ -4216,7 +4294,7 @@ def _deterministic_pending_fact_confirmation(
     )
     next_question_id = str((askable[0] if askable else {}).get("question_node_id") or "") or None
     if rejected_confirmation:
-        if kind == "name":
+        if capability in {"name", "common_fact"}:
             next_question_id = str(
                 next(
                     (
@@ -4398,6 +4476,200 @@ def _with_structural_proof_audit(
     return response.model_copy(update={"proof": proof})
 
 
+def _interaction_observation(
+    context: ConversationContext, model_observation: dict[str, Any] | None,
+) -> tuple[InteractionKind, str, float]:
+    raw = model_observation or {}
+    proposal = raw.get("proposal") if isinstance(raw.get("proposal"), dict) else raw
+    observed = (
+        proposal.get("interaction_observation")
+        if isinstance(proposal, dict) else None
+    ) or {}
+    kind = _coerce_interaction_kind(observed.get("kind"))
+    span = str(observed.get("evidence_span") or "").strip()
+    confidence = float(observed.get("confidence") or 0)
+    message = _latest_user_message(context)
+    if not _interaction_is_grounded(kind, span, confidence, message):
+        return InteractionKind.UNCLEAR, span, confidence
+    return kind, span, confidence
+
+
+def _coerce_interaction_kind(value: Any) -> InteractionKind:
+    try:
+        return InteractionKind(str(value or "unclear"))
+    except ValueError:
+        return InteractionKind.UNCLEAR
+
+
+def _interaction_is_grounded(
+    kind: InteractionKind, span: str, confidence: float, message: str,
+) -> bool:
+    return kind is InteractionKind.UNCLEAR or bool(
+        confidence >= 0.65 and span and span in message
+    )
+
+
+def _resolve_journey_action(
+    context: ConversationContext, kind: InteractionKind,
+) -> JourneyAction:
+    terminal = bool(context.post_completion_state.get("has_terminal_journey"))
+    if context.journey_id is None and not terminal:
+        return JourneyAction.OPEN
+    if terminal:
+        if kind is InteractionKind.NEW_DEMAND:
+            return JourneyAction.OPEN
+        return JourneyAction.NONE
+    return JourneyAction.CONTINUE
+
+
+def _no_journey_reply(context: ConversationContext, response: AgentResponse) -> str:
+    proved_doubt = (
+        response.proof.get("text")
+        if response.proof.get("doubt_resolution") == "answered" else None
+    )
+    candidates = [proved_doubt]
+    if response.proof.get("valid"):
+        candidates.extend([
+            _statements_only(response.proposal.reply) if response.proposal else None,
+            _statements_only(str(response.reply_text or "")),
+        ])
+    candidates.append(context.retrieval_trace.get("no_journey_fallback_reply"))
+    reply = next((str(value).strip() for value in candidates if str(value or "").strip()), "")
+    if not reply:
+        raise RuntimeError("published graph missing no-journey fallback reply")
+    return reply
+
+
+def _without_journey_mutation(
+    context: ConversationContext,
+    decision: ConversationDecision,
+    response: AgentResponse,
+    kind: InteractionKind,
+) -> tuple[ConversationDecision, AgentResponse, list[dict[str, Any]]]:
+    rejected = []
+    accepted = response.proof.get("accepted_facts") or []
+    if accepted:
+        rejected.append({
+            "component": "facts", "reason": "journey_action_none",
+            "count": len(accepted),
+        })
+    proposal = response.proposal.model_copy(update={
+        "branch_action": BranchAction.NONE,
+        "branch_anchor_node_id": None,
+        "branch_path_checksum": None,
+        "extracted_facts": [],
+        "next_question_node_id": None,
+        "qualification_complete": False,
+        "handoff_requested": False,
+    }) if response.proposal else None
+    response = response.model_copy(update={
+        "reply_text": _no_journey_reply(context, response),
+        "cart_state": dict(context.cart),
+        "handoff_required": False,
+        "proposal": proposal,
+        "proof": {
+            **response.proof,
+            "model_proposal_errors": response.proof.get("errors") or [],
+            "valid": True, "errors": [], "fallback_used": True,
+            "fallback_applied": "no_journey_policy_v4",
+            "accepted_facts": [], "missing_fields": [],
+            "next_question_node_id": None, "qualification_complete": False,
+            "confirmation_state": "no_journey",
+        },
+    })
+    route = _no_journey_route(context, kind)
+    decision = decision.model_copy(update={
+        "classifier": "graph_interaction_policy_v4", "intent": kind.value,
+        "route": route,
+        "handoff_reason": (
+            "post_sale_operation" if route is ConversationRoute.HUMAN else None
+        ),
+    })
+    response = response.model_copy(update={"role": route})
+    return decision, response, rejected
+
+
+def _no_journey_route(
+    context: ConversationContext, kind: InteractionKind,
+) -> ConversationRoute:
+    if kind is not InteractionKind.POST_SALE_OPERATION:
+        return ConversationRoute.SDR
+    try:
+        return ConversationRoute(str(
+            context.retrieval_trace.get("post_sale_operation_route") or "HUMAN"
+        ).upper())
+    except ValueError:
+        return ConversationRoute.HUMAN
+
+
+def _apply_journey_policy(
+    context: ConversationContext,
+    decision: ConversationDecision,
+    response: AgentResponse,
+    *, model_observation: dict[str, Any] | None,
+) -> tuple[ConversationDecision, AgentResponse]:
+    kind, evidence_span, confidence = _interaction_observation(
+        context, model_observation,
+    )
+    action = _resolve_journey_action(context, kind)
+    if action is JourneyAction.OPEN:
+        response = _seed_profile_facts_for_open_journey(context, response)
+    accepted_components = list(response.proof.get("accepted_components") or [])
+    rejected_components = list(response.proof.get("rejected_components") or [])
+    if action is JourneyAction.NONE:
+        decision, response, rejected = _without_journey_mutation(
+            context, decision, response, kind,
+        )
+        rejected_components.extend(rejected)
+        accepted_components.append({"component": "reply", "policy": "no_journey"})
+    proof = {
+        **response.proof,
+        "journey_action": action.value,
+        "interaction_observation": {
+            "kind": kind.value,
+            "evidence_span": evidence_span,
+            "confidence": confidence,
+            "authority": "model_observation_backend_reconciled",
+        },
+        "accepted_components": accepted_components,
+        "rejected_components": rejected_components,
+        "agent_slug": context.agent_slug,
+        "agent_role": response.role.value,
+        "policy_version": CONTRACT_VERSION,
+    }
+    return decision, response.model_copy(update={"proof": proof})
+
+
+def _seed_profile_facts_for_open_journey(
+    context: ConversationContext, response: AgentResponse,
+) -> AgentResponse:
+    accepted = list(response.proof.get("accepted_facts") or [])
+    identities = {
+        (str(fact.get("field_key") or ""), str(fact.get("owner_node_id") or ""))
+        for fact in accepted
+    }
+    source_message_id = _source_message_id(context.messages)
+    for fact in context.shared_memory.profile_facts:
+        identity = (fact.key, fact.owner_node_id)
+        if identity in identities:
+            continue
+        accepted.append({
+            "field_key": fact.key, "owner_node_id": fact.owner_node_id,
+            "status": fact.status.value, "value": fact.value,
+            "source_message_id": fact.source_message_id or source_message_id,
+            "evidence_span": "", "confidence": fact.confidence,
+            "metadata": {
+                **fact.metadata, "origin_journey_id": fact.journey_id,
+                "reuse_policy": "carry_over",
+                "policy_version": context.shared_memory.policy_version,
+            },
+        })
+        identities.add(identity)
+    return response.model_copy(update={
+        "proof": {**response.proof, "accepted_facts": accepted},
+    })
+
+
 def decide(
     context: ConversationContext, *, model_observation: dict[str, Any] | None
 ) -> tuple[ConversationDecision, AgentResponse]:
@@ -4451,7 +4723,10 @@ def decide(
                     ],
                 },
             })
-    return decision, _with_structural_proof_audit(context, decision, response)
+    audited = _with_structural_proof_audit(context, decision, response)
+    return _apply_journey_policy(
+        context, decision, audited, model_observation=model_observation,
+    )
 
 
 def _sanitize_untrusted_service_operations(raw: Any) -> Any:
@@ -4558,6 +4833,8 @@ def _reconcile_human_full_name_facts(
                 **fact.metadata,
                 "confirmation": {
                     "kind": "name",
+                    "capability": "common_fact",
+                    "template_key": "name",
                     "candidate": candidate,
                     "field_key": fact.field_key,
                     "owner_node_id": fact.owner_node_id,
@@ -4770,13 +5047,23 @@ def _decide(
             "title": str(node.get("title") or anchor),
             "slug": str(node.get("slug") or anchor),
         }
+    observed_contract_anchor = (
+        proposal.branch_anchor_node_id
+        if proposal.branch_anchor_node_id in set(document.get("branch_anchors") or [])
+        else None
+    )
     proposal = _apply_authoritative_branch_resolution(proposal, context, document)
     proposal = _normalize_initial_service_keep(proposal, context=context)
-    contract = (document.get("branch_contracts") or {}).get(proposal.branch_anchor_node_id) or {}
+    contract_anchor = (
+        proposal.branch_anchor_node_id
+        or context.retrieval_trace.get("retrieval_branch_node_id")
+        or observed_contract_anchor
+    )
+    contract = (document.get("branch_contracts") or {}).get(contract_anchor) or {}
     if not context.active_branch_node_id and not (
         (context.retrieval_trace.get("service_resolution") or {}).get("operations")
     ):
-        contract = _preselection_contract(document, proposal.branch_anchor_node_id)
+        contract = _preselection_contract(document, contract_anchor)
     grouped_facts = context.cart.get("facts_by_key") or {}
     contract_facts = (
         _facts_for_contract(contract, grouped_facts)
@@ -5069,11 +5356,10 @@ def _decide(
     # lista inteira por igualdade tornava a recuperacao refem da ordem e de
     # duplicatas; o que importa e nao sobrar nenhum outro erro.
     discovery_only = (
-        not proof["valid"]
-        and context.active_branch_node_id is None
-        and proposal.branch_action.value == "keep"
+        context.active_branch_node_id is None
+        and proposal.branch_action.value == "none"
         and not service_operations
-        and set(proof.get("errors") or []) == {"keep_without_active_branch"}
+        and not proof.get("errors")
     )
     # A fact error belonging to a currently active branch OTHER than the one
     # the model focused on this turn must not, by itself, discard the whole
@@ -5135,6 +5421,7 @@ def _decide(
                 "metadata": {
                     "confirmation": {
                         "kind": "service",
+                        "capability": "branch_selector",
                         "candidate": service_candidate.get("slug"),
                         "candidate_title": service_candidate.get("title"),
                         "branch_anchor_node_id": service_candidate["branch_anchor_node_id"],

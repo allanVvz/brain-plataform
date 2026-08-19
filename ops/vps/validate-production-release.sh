@@ -57,7 +57,10 @@ where filename in (
   '124_reversible_conversion.sql',
   '125_cancel_reverses_the_purchase.sql',
   '126_journey_state_selector.sql',
-  '127_sdr_name_service_confirmation.sql'
+  '127_sdr_name_service_confirmation.sql',
+  '128_confirm_branch_offering_within_journey.sql',
+  '129_carry_over_facts_by_lead.sql',
+  '130_shared_lead_memory_and_journey_commit_v4.sql'
 ) order by filename;
 
 select 'unsafe_table_grants' metric, count(*)::text value
@@ -112,8 +115,11 @@ begin
       '124_reversible_conversion.sql',
       '125_cancel_reverses_the_purchase.sql',
       '126_journey_state_selector.sql',
-      '127_sdr_name_service_confirmation.sql')) <> 16 then
-    raise exception 'release migrations 112-127 are incomplete';
+      '127_sdr_name_service_confirmation.sql',
+      '128_confirm_branch_offering_within_journey.sql',
+      '129_carry_over_facts_by_lead.sql',
+      '130_shared_lead_memory_and_journey_commit_v4.sql')) <> 19 then
+    raise exception 'release migrations 112-130 are incomplete';
   end if;
   if exists (
     select 1 from information_schema.role_table_grants

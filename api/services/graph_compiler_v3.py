@@ -194,6 +194,16 @@ def _compiled_field_validation(item: dict[str, Any]) -> dict[str, Any]:
     return validation
 
 
+def _compiled_confirmation_policy(item: dict[str, Any]) -> dict[str, str]:
+    authored = item.get("confirmation")
+    authored = authored if isinstance(authored, dict) else {}
+    return {
+        "capability": str(authored.get("capability") or "common_fact"),
+        "template_key": str(authored.get("template_key") or "fact"),
+        "context_guidance": str(authored.get("context_guidance") or ""),
+    }
+
+
 def _field_declarations(
     node: dict[str, Any],
     *,
@@ -238,6 +248,7 @@ def _field_declarations(
             "condition": item.get("condition"),
             "priority": float(item.get("priority") or 0.5),
             "overwrite_policy": str(item.get("overwrite_policy") or "explicit_correction"),
+            "confirmation": _compiled_confirmation_policy(item),
         })
     return result
 
@@ -368,6 +379,12 @@ def _with_confirmable_status(field: dict[str, Any]) -> dict[str, Any]:
     return {
         **field,
         "accepted_statuses": list(dict.fromkeys([*accepted, "needs_confirmation"])),
+        "branch_selection_field": True,
+        "confirmation": {
+            **dict(field.get("confirmation") or {}),
+            "capability": "branch_selector",
+            "template_key": "service_selection",
+        },
     }
 
 
