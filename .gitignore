@@ -113,7 +113,12 @@ dashboard/modes.json
 !.agents/commands/*.md
 .mcp.json
 .vault-dev/
-.claude/
+.claude/*
+# Governanca compartilhada de agentes: versionada.
+# settings.local.json (pessoal) e locks continuam ignorados pelo glob acima.
+!.claude/settings.json
+!.claude/agents/
+!.claude/skills/
 tmp/
 memory.backup-*.md
 .pytest_cache/

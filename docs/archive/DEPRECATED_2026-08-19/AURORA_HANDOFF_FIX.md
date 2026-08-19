@@ -1,3 +1,7 @@
+> **DEPRECIADO em 2026-08-19 — SUPERSEDED BY `docs/roadmaps/AGENT_ROADMAP.md`.**
+> Não usar como fonte de verdade. Mantido apenas como histórico.
+> Motivo: root cause de 2026-08-10 (toggle vs estado de handoff), diferente da causa atual.
+
 # Aurora Handoff Fix — Resolução Completa
 
 **Data:** 2026-08-10  

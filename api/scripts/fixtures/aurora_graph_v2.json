@@ -16,7 +16,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "business_model": "appointment",
-        "greeting": "Olá! Aqui é o atendimento da Aurora Estética Automotiva. Como você se chama? E me conta: qual é o modelo do seu carro e o que você gostaria de melhorar nele?",
+        "greeting": "Oi! Eu sou a Lia, do atendimento da Aurora Estética Automotiva. Como você se chama? E me conta: qual é o modelo do seu carro e o que você gostaria de melhorar nele?",
         "summary": "Atendimento da Aurora para tirar dúvidas, fazer orçamento, agendar serviços e coletar informações para um atendente humano.",
         "commercial_note_fields": [
           "modelo_veiculo",
@@ -28,16 +28,48 @@
           "data_desejada",
           "janela_horario"
         ],
+        "agent_identity": {
+          "name": "Lia",
+          "role": "agente de atendimento",
+          "company": "Aurora Estética Automotiva",
+          "company_short": "Aurora"
+        },
         "conversation_policy": {
           "no_journey_fallback_reply": "Obrigada pelo contato. Se surgir uma nova necessidade, é só me dizer como posso ajudar.",
+          "field_feedback": {
+            "invalid_fallback": "Não consegui validar essa resposta.",
+            "recorded_unknown": "Registrei esse dado como desconhecido."
+          },
+          "reactivation": {
+            "manual": [
+              "Oii, sou a Lia de novo! Se precisar de qualquer coisa, estarei por aqui.",
+              "Oi! A Lia voltou. Qualquer coisa que precisar, é só chamar.",
+              "Oii! Aqui é a Lia outra vez. Fico à disposição."
+            ],
+            "journey_completed": [
+              "Oii! Aqui é a Lia. Passei só pra agradecer por ter confiado o seu carro à Aurora. Espero que tenha ficado do jeito que você queria!",
+              "Oi! A Lia por aqui. Obrigada por deixar o seu carro com a gente. Se precisar de mais alguma coisa, é só chamar.",
+              "Oii! É a Lia de novo. Foi um prazer cuidar do seu carro aqui na Aurora. Qualquer coisa, estou por aqui."
+            ],
+            "journey_cancelled": [
+              "Oii, aqui é a Lia. Vi que esse atendimento não seguiu. Se quiser retomar ou olhar outra opção, é só me chamar.",
+              "Oi! A Lia por aqui. Fico à disposição caso queira retomar quando fizer sentido pra você."
+            ]
+          },
           "post_sale_operation_route": "HUMAN",
           "intents": {
             "greeting": {
               "responses": [
-                "Olá! Que bom falar com você.",
-                "Oi! Seja bem-vindo à Aurora.",
-                "Olá! Obrigada por chamar a gente.",
-                "Oi! Bom ter você por aqui."
+                "Oi! Eu sou a Lia, do atendimento da Aurora.",
+                "Olá! Aqui é a Lia, da Aurora Estética Automotiva.",
+                "Oi! Meu nome é Lia e eu cuido do atendimento aqui na Aurora.",
+                "Olá! Sou a Lia, da Aurora. Que bom falar com você."
+              ],
+              "responses_returning": [
+                "Oi de novo! Aqui é a Lia.",
+                "Olá! A Lia por aqui outra vez.",
+                "Oi! Que bom te ver de volta.",
+                "Olá de novo! Fico feliz que tenha voltado."
               ],
               "always_acknowledge": true
             }
@@ -108,6 +140,44 @@
             "vehicle_color": [
               "chapeacao",
               "pintura"
+            ]
+          },
+          "field_question_paraphrases": {
+            "nome_cliente": [
+              "Como você prefere que eu te chame?",
+              "Me diz seu nome completo, por favor."
+            ],
+            "servico": [
+              "Qual desses serviços faz mais sentido pra você agora?",
+              "Me conta o que você está buscando pro carro."
+            ],
+            "objective": [
+              "Só pra eu entender melhor: a ideia é preparar o carro pra venda ou é pra manter ele bem cuidado?",
+              "Esse cuidado é pensando em vender ou em continuar com ele por um bom tempo?"
+            ],
+            "can_visit_in_person": [
+              "Fica fácil pra você passar aqui na Aurora, ou prefere resolver por aqui mesmo?",
+              "Consegue trazer o carro pra gente dar uma olhada de perto?"
+            ],
+            "modelo_veiculo": [
+              "Me diz qual é o carro, por favor.",
+              "Qual modelo você tem aí?"
+            ],
+            "vehicle_year": [
+              "De que ano ele é?",
+              "Me confirma o ano do carro."
+            ],
+            "vehicle_color": [
+              "De que cor ele é?",
+              "Me confirma a cor do carro."
+            ],
+            "condicao": [
+              "Me conta o que você gostaria de melhorar nele.",
+              "O que te motivou a procurar a gente agora?"
+            ],
+            "reclamacao_relato": [
+              "Me conta com suas palavras o que houve, por favor.",
+              "Pode me descrever o que aconteceu?"
             ]
           },
           "field_questions": {
@@ -351,7 +421,9 @@
           "pessoa de verdade",
           "suporte humano",
           "sac humano",
-          "falar com alguem"
+          "falar com alguem",
+          "quero falar com atendente",
+          "chamar um atendente"
         ],
         "summary": "Cliente pede explicitamente para falar com um atendente humano, sem querer seguir a qualificação automática de um serviço.",
         "booking": {
@@ -415,7 +487,9 @@
           "insatisfeito",
           "não gostei",
           "reclame aqui",
-          "tive um problema"
+          "tive um problema",
+          "quero reclamar",
+          "fazer uma reclamacao"
         ],
         "summary": "Cliente relata um problema ou insatisfação com um serviço já realizado e quer registrar uma reclamação.",
         "booking": {
@@ -490,7 +564,11 @@
         "aliases": [
           "avaliação",
           "avaliar veículo",
-          "avaliação do carro"
+          "avaliação do carro",
+          "avaliar meu carro",
+          "fazer uma avaliacao",
+          "quero um orcamento",
+          "orcamento"
         ],
         "summary": "Avaliação presencial do veículo, rápida e sem custo, para a Equipe Aurora montar o orçamento.",
         "price_qualifier": "quote_only",
@@ -590,7 +668,11 @@
         "aliases": [
           "lavagem",
           "lavagem completa",
-          "lavar carro"
+          "lavar carro",
+          "lavar",
+          "lavar o carro",
+          "lavar meu carro",
+          "dar um banho no carro"
         ],
         "summary": "Lavagem técnica detalhada: frisos, cantinhos, emblemas, caixas de rodas, portas, consoles e painel, com aspiração de bancos e carpetes e produto revitalizador nos plásticos.",
         "price_qualifier": "quote_only",
@@ -689,7 +771,13 @@
         "aliases": [
           "higienização",
           "limpeza interna",
-          "higienizar bancos"
+          "higienizar bancos",
+          "higienizar",
+          "higienizar o carro",
+          "limpar por dentro",
+          "limpar os bancos",
+          "lavar os bancos",
+          "limpar o interior"
         ],
         "summary": "Higienização interna completa, do teto ao carpete, com higienização dos bancos e hidratação quando o banco é de couro.",
         "price_qualifier": "quote_only",
@@ -791,7 +879,11 @@
           "polimento do carro",
           "polimento da carroceria",
           "polir carro",
-          "correção de pintura"
+          "correção de pintura",
+          "polir",
+          "polir o carro",
+          "polir meu carro",
+          "tirar riscos"
         ],
         "summary": "Correção mais detalhada da pintura, feita após avaliação e medição do verniz. Remove ou reduz riscos, hologramas, manchas e marcas de lavagem.",
         "price_qualifier": "quote_only",
@@ -893,7 +985,10 @@
         "aliases": [
           "vitrificação",
           "vitrificar carro",
-          "cristalização"
+          "cristalização",
+          "vitrificar",
+          "vitrificar o carro",
+          "cristalizar"
         ],
         "summary": "Vitrificação: mesmo processo do polimento, com foco em correção de riscos e aplicação final do vitrificador como camada de proteção química.",
         "price_qualifier": "quote_only",
@@ -1044,7 +1139,11 @@
         "aliases": [
           "ppf",
           "pelicula de protecao",
-          "pelicula protetora"
+          "pelicula protetora",
+          "proteger a pintura com pelicula",
+          "aplicar pelicula",
+          "instalar ppf",
+          "colocar ppf"
         ],
         "summary": "PPF: película de proteção física contra pequenos impactos, pedras, marcas de chuva ácida e fezes de pássaros.",
         "price_qualifier": "quote_only",
@@ -1143,7 +1242,10 @@
         "aliases": [
           "polimento de vidros",
           "polir vidros",
-          "vidros"
+          "vidros",
+          "polir os vidros",
+          "tirar risco do vidro",
+          "despelicular vidro"
         ],
         "summary": "Reduz manchas minerais, marcas de chuva ácida e pequenas imperfeições no vidro.",
         "price_qualifier": "quote_only",
@@ -1261,7 +1363,13 @@
         "status": "validated",
         "aliases": [
           "chapeação",
-          "funilaria"
+          "funilaria",
+          "chapear",
+          "consertar lataria",
+          "arrumar lataria",
+          "bater lataria",
+          "tirar amassado",
+          "reparar amassado"
         ],
         "summary": "Chapeação. O processo é explicado pela Equipe Aurora.",
         "price_qualifier": "quote_only",
@@ -1365,7 +1473,13 @@
         "status": "validated",
         "aliases": [
           "pintura",
-          "repintura"
+          "repintura",
+          "pintar",
+          "pintar o carro",
+          "pintar meu carro",
+          "repintar",
+          "quero pintar",
+          "pintar o veiculo"
         ],
         "summary": "Pintura. O processo é explicado pela Equipe Aurora.",
         "price_qualifier": "quote_only",
@@ -2782,7 +2896,11 @@
           "polimento de farois",
           "farois",
           "farol",
-          "restaurar farol"
+          "restaurar farol",
+          "restaurar os farois",
+          "polir os farois",
+          "farol amarelado",
+          "farois opacos"
         ],
         "summary": "Recupera faróis amarelados ou opacos e normalmente recebe uma proteção UV depois.",
         "price_qualifier": "quote_only",

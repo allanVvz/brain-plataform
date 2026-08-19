@@ -1,6 +1,16 @@
 # Fluxo e Hierarquia do Conhecimento
 
-Este documento descreve o fluxo atual de conhecimento do Brain AI e a hierarquia usada pelo grafo semantico. Ele reflete o estado do repositorio em 2026-04-30, principalmente as migrations `008`, `009` e `010`, os services `kb_intake_service`, `vault_sync`, `knowledge_graph` e as rotas `/knowledge`.
+> **Escopo (revisado em 2026-08-19):** este documento descreve a camada de
+> **ingestao e curadoria** de conhecimento (migrations `008`/`009`/`010`,
+> `kb_intake_service`, `vault_sync`, `knowledge_graph`, rotas `/knowledge`),
+> no estado do repositorio em 2026-04-30. Ele **nao** cobre o GraphRAG v3
+> (`graph_compiler_v3`, `graph_publications`, `knowledge_rag_chunks`,
+> `graph_agent_runtime_v3`), que e o que realmente alimenta o agente SDR hoje.
+> Para a arquitetura de publicacao e runtime vale
+> `docs/roadmaps/AGENT_ROADMAP.md` e
+> `docs/architecture/graph-json-canonical-architecture.md`.
+
+Este documento descreve o fluxo de ingestao de conhecimento do Brain AI e a hierarquia usada pelo grafo semantico.
 
 ## Visao Geral
 

@@ -132,6 +132,21 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
                 errors.append("conversation_policy.intents.greeting.responses must contain non-empty texts")
             elif any("?" in value for value in responses):
                 errors.append("conversation_policy greeting responses must not embed qualification questions")
+            # Openings for a customer the agent already knows are optional, but
+            # when published they answer to the same contract: the question is
+            # always owned by the qualification contract, never by the opening.
+            returning = greeting.get("responses_returning")
+            if returning is not None:
+                if not isinstance(returning, list) or not returning or any(
+                    not isinstance(value, str) or not value.strip() for value in returning
+                ):
+                    errors.append(
+                        "conversation_policy.intents.greeting.responses_returning must contain non-empty texts"
+                    )
+                elif any("?" in value for value in returning):
+                    errors.append(
+                        "conversation_policy greeting responses_returning must not embed qualification questions"
+                    )
             if greeting.get("always_acknowledge") is not True:
                 errors.append("conversation_policy.intents.greeting.always_acknowledge must be true")
 

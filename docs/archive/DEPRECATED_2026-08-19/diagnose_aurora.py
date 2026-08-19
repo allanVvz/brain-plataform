@@ -1,3 +1,5 @@
+# DEPRECIADO 2026-08-19 - SUPERSEDED BY docs/roadmaps/AGENT_ROADMAP.md
+# Script de diagnostico da trava de HANDOFF de 2026-08-10. Nao usar.
 #!/usr/bin/env python3
 """
 Diagnóstico rápido: Aurora (lead_ref=29) não responde para Allan (lead_ref=41)

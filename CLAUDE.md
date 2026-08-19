@@ -1,24 +1,42 @@
 # Claude Project Contract
 
-Use this file as a root orientation layer. The source of truth remains
-`PROJECT_REQUIREMENTS.md`.
+## Ordem de precedência (resolve qualquer contradição)
+
+```
+1. docs/roadmaps/AGENT_ROADMAP.md   autoridade máxima
+2. AGENTS.md                        regras operacionais de produção
+3. PROJECT_REQUIREMENTS.md          contrato de produto
+4. memory.md                        estado corrente (não é contrato)
+5. docs/**                          referência
+   docs/archive/**                  NUNCA ler; histórico morto
+```
+
+Quando dois arquivos se contradizem, vence o de menor número. Reporte o conflito
+em vez de escolher em silêncio.
 
 ## Core Rules
 
-- Graph JSON v2 is the canonical published graph contract for the Graph UI.
-- Persona access must be validated on every persona-scoped read and mutation.
-- User API keys are stored encrypted server-side and must never be sent to the
-  browser.
-- Public site output is configured in `personas.config.public_site` and rendered
-  from the persona memory/graph through `/api/menu/{persona_slug}`.
-- Public site formats are fixed by `public_site_formats`; initial keys are
-  `cardapio`, `landing_page` and `catalogo_roupas`.
-- Public WhatsApp CTA uses `whatsapp_phone` and `whatsapp_message_template`.
-  Do not use or expose Meta/n8n `whatsapp_phone_number_id` for this link.
+- Graph JSON v2 é o contrato canônico publicado do grafo para a Graph UI.
+- Acesso a persona deve ser validado em toda leitura e mutação escopada por
+  persona.
+- API keys de usuário ficam encriptadas no servidor e nunca vão para o browser.
+- O output de site público é configurado em `personas.config.public_site` e
+  renderizado a partir da memória/grafo da persona via `/api/menu/{persona_slug}`.
+- Os formatos de site público são fixos por `public_site_formats`; as chaves
+  iniciais são `cardapio`, `landing_page` e `catalogo_roupas`.
+- O CTA público de WhatsApp usa `whatsapp_phone` e `whatsapp_message_template`.
+  Não usar nem expor o `whatsapp_phone_number_id` do Meta/n8n para esse link.
 
-## Required Reading Before Larger Changes
+## Leitura obrigatória antes de mudanças maiores
 
+- `docs/roadmaps/AGENT_ROADMAP.md`
+- `AGENTS.md`
 - `PROJECT_REQUIREMENTS.md`
 - `memory.md`
-- `AGENTS.md`
 - `docs/knowledge-flow.md`
+
+## Não ler
+
+`docs/archive/**` é histórico arquivado em 2026-08-19 porque contradizia o
+estado atual. Nunca é fonte de verdade. O bloqueio está em
+`.claude/settings.json` (`permissions.deny`).

@@ -728,3 +728,46 @@ def test_falha_ao_herdar_nao_derruba_o_turno(monkeypatch):
         _documento("nome_cliente", "servico"), {"id": "jornada-1"},
     )
     assert ledger["facts"] == {}
+
+
+def _terminal_context(trace):
+    from schemas.conversation import ConversationContext
+    from services import graph_agent_runtime_v3
+    return ConversationContext(
+        persona_slug="aurora", agent_slug="agent", graph_version=64,
+        graph_checksum="sha256:test", messages=[], cart={}, rag_nodes=[],
+        rag_paths=[], rag_chunks=[], context_cards=[], system_prompt="",
+        available_services=[], active_branch_node_id=None,
+        active_branch_node_ids=[], active_path_checksum=None, branch_node_ids=[],
+        graph_contract={}, publication_id="pub-1",
+        runtime_version=graph_agent_runtime_v3.RUNTIME_VERSION,
+        retrieval_trace=trace, journey_id=None,
+        post_completion_state={"has_terminal_journey": True},
+    )
+
+
+def test_closed_journey_reopens_when_the_graph_itself_resolves_a_service():
+    """Live 2026-08-19: the same fallback sentence eight times to lead 26.
+
+    After a journey closed the model reported `unclear` for every later
+    message, including plain new orders, so no second journey could ever open.
+    """
+    from schemas.conversation import InteractionKind, JourneyAction
+    from services import graph_agent_runtime_v3
+
+    context = _terminal_context({"deterministic_branch_match": True})
+    assert graph_agent_runtime_v3._resolve_journey_action(
+        context, InteractionKind.UNCLEAR,
+    ) is JourneyAction.OPEN
+
+
+def test_courtesy_close_still_never_reopens_a_closed_journey():
+    from schemas.conversation import InteractionKind, JourneyAction
+    from services import graph_agent_runtime_v3
+
+    context = _terminal_context({"deterministic_branch_match": False})
+    for kind in (InteractionKind.UNCLEAR, InteractionKind.COURTESY_CLOSE,
+                 InteractionKind.POST_SALE_OPERATION):
+        assert graph_agent_runtime_v3._resolve_journey_action(
+            context, kind,
+        ) is JourneyAction.NONE
