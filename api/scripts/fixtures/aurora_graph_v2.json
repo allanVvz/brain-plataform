@@ -142,7 +142,7 @@
               "pintura"
             ]
           },
-                    "field_question_paraphrases": {
+          "field_question_paraphrases": {
             "nome_cliente": [
               "Como você prefere que eu te chame?",
               "Me diz seu nome completo, por favor."
@@ -421,7 +421,9 @@
           "pessoa de verdade",
           "suporte humano",
           "sac humano",
-          "falar com alguem"
+          "falar com alguem",
+          "quero falar com atendente",
+          "chamar um atendente"
         ],
         "summary": "Cliente pede explicitamente para falar com um atendente humano, sem querer seguir a qualificação automática de um serviço.",
         "booking": {
@@ -485,7 +487,9 @@
           "insatisfeito",
           "não gostei",
           "reclame aqui",
-          "tive um problema"
+          "tive um problema",
+          "quero reclamar",
+          "fazer uma reclamacao"
         ],
         "summary": "Cliente relata um problema ou insatisfação com um serviço já realizado e quer registrar uma reclamação.",
         "booking": {
@@ -560,7 +564,11 @@
         "aliases": [
           "avaliação",
           "avaliar veículo",
-          "avaliação do carro"
+          "avaliação do carro",
+          "avaliar meu carro",
+          "fazer uma avaliacao",
+          "quero um orcamento",
+          "orcamento"
         ],
         "summary": "Avaliação presencial do veículo, rápida e sem custo, para a Equipe Aurora montar o orçamento.",
         "price_qualifier": "quote_only",
@@ -660,7 +668,11 @@
         "aliases": [
           "lavagem",
           "lavagem completa",
-          "lavar carro"
+          "lavar carro",
+          "lavar",
+          "lavar o carro",
+          "lavar meu carro",
+          "dar um banho no carro"
         ],
         "summary": "Lavagem técnica detalhada: frisos, cantinhos, emblemas, caixas de rodas, portas, consoles e painel, com aspiração de bancos e carpetes e produto revitalizador nos plásticos.",
         "price_qualifier": "quote_only",
@@ -759,7 +771,13 @@
         "aliases": [
           "higienização",
           "limpeza interna",
-          "higienizar bancos"
+          "higienizar bancos",
+          "higienizar",
+          "higienizar o carro",
+          "limpar por dentro",
+          "limpar os bancos",
+          "lavar os bancos",
+          "limpar o interior"
         ],
         "summary": "Higienização interna completa, do teto ao carpete, com higienização dos bancos e hidratação quando o banco é de couro.",
         "price_qualifier": "quote_only",
@@ -861,7 +879,11 @@
           "polimento do carro",
           "polimento da carroceria",
           "polir carro",
-          "correção de pintura"
+          "correção de pintura",
+          "polir",
+          "polir o carro",
+          "polir meu carro",
+          "tirar riscos"
         ],
         "summary": "Correção mais detalhada da pintura, feita após avaliação e medição do verniz. Remove ou reduz riscos, hologramas, manchas e marcas de lavagem.",
         "price_qualifier": "quote_only",
@@ -963,7 +985,10 @@
         "aliases": [
           "vitrificação",
           "vitrificar carro",
-          "cristalização"
+          "cristalização",
+          "vitrificar",
+          "vitrificar o carro",
+          "cristalizar"
         ],
         "summary": "Vitrificação: mesmo processo do polimento, com foco em correção de riscos e aplicação final do vitrificador como camada de proteção química.",
         "price_qualifier": "quote_only",
@@ -1114,7 +1139,11 @@
         "aliases": [
           "ppf",
           "pelicula de protecao",
-          "pelicula protetora"
+          "pelicula protetora",
+          "proteger a pintura com pelicula",
+          "aplicar pelicula",
+          "instalar ppf",
+          "colocar ppf"
         ],
         "summary": "PPF: película de proteção física contra pequenos impactos, pedras, marcas de chuva ácida e fezes de pássaros.",
         "price_qualifier": "quote_only",
@@ -1213,7 +1242,10 @@
         "aliases": [
           "polimento de vidros",
           "polir vidros",
-          "vidros"
+          "vidros",
+          "polir os vidros",
+          "tirar risco do vidro",
+          "despelicular vidro"
         ],
         "summary": "Reduz manchas minerais, marcas de chuva ácida e pequenas imperfeições no vidro.",
         "price_qualifier": "quote_only",
@@ -1331,7 +1363,13 @@
         "status": "validated",
         "aliases": [
           "chapeação",
-          "funilaria"
+          "funilaria",
+          "chapear",
+          "consertar lataria",
+          "arrumar lataria",
+          "bater lataria",
+          "tirar amassado",
+          "reparar amassado"
         ],
         "summary": "Chapeação. O processo é explicado pela Equipe Aurora.",
         "price_qualifier": "quote_only",
@@ -1435,7 +1473,13 @@
         "status": "validated",
         "aliases": [
           "pintura",
-          "repintura"
+          "repintura",
+          "pintar",
+          "pintar o carro",
+          "pintar meu carro",
+          "repintar",
+          "quero pintar",
+          "pintar o veiculo"
         ],
         "summary": "Pintura. O processo é explicado pela Equipe Aurora.",
         "price_qualifier": "quote_only",
@@ -2852,7 +2896,11 @@
           "polimento de farois",
           "farois",
           "farol",
-          "restaurar farol"
+          "restaurar farol",
+          "restaurar os farois",
+          "polir os farois",
+          "farol amarelado",
+          "farois opacos"
         ],
         "summary": "Recupera faróis amarelados ou opacos e normalmente recebe uma proteção UV depois.",
         "price_qualifier": "quote_only",
