@@ -1477,6 +1477,102 @@ def test_explicit_unknown_marks_field_unknown_immediately():
     assert fact["metadata"] == {"reason": "explicit_unknown"}
 
 
+def test_request_to_continue_without_pending_answer_is_not_a_faq():
+    faq = {
+        "id": "faq:schedule", "node_type": "faq", "status": "validated",
+        "data": {
+            "answer": "Appointments depend on human confirmation.",
+            "claims": [{
+                "claim_type": "schedule", "policy": {"mode": "informational"},
+                "evidence_node_ids": ["faq:schedule"],
+            }],
+        },
+    }
+    persona_node = {
+        "id": "persona:generic", "node_type": "persona", "data": {
+            "conversation_policy": {"doubt_handling": {
+                "answer_before_qualification": "Answer first.",
+                "continue_with_first_missing_field": "Continue with the pending field.",
+                "deferred_response": "The team will explain the published detail.",
+            }},
+        },
+    }
+    document = {
+        "nodes": [persona_node, faq],
+        "node_by_id": {"persona:generic": persona_node, "faq:schedule": faq},
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{
+            "role": "user", "content": "Podemos seguir sem essa informação?",
+            "message_id": "msg-defer",
+        }],
+        cart={"asked_question_node_ids": ["q:pending"]},
+        rag_nodes=[faq], rag_paths=[], graph_contract={},
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+        retrieval_trace={
+            "faq_selection_method": "semantic",
+            "interrogative_clause": "Podemos seguir sem essa informação?",
+            "selected_faq_node_id": "faq:schedule",
+            "selected_faq_chunk_id": "chunk:schedule",
+        },
+    )
+    proposed = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="sha256:path", extracted_facts=[], claims=[],
+        next_question_node_id="q:pending", cited_node_ids=[], cited_chunk_ids=[],
+        reply="", qualification_complete=False, handoff_requested=False,
+    )
+
+    resolution = graph_agent_runtime_v3._doubt_resolution(
+        context=context, document=document, proposal=proposed,
+        contract={"closure_node_ids": ["branch:a", "faq:schedule"]},
+        chunk_sources={"chunk:schedule": "faq:schedule"},
+        package_node_ids={"branch:a", "faq:schedule"},
+    )
+
+    assert resolution is None
+
+
+def test_request_to_continue_without_pending_answer_marks_it_unknown():
+    contract = {
+        "fields": [{
+            "key": "generic_field", "owner_node_id": "branch:a", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:pending",
+        }],
+        "questions": {
+            "q:pending": {"field_key": "generic_field", "text": "Pending question?"},
+        },
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{
+            "role": "user", "content": "Podemos seguir sem essa informação?",
+            "message_id": "msg-defer",
+        }],
+        cart={"facts": {}, "asked_question_node_ids": ["q:pending"]},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="sha256:path", extracted_facts=[], claims=[],
+        next_question_node_id="q:pending", cited_node_ids=[], cited_chunk_ids=[],
+        reply="", qualification_complete=False, handoff_requested=False,
+    )
+
+    fact = graph_agent_runtime_v3._unanswered_fact_after_question_limit(
+        context=context, contract=contract, ledger_facts={}, proposal=proposal,
+        max_attempts=1, doubt_answered=True,
+    )
+
+    assert fact and fact["status"] == "unknown"
+    assert fact["reason"] == "explicit_unknown"
+    assert fact["evidence_span"] == "Podemos seguir sem essa informação?"
+
+
 def test_commercial_projection_separates_common_and_per_service_facts():
     document = {
         "node_by_id": {
