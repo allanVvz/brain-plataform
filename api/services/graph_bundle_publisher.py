@@ -109,7 +109,6 @@ def stage_bundle(
             "tags": node["tags"],
             "status": node["status"],
             "source_table": "graph_bundle",
-            "source_id": node["id"],
             "metadata": {
                 "graph_json_node_id": node["id"],
                 "graph_bundle_draft_checksum": approved_draft_checksum,

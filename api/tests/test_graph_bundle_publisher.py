@@ -47,10 +47,11 @@ def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypa
         "list_all_knowledge_graph",
         lambda **_kwargs: next(graph_reads),
     )
+    materialized_nodes: list[dict] = []
     monkeypatch.setattr(
         graph_bundle_publisher.supabase_client,
         "upsert_knowledge_node",
-        lambda row: row,
+        lambda row: materialized_nodes.append(row) or row,
     )
     monkeypatch.setattr(
         graph_bundle_publisher.supabase_client,
@@ -84,6 +85,9 @@ def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypa
 
     assert staged["publication"]["checksum"] == plan["runtime_checksum"]
     assert staged["activation"] is None
+    assert materialized_nodes
+    assert all("source_id" not in row for row in materialized_nodes)
+    assert all(row["metadata"].get("graph_json_node_id") for row in materialized_nodes)
 
 
 def test_stage_bundle_rejects_stale_human_approval_before_writes(monkeypatch):
