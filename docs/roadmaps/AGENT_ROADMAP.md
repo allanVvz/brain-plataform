@@ -77,32 +77,49 @@ paralelo seguro.
 |---|---|---|---|
 | P0 | Destravar a Aurora SDR (ciclo com memória travado) | **em aberto — evidência coletada 2026-08-19 (branch `chore/aurora-unblock-p0-evidence-2026-08-19`, commit `62d8c62`, não mesclada): nenhuma das 5 hipóteses reproduziu contra tráfego real; falta sessão de prova formal via WA Validator e teste da hipótese 3 (orçamento de prompt) antes de marcar concluído** | `aurora-unblock` |
 | 0 | Higiene do repositório e precedência de documentos | **concluído 2026-08-19** | `deprecation-sweeper` |
-| 1 | Publisher genérico, PublicationPlan, embeddings incrementais | a fazer | `bundle-migrator`, `graph-publisher`, `release-gate` |
+| 1 | Publisher genérico, PublicationPlan, embeddings incrementais | **em progresso — GraphBundle + PublicationPlan + staging/ativação em duas fases já existem e publicaram a Tock Fatal real; falta embeddings incrementais por chunk e o publisher completo de edição/remoção** | `bundle-migrator`, `graph-publisher`, `release-gate` |
 | 2 | Cards editáveis alteram o agente de verdade | a fazer | `card-editor` |
 | 3 | Sofia produz dados declarativos, não código | a fazer | `faq-coverage`, `sdr-evaluator` |
-| 4 | Tock Fatal nasce no pipeline novo | a fazer | `graph-publisher` |
+| 4 | Tock Fatal nasce no pipeline novo | **em progresso — bundle nominal (`sdr-qualification-v1`, 2 galhos de audiência) ativo em produção e provado via WA Validator (varejo, revenda, troca de galho, lacuna de conhecimento); falta conteúdo comercial real (produto/preço/atacado-varejo) — ver item 4a** | `graph-publisher` |
 | 5 | n8n estável e desacoplado do conteúdo | a fazer | — |
 | 6 | Aurora migra para o bundle | a fazer | `bundle-migrator` |
-| 7 | Orquestradores por estágio e campanha por ciclo | a fazer | `graph-publisher`, `card-editor` |
+| 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20, ver seção própria abaixo** | `graph-publisher`, `card-editor` |
 
 ### Progresso local do pipeline novo — 2026-08-20
 
-O item 1 continua **a fazer** como entrega publicável. Foi concluído apenas o
-primeiro slice local e reversível: contrato `GraphBundle` em memória,
-`PublicationPlan` puro, CLI dry-run, fixture comercial sintética e skill Sofia
-composta. O slice não persiste staging, não gera embeddings, não ativa
-publicação e não altera produção.
+`GraphBundle` (contrato declarativo), `PublicationPlan` (diff + checksum +
+custo) e o publisher em duas fases (materialização/staging com gate CAS,
+depois ativação explícita via `activate_persona_whatsapp_binding`) existem e
+já publicaram um bundle real: `data/graph_bundles/tock-fatal/sdr-qualification-v1.json`,
+ativo em produção, `runtime_version=graph_agent_runtime_v3`,
+`decision_owner=n8n_agents` (binding `680422f3`). A seleção de galho deixou de
+usar o literal `servico` — `conversation_policy.branch_selection.field_key`
+agora é lido do grafo (`purchase_profile` na Tock Fatal); `appointment_policy`
+segue só como adapter legado da Aurora. Saudação também deixou de ser string
+hardcoded: `_greeting_policy` (commit `0c587f6`, 2026-08-20) agora lê nodes FAQ
+com `role: greeting_response` do grafo publicado, casados por trigger da
+mensagem do cliente — mais um caso do princípio "card = node do grafo".
 
-Em 2026-08-20 foi acrescentado o publisher genérico com duas fases e gates CAS:
-materialização/staging e ativação explícita. Embeddings incrementais por chunk e
-o publisher completo de edição/remoção continuam pendentes; por isso o item 1
-ainda não está concluído como arquitetura final.
+Ainda pendente pro item 1 fechar como arquitetura final: embeddings
+incrementais por `chunk_checksum` (compilação hoje reembeda tudo a cada
+publish) e o publisher completo de edição/remoção (hoje só cobre
+materialização inicial). Roadmap incremental e gates completos:
+`docs/architecture/GRAPH_BUNDLE_PUBLICATION_PLAN.md`.
 
-Roadmap incremental e gates: `docs/architecture/GRAPH_BUNDLE_PUBLICATION_PLAN.md`.
+### Item 4a — o que falta pra Tock Fatal ser uma persona real, não uma prova
 
-O P0 permanece aberto até a evidência formal da seção seguinte existir. Commits
-de correção e relatos de conversa funcionando não substituem a prova de saída
-via WA Validator interno.
+O bundle ativo hoje é deliberadamente nominal: **"não declara produto, preço,
+estoque, prazo, política nem pedido mínimo"** (`GRAPH_BUNDLE_PUBLICATION_PLAN.md`).
+Conteúdo comercial real já está capturado e validado (não inventado) em
+`docs/tock-fatal-modal-marketing-graph.md` (2 produtos confirmados — Kit Modal 1
+e 2, preços unidade/kit_5/kit_10 — e 2 audiências, `atacado-revenda`/`varejo`,
+com copy próprio para cada) e em `tests/fixtures/vault_modal/TOCK_FATAL/`.
+Falta: (1) trazer esse conteúdo pro bundle real como próxima revisão do
+`PublicationPlan`, nunca reescrevendo os arquivos-fonte; (2) manter fora
+`tricots`/`cropped-de-modal` — marcados `pending_source`, proibidos de virar
+node por regra do próprio documento; (3) não reusar
+`data/graph_documents/tock-fatal.v001.json`/`.v002.json` como fonte — payload é
+da Baita, confirmado quebrado.
 
 ### Débito técnico — motor selecionado não significa motor operacional
 
@@ -110,13 +127,18 @@ Confirmado em produção para `tock-fatal` em 2026-08-20: o dashboard mostrava
 `deterministic` selecionado embora o binding ainda estivesse em
 `conversation_v1`, sem `runtime_version`, sem workflow n8n e sem qualquer
 publicação GraphRAG v3. A seleção persistida é somente intenção de routing;
-ela não constitui prova de prontidão.
+ela não constitui prova de prontidão. **O binding específico da Tock Fatal já
+foi corrigido** (confirmado via query direta em produção, 2026-08-20:
+`runtime_version=graph_agent_runtime_v3`, `pipeline_contract=conversation_v3`,
+`decision_owner=n8n_agents`) — mas isso foi uma correção pontual desse
+binding, não o fechamento do débito.
 
-O contrato da UI/API passa a separar `conversation_mode` de `readiness` e deve
-exibir estado `blocked` ou `paused` enquanto faltar binding, publicação v3,
-credencial/workflow ou executor compatível. Nenhum card pode usar “ativado”
-apenas porque está selecionado. Fechar este débito exige a mesma verificação
-como gate transacional antes da troca e como diagnóstico no GET de routing.
+O débito estrutural continua aberto: o contrato da UI/API precisa separar
+`conversation_mode` de `readiness` e exibir estado `blocked`/`paused` enquanto
+faltar binding, publicação v3, credencial/workflow ou executor compatível.
+Nenhum card pode usar "ativado" apenas porque está selecionado. Fechar isso
+exige a mesma verificação como gate transacional antes da troca e como
+diagnóstico no GET de routing — não implementado ainda.
 
 ---
 
@@ -210,12 +232,55 @@ nunca WhatsApp real — regra rígida de `AGENTS.md`.
 
 ---
 
-## 7 — Orquestradores por estágio e campanha por ciclo
+## 7 — Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente
 
 Estrutura alvo do atendimento, registrada aqui porque **nada dela entra no P0**.
 Hoje a Aurora tem um binding só, e esse binding acumula SDR e CS.
 
-### Um dono por estágio
+**Redesenhado em 2026-08-20** a partir de um documento de arquitetura genérica
+("Agentic Revenue System" — `Tenant → Persona → Process → Graph → Capabilities
+→ Agents`, `LeadState` multi-dimensional, `Next Best Action`, `Agent
+Registry`/`Capability Resolver`, `MCP Registry`, `Prompt Stack`, `Control
+Plane`/`Runtime Plane`) trazido pelo usuário. **Regra inegociável fixada por
+ele**: toda estrutura de conhecimento que a Sofia cria é a fonte universal e
+absoluta de conhecimento pra esse sistema — nenhum agente especialista tem
+base de conhecimento própria fora do grafo que a Sofia já escreve. A camada
+"Graph" + "Knowledge" desse documento **já é** o pipeline GraphBundle →
+`graph_compiler_v3` → RAG que este roadmap descreve acima; o que falta
+construir é só a camada de **orquestração** por cima — nunca um sistema de
+conteúdo paralelo.
+
+### Mapeamento — o que já existe vs. o que falta
+
+| Conceito | Já existe (reusar, não recriar) | O que falta |
+|---|---|---|
+| `Persona` | tabela `personas` | — |
+| `Graph` + `Knowledge` | GraphBundle → `graph_compiler_v3` → RAG chunks/entries que a Sofia escreve | — |
+| `State.collected_fields`/`missing_fields` | `conversation_ledger`/`facts_by_key` | dimensão "completude" — ver item 7a |
+| `State` (fit/intenção/urgência/autoridade/capacidade) | nada | dimensões extras, deliberadamente fora de escopo agora |
+| `Policy` (`required_fields` por processo/audiência) | `appointment_policy`, `conditional_fields`, `conversation_policy.branch_selection` | nomeação genérica ainda incompleta (`appointment_policy` só devia se chamar assim pra agendamento de verdade) |
+| `Next Best Action` | implícito dentro de `_decide()` (`graph_agent_runtime_v3.py`, função com ~1200 linhas — o próprio erro estrutural que este roadmap já nomeia) | extrair como decisão explícita e nomeada — pré-requisito técnico pra tudo abaixo |
+| `Agent` (especialista com prompt/MCP/tools próprios) | não existe — hoje é 1 persona = 1 modelo/prompt | primeiro só 2 agentes: SDR e Closer, sem MCP |
+| `Capability Resolver`/`Agent Registry` | `agents_service.py` (rótulo sdr/closer/followup por estágio — precursor primitivo) | resolução real por capability |
+| `MCP Registry` + permissão por tool | nada no repo | fora de escopo — nenhum caso de uso real ainda |
+| `Tenant` (multi-organização) | nada | fora de escopo — não necessário no número atual de clientes |
+| Seletor `multi_agentic` (3º `decision_owner`) | hoje só `deterministic`/`n8n_agents` existem (migration 074) | novo — ver item 7c |
+
+### 7a — Pontuação de jornada (a dimensão "completude" do `LeadState`)
+
+Pontuação simplificada = fração das perguntas do "caminho feliz" já
+respondidas: `score = count(required_fields do galho ativo com status
+"known") / count(required_fields totais do galho)`. "Caminho feliz" já é
+`branch_contracts[*].fields`, compilado pelo `graph_compiler_v3` — nada novo a
+computar na compilação, só consumir. Faixas de estágio (ajustáveis por
+persona no futuro, não hardcoded): SDR concede até 50%, conversão 75%, venda
+100%, pós-venda acima de 100%. Fica exposto (jornada, dashboard) — **não**
+aciona roteamento automático agora. Fecha a peça que este item já chamava de
+"o contrato que diz qual audiência/serviço/appointment cada campanha publica".
+Peso por tempo/esforço de jornada fica como refinamento futuro documentado,
+não construído nesta rodada.
+
+### 7b — Um dono por estágio (Agent Registry mínimo)
 
 ```
 SDR     -> até `qualificado`
@@ -223,15 +288,42 @@ Closer  -> `convertido` e `agendado`
 CS      -> `concluído`
 ```
 
-Os galhos `service` do grafo (`atendimento-humano`, `reclamacao`) já são
-roteiros de atendimento distintos da qualificação comercial: são os primeiros
-candidatos a ganhar dono próprio. Enquanto isso, o SDR responde por eles.
+Primeiro passo real: formalizar o que já existe informalmente em
+`agents_service.py` (rótulo por estágio) como registro de verdade —
+`capability -> agent`, onde `capability` vem do estágio calculado pela
+pontuação (7a) e `agent` é um sub-conjunto de prompt/policy do MESMO grafo
+compilado (SDR = galhos até qualificado; Closer = galhos de fechamento). O
+Closer continua sem reasoning próprio por enquanto — é um papel configurado,
+não um LLM novo. Os galhos `service` do grafo (`atendimento-humano`,
+`reclamacao`) já são roteiros distintos da qualificação comercial: são os
+primeiros candidatos a ganhar dono próprio; enquanto isso, o SDR responde por
+eles.
 
 O histórico atravessa todos os estágios sem cópia: `conversation_journeys`
 guarda sequência e desfecho, `carry_over` guarda o que o cliente **é**, e
 `conversation_carry_over_facts_by_lead_v1` (migration 129) busca em qualquer
 jornada do lead. Um orquestrador novo lê a mesma memória — nenhum deles ganha
 armazenamento próprio.
+
+### 7c — `multi_agentic`: terceiro `decision_owner`, gradual, sem quebrar Aurora
+
+`decision_owner` hoje só aceita `deterministic`/`n8n_agents` (migration 074).
+Ordem de construção, do menor risco pro maior:
+
+1. **Testar dentro do n8n primeiro.** Hoje `persona-conversation-template.json`
+   chama um modelo só. Variante com 2 modelos — um nó classificador leve
+   (audiência/intenção/estágio, barato) antes do nó de resposta (especialista,
+   como hoje) — prova o conceito de "múltiplos agentes" sem mover nada pro
+   backend.
+2. **Só depois de provado estável**, mover a orquestração pesada (Capability
+   Resolver, seleção de agente) pro backend Python. n8n fica reduzido a
+   transporte/log (webhook receive + histórico de execução) — n8n continua
+   útil, não é removido.
+3. Migration nova permitindo `decision_owner = 'multi_agentic'` só depois do
+   passo 1 provado — checar `activate_persona_whatsapp_binding` e as
+   triggers de integridade das migrations 067-072 antes de mexer.
+4. **A Aurora continua em `n8n_agents` até isso estar provado na Tock Fatal**
+   — nenhuma migração forçada de persona já em produção real.
 
 ### Campanha muda com o ciclo
 
@@ -245,16 +337,29 @@ ativação  ->  CS  ->  reativação  ->  remarketing
 
 O que falta existir: vínculo lead→campanha escrito pelo próprio ciclo (hoje
 `campaign_recipients` só serve a disparo de saída), e o contrato que diz qual
-audiência/serviço/appointment cada campanha publica. Enquanto isso não existe,
-a diferença de comportamento entre o primeiro ciclo e os seguintes é apenas de
-prompt, lendo `journey.sequence` e `shared_memory.journey_outcomes` — que é o
-que o P0 entregou.
+audiência/serviço/appointment cada campanha publica. `campaigns_service.py`
+já produz `audience_snapshot` na revisão da campanha, mas `conversation_runtime`/
+`graph_agent_runtime_v3` nunca leem isso — zero hits confirmados. Enquanto
+isso não existe, a diferença de comportamento entre o primeiro ciclo e os
+seguintes é apenas de prompt, lendo `journey.sequence` e
+`shared_memory.journey_outcomes` — que é o que o P0 entregou. Duas opções em
+aberto pra decidir depois, nenhuma escolhida aqui: lead→campanha escrito pelo
+próprio ciclo, ou tabela nova (precisa de autorização explícita, regra de
+governança 7 abaixo).
 
 ### O que o P0 deliberadamente não fez
 
 - Não criou tabela, migration nem vínculo lead→campanha.
 - Não separou bindings por estágio.
 - Não moveu os galhos `service` para outro dono.
+
+### O que fica fora de escopo por enquanto (não é "nunca", é "não agora")
+
+- `Tenant` formal, `MCP Registry`/permissão por tool, `Agent Builder`
+  (criação de especialista sem código), dimensões extras de `LeadState`
+  (fit/intenção/urgência/autoridade separadas de completude).
+- Closer com reasoning próprio (LLM dedicado) — ele entra como próxima etapa,
+  depois do Agent Registry mínimo (7b) provado.
 
 ---
 
