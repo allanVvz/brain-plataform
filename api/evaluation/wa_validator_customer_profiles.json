@@ -79,10 +79,10 @@
   },
   "sales": {
     "openings": {
-      "sdr_sales_retail": "Oi! Estou procurando algumas peças para uso próprio.",
+      "sdr_sales_retail": "Oi! Quero algumas peças para uso próprio.",
       "sdr_sales_reseller": "Oi! Quero conhecer opções para revenda.",
       "sdr_sales_branch_switch": "Oi! Quero conhecer opções para revenda.",
-      "sdr_sales_knowledge_gap": "Oi! Estou procurando algumas peças para uso próprio."
+      "sdr_sales_knowledge_gap": "Oi! Quero algumas peças para uso próprio."
     },
     "answers": {
       "retail_need": {

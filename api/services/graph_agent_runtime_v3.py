@@ -837,7 +837,7 @@ _SERVICE_DROP_MARKER = re.compile(
 )
 
 _SERVICE_SELECT_MARKER = re.compile(
-    r"\b(?:quero|queria|gostaria|preciso|procur\w*|tenho\s+interesse|fazer|contratar|"
+    r"\b(?:quero|queria|gostaria|preciso|tenho\s+interesse|fazer|contratar|"
     r"selecion\w*|escolh\w*|adicion\w*|inclu\w*|coloc\w*)\b",
     re.IGNORECASE,
 )
