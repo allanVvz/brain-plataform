@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.6.0"
+COMPILER_VERSION = "graph-compiler-v3.6.1"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -658,6 +658,7 @@ def compile_graph(
             for projection_id, stable_id in db_to_stable.items()
             if stable_id in retained_ids
         }
+    nodes.sort(key=lambda node: str(node["id"]))
     node_by_id = {node["id"]: node for node in nodes}
     if not nodes:
         errors.append("publication_has_no_published_nodes")
@@ -678,6 +679,7 @@ def compile_graph(
             "metadata": _runtime_edge_metadata(row),
             "primary": relation in STRUCTURAL_RELATIONS,
         })
+    edges.sort(key=lambda edge: str(edge["id"]))
 
     parents: dict[str, tuple[str, str]] = {}
     children: dict[str, list[str]] = defaultdict(list)

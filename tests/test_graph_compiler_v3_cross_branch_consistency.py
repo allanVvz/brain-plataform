@@ -333,6 +333,31 @@ def test_runtime_checksum_ignores_graph_bundle_and_layout_provenance():
     assert annotated["checksum"] == clean["checksum"]
 
 
+def test_compiler_checksum_is_invariant_to_input_row_order():
+    root = node(1, "persona:canonical", parent_type="persona")
+    first = node(
+        2, "branch:first", parent_type="product",
+        data={"capabilities": {"branch_anchor": True}},
+    )
+    second = node(
+        3, "branch:second", parent_type="product",
+        data={"capabilities": {"branch_anchor": True}},
+    )
+    node_rows = [root, first, second]
+    edge_rows = [edge(1, root, first), edge(2, root, second)]
+    forward = graph_compiler_v3.compile_graph(
+        persona=PERSONA, node_rows=node_rows, edge_rows=edge_rows
+    )
+    reversed_rows = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=list(reversed(node_rows)),
+        edge_rows=list(reversed(edge_rows)),
+    )
+    assert reversed_rows["checksum"] == forward["checksum"]
+    assert reversed_rows["nodes"] == forward["nodes"]
+    assert reversed_rows["edges"] == forward["edges"]
+
+
 def test_declaration_scope_binds_field_to_campaign_node():
     root = node(1, "persona:aurora", parent_type="persona")
     campaign = node(2, "campaign:premium", parent_type="campaign")

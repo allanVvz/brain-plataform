@@ -110,7 +110,7 @@ novos e zero breaking changes. O gate aprovado é:
 
 ```text
 draft  : sha256:69efeb8fb5eef25512e901d1fd2fd1a05362a4bc97f24b94345e684c757cde50
-runtime: sha256:1d5e1783bc2d4f2c321a41b9905974f3a766405756efa574a58964d9613f91e1
+runtime: sha256:453b5a52654d1dd01ff497d3fc56518404c0fd3f3d65cc8fccd72ec4211ebbef
 ```
 
 `graph_bundle_publisher.stage_bundle` materializa nodes/edges canônicos,

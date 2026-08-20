@@ -2,7 +2,7 @@
 
 Contract-ID: `graph-agent-runtime-v3`
 
-Compiler: `graph-compiler-v3.6.0`
+Compiler: `graph-compiler-v3.6.1`
 
 Este Markdown faz parte da proveniência de cada publicação. O compilador grava
 seu caminho e checksum no Graph JSON; qualquer alteração deliberada neste
