@@ -62,6 +62,29 @@ def test_tock_sales_bundle_declares_terminal_qualification_copy():
         }]
 
 
+def test_tock_sales_bundle_publishes_voice_tone_greetings_and_plain_labels():
+    document = graph_bundle.compile_bundle(load_tock_example())
+    node_by_id = document["node_by_id"]
+
+    assert node_by_id["tone:tock-vitoria-voice"]["node_type"] == "tone"
+    assert node_by_id["tone:tock-vitoria-clear-language"]["node_type"] == "tone"
+    greeting = node_by_id["persona:tock-fatal"]["data"]["conversation_policy"][
+        "intents"
+    ]["greeting"]
+    assert len(greeting["response_node_ids"]) == 6
+    assert all(
+        node_by_id[node_id]["node_type"] == "faq"
+        and node_by_id[node_id]["data"]["role"] == "greeting_response"
+        for node_id in greeting["response_node_ids"]
+    )
+    for branch_id in document["branch_anchors"]:
+        contract = document["branch_contracts"][branch_id]
+        assert contract["field_labels"]["purchase_profile"] == "tipo de compra"
+        assert "tone:tock-vitoria-voice" in contract["closure_node_ids"]
+        assert "tone:tock-vitoria-clear-language" in contract["closure_node_ids"]
+        assert set(greeting["response_node_ids"]).issubset(contract["closure_node_ids"])
+
+
 @pytest.mark.parametrize(
     ("copy_key", "invalid_value"),
     [

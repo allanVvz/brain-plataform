@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.6.1"
+COMPILER_VERSION = "graph-compiler-v3.6.2"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -1000,7 +1000,11 @@ def compile_graph(
             "claims": claims,
             "completion": completion,
             "conversation_policy": conversation_policy,
-            "field_labels": dict(appointment_policy.get("field_labels") or {}),
+            "field_labels": dict(
+                conversation_policy.get("field_labels")
+                or appointment_policy.get("field_labels")
+                or {}
+            ),
             "handoff": handoff if isinstance(handoff, dict) else {},
             "handoff_rule_node_ids": handoff_rules,
             "handoff_rules": handoff_contract_rules,

@@ -1883,31 +1883,6 @@ def _service_disambiguation_response(
     )
 
 
-def _service_operation_acknowledgement(
-    document: dict[str, Any], operations: list[dict[str, Any]],
-) -> str:
-    node_by_id = document.get("node_by_id") or {}
-
-    def titles(action: str) -> list[str]:
-        return [
-            str((node_by_id.get(item.get("branch_anchor_node_id")) or {}).get("title")
-                or item.get("branch_anchor_node_id"))
-            for item in operations if item.get("action") == action
-        ]
-
-    parts: list[str] = []
-    added = titles("add")
-    kept = titles("keep")
-    dropped = titles("drop")
-    if added:
-        parts.append("Adicionei " + ", ".join(added) + ".")
-    if kept and not added:
-        parts.append("Mantive " + ", ".join(kept) + " em foco.")
-    if dropped:
-        parts.append("Removi " + ", ".join(dropped) + ".")
-    return " ".join(parts)
-
-
 def active_offering_titles(
     document: dict[str, Any],
     active_branch_ids: list[str],
@@ -3190,25 +3165,73 @@ def _qualification_question_node_id(document: dict[str, Any], field_key: str) ->
 
 def _greeting_policy(
     document: dict[str, Any], *, contract: dict[str, Any], facts: dict[str, Any],
-    lead_ref: int = 0, recent_replies: Sequence[str] = (),
+    lead_ref: int = 0, recent_replies: Sequence[str] = (), message: str = "",
 ) -> dict[str, Any] | None:
     persona = _persona_node(document)
-    data = persona.get("data") or {}
-    policy = data.get("conversation_policy") or {}
+    persona_data = persona.get("data") or {}
+    policy = persona_data.get("conversation_policy") or {}
     greeting = ((policy.get("intents") or {}).get("greeting") or {})
     # A customer the agent already knows must not be introduced from scratch
     # again. The graph publishes the two sets separately; when it only
     # publishes the first-contact set, that one keeps serving both cases.
-    returning = bool(facts) and bool(greeting.get("responses_returning"))
-    responses = [
+    returning = bool(facts) and bool(
+        greeting.get("response_node_ids_returning")
+        or greeting.get("responses_returning")
+    )
+    node_ids = (
+        greeting.get("response_node_ids_returning")
+        if returning else greeting.get("response_node_ids")
+    ) or []
+    node_by_id = document.get("node_by_id") or {
+        str(node.get("id") or ""): node for node in document.get("nodes") or []
+    }
+    node_responses: list[tuple[str, str, list[str]]] = []
+    for value in node_ids:
+        node_id = str(value or "").strip()
+        node = node_by_id.get(node_id) or {}
+        node_data = node.get("data") or {}
+        role = str(
+            node_data.get("role")
+            or ((node_data.get("metadata") or {}).get("role") or "")
+        )
+        answer = str(node_data.get("answer") or "").strip()
+        if node.get("node_type") == "faq" and role == "greeting_response" and answer:
+            triggers = [
+                str(trigger).strip()
+                for trigger in node_data.get("triggers") or []
+                if str(trigger).strip()
+            ]
+            node_responses.append((node_id, answer, triggers))
+    normalized_message = _normalized_phrase(message)
+    matching_node_responses = [
+        item for item in node_responses
+        if normalized_message and any(
+            re.search(
+                rf"(?<!\w){re.escape(_normalized_phrase(trigger))}(?!\w)",
+                normalized_message,
+            )
+            for trigger in item[2]
+        )
+    ]
+    selectable_node_responses = matching_node_responses or node_responses
+    direct_responses = [
         text
         for value in (
             greeting.get("responses_returning") if returning else greeting.get("responses")
         ) or []
         if isinstance(value, str) and (text := value.strip())
     ]
-    response = _unrepeated_variant(responses, recent_replies) or (
-        str(greeting.get("response") or "").strip()
+    response = _unrepeated_variant(
+        [text for _node_id, text, _triggers in selectable_node_responses]
+        or direct_responses,
+        recent_replies,
+    ) or str(greeting.get("response") or "").strip()
+    response_node_id = next(
+        (
+            node_id for node_id, text, _triggers in selectable_node_responses
+            if text == response
+        ),
+        None,
     )
     if not response:
         return None
@@ -3225,7 +3248,7 @@ def _greeting_policy(
     ).strip()
     field_key = chosen.get("key") if chosen else None
     if not contract:
-        appointment = data.get("appointment_policy") or {}
+        appointment = persona_data.get("appointment_policy") or {}
         required = [str(value) for value in appointment.get("required_fields") or [] if value]
         questions = appointment.get("field_questions") or {}
         unresolved = [
@@ -3237,6 +3260,7 @@ def _greeting_policy(
         question_id = _qualification_question_node_id(document, str(field_key or ""))
     return {
         "response": response,
+        "response_node_id": response_node_id,
         "question": question,
         "question_node_id": question_id,
         "asked_field_key": field_key,
@@ -3773,7 +3797,7 @@ def build_context(
     greeting_eligible = _is_greeting(message)
     greeting_prefix = _greeting_policy(
         document, contract=active_contract, facts=ledger.get("facts") or {},
-        lead_ref=lead_ref, recent_replies=_assistant_replies(messages),
+        lead_ref=lead_ref, recent_replies=_assistant_replies(messages), message=message,
     ) if greeting_eligible else None
     if greeting_prefix and operational_mode == "post_qualification_support":
         greeting_prefix = {
@@ -3813,6 +3837,7 @@ def build_context(
             "post_sale_operation_route": _post_sale_route(document),
             "deterministic_intent": "greeting",
             "deterministic_reply": reply,
+            "greeting_response_node_id": greeting.get("response_node_id"),
             "asked_field_key": greeting.get("asked_field_key"),
             "next_question_node_id": greeting.get("question_node_id"),
             "missing_fields": greeting.get("missing_fields") or [],
@@ -5368,6 +5393,10 @@ def _decide(
     observation = model_observation or {}
     if context.retrieval_trace.get("deterministic_intent") == "greeting":
         question_id = context.retrieval_trace.get("next_question_node_id")
+        greeting_node_id = context.retrieval_trace.get("greeting_response_node_id")
+        evidence_node_ids = list(dict.fromkeys(
+            node_id for node_id in (greeting_node_id, question_id) if node_id
+        ))
         asked = list(context.cart.get("asked_question_node_ids") or [])
         if question_id and question_id not in asked:
             asked.append(question_id)
@@ -5401,12 +5430,12 @@ def _decide(
                 classifier="graph_intent_v3", intent="greeting",
                 route=ConversationRoute.SDR, confidence=1,
                 lead_stage=str(context.cart.get("_lead_stage") or "novo"),
-                evidence_node_ids=[question_id] if question_id else [],
+                evidence_node_ids=evidence_node_ids,
             ),
             AgentResponse(
                 reply_text=str(context.retrieval_trace.get("deterministic_reply") or "") or None,
                 role=ConversationRoute.SDR,
-                evidence_node_ids=[question_id] if question_id else [],
+                evidence_node_ids=evidence_node_ids,
                 cart_state=state, handoff_required=False, proof=proof,
                 token_usage={"model_calls": 0, "repair_calls": 0, "prompt_tokens": 0,
                              "completion_tokens": 0, "total_tokens": 0},
@@ -6019,11 +6048,6 @@ def _decide(
             # acknowledgement, a useful observation -- and drop only the
             # interrogative part, whose routing belongs to the graph.
             reply_seed = _statements_only(reply_seed)
-        service_ack = _service_operation_acknowledgement(
-            document, service_operations,
-        )
-        if service_ack:
-            reply_seed = " ".join(part for part in (service_ack, reply_seed) if part)
         if incompatible_pending:
             invalid_response = str(
                 (((pending_before_field or {}).get("validation") or {}).get("invalid_response"))
@@ -6089,7 +6113,7 @@ def _decide(
             # answer -- and when the same template was already sent, the
             # duplicate suppression turns it into silence.
             doubt_text = str((doubt or {}).get("text") or "").strip()
-            lead = [doubt_text, service_ack or ""]
+            lead = [doubt_text]
             if _confirmation_is_last_resort(contract, field_confirmation):
                 # `last_resort` lets the model's own statements lead too, so a
                 # turn that genuinely answered something never reaches the

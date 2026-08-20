@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import sys
 from pathlib import Path
 
@@ -412,7 +413,8 @@ def test_graph_owned_greeting_is_short_and_model_free():
     assert graph_agent_runtime_v3._is_greeting("Olá") is True
     assert graph_agent_runtime_v3._is_greeting("Olá, quero branch a") is True
     assert greeting == {
-        "response": "Olá! Bem-vindo.", "question": "Como você se chama?",
+        "response": "Olá! Bem-vindo.", "response_node_id": None,
+        "question": "Como você se chama?",
         "question_node_id": None, "asked_field_key": "nome_cliente",
         "missing_fields": ["nome_cliente"],
     }
@@ -436,6 +438,65 @@ def test_graph_owned_greeting_is_short_and_model_free():
     assert decision.intent == "greeting"
     assert response.reply_text.endswith("Como você se chama?")
     assert response.token_usage["model_calls"] == 0
+
+
+def test_graph_faq_greeting_is_selected_by_the_customer_words_and_proven():
+    document = greeting_document(responses=[])
+    document["nodes"].extend([
+        {
+            "id": "faq:greeting:oi", "node_type": "faq",
+            "data": {
+                "role": "greeting_response", "question": "Oi",
+                "answer": "Oi! Que bom ter você por aqui.", "triggers": ["oi"],
+            },
+        },
+        {
+            "id": "faq:greeting:night", "node_type": "faq",
+            "data": {
+                "role": "greeting_response", "question": "Boa noite",
+                "answer": "Boa noite! Estou por aqui para ajudar.",
+                "triggers": ["boa noite"],
+            },
+        },
+    ])
+    greeting = document["nodes"][0]["data"]["conversation_policy"]["intents"]["greeting"]
+    greeting["responses"] = []
+    greeting["response_node_ids"] = ["faq:greeting:oi", "faq:greeting:night"]
+
+    selected = graph_agent_runtime_v3._greeting_policy(
+        document, contract={}, facts={}, message="Boa noite",
+    )
+    assert selected["response"] == "Boa noite! Estou por aqui para ajudar."
+    assert selected["response_node_id"] == "faq:greeting:night"
+
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test", messages=[{"role": "user", "content": "Boa noite"}],
+        cart={"facts": {}, "asked_question_node_ids": []}, rag_nodes=[], rag_paths=[],
+        rag_chunks=[], context_cards=[], system_prompt="", available_services=[],
+        active_branch_node_id=None, active_branch_node_ids=[], active_path_checksum=None,
+        branch_node_ids=[], graph_contract={}, publication_id="publication-1",
+        runtime_version=graph_agent_runtime_v3.RUNTIME_VERSION,
+        retrieval_trace={
+            "deterministic_intent": "greeting",
+            "deterministic_reply": (
+                "Boa noite! Estou por aqui para ajudar.\n\nComo você se chama?"
+            ),
+            "greeting_response_node_id": "faq:greeting:night",
+            "asked_field_key": "nome_cliente", "next_question_node_id": "q:name",
+            "missing_fields": ["nome_cliente"], "ledger_revision": 0,
+        },
+    )
+    decision, response = graph_agent_runtime_v3.decide(context, model_observation=None)
+    assert decision.evidence_node_ids == ["faq:greeting:night", "q:name"]
+    assert response.evidence_node_ids == ["faq:greeting:night", "q:name"]
+
+
+def test_customer_reply_never_contains_internal_service_change_copy():
+    source = inspect.getsource(graph_agent_runtime_v3._decide)
+    assert "Adicionei " not in source
+    assert "Removi " not in source
+    assert " em foco." not in source
 
 
 def test_invalid_model_fallback_cannot_leave_terminal_state_on_sdr():
