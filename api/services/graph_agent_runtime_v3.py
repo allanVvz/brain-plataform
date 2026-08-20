@@ -837,7 +837,7 @@ _SERVICE_DROP_MARKER = re.compile(
 )
 
 _SERVICE_SELECT_MARKER = re.compile(
-    r"\b(?:quero|queria|gostaria|preciso|tenho\s+interesse|fazer|contratar|"
+    r"\b(?:quero|queria|gostaria|preciso|procur\w*|tenho\s+interesse|fazer|contratar|"
     r"selecion\w*|escolh\w*|adicion\w*|inclu\w*|coloc\w*)\b",
     re.IGNORECASE,
 )
@@ -1739,9 +1739,10 @@ def _service_facts_for_operations(
     grouped_facts: dict[str, list[dict[str, Any]]],
     source_message_id: str,
 ) -> list[dict[str, Any]]:
+    selection_key = branch_selection_field_key(document)
     current_owners = {
         str(fact.get("owner_node_id") or "")
-        for fact in grouped_facts.get("servico", [])
+        for fact in grouped_facts.get(selection_key, [])
         if fact.get("status") == "known"
     }
     facts: list[dict[str, Any]] = []
@@ -1754,7 +1755,7 @@ def _service_facts_for_operations(
             continue
         node = (document.get("node_by_id") or {}).get(anchor) or {}
         facts.append({
-            "field_key": "servico",
+            "field_key": selection_key,
             "owner_node_id": anchor,
             "status": "declined" if action == "drop" else "known",
             "value": None if action == "drop" else str(

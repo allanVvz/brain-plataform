@@ -2317,6 +2317,14 @@ def test_exact_service_applies_only_with_intent_or_direct_published_question():
     assert explicit["status"] == "resolved"
     assert explicit["operations"][0]["evidence_type"] == "exact_catalog"
 
+    looking_for = graph_agent_runtime_v3._resolve_service_operations(
+        document, "Estou procurando prote\u00e7\u00e3o cer\u00e2mica.",
+        active_branch_node_id=None, active_branch_node_ids=[],
+    )
+    assert looking_for["status"] == "resolved"
+    assert looking_for["operations"][0]["action"] == "add"
+    assert looking_for["focused_branch_node_id"] == "branch:vitrification"
+
     direct = graph_agent_runtime_v3._resolve_service_operations(
         document, "vitrifica\u00e7\u00e3o.", active_branch_node_id=None,
         active_branch_node_ids=[],

@@ -2858,7 +2858,7 @@ async def run_session_direct(
                         "classifier": data.get("classifier"),
                         "conversation_mode": conversation_mode,
                         "pipeline_contract": data.get("pipeline_contract")
-                        or "conversation_v1",
+                        or pipeline_contract,
                         "evidence_node_ids": data.get("evidence_node_ids")
                         or [],
                         "graph_version": data.get("graph_version")

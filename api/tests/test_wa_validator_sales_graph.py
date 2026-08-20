@@ -10,7 +10,12 @@ REPO_ROOT = API_ROOT.parent
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
-from services import graph_bundle, validator_sofia_insights, wa_validator_service
+from services import (
+    graph_agent_runtime_v3,
+    graph_bundle,
+    validator_sofia_insights,
+    wa_validator_service,
+)
 
 
 def _publication() -> dict:
@@ -42,6 +47,47 @@ def test_sales_semantic_scripts_select_distinct_graph_branches():
     assert reseller["driver"]["branch_anchor_node_id"] == "audience:tock-reseller"
     assert retail["driver"]["branch_anchor_node_id"] != reseller["driver"]["branch_anchor_node_id"]
     assert retail["driver"]["doubt"]["forbidden_claim_patterns"]
+
+
+def test_sales_opening_resolves_and_emits_the_published_selector_field():
+    publication = _publication()
+    document = publication["document_json"]
+    script = wa_validator_service._semantic_sales_script(
+        publication=publication, flow_id="sdr_sales_retail"
+    )
+
+    resolution = graph_agent_runtime_v3._resolve_service_operations(
+        document,
+        script["driver"]["opening"]["text"],
+        active_branch_node_id=None,
+        active_branch_node_ids=[],
+    )
+    assert resolution["status"] == "resolved"
+    assert resolution["focused_branch_node_id"] == "audience:tock-retail"
+    facts = graph_agent_runtime_v3._service_facts_for_operations(
+        operations=resolution["operations"],
+        document=document,
+        grouped_facts={},
+        source_message_id="validator:opening",
+    )
+    assert facts == [{
+        "field_key": "purchase_profile",
+        "owner_node_id": "audience:tock-retail",
+        "status": "known",
+        "value": "uso-proprio-varejo",
+        "source_message_id": "validator:opening",
+        "evidence_span": "uso próprio",
+        "confidence": 1.0,
+        "metadata": {
+            "source": "service_resolution",
+            "operation": "add",
+            "evidence_type": "exact_catalog",
+            "resolution_method": "exact_catalog",
+            "score": None,
+            "margin": None,
+            "branch_path_checksum": document["coordinates"]["audience:tock-retail"]["path_checksum"],
+        },
+    }]
 
 
 def test_graph_context_falls_back_to_active_v3_without_legacy_v2(monkeypatch):
