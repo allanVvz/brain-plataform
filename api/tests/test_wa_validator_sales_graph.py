@@ -101,6 +101,7 @@ def test_sales_bundle_publishes_a_safe_unknown_commercial_deferral():
     assert policy["safety"][
         "forbid_unpublished_price_stock_deadline_policy"
     ] is True
+    assert policy["question_repetition"] == {"max_attempts": 1}
 
 
 def test_graph_context_falls_back_to_active_v3_without_legacy_v2(monkeypatch):

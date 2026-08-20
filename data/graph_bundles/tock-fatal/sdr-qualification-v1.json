@@ -37,6 +37,9 @@
           "doubt_handling": {
             "deferred_response": "Ainda não tenho uma informação publicada e validada sobre preço, estoque, prazo, política ou pedido mínimo. Vou encaminhar sua dúvida para a equipe."
           },
+          "question_repetition": {
+            "max_attempts": 1
+          },
           "safety": {
             "unsupported_commercial_claim": "handoff",
             "forbid_unpublished_price_stock_deadline_policy": true
