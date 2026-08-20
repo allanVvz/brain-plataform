@@ -90,6 +90,19 @@ def test_sales_opening_resolves_and_emits_the_published_selector_field():
     }]
 
 
+def test_sales_bundle_publishes_a_safe_unknown_commercial_deferral():
+    document = _publication()["document_json"]
+    policy = document["common_contract"]["conversation_policy"]
+
+    assert policy["doubt_handling"]["deferred_response"] == (
+        "Ainda não tenho uma informação publicada e validada sobre preço, estoque, "
+        "prazo, política ou pedido mínimo. Vou encaminhar sua dúvida para a equipe."
+    )
+    assert policy["safety"][
+        "forbid_unpublished_price_stock_deadline_policy"
+    ] is True
+
+
 def test_graph_context_falls_back_to_active_v3_without_legacy_v2(monkeypatch):
     publication = _publication()
     monkeypatch.setattr(

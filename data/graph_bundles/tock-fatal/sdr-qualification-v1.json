@@ -34,6 +34,9 @@
             "field_key": "purchase_profile",
             "description": "Escolhe o fluxo de uso próprio ou revenda sem assumir produto, preço ou quantidade."
           },
+          "doubt_handling": {
+            "deferred_response": "Ainda não tenho uma informação publicada e validada sobre preço, estoque, prazo, política ou pedido mínimo. Vou encaminhar sua dúvida para a equipe."
+          },
           "safety": {
             "unsupported_commercial_claim": "handoff",
             "forbid_unpublished_price_stock_deadline_policy": true
