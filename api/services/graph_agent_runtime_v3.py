@@ -1406,9 +1406,12 @@ def _resolve_service_operations(
     explicit_change = bool(_SERVICE_CHANGE_MARKER.search(message or ""))
     explicit_drop = bool(_SERVICE_DROP_MARKER.search(message or ""))
     operations: list[dict[str, Any]] = []
+    derived_consumed_spans: list[dict[str, Any]] = []
     after = list(before)
 
-    def append_operation(action: str, anchor: str, evidence: str) -> None:
+    def append_operation(
+        action: str, anchor: str, evidence: str, *, evidence_type: str = "exact_catalog",
+    ) -> None:
         checksum = str(
             ((document.get("coordinates") or {}).get(anchor) or {}).get("path_checksum")
             or ""
@@ -1418,7 +1421,7 @@ def _resolve_service_operations(
             "branch_anchor_node_id": anchor,
             "branch_path_checksum": checksum,
             "evidence_span": evidence,
-            "evidence_type": "exact_catalog",
+            "evidence_type": evidence_type,
             "resolution_method": "exact_catalog",
         })
 
@@ -1433,12 +1436,26 @@ def _resolve_service_operations(
             drop_targets = [anchor for anchor in mentioned if anchor in after]
             if not drop_targets and active_branch_node_id:
                 drop_targets = [active_branch_node_id]
-            change_evidence = str((_SERVICE_CHANGE_MARKER.search(message or "") or [""])[0])
+            change_match = _SERVICE_CHANGE_MARKER.search(message or "")
+            change_evidence = str((change_match or [""])[0])
             for anchor in drop_targets:
                 if anchor in after:
                     after.remove(anchor)
                     own_match = next((item for item in matches if item["branch_anchor_node_id"] == anchor), None)
-                    append_operation("drop", anchor, str((own_match or {}).get("span") or change_evidence))
+                    if own_match:
+                        append_operation("drop", anchor, str(own_match.get("span") or ""))
+                    else:
+                        append_operation(
+                            "drop", anchor, change_evidence, evidence_type="explicit_change",
+                        )
+                        if change_match:
+                            derived_consumed_spans.append({
+                                "text": change_evidence,
+                                "start": change_match.start(),
+                                "end": change_match.end(),
+                                "branch_anchor_node_id": anchor,
+                                "evidence_type": "explicit_change",
+                            })
         for item in matches:
             anchor = item["branch_anchor_node_id"]
             if explicit_change and anchor in before:
@@ -1464,6 +1481,10 @@ def _resolve_service_operations(
         "direct_answer_to_service_question": direct_answer,
         "explicit_service_intent": explicit_selection,
         "operations": operations,
+        "consumed_spans": [
+            *(literal.get("consumed_spans") or []),
+            *derived_consumed_spans,
+        ],
         "next_active_branch_node_ids": after,
         "focused_branch_node_id": focus,
     }

@@ -2971,13 +2971,24 @@ def test_explicit_service_switch_drops_focus_before_adding_new_service():
         },
     }
 
+    message = "Na verdade, prefiro Serviço Beta"
     resolution = graph_agent_runtime_v3._resolve_service_operations(
-        document, "Na verdade, prefiro Serviço Beta",
+        document, message,
         active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
     )
 
     assert [item["action"] for item in resolution["operations"]] == ["drop", "add"]
     assert resolution["next_active_branch_node_ids"] == ["branch:b"]
+    assert resolution["operations"][0]["evidence_type"] == "explicit_change"
+    proof = graph_proof_checker_v3.check_service_operations(
+        document=document,
+        message=message,
+        operations=resolution["operations"],
+        active_branch_node_ids=["branch:a"],
+        consumed_service_spans=resolution["consumed_spans"],
+    )
+    assert proof["valid"], proof["errors"]
+    assert proof["next_active_branch_node_ids"] == ["branch:b"]
 
 
 def test_service_evidence_cannot_be_reused_as_objective_value():

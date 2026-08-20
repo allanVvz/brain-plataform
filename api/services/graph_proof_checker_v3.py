@@ -426,8 +426,12 @@ def check_service_operations(
         if not _literal_span(message, operation.get("evidence_span")):
             errors.append(f"service_evidence_not_literal:{anchor}")
         evidence_type = str(operation.get("evidence_type") or "")
-        if evidence_type not in {"exact_catalog", "confirmed_candidate"}:
+        if evidence_type not in {
+            "exact_catalog", "confirmed_candidate", "explicit_change",
+        }:
             errors.append(f"service_evidence_type_not_authorized:{anchor}")
+        if evidence_type == "explicit_change" and action != "drop":
+            errors.append(f"service_explicit_change_only_authorizes_drop:{anchor}")
         registered = next(
             (
                 span for span in consumed_service_spans or []

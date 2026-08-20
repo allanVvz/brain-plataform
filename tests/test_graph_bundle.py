@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = ROOT / "api"
@@ -58,6 +60,37 @@ def test_tock_sales_bundle_declares_terminal_qualification_copy():
             "condition": "qualification_complete",
             "text": "Perfeito. Vou encaminhar seu interesse para a equipe continuar o atendimento.",
         }]
+
+
+@pytest.mark.parametrize(
+    ("copy_key", "invalid_value"),
+    [
+        (copy_key, invalid_value)
+        for copy_key in graph_bundle.SALES_QUALIFICATION_COPY_KEYS
+        for invalid_value in (None, "   ")
+    ],
+)
+def test_sales_bundle_without_required_qualification_copy_is_blocked(
+    copy_key: str,
+    invalid_value: str | None,
+):
+    bundle = load_tock_example()
+    persona = next(node for node in bundle["nodes"] if node["node_type"] == "persona")
+    qualification = persona["data"]["conversation_policy"]["qualification"]
+    if invalid_value is None:
+        qualification.pop(copy_key)
+    else:
+        qualification[copy_key] = invalid_value
+
+    expected_error = f"bundle_sales_qualification_copy_required:{copy_key}"
+    with pytest.raises(graph_bundle.GraphBundleError) as exc_info:
+        graph_bundle.compile_bundle(bundle)
+    assert expected_error in exc_info.value.errors
+
+    plan = graph_bundle.build_publication_plan(bundle)
+    assert plan["disposition"] == "blocked"
+    assert plan["publication_allowed"] is False
+    assert expected_error in plan["validation_errors"]
 
 
 def test_tock_bundle_is_ready_for_explicit_publication_approval():

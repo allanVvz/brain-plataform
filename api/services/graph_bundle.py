@@ -17,6 +17,13 @@ from services import graph_compiler_v3
 BUNDLE_VERSION = "1.0"
 PUBLISHABLE_STATUSES = set(graph_compiler_v3.PUBLISHED_STATUSES)
 DETACHED_TERMINAL_TYPES = {"embed", "embedded", "gallery"}
+SALES_QUALIFICATION_COPY_KEYS = (
+    "summary_template",
+    "confirmation_question",
+    "completion_message",
+    "correction_prompt",
+    "incomplete_handoff_template",
+)
 
 
 class GraphBundleError(ValueError):
@@ -110,6 +117,22 @@ def normalize_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
         })
     if len(persona_nodes) != 1:
         errors.append(f"bundle_requires_one_persona_node:{len(persona_nodes)}")
+    elif persona_node := next(
+        (node for node in nodes if node["id"] == persona_nodes[0]), None
+    ):
+        persona_data = persona_node.get("data") or {}
+        if str(persona_data.get("business_model") or "").strip().lower() == "sales":
+            conversation_policy = persona_data.get("conversation_policy")
+            qualification = (
+                conversation_policy.get("qualification")
+                if isinstance(conversation_policy, dict)
+                else None
+            )
+            qualification = qualification if isinstance(qualification, dict) else {}
+            for key in SALES_QUALIFICATION_COPY_KEYS:
+                value = qualification.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    errors.append(f"bundle_sales_qualification_copy_required:{key}")
 
     edges: list[dict[str, Any]] = []
     edge_ids: set[str] = set()

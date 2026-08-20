@@ -629,6 +629,36 @@ def test_service_operation_requires_authorized_consumed_evidence():
     assert accepted["next_active_branch_node_ids"] == ["branch:a"]
 
 
+def test_explicit_change_evidence_can_only_drop_an_active_branch():
+    document = {
+        "branch_anchors": ["branch:a"],
+        "coordinates": {"branch:a": {"path_checksum": "checksum:a"}},
+    }
+    operation = {
+        "action": "drop", "branch_anchor_node_id": "branch:a",
+        "branch_path_checksum": "checksum:a", "evidence_span": "Na verdade",
+        "evidence_type": "explicit_change", "resolution_method": "exact_catalog",
+    }
+    consumed = [{
+        "text": "Na verdade", "start": 0, "end": 10,
+        "branch_anchor_node_id": "branch:a", "evidence_type": "explicit_change",
+    }]
+    accepted = graph_proof_checker_v3.check_service_operations(
+        document=document, message="Na verdade, quero outro caminho",
+        operations=[operation], active_branch_node_ids=["branch:a"],
+        consumed_service_spans=consumed,
+    )
+    assert accepted["valid"], accepted["errors"]
+
+    operation["action"] = "add"
+    rejected = graph_proof_checker_v3.check_service_operations(
+        document=document, message="Na verdade, quero outro caminho",
+        operations=[operation], active_branch_node_ids=[],
+        consumed_service_spans=consumed,
+    )
+    assert "service_explicit_change_only_authorizes_drop:branch:a" in rejected["errors"]
+
+
 # ── validate_natural_summary: grounding guard for the model-written summary ──
 
 def test_natural_summary_accepted_when_every_value_is_mentioned():

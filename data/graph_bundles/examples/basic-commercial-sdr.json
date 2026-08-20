@@ -24,6 +24,15 @@
       "status": "validated",
       "data": {
         "business_model": "sales",
+        "conversation_policy": {
+          "qualification": {
+            "summary_template": "Registrei estas informações: {informed_fields}.",
+            "confirmation_question": "As informações estão corretas?",
+            "completion_message": "Perfeito. Vou encaminhar seu interesse para a equipe continuar o atendimento.",
+            "correction_prompt": "Certo. Qual informação você quer corrigir?",
+            "incomplete_handoff_template": "Ainda faltam estas informações: {missing_fields}. Vou encaminhar seu interesse para a equipe continuar o atendimento."
+          }
+        },
         "source": "synthetic_fixture",
         "status": "validated"
       }
