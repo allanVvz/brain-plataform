@@ -75,7 +75,7 @@ paralelo seguro.
 
 | # | Item | Estado | Agente |
 |---|---|---|---|
-| P0 | Destravar a Aurora SDR (ciclo com memória travado) | **em aberto — bloqueia tudo** | `aurora-unblock` |
+| P0 | Destravar a Aurora SDR (ciclo com memória travado) | **em aberto — evidência coletada 2026-08-19 (branch `chore/aurora-unblock-p0-evidence-2026-08-19`, commit `62d8c62`, não mesclada): nenhuma das 5 hipóteses reproduziu contra tráfego real; falta sessão de prova formal via WA Validator e teste da hipótese 3 (orçamento de prompt) antes de marcar concluído** | `aurora-unblock` |
 | 0 | Higiene do repositório e precedência de documentos | **concluído 2026-08-19** | `deprecation-sweeper` |
 | 1 | Publisher genérico, PublicationPlan, embeddings incrementais | a fazer | `bundle-migrator`, `graph-publisher`, `release-gate` |
 | 2 | Cards editáveis alteram o agente de verdade | a fazer | `card-editor` |
@@ -169,6 +169,33 @@ Destino: `docs/evidence/AURORA_STUCK_2026-08-19/`
    `accepted_statuses: ["known","unknown"]`) virar `unknown` cedo demais, a
    qualificação não completa e o campo não pode ser reperguntado.
    *Teste:* `facts_by_key`.
+
+### Evidência coletada (2026-08-19, não mesclada)
+
+Rodada de evidência read-only (`aurora-unblock`) contra lead real ativo em
+produção (`aurora`, lead_ref 32, publicação v66), na branch
+`chore/aurora-unblock-p0-evidence-2026-08-19` (commit `62d8c62`, **ainda não
+mesclada em `main`**). Detalhe completo em
+`docs/evidence/AURORA_STUCK_2026-08-19/findings.md`.
+
+**Nenhuma das 5 hipóteses acima reproduziu.** Dois sinais que pareciam
+confirmar bug eram falsos positivos do próprio script de diagnóstico, não do
+runtime: (1) `conversation_carry_over_facts_by_lead_v1(persona_id, lead_ref,
+null)` sempre devolve 0 linhas quando `p_field_keys` é `null` — `field_key =
+ANY(null)` nunca é verdadeiro em SQL; o runtime real nunca chama a função com
+`null`; (2) `final_decision->>'reply_text'` estava vazio nos últimos turnos,
+mas o outbound real (`lead_buffer.payload->>'text'`) tinha o texto correto —
+o texto sai por `proof_result->>'text'` (rede de segurança
+`_ensure_reply_text_or_log`), não pela chave que o script checava.
+
+Achado positivo: a memória sobreviveu a um fechamento de jornada real
+(jornada 2 herdou `nome_cliente`, `modelo_veiculo`, `vehicle_year`,
+`condicao`, reconfirmando só `servico`).
+
+**Ainda falta antes de marcar concluído**: sessão de prova formal pelo WA
+Validator interno (`POST /wa-validator/run-direct`) — a evidência acima veio
+de tráfego orgânico real, não de uma sessão sintética controlada — e teste da
+hipótese 3 (orçamento de prompt), que não foi coberta nesta rodada.
 
 ### Prova de saída
 

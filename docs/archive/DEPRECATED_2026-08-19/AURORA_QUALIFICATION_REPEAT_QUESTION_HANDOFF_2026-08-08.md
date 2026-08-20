@@ -1,8 +1,21 @@
+> **DEPRECIADO em 2026-08-19 — SUPERSEDED BY `docs/roadmaps/AGENT_ROADMAP.md`.**
+> Não usar como fonte de verdade. Mantido apenas como histórico.
+> Motivo: bug resolvido (ver §9 abaixo), conteúdo consolidado. O bug novo e
+> distinto encontrado durante a validação foi extraído para
+> `docs/handoffs/AURORA_BRANCH_SELECTION_FIELD_OWNER_MISMATCH_2026-08-08.md`
+> (continua aberto, não bloqueante).
+
 # Handoff — Aurora repete perguntas de qualificação já respondidas
 
 Data de abertura: 2026-08-08
 Escopo: `graph_agent_runtime_v3`, `services/conversation_runtime.py`, `services/graph_conversation_contract.py`, `services/deterministic_appointment.py`, WA Validator, persona Aurora (`business_model: "appointment"`).
-Status: **bug real, reproduzido 3 vezes, causa raiz ainda não confirmada.** Este documento existe para retomar a investigação em uma sessão nova, com contexto limpo.
+Status: **RESOLVIDO 2026-08-08 (ver §9)** — causa raiz confirmada
+(`owner_node_id` redeclarado por branch para campos persona-wide), corrigido,
+republicado v23, validado com 0 recorrências em duas execuções WA Validator
+pós-fix. Um bug novo e distinto encontrado durante a validação (seleção
+inicial de galho, `field_owner_mismatch:servico`) foi extraído para
+`docs/handoffs/AURORA_BRANCH_SELECTION_FIELD_OWNER_MISMATCH_2026-08-08.md` —
+não bloqueante, continua aberto lá.
 
 ## 1. Como chegamos aqui (linha do tempo desta sessão)
 
