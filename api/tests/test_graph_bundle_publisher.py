@@ -36,7 +36,17 @@ def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypa
         for node in normalized["nodes"]
         if node["node_type"] in {"persona", "embed", "gallery"}
     ]
-    graph_reads = iter([(current_nodes, []), (compiled_nodes, compiled_edges)])
+    current_nodes.append({
+        "id": "582e44b8-505d-4e1b-adb0-2c8e3684f980",
+        "node_type": "persona",
+        "slug": "self",
+        "status": "validated",
+        "metadata": {"role": "root"},
+    })
+    graph_reads = iter([
+        (current_nodes, []),
+        (compiled_nodes + current_nodes[-1:], compiled_edges),
+    ])
     monkeypatch.setattr(
         graph_bundle_publisher.supabase_client,
         "get_persona",
@@ -53,10 +63,22 @@ def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypa
         "upsert_knowledge_node",
         lambda row: materialized_nodes.append(row) or row,
     )
+    replaced_nodes: list[dict] = []
+    monkeypatch.setattr(
+        graph_bundle_publisher.supabase_client,
+        "update_knowledge_node",
+        lambda node_id, row, **_kwargs: replaced_nodes.append(row) or {"id": node_id, **row},
+    )
     monkeypatch.setattr(
         graph_bundle_publisher.supabase_client,
         "upsert_knowledge_edge",
         lambda *_args, **_kwargs: {"id": "edge-row"},
+    )
+    replaced_edges: list[dict] = []
+    monkeypatch.setattr(
+        graph_bundle_publisher.supabase_client,
+        "update_knowledge_edge",
+        lambda edge_id, row: replaced_edges.append(row) or {"id": edge_id, **row},
     )
     monkeypatch.setattr(
         graph_bundle_publisher.graph_compiler_v3,
@@ -86,8 +108,11 @@ def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypa
     assert staged["publication"]["checksum"] == plan["runtime_checksum"]
     assert staged["activation"] is None
     assert materialized_nodes
+    assert len(replaced_nodes) == len(normalized["nodes"])
+    assert len(replaced_edges) == len(normalized["edges"])
     assert all("source_id" not in row for row in materialized_nodes)
     assert all(row["metadata"].get("graph_json_node_id") for row in materialized_nodes)
+    assert all(set(row["metadata"]) >= {"active", "graph_json_edge_id"} for row in replaced_edges)
 
 
 def test_stage_bundle_rejects_stale_human_approval_before_writes(monkeypatch):

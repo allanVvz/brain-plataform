@@ -283,6 +283,56 @@ def test_compiler_rejects_multiple_canonical_graph_json_personas():
     )
 
 
+def test_compiler_ignores_operational_persona_root_when_canonical_exists():
+    canonical = node(
+        1, "persona:canonical", parent_type="persona"
+    )
+    operational = node(
+        2, "node:persona:self", parent_type="persona", data={"role": "root"}
+    )
+    branch = node(
+        3,
+        "branch:appointment",
+        parent_type="product",
+        data={"capabilities": {"branch_anchor": True}},
+    )
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=[canonical, operational, branch],
+        edge_rows=[edge(1, canonical, branch)],
+    )
+    assert "persona:canonical" in document["node_by_id"]
+    assert "node:persona:self" not in document["node_by_id"]
+
+
+def test_runtime_checksum_ignores_graph_bundle_and_layout_provenance():
+    root = node(1, "persona:canonical", parent_type="persona")
+    branch = node(
+        2,
+        "branch:appointment",
+        parent_type="product",
+        data={"capabilities": {"branch_anchor": True}},
+    )
+    clean = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=[root, branch],
+        edge_rows=[edge(1, root, branch)],
+    )
+    root["metadata"]["graph_bundle_draft_checksum"] = "sha256:audit"
+    branch["metadata"]["graph_bundle_draft_checksum"] = "sha256:audit"
+    annotated_edge = edge(1, root, branch)
+    annotated_edge["metadata"].update({
+        "graph_bundle_draft_checksum": "sha256:audit",
+        "primary_tree": True,
+    })
+    annotated = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=[root, branch],
+        edge_rows=[annotated_edge],
+    )
+    assert annotated["checksum"] == clean["checksum"]
+
+
 def test_declaration_scope_binds_field_to_campaign_node():
     root = node(1, "persona:aurora", parent_type="persona")
     campaign = node(2, "campaign:premium", parent_type="campaign")

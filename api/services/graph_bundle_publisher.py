@@ -27,10 +27,19 @@ def _preflight_source_scope(
     desired_nodes = {
         (node["node_type"], node["slug"]) for node in normalized["nodes"]
     }
+    has_authored_persona = any(
+        node_type == "persona" and slug != "self"
+        for node_type, slug in desired_nodes
+    )
     existing_nodes = {
         (str(row.get("node_type") or ""), str(row.get("slug") or ""))
         for row in node_rows
         if str(row.get("status") or "").lower() in graph_compiler_v3.PUBLISHED_STATUSES
+        and not (
+            has_authored_persona
+            and str(row.get("node_type") or "").lower() == "persona"
+            and str(row.get("slug") or "").lower() == "self"
+        )
     }
     unexpected_nodes = sorted(existing_nodes - desired_nodes)
     if unexpected_nodes:
@@ -122,6 +131,24 @@ def stage_bundle(
                 f"projection_node_id_drift:{node['id']}:{row['id']}:"
                 f"{node['projection_node_id']}"
             )
+        row = supabase_client.update_knowledge_node(
+            str(row["id"]),
+            {
+                "title": node["title"],
+                "summary": node["summary"],
+                "tags": node["tags"],
+                "status": node["status"],
+                "source_table": "graph_bundle",
+                "metadata": {
+                    "graph_json_node_id": node["id"],
+                    "graph_bundle_draft_checksum": approved_draft_checksum,
+                    **node["data"],
+                },
+            },
+            mark_related_faqs=False,
+        )
+        if not row:
+            raise GraphBundlePublishError(f"node_projection_replace_failed:{node['id']}")
         projection_by_stable[node["id"]] = str(row["id"])
 
     for edge in normalized["edges"]:
@@ -141,6 +168,22 @@ def stage_bundle(
         )
         if not row:
             raise GraphBundlePublishError(f"edge_materialization_failed:{edge['id']}")
+        row = supabase_client.update_knowledge_edge(
+            str(row["id"]),
+            {
+                "persona_id": persona_id,
+                "weight": edge["weight"],
+                "metadata": {
+                    "active": True,
+                    "primary_tree": edge["relation_type"] == "contains",
+                    "graph_json_edge_id": edge["id"],
+                    "graph_bundle_draft_checksum": approved_draft_checksum,
+                    **edge["metadata"],
+                },
+            },
+        )
+        if not row:
+            raise GraphBundlePublishError(f"edge_projection_replace_failed:{edge['id']}")
 
     node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
         persona_id=persona_id, limit_nodes=10000

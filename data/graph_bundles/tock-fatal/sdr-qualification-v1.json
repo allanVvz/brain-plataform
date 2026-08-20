@@ -24,6 +24,7 @@
       "slug": "tock-fatal",
       "title": "Tock Fatal",
       "summary": "Persona comercial em validação interna para qualificar interesse de uso próprio ou revenda.",
+      "tags": ["persona"],
       "status": "validated",
       "data": {
         "business_model": "sales",
@@ -49,9 +50,15 @@
       "slug": "embedded-default",
       "title": "Embedded",
       "summary": "Destino protegido da base de conhecimento da persona.",
+      "tags": ["rag", "embedded", "golden-dataset", "default"],
       "status": "active",
       "data": {
         "capabilities": {"detached_terminal": true},
+        "protected": true,
+        "system_node": true,
+        "graph_json_id": "protected-output-sink",
+        "rag_index": "default",
+        "open_url": "/kb",
         "source": "production_readonly_audit_2026-08-20",
         "status": "active"
       }
@@ -63,9 +70,14 @@
       "slug": "gallery-default",
       "title": "Gallery",
       "summary": "Destino protegido de assets da persona.",
+      "tags": ["gallery", "assets", "visual"],
       "status": "active",
       "data": {
         "capabilities": {"detached_terminal": true},
+        "protected": true,
+        "system_node": true,
+        "asset_scope": "visual_media",
+        "open_url": "/marketing/assets",
         "source": "production_readonly_audit_2026-08-20",
         "status": "active"
       }

@@ -109,8 +109,8 @@ O PublicationPlan aprovado contém 13 nodes, 10 edges, dois branches, 29 chunks
 novos e zero breaking changes. O gate aprovado é:
 
 ```text
-draft  : sha256:9d8811af2f299075137f4b9ec5d80925c1e7b9caa401a9b31a8f4e135360ac55
-runtime: sha256:6b885e5645b3e835fa9fa1b6ee18aba55cdb454e020ba918ad183c04daff73cf
+draft  : sha256:69efeb8fb5eef25512e901d1fd2fd1a05362a4bc97f24b94345e684c757cde50
+runtime: sha256:1d5e1783bc2d4f2c321a41b9905974f3a766405756efa574a58964d9613f91e1
 ```
 
 `graph_bundle_publisher.stage_bundle` materializa nodes/edges canônicos,

@@ -1601,7 +1601,6 @@ def upsert_knowledge_edge(
             if existing:
                 return existing
         raise
-
     requested_metadata = dict(metadata or {})
     is_primary_path = requested_metadata.get("primary_tree") is True
     if is_primary_path and (relation_type or "").lower() == "about_product":
@@ -1690,6 +1689,28 @@ def upsert_knowledge_edge(
             "metadata": insert_metadata,
         }).execute()
         return (r.data or [{}])[0]
+    except Exception as exc:
+        if _kg_unavailable(exc):
+            _KG_TABLES_MISSING = True
+            return None
+        raise
+
+
+def update_knowledge_edge(edge_id: str, data: dict) -> Optional[dict]:
+    """Replace selected fields on one edge by UUID without metadata merging."""
+    global _KG_TABLES_MISSING
+    if _KG_TABLES_MISSING or not edge_id or not data:
+        return None
+    try:
+        payload = dict(data)
+        result = (
+            get_client()
+            .table("knowledge_edges")
+            .update(payload)
+            .eq("id", edge_id)
+            .execute()
+        )
+        return (result.data or [{"id": edge_id, **payload}])[0]
     except Exception as exc:
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True

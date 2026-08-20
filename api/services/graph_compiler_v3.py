@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.5.0"
+COMPILER_VERSION = "graph-compiler-v3.6.0"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -101,6 +101,21 @@ def _metadata(row: dict[str, Any]) -> dict[str, Any]:
     return dict(row.get("metadata") or {})
 
 
+def _runtime_node_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    """Exclude publication provenance that cannot change dialogue behavior."""
+    metadata = _metadata(row)
+    metadata.pop("graph_bundle_draft_checksum", None)
+    return metadata
+
+
+def _runtime_edge_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    """Keep layout/provenance fields out of the semantic runtime checksum."""
+    metadata = _metadata(row)
+    metadata.pop("graph_bundle_draft_checksum", None)
+    metadata.pop("primary_tree", None)
+    return metadata
+
+
 def _capability(data: dict[str, Any], name: str) -> bool:
     capabilities = data.get("capabilities")
     if isinstance(capabilities, dict):
@@ -136,7 +151,13 @@ def _select_persona_node(
         for node in candidates
         if (node.get("data") or {}).get("graph_json_import") is True
     ]
-    eligible = projected if projected else candidates
+    authored = [
+        node
+        for node in candidates
+        if str(node.get("slug") or "").lower() != "self"
+        and str((node.get("data") or {}).get("role") or "").lower() != "root"
+    ]
+    eligible = projected if projected else (authored if authored else candidates)
     if len(eligible) == 1:
         return eligible[0]
     if len(eligible) > 1:
@@ -608,7 +629,7 @@ def compile_graph(
             continue
         seen.add(stable_id)
         db_to_stable[str(row.get("id"))] = stable_id
-        data = _metadata(row)
+        data = _runtime_node_metadata(row)
         nodes.append({
             "id": stable_id,
             "projection_node_id": str(row.get("id")),
@@ -623,14 +644,28 @@ def compile_graph(
             "status": str(row.get("status") or ""),
             "data": data,
         })
+    persona_node = _select_persona_node(nodes, errors)
+    if persona_node is not None:
+        canonical_persona_id = str(persona_node["id"])
+        nodes = [
+            node
+            for node in nodes
+            if node["node_type"] != "persona" or node["id"] == canonical_persona_id
+        ]
+        retained_ids = {str(node["id"]) for node in nodes}
+        db_to_stable = {
+            projection_id: stable_id
+            for projection_id, stable_id in db_to_stable.items()
+            if stable_id in retained_ids
+        }
     node_by_id = {node["id"]: node for node in nodes}
     if not nodes:
         errors.append("publication_has_no_published_nodes")
 
     edges: list[dict[str, Any]] = []
     for row in edge_rows:
-        metadata = _metadata(row)
-        if metadata.get("active", True) is False:
+        source_metadata = _metadata(row)
+        if source_metadata.get("active", True) is False:
             continue
         source = db_to_stable.get(str(row.get("source_node_id")))
         target = db_to_stable.get(str(row.get("target_node_id")))
@@ -640,7 +675,7 @@ def compile_graph(
         edges.append({
             "id": _stable_edge_id(row), "source": source, "target": target,
             "relation_type": relation, "weight": float(row.get("weight") or 1),
-            "metadata": metadata,
+            "metadata": _runtime_edge_metadata(row),
             "primary": relation in STRUCTURAL_RELATIONS,
         })
 
@@ -697,7 +732,6 @@ def compile_graph(
             queue.extend((child, _distance + 1) for child in children.get(current, []))
         return result
 
-    persona_node = _select_persona_node(nodes, errors)
     persona_data = (persona_node or {}).get("data") or {}
     conversation_policy = persona_data.get("conversation_policy")
     conversation_policy = (

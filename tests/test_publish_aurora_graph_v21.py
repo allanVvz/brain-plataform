@@ -111,7 +111,7 @@ def test_all_aurora_factual_faqs_receive_v34_projection_membership() -> None:
     graph = graph_markdown.canonicalize_graph(build_graph())
     document = _compile(graph)
 
-    assert document["compiler_version"] == "graph-compiler-v3.5.0"
+    assert document["compiler_version"] == "graph-compiler-v3.6.0"
     assert document["faq_projection_contract"] == "v1"
     assert len(document["eligible_faq_node_ids"]) == 31
     # Thirteen portfolio/global FAQs are available in every branch; a branch
