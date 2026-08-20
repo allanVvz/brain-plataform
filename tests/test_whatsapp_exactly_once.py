@@ -816,7 +816,11 @@ def test_validation_lead_commit_persists_the_reply_without_a_real_send(monkeypat
     captured_envelopes = []
 
     def fake_atomic_commit(*, turn, outbound_buffer, outbound_message, result_payload):
-        captured_envelopes.append({"buffer": outbound_buffer, "message": outbound_message})
+        captured_envelopes.append({
+            "buffer": outbound_buffer,
+            "message": outbound_message,
+            "result": result_payload,
+        })
         return {
             "graph_turn": {"proof_id": "proof-1", "ledger_revision": 1},
             "outbound_buffer_id": "buffer-out-1",
@@ -854,6 +858,10 @@ def test_validation_lead_commit_persists_the_reply_without_a_real_send(monkeypat
     assert envelope["message"]["role"] == "assistant"
     assert envelope["message"]["content"] == "Ola!"
     assert envelope["message"]["direction"] == "outbound"
+    assert envelope["result"]["evidence_node_ids"] == result["evidence_node_ids"]
+    assert envelope["result"]["knowledge_context"] == result["knowledge_context"]
+    assert envelope["result"]["proof"] == result["proof"]
+    assert envelope["result"]["qualification"] == result["qualification"]
 
 
 def test_invalid_branch_proof_still_commits_individually_accepted_persona_fact(monkeypatch):

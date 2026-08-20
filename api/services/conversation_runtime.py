@@ -2668,6 +2668,11 @@ def commit(
             "role": response.role.value, "intent": decision.intent,
             "reply_text": response.reply_text, "graph_version": context.graph_version,
             "graph_checksum": context.graph_checksum, "stage": qualified_stage,
+            "classifier": decision.classifier,
+            "evidence_node_ids": decision.evidence_node_ids,
+            "knowledge_context": knowledge_context,
+            "proof": response.proof,
+            "qualification": qualification,
         }
         commit_started = time.monotonic()
         atomic_commit = _commit_graph_turn_and_outbox_or_raise(
