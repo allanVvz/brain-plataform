@@ -40,6 +40,13 @@
           "question_repetition": {
             "max_attempts": 1
           },
+          "qualification": {
+            "summary_template": "Registrei estas informações: {informed_fields}.",
+            "confirmation_question": "As informações estão corretas?",
+            "completion_message": "Perfeito. Vou encaminhar seu interesse para a equipe continuar o atendimento.",
+            "correction_prompt": "Certo. Qual informação você quer corrigir?",
+            "incomplete_handoff_template": "Ainda faltam estas informações: {missing_fields}. Vou encaminhar seu interesse para a equipe continuar o atendimento."
+          },
           "safety": {
             "unsupported_commercial_claim": "handoff",
             "forbid_unpublished_price_stock_deadline_policy": true
@@ -294,7 +301,11 @@
       "summary": "Sem fonte comercial publicada, Vitória registra o interesse e encaminha para a equipe sem confirmar preço, estoque, prazo, política ou pedido mínimo.",
       "status": "validated",
       "data": {
-        "capabilities": {"global_context": true},
+        "capabilities": {"global_context": true, "handoff_rule": true},
+        "handoff_rule": {
+          "condition": "qualification_complete",
+          "text": "Perfeito. Vou encaminhar seu interesse para a equipe continuar o atendimento."
+        },
         "handoff_message": "Vou encaminhar seu interesse para a equipe continuar o atendimento.",
         "source": "operator_approval_and_handoff_2026-08-20",
         "status": "validated"

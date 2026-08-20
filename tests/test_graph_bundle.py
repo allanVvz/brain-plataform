@@ -42,6 +42,24 @@ def test_tock_sales_bundle_declares_generic_audience_selector():
     ]
 
 
+def test_tock_sales_bundle_declares_terminal_qualification_copy():
+    document = graph_bundle.compile_bundle(load_tock_example())
+
+    for branch_id in document["branch_anchors"]:
+        contract = document["branch_contracts"][branch_id]
+        qualification = contract["conversation_policy"]["qualification"]
+        assert qualification["summary_template"]
+        assert qualification["confirmation_question"]
+        assert qualification["completion_message"]
+        assert qualification["correction_prompt"]
+        assert qualification["incomplete_handoff_template"]
+        assert contract["handoff_rules"] == [{
+            "node_id": "rule:tock-safe-handoff",
+            "condition": "qualification_complete",
+            "text": "Perfeito. Vou encaminhar seu interesse para a equipe continuar o atendimento.",
+        }]
+
+
 def test_tock_bundle_is_ready_for_explicit_publication_approval():
     plan = graph_bundle.build_publication_plan(load_tock_example())
 
