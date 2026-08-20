@@ -102,7 +102,7 @@ class ServiceOperation(StrictModel):
     evidence_span: str = Field(min_length=1)
     evidence_type: str = Field(
         default="exact_catalog",
-        pattern="^(exact_catalog|confirmed_candidate)$",
+        pattern="^(exact_catalog|confirmed_candidate|explicit_change)$",
     )
     resolution_method: str = "exact_catalog"
     score: float | None = Field(default=None, ge=0, le=1)

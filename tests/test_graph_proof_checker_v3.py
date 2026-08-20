@@ -11,6 +11,7 @@ if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
 from services import graph_proof_checker_v3
+from schemas.conversation import ServiceOperation
 
 
 def test_aggregate_missing_fields_unions_two_active_branches():
@@ -639,6 +640,7 @@ def test_explicit_change_evidence_can_only_drop_an_active_branch():
         "branch_path_checksum": "checksum:a", "evidence_span": "Na verdade",
         "evidence_type": "explicit_change", "resolution_method": "exact_catalog",
     }
+    assert ServiceOperation.model_validate(operation).evidence_type == "explicit_change"
     consumed = [{
         "text": "Na verdade", "start": 0, "end": 10,
         "branch_anchor_node_id": "branch:a", "evidence_type": "explicit_change",
