@@ -19,7 +19,12 @@ def _publication() -> dict:
         .read_text(encoding="utf-8")
     )
     document = graph_bundle.compile_bundle(bundle)
-    return {"version": 1, "checksum": document["checksum"], "document_json": document}
+    return {
+        "version": 1,
+        "status": "active",
+        "checksum": document["checksum"],
+        "document_json": document,
+    }
 
 
 def test_sales_semantic_scripts_select_distinct_graph_branches():
@@ -37,6 +42,85 @@ def test_sales_semantic_scripts_select_distinct_graph_branches():
     assert reseller["driver"]["branch_anchor_node_id"] == "audience:tock-reseller"
     assert retail["driver"]["branch_anchor_node_id"] != reseller["driver"]["branch_anchor_node_id"]
     assert retail["driver"]["doubt"]["forbidden_claim_patterns"]
+
+
+def test_graph_context_falls_back_to_active_v3_without_legacy_v2(monkeypatch):
+    publication = _publication()
+    monkeypatch.setattr(
+        wa_validator_service.graph_json_v2_store, "load_current", lambda _slug: None
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_persona",
+        lambda _slug: {"id": "4acb2739-127e-4143-acf5-f5c3ea1aaa98"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_active_graph_publication",
+        lambda _persona_id: publication,
+    )
+
+    context, version, checksum, graph = wa_validator_service._build_graph_context(
+        "tock-fatal"
+    )
+
+    assert version == 1
+    assert checksum == publication["checksum"]
+    assert "persona:tock-fatal" in context
+    assert wa_validator_service.conversation_runtime._business_model(graph) == "sales"
+
+
+def test_graph_context_does_not_mask_invalid_legacy_v2(monkeypatch):
+    monkeypatch.setattr(
+        wa_validator_service.graph_json_v2_store,
+        "load_current",
+        lambda _slug: (1, object()),
+    )
+    monkeypatch.setattr(
+        wa_validator_service,
+        "_published_graph",
+        lambda _slug: (_ for _ in ()).throw(ValueError("Graph JSON v2 publicado não está válido")),
+    )
+    try:
+        wa_validator_service._build_graph_context("tock-fatal")
+        raise AssertionError("expected invalid v2 rejection")
+    except ValueError as exc:
+        assert "não está válido" in str(exc)
+
+
+def test_graph_context_rejects_inconsistent_v3_and_uses_top_level_node_status(monkeypatch):
+    publication = _publication()
+    document = publication["document_json"]
+    for node in document["nodes"]:
+        node["data"].pop("status", None)
+    unsigned = dict(document)
+    unsigned.pop("checksum", None)
+    document["checksum"] = wa_validator_service.graph_compiler_v3.canonical_checksum(unsigned)
+    publication["checksum"] = document["checksum"]
+    monkeypatch.setattr(
+        wa_validator_service.graph_json_v2_store, "load_current", lambda _slug: None
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_persona",
+        lambda _slug: {"id": "4acb2739-127e-4143-acf5-f5c3ea1aaa98"},
+    )
+    monkeypatch.setattr(
+        wa_validator_service.supabase_client,
+        "get_active_graph_publication",
+        lambda _persona_id: publication,
+    )
+    context, _version, _checksum, _graph = wa_validator_service._build_graph_context(
+        "tock-fatal"
+    )
+    assert "persona:tock-fatal" in context
+
+    publication["checksum"] = "sha256:tampered"
+    try:
+        wa_validator_service._build_graph_context("tock-fatal")
+        raise AssertionError("expected inconsistent v3 rejection")
+    except ValueError as exc:
+        assert "inconsistente" in str(exc)
 
 
 def test_validator_gaps_become_review_only_sofia_proposals():

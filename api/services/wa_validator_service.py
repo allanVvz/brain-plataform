@@ -21,6 +21,7 @@ import unicodedata
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
 from services import (
@@ -28,6 +29,7 @@ from services import (
     conversation_repetition,
     conversation_runtime,
     graph_agent_runtime_v3,
+    graph_compiler_v3,
     graph_json_v2_store,
     graph_proof_checker_v3,
     media_ingest,
@@ -409,7 +411,55 @@ def _published_graph(persona_slug: str):
 
 
 def _build_graph_context(persona_slug: str) -> tuple[str, int, str, object]:
-    version, checksum, graph = _published_graph(persona_slug)
+    if graph_json_v2_store.load_current(persona_slug):
+        version, checksum, graph = _published_graph(persona_slug)
+    else:
+        persona = supabase_client.get_persona(persona_slug) or {}
+        publication = supabase_client.get_active_graph_publication(
+            str(persona.get("id") or "")
+        )
+        if not publication:
+            raise ValueError(
+                f"Nenhum Graph JSON v2 ou GraphRAG v3 publicado para {persona_slug}"
+            )
+        document = publication.get("document_json") or {}
+        document_without_checksum = dict(document) if isinstance(document, dict) else {}
+        document_checksum = str(document_without_checksum.pop("checksum", ""))
+        publication_checksum = str(publication.get("checksum") or "")
+        document_persona = document.get("persona") if isinstance(document, dict) else {}
+        document_nodes = document.get("nodes") if isinstance(document, dict) else None
+        if (
+            str(publication.get("status") or "") != "active"
+            or not document_checksum
+            or document_checksum != publication_checksum
+            or graph_compiler_v3.canonical_checksum(document_without_checksum)
+            != document_checksum
+            or not isinstance(document_persona, dict)
+            or str(document_persona.get("id") or "") != str(persona.get("id") or "")
+            or str(document_persona.get("slug") or "") != persona_slug
+            or not isinstance(document_nodes, list)
+            or not document_nodes
+        ):
+            raise ValueError("Publicação GraphRAG v3 ativa está inconsistente")
+        graph = SimpleNamespace(
+            nodes=[
+                SimpleNamespace(
+                    id=str(node.get("id") or ""),
+                    node_type=str(node.get("node_type") or "knowledge"),
+                    slug=str(node.get("slug") or node.get("id") or ""),
+                    label=str(node.get("title") or node.get("slug") or ""),
+                    data={
+                        **dict(node.get("data") or {}),
+                        "status": str(node.get("status") or ""),
+                    },
+                )
+                for node in document_nodes
+            ],
+            status="published",
+            validation=SimpleNamespace(is_valid=True),
+        )
+        version = int(publication["version"])
+        checksum = str(publication["checksum"])
     lines: list[str] = []
     for node in graph.nodes:
         data = node.data or {}
