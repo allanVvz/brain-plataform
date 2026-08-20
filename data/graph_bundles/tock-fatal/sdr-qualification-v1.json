@@ -286,7 +286,19 @@
               "scope": "branch",
               "accepted_statuses": ["known"],
               "value_schema": {"type": "string", "minLength": 2},
-              "validation": {"mode": "schema"}
+              "validation": {
+                "mode": "enum",
+                "values": [
+                  {
+                    "value": "uso-proprio-varejo",
+                    "aliases": ["uso próprio", "pra mim", "varejo", "comprar para mim"]
+                  },
+                  {
+                    "value": "atacado-revenda",
+                    "aliases": ["revenda", "revender", "atacado", "minha loja", "empreender"]
+                  }
+                ]
+              }
             },
             {
               "key": "retail_need",
@@ -378,7 +390,19 @@
               "scope": "branch",
               "accepted_statuses": ["known"],
               "value_schema": {"type": "string", "minLength": 2},
-              "validation": {"mode": "schema"}
+              "validation": {
+                "mode": "enum",
+                "values": [
+                  {
+                    "value": "uso-proprio-varejo",
+                    "aliases": ["uso próprio", "pra mim", "varejo", "comprar para mim"]
+                  },
+                  {
+                    "value": "atacado-revenda",
+                    "aliases": ["revenda", "revender", "atacado", "minha loja", "empreender"]
+                  }
+                ]
+              }
             },
             {
               "key": "resale_stage",

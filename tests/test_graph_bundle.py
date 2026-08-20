@@ -80,6 +80,23 @@ def test_tock_sales_bundle_publishes_voice_tone_greetings_and_plain_labels():
     for branch_id in document["branch_anchors"]:
         contract = document["branch_contracts"][branch_id]
         assert contract["field_labels"]["purchase_profile"] == "tipo de compra"
+        selector = next(
+            field for field in contract["fields"]
+            if field["key"] == "purchase_profile"
+        )
+        assert selector["validation"] == {
+            "mode": "enum",
+            "values": [
+                {
+                    "value": "uso-proprio-varejo",
+                    "aliases": ["uso próprio", "pra mim", "varejo", "comprar para mim"],
+                },
+                {
+                    "value": "atacado-revenda",
+                    "aliases": ["revenda", "revender", "atacado", "minha loja", "empreender"],
+                },
+            ],
+        }
         assert "tone:tock-vitoria-voice" in contract["closure_node_ids"]
         assert "tone:tock-vitoria-clear-language" in contract["closure_node_ids"]
         assert set(greeting["response_node_ids"]).issubset(contract["closure_node_ids"])
