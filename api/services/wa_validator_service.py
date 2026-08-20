@@ -2073,7 +2073,11 @@ def _semantic_turn_audit(
     consumed_spans = proof.get("consumed_service_spans") or []
     operations_have_authorized_evidence = all(
         str(operation.get("evidence_type") or "")
-        in {"exact_catalog", "confirmed_candidate"}
+        in {"exact_catalog", "confirmed_candidate", "explicit_change"}
+        and (
+            str(operation.get("evidence_type") or "") != "explicit_change"
+            or str(operation.get("action") or "") == "drop"
+        )
         and any(
             _semantic_fold(str(span.get("text") or ""))
             == _semantic_fold(str(operation.get("evidence_span") or ""))

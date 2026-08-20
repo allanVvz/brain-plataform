@@ -498,6 +498,25 @@ def test_semantic_turn_audit_rejects_operation_without_consumed_evidence():
     assert "service_operations_have_authorized_evidence" in audit["failures"]
 
 
+def test_semantic_turn_audit_accepts_explicit_change_evidence_for_drop():
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"]["text"] = "Na verdade, quero trocar."
+    operation = {
+        "action": "drop", "branch_anchor_node_id": "branch:one",
+        "branch_path_checksum": "checksum:one", "evidence_span": "Na verdade",
+        "evidence_type": "explicit_change",
+    }
+    proof = inputs["proof_record"]["proof_result"]
+    proof["service_resolution"] = {"operations": [operation]}
+    proof["applied_service_operations"] = [operation]
+    proof["consumed_service_spans"] = [{
+        "text": "Na verdade", "start": 0, "end": 10,
+        "branch_anchor_node_id": "branch:one", "evidence_type": "explicit_change",
+    }]
+    audit = wv._semantic_turn_audit(**inputs)
+    assert audit["criteria"]["service_operations_have_authorized_evidence"] is True
+
+
 def test_semantic_turn_audit_rejects_overlapping_service_and_field_spans():
     inputs = _semantic_audit_inputs()
     inputs["customer_step"]["text"] = "Quero Service Two"
