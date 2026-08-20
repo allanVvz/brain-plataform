@@ -377,11 +377,12 @@ def _topological_fields(
 def branch_selection_field_key(
     contracts: dict[str, dict[str, Any]], persona_node: dict[str, Any] | None,
 ) -> str | None:
-    """O field referencial que escolhe o galho, sem hardcode de nome.
+    """Resolve the graph-declared field that selects a branch.
 
-    E o unico campo que **todo** galho declara e que pertence ao proprio galho
-    -- por construcao, o campo de servico. Derivar assim mantem o gate
-    anti-hardcode: nenhum nome de campo entra no codigo.
+    Sales graphs can declare ``conversation_policy.branch_selection.field_key``.
+    Appointment graphs retain the legacy derivation from required_fields as a
+    compatibility adapter. No client, product, service or audience key is
+    hardcoded here.
     """
     if not contracts or not persona_node:
         return None
@@ -392,16 +393,20 @@ def branch_selection_field_key(
         }
         for anchor, contract in contracts.items()
     }
-    persona_policy = (persona_node.get("data") or {}).get("appointment_policy") or {}
-    for value in persona_policy.get("required_fields") or []:
-        key = str(value or "")
+    persona_data = persona_node.get("data") or {}
+    conversation_policy = persona_data.get("conversation_policy") or {}
+    declared_selection = conversation_policy.get("branch_selection") or {}
+    explicit_key = str(declared_selection.get("field_key") or "").strip()
+    appointment_policy = persona_data.get("appointment_policy") or {}
+    candidates = [
+        explicit_key,
+        *(str(value or "") for value in appointment_policy.get("required_fields") or []),
+    ]
+    for key in candidates:
         if not key:
             continue
-        # Nem todo galho e um servico de catalogo: atendimento humano e
-        # reclamacao existem no grafo mas nao sao escolhidos dizendo um nome de
-        # servico. Exigir declaracao em *todos* os anchors fazia o seletor sumir
-        # e derrubava junto o contrato comum -- entao o criterio e "onde e
-        # declarado, pertence ao proprio galho", com pelo menos dois galhos.
+        # Support branches may omit the selector. Where declared, it must be
+        # owned by that branch, and at least two branches must participate.
         declarantes = {
             anchor: campos[key] for anchor, campos in by_anchor.items() if key in campos
         }
@@ -468,10 +473,18 @@ def _common_persona_contract(
         for anchor, contract in contracts.items()
     }
     persona_id = str(persona_node.get("id") or "")
-    persona_policy = (persona_node.get("data") or {}).get("appointment_policy") or {}
+    persona_data = persona_node.get("data") or {}
+    persona_policy = persona_data.get("appointment_policy") or {}
+    branch_selection = (
+        (persona_data.get("conversation_policy") or {}).get("branch_selection")
+        or {}
+    )
     preferred = [
         str(value) for value in persona_policy.get("required_fields") or [] if value
     ]
+    explicit_selector = str(branch_selection.get("field_key") or "").strip()
+    if explicit_selector and explicit_selector not in preferred:
+        preferred.insert(0, explicit_selector)
 
     selector_key = branch_selection_field_key(contracts, persona_node)
 
@@ -579,7 +592,8 @@ def _common_persona_contract(
 
 
 def compile_graph(
-    *, persona: dict[str, Any], node_rows: list[dict[str, Any]], edge_rows: list[dict[str, Any]]
+    *, persona: dict[str, Any], node_rows: list[dict[str, Any]], edge_rows: list[dict[str, Any]],
+    embedding_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     db_to_stable: dict[str, str] = {}
@@ -1003,6 +1017,18 @@ def compile_graph(
                     f"inconsistent_field_owner:{field_key}:{', '.join(branches_with_owners)}"
                 )
 
+    declared_branch_selection = str(
+        ((conversation_policy.get("branch_selection") or {}).get("field_key")) or ""
+    ).strip()
+    if (
+        declared_branch_selection
+        and branch_selection_field_key(contracts, persona_node)
+        != declared_branch_selection
+    ):
+        errors.append(
+            f"branch_selection_field_invalid:{declared_branch_selection}"
+        )
+
     if errors:
         raise GraphCompilationError(errors)
     contract_markdown = CONTRACT_DOCUMENT.read_text(encoding="utf-8")
@@ -1015,13 +1041,20 @@ def compile_graph(
         branch: sum(len(projected_nodes.get(node_id) or []) for node_id in members)
         for branch, members in memberships.items()
     }
+    resolved_embedding_profile = dict(embedding_profile or {})
     projection_manifest = {
         "entry_count": sum(bool(chunks) for chunks in projected_nodes.values()),
         "chunk_count": sum(branch_chunk_counts.values()),
         "branch_chunk_counts": branch_chunk_counts,
-        "embedding_dimension": EMBEDDING_DIMENSION,
-        "embedding_provider": embedding_provider(),
-        "embedding_model": embedding_model_name(),
+        "embedding_dimension": int(
+            resolved_embedding_profile.get("embedding_dimension") or EMBEDDING_DIMENSION
+        ),
+        "embedding_provider": str(
+            resolved_embedding_profile.get("embedding_provider") or embedding_provider()
+        ),
+        "embedding_model": str(
+            resolved_embedding_profile.get("embedding_model") or embedding_model_name()
+        ),
     }
     projected_eligible_faq_ids = sorted(
         node_id for node_id in eligible_faq_ids
@@ -1146,20 +1179,22 @@ def semantic_chunks(node: dict[str, Any]) -> list[dict[str, Any]]:
     return deduped
 
 
-def _local_embeddings(texts: list[str], *, input_type: str) -> list[list[float]]:
+def _local_embeddings(
+    texts: list[str], *, input_type: str, model_name: str | None = None,
+) -> list[list[float]]:
     global _local_embedding_model, _local_embedding_model_name
     from fastembed import TextEmbedding
 
-    model_name = embedding_model_name()
-    if _local_embedding_model is None or _local_embedding_model_name != model_name:
+    resolved_model_name = str(model_name or embedding_model_name())
+    if _local_embedding_model is None or _local_embedding_model_name != resolved_model_name:
         _local_embedding_model = TextEmbedding(
-            model_name=model_name,
+            model_name=resolved_model_name,
             cache_dir=(
                 os.environ.get("FASTEMBED_CACHE_PATH")
                 or "/opt/venv/fastembed-cache"
             ),
         )
-        _local_embedding_model_name = model_name
+        _local_embedding_model_name = resolved_model_name
     method_name = "query_embed" if input_type == "query" else "passage_embed"
     method = getattr(_local_embedding_model, method_name, None)
     generated = method(texts) if callable(method) else _local_embedding_model.embed(texts)
@@ -1204,6 +1239,41 @@ def generate_embeddings(
     return vectors
 
 
+def generate_embeddings_for_profile(
+    texts: list[str], *, profile: dict[str, Any], input_type: str = "passage",
+) -> list[list[float]]:
+    """Generate vectors with the exact provider/model approved in the plan."""
+    if not texts:
+        return []
+    provider = str(profile.get("embedding_provider") or "").strip().lower()
+    model = str(profile.get("embedding_model") or "").strip()
+    dimension = int(profile.get("embedding_dimension") or 0)
+    if dimension != EMBEDDING_DIMENSION:
+        raise RuntimeError("approved embedding dimension does not match runtime")
+    if provider == "local":
+        vectors = _local_embeddings(
+            texts, input_type=input_type, model_name=model
+        )
+    elif provider == "openai":
+        key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY is required by the approved embedding profile")
+        from openai import OpenAI
+
+        response = OpenAI(api_key=key).embeddings.create(
+            model=model, input=texts, dimensions=EMBEDDING_DIMENSION
+        )
+        vectors = [
+            _fit_embedding_dimension(item.embedding)
+            for item in sorted(response.data, key=lambda item: item.index)
+        ]
+    else:
+        raise RuntimeError(f"unsupported approved embedding provider: {provider}")
+    if len(vectors) != len(texts):
+        raise RuntimeError("embedding provider returned an invalid batch size")
+    return vectors
+
+
 def openai_embeddings(texts: list[str]) -> list[list[float]]:
     """Backward-compatible passage embedding entry point."""
     return generate_embeddings(texts, input_type="passage")
@@ -1218,6 +1288,7 @@ def compile_persona_publication(
     *,
     activate: bool = True,
     embedder: Callable[[list[str]], list[list[float]]] | None = None,
+    embedding_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile, persist, embed, and atomically activate one persona snapshot."""
     persona = supabase_client.get_persona(persona_slug)
@@ -1226,7 +1297,12 @@ def compile_persona_publication(
     node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
         persona_id=str(persona["id"]), limit_nodes=10000
     )
-    document = compile_graph(persona=persona, node_rows=node_rows, edge_rows=edge_rows)
+    document = compile_graph(
+        persona=persona,
+        node_rows=node_rows,
+        edge_rows=edge_rows,
+        embedding_profile=embedding_profile,
+    )
     client = supabase_client.get_client()
     existing_response = (
         client.table("graph_publications").select("*")
@@ -1270,8 +1346,16 @@ def compile_persona_publication(
         } for branch, contract in document["branch_contracts"].items()]
         client.table("graph_branch_contracts").insert(contracts).execute()
 
-        embedding_model = embedding_model_name()
-        batch_embed = embedder or openai_embeddings
+        embedding_model = str(
+            document["projection_manifest"].get("embedding_model")
+            or embedding_model_name()
+        )
+        batch_embed = embedder or (
+            (lambda texts: generate_embeddings_for_profile(
+                texts, profile=embedding_profile, input_type="passage"
+            ))
+            if embedding_profile else openai_embeddings
+        )
         for node_id, node in document["node_by_id"].items():
             chunks = semantic_chunks(node)
             if not chunks:

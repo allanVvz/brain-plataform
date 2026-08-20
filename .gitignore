@@ -109,6 +109,8 @@ dashboard/modes.json
 !.agents/skills/whatsapp-binding-reassignment/**
 !.agents/skills/validate-production-release/
 !.agents/skills/validate-production-release/**
+!.agents/skills/sofia-graph-publication-plan/
+!.agents/skills/sofia-graph-publication-plan/**
 !.agents/commands/
 !.agents/commands/*.md
 .mcp.json

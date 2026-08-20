@@ -1,0 +1,176 @@
+{
+  "bundle_version": "1.0",
+  "persona": {
+    "id": "persona:example-commercial",
+    "slug": "example-commercial"
+  },
+  "metadata": {
+    "purpose": "local_dry_run_example",
+    "source": "HANDOFF_BRAIN_PLATFORM_AURORA_TOCK_FATAL_SOFIA_2026-08-20",
+    "publication_allowed": false,
+    "embedding_profile": {
+      "embedding_provider": "local",
+      "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "embedding_dimension": 1536
+    }
+  },
+  "nodes": [
+    {
+      "id": "persona:example-commercial",
+      "node_type": "persona",
+      "slug": "example-commercial",
+      "title": "Persona comercial de exemplo",
+      "summary": "Exemplo local sem dados comerciais reais.",
+      "status": "validated",
+      "data": {
+        "business_model": "sales",
+        "source": "synthetic_fixture",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "brand:example-commercial",
+      "node_type": "brand",
+      "slug": "example-commercial",
+      "title": "Marca de exemplo",
+      "summary": "Placeholder estrutural; não representa uma marca publicável.",
+      "status": "validated",
+      "data": {
+        "source": "synthetic_fixture",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "campaign:qualification-whatsapp",
+      "node_type": "campaign",
+      "slug": "qualification-whatsapp",
+      "title": "Qualificação WhatsApp",
+      "summary": "Campanha SDR de exemplo, sem transporte real.",
+      "status": "validated",
+      "data": {
+        "agent_role": "sdr",
+        "journey_stage": "sdr",
+        "source": "synthetic_fixture",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "audience:retail",
+      "node_type": "audience",
+      "slug": "retail",
+      "title": "Uso próprio",
+      "summary": "Pessoa interessada em comprar para uso próprio.",
+      "status": "validated",
+      "data": {
+        "capabilities": {"branch_anchor": true},
+        "inherited_context": {"campaign": "qualification-whatsapp", "journey_stage": "sdr"},
+        "qualification": {
+          "fields": [
+            {
+              "key": "need",
+              "question_node_id": "faq:retail-need",
+              "required": true,
+              "owner_node_id": "audience:retail",
+              "scope": "branch",
+              "accepted_statuses": ["known"],
+              "value_schema": {"type": "string", "minLength": 2},
+              "validation": {"mode": "schema"}
+            }
+          ]
+        },
+        "source": "synthetic_fixture",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "faq:retail-need",
+      "node_type": "faq",
+      "slug": "retail-need",
+      "title": "Necessidade para uso próprio",
+      "summary": "Pergunta de qualificação; não contém oferta ou promessa.",
+      "status": "validated",
+      "data": {
+        "question": "O que você procura para uso próprio?",
+        "role": "qualification_question",
+        "source": "synthetic_fixture",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "audience:reseller",
+      "node_type": "audience",
+      "slug": "reseller",
+      "title": "Revenda",
+      "summary": "Pessoa interessada em comprar para revender.",
+      "status": "validated",
+      "data": {
+        "capabilities": {"branch_anchor": true},
+        "inherited_context": {"campaign": "qualification-whatsapp", "journey_stage": "sdr"},
+        "qualification": {
+          "fields": [
+            {
+              "key": "resale_stage",
+              "question_node_id": "faq:reseller-stage",
+              "required": true,
+              "owner_node_id": "audience:reseller",
+              "scope": "branch",
+              "accepted_statuses": ["known"],
+              "value_schema": {"type": "string", "minLength": 2},
+              "validation": {"mode": "schema"}
+            },
+            {
+              "key": "volume_interest",
+              "question_node_id": "faq:reseller-volume-interest",
+              "required": true,
+              "owner_node_id": "audience:reseller",
+              "scope": "branch",
+              "accepted_statuses": ["known"],
+              "depends_on": ["resale_stage"],
+              "value_schema": {"type": "string", "minLength": 2},
+              "validation": {"mode": "schema"}
+            }
+          ]
+        },
+        "source": "synthetic_fixture",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "faq:reseller-stage",
+      "node_type": "faq",
+      "slug": "reseller-stage",
+      "title": "Estágio da revenda",
+      "summary": "Pergunta de qualificação; não presume condição comercial.",
+      "status": "validated",
+      "data": {
+        "question": "Você já revende ou está começando agora?",
+        "role": "qualification_question",
+        "source": "synthetic_fixture",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "faq:reseller-volume-interest",
+      "node_type": "faq",
+      "slug": "reseller-volume-interest",
+      "title": "Interesse de volume",
+      "summary": "Pergunta aberta; não inventa quantidade mínima.",
+      "status": "validated",
+      "data": {
+        "question": "Que tipo de volume você pretende avaliar para revenda?",
+        "role": "qualification_question",
+        "source": "synthetic_fixture",
+        "status": "validated"
+      }
+    }
+  ],
+  "edges": [
+    {"id": "edge:persona-brand", "source": "persona:example-commercial", "target": "brand:example-commercial", "relation_type": "contains"},
+    {"id": "edge:brand-campaign", "source": "brand:example-commercial", "target": "campaign:qualification-whatsapp", "relation_type": "contains"},
+    {"id": "edge:campaign-retail", "source": "campaign:qualification-whatsapp", "target": "audience:retail", "relation_type": "contains"},
+    {"id": "edge:retail-question", "source": "audience:retail", "target": "faq:retail-need", "relation_type": "contains"},
+    {"id": "edge:campaign-reseller", "source": "campaign:qualification-whatsapp", "target": "audience:reseller", "relation_type": "contains"},
+    {"id": "edge:reseller-stage", "source": "audience:reseller", "target": "faq:reseller-stage", "relation_type": "contains"},
+    {"id": "edge:reseller-volume", "source": "audience:reseller", "target": "faq:reseller-volume-interest", "relation_type": "contains"}
+  ]
+}

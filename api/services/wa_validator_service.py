@@ -33,6 +33,7 @@ from services import (
     media_ingest,
     n8n_client,
     supabase_client,
+    validator_sofia_insights,
 )
 
 logger = logging.getLogger("wa_validator_service")
@@ -326,6 +327,18 @@ _FLOWS = {
         "Qualifica e confirma um pedido, reativa somente o lead sintético e "
         "prova que Oi/Oii permanecem saudações sem reiniciar a coleta."
     ),
+    "sdr_sales_retail": (
+        "Qualificação sales orientada pelo grafo para uso próprio/varejo."
+    ),
+    "sdr_sales_reseller": (
+        "Qualificação sales orientada pelo grafo para atacado/revenda."
+    ),
+    "sdr_sales_branch_switch": (
+        "Troca entre audiências sales, preservando apenas fatos compatíveis."
+    ),
+    "sdr_sales_knowledge_gap": (
+        "Pergunta comercial sem fonte deve ser deferida sem invenção."
+    ),
 }
 
 # A fixed name (previously always "Allan") made every validator run
@@ -359,6 +372,10 @@ _FLOW_BUSINESS_MODELS: dict[str, set[str]] = {
     "sdr_troca_servico": {"appointment"},
     "sdr_multiplos_servicos": {"appointment"},
     "sdr_reativacao_pos_handoff": {"appointment"},
+    "sdr_sales_retail": {"sales"},
+    "sdr_sales_reseller": {"sales"},
+    "sdr_sales_branch_switch": {"sales"},
+    "sdr_sales_knowledge_gap": {"sales"},
 }
 
 
@@ -456,8 +473,15 @@ def _branch_identity_field(contract: dict, anchor: str) -> dict | None:
         (
             field for field in contract.get("fields") or []
             if str(field.get("owner_node_id") or "") == anchor
+            and field.get("branch_selection_field") is True
         ),
-        None,
+        next(
+            (
+                field for field in contract.get("fields") or []
+                if str(field.get("owner_node_id") or "") == anchor
+            ),
+            None,
+        ),
     )
 
 
@@ -661,6 +685,142 @@ def _semantic_appointment_script(
     }
 
 
+def _semantic_sales_script(*, publication: dict, flow_id: str) -> dict:
+    """Build a graph-driven sales customer without fixed products or prices."""
+    document = publication.get("document_json") or {}
+    branches = _appointment_branch_candidates(document)
+    preferred_terms = (
+        ("revenda", "atacado")
+        if flow_id in {"sdr_sales_reseller", "sdr_sales_branch_switch"}
+        else ("varejo", "uso-proprio", "uso próprio")
+    )
+
+    def branch_text(row: tuple[str, dict, dict]) -> str:
+        anchor, node, _contract = row
+        return _semantic_fold(
+            " ".join([
+                anchor,
+                str(node.get("slug") or ""),
+                str(node.get("title") or ""),
+                " ".join(str(value) for value in (node.get("data") or {}).get("aliases") or []),
+            ])
+        )
+
+    selected = next(
+        (row for row in branches if any(_semantic_fold(term) in branch_text(row) for term in preferred_terms)),
+        branches[0],
+    )
+    anchor, branch_node, contract = selected
+    identity_field = _branch_identity_field(contract, anchor)
+    if not identity_field:
+        raise ValueError(f"Branch {anchor} não declara branch selector")
+    identity_key = str(identity_field.get("key") or "")
+    identity_value = str(branch_node.get("slug") or branch_node.get("title") or anchor)
+    profile = _customer_profile("sales")
+    configured_answers = profile.get("answers") or {}
+    answers: dict[str, dict] = {}
+    missing_examples: list[str] = []
+    for field in contract.get("fields") or []:
+        key = str(field.get("key") or "")
+        if not key or key == identity_key:
+            continue
+        answer = configured_answers.get(key)
+        if not isinstance(answer, dict) or not str(answer.get("text") or "").strip():
+            missing_examples.append(key)
+            continue
+        answers[key] = {"text": str(answer["text"]), "value": answer.get("value")}
+    if missing_examples:
+        raise ValueError(
+            "Perfil sales do WA Validator não cobre os campos publicados: "
+            + ", ".join(sorted(missing_examples))
+        )
+
+    openings = profile.get("openings") or {}
+    opening_text = str(openings.get(flow_id) or "").strip()
+    if not opening_text:
+        opening_text = f"Olá! Tenho interesse em {branch_node.get('title') or identity_value}."
+    opening = {
+        "text": opening_text,
+        "intended_facts": {identity_key: identity_value},
+        "expected_branch_node_id": anchor,
+    }
+    required_fields = [
+        str(field.get("key") or "") for field in contract.get("fields") or []
+        if str(field.get("key") or "")
+    ]
+    driver_questions = dict(contract.get("questions") or {})
+    doubt = {
+        "text": str(profile.get("unsupported_commercial_question") or "Qual é o preço?"),
+        "expected_evidence_node_ids": [],
+        "forbidden_claim_patterns": [
+            r"R\$\s*\d", r"\bestoque\s+(?:disponível|garantido)\b",
+            r"\bentrega\s+em\s+\d+", r"\bpedido\s+mínimo\s+(?:é|de)\b",
+        ],
+    }
+    switch = None
+    if flow_id == "sdr_sales_branch_switch" and len(branches) > 1:
+        alternative = next((row for row in branches if row[0] != anchor), None)
+        if alternative:
+            second_anchor, second_node, second_contract = alternative
+            second_identity = _branch_identity_field(second_contract, second_anchor)
+            if second_identity:
+                switch = {
+                    "after_answered_fields": 1,
+                    "text": str(profile.get("branch_switch_text") or "Na verdade, é para uso próprio."),
+                    "intended_facts": {
+                        str(second_identity.get("key") or identity_key): str(
+                            second_node.get("slug") or second_node.get("title") or second_anchor
+                        )
+                    },
+                    "expected_branch_node_id": second_anchor,
+                    "expected_active_branch_node_ids": [second_anchor],
+                }
+                for field in second_contract.get("fields") or []:
+                    key = str(field.get("key") or "")
+                    if key and key != str(second_identity.get("key") or ""):
+                        answer = configured_answers.get(key)
+                        if isinstance(answer, dict) and str(answer.get("text") or "").strip():
+                            answers.setdefault(key, {
+                                "text": str(answer["text"]), "value": answer.get("value")
+                            })
+                for key, question in (second_contract.get("questions") or {}).items():
+                    driver_questions.setdefault(key, question)
+                for field in second_contract.get("fields") or []:
+                    key = str(field.get("key") or "")
+                    if key and key not in required_fields:
+                        required_fields.append(key)
+
+    driver = {
+        "mode": "semantic_graph_v1",
+        "opening": opening,
+        "answers": answers,
+        "required_fields": required_fields,
+        "questions": driver_questions,
+        "branch_anchor_node_id": anchor,
+        "max_turns": len(required_fields) + 7,
+        "expected_handoff": True,
+        "switch": switch,
+        "doubt": doubt,
+        "interruption_after_answered_fields": max(1, len(required_fields) - 1),
+        "confirmation": {"text": "Sim"},
+        "question_repetition": dict(
+            (contract.get("conversation_policy") or {}).get("question_repetition") or {}
+        ),
+    }
+    return {
+        "flow_description": _FLOWS.get(flow_id, flow_id),
+        "expected_knowledge": [
+            f"graph:{publication.get('version')}:{publication.get('checksum')}"
+        ],
+        "steps": [opening],
+        "driver": driver,
+        "expected_dialogue": {
+            "branch_anchor_node_id": anchor,
+            "unsupported_claims_forbidden": True,
+        },
+    }
+
+
 def _deterministic_script(
     flow_id: str,
     *,
@@ -816,6 +976,10 @@ def generate_script(
         "sdr_qualificacao_carro", "sdr_troca_servico", "sdr_multiplos_servicos",
         "sdr_reativacao_pos_handoff",
     }
+    semantic_sales_flow = flow_id in {
+        "sdr_sales_retail", "sdr_sales_reseller", "sdr_sales_branch_switch",
+        "sdr_sales_knowledge_gap",
+    }
     if business_model == "appointment" and semantic_appointment_flow and not v3_publication:
         raise ValueError(
             "Fluxos de agendamento exigem publicação Graph v3 ativa; "
@@ -826,6 +990,16 @@ def generate_script(
             publication=v3_publication,
             flow_id=flow_id,
             initial_state=resolved_initial_state,
+        )
+    elif business_model == "sales" and semantic_sales_flow and not v3_publication:
+        raise ValueError(
+            "Fluxos sales semânticos exigem publicação Graph v3 ativa; "
+            "o roteiro fixo não é evidência conversacional."
+        )
+    elif business_model == "sales" and v3_publication and semantic_sales_flow:
+        script_data = _semantic_sales_script(
+            publication=v3_publication,
+            flow_id=flow_id,
         )
     else:
         script_data = _deterministic_script(
@@ -853,7 +1027,11 @@ def generate_script(
                 else "deterministic_v1"
             ),
             "conversation_mode": conversation_mode,
-            "pipeline_contract": "conversation_v1",
+            "pipeline_contract": (
+                "conversation_v3"
+                if (script_data.get("driver") or {}).get("mode") == "semantic_graph_v1"
+                else "conversation_v1"
+            ),
             "agent_slug": agent_slug,
             "graph_version": graph_version,
             "graph_checksum": graph_checksum,
@@ -1343,6 +1521,11 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
             "persona_slug": persona_slug,
             "analyzer": "semantic_graph_v1",
         }
+        insights["sofia_review"] = validator_sofia_insights.build_sofia_review(
+            persona_slug=persona_slug,
+            session_id=session_id,
+            gaps=semantic_gaps,
+        )
         _session_update(session_id, insights=insights)
         supabase_client.insert_event({
             "event_type": "wa_validator_gaps_analyzed",
@@ -1438,6 +1621,11 @@ def analyze_gaps(session_id: str, model: str = _MODEL_DEFAULT) -> dict:
         "persona_slug": persona_slug,
         "analyzer": "deterministic_v1",
     }
+    insights["sofia_review"] = validator_sofia_insights.build_sofia_review(
+        persona_slug=persona_slug,
+        session_id=session_id,
+        gaps=gaps,
+    )
 
     _session_update(session_id, insights=insights)
 
@@ -1792,8 +1980,13 @@ def _semantic_turn_audit(
         for span in proof.get("consumed_service_spans") or []
         if str(span.get("text") or "").strip()
     }
+    branch_selection_keys = {
+        str(field.get("key") or "")
+        for field in contract.get("fields") or []
+        if field.get("branch_selection_field") is True
+    }
     service_value_not_reused_as_field = not any(
-        str(fact.get("field_key") or "") != "servico"
+        str(fact.get("field_key") or "") not in branch_selection_keys
         and (
             _semantic_fold(str(fact.get("value") or "")) in consumed_service_values
             or _semantic_fold(str(fact.get("evidence_span") or "")) in consumed_service_values
@@ -1848,7 +2041,7 @@ def _semantic_turn_audit(
     ]
     field_evidence_disjoint = True
     for fact in proof.get("accepted_facts") or []:
-        if str(fact.get("field_key") or "") == "servico":
+        if str(fact.get("field_key") or "") in branch_selection_keys:
             continue
         evidence = str(fact.get("evidence_span") or "")
         starts = [match.start() for match in re.finditer(re.escape(evidence), customer_text)] if evidence else []
@@ -1880,6 +2073,14 @@ def _semantic_turn_audit(
             "qualification_complete" if qualification_complete
             else "qualification_incomplete"
         )
+    forbidden_claim_patterns = [
+        str(pattern) for pattern in customer_step.get("forbidden_claim_patterns") or []
+        if str(pattern)
+    ]
+    unsupported_claim_not_invented = not any(
+        re.search(pattern, reply, flags=re.IGNORECASE)
+        for pattern in forbidden_claim_patterns
+    )
     repetition_policy = (
         (contract.get("conversation_policy") or {}).get("question_repetition") or {}
     )
@@ -1907,6 +2108,7 @@ def _semantic_turn_audit(
                 and (first_question_offset < 0 or acknowledgement_before_question)
             )
         ),
+        "unsupported_claim_not_invented": unsupported_claim_not_invented,
         "all_intended_facts_extracted": accepted_all,
         "service_value_not_reused_as_field": service_value_not_reused_as_field,
         "service_operations_match_resolution": operations_match_resolution,

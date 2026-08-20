@@ -76,5 +76,48 @@
         "expected_summary_service_count": 2
       }
     ]
+  },
+  "sales": {
+    "openings": {
+      "sdr_sales_retail": "Oi! Estou procurando algumas peças para uso próprio.",
+      "sdr_sales_reseller": "Oi! Quero conhecer opções para revenda.",
+      "sdr_sales_branch_switch": "Oi! Quero conhecer opções para revenda.",
+      "sdr_sales_knowledge_gap": "Oi! Estou procurando algumas peças para uso próprio."
+    },
+    "answers": {
+      "retail_need": {
+        "text": "Estou procurando algo para usar no dia a dia",
+        "value": "roupa para uso no dia a dia"
+      },
+      "retail_style": {
+        "text": "Prefiro um estilo casual",
+        "value": "casual"
+      },
+      "resale_stage": {
+        "text": "Estou começando agora",
+        "value": "começando agora"
+      },
+      "volume_interest": {
+        "text": "Quero avaliar um volume inicial, ainda sem quantidade definida",
+        "value": "volume inicial a definir"
+      }
+    },
+    "unsupported_commercial_question": "Qual é o preço e o pedido mínimo?",
+    "branch_switch_text": "Na verdade, é para uso próprio.",
+    "regression_cases": [
+      {
+        "id": "retail_and_reseller_select_different_branches",
+        "expected_distinct_branch_anchors": true
+      },
+      {
+        "id": "unsupported_price_stock_deadline_deferred",
+        "forbidden_without_evidence": ["price", "stock", "deadline", "minimum_order"]
+      },
+      {
+        "id": "duplicate_inbound_exactly_once",
+        "max_decisions": 1,
+        "max_outbounds": 1
+      }
+    ]
   }
 }

@@ -57,7 +57,73 @@ def _active_binding(persona_id: str | None) -> dict:
     return {}
 
 
-def _mask_routing(routing: dict) -> dict:
+def _routing_readiness(
+    routing: dict,
+    live_binding: dict,
+    conversation_mode: str,
+) -> dict:
+    """Report whether the selected engine can actually execute a v3 turn.
+
+    Selection and readiness are intentionally separate. A failed switch must
+    not leave the dashboard presenting the previous legacy engine as healthy.
+    """
+    persona_id = str(routing.get("id") or "")
+    metadata = live_binding.get("metadata") or {}
+    publication = (
+        supabase_client.get_active_graph_publication(persona_id)
+        if persona_id and conversation_mode in {"deterministic", "n8n_agents"}
+        else None
+    )
+    blocked_reasons: list[str] = []
+    if not live_binding:
+        blocked_reasons.append("active_binding_missing")
+    if conversation_mode in {"deterministic", "n8n_agents"} and not publication:
+        blocked_reasons.append("active_graph_publication_v3_missing")
+
+    paused = bool(
+        metadata.get("safety_paused")
+        or live_binding.get("connection_status") == "safety_paused"
+    )
+    if conversation_mode == "deterministic":
+        if metadata.get("runtime_version") != "graph_agent_runtime_v3":
+            blocked_reasons.append("legacy_deterministic_runtime_unverified")
+    elif conversation_mode == "n8n_agents":
+        integration = (
+            supabase_client.get_persona_integration_connection(persona_id, "deepseek")
+            or {}
+        )
+        integration_config = integration.get("config_json") or {}
+        if not integration.get("enabled"):
+            blocked_reasons.append("deepseek_integration_disabled")
+        if not integration_config.get("n8n_credential_id"):
+            blocked_reasons.append("deepseek_n8n_credential_missing")
+        if not live_binding.get("n8n_workflow_id"):
+            blocked_reasons.append("n8n_workflow_missing")
+        if metadata.get("pipeline_contract") != "conversation_v3":
+            blocked_reasons.append("conversation_v3_contract_missing")
+        if metadata.get("runtime_version") != "graph_agent_runtime_v3":
+            blocked_reasons.append("graph_agent_runtime_v3_missing")
+    else:
+        blocked_reasons.append("engine_not_implemented")
+
+    operational = not paused and not blocked_reasons
+    return {
+        "operational": operational,
+        "operational_state": "paused" if paused else ("ready" if operational else "blocked"),
+        "blocked_reasons": blocked_reasons,
+        "active_graph_publication": (
+            {
+                "id": publication.get("id"),
+                "version": publication.get("version"),
+                "checksum": publication.get("checksum"),
+                "compiler_version": publication.get("compiler_version"),
+            }
+            if publication else None
+        ),
+    }
+
+
+def _mask_routing(routing: dict, *, include_readiness: bool = False) -> dict:
     """Hide secret/token values from GET responses; return only presence flag."""
     if not routing:
         return routing
@@ -70,7 +136,7 @@ def _mask_routing(routing: dict) -> dict:
         if live_decision_owner in _KNOWN_CONVERSATION_MODES
         else ("n8n_agents" if process_mode == "n8n" else "deterministic")
     )
-    return {
+    response = {
         "slug": routing.get("slug"),
         "id": routing.get("id"),
         "process_mode": process_mode,
@@ -87,6 +153,11 @@ def _mask_routing(routing: dict) -> dict:
         "migration_applied": bool(routing.get("migration_applied")),
         "routing_source": routing.get("routing_source") or "default",
     }
+    if include_readiness:
+        response["readiness"] = _routing_readiness(
+            routing, live_binding, conversation_mode
+        )
+    return response
 
 
 @router.get("")
@@ -199,7 +270,7 @@ def get_routing(slug: str, request: Request):
     if not routing:
         raise HTTPException(404, "Persona not found")
     auth_service.assert_persona_access(request, persona_id=routing.get("id"), persona_slug=slug)
-    return _mask_routing(routing)
+    return _mask_routing(routing, include_readiness=True)
 
 
 @router.patch("/{slug}/routing")
@@ -259,7 +330,7 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
         rotated_token = secrets.token_urlsafe(32)
         payload["inbound_webhook_token"] = rotated_token
     if not payload and requested_conversation_mode is None:
-        return _mask_routing(current)
+        return _mask_routing(current, include_readiness=True)
     if requested_conversation_mode is not None:
         conversation_mode = requested_conversation_mode
         deepseek_config: dict = {}
@@ -427,7 +498,7 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
     elif payload:
         supabase_client.update_persona_routing(slug, payload)
     final = supabase_client.get_persona_routing(slug) or current
-    response = _mask_routing(final)
+    response = _mask_routing(final, include_readiness=True)
     if rotated_token:
         response["inbound_webhook_token"] = rotated_token
     return response

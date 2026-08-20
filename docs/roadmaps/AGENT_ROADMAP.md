@@ -85,6 +85,39 @@ paralelo seguro.
 | 6 | Aurora migra para o bundle | a fazer | `bundle-migrator` |
 | 7 | Orquestradores por estágio e campanha por ciclo | a fazer | `graph-publisher`, `card-editor` |
 
+### Progresso local do pipeline novo — 2026-08-20
+
+O item 1 continua **a fazer** como entrega publicável. Foi concluído apenas o
+primeiro slice local e reversível: contrato `GraphBundle` em memória,
+`PublicationPlan` puro, CLI dry-run, fixture comercial sintética e skill Sofia
+composta. O slice não persiste staging, não gera embeddings, não ativa
+publicação e não altera produção.
+
+Em 2026-08-20 foi acrescentado o publisher genérico com duas fases e gates CAS:
+materialização/staging e ativação explícita. Embeddings incrementais por chunk e
+o publisher completo de edição/remoção continuam pendentes; por isso o item 1
+ainda não está concluído como arquitetura final.
+
+Roadmap incremental e gates: `docs/architecture/GRAPH_BUNDLE_PUBLICATION_PLAN.md`.
+
+O P0 permanece aberto até a evidência formal da seção seguinte existir. Commits
+de correção e relatos de conversa funcionando não substituem a prova de saída
+via WA Validator interno.
+
+### Débito técnico — motor selecionado não significa motor operacional
+
+Confirmado em produção para `tock-fatal` em 2026-08-20: o dashboard mostrava
+`deterministic` selecionado embora o binding ainda estivesse em
+`conversation_v1`, sem `runtime_version`, sem workflow n8n e sem qualquer
+publicação GraphRAG v3. A seleção persistida é somente intenção de routing;
+ela não constitui prova de prontidão.
+
+O contrato da UI/API passa a separar `conversation_mode` de `readiness` e deve
+exibir estado `blocked` ou `paused` enquanto faltar binding, publicação v3,
+credencial/workflow ou executor compatível. Nenhum card pode usar “ativado”
+apenas porque está selecionado. Fechar este débito exige a mesma verificação
+como gate transacional antes da troca e como diagnóstico no GET de routing.
+
 ---
 
 ## P0 — Destravar a Aurora SDR

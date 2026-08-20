@@ -87,6 +87,73 @@ def test_mask_routing_ignores_legacy_persona_wide_automation_mode(monkeypatch):
     assert "automation_mode" not in masked
 
 
+def test_routing_readiness_blocks_legacy_deterministic_without_v3(monkeypatch):
+    from routes import personas
+
+    monkeypatch.setattr(
+        personas.supabase_client, "get_active_graph_publication", lambda _id: None
+    )
+    readiness = personas._routing_readiness(
+        _routing_row(),
+        {
+            "id": "binding-1",
+            "active": True,
+            "connection_status": "connected",
+            "metadata": {"decision_owner": "deterministic"},
+        },
+        "deterministic",
+    )
+
+    assert readiness["operational"] is False
+    assert readiness["operational_state"] == "blocked"
+    assert readiness["blocked_reasons"] == [
+        "active_graph_publication_v3_missing",
+        "legacy_deterministic_runtime_unverified",
+    ]
+
+
+def test_routing_readiness_accepts_complete_n8n_v3(monkeypatch):
+    from routes import personas
+
+    monkeypatch.setattr(
+        personas.supabase_client,
+        "get_active_graph_publication",
+        lambda _id: {
+            "id": "pub-1",
+            "version": 1,
+            "checksum": "sha256:abc",
+            "compiler_version": "3.0",
+        },
+    )
+    monkeypatch.setattr(
+        personas.supabase_client,
+        "get_persona_integration_connection",
+        lambda *_args: {
+            "enabled": True,
+            "config_json": {"n8n_credential_id": "cred-1"},
+        },
+    )
+    readiness = personas._routing_readiness(
+        _routing_row(),
+        {
+            "id": "binding-1",
+            "active": True,
+            "connection_status": "connected",
+            "n8n_workflow_id": "wf-1",
+            "metadata": {
+                "decision_owner": "n8n_agents",
+                "pipeline_contract": "conversation_v3",
+                "runtime_version": "graph_agent_runtime_v3",
+            },
+        },
+        "n8n_agents",
+    )
+
+    assert readiness["operational"] is True
+    assert readiness["operational_state"] == "ready"
+    assert readiness["blocked_reasons"] == []
+
+
 def test_update_routing_accepts_orquestrador_without_requiring_deepseek(monkeypatch):
     """Regression test: orquestrador has no backend implementation yet, so
     switching to it must never require (or touch) DeepSeek provisioning —
@@ -112,6 +179,9 @@ def test_update_routing_accepts_orquestrador_without_requiring_deepseek(monkeypa
     monkeypatch.setattr(personas.supabase_client, "update_persona_routing", lambda _slug, _payload: routing)
     monkeypatch.setattr(personas.supabase_client, "insert_event", lambda *a, **k: None)
     monkeypatch.setattr(personas.supabase_client, "get_persona", lambda _slug: {**routing, "name": "Aurora"})
+    monkeypatch.setattr(
+        personas.supabase_client, "get_active_graph_publication", lambda _id: None
+    )
 
     def _boom(*_a, **_k):
         raise AssertionError("orquestrador must not touch DeepSeek integration lookup")

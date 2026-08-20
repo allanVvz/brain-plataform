@@ -1,0 +1,298 @@
+{
+  "bundle_version": "1.0",
+  "persona": {
+    "id": "4acb2739-127e-4143-acf5-f5c3ea1aaa98",
+    "slug": "tock-fatal"
+  },
+  "metadata": {
+    "purpose": "tock_fatal_internal_wa_validator_example",
+    "source": "operator_approval_and_handoff_2026-08-20",
+    "publication_allowed": true,
+    "internal_wa_validator_test_allowed": true,
+    "commercial_claims_allowed": false,
+    "embedding_profile": {
+      "embedding_provider": "local",
+      "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "embedding_dimension": 1536
+    }
+  },
+  "nodes": [
+    {
+      "id": "persona:tock-fatal",
+      "projection_node_id": "05d175d7-5ec8-4650-a60a-c270abd37063",
+      "node_type": "persona",
+      "slug": "tock-fatal",
+      "title": "Tock Fatal",
+      "summary": "Persona comercial em validação interna para qualificar interesse de uso próprio ou revenda.",
+      "status": "validated",
+      "data": {
+        "business_model": "sales",
+        "metadata": {"agent_slug": "vitoria"},
+        "conversation_policy": {
+          "branch_selection": {
+            "field_key": "purchase_profile",
+            "description": "Escolhe o fluxo de uso próprio ou revenda sem assumir produto, preço ou quantidade."
+          },
+          "safety": {
+            "unsupported_commercial_claim": "handoff",
+            "forbid_unpublished_price_stock_deadline_policy": true
+          }
+        },
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "embed:tock-default",
+      "projection_node_id": "bc832ec6-a3e4-4e62-802d-76ca179703e8",
+      "node_type": "embed",
+      "slug": "embedded-default",
+      "title": "Embedded",
+      "summary": "Destino protegido da base de conhecimento da persona.",
+      "status": "active",
+      "data": {
+        "capabilities": {"detached_terminal": true},
+        "source": "production_readonly_audit_2026-08-20",
+        "status": "active"
+      }
+    },
+    {
+      "id": "gallery:tock-default",
+      "projection_node_id": "9d00e6b7-08fd-47fb-b022-5f70289f7e41",
+      "node_type": "gallery",
+      "slug": "gallery-default",
+      "title": "Gallery",
+      "summary": "Destino protegido de assets da persona.",
+      "status": "active",
+      "data": {
+        "capabilities": {"detached_terminal": true},
+        "source": "production_readonly_audit_2026-08-20",
+        "status": "active"
+      }
+    },
+    {
+      "id": "campaign:tock-whatsapp-qualification",
+      "node_type": "campaign",
+      "slug": "whatsapp-qualification",
+      "title": "Qualificação WhatsApp",
+      "summary": "Campanha SDR de teste interno, sem disparo ou transporte WhatsApp real.",
+      "status": "validated",
+      "data": {
+        "agent_role": "sdr",
+        "journey_stage": "qualification",
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "audience:tock-retail",
+      "node_type": "audience",
+      "slug": "uso-proprio-varejo",
+      "title": "Uso próprio / varejo",
+      "summary": "Pessoa interessada em peças para uso próprio.",
+      "status": "validated",
+      "data": {
+        "aliases": ["uso próprio", "pra mim", "varejo", "comprar para mim"],
+        "capabilities": {"branch_anchor": true},
+        "qualification": {
+          "fields": [
+            {
+              "key": "purchase_profile",
+              "question_node_id": "faq:tock-retail-profile",
+              "required": true,
+              "owner_node_id": "audience:tock-retail",
+              "scope": "branch",
+              "accepted_statuses": ["known"],
+              "value_schema": {"type": "string", "minLength": 2},
+              "validation": {"mode": "schema"}
+            },
+            {
+              "key": "retail_need",
+              "question_node_id": "faq:tock-retail-need",
+              "required": true,
+              "owner_node_id": "audience:tock-retail",
+              "scope": "branch",
+              "accepted_statuses": ["known"],
+              "depends_on": ["purchase_profile"],
+              "value_schema": {"type": "string", "minLength": 2},
+              "validation": {"mode": "schema"}
+            },
+            {
+              "key": "retail_style",
+              "question_node_id": "faq:tock-retail-style",
+              "required": true,
+              "owner_node_id": "audience:tock-retail",
+              "scope": "branch",
+              "accepted_statuses": ["known", "unknown"],
+              "depends_on": ["retail_need"],
+              "value_schema": {"type": "string", "minLength": 2},
+              "validation": {"mode": "schema"}
+            }
+          ]
+        },
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "faq:tock-retail-profile",
+      "node_type": "faq",
+      "slug": "retail-purchase-profile",
+      "title": "Perfil de compra",
+      "summary": "Pergunta que seleciona o caminho de atendimento.",
+      "status": "validated",
+      "data": {
+        "question": "Você procura para uso próprio ou para revender?",
+        "role": "qualification_question",
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "faq:tock-retail-need",
+      "node_type": "faq",
+      "slug": "retail-need",
+      "title": "Necessidade de uso próprio",
+      "summary": "Qualifica o interesse sem presumir um produto.",
+      "status": "validated",
+      "data": {
+        "question": "O que você está procurando para uso próprio?",
+        "role": "qualification_question",
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "faq:tock-retail-style",
+      "node_type": "faq",
+      "slug": "retail-style",
+      "title": "Preferência de estilo",
+      "summary": "Pergunta aberta de preferência, sem afirmar catálogo ou disponibilidade.",
+      "status": "validated",
+      "data": {
+        "question": "Você tem algum estilo ou ocasião em mente?",
+        "role": "qualification_question",
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "audience:tock-reseller",
+      "node_type": "audience",
+      "slug": "atacado-revenda",
+      "title": "Atacado / revenda",
+      "summary": "Pessoa interessada em avaliar peças para revenda.",
+      "status": "validated",
+      "data": {
+        "aliases": ["revenda", "revender", "atacado", "minha loja", "empreender"],
+        "capabilities": {"branch_anchor": true},
+        "qualification": {
+          "fields": [
+            {
+              "key": "purchase_profile",
+              "question_node_id": "faq:tock-reseller-profile",
+              "required": true,
+              "owner_node_id": "audience:tock-reseller",
+              "scope": "branch",
+              "accepted_statuses": ["known"],
+              "value_schema": {"type": "string", "minLength": 2},
+              "validation": {"mode": "schema"}
+            },
+            {
+              "key": "resale_stage",
+              "question_node_id": "faq:tock-reseller-stage",
+              "required": true,
+              "owner_node_id": "audience:tock-reseller",
+              "scope": "branch",
+              "accepted_statuses": ["known"],
+              "depends_on": ["purchase_profile"],
+              "value_schema": {"type": "string", "minLength": 2},
+              "validation": {"mode": "schema"}
+            },
+            {
+              "key": "volume_interest",
+              "question_node_id": "faq:tock-reseller-volume",
+              "required": true,
+              "owner_node_id": "audience:tock-reseller",
+              "scope": "branch",
+              "accepted_statuses": ["known", "unknown"],
+              "depends_on": ["resale_stage"],
+              "value_schema": {"type": "string", "minLength": 2},
+              "validation": {"mode": "schema"}
+            }
+          ]
+        },
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "faq:tock-reseller-profile",
+      "node_type": "faq",
+      "slug": "reseller-purchase-profile",
+      "title": "Perfil de compra para revenda",
+      "summary": "Pergunta que seleciona o caminho de atendimento.",
+      "status": "validated",
+      "data": {
+        "question": "Você procura para uso próprio ou para revender?",
+        "role": "qualification_question",
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "faq:tock-reseller-stage",
+      "node_type": "faq",
+      "slug": "reseller-stage",
+      "title": "Estágio da revenda",
+      "summary": "Qualifica o momento do interesse de revenda.",
+      "status": "validated",
+      "data": {
+        "question": "Você já revende ou está começando agora?",
+        "role": "qualification_question",
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "faq:tock-reseller-volume",
+      "node_type": "faq",
+      "slug": "reseller-volume-interest",
+      "title": "Interesse de volume",
+      "summary": "Pergunta aberta que não presume pedido mínimo.",
+      "status": "validated",
+      "data": {
+        "question": "Que tipo de volume você pretende avaliar para revenda?",
+        "role": "qualification_question",
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    },
+    {
+      "id": "rule:tock-safe-handoff",
+      "node_type": "rule",
+      "slug": "safe-commercial-handoff",
+      "title": "Encaminhamento comercial seguro",
+      "summary": "Sem fonte comercial publicada, Vitória registra o interesse e encaminha para a equipe sem confirmar preço, estoque, prazo, política ou pedido mínimo.",
+      "status": "validated",
+      "data": {
+        "capabilities": {"global_context": true},
+        "handoff_message": "Vou encaminhar seu interesse para a equipe continuar o atendimento.",
+        "source": "operator_approval_and_handoff_2026-08-20",
+        "status": "validated"
+      }
+    }
+  ],
+  "edges": [
+    {"id": "edge:tock-persona-campaign", "source": "persona:tock-fatal", "target": "campaign:tock-whatsapp-qualification", "relation_type": "contains"},
+    {"id": "edge:tock-campaign-retail", "source": "campaign:tock-whatsapp-qualification", "target": "audience:tock-retail", "relation_type": "contains"},
+    {"id": "edge:tock-retail-profile", "source": "audience:tock-retail", "target": "faq:tock-retail-profile", "relation_type": "contains"},
+    {"id": "edge:tock-retail-need", "source": "audience:tock-retail", "target": "faq:tock-retail-need", "relation_type": "contains"},
+    {"id": "edge:tock-retail-style", "source": "audience:tock-retail", "target": "faq:tock-retail-style", "relation_type": "contains"},
+    {"id": "edge:tock-campaign-reseller", "source": "campaign:tock-whatsapp-qualification", "target": "audience:tock-reseller", "relation_type": "contains"},
+    {"id": "edge:tock-reseller-profile", "source": "audience:tock-reseller", "target": "faq:tock-reseller-profile", "relation_type": "contains"},
+    {"id": "edge:tock-reseller-stage", "source": "audience:tock-reseller", "target": "faq:tock-reseller-stage", "relation_type": "contains"},
+    {"id": "edge:tock-reseller-volume", "source": "audience:tock-reseller", "target": "faq:tock-reseller-volume", "relation_type": "contains"},
+    {"id": "edge:tock-campaign-handoff", "source": "campaign:tock-whatsapp-qualification", "target": "rule:tock-safe-handoff", "relation_type": "contains"}
+  ]
+}

@@ -28,6 +28,29 @@ type RoutingConfig = {
   migration_applied?: boolean;
   model_required?: boolean;
   field_extractor?: string | null;
+  readiness?: {
+    operational: boolean;
+    operational_state: "ready" | "blocked" | "paused";
+    blocked_reasons: string[];
+    active_graph_publication?: {
+      id?: string;
+      version?: number;
+      checksum?: string;
+      compiler_version?: string;
+    } | null;
+  };
+};
+
+const READINESS_REASON_LABELS: Record<string, string> = {
+  active_binding_missing: "Não existe binding ativo.",
+  active_graph_publication_v3_missing: "Não existe publicação GraphRAG v3 ativa.",
+  legacy_deterministic_runtime_unverified: "O runtime determinístico é legado e não tem prontidão comprovada.",
+  deepseek_integration_disabled: "A integração DeepSeek está desativada.",
+  deepseek_n8n_credential_missing: "A credencial DeepSeek ainda não foi vinculada ao n8n.",
+  n8n_workflow_missing: "O workflow n8n ainda não foi provisionado.",
+  conversation_v3_contract_missing: "O binding ainda não usa o contrato conversation_v3.",
+  graph_agent_runtime_v3_missing: "O binding ainda não usa o Graph Agent Runtime v3.",
+  engine_not_implemented: "Este motor ainda não possui executor.",
 };
 
 const CONNECTED = new Set(["connected", "open"]);
@@ -486,13 +509,10 @@ function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
     try {
       const updated = await api.updatePersonaRouting(personaSlug, { conversation_mode: mode });
       setRouting(updated);
-      setRoutingMessage(
-        mode === "deterministic"
-          ? "Fluxo determinístico ativado."
-          : mode === "n8n_agents"
-          ? "Orquestração n8n com IA ativada e workflow ressincronizado."
-          : "Orquestrador interno selecionado.",
-      );
+      const ready = updated?.readiness?.operational === true;
+      setRoutingMessage(ready
+        ? `${mode === "n8n_agents" ? "n8n" : "Motor determinístico"} selecionado e operacional.`
+        : "Motor selecionado, mas ainda não operacional. Revise os bloqueios abaixo.");
     } catch (error: any) {
       setRoutingError(error?.message || "Falha ao atualizar o motor de atendimento.");
     } finally {
@@ -537,6 +557,7 @@ function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
             },
           ] as const).map((option) => {
             const selected = routing?.conversation_mode === option.value;
+            const selectedBlocked = selected && routing?.readiness?.operational !== true;
             const disabled = routingBusy || !routing?.migration_applied || option.value === "orquestrador";
             return (
               <button
@@ -552,7 +573,8 @@ function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
               >
                 <span className="flex items-center justify-between gap-3">
                   <span className="text-sm font-medium text-obs-text">{option.title}</span>
-                  {selected && <CheckCircle2 size={15} className="text-obs-violet" />}
+                  {selected && !selectedBlocked && <CheckCircle2 size={15} className="text-green-300" />}
+                  {selectedBlocked && <AlertTriangle size={15} className="text-amber-300" />}
                   {"badge" in option && (
                     <span className="rounded-full border border-white/10 bg-obs-base px-2 py-0.5 text-[10px] uppercase tracking-wide text-obs-faint">
                       {option.badge}
@@ -566,6 +588,19 @@ function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
             );
           })}
         </div>
+
+        {routing?.readiness && routing.readiness.operational_state !== "ready" && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-xs text-amber-100">
+            <p className="font-medium">
+              Motor selecionado, mas {routing.readiness.operational_state === "paused" ? "pausado" : "bloqueado"}.
+            </p>
+            <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-100/85">
+              {routing.readiness.blocked_reasons.map((reason) => (
+                <li key={reason}>{READINESS_REASON_LABELS[reason] || reason}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {routingMessage && <p className="mt-3 text-xs text-green-300">{routingMessage}</p>}
         {routingError && (

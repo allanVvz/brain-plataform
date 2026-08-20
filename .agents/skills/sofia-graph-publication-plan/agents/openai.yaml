@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sofia Graph Publication Plan"
+  short_description: "Compila GraphBundle e prepara plano dry-run"
+  default_prompt: "Use $sofia-graph-publication-plan para compilar um GraphBundle e revisar o PublicationPlan sem publicar."
