@@ -2232,7 +2232,14 @@ def _semantic_turn_audit(
         ),
         "expected_active_branches_persisted": (
             not customer_step.get("expected_active_branch_node_ids")
-            or set(ledger_after.get("active_branch_node_ids") or [])
+            or set(
+                ledger_after.get("active_branch_node_ids")
+                or (
+                    [ledger_after.get("active_branch_node_id")]
+                    if ledger_after.get("active_branch_node_id")
+                    else []
+                )
+            )
             == set(customer_step.get("expected_active_branch_node_ids") or [])
         ),
         "question_advanced": (

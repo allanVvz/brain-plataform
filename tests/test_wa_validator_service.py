@@ -942,6 +942,17 @@ def test_semantic_turn_audit_allows_focus_change_inside_preserved_active_set():
     assert audit["criteria"]["expected_active_branches_persisted"] is True
 
 
+def test_semantic_turn_audit_uses_singular_active_branch_at_terminal_commit():
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"]["expected_active_branch_node_ids"] = ["branch:one"]
+    inputs["ledger_after"]["active_branch_node_id"] = "branch:one"
+    inputs["ledger_after"].pop("active_branch_node_ids", None)
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["expected_active_branches_persisted"] is True
+
+
 def test_analyze_gaps_never_promotes_legacy_sequence_to_quality_evidence(monkeypatch):
     session = {
         "id": "legacy-session",
