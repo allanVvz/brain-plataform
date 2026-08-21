@@ -437,6 +437,13 @@ def reactivation_notice(lead_ref: int, *, reason: str) -> dict:
     # straight from a resume.
     if window is None:
         window = resume_answer_window(lead)
+    # A recent unanswered inbound is the turn that must speak. This check is
+    # deliberately independent of the requeue count: audio can still be in
+    # media/transcription processing and therefore not yet be claimable as a
+    # waiting_human row. Enqueuing a courtesy notice in that gap creates a
+    # second outbound before the canonical inbound decision exists.
+    if window.get("reason") == "unanswered_customer_message_within_window":
+        return {"sent": False, "skipped": "pending_inbound_will_be_answered"}
     if not window.get("may_speak"):
         return {
             "sent": False,

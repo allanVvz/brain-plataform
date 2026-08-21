@@ -83,6 +83,24 @@ def test_inbound_recente_e_respondido_ao_religar(monkeypatch):
     assert requeued == [LEAD_REF]
 
 
+def test_audio_recente_em_transcricao_bloqueia_aviso_automatico(monkeypatch):
+    _install(monkeypatch, [{
+        **_message("inbound", minutes_ago=1),
+        "texto": "[o cliente enviou um audio]",
+        "metadata": {"media": {"kind": "audio", "status": "processing"}},
+    }])
+    monkeypatch.setattr(
+        agents_service.supabase_client,
+        "requeue_waiting_human_whatsapp_buffer",
+        lambda _ref: 0,
+    )
+
+    assert agents_service.resume_lead(LEAD_REF) is True
+    assert agents_service.reactivation_notice(LEAD_REF, reason="manual") == {
+        "sent": False, "skipped": "pending_inbound_will_be_answered",
+    }
+
+
 def test_inbound_estacionado_alem_da_janela_permanece_intacto(monkeypatch):
     requeued = _install(monkeypatch, [_message("inbound", minutes_ago=15 * 60)])
 

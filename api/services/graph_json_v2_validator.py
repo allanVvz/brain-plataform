@@ -196,6 +196,19 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
             errors.append(
                 "conversation_policy.question_repetition.max_attempts must be 0 or 1"
             )
+        service_clarification = conversation_policy.get("service_clarification")
+        if service_clarification is not None:
+            if not isinstance(service_clarification, dict):
+                errors.append("conversation_policy.service_clarification must be an object")
+            else:
+                for key in (
+                    "add_or_switch_question", "retry_question",
+                    "handoff_message", "summary_template",
+                ):
+                    if not str(service_clarification.get(key) or "").strip():
+                        errors.append(
+                            f"conversation_policy.service_clarification.{key} must be non-empty"
+                        )
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     business_model = str(
         data.get("business_model") or metadata.get("business_model") or ""

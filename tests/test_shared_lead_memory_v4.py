@@ -74,6 +74,75 @@ def test_terminal_interactions_do_not_open_a_journey_without_literal_new_demand(
     ).value == "open"
 
 
+def test_terminal_candidate_opens_before_booking_but_routes_human_after_conversion() -> None:
+    base = dict(
+        persona_slug="p", agent_slug="sdr", graph_version=1,
+        graph_checksum="sha256:x",
+        messages=[{"role": "user", "content": "[audio do cliente]: chapiação"}],
+        cart={}, rag_nodes=[], rag_paths=[], journey_id="journey-1",
+        retrieval_trace={"service_resolution": {
+            "status": "needs_confirmation",
+            "candidate": {"branch_anchor_node_id": "branch:bodywork"},
+        }},
+    )
+    before_booking = ConversationContext(
+        **base,
+        post_completion_state={
+            "has_terminal_journey": True, "has_confirmed_conversion": False,
+        },
+    )
+    after_booking = before_booking.model_copy(update={
+        "post_completion_state": {
+            "has_terminal_journey": True, "has_confirmed_conversion": True,
+        },
+    })
+
+    assert graph_agent_runtime_v3._resolve_journey_action(
+        before_booking, graph_agent_runtime_v3.InteractionKind.UNCLEAR,
+    ).value == "open"
+    assert graph_agent_runtime_v3._resolve_journey_action(
+        after_booking, graph_agent_runtime_v3.InteractionKind.NEW_DEMAND,
+    ).value == "none"
+    assert graph_agent_runtime_v3._no_journey_route(
+        after_booking, graph_agent_runtime_v3.InteractionKind.NEW_DEMAND,
+    ) is ConversationRoute.HUMAN
+
+
+def test_contract_probe_survives_terminal_journey_until_model_gate() -> None:
+    context = ConversationContext(
+        persona_slug="p", agent_slug="sdr", graph_version=1,
+        graph_checksum="sha256:x", messages=[{"role": "user", "content": "novo pedido"}],
+        cart={}, rag_nodes=[], rag_paths=[], journey_id="journey-1",
+        post_completion_state={"has_terminal_journey": True},
+    )
+    decision = ConversationDecision(
+        classifier="graph_contract_probe_v3", intent="await_model_proposal",
+        route=ConversationRoute.SDR, confidence=1, lead_stage="engajado",
+    )
+    response = AgentResponse(
+        reply_text=None, role=ConversationRoute.SDR, cart_state={},
+        proof={"valid": True, "mode": "contract_probe"},
+    )
+
+    preserved_decision, preserved_response = graph_agent_runtime_v3._apply_journey_policy(
+        context, decision, response, model_observation={"contract_probe": True},
+    )
+
+    assert preserved_decision.intent == "await_model_proposal"
+    assert preserved_response.proof["mode"] == "contract_probe"
+    assert "journey_action" not in preserved_response.proof
+
+
+def test_confirmed_conversion_is_scoped_to_latest_journey() -> None:
+    assert graph_agent_runtime_v3._journey_has_confirmed_conversion(
+        {"id": "j2", "converted_at": None},
+        [{"journey_id": "j1", "conversion_type": "appointment_booked", "status": "completed"}],
+    ) is False
+    assert graph_agent_runtime_v3._journey_has_confirmed_conversion(
+        {"id": "j2", "converted_at": "2026-08-20T12:00:00Z"}, [],
+    ) is True
+
+
 def test_conversation_proposal_supports_explicit_absence_of_branch() -> None:
     proposal = ConversationProposal.model_validate({"branch_action": "none"})
     assert proposal.branch_action is BranchAction.NONE

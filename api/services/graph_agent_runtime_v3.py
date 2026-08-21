@@ -1358,6 +1358,12 @@ def _resolve_service_operations(
                 "textual_candidates": textual,
                 "confirmation": {"kind": "service_disambiguation", "options": tied},
             }
+        operation_ambiguous = bool(
+            before
+            and not _ADDITIVE_SERVICE_MARKER.search(message or "")
+            and not _SERVICE_CHANGE_MARKER.search(message or "")
+            and not _SERVICE_DROP_MARKER.search(message or "")
+        )
         action = (
             "drop" if _SERVICE_DROP_MARKER.search(message or "")
             else "switch" if (
@@ -1369,6 +1375,7 @@ def _resolve_service_operations(
         )
         candidate = {
             **best, "action": action,
+            "operation_ambiguous": operation_ambiguous,
             "replace_branch_node_id": (
                 active_branch_node_id if action == "switch" else None
             ),
@@ -1389,15 +1396,28 @@ def _resolve_service_operations(
     if not (direct_answer or explicit_selection):
         candidate = literal["matches"][-1]
         action = "keep" if candidate["branch_anchor_node_id"] in before else "add"
+        operation_ambiguous = bool(
+            before
+            and candidate["branch_anchor_node_id"] not in before
+            and not _ADDITIVE_SERVICE_MARKER.search(message or "")
+            and not _SERVICE_CHANGE_MARKER.search(message or "")
+            and not _SERVICE_DROP_MARKER.search(message or "")
+        )
         return {
             **base, "status": "needs_confirmation",
             "consumed_spans": [],
             "reserved_spans": literal.get("consumed_spans") or [],
             "resolution_method": "exact_catalog_informative_mention",
-            "candidate": {**candidate, "evidence_span": candidate["span"], "action": action},
+            "candidate": {
+                **candidate, "evidence_span": candidate["span"], "action": action,
+                "operation_ambiguous": operation_ambiguous,
+            },
             "confirmation": {
                 "kind": "service",
-                "candidate": {**candidate, "evidence_span": candidate["span"], "action": action},
+                "candidate": {
+                    **candidate, "evidence_span": candidate["span"], "action": action,
+                    "operation_ambiguous": operation_ambiguous,
+                },
             },
         }
 
@@ -3625,6 +3645,31 @@ def _journey_operational_mode(journey_state: str) -> str:
     return "collection"
 
 
+def _journey_has_confirmed_conversion(
+    journey: dict[str, Any], outcomes: Sequence[dict[str, Any]],
+) -> bool:
+    """Whether the current/latest request already has a commercial booking.
+
+    `converted_at` is the journey-level canonical stamp.  The outcomes check
+    keeps compatibility with projections where only `sales_conversions` was
+    returned.  A conversion from an older request must not lock a newer one.
+    """
+    if journey.get("converted_at"):
+        return True
+    journey_id = str(journey.get("id") or "")
+    if not journey_id:
+        return False
+    inactive = {"cancelled", "reverted", "refunded", "void"}
+    return any(
+        str(row.get("journey_id") or "") == journey_id
+        and str(row.get("conversion_type") or "") in {
+            "appointment_booked", "purchase", "contract_signed",
+        }
+        and str(row.get("status") or "completed").lower() not in inactive
+        for row in outcomes
+    )
+
+
 def build_context(
     *, persona_slug: str, lead_ref: int, message: str, message_id: str | None,
 ) -> ConversationContext:
@@ -3692,6 +3737,10 @@ def build_context(
     lead_conversation_state = ((lead.get("metadata") or {}).get("conversation_state") or {})
     journey_state = str(
         journey.get("state") or lead_conversation_state.get("sdr_state") or "collecting"
+    )
+    completion_journey = latest_journey or journey
+    has_confirmed_conversion = _journey_has_confirmed_conversion(
+        completion_journey, shared_memory.journey_outcomes,
     )
     pending_reconfirmation = bool(
         (lead.get("metadata") or {}).get("pending_reconfirmation")
@@ -3890,13 +3939,14 @@ def build_context(
             shared_memory=shared_memory,
             post_completion_state={
                 "has_terminal_journey": str(
-                    (latest_journey or journey).get("state") or journey_state
+                    completion_journey.get("state") or journey_state
                 ) in {
                     "qualified_confirmed", "handed_off", "converted", "closed"
                 },
+                "has_confirmed_conversion": has_confirmed_conversion,
                 "latest_journey_sequence": int(journey.get("sequence") or 1),
                 "latest_journey_state": str(
-                    (latest_journey or journey).get("state") or journey_state
+                    completion_journey.get("state") or journey_state
                 ),
             },
         )
@@ -4193,13 +4243,14 @@ def build_context(
         shared_memory=shared_memory,
         post_completion_state={
             "has_terminal_journey": str(
-                (latest_journey or journey).get("state") or journey_state
+                completion_journey.get("state") or journey_state
             ) in {
                 "qualified_confirmed", "handed_off", "converted", "closed"
             },
+            "has_confirmed_conversion": has_confirmed_conversion,
             "latest_journey_sequence": int(journey.get("sequence") or 1),
             "latest_journey_state": str(
-                (latest_journey or journey).get("state") or journey_state
+                completion_journey.get("state") or journey_state
             ),
         },
     )
@@ -4327,6 +4378,178 @@ def _pending_confirmation_fact(context: ConversationContext) -> dict[str, Any] |
     return None
 
 
+def _service_clarification_policy(document: dict[str, Any]) -> dict[str, Any]:
+    persona = _persona_node(document) or {}
+    conversation_policy = ((persona.get("data") or {}).get("conversation_policy") or {})
+    return dict(conversation_policy.get("service_clarification") or {})
+
+
+def _render_service_clarification(
+    document: dict[str, Any], key: str, *, candidate: str = "",
+    service_titles: Sequence[str] = (),
+) -> str:
+    template = str(_service_clarification_policy(document).get(key) or "").strip()
+    if not template:
+        raise RuntimeError(f"published graph missing service clarification text: {key}")
+    return (
+        template.replace("{candidate}", candidate)
+        .replace("{services}", ", ".join(service_titles))
+    ).strip()
+
+
+def _service_titles(document: dict[str, Any], branch_ids: Sequence[str]) -> list[str]:
+    nodes = document.get("node_by_id") or {}
+    return [
+        str((nodes.get(branch_id) or {}).get("title") or branch_id)
+        for branch_id in dict.fromkeys(str(value) for value in branch_ids if value)
+    ]
+
+
+def _service_request_summary(
+    document: dict[str, Any], branch_ids: Sequence[str],
+) -> str:
+    titles = _service_titles(document, branch_ids)
+    if not titles:
+        return ""
+    policy = _service_clarification_policy(document)
+    template = str(policy.get("summary_template") or "").strip()
+    return template.replace("{services}", ", ".join(titles)).strip() if template else ""
+
+
+def _deterministic_pending_service_clarification(
+    context: ConversationContext,
+) -> tuple[ConversationDecision, AgentResponse] | None:
+    """Advance the graph-owned add/switch ambiguity ladder without a model.
+
+    The pending fact is the ledger: candidate, proposed operation and attempt
+    count all live in its metadata, so retries and resume remain idempotent and
+    no schema change is needed.
+    """
+    pending = _pending_confirmation_fact(context)
+    if not pending:
+        return None
+    confirmation = dict((pending.get("metadata") or {}).get("confirmation") or {})
+    if (
+        _confirmation_capability(confirmation) not in {"service", "branch_selector"}
+        or not confirmation.get("operation_ambiguous")
+    ):
+        return None
+    message = _latest_user_message(context)
+    current_candidate = str(confirmation.get("branch_anchor_node_id") or "")
+    current_resolution = context.retrieval_trace.get("service_resolution") or {}
+    new_candidate = str(
+        ((current_resolution.get("candidate") or {}).get("branch_anchor_node_id")) or ""
+    )
+    if new_candidate and new_candidate != current_candidate:
+        return None
+    if (
+        _is_explicit_confirmation(message)
+        or _is_explicit_rejection(message)
+        or _restates_pending_candidate(message, pending)
+        or _ADDITIVE_SERVICE_MARKER.search(message or "")
+        or _SERVICE_CHANGE_MARKER.search(message or "")
+        or _SERVICE_DROP_MARKER.search(message or "")
+    ):
+        return None
+
+    persona = supabase_client.get_persona(context.persona_slug) or {}
+    publication = supabase_client.get_active_graph_publication(
+        str(persona.get("id") or "")
+    ) or {}
+    if (
+        str(publication.get("id") or "") != str(context.publication_id or "")
+        or str(publication.get("checksum") or "") != str(context.graph_checksum)
+    ):
+        raise RuntimeError("GraphRAG publication changed during service clarification")
+    document = publication.get("document_json") or {}
+    attempts = int(confirmation.get("attempts") or 1)
+    candidate_title = str(
+        confirmation.get("candidate_title") or confirmation.get("candidate") or ""
+    )
+    possible = _service_titles(
+        document,
+        [*context.active_branch_node_ids, current_candidate],
+    )
+    if attempts >= 2:
+        reply = _render_service_clarification(
+            document, "handoff_message", candidate=candidate_title,
+            service_titles=possible,
+        )
+        proof = {
+            "valid": True, "errors": [],
+            "mode": "deterministic_service_clarification_handoff",
+            "accepted_facts": [], "missing_fields": [],
+            "pending_confirmation": confirmation,
+            "clarification_attempts": attempts,
+            "possible_service_node_ids": list(dict.fromkeys([
+                *context.active_branch_node_ids, current_candidate,
+            ])),
+            "confirmation_state": "clarification_handoff",
+            "model_calls": 0,
+        }
+        return (
+            ConversationDecision(
+                classifier="graph_service_clarification_v1",
+                intent="service_clarification_exhausted",
+                route=ConversationRoute.HUMAN, confidence=1,
+                lead_stage="engajado", handoff_reason="service_clarification_exhausted",
+            ),
+            AgentResponse(
+                reply_text=reply, role=ConversationRoute.HUMAN,
+                cart_state={**context.cart, "sdr_state": "handed_off"},
+                handoff_required=True, proof=proof,
+                token_usage={"model_calls": 0, "repair_calls": 0},
+            ),
+        )
+
+    next_confirmation = {**confirmation, "attempts": attempts + 1}
+    next_fact = {
+        **pending,
+        "source_message_id": _source_message_id(context.messages),
+        "evidence_span": message.strip(),
+        "metadata": {
+            **dict(pending.get("metadata") or {}),
+            "confirmation": next_confirmation,
+        },
+    }
+    grouped = {
+        str(key): list(values)
+        for key, values in (context.cart.get("facts_by_key") or {}).items()
+    }
+    key = str(next_fact.get("field_key") or "")
+    owner = str(next_fact.get("owner_node_id") or "")
+    grouped[key] = [
+        fact for fact in grouped.get(key, [])
+        if str(fact.get("owner_node_id") or "") != owner
+    ] + [next_fact]
+    reply = _render_service_clarification(
+        document, "retry_question", candidate=candidate_title,
+        service_titles=possible,
+    )
+    proof = {
+        "valid": True, "errors": [],
+        "mode": "deterministic_service_clarification_retry",
+        "accepted_facts": [next_fact], "missing_fields": [key],
+        "pending_confirmation": next_confirmation,
+        "clarification_attempts": attempts + 1,
+        "confirmation_state": "field_confirmation",
+        "model_calls": 0,
+    }
+    return (
+        ConversationDecision(
+            classifier="graph_service_clarification_v1",
+            intent="service_clarification_retry",
+            route=ConversationRoute.SDR, confidence=1, lead_stage="engajado",
+        ),
+        AgentResponse(
+            reply_text=reply, role=ConversationRoute.SDR,
+            cart_state={**context.cart, "facts_by_key": grouped},
+            handoff_required=False, proof=proof,
+            token_usage={"model_calls": 0, "repair_calls": 0},
+        ),
+    )
+
+
 def _confirmation_prompt_for_fact(
     document: dict[str, Any], fact: dict[str, Any],
     active_branch_node_ids: list[str],
@@ -4402,12 +4625,35 @@ def _deterministic_pending_fact_confirmation(
 ) -> tuple[ConversationDecision, AgentResponse] | None:
     pending = _pending_confirmation_fact(context)
     message = _latest_user_message(context)
-    rejected_confirmation = _is_explicit_rejection(message)
+    pending_confirmation = (
+        ((pending or {}).get("metadata") or {}).get("confirmation") or {}
+    )
+    pending_anchor = str(pending_confirmation.get("branch_anchor_node_id") or "")
+    rejected_confirmation = bool(
+        _is_explicit_rejection(message)
+        or (
+            pending
+            and pending_confirmation.get("operation_ambiguous")
+            and _SERVICE_DROP_MARKER.search(message or "")
+            and pending_anchor not in set(context.active_branch_node_ids)
+        )
+    )
     accepted_confirmation = bool(
         not rejected_confirmation
         and (
             _is_explicit_confirmation(message)
             or (pending and _restates_pending_candidate(message, pending))
+            or bool(
+                pending
+                and _confirmation_capability(
+                    ((pending.get("metadata") or {}).get("confirmation") or {})
+                ) in {"service", "branch_selector"}
+                and (
+                    _ADDITIVE_SERVICE_MARKER.search(message or "")
+                    or _SERVICE_CHANGE_MARKER.search(message or "")
+                    or _SERVICE_DROP_MARKER.search(message or "")
+                )
+            )
         )
     )
     if not pending or not (accepted_confirmation or rejected_confirmation):
@@ -4470,6 +4716,12 @@ def _deterministic_pending_fact_confirmation(
         anchor = str(confirmation.get("branch_anchor_node_id") or pending.get("owner_node_id") or "")
         action = str(confirmation.get("action") or "add")
         if accepted_confirmation:
+            if _SERVICE_DROP_MARKER.search(message or ""):
+                action = "drop"
+            elif _SERVICE_CHANGE_MARKER.search(message or ""):
+                action = "switch"
+            elif _ADDITIVE_SERVICE_MARKER.search(message or ""):
+                action = "add"
             if action == "add" and anchor in active:
                 action = "keep"
             replace_anchor = str(
@@ -4633,6 +4885,10 @@ def _deterministic_pending_fact_confirmation(
         reply = graph_proof_checker_v3.compose_published_question(
             reply="", next_question_node_id=next_question_id, contract=question_contract,
         )
+    if operations:
+        summary = _service_request_summary(document, active)
+        if summary and _normalized_phrase(summary) not in _normalized_phrase(reply):
+            reply = "\n\n".join(part for part in (summary, reply) if part)
     asked = list(context.cart.get("asked_question_node_ids") or [])
     if next_question_id:
         asked.append(next_question_id)
@@ -4819,6 +5075,8 @@ def _resolve_journey_action(
     if context.journey_id is None and not terminal:
         return JourneyAction.OPEN
     if terminal:
+        if context.post_completion_state.get("has_confirmed_conversion"):
+            return JourneyAction.NONE
         if kind is InteractionKind.NEW_DEMAND:
             return JourneyAction.OPEN
         # Confirmed live 2026-08-19 (lead 26, publication v64): once a journey
@@ -4831,8 +5089,10 @@ def _resolve_journey_action(
         # message to a service branch, that is objective evidence of a new
         # demand, so honour it. Courtesy closes and post-sale operations still
         # never open a journey: they carry no branch of their own.
-        if kind is InteractionKind.UNCLEAR and context.retrieval_trace.get(
-            "deterministic_branch_match"
+        service_resolution = context.retrieval_trace.get("service_resolution") or {}
+        if kind is InteractionKind.UNCLEAR and (
+            context.retrieval_trace.get("deterministic_branch_match")
+            or bool(service_resolution.get("candidate"))
         ):
             return JourneyAction.OPEN
         return JourneyAction.NONE
@@ -4909,6 +5169,15 @@ def _without_journey_mutation(
 def _no_journey_route(
     context: ConversationContext, kind: InteractionKind,
 ) -> ConversationRoute:
+    if context.post_completion_state.get("has_confirmed_conversion"):
+        resolution = context.retrieval_trace.get("service_resolution") or {}
+        if (
+            resolution.get("candidate")
+            or resolution.get("matches")
+            or resolution.get("operations")
+            or _has_explicit_service_intent(_latest_user_message(context))
+        ):
+            return ConversationRoute.HUMAN
     if kind is not InteractionKind.POST_SALE_OPERATION:
         return ConversationRoute.SDR
     try:
@@ -4925,6 +5194,15 @@ def _apply_journey_policy(
     response: AgentResponse,
     *, model_observation: dict[str, Any] | None,
 ) -> tuple[ConversationDecision, AgentResponse]:
+    # The contract probe is phase one of a two-phase decision. It deliberately
+    # has no model interaction observation yet, so applying terminal-journey
+    # policy here would coerce it to unclear/no_journey before the model gate.
+    # The reconciled proposal returns through this function on phase two.
+    if (
+        decision.intent == "await_model_proposal"
+        or response.proof.get("mode") == "contract_probe"
+    ):
+        return decision, response
     deterministic_intent = str(
         context.retrieval_trace.get("deterministic_intent") or ""
     ).strip()
@@ -5024,7 +5302,8 @@ def decide(
     context: ConversationContext, *, model_observation: dict[str, Any] | None
 ) -> tuple[ConversationDecision, AgentResponse]:
     deterministic = (
-        _deterministic_pending_fact_confirmation(context)
+        _deterministic_pending_service_clarification(context)
+        or _deterministic_pending_fact_confirmation(context)
         or _deterministic_confirmation_decision(context)
     )
     decision, response = deterministic or _decide(
@@ -5361,6 +5640,8 @@ def _confirmation_template(
     only the acknowledgement.
     """
     published = (document.get("confirmation_templates") or {}).get(key)
+    if published is None:
+        published = _service_clarification_policy(document).get(key)
     variants = published if isinstance(published, list) else [published]
     rendered = [
         text.replace("{candidate}", candidate).replace("{options}", options)
@@ -5375,6 +5656,8 @@ def _confirmation_template(
 def _service_candidate_template_key(
     candidate: dict[str, Any], active_branch_node_ids: list[str],
 ) -> str:
+    if candidate.get("operation_ambiguous") and active_branch_node_ids:
+        return "add_or_switch_question"
     action = str(candidate.get("action") or "add")
     if action == "drop":
         return "service_removal"
@@ -5868,6 +6151,11 @@ def _decide(
                         "branch_anchor_node_id": service_candidate["branch_anchor_node_id"],
                         "branch_path_checksum": service_candidate["branch_path_checksum"],
                         "action": service_candidate.get("action") or "add",
+                        "operation": service_candidate.get("action") or "add",
+                        "operation_ambiguous": bool(
+                            service_candidate.get("operation_ambiguous")
+                        ),
+                        "attempts": 1,
                         "replace_branch_node_id": service_candidate.get("replace_branch_node_id"),
                         "previous_active_branch_node_id": context.active_branch_node_id,
                         "previous_active_branch_node_ids": before_services,
@@ -5889,6 +6177,32 @@ def _decide(
                     },
                 },
             })
+            # A different candidate starts a fresh clarification ladder. Mark
+            # older pending service candidates non-current in the same commit
+            # so a later "sim" can never confirm the stale one.
+            for stale in grouped_facts.get("servico", []):
+                stale_confirmation = (
+                    (stale.get("metadata") or {}).get("confirmation") or {}
+                )
+                if (
+                    stale.get("status") == "needs_confirmation"
+                    and _confirmation_capability(stale_confirmation)
+                    in {"service", "branch_selector"}
+                    and str(stale.get("owner_node_id") or "")
+                    != str(service_candidate["branch_anchor_node_id"])
+                ):
+                    accepted_facts.append({
+                        **stale,
+                        "status": "invalid", "value": None,
+                        "source_message_id": _source_message_id(context.messages),
+                        "metadata": {
+                            **dict(stale.get("metadata") or {}),
+                            "confirmation": {
+                                **stale_confirmation,
+                                "transition": "superseded_by_new_candidate",
+                            },
+                        },
+                    })
         accepted_facts = list({
             (str(fact.get("field_key") or ""), str(fact.get("owner_node_id") or "")): fact
             for fact in accepted_facts
@@ -6160,6 +6474,10 @@ def _decide(
                 next_question_node_id=next_question_id,
                 contract=question_contract,
             )
+        if service_operations and not pending_confirmation_fact:
+            summary = _service_request_summary(document, active_branch_ids)
+            if summary and _normalized_phrase(summary) not in _normalized_phrase(reply):
+                reply = "\n\n".join(part for part in (summary, reply) if part)
         greeting_response = str(context.retrieval_trace.get("greeting_response") or "").strip()
         if greeting_response and not _normalized_phrase(reply).startswith(
             _normalized_phrase(greeting_response)
