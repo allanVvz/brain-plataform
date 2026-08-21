@@ -8,7 +8,7 @@ import re
 import time
 import unicodedata
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 logger = logging.getLogger("conversation_runtime")
 
@@ -2010,6 +2010,40 @@ def _ensure_reply_text_or_log(
     return response
 
 
+AgentRole = Literal["sdr", "closer", "cs"]
+
+# AGENT_ROADMAP.md item 7a: stage bands over the happy-path completion score.
+# Not yet configurable per persona (personas.config.stage_thresholds) -- that
+# read would add a DB round trip to every commit(); deferred until this
+# module-level default has run in production without surprise.
+DEFAULT_STAGE_THRESHOLDS: dict[str, float] = {
+    "sdr": 0.50,
+    "conversao": 0.75,
+    "venda": 1.00,
+    "pos_venda": 1.01,
+}
+
+
+def _qualification_score(required_field_count: int, resolved_required_count: int) -> float:
+    if required_field_count <= 0:
+        return 0.0
+    return resolved_required_count / required_field_count
+
+
+def resolve_agent_role(
+    score: float, thresholds: dict[str, float] | None = None,
+) -> AgentRole:
+    """AGENT_ROADMAP.md item 7b -- label only, nothing reads this yet to pick
+    a prompt or change the reply. SDR below the "sdr" band, Closer through
+    "venda", CS from "pos_venda" up."""
+    bands = thresholds or DEFAULT_STAGE_THRESHOLDS
+    if score >= bands.get("pos_venda", 1.01):
+        return "cs"
+    if score >= bands.get("sdr", 0.50):
+        return "closer"
+    return "sdr"
+
+
 def commit(
     *,
     lead_ref: int,
@@ -2262,6 +2296,8 @@ def commit(
         )
         missing = list(response.proof.get("missing_fields") or [])
         required_total = int(response.proof.get("required_field_count") or 0)
+        resolved_required = max(0, required_total - len(missing))
+        qualification_score = _qualification_score(required_total, resolved_required)
         qualified_stage = decision.lead_stage
         qualification = {
             "version": graph_agent_runtime_v3.RUNTIME_VERSION,
@@ -2270,7 +2306,9 @@ def commit(
             "resolved_fields": resolved,
             "missing_fields": missing,
             "required_field_count": required_total,
-            "resolved_required_count": max(0, required_total - len(missing)),
+            "resolved_required_count": resolved_required,
+            "score": qualification_score,
+            "suggested_role": resolve_agent_role(qualification_score),
             "source_evidence_node_ids": list(decision.evidence_node_ids),
             "stage": qualified_stage,
             "stage_source": "graph_contract",

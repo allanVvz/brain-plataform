@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "api"))
@@ -381,3 +382,28 @@ def test_paused_binding_bypass_and_inert_outbound_share_same_canonical_guard():
     assert "is_validation_lead = _is_canonical_validation_lead(lead)" in source
     assert ") and not is_validation_lead:" in source
     assert "if response.reply_text and is_validation_lead:" in source
+
+
+def test_qualification_score_is_the_completion_ratio():
+    assert conversation_runtime._qualification_score(0, 0) == 0.0
+    assert conversation_runtime._qualification_score(3, 0) == 0.0
+    assert conversation_runtime._qualification_score(3, 1) == pytest.approx(1 / 3)
+    assert conversation_runtime._qualification_score(3, 2) == pytest.approx(2 / 3)
+    assert conversation_runtime._qualification_score(3, 3) == 1.0
+
+
+def test_resolve_agent_role_follows_the_documented_bands():
+    assert conversation_runtime.resolve_agent_role(0.0) == "sdr"
+    assert conversation_runtime.resolve_agent_role(0.49) == "sdr"
+    assert conversation_runtime.resolve_agent_role(0.50) == "closer"
+    assert conversation_runtime.resolve_agent_role(0.75) == "closer"
+    assert conversation_runtime.resolve_agent_role(1.00) == "closer"
+    assert conversation_runtime.resolve_agent_role(1.01) == "cs"
+    assert conversation_runtime.resolve_agent_role(1.5) == "cs"
+
+
+def test_resolve_agent_role_honors_custom_thresholds():
+    tight = {"sdr": 0.20, "conversao": 0.40, "venda": 0.60, "pos_venda": 0.61}
+    assert conversation_runtime.resolve_agent_role(0.10, tight) == "sdr"
+    assert conversation_runtime.resolve_agent_role(0.30, tight) == "closer"
+    assert conversation_runtime.resolve_agent_role(0.70, tight) == "cs"
