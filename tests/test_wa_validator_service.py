@@ -469,6 +469,99 @@ def test_semantic_turn_audit_accepts_acknowledgement_and_first_missing_question(
     assert audit["asked_field"] == "nome_cliente"
 
 
+def test_semantic_turn_audit_accepts_graph_bound_service_pending_confirmation():
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"] = {
+        "text": (
+            "[audio do cliente]: Quero contratar o polimento de vidros e "
+            "tenho uma dúvida."
+        ),
+        "intended_facts": {"servico": "polimento-de-vidros"},
+        "expected_branch_node_id": "branch:glass-polish",
+    }
+    inputs["turn"]["text"] = (
+        "Entendi a sua dúvida. Você quer seguir com Polimento de vidros?"
+    )
+    proof = inputs["proof_record"]["proof_result"]
+    proof.update({
+        "accepted_facts": [{
+            "field_key": "servico",
+            "status": "needs_confirmation",
+            "value": None,
+            "owner_node_id": "branch:glass-polish",
+            "evidence_span": "polimento de vidros",
+        }],
+        "missing_fields": ["nome_cliente", "servico"],
+        "next_question_node_id": None,
+        "confirmation_state": "field_confirmation",
+        "pending_confirmation": {
+            "kind": "service",
+            "candidate": "polimento-de-vidros",
+            "candidate_title": "Polimento de vidros",
+            "branch_anchor_node_id": "branch:glass-polish",
+        },
+    })
+    inputs["contract"]["fields"].append({
+        "key": "servico",
+        "owner_node_id": "branch:glass-polish",
+        "question_node_id": "q:service",
+        "branch_selection_field": True,
+    })
+    inputs["ledger_after"].update({
+        "active_branch_node_id": None,
+        "active_branch_node_ids": [],
+        "facts": {},
+        "facts_by_key": {},
+    })
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["all_intended_facts_extracted"] is True
+    assert audit["criteria"]["expected_branch_persisted"] is True
+    assert audit["passed"] is True
+
+
+def test_semantic_turn_audit_rejects_pending_confirmation_for_wrong_branch():
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"] = {
+        "text": "Quero contratar o polimento de vidros.",
+        "intended_facts": {"servico": "polimento-de-vidros"},
+        "expected_branch_node_id": "branch:glass-polish",
+    }
+    proof = inputs["proof_record"]["proof_result"]
+    proof.update({
+        "accepted_facts": [{
+            "field_key": "servico",
+            "status": "needs_confirmation",
+            "value": None,
+            "owner_node_id": "branch:other",
+            "evidence_span": "polimento de vidros",
+        }],
+        "confirmation_state": "field_confirmation",
+        "pending_confirmation": {
+            "kind": "service",
+            "candidate": "polimento-de-vidros",
+            "branch_anchor_node_id": "branch:other",
+        },
+    })
+    inputs["contract"]["fields"].append({
+        "key": "servico",
+        "owner_node_id": "branch:other",
+        "branch_selection_field": True,
+    })
+    inputs["ledger_after"].update({
+        "active_branch_node_id": None,
+        "active_branch_node_ids": [],
+        "facts": {},
+        "facts_by_key": {},
+    })
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["all_intended_facts_extracted"] is False
+    assert audit["criteria"]["expected_branch_persisted"] is False
+
+
 def _authorized_service_operation():
     return {
         "action": "add", "branch_anchor_node_id": "branch:two",

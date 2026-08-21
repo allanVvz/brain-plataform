@@ -1982,25 +1982,6 @@ def _semantic_turn_audit(
     previous_asked_field = str(previous_question.get("field_key") or "") or None
     question_text = str(question.get("text") or "").strip()
     asked_field = str(question.get("field_key") or "") or None
-    accepted_all = all(
-        key in accepted
-        and _accepted_fact_matches_intent(
-            accepted.get(key), value, str(customer_step.get("text") or ""),
-        )
-        and any(
-            _fact_matches_expected(
-                current,
-                accepted[key].get("value", accepted[key].get("value_json")),
-            )
-            and (
-                not accepted[key].get("owner_node_id")
-                or str(current.get("owner_node_id") or "")
-                == str(accepted[key].get("owner_node_id") or "")
-            )
-            for current in facts_by_key.get(key) or []
-        )
-        for key, value in intended.items()
-    )
     declarative_parts = [
         sentence.strip()
         for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", reply)
@@ -2035,6 +2016,67 @@ def _semantic_turn_audit(
         for field in contract.get("fields") or []
         if field.get("branch_selection_field") is True
     }
+    pending_confirmation = (
+        proof.get("pending_confirmation")
+        if isinstance(proof.get("pending_confirmation"), dict)
+        else {}
+    )
+    pending_confirmation_branch = str(
+        pending_confirmation.get("branch_anchor_node_id") or ""
+    )
+    pending_confirmation_candidate = str(
+        pending_confirmation.get("candidate") or ""
+    )
+
+    def intended_fact_is_pending_branch_confirmation(key: str, value: object) -> bool:
+        """Accept a graph-proved service candidate until the customer confirms it.
+
+        A branch selector deliberately persists only after the next explicit
+        confirmation.  The previous Validator required the active branch and
+        a ledger fact on the candidate-detection turn, so it stopped before it
+        could send that confirmation even when the proof had already bound the
+        exact catalog candidate to the expected graph branch.
+        """
+        fact = accepted.get(key) or {}
+        expected_branch = str(customer_step.get("expected_branch_node_id") or "")
+        return bool(
+            key in branch_selection_keys
+            and fact.get("status") == "needs_confirmation"
+            and pending_confirmation.get("kind") == "service"
+            and pending_confirmation_branch
+            and pending_confirmation_branch == expected_branch
+            and str(fact.get("owner_node_id") or "") == expected_branch
+            and _semantic_fold(pending_confirmation_candidate)
+            == _semantic_fold(str(value or ""))
+            and _semantic_fold(str(fact.get("evidence_span") or ""))
+            in _semantic_fold(str(customer_step.get("text") or ""))
+            and bool(
+                _semantic_fold(str(fact.get("evidence_span") or ""))
+            )
+        )
+
+    accepted_all = all(
+        (
+            key in accepted
+            and _accepted_fact_matches_intent(
+                accepted.get(key), value, str(customer_step.get("text") or ""),
+            )
+            and any(
+                _fact_matches_expected(
+                    current,
+                    accepted[key].get("value", accepted[key].get("value_json")),
+                )
+                and (
+                    not accepted[key].get("owner_node_id")
+                    or str(current.get("owner_node_id") or "")
+                    == str(accepted[key].get("owner_node_id") or "")
+                )
+                for current in facts_by_key.get(key) or []
+            )
+        )
+        or intended_fact_is_pending_branch_confirmation(key, value)
+        for key, value in intended.items()
+    )
     service_value_not_reused_as_field = not any(
         str(fact.get("field_key") or "") not in branch_selection_keys
         and (
@@ -2228,6 +2270,12 @@ def _semantic_turn_audit(
                 len(ledger_after.get("active_branch_node_ids") or []) > 1
                 and str(customer_step.get("expected_branch_node_id"))
                 in set(ledger_after.get("active_branch_node_ids") or [])
+            )
+            or (
+                proof.get("confirmation_state") == "field_confirmation"
+                and pending_confirmation.get("kind") == "service"
+                and pending_confirmation_branch
+                == str(customer_step.get("expected_branch_node_id"))
             )
         ),
         "expected_active_branches_persisted": (
