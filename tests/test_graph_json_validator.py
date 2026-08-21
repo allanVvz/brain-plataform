@@ -123,6 +123,20 @@ def test_question_repetition_accepts_zero_contextual_retries():
     assert valid is True, errors
 
 
+def test_service_clarification_policy_requires_every_runtime_text():
+    graph = build_aurora_graph()
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    persona.data["conversation_policy"]["service_clarification"]["retry_question"] = ""
+
+    valid, errors = validate_graph_json(graph)
+
+    assert valid is False
+    assert (
+        "conversation_policy.service_clarification.retry_question must be non-empty"
+        in errors
+    )
+
+
 def test_appointment_identity_field_must_be_first_required_field():
     graph = build_aurora_graph()
     persona = next(node for node in graph.nodes if node.node_type == "persona")

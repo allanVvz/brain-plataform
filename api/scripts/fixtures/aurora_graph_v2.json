@@ -88,6 +88,12 @@
               "purchase_completed"
             ]
           },
+          "service_clarification": {
+            "add_or_switch_question": "Você quer trocar o serviço atual ou adicionar {candidate} ao pedido?",
+            "retry_question": "Acho que não estou conseguindo entender direitinho o que você quer. Você quer trocar o serviço atual ou adicionar {candidate} ao pedido?",
+            "handoff_message": "Vou chamar a Equipe Aurora para confirmar a alteração com você. Serviços possíveis: {services}.",
+            "summary_template": "Até agora seu pedido tem: {services}."
+          },
           "qualification": {
             "summary_template": "Então ficou assim: {informed_fields}.",
             "confirmation_question": "Tá tudo certo?",
@@ -3105,6 +3111,106 @@
           }
         ]
       }
+    },
+    {
+      "id": "aurora-faq-reopen-request",
+      "node_type": "faq",
+      "slug": "faq-reabrir-pedido-pos-atendimento",
+      "label": "Posso abrir outro pedido depois de já ter falado com a equipe?",
+      "parent_id": "aurora-rule-atendimento",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Posso abrir outro pedido depois de já ter falado com a equipe?",
+        "answer": "Sim. Se o agendamento ainda não foi confirmado, posso atualizar seu pedido e aproveitar os dados do veículo que continuam válidos.",
+        "source_node_id": "aurora-rule-atendimento",
+        "source_node_type": "rule",
+        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"],
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [{
+          "claim_type": "service_detail",
+          "policy": {"mode": "informational"},
+          "evidence_node_ids": ["aurora-faq-reopen-request"],
+          "source_node_id": "aurora-rule-atendimento",
+          "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"]
+        }]
+      }
+    },
+    {
+      "id": "aurora-faq-multiple-services",
+      "node_type": "faq",
+      "slug": "faq-multiplos-servicos-pedido",
+      "label": "Posso adicionar dois ou três serviços ao mesmo pedido?",
+      "parent_id": "aurora-rule-atendimento",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Posso adicionar dois ou três serviços ao mesmo pedido?",
+        "answer": "Sim. Você pode incluir mais de um serviço. Vou manter todos no mesmo pedido, e a Equipe Aurora confirmará avaliação, valor e horário.",
+        "source_node_id": "aurora-rule-atendimento",
+        "source_node_type": "rule",
+        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"],
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [{
+          "claim_type": "service_detail",
+          "policy": {"mode": "informational"},
+          "evidence_node_ids": ["aurora-faq-multiple-services"],
+          "source_node_id": "aurora-rule-atendimento",
+          "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"]
+        }]
+      }
+    },
+    {
+      "id": "aurora-faq-switch-service",
+      "node_type": "faq",
+      "slug": "faq-trocar-servico-antes-agendamento",
+      "label": "Posso trocar o serviço antes do agendamento?",
+      "parent_id": "aurora-rule-atendimento",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Posso trocar o serviço antes do agendamento?",
+        "answer": "Sim. Antes da confirmação do agendamento, posso substituir o serviço atual e preservar as informações do veículo que continuam válidas.",
+        "source_node_id": "aurora-rule-atendimento",
+        "source_node_type": "rule",
+        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"],
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [{
+          "claim_type": "service_detail",
+          "policy": {"mode": "informational"},
+          "evidence_node_ids": ["aurora-faq-switch-service"],
+          "source_node_id": "aurora-rule-atendimento",
+          "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"]
+        }]
+      }
+    },
+    {
+      "id": "aurora-faq-remove-service",
+      "node_type": "faq",
+      "slug": "faq-remover-servico-pedido",
+      "label": "Posso remover um serviço do pedido?",
+      "parent_id": "aurora-rule-atendimento",
+      "data": {
+        "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
+        "status": "validated",
+        "question": "Posso remover um serviço do pedido?",
+        "answer": "Sim. Posso retirar somente o serviço indicado e manter os demais no pedido.",
+        "source_node_id": "aurora-rule-atendimento",
+        "source_node_type": "rule",
+        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"],
+        "markdown_document": true,
+        "question_count": 1,
+        "claims": [{
+          "claim_type": "service_detail",
+          "policy": {"mode": "informational"},
+          "evidence_node_ids": ["aurora-faq-remove-service"],
+          "source_node_id": "aurora-rule-atendimento",
+          "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"]
+        }]
+      }
     }
   ],
   "edges": [
@@ -3967,6 +4073,70 @@
     {
       "id": "aurora-e-why-name-embedded",
       "source": "aurora-faq-why-name",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-rule-reopen-request",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-reopen-request",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-reopen-request-embedded",
+      "source": "aurora-faq-reopen-request",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-rule-multiple-services",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-multiple-services",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-multiple-services-embedded",
+      "source": "aurora-faq-multiple-services",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-rule-switch-service",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-switch-service",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-switch-service-embedded",
+      "source": "aurora-faq-switch-service",
+      "target": "aurora-embedded",
+      "relation": "visible_to_agent",
+      "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-rule-remove-service",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-remove-service",
+      "relation": "answers_question",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-remove-service-embedded",
+      "source": "aurora-faq-remove-service",
       "target": "aurora-embedded",
       "relation": "visible_to_agent",
       "primary_tree": false,

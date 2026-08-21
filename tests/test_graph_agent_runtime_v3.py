@@ -3019,6 +3019,121 @@ def test_two_services_in_one_message_are_both_added_without_additive_word():
     assert resolution["next_active_branch_node_ids"] == ["branch:a", "branch:b"]
 
 
+def test_new_service_without_operation_asks_add_or_switch_once():
+    document = {
+        "branch_anchors": ["branch:a", "branch:b"],
+        "node_by_id": {
+            "branch:a": {"title": "Serviço Alpha", "slug": "alpha", "data": {}},
+            "branch:b": {"title": "Serviço Beta", "slug": "beta", "data": {}},
+        },
+        "coordinates": {
+            "branch:a": {"path_checksum": "checksum:a"},
+            "branch:b": {"path_checksum": "checksum:b"},
+        },
+    }
+    ambiguous = graph_agent_runtime_v3._resolve_service_operations(
+        document, "Serviço Beta",
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    additive = graph_agent_runtime_v3._resolve_service_operations(
+        document, "adicione Serviço Beta",
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+
+    assert ambiguous["status"] == "needs_confirmation"
+    assert ambiguous["candidate"]["operation_ambiguous"] is True
+    assert graph_agent_runtime_v3._service_candidate_template_key(
+        ambiguous["candidate"], ["branch:a"],
+    ) == "add_or_switch_question"
+    assert additive["operations"][0]["action"] == "add"
+
+
+def test_service_clarification_uses_two_attempts_then_handoff(monkeypatch):
+    document = _pending_confirmation_document()
+    document["nodes"] = [{
+        "id": "persona:generic", "node_type": "persona", "data": {
+            "conversation_policy": {"service_clarification": {
+                "add_or_switch_question": "Trocar ou adicionar {candidate}?",
+                "retry_question": "Ainda não entendi. Trocar ou adicionar {candidate}?",
+                "handoff_message": "Vou chamar a equipe. Serviços: {services}.",
+                "summary_template": "Até agora seu pedido tem: {services}.",
+            }},
+        },
+    }]
+    document["branch_anchors"].append("branch:p")
+    document["node_by_id"]["branch:p"] = {"title": "Polimento", "slug": "polimento"}
+    document["coordinates"]["branch:p"] = {"path_checksum": "checksum:p"}
+    pub = publication(document)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_persona",
+        lambda _slug: {**PERSONA, "config": {}},
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
+        lambda _persona_id: pub,
+    )
+
+    def pending(attempts):
+        return {
+            "field_key": "servico", "owner_node_id": "branch:v",
+            "status": "needs_confirmation", "value": None,
+            "metadata": {"confirmation": {
+                "kind": "service", "capability": "branch_selector",
+                "candidate": "vitrificacao", "candidate_title": "Vitrificação",
+                "branch_anchor_node_id": "branch:v", "action": "add",
+                "operation": "add", "operation_ambiguous": True,
+                "attempts": attempts,
+            }},
+        }
+
+    def context(attempts, message):
+        fact = pending(attempts)
+        return ConversationContext(
+            persona_slug="generic", agent_slug="agent", graph_version=1,
+            graph_checksum=document["checksum"], publication_id=pub["id"],
+            messages=[{"message_id": f"msg-{attempts}", "role": "user", "content": message}],
+            cart={"facts_by_key": {"servico": [fact]}},
+            rag_nodes=[], rag_paths=[], graph_contract=document["common_contract"],
+            branch_node_ids=[], active_branch_node_id="branch:p",
+            active_branch_node_ids=["branch:p"],
+            retrieval_trace={"service_resolution": {}},
+        )
+
+    retry_decision, retry = graph_agent_runtime_v3.decide(
+        context(1, "quero isso"), model_observation=None,
+    )
+    assert retry_decision.intent == "service_clarification_retry"
+    assert retry.proof["clarification_attempts"] == 2
+    assert retry.reply_text == "Ainda não entendi. Trocar ou adicionar Vitrificação?"
+    assert retry.handoff_required is False
+
+    handoff_decision, handoff = graph_agent_runtime_v3.decide(
+        context(2, "continua igual"), model_observation=None,
+    )
+    assert handoff_decision.intent == "service_clarification_exhausted"
+    assert handoff.handoff_required is True
+    assert "Polimento" in handoff.reply_text
+    assert "Vitrificação" in handoff.reply_text
+    assert "?" not in handoff.reply_text
+
+
+def test_graph_owned_service_summary_supports_three_services():
+    document = {
+        "nodes": [{"node_type": "persona", "data": {"conversation_policy": {
+            "service_clarification": {
+                "summary_template": "Até agora seu pedido tem: {services}.",
+            },
+        }}}],
+        "node_by_id": {
+            "a": {"title": "Lavagem"}, "b": {"title": "Chapeação"},
+            "c": {"title": "Vitrificação"},
+        },
+    }
+    assert graph_agent_runtime_v3._service_request_summary(
+        document, ["a", "b", "c"],
+    ) == "Até agora seu pedido tem: Lavagem, Chapeação, Vitrificação."
+
+
 def test_explicit_service_switch_drops_focus_before_adding_new_service():
     document = {
         "branch_anchors": ["branch:a", "branch:b"],
@@ -3050,6 +3165,30 @@ def test_explicit_service_switch_drops_focus_before_adding_new_service():
     )
     assert proof["valid"], proof["errors"]
     assert proof["next_active_branch_node_ids"] == ["branch:b"]
+
+
+def test_removing_one_service_preserves_the_other_two():
+    document = {
+        "branch_anchors": ["branch:a", "branch:b", "branch:c"],
+        "node_by_id": {
+            "branch:a": {"title": "Alpha", "slug": "alpha", "data": {}},
+            "branch:b": {"title": "Beta", "slug": "beta", "data": {}},
+            "branch:c": {"title": "Gamma", "slug": "gamma", "data": {}},
+        },
+        "coordinates": {
+            key: {"path_checksum": f"checksum:{key[-1]}"}
+            for key in ("branch:a", "branch:b", "branch:c")
+        },
+    }
+    resolution = graph_agent_runtime_v3._resolve_service_operations(
+        document, "remova Beta do pedido",
+        active_branch_node_id="branch:c",
+        active_branch_node_ids=["branch:a", "branch:b", "branch:c"],
+    )
+    assert [(item["action"], item["branch_anchor_node_id"])
+            for item in resolution["operations"]] == [("drop", "branch:b")]
+    assert set(resolution["next_active_branch_node_ids"]) == {"branch:a", "branch:c"}
+    assert "branch:b" not in resolution["next_active_branch_node_ids"]
 
 
 def test_service_evidence_cannot_be_reused_as_objective_value():

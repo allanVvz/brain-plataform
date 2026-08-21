@@ -10,7 +10,12 @@ if str(API_ROOT) not in sys.path:
 
 from scripts.publish_aurora_graph import build_graph
 from routes.conversations import ContextRequest
-from services import graph_compiler_v3, graph_json_v2_validator, graph_markdown
+from services import (
+    graph_agent_runtime_v3,
+    graph_compiler_v3,
+    graph_json_v2_validator,
+    graph_markdown,
+)
 
 
 def _compile(graph) -> dict:
@@ -47,11 +52,10 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
 
     assert valid, errors
     assert graph.schema_version == "2.1"
-    # 88 desde 2026-08-19: aurora-faq-why-name fechou a unica duvida de
-    # qualificacao sem resposta publicada, e ela cai justamente no primeiro
-    # campo do roteiro.
-    assert len(graph.nodes) == 88
-    assert len(graph.edges) == 170
+    # 92 desde a politica de reabertura/multisservico: quatro FAQs gerais
+    # aprovadas explicam adicionar, trocar, remover e reabrir um pedido.
+    assert len(graph.nodes) == 92
+    assert len(graph.edges) == 178
 
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
     assert embedded.action is not None
@@ -64,7 +68,7 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
         and edge.relation_type == "publishes_to"
         and edge.lifecycle.status == "active"
     ]
-    assert len(grants) == 85
+    assert len(grants) == 89
     assert {edge.source for edge in grants} == {
         node.id
         for node in graph.nodes
@@ -73,6 +77,37 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
         and node.lifecycle.status == "approved"
     }
     assert len({edge.id for edge in graph.edges}) == len(graph.edges)
+
+
+def test_real_audio_transcription_typos_become_one_confirmable_service_candidate() -> None:
+    document = _compile(graph_markdown.canonicalize_graph(build_graph()))
+    cases = {
+        "[audio do cliente]: Eu quero laçar meu carro.": "aurora-product-wash",
+        "[audio do cliente]: Chapiação. Quero Chapiação.": "aurora-product-bodywork",
+    }
+    for message, expected_anchor in cases.items():
+        resolution = graph_agent_runtime_v3._resolve_service_operations(
+            document, message,
+            active_branch_node_id=None, active_branch_node_ids=[],
+        )
+        assert resolution["status"] == "needs_confirmation"
+        assert resolution["operations"] == []
+        assert resolution["candidate"]["branch_anchor_node_id"] == expected_anchor
+        assert resolution["confirmation"]["kind"] == "service"
+
+
+def test_compiled_aurora_keeps_graph_owned_service_clarification_copy() -> None:
+    document = _compile(graph_markdown.canonicalize_graph(build_graph()))
+    policy = graph_agent_runtime_v3._service_clarification_policy(document)
+    assert policy["add_or_switch_question"] == (
+        "Você quer trocar o serviço atual ou adicionar {candidate} ao pedido?"
+    )
+    assert policy["retry_question"].startswith(
+        "Acho que não estou conseguindo entender direitinho"
+    )
+    assert graph_agent_runtime_v3._service_request_summary(
+        document, ["aurora-product-wash", "aurora-product-bodywork"],
+    ) == "Até agora seu pedido tem: Lavagem detalhada, Chapeação."
 
 
 def test_full_qualification_walk_never_asks_the_same_published_question_twice() -> None:
@@ -113,7 +148,7 @@ def test_all_aurora_factual_faqs_receive_v34_projection_membership() -> None:
 
     assert document["compiler_version"] == "graph-compiler-v3.6.2"
     assert document["faq_projection_contract"] == "v1"
-    assert len(document["eligible_faq_node_ids"]) == 31
+    assert len(document["eligible_faq_node_ids"]) == 35
     # Thirteen portfolio/global FAQs are available in every branch; a branch
     # may additionally own service-specific FAQs.
     assert all(

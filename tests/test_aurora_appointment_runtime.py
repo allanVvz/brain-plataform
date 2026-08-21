@@ -143,6 +143,47 @@ def test_aurora_graph_is_published_valid_and_every_faq_reaches_embedded_once():
     )
 
 
+def test_aurora_request_change_faqs_are_validated_under_service_policy_rule():
+    graph = canonical_aurora_graph()
+    expected = {
+        "aurora-faq-reopen-request": (
+            "Posso abrir outro pedido depois de já ter falado com a equipe?",
+            "Sim. Se o agendamento ainda não foi confirmado, posso atualizar seu pedido e aproveitar os dados do veículo que continuam válidos.",
+        ),
+        "aurora-faq-multiple-services": (
+            "Posso adicionar dois ou três serviços ao mesmo pedido?",
+            "Sim. Você pode incluir mais de um serviço. Vou manter todos no mesmo pedido, e a Equipe Aurora confirmará avaliação, valor e horário.",
+        ),
+        "aurora-faq-switch-service": (
+            "Posso trocar o serviço antes do agendamento?",
+            "Sim. Antes da confirmação do agendamento, posso substituir o serviço atual e preservar as informações do veículo que continuam válidas.",
+        ),
+        "aurora-faq-remove-service": (
+            "Posso remover um serviço do pedido?",
+            "Sim. Posso retirar somente o serviço indicado e manter os demais no pedido.",
+        ),
+    }
+    by_id = {node.id: node for node in graph.nodes}
+    for node_id, (question, answer) in expected.items():
+        node = by_id[node_id]
+        assert node.data["status"] == "validated"
+        assert node.data["question"] == question
+        assert node.data["answer"] == answer
+        assert node.data["source_node_id"] == "aurora-rule-atendimento"
+        assert node.data["source_node_type"] == "rule"
+        assert node.data["branch_path"][-1] == "aurora-rule-atendimento"
+        assert any(
+            edge.source == "aurora-rule-atendimento"
+            and edge.target == node_id and edge.primary_tree is True
+            for edge in graph.edges
+        )
+        assert any(
+            edge.source == node_id and edge.target == "aurora-embedded"
+            and edge.primary_tree is False
+            for edge in graph.edges
+        )
+
+
 def test_catalog_reads_quote_only_capacity_and_manual_confirmation():
     """The briefing never published a price or a duration for any service.
 
