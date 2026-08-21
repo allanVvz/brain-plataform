@@ -1949,9 +1949,28 @@ def _semantic_turn_audit(
     decision = proof_record.get("final_decision") or {}
     reply = str(turn.get("text") or "").strip()
     intended = customer_step.get("intended_facts") or {}
+    accepted_by_key: dict[str, list[dict]] = {}
+    for fact in proof.get("accepted_facts") or []:
+        accepted_by_key.setdefault(str(fact.get("field_key") or ""), []).append(fact)
+    # A service switch legitimately commits two facts for the same selector:
+    # the new branch as ``known`` and the previous branch as ``declined``.
+    # Keep the positive candidate as the representative fact so the old
+    # branch's tombstone cannot turn a proved switch into a Validator-only
+    # ``all_intended_facts_extracted`` failure.
+    accepted_status_rank = {
+        "known": 5,
+        "needs_confirmation": 4,
+        "unknown": 3,
+        "invalid": 2,
+        "declined": 1,
+    }
     accepted = {
-        str(fact.get("field_key") or ""): fact
-        for fact in proof.get("accepted_facts") or []
+        key: max(
+            facts,
+            key=lambda fact: accepted_status_rank.get(str(fact.get("status") or ""), 0),
+        )
+        for key, facts in accepted_by_key.items()
+        if key and facts
     }
     facts_after = ledger_after.get("facts") or {}
     facts_by_key = ledger_after.get("facts_by_key") or {

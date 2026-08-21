@@ -521,6 +521,53 @@ def test_semantic_turn_audit_accepts_graph_bound_service_pending_confirmation():
     assert audit["passed"] is True
 
 
+def test_semantic_turn_audit_prefers_added_service_over_declined_previous_branch():
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"] = {
+        "text": "Na verdade, prefiro Service Two.",
+        "intended_facts": {"servico": "service-two"},
+        "expected_branch_node_id": "branch:two",
+        "expected_active_branch_node_ids": ["branch:two"],
+    }
+    proof = inputs["proof_record"]["proof_result"]
+    proof["accepted_facts"] = [
+        {
+            "field_key": "servico", "status": "known", "value": "service-two",
+            "owner_node_id": "branch:two", "evidence_span": "Service Two",
+        },
+        {
+            "field_key": "servico", "status": "declined", "value": None,
+            "owner_node_id": "branch:one", "evidence_span": "Na verdade",
+        },
+    ]
+    inputs["contract"]["fields"].append({
+        "key": "servico", "owner_node_id": "branch:two",
+        "question_node_id": "q:service", "branch_selection_field": True,
+    })
+    inputs["ledger_after"].update({
+        "active_branch_node_id": "branch:two",
+        "active_branch_node_ids": ["branch:two"],
+        "facts_by_key": {
+            "servico": [
+                {
+                    "status": "known", "value": "service-two",
+                    "owner_node_id": "branch:two",
+                },
+                {
+                    "status": "declined", "value": None,
+                    "owner_node_id": "branch:one",
+                },
+            ],
+            "objective": [inputs["ledger_after"]["facts"]["objective"]],
+        },
+    })
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["all_intended_facts_extracted"] is True
+    assert audit["criteria"]["expected_branch_persisted"] is True
+
+
 def test_semantic_turn_audit_rejects_pending_confirmation_for_wrong_branch():
     inputs = _semantic_audit_inputs()
     inputs["customer_step"] = {
