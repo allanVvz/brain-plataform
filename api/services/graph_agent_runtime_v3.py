@@ -4310,6 +4310,15 @@ def _validated_interpretation(
     Returns None when the turn carried no interpretation at all (a repair
     call, a contract probe, or a workflow still on the previous contract), so
     callers keep their existing behaviour instead of inventing one.
+
+    Validation happens in two stages because the graph document is not loaded
+    until later in the turn. Called WITHOUT a document -- as `decide()` does,
+    to reach the confirmation short-circuits before paying for a publication
+    fetch -- everything that needs only the message and the pending state is
+    proved, and anything graph-scoped (branch anchors above all) is dropped
+    for lack of a graph to check against. Callers that hold a real document
+    must therefore re-prove graph-scoped elements against it; passing a
+    document here does the whole job in one pass.
     """
     raw = (model_observation or {}).get("interpretation")
     if not isinstance(raw, dict):
@@ -4820,14 +4829,21 @@ def _deterministic_pending_fact_confirmation(
         action = str(confirmation.get("action") or "add")
         if accepted_confirmation:
             # The customer may confirm AND redirect in one breath ("yes, but
-            # switch it to the other one"). The model reports which, bound to a
-            # branch anchor the validator already proved exists in this graph;
-            # the pending confirmation's own action stays the default.
+            # switch it to the other one"). The anchor is re-proved against the
+            # publication loaded above -- decide() validates the interpretation
+            # before the document is known, so a branch selection can only be
+            # trusted here, where the real anchor set exists.
             selection = interpretation.branch_selection
-            if selection.branch_anchor_node_id and selection.action.value != "none":
+            redirected = (
+                str(selection.branch_anchor_node_id or "")
+                in set(document.get("branch_anchors") or [])
+                and selection.action.value != "none"
+            )
+            if redirected:
                 action = selection.action.value
                 if action == "select":
                     action = "add"
+                anchor = str(selection.branch_anchor_node_id)
             if action == "add" and anchor in active:
                 action = "keep"
             replace_anchor = str(
