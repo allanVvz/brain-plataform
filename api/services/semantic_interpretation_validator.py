@@ -186,8 +186,16 @@ def validate_interpretation(
         if spec is None:
             drop("fact", "unknown_field_key", fact)
             continue
-        if str(fact.get("owner_node_id") or "") not in node_by_id:
+        owner = str(fact.get("owner_node_id") or "")
+        if owner not in node_by_id:
             drop("fact", "unknown_owner_node", fact)
+            continue
+        declared_owner = str(spec.get("owner_node_id") or "")
+        if declared_owner and owner != declared_owner:
+            # Existing in the graph is not enough: the fact has to be owned by
+            # the node the contract says owns that field, or it would land on
+            # the wrong branch's ledger.
+            drop("fact", "owner_not_declared_for_field", fact)
             continue
         if not _is_grounded(fact.get("evidence_span"), folded_message):
             drop("fact", "evidence_not_in_message", fact)

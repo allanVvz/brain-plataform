@@ -230,9 +230,9 @@ class SemanticIntentKind(StrEnum):
 class SemanticIntent(StrictModel):
     """One act the customer performed in this message.
 
-    A message routinely carries several ("é para revenda. vocês têm 50
-    vestidos?" is an answer plus a commercial question), so the contract is a
-    list and the backend must serve every one of them.
+    A message routinely carries several -- answering the pending question and
+    asking a commercial one in the same breath -- so the contract is a list
+    and the backend must serve every one of them.
     """
 
     kind: SemanticIntentKind
@@ -259,7 +259,7 @@ class SemanticConfirmation(StrictModel):
     state: ConfirmationState = ConfirmationState.NONE
     target_ref: str | None = None
     evidence_span: str = ""
-    # For PARTIAL ("sim, mas muda para revenda"): what still has to change.
+    # For PARTIAL ("yes, but change X to Y"): what still has to change.
     correction_field_key: str | None = None
     correction_value: Any | None = None
 

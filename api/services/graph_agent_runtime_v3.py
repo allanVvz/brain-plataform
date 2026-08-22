@@ -24,6 +24,7 @@ from schemas.conversation import (
     ExtractedFact,
     InteractionKind,
     JourneyAction,
+    SemanticInterpretation,
     ServiceOperation,
     ServiceOperationAction,
 )
@@ -31,6 +32,8 @@ from services import (
     conversation_repetition,
     graph_compiler_v3,
     graph_proof_checker_v3,
+    semantic_conversation_policy,
+    semantic_interpretation_validator,
     shared_lead_memory,
     supabase_client,
 )
@@ -3645,6 +3648,31 @@ def _journey_operational_mode(journey_state: str) -> str:
     return "collection"
 
 
+def _pending_confirmation_ref(
+    operational_mode: str, ledger: dict[str, Any], journey_id: str | None,
+) -> str | None:
+    """Stable id for whatever this turn is asking the customer to confirm.
+
+    The model must echo this back in `confirmation.target_ref`, which is what
+    binds a yes to a specific question. Derived from state the turn already
+    has, so nothing new is persisted, and scoped per journey+revision so a
+    stale yes from an older exchange cannot close a newer one.
+
+    A pending fact confirmation (a name, a service candidate) outranks the
+    journey-level qualification summary, because that is the narrower thing
+    actually on the table.
+    """
+    for rows in (ledger.get("facts_by_key") or {}).values():
+        for fact in rows if isinstance(rows, list) else []:
+            if not isinstance(fact, dict) or fact.get("status") != "needs_confirmation":
+                continue
+            if isinstance((fact.get("metadata") or {}).get("confirmation"), dict):
+                return f"fact:{fact.get('field_key')}:{fact.get('owner_node_id')}"
+    if operational_mode == "confirmation":
+        return f"qualification:{journey_id or 'current'}:{ledger.get('revision') or 0}"
+    return None
+
+
 def _journey_has_confirmed_conversion(
     journey: dict[str, Any], outcomes: Sequence[dict[str, Any]],
 ) -> bool:
@@ -3930,6 +3958,9 @@ def build_context(
             journey_state=journey_state,
             pending_field_key=str(pending_field.get("key") or "") or None,
             pending_question_node_id=str(pending_field.get("question_node_id") or "") or None,
+            pending_confirmation_ref=_pending_confirmation_ref(
+                operational_mode, ledger, str(journey.get("id") or "") or None,
+            ),
             last_handoff={
                 "at": journey.get("handed_off_at"),
                 "reason": (journey.get("metadata") or {}).get("handoff_reason")
@@ -4214,9 +4245,18 @@ def build_context(
         rag_paths=[card.path for card in cards],
         rag_chunks=[_compact_prompt_chunk(row) for row in package],
         context_cards=cards,
+        # Every published anchor, with the graph's own alias vocabulary, so the
+        # model can map "é pra mim" onto a real anchor id. The aliases are
+        # graph data travelling to the model -- the backend itself no longer
+        # matches on them.
         system_prompt=prompt, available_services=[{
             "branch_anchor_node_id": anchor,
-            "slug": document["node_by_id"][anchor]["slug"], "label": document["node_by_id"][anchor]["title"]
+            "slug": document["node_by_id"][anchor]["slug"],
+            "label": document["node_by_id"][anchor]["title"],
+            "aliases": [
+                str(alias) for alias in
+                ((document["node_by_id"][anchor].get("data") or {}).get("aliases") or [])
+            ],
         } for anchor in document.get("branch_anchors") or []],
         active_branch_node_id=active_branch,
         active_branch_node_ids=active_branches,
@@ -4234,6 +4274,9 @@ def build_context(
         journey_state=journey_state,
         pending_field_key=str(pending_field.get("key") or "") or None,
         pending_question_node_id=str(pending_field.get("question_node_id") or "") or None,
+        pending_confirmation_ref=_pending_confirmation_ref(
+            operational_mode, ledger, str(journey.get("id") or "") or None,
+        ),
         last_handoff={
             "at": journey.get("handed_off_at"),
             "reason": (journey.get("metadata") or {}).get("handoff_reason")
@@ -4256,13 +4299,84 @@ def build_context(
     )
 
 
+def _validated_interpretation(
+    context: ConversationContext,
+    model_observation: dict[str, Any] | None,
+    document: dict[str, Any] | None = None,
+    contract: dict[str, Any] | None = None,
+) -> semantic_interpretation_validator.ValidationResult | None:
+    """Parse and prove the model's structured reading of this inbound.
+
+    Returns None when the turn carried no interpretation at all (a repair
+    call, a contract probe, or a workflow still on the previous contract), so
+    callers keep their existing behaviour instead of inventing one.
+    """
+    raw = (model_observation or {}).get("interpretation")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        interpretation = SemanticInterpretation.model_validate(raw)
+    except ValidationError:
+        return None
+    return semantic_interpretation_validator.validate_interpretation(
+        interpretation,
+        message=_latest_user_message(context),
+        document=document or {},
+        contract=contract or {},
+        context=context,
+    )
+
+
+def _with_semantic_branch_fallback(
+    context: ConversationContext,
+    model_observation: dict[str, Any] | None,
+    document: dict[str, Any],
+) -> ConversationContext:
+    """Let the model's proved branch reading stand in for a literal miss.
+
+    Only fills a gap: if the literal resolver already resolved or flagged an
+    ambiguity, its result wins untouched. Returns a copy -- no persisted state
+    is mutated here.
+    """
+    existing = context.retrieval_trace.get("service_resolution") or {}
+    if existing.get("status") in {"resolved", "ambiguous", "needs_confirmation"}:
+        return context
+    validation = _validated_interpretation(context, model_observation, document)
+    if validation is None:
+        return context
+    resolution = semantic_conversation_policy.semantic_service_resolution(
+        validation.interpretation, context, document,
+    )
+    if not resolution:
+        return context
+    return context.model_copy(update={
+        "retrieval_trace": {
+            **context.retrieval_trace,
+            "service_resolution": resolution,
+        },
+    })
+
+
 def _deterministic_confirmation_decision(
     context: ConversationContext,
+    interpretation: SemanticInterpretation | None = None,
 ) -> tuple[ConversationDecision, AgentResponse] | None:
+    """Close or correct a pending qualification from the model's reading.
+
+    Confirmation used to be decided by exact membership in a fixed phrase set,
+    so "sim, tá correto" left a qualified lead un-handed-off in production
+    (audit 2026-08-21). The wording no longer decides anything: the model says
+    what the customer did, the validator proves the span and the pending ref,
+    and this function still owns every consequence -- route, stage, handoff
+    reason, and the `confirmed_branch_node_ids` stamp that
+    commit_graph_turn_and_outbox_v3 (migration 128) consumes to close ledger
+    branches.
+    """
     if str(context.operational_mode) != "confirmation":
         return None
-    message = _latest_user_message(context)
-    if _is_explicit_confirmation(message):
+    if interpretation is None:
+        return None
+    if semantic_conversation_policy.confirms_pending(interpretation, context):
         reply = _completion_reply(context.graph_contract)
         state = {
             **context.cart,
@@ -4314,7 +4428,7 @@ def _deterministic_confirmation_decision(
                 },
             ),
         )
-    if _is_explicit_rejection(message):
+    if semantic_conversation_policy.rejects_pending(interpretation, context):
         state = {**context.cart, "sdr_state": "collecting"}
         return (
             ConversationDecision(
@@ -4622,41 +4736,30 @@ def _aggregate_confirmation_state(
 
 def _deterministic_pending_fact_confirmation(
     context: ConversationContext,
+    interpretation: SemanticInterpretation | None = None,
 ) -> tuple[ConversationDecision, AgentResponse] | None:
+    """Apply the customer's answer to a pending fact/service confirmation.
+
+    Accept/reject now comes from the model's proved reading rather than from
+    phrase and regex markers. Everything downstream is unchanged and still
+    deterministic: the publication re-check, `check_service_operations`, the
+    stale-focus guard on a confirmed switch, and evidence provenance all still
+    trace back to the literal inbound.
+    """
     pending = _pending_confirmation_fact(context)
+    if not pending or interpretation is None:
+        return None
+    # Evidence provenance stays the literal inbound, never the model's
+    # paraphrase -- the spans persisted below must be the customer's words.
     message = _latest_user_message(context)
-    pending_confirmation = (
-        ((pending or {}).get("metadata") or {}).get("confirmation") or {}
+    rejected_confirmation = semantic_conversation_policy.rejects_pending(
+        interpretation, context
     )
-    pending_anchor = str(pending_confirmation.get("branch_anchor_node_id") or "")
-    rejected_confirmation = bool(
-        _is_explicit_rejection(message)
-        or (
-            pending
-            and pending_confirmation.get("operation_ambiguous")
-            and _SERVICE_DROP_MARKER.search(message or "")
-            and pending_anchor not in set(context.active_branch_node_ids)
-        )
-    )
-    accepted_confirmation = bool(
+    accepted_confirmation = (
         not rejected_confirmation
-        and (
-            _is_explicit_confirmation(message)
-            or (pending and _restates_pending_candidate(message, pending))
-            or bool(
-                pending
-                and _confirmation_capability(
-                    ((pending.get("metadata") or {}).get("confirmation") or {})
-                ) in {"service", "branch_selector"}
-                and (
-                    _ADDITIVE_SERVICE_MARKER.search(message or "")
-                    or _SERVICE_CHANGE_MARKER.search(message or "")
-                    or _SERVICE_DROP_MARKER.search(message or "")
-                )
-            )
-        )
+        and semantic_conversation_policy.confirms_pending(interpretation, context)
     )
-    if not pending or not (accepted_confirmation or rejected_confirmation):
+    if not (accepted_confirmation or rejected_confirmation):
         return None
 
     persona = supabase_client.get_persona(context.persona_slug) or {}
@@ -4716,12 +4819,15 @@ def _deterministic_pending_fact_confirmation(
         anchor = str(confirmation.get("branch_anchor_node_id") or pending.get("owner_node_id") or "")
         action = str(confirmation.get("action") or "add")
         if accepted_confirmation:
-            if _SERVICE_DROP_MARKER.search(message or ""):
-                action = "drop"
-            elif _SERVICE_CHANGE_MARKER.search(message or ""):
-                action = "switch"
-            elif _ADDITIVE_SERVICE_MARKER.search(message or ""):
-                action = "add"
+            # The customer may confirm AND redirect in one breath ("yes, but
+            # switch it to the other one"). The model reports which, bound to a
+            # branch anchor the validator already proved exists in this graph;
+            # the pending confirmation's own action stays the default.
+            selection = interpretation.branch_selection
+            if selection.branch_anchor_node_id and selection.action.value != "none":
+                action = selection.action.value
+                if action == "select":
+                    action = "add"
             if action == "add" and anchor in active:
                 action = "keep"
             replace_anchor = str(
@@ -5301,14 +5407,20 @@ def _seed_profile_facts_for_open_journey(
 def decide(
     context: ConversationContext, *, model_observation: dict[str, Any] | None
 ) -> tuple[ConversationDecision, AgentResponse]:
+    validation = _validated_interpretation(context, model_observation)
+    interpretation = validation.interpretation if validation else None
     deterministic = (
         _deterministic_pending_service_clarification(context)
-        or _deterministic_pending_fact_confirmation(context)
-        or _deterministic_confirmation_decision(context)
+        or _deterministic_pending_fact_confirmation(context, interpretation)
+        or _deterministic_confirmation_decision(context, interpretation)
     )
     decision, response = deterministic or _decide(
         context, model_observation=model_observation,
     )
+    if validation is not None:
+        response = response.model_copy(update={
+            "proof": {**response.proof, **validation.as_proof()},
+        })
     token_usage = (model_observation or {}).get("token_usage")
     if token_usage:
         response = response.model_copy(update={"token_usage": token_usage})
@@ -5776,6 +5888,12 @@ def _decide(
         if proposal.branch_anchor_node_id in set(document.get("branch_anchors") or [])
         else None
     )
+    # The literal alias matcher only ever sees phrasings someone published in
+    # advance, so "uso próprio mesmo" resolved to nothing and the turn repeated
+    # its own question forever (audit 2026-08-21). When it finds nothing, fall
+    # back to the model's reading -- already proved by the validator to name a
+    # real anchor of THIS graph with a span really present in the message.
+    context = _with_semantic_branch_fallback(context, model_observation, document)
     proposal = _apply_authoritative_branch_resolution(proposal, context, document)
     proposal = _normalize_initial_service_keep(proposal, context=context)
     contract_anchor = (

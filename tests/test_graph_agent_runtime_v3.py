@@ -2261,13 +2261,27 @@ def test_published_confirmation_requires_an_explicit_followup_turn(
         cart={"facts": {"name": {"status": "known", "value": "Beatriz"}}},
         rag_nodes=[], rag_paths=[], journey_state="awaiting_confirmation",
         operational_mode="confirmation",
+        pending_confirmation_ref="qualification:current:0",
         graph_contract={"conversation_policy": {"qualification": {
             "completion_message": "Obrigada. A equipe continuará o atendimento.",
             "correction_prompt": "Diga qual informação precisa ser corrigida.",
         }}},
     )
+    intent_kind = "confirmation" if message == "Sim" else "rejection"
+    confirmation_state = "affirm" if message == "Sim" else "reject"
     decision, response = graph_agent_runtime_v3.decide(
-        context, model_observation={"contract_probe": True},
+        context, model_observation={
+            "contract_probe": True,
+            "interpretation": {
+                "intents": [{"kind": intent_kind, "evidence_span": message}],
+                "state_relation": "continue",
+                "confirmation": {
+                    "state": confirmation_state,
+                    "target_ref": "qualification:current:0",
+                    "evidence_span": message,
+                },
+            },
+        },
     )
     assert decision.intent == intent
     assert decision.route.value == route
@@ -2726,9 +2740,22 @@ def test_name_candidate_confirmation_is_resolved_before_final_confirmation(
               "asked_question_node_ids": ["q:name"]},
         rag_nodes=[], rag_paths=[], graph_contract=document["common_contract"],
         branch_node_ids=[], active_branch_node_ids=[],
+        pending_confirmation_ref="fact:nome:persona:generic",
     )
+    intent_kind = "confirmation" if answer == "sim" else "rejection"
+    confirmation_state = "affirm" if answer == "sim" else "reject"
     _decision, response = graph_agent_runtime_v3.decide(
-        context, model_observation=None,
+        context, model_observation={
+            "interpretation": {
+                "intents": [{"kind": intent_kind, "evidence_span": answer}],
+                "state_relation": "continue",
+                "confirmation": {
+                    "state": confirmation_state,
+                    "target_ref": "fact:nome:persona:generic",
+                    "evidence_span": answer,
+                },
+            },
+        },
     )
     fact = response.proof["accepted_facts"][0]
     assert fact["status"] == expected_status
@@ -2787,9 +2814,20 @@ def test_resolving_name_candidate_asks_next_persisted_service_confirmation(monke
         },
         rag_nodes=[], rag_paths=[], graph_contract=document["common_contract"],
         branch_node_ids=[], active_branch_node_ids=[],
+        pending_confirmation_ref="fact:nome:persona:generic",
     )
     _decision, response = graph_agent_runtime_v3.decide(
-        context, model_observation=None,
+        context, model_observation={
+            "interpretation": {
+                "intents": [{"kind": "confirmation", "evidence_span": "sim"}],
+                "state_relation": "continue",
+                "confirmation": {
+                    "state": "affirm",
+                    "target_ref": "fact:nome:persona:generic",
+                    "evidence_span": "sim",
+                },
+            },
+        },
     )
     assert response.reply_text == "Você quer selecionar Vitrificação?"
     assert response.proof["confirmation_state"] == "field_confirmation"
@@ -2832,9 +2870,24 @@ def test_positive_service_candidate_confirmation_applies_bound_operation_only(mo
               "asked_question_node_ids": ["q:service"]},
         rag_nodes=[], rag_paths=[], graph_contract=document["common_contract"],
         branch_node_ids=[], active_branch_node_ids=[],
+        pending_confirmation_ref="fact:servico:branch:v",
     )
     _decision, response = graph_agent_runtime_v3.decide(
-        context, model_observation=None,
+        context, model_observation={
+            "interpretation": {
+                "intents": [{"kind": "confirmation", "evidence_span": "sim"}],
+                "state_relation": "continue",
+                "confirmation": {
+                    "state": "affirm",
+                    "target_ref": "fact:servico:branch:v",
+                    "evidence_span": "sim",
+                },
+                "branch_selection": {
+                    "action": "add", "branch_anchor_node_id": "branch:v",
+                    "evidence_span": "sim",
+                },
+            },
+        },
     )
     assert response.cart_state["active_branch_node_ids"] == ["branch:v"]
     assert response.cart_state["active_branch_node_id"] == "branch:v"
@@ -2891,10 +2944,25 @@ def test_confirmed_switch_drops_previous_service_and_negative_preserves_it(monke
             rag_nodes=[], rag_paths=[], graph_contract=document["common_contract"],
             branch_node_ids=[], active_branch_node_id="branch:p",
             active_branch_node_ids=["branch:p"],
+            pending_confirmation_ref="fact:servico:branch:v",
         )
 
     _decision, accepted = graph_agent_runtime_v3.decide(
-        context("sim"), model_observation=None,
+        context("sim"), model_observation={
+            "interpretation": {
+                "intents": [{"kind": "confirmation", "evidence_span": "sim"}],
+                "state_relation": "continue",
+                "confirmation": {
+                    "state": "affirm",
+                    "target_ref": "fact:servico:branch:v",
+                    "evidence_span": "sim",
+                },
+                "branch_selection": {
+                    "action": "switch", "branch_anchor_node_id": "branch:v",
+                    "evidence_span": "sim",
+                },
+            },
+        },
     )
     assert [item["action"] for item in accepted.proof["applied_service_operations"]] == [
         "drop", "add",
@@ -2903,7 +2971,17 @@ def test_confirmed_switch_drops_previous_service_and_negative_preserves_it(monke
     assert accepted.cart_state["active_branch_node_id"] == "branch:v"
 
     _decision, rejected = graph_agent_runtime_v3.decide(
-        context("n\u00e3o"), model_observation=None,
+        context("n\u00e3o"), model_observation={
+            "interpretation": {
+                "intents": [{"kind": "rejection", "evidence_span": "n\u00e3o"}],
+                "state_relation": "continue",
+                "confirmation": {
+                    "state": "reject",
+                    "target_ref": "fact:servico:branch:v",
+                    "evidence_span": "n\u00e3o",
+                },
+            },
+        },
     )
     assert rejected.proof["applied_service_operations"] == []
     assert rejected.cart_state["active_branch_node_ids"] == ["branch:p"]
@@ -2943,9 +3021,20 @@ def test_rejected_confirmation_of_active_service_restores_previous_known_fact(mo
         rag_nodes=[], rag_paths=[], graph_contract=document["branch_contracts"]["branch:v"],
         branch_node_ids=[], active_branch_node_id="branch:v",
         active_branch_node_ids=["branch:v"],
+        pending_confirmation_ref="fact:servico:branch:v",
     )
     _decision, response = graph_agent_runtime_v3.decide(
-        context, model_observation=None,
+        context, model_observation={
+            "interpretation": {
+                "intents": [{"kind": "rejection", "evidence_span": "não"}],
+                "state_relation": "continue",
+                "confirmation": {
+                    "state": "reject",
+                    "target_ref": "fact:servico:branch:v",
+                    "evidence_span": "não",
+                },
+            },
+        },
     )
     restored = response.cart_state["facts_by_key"]["servico"][0]
     assert restored["status"] == "known"
@@ -3905,8 +3994,19 @@ def test_confirmed_branch_node_ids_covers_every_active_branch(monkeypatch):
         },
         active_branch_node_id="branch:b", active_branch_node_ids=["branch:a", "branch:b"],
         journey_state="awaiting_confirmation", operational_mode="confirmation",
+        pending_confirmation_ref="qualification:current:0",
     )
-    decision, response = graph_agent_runtime_v3.decide(context, model_observation=None)
+    decision, response = graph_agent_runtime_v3.decide(context, model_observation={
+        "interpretation": {
+            "intents": [{"kind": "confirmation", "evidence_span": "sim"}],
+            "state_relation": "continue",
+            "confirmation": {
+                "state": "affirm",
+                "target_ref": "qualification:current:0",
+                "evidence_span": "sim",
+            },
+        },
+    })
     assert decision.intent == "qualification_confirmed"
     assert set(response.proof["confirmed_branch_node_ids"]) == {"branch:a", "branch:b"}
 

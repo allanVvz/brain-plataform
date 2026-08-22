@@ -106,7 +106,12 @@ def test_model_proposal_is_proved_and_repaired_against_graph_before_commit():
     assert node_ids.index("final_response") < node_ids.index("commit")
     assert "model_observation" in reconcile["parameters"]["body"]
     assert "contract_probe" in policy["parameters"]["body"]
-    assert "extracted_facts" in model_response["parameters"]["jsCode"]
+    # The parse node builds the semantic interpretation the backend proves:
+    # the customer's facts plus the questions they asked, kept apart so a
+    # commercial question is never absorbed as a field value.
+    assert "interpretation" in model_response["parameters"]["jsCode"]
+    assert "facts" in model_response["parameters"]["jsCode"]
+    assert "questions" in model_response["parameters"]["jsCode"]
     assert "repair_required" in str(repair_gate["parameters"])
     assert "repair_attempt" in repair_reconcile["parameters"]["body"] or "model_observation" in repair_reconcile["parameters"]["body"]
     assert "graph proof" in final_response["parameters"]["jsCode"]
