@@ -1,0 +1,92 @@
+const context = $('Load published graph context').item.json; const policy = $('Resolve conversation policy').item.json; const binding = $('Validate conversation
+binding').item.json; const cards = (context.context_cards || []).map(function(card) { return { node_id: card.id, type: card.node_type, title: card.title,
+checksum: card.content_checksum, source: card.source, status: card.status }; }); const chunks = (context.rag_chunks || []).map(function(chunk) { return {
+chunk_id: chunk.chunk_id || chunk.id, source_node_id: chunk.source_node_id || chunk.source_graph_node_id, kind: chunk.chunk_kind, text: chunk.chunk_text,
+checksum: chunk.chunk_checksum, path_checksum: chunk.path_checksum, provenance: chunk.metadata && chunk.metadata.provenance || {} }; }); const rawMemory =
+context.shared_memory || {}; const boundedMemory = { profile_facts: rawMemory.profile_facts || [], current_journey: rawMemory.current_journey || null,
+pending_items: rawMemory.pending_items || [], historical_facts: (rawMemory.historical_facts || []).slice(), journey_outcomes: (rawMemory.journey_outcomes ||
+[]).slice(), recent_messages: (rawMemory.recent_messages || []).slice(-8), agent_activity: (rawMemory.agent_activity || []).slice(), policy_version:
+rawMemory.policy_version }; const optionalMemoryOrder = ['agent_activity','journey_outcomes','recent_messages','historical_facts']; const semanticMemoryBudget =
+3000; const memoryTokens = function() { return Math.max(1, Math.ceil(JSON.stringify(boundedMemory).length / 4)); }; for (const key of optionalMemoryOrder) {
+while (memoryTokens() > semanticMemoryBudget && boundedMemory[key].length) boundedMemory[key].shift(); } const graphContract = context.graph_contract || {};
+const commonContract = context.retrieval_trace && context.retrieval_trace.common_contract || {}; const graphFieldKeys = new Set((graphContract.fields ||
+[]).map(function(field) { return String(field && field.key || ''); })); const graphQuestions = graphContract.questions || {}; const graphClaimChecksums = new
+Set((graphContract.claims || []).map(function(claim) { return JSON.stringify(claim); })); const commonContractEmbedded = Object.keys(commonContract).length > 0
+&& (commonContract.fields || []).every(function(field) { return graphFieldKeys.has(String(field && field.key || '')); }) && Object.keys(commonContract.questions
+|| {}).every(function(questionId) { return Object.prototype.hasOwnProperty.call(graphQuestions, questionId); }) && (commonContract.claims ||
+[]).every(function(claim) { return graphClaimChecksums.has(JSON.stringify(claim)); }); const commonContractPrompt = commonContractEmbedded ? { '$ref':
+'graph_contract', scope: 'common_fields_questions_claims' } : commonContract; const branchCandidateList = (context.retrieval_trace &&
+context.retrieval_trace.branch_candidates) || []; const rawCardsById = {}; (context.context_cards || []).forEach(function(card) { rawCardsById[card.id] = card;
+}); const branchAnchorIds = new Set([].concat(context.branch_node_ids || [], context.active_branch_node_ids || [], branchCandidateList.map(function(candidate) {
+return candidate.branch_anchor_node_id; }))); const branchCandidateTitleById = {}; branchCandidateList.forEach(function(candidate) {
+branchCandidateTitleById[candidate.branch_anchor_node_id] = candidate.title; }); const branchAnchors =
+Array.from(branchAnchorIds).filter(Boolean).map(function(nodeId) { const card = rawCardsById[nodeId]; const technicalMetadata = (card &&
+card.technical_metadata) || {}; return { node_id: nodeId, title: (card && card.title) || branchCandidateTitleById[nodeId] || null, aliases:
+technicalMetadata.aliases || [] }; }); const interpretationSchema = { type: 'object', additionalProperties: false, required:
+['intents','state_relation','answers_field_key','confirmation','branch_selection','facts','invalidated_facts','entities','questions','claims','recommended_next_action','cited_node_ids','cited_chunk_ids','reply','handoff_requested'],
+properties: { intents: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['kind','evidence_span'], properties: { kind: { enum:
+['answer_pending_field','commercial_question','spontaneous_info','correction','confirmation','rejection','greeting','objection','product_change','audience_change','resume','small_talk','unclear']
+}, evidence_span: { type: 'string' } } } }, state_relation: { enum: ['continue','new_demand','correction','resume','post_completion','unclear'] },
+answers_field_key: { type: ['string','null'] }, confirmation: { type: 'object', additionalProperties: false, required:
+['state','target_ref','evidence_span','correction_field_key','correction_value'], properties: { state: { enum: ['none','affirm','reject','partial','ambiguous']
+}, target_ref: { type: ['string','null'] }, evidence_span: { type: 'string' }, correction_field_key: { type: ['string','null'] }, correction_value: {} } },
+branch_selection: { type: 'object', additionalProperties: false, required: ['action','branch_anchor_node_id','evidence_span'], properties: { action: { enum:
+['none','keep','select','switch','add','drop'] }, branch_anchor_node_id: { type: ['string','null'] }, evidence_span: { type: 'string' } } }, facts: { type:
+'array', items: { type: 'object', additionalProperties: false, required:
+['field_key','value','status','owner_node_id','evidence_span','source_message_id','metadata'], properties: { field_key: { type: 'string' }, value: {}, status: {
+enum: ['known','unknown','declined','needs_confirmation','invalid'] }, owner_node_id: { type: 'string' }, evidence_span: { type: 'string' }, source_message_id:
+{ type: ['string','null'] }, metadata: { type: 'object' } } } }, invalidated_facts: { type: 'array', items: { type: 'object', additionalProperties: false,
+required: ['field_key','reason','evidence_span'], properties: { field_key: { type: 'string' }, reason: { type: 'string' }, evidence_span: { type: 'string' } } }
+}, entities: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['kind','value','node_id','evidence_span'], properties: { kind: {
+enum: ['product','quantity','audience','other'] }, value: {}, node_id: { type: ['string','null'] }, evidence_span: { type: 'string' } } } }, questions: { type:
+'array', items: { type: 'object', additionalProperties: false, required: ['kind','topic','entity_node_ids','evidence_span'], properties: { kind: { enum:
+['availability','price','stock','policy','schedule','deadline','product_detail','other'] }, topic: { type: 'string' }, entity_node_ids: { type: 'array', items:
+{ type: 'string' } }, evidence_span: { type: 'string' } } } }, claims: { type: 'array', items: { type: 'object', additionalProperties: false, required:
+['claim_type','value','evidence_node_ids','evidence_chunk_ids'], properties: { claim_type: { enum:
+['price','availability','schedule','stock','duration','service_detail','other'] }, value: { type: 'object' }, evidence_node_ids: { type: 'array', items: { type:
+'string' } }, evidence_chunk_ids: { type: 'array', items: { type: 'string' } } } } }, recommended_next_action: { enum:
+['ask_field','answer_question','confirm','handoff','clarify','close'] }, cited_node_ids: { type: 'array', items: { type: 'string' } }, cited_chunk_ids: { type:
+'array', items: { type: 'string' } }, reply: { type: 'string' }, handoff_requested: { type: 'boolean' } } }; const interpretationInstructions = { contract:
+'semantic_interpretation_v1', evidence_rule: 'Every evidence_span must be an exact, verbatim substring copied from customer_message -- same characters, same
+order, same accents. Do not paraphrase, translate, summarize or fix typos inside a span. If you cannot quote an exact span from the message, omit that item
+entirely -- the backend rejects any span it cannot find verbatim in the message.', no_confidence_rule: 'This contract has no numeric confidence or score field
+anywhere. Do not invent one. The evidence_span itself is what justifies every item -- not a probability.', multi_intent_rule: 'A single message routinely
+carries more than one intent (for example an answer plus a commercial question). List every intent you find in intents -- do not collapse them into one.',
+confirmation_rule: 'Only set confirmation.state to affirm, reject or partial when pending_confirmation_ref is present in this prompt, and
+confirmation.target_ref must repeat that exact pending_confirmation_ref value. If pending_confirmation_ref is null or missing, confirmation.state must stay
+none.', branch_rule: 'branch_selection.branch_anchor_node_id must be one of the ids listed in branch_anchors or branch_candidates below. Normalize the customer
+wording onto the closest real anchor id; never invent, guess or fabricate a node id that is not listed.', claims_rule: 'Never state a price, stock level,
+availability, deadline, schedule or policy that is not directly supported by an approved node in approved_nodes or an approved chunk in approved_chunks. If the
+customer asks about one of these and nothing approved supports an answer, record the question in questions with no matching claim, and have reply defer to the
+team instead of guessing.' }; const requestBody = { model: binding.model, thinking: { type: 'disabled' }, temperature: 0.3, max_tokens: 1400, response_format: {
+type: 'json_object' }, messages: [{ role: 'system', content: context.system_prompt || 'Responda somente com base no conhecimento publicado e em JSON.' }, {
+role: 'user', content: JSON.stringify({ interpretation_json_schema: interpretationSchema, interpretation_instructions: interpretationInstructions, publication:
+{ id: context.publication_id, version: context.graph_version, checksum: context.graph_checksum }, graph_contract: context.graph_contract || {}, approved_nodes:
+cards, approved_chunks: chunks, active_branch_node_id: context.active_branch_node_id, active_branch_node_ids: context.active_branch_node_ids || [], journey: {
+id: context.journey_id, sequence: context.journey_sequence, state: context.journey_state }, pending_field_key: context.pending_field_key,
+pending_question_node_id: context.pending_question_node_id, pending_confirmation_ref: context.pending_confirmation_ref, last_handoff: context.last_handoff ||
+{}, pending_reconfirmation: context.pending_reconfirmation === true, time_since_last_client_message: context.time_since_last_client_message, operational_mode:
+context.operational_mode, facts_by_key: context.cart && context.cart.facts_by_key || {}, branch_anchors: branchAnchors, branch_candidates: branchCandidateList,
+service_catalog: context.available_services || [], service_resolution: context.retrieval_trace && context.retrieval_trace.service_resolution || {},
+consumed_service_spans: context.retrieval_trace && context.retrieval_trace.service_resolution && context.retrieval_trace.service_resolution.consumed_spans ||
+[], reserved_spans: context.retrieval_trace && context.retrieval_trace.service_resolution && (context.retrieval_trace.service_resolution.reserved_spans ||
+context.retrieval_trace.service_resolution.consumed_spans) || [], common_contract: commonContractPrompt, pending_confirmation: context.retrieval_trace &&
+context.retrieval_trace.service_resolution && context.retrieval_trace.service_resolution.confirmation || null, confirmation_templates: context.retrieval_trace
+&& context.retrieval_trace.confirmation_templates || {}, shared_memory: boundedMemory, customer_message: binding.message, source_message_id:
+binding.external_message_id, prompt_layers: { platform_invariants: 'graph-proof-exactly-once', role_policy: policy.decision.route, persona_policy: { '$ref':
+'graph_contract.conversation_policy' }, agent_behavior: 'system_message', graph_and_cards: 'top_level_graph_contract_approved_nodes_approved_chunks', memory:
+'top_level_shared_memory', turn: { customer_message: binding.message, pending_field_key: context.pending_field_key } }, agent_policy: { agent_slug:
+context.agent_slug, role: policy.decision.route, contract_version: 'graph_agent_contract_v4' }, policy_signal: { intent: policy.decision.intent, route:
+policy.decision.route } }) }] }; const tokenEstimate = function(value) { const text = typeof value === 'string' ? value : JSON.stringify(value); return
+Math.max(1, Math.ceil(text.length / 4)); }; let promptEstimatedTokens = tokenEstimate(requestBody.messages); const promptContext =
+JSON.parse(requestBody.messages[1].content || '{}'); for (const key of optionalMemoryOrder) { while (promptEstimatedTokens > 22000 &&
+promptContext.shared_memory && Array.isArray(promptContext.shared_memory[key]) && promptContext.shared_memory[key].length) {
+promptContext.shared_memory[key].shift(); requestBody.messages[1].content = JSON.stringify(promptContext); promptEstimatedTokens =
+tokenEstimate(requestBody.messages); } } const componentTokens = { system_prompt: tokenEstimate(requestBody.messages[0].content || ''), shared_memory:
+tokenEstimate(promptContext.shared_memory || {}), recent_messages: tokenEstimate(promptContext.shared_memory && promptContext.shared_memory.recent_messages ||
+[]), branch_candidates: tokenEstimate(branchCandidateList), branch_anchors: tokenEstimate(branchAnchors), cards: tokenEstimate(cards), chunks:
+tokenEstimate(chunks), graph_contract: tokenEstimate(context.graph_contract || {}) }; const largestComponent =
+Object.entries(componentTokens).sort(function(a,b) { return b[1]-a[1]; })[0]; if (promptEstimatedTokens > 24000) throw new Error('prompt_budget_exceeded:' +
+promptEstimatedTokens + ':limit=24000:component=' + largestComponent[0] + ':component_tokens=' + largestComponent[1]); return [{ json: { request_body:
+requestBody, interpretation_schema: interpretationSchema, llm_call_started_at: Date.now(), prompt_estimated_tokens: promptEstimatedTokens,
+prompt_component_tokens: componentTokens } }];

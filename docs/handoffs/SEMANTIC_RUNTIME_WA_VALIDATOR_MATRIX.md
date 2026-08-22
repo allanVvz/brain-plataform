@@ -65,13 +65,21 @@ commit atômico) e `quality_pass` (critérios semânticos acima).
    os short-circuits determinísticos retornarem `None` e o turno cai no
    caminho do modelo. Não quebra, mas perde o atalho sem custo de modelo —
    por isso o template tem que ser provisionado junto.
-3. **`branch_selection` só cobre um anchor por turno.** Duas seleções
-   simultâneas na mesma mensagem não são representáveis hoje; o resolvedor
-   literal cobria esse caso com múltiplas operações. Regressão conhecida,
-   ainda não fechada.
-4. **`_deterministic_pending_service_clarification` continua literal.** A
-   escada de desambiguação de serviço ainda usa os markers de regex; foi
-   deixada de fora desta rodada por depender do contador de tentativas.
+3. **A diretriz "semantic-first" está cumprida nas decisões que quebravam, não
+   em todas.** Confirmação, rejeição, a escada de desambiguação e a seleção de
+   público quando o matcher literal não resolve: todas passaram para a camada
+   semântica, sem fallback literal decisório. Mas `_resolve_service_operations`
+   continua sendo o caminho **primário** de seleção de público, com o semântico
+   entrando quando ele não resolve — o inverso da ordem pedida.
+
+   Motivo, explícito: `branch_selection` representa **um** anchor por turno. O
+   resolvedor literal representa várias operações (`add`+`add`, `drop`+`add`),
+   tolera erro de digitação por distância de edição e detecta ambiguidade entre
+   dois anchors. Inverter a prioridade hoje perderia essas três capacidades —
+   inclusive a regressão de transcrição de áudio coberta por
+   `tests/test_publish_aurora_graph_v21.py`. Fechar isso de verdade exige
+   alargar o contrato para uma **lista** de seleções antes de inverter a ordem;
+   é a próxima tarefa, não algo que dê para forçar sem regredir.
 5. **Pré-existente, fora do escopo:** `api/services/vault_sync.py` (linhas
    ~131-142 e ~195-200) ramifica por nome de persona hardcoded
    (`_FOLDER_TO_SLUG`, `_detect_persona`) — violação real de AGENTS.md §26,

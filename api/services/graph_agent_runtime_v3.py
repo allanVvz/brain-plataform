@@ -4541,12 +4541,19 @@ def _service_request_summary(
 
 def _deterministic_pending_service_clarification(
     context: ConversationContext,
+    interpretation: SemanticInterpretation | None = None,
 ) -> tuple[ConversationDecision, AgentResponse] | None:
     """Advance the graph-owned add/switch ambiguity ladder without a model.
 
     The pending fact is the ledger: candidate, proposed operation and attempt
     count all live in its metadata, so retries and resume remain idempotent and
     no schema change is needed.
+
+    This runs only while the ambiguity is still unresolved. Whether the
+    customer just resolved it -- by confirming, rejecting, or naming a branch
+    -- is read from the interpretation, not from phrase and regex markers, so
+    an answer phrased in any ordinary way hands off to the confirmation path
+    instead of being re-asked.
     """
     pending = _pending_confirmation_fact(context)
     if not pending:
@@ -4565,13 +4572,10 @@ def _deterministic_pending_service_clarification(
     )
     if new_candidate and new_candidate != current_candidate:
         return None
-    if (
-        _is_explicit_confirmation(message)
-        or _is_explicit_rejection(message)
-        or _restates_pending_candidate(message, pending)
-        or _ADDITIVE_SERVICE_MARKER.search(message or "")
-        or _SERVICE_CHANGE_MARKER.search(message or "")
-        or _SERVICE_DROP_MARKER.search(message or "")
+    if interpretation is not None and (
+        semantic_conversation_policy.confirmation_state(interpretation, context).value
+        in {"affirm", "reject", "partial"}
+        or interpretation.branch_selection.action.value != "none"
     ):
         return None
 
@@ -5426,7 +5430,7 @@ def decide(
     validation = _validated_interpretation(context, model_observation)
     interpretation = validation.interpretation if validation else None
     deterministic = (
-        _deterministic_pending_service_clarification(context)
+        _deterministic_pending_service_clarification(context, interpretation)
         or _deterministic_pending_fact_confirmation(context, interpretation)
         or _deterministic_confirmation_decision(context, interpretation)
     )
