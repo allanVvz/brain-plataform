@@ -213,14 +213,17 @@ Ordem importa; o plano aprovado está em
 
 | # | Item | Estado |
 |---|---|---|
-| A | Ponte interpretação→proposal | **corrigida, falta rodar a suíte e commitar** |
-| B | `branch_selections` como **lista** (um, dois ou ambos os ramos por turno) | a fazer — mapeia direto em `service_operations`, que já é lista e já tem prova (`check_service_operations`) e testes de 2–3 ramos |
+| A | Ponte interpretação→proposal | **concluída** (`65a3bc6`) — com teste de regressão verificado (falha sem a correção) |
+| B | `branch_selections` como **lista** (um, dois ou ambos os ramos por turno) | **concluída** (`83a47ec`) — validação item a item, contradição `add`+`drop` é erro do turno, N operações no mesmo formato do resolvedor literal, template n8n como array |
 | C | Recuperação **unida** entre ramos ativos | a fazer — é o que falta para "receber mais de uma branch" de verdade; respeitar o orçamento de 24000 tokens com poda por ramo |
-| D | `include_subtree_in_branch` no compilador | a fazer — troca ~300 arestas ponto-a-ponto por 4 |
-| E | Bundle: `offer`/`copy` de canal penduradas na **marca** certa, 4 arestas de escopo, remover as 165 arestas `persona → nó` | a fazer — decisão do usuário confirmada |
-| F | **v9** — estrutura e escopo, **sem preço** | a fazer, depois de D+E |
+| D | `include_subtree_in_branch` no compilador | **concluída** (`fa43939`) — 3 testes fixam subárvore / nó único / aresta sem escopo |
+| E | Bundle: `offer`/`copy` de canal penduradas na **marca** certa, 4 arestas de escopo, remover as 165 arestas `persona → nó` | **próximo** — decisão do usuário confirmada; depende de copiar os bundles untracked para a worktree |
+| F | **v9** — estrutura e escopo, **sem preço** | a fazer, depois de E |
 | G | Cards `Embedded` por agente + portar a trava de preço para rodar contra a política do agente | a fazer |
 | H | **v10** — catálogo comercial completo (146 `offer`, 146 `copy`, regra de desconto) | a fazer, só depois de F e G |
+
+**Suíte na última verificação: 1298 passando / 2 falhando** — as duas
+pré-existentes já confirmadas no commit base.
 
 **Decisões do usuário já tomadas, não reabrir:**
 - v9 (escopo) e v10 (preço) são publicações **separadas**, nessa ordem; v10 só
