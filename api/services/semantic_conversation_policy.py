@@ -176,74 +176,88 @@ def semantic_service_resolution(
     ``None`` means "the model did not select a branch", never "the wording was
     unfamiliar".
     """
-    selection = interpretation.branch_selection
-    anchor = str(selection.branch_anchor_node_id or "")
-    action = selection.action.value
-    if not anchor or action == "none":
+    selections = [
+        item for item in interpretation.branch_selections
+        if item.branch_anchor_node_id and item.action.value != "none"
+    ]
+    if not selections:
         return None
 
     before = list(dict.fromkeys([
         *([context.active_branch_node_id] if context.active_branch_node_id else []),
         *context.active_branch_node_ids,
     ]))
-    checksum = str(
-        ((document.get("coordinates") or {}).get(anchor) or {}).get("path_checksum") or ""
-    )
-    evidence = selection.evidence_span
+    coordinates = document.get("coordinates") or {}
+    node_by_id = document.get("node_by_id") or {}
 
     after = list(before)
     operations: list[dict[str, Any]] = []
+    matches: list[dict[str, Any]] = []
+    consumed: list[dict[str, Any]] = []
+    focus: str | None = None
 
-    def operation(kind: str, target: str) -> dict[str, Any]:
+    def operation(kind: str, target: str, evidence: str) -> dict[str, Any]:
         return {
             "action": kind,
             "branch_anchor_node_id": target,
             "branch_path_checksum": str(
-                ((document.get("coordinates") or {}).get(target) or {})
-                .get("path_checksum") or ""
+                (coordinates.get(target) or {}).get("path_checksum") or ""
             ),
             "evidence_span": evidence,
             "evidence_type": "confirmed_candidate",
             "resolution_method": "semantic_interpretation",
         }
 
-    if action == "drop":
-        if anchor in after:
-            after.remove(anchor)
-            operations.append(operation("drop", anchor))
-    else:
+    # Applied in the order the customer said them, so a switch followed by an
+    # add composes the way it reads rather than by rule precedence.
+    for selection in selections:
+        anchor = str(selection.branch_anchor_node_id)
+        action = selection.action.value
+        evidence = selection.evidence_span
+        node = node_by_id.get(anchor) or {}
+        matches.append({
+            "branch_anchor_node_id": anchor,
+            "branch_path_checksum": str(
+                (coordinates.get(anchor) or {}).get("path_checksum") or ""
+            ),
+            "title": node.get("title"),
+            "slug": node.get("slug"),
+            "span": evidence,
+        })
+        consumed.append({
+            "text": evidence,
+            "branch_anchor_node_id": anchor,
+            "evidence_type": "semantic_interpretation",
+        })
+        if action == "drop":
+            if anchor in after:
+                after.remove(anchor)
+                operations.append(operation("drop", anchor, evidence))
+            continue
         if action == "switch":
             for previous in list(after):
                 if previous != anchor:
                     after.remove(previous)
-                    operations.append(operation("drop", previous))
+                    operations.append(operation("drop", previous, evidence))
         if anchor in after:
-            operations.append(operation("keep", anchor))
+            operations.append(operation("keep", anchor, evidence))
         else:
             after.append(anchor)
-            operations.append(operation("add", anchor))
+            operations.append(operation("add", anchor, evidence))
+        focus = anchor
 
-    node = (document.get("node_by_id") or {}).get(anchor) or {}
     return {
         "status": "resolved",
         "resolution_method": "semantic_interpretation",
-        "matches": [{
-            "branch_anchor_node_id": anchor,
-            "branch_path_checksum": checksum,
-            "title": node.get("title"),
-            "slug": node.get("slug"),
-            "span": evidence,
-        }],
+        "matches": matches,
         "ambiguities": [],
-        "consumed_spans": [{
-            "text": evidence,
-            "branch_anchor_node_id": anchor,
-            "evidence_type": "semantic_interpretation",
-        }],
+        "consumed_spans": consumed,
         "operations": operations,
         "previous_active_branch_node_ids": before,
         "next_active_branch_node_ids": after,
-        "focused_branch_node_id": anchor if action != "drop" else (after[-1] if after else None),
+        # The last branch the customer opened leads the reply; if the turn only
+        # closed branches, whatever is still open leads it.
+        "focused_branch_node_id": focus or (after[-1] if after else None),
         "direct_answer_to_service_question": True,
         "explicit_service_intent": True,
     }

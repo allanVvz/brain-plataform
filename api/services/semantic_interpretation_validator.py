@@ -159,18 +159,37 @@ def validate_interpretation(
     data["confirmation"] = confirmation
 
     # -- branch selection ------------------------------------------------
-    selection = dict(data.get("branch_selection") or {})
-    if str(selection.get("action") or "none") != "none":
+    # Each selection is proved on its own: one unusable item never discards a
+    # perfectly good second branch in the same message.
+    surviving_selections: list[dict[str, Any]] = []
+    for selection in data.get("branch_selections") or []:
+        if str(selection.get("action") or "none") == "none":
+            continue
         anchor = str(selection.get("branch_anchor_node_id") or "")
         if anchor not in branch_anchors:
             drop("branch_selection", "unknown_branch_anchor", selection)
-            selection = {"action": "none", "branch_anchor_node_id": None,
-                         "evidence_span": ""}
-        elif not _is_grounded(selection.get("evidence_span"), folded_message):
+            continue
+        if not _is_grounded(selection.get("evidence_span"), folded_message):
             drop("branch_selection", "evidence_not_in_message", selection)
-            selection = {"action": "none", "branch_anchor_node_id": None,
-                         "evidence_span": ""}
-    data["branch_selection"] = selection
+            continue
+        surviving_selections.append(selection)
+
+    # Asking to both open and close the same branch in one turn is not a
+    # partial reading to salvage -- it is a contradiction, and acting on either
+    # half would be a guess.
+    dropping = {
+        str(item.get("branch_anchor_node_id"))
+        for item in surviving_selections if str(item.get("action")) == "drop"
+    }
+    opening = {
+        str(item.get("branch_anchor_node_id"))
+        for item in surviving_selections
+        if str(item.get("action")) in {"select", "add", "keep", "switch"}
+    }
+    for anchor in sorted(dropping & opening):
+        errors.append(f"contradiction_branch_add_and_drop:{anchor}")
+
+    data["branch_selections"] = surviving_selections
 
     # -- answered field --------------------------------------------------
     answers_key = data.get("answers_field_key")
@@ -297,7 +316,7 @@ def needs_clarification(result: ValidationResult) -> bool:
     return not (
         interpretation.facts
         or interpretation.questions
-        or interpretation.branch_selection.action.value != "none"
+        or interpretation.branch_selections
         or interpretation.confirmation.state.value != "none"
         or interpretation.invalidated_facts
     )

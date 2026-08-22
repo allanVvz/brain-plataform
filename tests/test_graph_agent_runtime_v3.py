@@ -2882,10 +2882,10 @@ def test_positive_service_candidate_confirmation_applies_bound_operation_only(mo
                     "target_ref": "fact:servico:branch:v",
                     "evidence_span": "sim",
                 },
-                "branch_selection": {
+                "branch_selections": [{
                     "action": "add", "branch_anchor_node_id": "branch:v",
                     "evidence_span": "sim",
-                },
+                }],
             },
         },
     )
@@ -2957,10 +2957,10 @@ def test_confirmed_switch_drops_previous_service_and_negative_preserves_it(monke
                     "target_ref": "fact:servico:branch:v",
                     "evidence_span": "sim",
                 },
-                "branch_selection": {
+                "branch_selections": [{
                     "action": "switch", "branch_anchor_node_id": "branch:v",
                     "evidence_span": "sim",
-                },
+                }],
             },
         },
     )

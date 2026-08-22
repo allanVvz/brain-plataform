@@ -364,9 +364,11 @@ class SemanticInterpretation(StrictModel):
     # Which pending field (if any) this message answers, by graph field key.
     answers_field_key: str | None = None
     confirmation: SemanticConfirmation = Field(default_factory=SemanticConfirmation)
-    branch_selection: SemanticBranchSelection = Field(
-        default_factory=SemanticBranchSelection
-    )
+    # A turn may open one branch, two at once ("é pra mim e também quero
+    # revender"), or swap one for another. The literal resolver always emitted
+    # a list of operations; the semantic reading has to be able to say the same
+    # thing or it silently loses multi-branch conversations.
+    branch_selections: list[SemanticBranchSelection] = Field(default_factory=list)
     facts: list[ExtractedFact] = Field(default_factory=list)
     invalidated_facts: list[FactInvalidation] = Field(default_factory=list)
     entities: list[SemanticEntity] = Field(default_factory=list)

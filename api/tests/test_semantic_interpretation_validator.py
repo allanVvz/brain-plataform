@@ -220,7 +220,7 @@ def make_interpretation(**overrides) -> SemanticInterpretation:
         "state_relation": "unclear",
         "answers_field_key": None,
         "confirmation": _confirmation(),
-        "branch_selection": _branch_selection(),
+        "branch_selections": [],
         "facts": [],
         "invalidated_facts": [],
         "entities": [],
@@ -527,9 +527,9 @@ EVIDENCE_NOT_IN_MESSAGE_CASES = {
     ),
     "branch_selection": (
         lambda span: make_interpretation(
-            branch_selection=_branch_selection(action="select", anchor=BRANCH_RETAIL, span=span)
+            branch_selections=[_branch_selection(action="select", anchor=BRANCH_RETAIL, span=span)]
         ),
-        lambda interp: interp.branch_selection.action.value == "none",
+        lambda interp: interp.branch_selections == [],
     ),
     "entity": (
         lambda span: make_interpretation(entities=[_entity("quantity", 10, span)]),
@@ -667,12 +667,12 @@ def test_cited_node_ids_strip_foreign_ids():
 def test_branch_selection_with_unknown_anchor_is_dropped():
     message = "quero mudar pra outra categoria"
     interpretation = make_interpretation(
-        branch_selection=_branch_selection(
+        branch_selections=[_branch_selection(
             action="select", anchor="branch:does-not-exist", span="mudar pra outra categoria"
-        ),
+        )],
     )
     result = run(interpretation, message)
-    assert result.interpretation.branch_selection.action.value == "none"
+    assert result.interpretation.branch_selections == []
     assert any(
         item["kind"] == "branch_selection" and item["reason"] == "unknown_branch_anchor"
         for item in result.dropped
@@ -682,13 +682,13 @@ def test_branch_selection_with_unknown_anchor_is_dropped():
 def test_branch_switch_with_valid_anchor_survives():
     message = "na verdade quero mudar pra revenda"
     interpretation = make_interpretation(
-        branch_selection=_branch_selection(
+        branch_selections=[_branch_selection(
             action="switch", anchor=BRANCH_RESELLER, span="mudar pra revenda"
-        ),
+        )],
     )
     result = run(interpretation, message)
-    assert result.interpretation.branch_selection.action.value == "switch"
-    assert result.interpretation.branch_selection.branch_anchor_node_id == BRANCH_RESELLER
+    assert result.interpretation.branch_selections[0].action.value == "switch"
+    assert result.interpretation.branch_selections[0].branch_anchor_node_id == BRANCH_RESELLER
 
 
 def test_fact_with_unknown_field_key_is_dropped():
@@ -799,9 +799,9 @@ NEEDS_CLARIFICATION_SURVIVORS = {
     ),
     "branch_selection": lambda: (
         make_interpretation(
-            branch_selection=_branch_selection(
+            branch_selections=[_branch_selection(
                 action="select", anchor=BRANCH_RETAIL, span="quero esse aqui"
-            )
+            )]
         ),
         "quero esse aqui",
         make_context(),
@@ -875,11 +875,11 @@ def test_extracted_fact_confidence_is_a_documented_pre_existing_exception():
 def test_regression_uso_proprio_mesmo_selects_retail_anchor():
     message = "uso próprio mesmo"
     interpretation = make_interpretation(
-        branch_selection=_branch_selection(action="select", anchor=BRANCH_RETAIL, span=message),
+        branch_selections=[_branch_selection(action="select", anchor=BRANCH_RETAIL, span=message)],
     )
     result = run(interpretation, message)
-    assert result.interpretation.branch_selection.action.value == "select"
-    assert result.interpretation.branch_selection.branch_anchor_node_id == BRANCH_RETAIL
+    assert result.interpretation.branch_selections[0].action.value == "select"
+    assert result.interpretation.branch_selections[0].branch_anchor_node_id == BRANCH_RETAIL
 
 
 def test_regression_sim_ta_correto_confirms_pending_ref():
@@ -917,3 +917,75 @@ def test_regression_bare_sim_with_pending_ref_survives():
     result = run(interpretation, "sim", context=context)
     assert result.interpretation.confirmation.state.value == "affirm"
     assert result.interpretation.confirmation.target_ref == PENDING_REF
+
+
+# ===========================================================================
+# Multi-branch: a turn may open one branch, two at once, or swap one out.
+# The literal resolver always emitted a LIST of operations; the semantic
+# reading has to be able to say the same thing or multi-branch conversations
+# are silently lost.
+# ===========================================================================
+
+
+def test_two_branches_selected_in_one_message_both_survive():
+    message = "quero pra mim e também quero revender"
+    result = run(
+        make_interpretation(branch_selections=[
+            _branch_selection(action="select", anchor=BRANCH_RETAIL, span="pra mim"),
+            _branch_selection(action="add", anchor=BRANCH_RESELLER, span="quero revender"),
+        ]),
+        message,
+    )
+    assert result.valid, result.errors
+    anchors = [item.branch_anchor_node_id for item in result.interpretation.branch_selections]
+    assert anchors == [BRANCH_RETAIL, BRANCH_RESELLER]
+
+
+def test_one_unusable_selection_never_discards_the_other():
+    """A bad second branch must not cost the customer the good first one."""
+    message = "quero pra mim"
+    result = run(
+        make_interpretation(branch_selections=[
+            _branch_selection(action="select", anchor=BRANCH_RETAIL, span="pra mim"),
+            # Ungrounded: this span is nowhere in the message.
+            _branch_selection(action="add", anchor=BRANCH_RESELLER, span="revender"),
+        ]),
+        message,
+    )
+    surviving = [item.branch_anchor_node_id for item in result.interpretation.branch_selections]
+    assert surviving == [BRANCH_RETAIL]
+    assert any(item["reason"] == "evidence_not_in_message" for item in result.dropped)
+
+
+def test_adding_and_dropping_the_same_branch_is_a_contradiction():
+    message = "quero revender mas tira revenda"
+    result = run(
+        make_interpretation(branch_selections=[
+            _branch_selection(action="add", anchor=BRANCH_RESELLER, span="quero revender"),
+            _branch_selection(action="drop", anchor=BRANCH_RESELLER, span="tira revenda"),
+        ]),
+        message,
+    )
+    assert result.valid is False
+    assert any(
+        error.startswith("contradiction_branch_add_and_drop") for error in result.errors
+    ), result.errors
+
+
+def test_dropping_one_branch_while_keeping_another_is_not_a_contradiction():
+    message = "tira revenda, deixa só pra mim"
+    result = run(
+        make_interpretation(branch_selections=[
+            _branch_selection(action="drop", anchor=BRANCH_RESELLER, span="tira revenda"),
+            _branch_selection(action="keep", anchor=BRANCH_RETAIL, span="pra mim"),
+        ]),
+        message,
+    )
+    assert result.valid, result.errors
+    assert len(result.interpretation.branch_selections) == 2
+
+
+def test_no_branch_selection_is_not_an_error():
+    result = run(make_interpretation(branch_selections=[]), "bom dia")
+    assert result.valid, result.errors
+    assert result.interpretation.branch_selections == []

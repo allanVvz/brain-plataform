@@ -4575,7 +4575,7 @@ def _deterministic_pending_service_clarification(
     if interpretation is not None and (
         semantic_conversation_policy.confirmation_state(interpretation, context).value
         in {"affirm", "reject", "partial"}
-        or interpretation.branch_selection.action.value != "none"
+        or bool(interpretation.branch_selections)
     ):
         return None
 
@@ -4837,13 +4837,19 @@ def _deterministic_pending_fact_confirmation(
             # publication loaded above -- decide() validates the interpretation
             # before the document is known, so a branch selection can only be
             # trusted here, where the real anchor set exists.
-            selection = interpretation.branch_selection
-            redirected = (
-                str(selection.branch_anchor_node_id or "")
-                in set(document.get("branch_anchors") or [])
-                and selection.action.value != "none"
+            # This ladder confirms ONE pending candidate, so only the first
+            # proved redirect applies here; a turn that opens several branches
+            # at once is resolved by the service resolution path instead.
+            published_anchors = set(document.get("branch_anchors") or [])
+            selection = next(
+                (
+                    item for item in interpretation.branch_selections
+                    if str(item.branch_anchor_node_id or "") in published_anchors
+                    and item.action.value != "none"
+                ),
+                None,
             )
-            if redirected:
+            if selection is not None:
                 action = selection.action.value
                 if action == "select":
                     action = "add"
@@ -5875,17 +5881,23 @@ def _decide(
             or []
         )
     ]
-    persona = supabase_client.get_persona(context.persona_slug) or {}
-    publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
-    if str(publication.get("id")) != str(context.publication_id) or publication.get("checksum") != context.graph_checksum:
-        raise RuntimeError("GraphRAG publication changed during turn")
-    document = publication.get("document_json") or {}
     # A turn on the semantic contract carries `interpretation`, never a
-    # `proposal`. Translating it here keeps ONE decision path: everything below
-    # -- branch resolution, fact reconciliation, proof, commit -- is the same
+    # `proposal`. Translating it keeps ONE decision path: everything below --
+    # branch resolution, fact reconciliation, proof, commit -- is the same
     # well-covered machinery, now sourced from the model's proved reading.
-    # The graph is loaded first on purpose: validated without a document and a
-    # contract, every fact and anchor would be dropped as unknown.
+    #
+    # The graph has to be loaded before validating, because without a document
+    # and a contract every fact and anchor is dropped as unknown. It is loaded
+    # only on this path, so a malformed legacy proposal still fails fast
+    # without paying for a publication fetch.
+    document: dict[str, Any] = {}
+    publication: dict[str, Any] = {}
+    if isinstance(observation.get("interpretation"), dict):
+        persona = supabase_client.get_persona(context.persona_slug) or {}
+        publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
+        if str(publication.get("id")) != str(context.publication_id) or publication.get("checksum") != context.graph_checksum:
+            raise RuntimeError("GraphRAG publication changed during turn")
+        document = publication.get("document_json") or {}
     validation = _validated_interpretation(
         context, observation, document, context.graph_contract,
     )
@@ -5908,6 +5920,12 @@ def _decide(
             )
         if parse_errors:
             return _invalid_proposal_fallback(context, raw, parse_errors)
+    if not publication:
+        persona = supabase_client.get_persona(context.persona_slug) or {}
+        publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
+        if str(publication.get("id")) != str(context.publication_id) or publication.get("checksum") != context.graph_checksum:
+            raise RuntimeError("GraphRAG publication changed during turn")
+        document = publication.get("document_json") or {}
     model_proposed_service_operations = [
         item.model_dump(mode="json") for item in proposal.service_operations
     ]
