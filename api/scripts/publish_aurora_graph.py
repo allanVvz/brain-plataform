@@ -16,6 +16,7 @@ from services import (
     graph_document_publisher,
     graph_json_v21_adapter,
     graph_json_v2_store,
+    supabase_client,
 )
 
 
@@ -391,11 +392,267 @@ def publish(*, expected_version: int | None = None) -> dict:
     )
 
 
+def _projection_node_types(node_type: str) -> set[str]:
+    return {"embed", "embedded"} if node_type == "embedded" else {node_type}
+
+
+def build_v3_source_rows(
+    graph: GraphJson,
+    *,
+    projection_nodes: list[dict],
+    projection_edges: list[dict],
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Build the Aurora v3 input from Graph v9, never from unrelated KB rows.
+
+    UUIDs remain the materialized projection identities required by runtime and
+    RAG foreign keys. All semantic fields come from the approved Graph JSON,
+    so assets/conversations and importer bookkeeping cannot change the SHA.
+    """
+    nodes_by_stable: dict[str, list[dict]] = {}
+    for row in projection_nodes:
+        metadata = row.get("metadata") or {}
+        if metadata.get("active", True) is False:
+            continue
+        stable_id = str(metadata.get("graph_json_node_id") or "")
+        if stable_id:
+            nodes_by_stable.setdefault(stable_id, []).append(row)
+
+    selected_by_stable: dict[str, dict] = {}
+    duplicate_rows: list[dict] = []
+    for node in graph.nodes:
+        candidates = nodes_by_stable.get(node.id) or []
+        expected_types = _projection_node_types(node.node_type)
+        exact = [
+            row for row in candidates
+            if str(row.get("node_type") or "") in expected_types
+            and (
+                node.node_type in {"persona", "embedded", "gallery"}
+                or str(row.get("slug") or "") == node.slug
+            )
+        ]
+        if len(exact) != 1:
+            candidate_shapes = sorted(
+                f"{row.get('node_type')}:{row.get('slug')}" for row in candidates
+            )
+            raise RuntimeError(
+                f"aurora_projection_node_not_unique:{node.id}:exact={len(exact)}:"
+                f"active={len(candidates)}:candidates={candidate_shapes}"
+            )
+        selected = exact[0]
+        selected_by_stable[node.id] = selected
+        duplicate_rows.extend(
+            {**row, "canonical_projection_id": selected.get("id")}
+            for row in candidates if row.get("id") != selected.get("id")
+        )
+
+    graph_edge_ids = {
+        edge.id for edge in graph.edges if edge.lifecycle.status == "active"
+    }
+    projected_edges_by_stable: dict[str, list[dict]] = {}
+    for row in projection_edges:
+        metadata = row.get("metadata") or {}
+        if metadata.get("active", True) is False:
+            continue
+        stable_id = str(metadata.get("graph_json_edge_id") or "")
+        if stable_id in graph_edge_ids:
+            projected_edges_by_stable.setdefault(stable_id, []).append(row)
+
+    node_rows = []
+    for node in graph.nodes:
+        selected = selected_by_stable[node.id]
+        node_rows.append({
+            "id": selected["id"],
+            "node_type": selected.get("node_type") or node.node_type,
+            "slug": node.slug,
+            "title": node.label,
+            "summary": str((node.data or {}).get("summary") or ""),
+            "tags": [],
+            "status": node.lifecycle.status,
+            "metadata": {"graph_json_node_id": node.id, **(node.data or {})},
+        })
+
+    edge_rows = []
+    for edge in graph.edges:
+        if edge.lifecycle.status != "active":
+            continue
+        projected = projected_edges_by_stable.get(edge.id) or []
+        if len(projected) != 1:
+            raise RuntimeError(
+                f"aurora_projection_edge_not_unique:{edge.id}:active={len(projected)}"
+            )
+        edge_rows.append({
+            "id": projected[0]["id"],
+            "source_node_id": selected_by_stable[edge.source]["id"],
+            "target_node_id": selected_by_stable[edge.target]["id"],
+            "relation_type": edge.relation_type,
+            "metadata": {"active": True, "graph_json_edge_id": edge.id},
+        })
+    return node_rows, edge_rows, duplicate_rows
+
+
+def prepare_v3_candidate() -> dict:
+    current = graph_json_v2_store.load_current(
+        "aurora", "aurora-estetica-automotiva"
+    )
+    if not current:
+        raise RuntimeError("aurora_current_graph_missing")
+    version, graph = current
+    persona = supabase_client.get_persona("aurora")
+    if not persona:
+        raise RuntimeError("aurora_persona_missing")
+    all_nodes, all_edges = supabase_client.list_all_knowledge_graph(
+        persona_id=str(persona["id"]), limit_nodes=10000
+    )
+    projection_nodes = [
+        row for row in all_nodes
+        if (row.get("metadata") or {}).get("graph_json_import") is True
+    ]
+    projection_edges = [
+        row for row in all_edges
+        if (row.get("metadata") or {}).get("graph_json_edge_id")
+    ]
+    node_rows, edge_rows, duplicate_rows = build_v3_source_rows(
+        graph,
+        projection_nodes=projection_nodes,
+        projection_edges=projection_edges,
+    )
+    document = graph_compiler_v3.compile_graph(
+        persona=persona, node_rows=node_rows, edge_rows=edge_rows
+    )
+    return {
+        "legacy_version": version,
+        "legacy_checksum": graph_json_v2_store.checksum_graph(graph),
+        "graph": graph,
+        "persona": persona,
+        "node_rows": node_rows,
+        "edge_rows": edge_rows,
+        "duplicate_rows": duplicate_rows,
+        "document": document,
+    }
+
+
+def _require_candidate(candidate: dict, *, expected_legacy_checksum: str | None,
+                       expected_runtime_checksum: str | None) -> None:
+    if expected_legacy_checksum and candidate["legacy_checksum"] != expected_legacy_checksum:
+        raise RuntimeError(
+            f"aurora_legacy_checksum_mismatch:{candidate['legacy_checksum']}:"
+            f"{expected_legacy_checksum}"
+        )
+    actual_runtime = candidate["document"]["checksum"]
+    if expected_runtime_checksum and actual_runtime != expected_runtime_checksum:
+        raise RuntimeError(
+            f"aurora_runtime_checksum_mismatch:{actual_runtime}:"
+            f"{expected_runtime_checksum}"
+        )
+
+
+def v3_action(*, action: str, expected_legacy_checksum: str | None,
+              expected_runtime_checksum: str | None,
+              publication_id: str | None) -> dict:
+    candidate = prepare_v3_candidate()
+    _require_candidate(
+        candidate,
+        expected_legacy_checksum=expected_legacy_checksum,
+        expected_runtime_checksum=expected_runtime_checksum,
+    )
+    document = candidate["document"]
+    base = {
+        "action": action,
+        "legacy_version": candidate["legacy_version"],
+        "legacy_checksum": candidate["legacy_checksum"],
+        "runtime_checksum": document["checksum"],
+        "compiler_version": document["compiler_version"],
+        "source_node_count": len(candidate["node_rows"]),
+        "source_edge_count": len(candidate["edge_rows"]),
+        "compiled_node_count": len(document["node_by_id"]),
+        "compiled_edge_count": len(document["edges"]),
+        "branch_count": len(document["branch_contracts"]),
+        "eligible_faq_count": len(document["eligible_faq_node_ids"]),
+        "duplicate_projection_ids": [row.get("id") for row in candidate["duplicate_rows"]],
+    }
+    if action == "dry-run":
+        return base
+    if action == "repair-duplicates":
+        repaired = []
+        for row in candidate["duplicate_rows"]:
+            metadata = {
+                **(row.get("metadata") or {}),
+                "active": False,
+                "projection_duplicate_of": row.get("canonical_projection_id"),
+                "projection_removed_in_version": candidate["legacy_version"],
+                "projection_removed_from": "aurora_v3_final_publication",
+            }
+            supabase_client.update_knowledge_node(
+                str(row["id"]), {"metadata": metadata}, mark_related_faqs=False
+            )
+            repaired.append(str(row["id"]))
+        return {**base, "repaired_duplicate_ids": repaired}
+    if action == "stage":
+        staged = graph_compiler_v3.compile_persona_publication(
+            "aurora",
+            activate=False,
+            source_rows=(candidate["node_rows"], candidate["edge_rows"]),
+        )
+        publication = staged.get("publication") or {}
+        if publication.get("checksum") != document["checksum"]:
+            raise RuntimeError("aurora_staged_checksum_mismatch")
+        return {
+            **base,
+            "publication_id": publication.get("id"),
+            "publication_version": publication.get("version"),
+            "publication_status": publication.get("status"),
+            "cached": staged.get("cached"),
+        }
+    if action == "activate":
+        if not publication_id:
+            raise RuntimeError("aurora_publication_id_required")
+        client = supabase_client.get_client()
+        publication = (
+            client.table("graph_publications").select("*")
+            .eq("id", publication_id).eq("persona_id", candidate["persona"]["id"])
+            .maybe_single().execute().data
+        )
+        if not publication:
+            raise RuntimeError("aurora_staged_publication_missing")
+        if publication.get("status") not in {"compiled", "active"}:
+            raise RuntimeError(
+                f"aurora_staged_publication_not_activatable:{publication.get('status')}"
+            )
+        if publication.get("checksum") != document["checksum"]:
+            raise RuntimeError("aurora_publication_checksum_changed_before_activation")
+        activation = client.rpc(
+            "activate_graph_publication_v3", {"p_publication_id": publication_id}
+        ).execute().data
+        return {
+            **base,
+            "publication_id": publication_id,
+            "publication_version": publication.get("version"),
+            "publication_status": "active",
+            "activation": activation,
+        }
+    raise RuntimeError(f"unsupported_v3_action:{action}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--expected-version", type=int)
     parser.add_argument("--skip-v3", action="store_true")
+    parser.add_argument(
+        "--v3-action",
+        choices=["dry-run", "repair-duplicates", "stage", "activate"],
+    )
+    parser.add_argument("--expected-legacy-checksum")
+    parser.add_argument("--expected-runtime-checksum")
+    parser.add_argument("--publication-id")
     args = parser.parse_args()
+    if args.v3_action:
+        print(json.dumps(v3_action(
+            action=args.v3_action,
+            expected_legacy_checksum=args.expected_legacy_checksum,
+            expected_runtime_checksum=args.expected_runtime_checksum,
+            publication_id=args.publication_id,
+        ), ensure_ascii=False, default=str))
+        raise SystemExit(0)
     result = publish(expected_version=args.expected_version)
     v3_result = None
     if result.get("ok") and not args.skip_v3:

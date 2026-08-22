@@ -28,6 +28,26 @@ O checksum canônico difere do hash do arquivo porque o pipeline atualiza o
 Graph JSON 2.0 para 2.1, materializa nodes de pergunta e renderiza Markdown de
 forma determinística antes da publicação.
 
+## Correção do gate materializado — 2026-08-22
+
+O checksum `sha256:f40a29b5b8fdc8373948b7e281c0f96e8487084d8e92e81ae9ec367d70bc1b40`
+foi produzido pelo helper offline com IDs textuais de fixture. O documento v3
+produtivo inclui os UUIDs reais da persona e dos nodes projetados; por isso esse
+SHA não era materializável e não podia ser ativado sem divergir do documento
+validado pelo runtime.
+
+O publicador legado Aurora agora restringe a compilação aos 153 nodes e 234
+edges do Graph v9, excluindo assets, conversas e outros nodes operacionais da
+persona. Dois dry-runs consecutivos contra a projeção produtiva produziram:
+
+| Artefato | Checksum | Contagem |
+|---|---|---|
+| Documento v3 materializável | `sha256:06fd7dd7f3452fea3b2e688c7864243b19ab2fa2380873f93a7c9a6d17c12299` | 87 nodes / 168 edges / 14 branches / 30 FAQs elegíveis |
+
+Três projeções FAQ antigas com o mesmo `graph_json_node_id` foram identificadas
+para desativação não destrutiva no deploy. As linhas canônicas são escolhidas
+por ID estável, tipo e slug do Graph v9. GraphBundle permanece dívida técnica.
+
 ## Diff semântico
 
 - Campos comuns reduzidos para `nome_cliente` e `servico`.

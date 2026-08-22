@@ -1329,14 +1329,18 @@ def compile_persona_publication(
     activate: bool = True,
     embedder: Callable[[list[str]], list[list[float]]] | None = None,
     embedding_profile: dict[str, Any] | None = None,
+    source_rows: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Compile, persist, embed, and atomically activate one persona snapshot."""
     persona = supabase_client.get_persona(persona_slug)
     if not persona:
         raise LookupError(f"persona not found: {persona_slug}")
-    node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
-        persona_id=str(persona["id"]), limit_nodes=10000
-    )
+    if source_rows is None:
+        node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
+            persona_id=str(persona["id"]), limit_nodes=10000
+        )
+    else:
+        node_rows, edge_rows = source_rows
     document = compile_graph(
         persona=persona,
         node_rows=node_rows,
