@@ -59,7 +59,7 @@ def build_graph() -> GraphJson:
                 {"type": "string", "pattern": "^[0-9]{4}$"},
                 {"type": "integer", "minimum": 1886, "maximum": 2200},
             ]}
-        if field_key == "can_visit_in_person":
+        if field_key in {"can_visit_in_person", "estrada_de_chao", "vazamento_oleo", "media_requested"}:
             return {"type": ["string", "boolean"]}
         return {"type": "string", "minLength": 1}
 
@@ -106,6 +106,60 @@ def build_graph() -> GraphJson:
                 "values": [
                     {"value": True, "aliases": ["sim", "consigo levar", "posso levar"]},
                     {"value": False, "aliases": ["não", "prefiro seguir por aqui", "não consigo levar"]},
+                ],
+                "invalid_response": invalid_response,
+            }
+        if field_key == "procedimento_anterior":
+            return {
+                "mode": "semantic",
+                "description": "Histórico declarado de procedimento anterior na pintura, inclusive resposta negativa.",
+                "examples": [
+                    "Nunca foi feito procedimento nessa pintura",
+                    "Já fizeram polimento antes",
+                    "Não sei se houve procedimento anterior",
+                ],
+                "invalid_response": invalid_response,
+            }
+        if field_key == "foco_brilho_riscos":
+            return {
+                "mode": "enum",
+                "values": [
+                    {"value": "brilho", "aliases": ["melhorar o brilho", "só brilho"]},
+                    {"value": "riscos", "aliases": ["reduzir riscos", "tirar riscos"]},
+                    {
+                        "value": "brilho_e_riscos",
+                        "aliases": ["brilho e riscos", "os dois", "melhorar o brilho e reduzir os riscos"],
+                    },
+                ],
+                "invalid_response": invalid_response,
+            }
+        if field_key == "revestimento_bancos":
+            return {
+                "mode": "enum",
+                "values": [
+                    {"value": "couro", "aliases": ["couro", "bancos de couro"]},
+                    {"value": "tecido", "aliases": ["tecido", "bancos de tecido"]},
+                ],
+                "invalid_response": invalid_response,
+            }
+        if field_key in {"estrada_de_chao", "vazamento_oleo", "media_requested"}:
+            return {
+                "mode": "enum",
+                "values": [
+                    {"value": True, "aliases": ["sim", "há", "tem", "posso enviar"]},
+                    {"value": False, "aliases": ["não", "não há", "não tem"]},
+                ],
+                "invalid_response": invalid_response,
+            }
+        if field_key == "evaluation_route":
+            return {
+                "mode": "enum",
+                "values": [
+                    {"value": "presencial", "aliases": ["presencial", "levar o carro"]},
+                    {
+                        "value": "remota",
+                        "aliases": ["remota", "por fotos e vídeos", "começar por fotos e vídeos"],
+                    },
                 ],
                 "invalid_response": invalid_response,
             }
