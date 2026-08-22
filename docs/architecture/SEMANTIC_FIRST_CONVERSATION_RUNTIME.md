@@ -1,0 +1,129 @@
+# Runtime de conversa semantic-first
+
+Substitui a camada de interpretação literal do runtime de conversa por uma
+camada semântica. Documento de arquitetura da branch `agent/sofia-vitoria-audit`.
+
+## Por que
+
+A auditoria ao vivo de 2026-08-21
+(`docs/handoffs/VITORIA_V8_LIVE_TESTING_FINDINGS_2026-08-21.md`) provou, em
+produção, que o modelo interpretava corretamente e o backend descartava a
+interpretação correta porque a frase não batia com uma lista fixa:
+
+- `"uso próprio mesmo"` → o modelo propôs `select` do anchor de varejo; o
+  resolvedor literal não achou alias e o backend repetiu a mesma pergunta.
+- `"sim, tá correto"` → o modelo propôs `qualification_complete` +
+  `handoff_requested`; `_EXPLICIT_CONFIRMATIONS` (conjunto fixo de ~11 frases,
+  comparação exata) não reconheceu e o lead nunca foi para a equipe.
+- `"vocês tem 50 vestidos em mousse?"` → a mensagem inteira virou valor bruto
+  do campo `volume_interest` e a pergunta nunca foi respondida.
+
+O primeiro e o último passo do funil, nos dois ramos, dependiam de acerto de
+fraseado. Em WhatsApp, fraseado natural é a norma.
+
+## Princípio
+
+**Interpretar é do modelo. Provar é do backend.**
+
+O backend não volta a interpretar linguagem com listas de frases. Ele só
+verifica se o que o modelo afirmou está sustentado pela mensagem literal e
+permitido pelo grafo publicado.
+
+```
+inbound
+→ interpretação estruturada pelo modelo      (SemanticInterpretation)
+→ validação determinística de segurança       (semantic_interpretation_validator)
+→ reconciliação com estado e grafo
+→ recuperação de conhecimento/FAQ
+→ seleção da próxima ação
+→ composição natural
+→ proof
+→ commit idempotente
+→ no máximo um outbound
+```
+
+## O contrato
+
+`api/schemas/conversation.py` :: `SemanticInterpretation`
+
+Uma única decisão estruturada por inbound, cobrindo múltiplas intenções na
+mesma mensagem:
+
+| campo | papel |
+|---|---|
+| `intents[]` | um ou vários atos do cliente, cada um com `evidence_span` |
+| `state_relation` | relação da mensagem com o estado atual |
+| `answers_field_key` | qual campo pendente esta mensagem responde |
+| `confirmation` | `state` + `target_ref` + correção parcial |
+| `branch_selection` | público/serviço normalizado para um anchor do grafo |
+| `facts[]` | fatos extraídos, com dono e evidência |
+| `invalidated_facts[]` | fatos que esta mensagem torna falsos |
+| `entities[]` | produto, quantidade, outros |
+| `questions[]` | perguntas do cliente que o turno deve responder |
+| `claims[]` | afirmações comerciais, sempre com nós de evidência |
+| `recommended_next_action` | ação seguinte recomendada |
+
+### Sem confiança numérica
+
+Não existe campo `confidence` no contrato novo. Um score não é uma
+explicação: a decisão precisa ser explicável pelo texto e pelo estado. Todo
+elemento carrega `evidence_span` — o trecho literal da mensagem do cliente que
+o sustenta — e o backend reconfere esse trecho contra a mensagem.
+
+### Confirmação é ligada a um alvo, não a palavras positivas
+
+`confirmation.target_ref` tem que casar com `context.pending_confirmation_ref`,
+publicado pelo turno anterior. Isso resolve dois casos de uma vez:
+
+- `"sim"` sem nada pendente não confirma nada arbitrário (`no_pending_confirmation`);
+- confirmação de qualificação nunca é confundida com confirmação de preço,
+  estoque, pedido ou agenda, porque são refs diferentes.
+
+`state=partial` cobre `"sim, mas muda para revenda"`: confirma o alvo e
+carrega `correction_field_key`/`correction_value`.
+
+## A camada determinística
+
+`api/services/semantic_interpretation_validator.py`
+
+Não tem lista de frases, tabela de alias, regex sobre texto do cliente, nem
+qualquer conhecimento do que a persona vende. Só verifica:
+
+1. **evidência real** — todo `evidence_span` tem que ser substring literal da
+   mensagem (insensível a caixa, acento e pontuação). Elemento sem evidência é
+   descartado, nunca reescrito.
+2. **existência no grafo** — anchor ∈ `branch_anchors`; `field_key` ∈ contrato;
+   `owner_node_id` e `node_id` ∈ `node_by_id`.
+3. **valor permitido** — campo com validação `enum` só aceita valor/alias
+   declarado no próprio grafo.
+4. **coerência com o pendente** — confirmação exige `pending_confirmation_ref`
+   correspondente.
+5. **ausência de contradição** — `confirmation` e `rejection` juntos invalidam
+   o turno.
+6. **proibição de invenção comercial** — `claim` sem nó publicado de evidência
+   é descartada.
+7. **handoff permitido** — só quando o grafo autoriza.
+8. **isolamento de persona** — id de nó de outra persona simplesmente não está
+   em `node_by_id`, então não pode ser citado.
+
+Descartar um elemento nunca o reinterpreta com outro sentido. Ou ele sobrevive
+com o sentido que o modelo deu, ou sai — e aí `needs_clarification()` manda o
+turno fazer **uma** pergunta curta, em vez de repetir mecanicamente a pergunta
+anterior (o modo de falha do matcher literal).
+
+## Compatibilidade com a skill de E2E
+
+`.agents/skills/brain-agent-e2e/SKILL.md` diz que o modelo "never owns routing,
+required fields, the next question, handoff or confirmation policy". Continua
+valendo, e este desenho reforça: o modelo **interpreta**; quem decide rota,
+campos obrigatórios, próxima pergunta (sempre
+`field_questions[missing_fields[0]]`), handoff e política de confirmação
+continua sendo o backend determinístico. O que mudou é só a fonte da
+interpretação — do matcher literal para o modelo — não a fonte da política.
+
+## Regra anti-hardcoded
+
+Nenhum nome de persona, produto, marca, público ou frase comercial entra em
+`api/routes`, `api/services`, `api/core`, `api/workers` (AGENTS.md §26).
+Catálogo, aliases e valores permitidos vêm do Graph JSON publicado. O validador
+novo é, por construção, agnóstico de persona.
