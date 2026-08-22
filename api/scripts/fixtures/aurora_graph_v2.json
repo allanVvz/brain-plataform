@@ -137,19 +137,9 @@
           "identity_field": "nome_cliente",
           "required_fields": [
             "nome_cliente",
-            "servico",
-            "objective",
-            "can_visit_in_person",
-            "modelo_veiculo",
-            "vehicle_year",
-            "condicao"
+            "servico"
           ],
-          "conditional_fields": {
-            "vehicle_color": [
-              "chapeacao",
-              "pintura"
-            ]
-          },
+          "conditional_fields": {},
           "field_question_paraphrases": {
             "nome_cliente": [
               "Como você prefere que eu te chame?",
@@ -190,15 +180,22 @@
             ]
           },
           "field_questions": {
-            "nome_cliente": "Antes de tudo, qual é o seu nome e sobrenome?",
-            "servico": "Qual serviço te interessa: lavagem técnica detalhada, higienização interna, polimento, vitrificação, PPF, polimento de vidros, chapeação ou pintura?",
-            "objective": "Você pretende vender o carro em breve ou vai continuar com ele e quer investir em cuidado e proteção?",
-            "can_visit_in_person": "Você consegue trazer o carro aqui na Aurora para uma avaliação rápida, ou prefere seguir tudo por aqui mesmo?",
-            "modelo_veiculo": "Qual é o modelo do seu carro?",
-            "vehicle_year": "E qual é o ano dele?",
+            "nome_cliente": "Qual é o seu nome, por favor?",
+            "servico": "Qual serviço você procura para o veículo?",
+            "objective": "O que você espera melhorar ou proteger no veículo?",
+            "can_visit_in_person": "Você consegue trazer o veículo para uma avaliação presencial?",
+            "modelo_veiculo": "Qual é o modelo do veículo?",
+            "vehicle_year": "Qual é o ano do veículo?",
             "vehicle_color": "Qual é a cor do veículo?",
-            "condicao": "O que mais te incomoda no carro hoje?",
-            "reclamacao_relato": "Sinto muito por isso. Pode me contar rapidamente o que aconteceu, por favor?"
+            "condicao": "Como está a condição atual do veículo nessa área?",
+            "reclamacao_relato": "Sinto muito por isso. Pode me contar rapidamente o que aconteceu, por favor?",
+            "procedimento_anterior": "Já foi feito algum procedimento nessa pintura antes?",
+            "foco_brilho_riscos": "Seu foco principal é recuperar o brilho, reduzir riscos ou os dois?",
+            "revestimento_bancos": "Os bancos são de couro ou tecido?",
+            "estrada_de_chao": "O veículo circula com frequência em estrada de chão?",
+            "vazamento_oleo": "Há sinal de vazamento de óleo no motor ou no cofre?",
+            "evaluation_route": "Você prefere avaliação presencial ou seguir a avaliação inicial por fotos e vídeos?",
+            "media_requested": "Pode enviar fotos e vídeos nítidos das áreas que precisam de avaliação?"
           },
           "field_labels": {
             "nome_cliente": "nome",
@@ -209,7 +206,14 @@
             "vehicle_year": "ano do veículo",
             "vehicle_color": "cor do veículo",
             "condicao": "condição do veículo",
-            "reclamacao_relato": "relato"
+            "reclamacao_relato": "relato",
+            "procedimento_anterior": "procedimento anterior na pintura",
+            "foco_brilho_riscos": "foco em brilho ou riscos",
+            "revestimento_bancos": "revestimento dos bancos",
+            "estrada_de_chao": "uso em estrada de chão",
+            "vazamento_oleo": "sinal de vazamento de óleo",
+            "evaluation_route": "rota de avaliação",
+            "media_requested": "fotos e vídeos para avaliação remota"
           },
           "confirmation_templates": {
             "fact": [
@@ -310,7 +314,7 @@
       "data": {
         "source": "user_authorized_demo_briefing_2026_07_29",
         "status": "validated",
-        "summary": "Serviços agendáveis da Aurora. O orçamento é personalizado e definido pela Equipe Aurora após avaliação."
+        "summary": "Catálogo revisado de serviços da Aurora, com orçamento e agenda confirmados exclusivamente pela equipe humana."
       }
     },
     {
@@ -370,16 +374,22 @@
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
-        "summary": "Tom objetivo, amigável, profissional e consultivo, em mensagens curtas. Acolhedor, direto e educado, com linguagem próxima e técnica, adaptando-se ao clima da conversa. Nunca comentar ou comparar com concorrentes.",
+        "summary": "Linguagem especialista, simples, consultiva, curta, humana e variável. Reconhece o conteúdo do cliente, responde antes de perguntar e evita repetição mecânica ou certeza sem avaliação.",
         "traits": [
-          "objetivo",
-          "amigável",
-          "profissional",
-          "consultivo",
-          "mensagens curtas"
+          "especialista",
+          "simples",
+          "consultiva",
+          "curta",
+          "humana",
+          "variável"
         ],
         "avoid": [
-          "falar sobre concorrentes"
+          "falar sobre concorrentes",
+          "repetição mecânica",
+          "prometer preço ou agenda",
+          "certeza técnica sem avaliação",
+          "excesso de emojis",
+          "pressão comercial"
         ],
         "adaptation_rules": [
           "Leia a formalidade e a energia da última mensagem do cliente antes de responder.",
@@ -597,10 +607,8 @@
             "nome_cliente",
             "servico",
             "objective",
-            "can_visit_in_person",
-            "modelo_veiculo",
-            "vehicle_year",
-            "condicao"
+            "condicao",
+            "can_visit_in_person"
           ]
         },
         "requires_in_person_evaluation": false,
@@ -701,9 +709,6 @@
             "nome_cliente",
             "servico",
             "objective",
-            "can_visit_in_person",
-            "modelo_veiculo",
-            "vehicle_year",
             "condicao"
           ]
         },
@@ -807,6 +812,8 @@
             "servico",
             "objective",
             "can_visit_in_person",
+            "revestimento_bancos",
+            "estrada_de_chao",
             "modelo_veiculo",
             "vehicle_year",
             "condicao"
@@ -900,7 +907,10 @@
           "polir",
           "polir o carro",
           "polir meu carro",
-          "tirar riscos"
+          "tirar riscos",
+          "espelhamento",
+          "pintura opaca",
+          "melhorar brilho"
         ],
         "summary": "Correção mais detalhada da pintura, feita após avaliação e medição do verniz. Remove ou reduz riscos, hologramas, manchas e marcas de lavagem.",
         "price_qualifier": "quote_only",
@@ -915,9 +925,12 @@
             "nome_cliente",
             "servico",
             "objective",
+            "procedimento_anterior",
+            "foco_brilho_riscos",
             "can_visit_in_person",
             "modelo_veiculo",
             "vehicle_year",
+            "vehicle_color",
             "condicao"
           ]
         },
@@ -1020,10 +1033,8 @@
             "nome_cliente",
             "servico",
             "objective",
-            "can_visit_in_person",
-            "modelo_veiculo",
-            "vehicle_year",
-            "condicao"
+            "condicao",
+            "can_visit_in_person"
           ]
         },
         "requires_in_person_evaluation": true,
@@ -1172,10 +1183,8 @@
             "nome_cliente",
             "servico",
             "objective",
-            "can_visit_in_person",
-            "modelo_veiculo",
-            "vehicle_year",
-            "condicao"
+            "condicao",
+            "can_visit_in_person"
           ]
         },
         "requires_in_person_evaluation": true,
@@ -1274,10 +1283,8 @@
             "nome_cliente",
             "servico",
             "objective",
-            "can_visit_in_person",
-            "modelo_veiculo",
-            "vehicle_year",
-            "condicao"
+            "condicao",
+            "can_visit_in_person"
           ]
         },
         "requires_in_person_evaluation": true,
@@ -1395,15 +1402,16 @@
           "confirmation_required": true,
           "provider": "manual",
           "field_guidance": {
-            "vehicle_color": "A cor ajuda a preparar a avaliação técnica e a correspondência da pintura."
+            "vehicle_color": "A cor ajuda a preparar a avaliação técnica e a correspondência da pintura.",
+            "evaluation_route": "Na rota remota, solicitar fotos e vídeos nítidos; não prometer diagnóstico conclusivo."
           },
           "required_fields": [
             "nome_cliente",
             "servico",
-            "objective",
-            "can_visit_in_person",
+            "evaluation_route",
             "modelo_veiculo",
             "vehicle_year",
+            "vehicle_color",
             "condicao"
           ]
         },
@@ -1505,15 +1513,16 @@
           "confirmation_required": true,
           "provider": "manual",
           "field_guidance": {
-            "vehicle_color": "A cor ajuda a preparar a avaliação técnica e a correspondência da pintura."
+            "vehicle_color": "A cor ajuda a preparar a avaliação técnica e a correspondência da pintura.",
+            "evaluation_route": "Na rota remota, solicitar fotos e vídeos nítidos; não prometer diagnóstico conclusivo."
           },
           "required_fields": [
             "nome_cliente",
             "servico",
-            "objective",
-            "can_visit_in_person",
+            "evaluation_route",
             "modelo_veiculo",
             "vehicle_year",
+            "vehicle_color",
             "condicao"
           ]
         },
@@ -1895,7 +1904,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Quais serviços vocês oferecem?",
-        "answer": "A Aurora faz lavagem técnica detalhada, higienização interna, polimento, vitrificação, PPF, polimento de vidros, chapeação e pintura.",
+        "answer": "A Aurora atende avaliação presencial, lavagem técnica detalhada, lavagem de motor/cofre, higienização interna, polimento técnico e comercial, vitrificação, PPF, polimento de vidros, restauração de faróis, chapeação e pintura.",
         "source_node_id": "aurora-services",
         "source_node_type": "product_group",
         "markdown_document": true,
@@ -2368,9 +2377,12 @@
             "nome_cliente",
             "servico",
             "objective",
+            "procedimento_anterior",
+            "foco_brilho_riscos",
             "can_visit_in_person",
             "modelo_veiculo",
             "vehicle_year",
+            "vehicle_color",
             "condicao"
           ]
         },
@@ -2471,7 +2483,7 @@
       "parent_id": "aurora-services",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "aliases": [
           "polimento de uma etapa",
           "polimento one step",
@@ -2497,6 +2509,11 @@
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
           "on_schedule_request": "aurora-rule-lacunas"
+        },
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
         }
       }
     },
@@ -2508,9 +2525,14 @@
       "parent_id": "aurora-product-polish-one-step",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "channel": "whatsapp",
-        "content": "Corte leve e acabamento realizados em uma única etapa. Indicado para pinturas com poucos defeitos."
+        "content": "Corte leve e acabamento realizados em uma única etapa. Indicado para pinturas com poucos defeitos.",
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
+        }
       }
     },
     {
@@ -2521,7 +2543,7 @@
       "parent_id": "aurora-copy-polish-one-step",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "question": "Vocês fazem polimento de uma etapa (one step)?",
         "answer": "Fazemos, sim — o polimento de uma etapa: corte leve e acabamento realizados em uma única etapa. Indicado para pinturas com poucos defeitos.",
         "branch_path": [
@@ -2579,7 +2601,12 @@
               "aurora-copy-polish-one-step"
             ]
           }
-        ]
+        ],
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
+        }
       }
     },
     {
@@ -2590,7 +2617,7 @@
       "parent_id": "aurora-services",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "aliases": [
           "polimento em multiplas etapas",
           "polimento em etapas",
@@ -2616,6 +2643,11 @@
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
           "on_schedule_request": "aurora-rule-lacunas"
+        },
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
         }
       }
     },
@@ -2627,9 +2659,14 @@
       "parent_id": "aurora-product-polish-multi-step",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "channel": "whatsapp",
-        "content": "Utiliza etapas separadas de corte, refino e lustro. Indicado para pinturas mais danificadas ou quando se busca acabamento superior."
+        "content": "Utiliza etapas separadas de corte, refino e lustro. Indicado para pinturas mais danificadas ou quando se busca acabamento superior.",
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
+        }
       }
     },
     {
@@ -2640,7 +2677,7 @@
       "parent_id": "aurora-copy-polish-multi-step",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "question": "Vocês fazem polimento em múltiplas etapas?",
         "answer": "Fazemos, sim — o polimento em múltiplas etapas: utiliza etapas separadas de corte, refino e lustro. Indicado para pinturas mais danificadas ou quando se busca acabamento superior.",
         "branch_path": [
@@ -2698,7 +2735,12 @@
               "aurora-copy-polish-multi-step"
             ]
           }
-        ]
+        ],
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
+        }
       }
     },
     {
@@ -2709,7 +2751,7 @@
       "parent_id": "aurora-services",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "aliases": [
           "polimento localizado",
           "polimento em uma peca",
@@ -2735,6 +2777,11 @@
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
           "on_schedule_request": "aurora-rule-lacunas"
+        },
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
         }
       }
     },
@@ -2746,9 +2793,14 @@
       "parent_id": "aurora-product-polish-localized",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "channel": "whatsapp",
-        "content": "Aplicado somente em uma peça ou região específica, como porta, capô ou área riscada."
+        "content": "Aplicado somente em uma peça ou região específica, como porta, capô ou área riscada.",
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
+        }
       }
     },
     {
@@ -2759,7 +2811,7 @@
       "parent_id": "aurora-copy-polish-localized",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "question": "Vocês fazem polimento localizado, só em uma peça?",
         "answer": "Fazemos, sim — o polimento localizado: aplicado somente em uma peça ou região específica, como porta, capô ou área riscada.",
         "branch_path": [
@@ -2817,7 +2869,12 @@
               "aurora-copy-polish-localized"
             ]
           }
-        ]
+        ],
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
+        }
       }
     },
     {
@@ -2828,7 +2885,7 @@
       "parent_id": "aurora-services",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "aliases": [
           "polimento de acabamento",
           "polimento de lustro",
@@ -2854,6 +2911,11 @@
         "handoff": {
           "on_price_request": "aurora-rule-price-human-only",
           "on_schedule_request": "aurora-rule-lacunas"
+        },
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
         }
       }
     },
@@ -2865,9 +2927,14 @@
       "parent_id": "aurora-product-polish-finish",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "channel": "whatsapp",
-        "content": "Melhora o brilho e remove pequenas marcas ou hologramas, com pouca ou nenhuma correção profunda."
+        "content": "Melhora o brilho e remove pequenas marcas ou hologramas, com pouca ou nenhuma correção profunda.",
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
+        }
       }
     },
     {
@@ -2878,7 +2945,7 @@
       "parent_id": "aurora-copy-polish-finish",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "question": "Vocês fazem polimento de acabamento ou lustro?",
         "answer": "Fazemos, sim — o polimento de acabamento: melhora o brilho e remove pequenas marcas ou hologramas, com pouca ou nenhuma correção profunda.",
         "branch_path": [
@@ -2936,7 +3003,12 @@
               "aurora-copy-polish-finish"
             ]
           }
-        ]
+        ],
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
+        }
       }
     },
     {
@@ -2960,7 +3032,7 @@
           "farol amarelado",
           "farois opacos"
         ],
-        "summary": "Recupera faróis amarelados ou opacos e normalmente recebe uma proteção UV depois.",
+        "summary": "Recupera faróis amarelados ou opacos.",
         "price_qualifier": "quote_only",
         "booking": {
           "capacity": 5,
@@ -2970,10 +3042,8 @@
             "nome_cliente",
             "servico",
             "objective",
-            "can_visit_in_person",
-            "modelo_veiculo",
-            "vehicle_year",
-            "condicao"
+            "condicao",
+            "can_visit_in_person"
           ]
         },
         "requires_in_person_evaluation": true,
@@ -2993,7 +3063,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "channel": "whatsapp",
-        "content": "Recupera faróis amarelados ou opacos e normalmente recebe uma proteção UV depois."
+        "content": "Recupera faróis amarelados ou opacos."
       }
     },
     {
@@ -3006,7 +3076,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "Vocês fazem restauração de faróis?",
-        "answer": "Fazemos, sim — a restauração de faróis: recupera faróis amarelados ou opacos e normalmente recebe uma proteção UV depois.",
+        "answer": "Fazemos, sim — a restauração de faróis: recupera faróis amarelados ou opacos.",
         "branch_path": [
           "aurora-persona",
           "aurora-brand",
@@ -3073,7 +3143,7 @@
       "parent_id": "aurora-services",
       "data": {
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
-        "status": "validated",
+        "status": "archived",
         "question": "Quais tipos de polimento vocês oferecem?",
         "answer": "Temos vários tipos de polimento: polimento técnico, polimento comercial, polimento de uma etapa, polimento em múltiplas etapas, polimento localizado, polimento de acabamento (lustro), polimento de vidros, restauração de faróis. Me conta o que está te incomodando no carro que eu te indico o mais indicado.",
         "source_node_id": "aurora-services",
@@ -3109,7 +3179,12 @@
               "aurora-services"
             ]
           }
-        ]
+        ],
+        "deactivation": {
+          "active": false,
+          "reason": "unsupported_by_aurora_review_sources_2026_08_21",
+          "non_destructive": true
+        }
       }
     },
     {
@@ -3125,16 +3200,32 @@
         "answer": "Sim. Se o agendamento ainda não foi confirmado, posso atualizar seu pedido e aproveitar os dados do veículo que continuam válidos.",
         "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-atendimento"
+        ],
         "markdown_document": true,
         "question_count": 1,
-        "claims": [{
-          "claim_type": "service_detail",
-          "policy": {"mode": "informational"},
-          "evidence_node_ids": ["aurora-faq-reopen-request"],
-          "source_node_id": "aurora-rule-atendimento",
-          "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"]
-        }]
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-reopen-request"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
+        ]
       }
     },
     {
@@ -3150,16 +3241,32 @@
         "answer": "Sim. Você pode incluir mais de um serviço. Vou manter todos no mesmo pedido, e a Equipe Aurora confirmará avaliação, valor e horário.",
         "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-atendimento"
+        ],
         "markdown_document": true,
         "question_count": 1,
-        "claims": [{
-          "claim_type": "service_detail",
-          "policy": {"mode": "informational"},
-          "evidence_node_ids": ["aurora-faq-multiple-services"],
-          "source_node_id": "aurora-rule-atendimento",
-          "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"]
-        }]
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-multiple-services"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
+        ]
       }
     },
     {
@@ -3175,16 +3282,32 @@
         "answer": "Sim. Antes da confirmação do agendamento, posso substituir o serviço atual e preservar as informações do veículo que continuam válidas.",
         "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-atendimento"
+        ],
         "markdown_document": true,
         "question_count": 1,
-        "claims": [{
-          "claim_type": "service_detail",
-          "policy": {"mode": "informational"},
-          "evidence_node_ids": ["aurora-faq-switch-service"],
-          "source_node_id": "aurora-rule-atendimento",
-          "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"]
-        }]
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-switch-service"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
+        ]
       }
     },
     {
@@ -3200,16 +3323,2890 @@
         "answer": "Sim. Posso retirar somente o serviço indicado e manter os demais no pedido.",
         "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
-        "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"],
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-atendimento"
+        ],
         "markdown_document": true,
         "question_count": 1,
-        "claims": [{
-          "claim_type": "service_detail",
-          "policy": {"mode": "informational"},
-          "evidence_node_ids": ["aurora-faq-remove-service"],
-          "source_node_id": "aurora-rule-atendimento",
-          "branch_path": ["aurora-persona", "aurora-brand", "aurora-briefing", "aurora-rule-atendimento"]
-        }]
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-remove-service"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-product-engine-wash",
+      "node_type": "product",
+      "slug": "lavagem-motor-cofre",
+      "label": "Lavagem técnica do motor/cofre",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "validated",
+        "aliases": [
+          "lavagem de motor",
+          "lavagem do motor",
+          "limpeza do cofre",
+          "lavar o cofre",
+          "limpar o motor"
+        ],
+        "summary": "Lavagem técnica do motor e do cofre, qualificada com atenção a vazamento de óleo, uso em estrada de chão e condição atual.",
+        "price_qualifier": "quote_only",
+        "booking": {
+          "capacity": 5,
+          "confirmation_required": true,
+          "provider": "manual",
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "vazamento_oleo",
+            "estrada_de_chao",
+            "modelo_veiculo",
+            "vehicle_year",
+            "condicao"
+          ]
+        },
+        "requires_in_person_evaluation": false,
+        "handoff": {
+          "on_price_request": "aurora-rule-price-human-only",
+          "on_schedule_request": "aurora-rule-lacunas"
+        }
+      }
+    },
+    {
+      "id": "aurora-copy-engine-wash",
+      "node_type": "copy",
+      "slug": "copy-lavagem-motor-cofre",
+      "label": "Copy — Lavagem técnica do motor/cofre",
+      "parent_id": "aurora-product-engine-wash",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "validated",
+        "content": "A Aurora oferece lavagem técnica do motor e do cofre. A equipe avalia a condição e confirma orçamento e agenda."
+      }
+    },
+    {
+      "id": "aurora-faq-catalogo",
+      "node_type": "faq",
+      "slug": "faq-catalogo",
+      "label": "Quais serviços vocês fazem?",
+      "parent_id": "aurora-services",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Quais serviços vocês fazem?",
+        "question_aliases": [
+          "quais serviços vocês fazem",
+          "o que a Aurora oferece",
+          "lista de serviços",
+          "vocês trabalham com estética automotiva",
+          "que cuidados fazem no carro"
+        ],
+        "answer": "A Aurora atende avaliação presencial, lavagem técnica detalhada, lavagem de motor/cofre, higienização interna, polimento técnico e comercial, vitrificação, PPF, polimento de vidros, restauração de faróis, chapeação e pintura.",
+        "next_action": "perguntar qual necessidade quer avaliar",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services"
+        ],
+        "source_node_id": "aurora-services",
+        "source_node_type": "product_group",
+        "markdown_document": true,
+        "question_count": 6,
+        "scope": "product_group",
+        "grouped_faq": true,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-catalogo"
+            ],
+            "source_node_id": "aurora-services",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-orcamento",
+      "node_type": "faq",
+      "slug": "faq-orcamento",
+      "label": "Quanto custa?",
+      "parent_id": "aurora-rule-price-human-only",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Quanto custa?",
+        "question_aliases": [
+          "quanto custa",
+          "qual o preço",
+          "me passa o valor",
+          "tem tabela de preços",
+          "quanto vou pagar"
+        ],
+        "answer": "O orçamento é personalizado e o valor final é informado pela equipe humana após reunir os dados necessários do veículo e do serviço.",
+        "next_action": "coletar o primeiro campo faltante",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-price-human-only"
+        ],
+        "source_node_id": "aurora-rule-price-human-only",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "price",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-orcamento"
+            ],
+            "source_node_id": "aurora-rule-price-human-only",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-price-human-only"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-pix-dinheiro",
+      "node_type": "faq",
+      "slug": "faq-pix-dinheiro",
+      "label": "Aceita pix?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Aceita pix?",
+        "question_aliases": [
+          "aceita pix",
+          "posso pagar em dinheiro",
+          "quais formas de pagamento",
+          "pagamento à vista",
+          "tem pix ou espécie"
+        ],
+        "answer": "A Aurora aceita Pix e dinheiro.",
+        "next_action": "oferecer encaminhamento humano",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "payment",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-pix-dinheiro"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-quatro-vezes",
+      "node_type": "faq",
+      "slug": "faq-quatro-vezes",
+      "label": "Parcela sem juros?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Parcela sem juros?",
+        "question_aliases": [
+          "parcela sem juros",
+          "faz em quatro vezes",
+          "quantas vezes sem acréscimo",
+          "posso dividir em 4x",
+          "tem parcelamento gratuito"
+        ],
+        "answer": "O pagamento pode ser parcelado em até 4 vezes sem juros.",
+        "next_action": "equipe confirma o valor das parcelas",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "payment",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-quatro-vezes"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-dez-vezes",
+      "node_type": "faq",
+      "slug": "faq-dez-vezes",
+      "label": "Parcela em dez vezes?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Parcela em dez vezes?",
+        "question_aliases": [
+          "parcela em dez vezes",
+          "faz 10x",
+          "consigo dividir mais",
+          "tem parcelamento longo",
+          "qual o máximo de parcelas"
+        ],
+        "answer": "Também é possível parcelar em até 10 vezes com acréscimo; o cálculo é confirmado pela equipe humana.",
+        "next_action": "encaminhar o cálculo à equipe",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "payment",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-dez-vezes"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-sinal",
+      "node_type": "faq",
+      "slug": "faq-sinal",
+      "label": "Precisa dar entrada?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Precisa dar entrada?",
+        "question_aliases": [
+          "precisa dar entrada",
+          "quando cobra sinal",
+          "qual valor do sinal",
+          "serviço caro pede entrada",
+          "acima de dois mil como funciona"
+        ],
+        "answer": "Para valores acima de R$ 2.000, a política prevê sinal de 10%.",
+        "next_action": "equipe confirma cobrança e pagamento",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "payment_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-sinal"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-cancelamento",
+      "node_type": "faq",
+      "slug": "faq-cancelamento",
+      "label": "Posso cancelar?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Posso cancelar?",
+        "question_aliases": [
+          "posso cancelar",
+          "qual prazo para cancelar",
+          "cancelamento com dois dias",
+          "preciso avisar antes",
+          "regra de cancelamento"
+        ],
+        "answer": "O cancelamento deve ser solicitado com pelo menos 48 horas de antecedência.",
+        "next_action": "encaminhar alteração à equipe",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "cancellation_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-cancelamento"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-capacidade",
+      "node_type": "faq",
+      "slug": "faq-capacidade",
+      "label": "Quantos carros por dia?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Quantos carros por dia?",
+        "question_aliases": [
+          "quantos carros por dia",
+          "capacidade diária",
+          "atendem cinco clientes",
+          "quantas vagas tem",
+          "dá para atender muita gente"
+        ],
+        "answer": "A capacidade informada é de até cinco clientes por dia, sem representar disponibilidade para uma data específica.",
+        "next_action": "equipe confirma disponibilidade",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "capacity",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-capacidade"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-agendamento-humano",
+      "node_type": "faq",
+      "slug": "faq-agendamento-humano",
+      "label": "Pode agendar agora?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Pode agendar agora?",
+        "question_aliases": [
+          "pode agendar agora",
+          "confirma meu horário",
+          "marca para amanhã",
+          "reserva uma data",
+          "agenda automaticamente"
+        ],
+        "answer": "A Lia registra o pedido, mas data e horário são sempre confirmados pela equipe humana.",
+        "next_action": "coletar dados e fazer handoff",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "schedule_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-agendamento-humano"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-disponibilidade",
+      "node_type": "faq",
+      "slug": "faq-disponibilidade",
+      "label": "Tem horário hoje?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Tem horário hoje?",
+        "question_aliases": [
+          "tem horário hoje",
+          "tem vaga amanhã",
+          "quando tem disponibilidade",
+          "consegue encaixe",
+          "qual o próximo horário"
+        ],
+        "answer": "A disponibilidade muda e precisa ser consultada com a equipe humana; a Lia não confirma vaga automaticamente.",
+        "next_action": "handoff para agenda",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-disponibilidade"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-duracao",
+      "node_type": "faq",
+      "slug": "faq-duracao",
+      "label": "Quanto tempo demora?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Quanto tempo demora?",
+        "question_aliases": [
+          "quanto tempo demora",
+          "fica pronto quando",
+          "leva quantas horas",
+          "prazo do serviço",
+          "posso buscar no mesmo dia"
+        ],
+        "answer": "O tempo necessário depende do serviço e da condição do veículo, e deve ser confirmado pela equipe após a avaliação.",
+        "next_action": "encaminhar estimativa humana",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "duration_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-duracao"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-rota-remota",
+      "node_type": "faq",
+      "slug": "faq-rota-remota",
+      "label": "Dá para avaliar por whatsapp?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Dá para avaliar por whatsapp?",
+        "question_aliases": [
+          "dá para avaliar por whatsapp",
+          "posso mandar fotos",
+          "orçamento remoto",
+          "não consigo levar o carro",
+          "avaliam por vídeo"
+        ],
+        "answer": "Para pintura ou chapeação, a avaliação inicial pode seguir presencialmente ou por rota remota com fotos e vídeos, sem substituir a confirmação técnica da equipe.",
+        "next_action": "perguntar qual rota prefere",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "evaluation_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-rota-remota"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-fotos-videos",
+      "node_type": "faq",
+      "slug": "faq-fotos-videos",
+      "label": "Foto é suficiente?",
+      "parent_id": "aurora-rule-operation",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Foto é suficiente?",
+        "question_aliases": [
+          "foto é suficiente",
+          "vídeo resolve",
+          "conseguem diagnosticar por imagem",
+          "o que mando no whatsapp",
+          "avaliação por fotos é definitiva"
+        ],
+        "answer": "Fotos e vídeos podem apoiar a avaliação remota de pintura ou chapeação, mas não garantem um diagnóstico visual completo.",
+        "next_action": "solicitar mídia nítida na rota remota",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-operation"
+        ],
+        "source_node_id": "aurora-rule-operation",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "media_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-fotos-videos"
+            ],
+            "source_node_id": "aurora-rule-operation",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-operation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-multiplos-servicos",
+      "node_type": "faq",
+      "slug": "faq-multiplos-servicos",
+      "label": "Posso fazer dois serviços?",
+      "parent_id": "aurora-rule-atendimento",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Posso fazer dois serviços?",
+        "question_aliases": [
+          "posso fazer dois serviços",
+          "quero um pacote",
+          "junta polimento e lavagem",
+          "dá para combinar serviços",
+          "faço tudo no mesmo pedido"
+        ],
+        "answer": "O cliente pode demonstrar interesse em mais de um serviço; a equipe confirma a combinação, o orçamento e a agenda.",
+        "next_action": "registrar todos os serviços",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-atendimento"
+        ],
+        "source_node_id": "aurora-rule-atendimento",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "service_bundle",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-multiplos-servicos"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-desconto-pacote",
+      "node_type": "faq",
+      "slug": "faq-desconto-pacote",
+      "label": "Pacote tem desconto?",
+      "parent_id": "aurora-rule-price-human-only",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Pacote tem desconto?",
+        "question_aliases": [
+          "pacote tem desconto",
+          "quanto fica tudo junto",
+          "faz preço melhor",
+          "calcula combo",
+          "tem promoção para vários serviços"
+        ],
+        "answer": "A Lia pode sugerir combinar serviços, mas não calcula nem promete desconto ou preço de pacote.",
+        "next_action": "handoff para orçamento",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-price-human-only"
+        ],
+        "source_node_id": "aurora-rule-price-human-only",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "price_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-desconto-pacote"
+            ],
+            "source_node_id": "aurora-rule-price-human-only",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-price-human-only"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-audio",
+      "node_type": "faq",
+      "slug": "faq-audio",
+      "label": "Posso mandar áudio?",
+      "parent_id": "aurora-rule-atendimento",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Posso mandar áudio?",
+        "question_aliases": [
+          "posso mandar áudio",
+          "vocês ouvem mensagem de voz",
+          "Lia entende áudio",
+          "responde por áudio",
+          "áudio funciona"
+        ],
+        "answer": "O áudio recebido pode ser transcrito para o atendimento; não há promessa de resposta em áudio.",
+        "next_action": "seguir com o conteúdo transcrito",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-atendimento"
+        ],
+        "source_node_id": "aurora-rule-atendimento",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "channel_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-audio"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-objetivo",
+      "node_type": "faq",
+      "slug": "faq-objetivo",
+      "label": "Por que pergunta meu objetivo?",
+      "parent_id": "aurora-rule-atendimento",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Por que pergunta meu objetivo?",
+        "question_aliases": [
+          "por que pergunta meu objetivo",
+          "preciso dizer se vou vender",
+          "isso muda o atendimento",
+          "por que quer saber o uso",
+          "qual a importância do objetivo"
+        ],
+        "answer": "Saber o objetivo ajuda a equipe a entender se o foco é venda, manutenção, proteção ou outra melhoria, sem definir preço automaticamente.",
+        "next_action": "perguntar o objetivo se ausente",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-atendimento"
+        ],
+        "source_node_id": "aurora-rule-atendimento",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "qualification_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-objetivo"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-nome",
+      "node_type": "faq",
+      "slug": "faq-nome",
+      "label": "Por que precisa do meu nome?",
+      "parent_id": "aurora-rule-atendimento",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Por que precisa do meu nome?",
+        "question_aliases": [
+          "por que precisa do meu nome",
+          "posso não dizer o nome",
+          "para que nome completo",
+          "vocês guardam meu nome",
+          "nome é obrigatório"
+        ],
+        "answer": "O nome é usado para identificar e encaminhar corretamente o atendimento.",
+        "next_action": "pedir somente se ainda ausente",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-atendimento"
+        ],
+        "source_node_id": "aurora-rule-atendimento",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "qualification_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-nome"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-memoria",
+      "node_type": "faq",
+      "slug": "faq-memoria",
+      "label": "Já falei isso?",
+      "parent_id": "aurora-rule-atendimento",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Já falei isso?",
+        "question_aliases": [
+          "já falei isso",
+          "por que perguntou de novo",
+          "você lembra do carro",
+          "precisa repetir os dados",
+          "já informei o modelo"
+        ],
+        "answer": "Informações já confirmadas devem ser reaproveitadas; a Lia não deve repetir a mesma pergunta sem necessidade.",
+        "next_action": "reconhecer o fato e avançar",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-rule-atendimento"
+        ],
+        "source_node_id": "aurora-rule-atendimento",
+        "source_node_type": "rule",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "conversation_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-memoria"
+            ],
+            "source_node_id": "aurora-rule-atendimento",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-rule-atendimento"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-lavagem-detalhada-disponivel",
+      "node_type": "faq",
+      "slug": "faq-lavagem-detalhada-disponivel",
+      "label": "Fazem lavagem detalhada?",
+      "parent_id": "aurora-product-wash",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Fazem lavagem detalhada?",
+        "question_aliases": [
+          "fazem lavagem detalhada",
+          "tem lavagem técnica",
+          "quero lavar bem o carro",
+          "lavagem completa está disponível",
+          "vocês lavam o veículo"
+        ],
+        "answer": "A lavagem técnica detalhada faz parte do catálogo da Aurora.",
+        "next_action": "perguntar a condição atual",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-wash"
+        ],
+        "source_node_id": "aurora-product-wash",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-lavagem-detalhada-disponivel"
+            ],
+            "source_node_id": "aurora-product-wash",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-wash"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-lavagem-detalhada-objetivo",
+      "node_type": "faq",
+      "slug": "faq-lavagem-detalhada-objetivo",
+      "label": "Lavagem serve para meu caso?",
+      "parent_id": "aurora-product-wash",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Lavagem serve para meu caso?",
+        "question_aliases": [
+          "lavagem serve para meu caso",
+          "qual lavagem escolher",
+          "carro muito sujo pode",
+          "como saber se preciso",
+          "quero melhorar a limpeza"
+        ],
+        "answer": "Para orientar a lavagem técnica detalhada, a Lia registra o que o cliente quer melhorar e a condição atual do veículo.",
+        "next_action": "coletar objetivo e condição",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-wash"
+        ],
+        "source_node_id": "aurora-product-wash",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "qualification_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-lavagem-detalhada-objetivo"
+            ],
+            "source_node_id": "aurora-product-wash",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-wash"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-lavagem-detalhada-preco",
+      "node_type": "faq",
+      "slug": "faq-lavagem-detalhada-preco",
+      "label": "Preço da lavagem detalhada?",
+      "parent_id": "aurora-product-wash",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Preço da lavagem detalhada?",
+        "question_aliases": [
+          "preço da lavagem detalhada",
+          "quanto custa lavar",
+          "lavagem técnica tem valor",
+          "me passa orçamento da lavagem",
+          "tabela da lavagem"
+        ],
+        "answer": "O valor da lavagem técnica detalhada é confirmado pela equipe humana após os dados necessários do veículo.",
+        "next_action": "coletar dados e fazer handoff",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-wash"
+        ],
+        "source_node_id": "aurora-product-wash",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "price",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-lavagem-detalhada-preco"
+            ],
+            "source_node_id": "aurora-product-wash",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-wash"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-motor-disponivel",
+      "node_type": "faq",
+      "slug": "faq-motor-disponivel",
+      "label": "Lavam motor?",
+      "parent_id": "aurora-product-engine-wash",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Lavam motor?",
+        "question_aliases": [
+          "lavam motor",
+          "fazem limpeza do cofre",
+          "lavagem de motor está disponível",
+          "quero limpar o motor",
+          "vocês cuidam do cofre"
+        ],
+        "answer": "A Aurora oferece lavagem técnica do motor e do cofre.",
+        "next_action": "perguntar sobre vazamento",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-engine-wash"
+        ],
+        "source_node_id": "aurora-product-engine-wash",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-motor-disponivel"
+            ],
+            "source_node_id": "aurora-product-engine-wash",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-engine-wash"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-motor-vazamento",
+      "node_type": "faq",
+      "slug": "faq-motor-vazamento",
+      "label": "Tem problema lavar com vazamento?",
+      "parent_id": "aurora-product-engine-wash",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Tem problema lavar com vazamento?",
+        "question_aliases": [
+          "tem problema lavar com vazamento",
+          "motor vazando pode limpar",
+          "por que pergunta sobre óleo",
+          "vazamento muda a avaliação",
+          "preciso avisar vazamento"
+        ],
+        "answer": "Para esse serviço, é importante informar se há sinal de vazamento de óleo antes da avaliação.",
+        "next_action": "coletar `vazamento_oleo`",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-engine-wash"
+        ],
+        "source_node_id": "aurora-product-engine-wash",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "risk",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-motor-vazamento"
+            ],
+            "source_node_id": "aurora-product-engine-wash",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-engine-wash"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-motor-estrada",
+      "node_type": "faq",
+      "slug": "faq-motor-estrada",
+      "label": "Estrada de chão influencia?",
+      "parent_id": "aurora-product-engine-wash",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Estrada de chão influencia?",
+        "question_aliases": [
+          "estrada de chão influencia",
+          "carro pega muita poeira",
+          "por que pergunta onde circulo",
+          "uso rural muda o serviço",
+          "poeira no cofre importa"
+        ],
+        "answer": "A frequência em estrada de chão é uma informação usada para contextualizar a condição do motor e do cofre.",
+        "next_action": "coletar `estrada_de_chao`",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-engine-wash"
+        ],
+        "source_node_id": "aurora-product-engine-wash",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "qualification_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-motor-estrada"
+            ],
+            "source_node_id": "aurora-product-engine-wash",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-engine-wash"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-higienizacao-disponivel",
+      "node_type": "faq",
+      "slug": "faq-higienizacao-disponivel",
+      "label": "Fazem higienização interna?",
+      "parent_id": "aurora-product-interior",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Fazem higienização interna?",
+        "question_aliases": [
+          "fazem higienização interna",
+          "limpam por dentro",
+          "higienizam bancos",
+          "quero limpar o interior",
+          "serviço interno está disponível"
+        ],
+        "answer": "A higienização interna faz parte do catálogo da Aurora.",
+        "next_action": "perguntar o objetivo",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-interior"
+        ],
+        "source_node_id": "aurora-product-interior",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-higienizacao-disponivel"
+            ],
+            "source_node_id": "aurora-product-interior",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-interior"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-higienizacao-revestimento",
+      "node_type": "faq",
+      "slug": "faq-higienizacao-revestimento",
+      "label": "Importa ser couro?",
+      "parent_id": "aurora-product-interior",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Importa ser couro?",
+        "question_aliases": [
+          "importa ser couro",
+          "banco de tecido muda",
+          "por que pergunta o material",
+          "higieniza couro e tecido",
+          "qual revestimento preciso informar"
+        ],
+        "answer": "Para qualificar a higienização, a Lia pergunta se os bancos são de couro ou tecido.",
+        "next_action": "coletar `revestimento_bancos`",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-interior"
+        ],
+        "source_node_id": "aurora-product-interior",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "qualification_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-higienizacao-revestimento"
+            ],
+            "source_node_id": "aurora-product-interior",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-interior"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-higienizacao-estrada",
+      "node_type": "faq",
+      "slug": "faq-higienizacao-estrada",
+      "label": "Estrada de chão afeta interior?",
+      "parent_id": "aurora-product-interior",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Estrada de chão afeta interior?",
+        "question_aliases": [
+          "estrada de chão afeta interior",
+          "carro de sítio pode higienizar",
+          "poeira muda avaliação",
+          "uso rural importa",
+          "precisa saber onde o carro roda"
+        ],
+        "answer": "O uso frequente em estrada de chão ajuda a equipe a entender a exposição do interior à poeira e à sujeira.",
+        "next_action": "coletar `estrada_de_chao`",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-interior"
+        ],
+        "source_node_id": "aurora-product-interior",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "qualification_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-higienizacao-estrada"
+            ],
+            "source_node_id": "aurora-product-interior",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-interior"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-higienizacao-preco-tempo",
+      "node_type": "faq",
+      "slug": "faq-higienizacao-preco-tempo",
+      "label": "Quanto custa higienizar?",
+      "parent_id": "aurora-product-interior",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Quanto custa higienizar?",
+        "question_aliases": [
+          "quanto custa higienizar",
+          "tempo da higienização",
+          "orçamento da limpeza interna",
+          "fica pronto quando",
+          "preço para bancos"
+        ],
+        "answer": "Preço e duração da higienização são confirmados pela equipe conforme o veículo e sua condição.",
+        "next_action": "coletar dados e fazer handoff",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-interior"
+        ],
+        "source_node_id": "aurora-product-interior",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "price",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-higienizacao-preco-tempo"
+            ],
+            "source_node_id": "aurora-product-interior",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-interior"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-polimento-tecnico-disponivel",
+      "node_type": "faq",
+      "slug": "faq-polimento-tecnico-disponivel",
+      "label": "Fazem polimento técnico?",
+      "parent_id": "aurora-product-polish",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Fazem polimento técnico?",
+        "question_aliases": [
+          "fazem polimento técnico",
+          "quero polir o carro",
+          "tem correção da pintura",
+          "trabalham com polimento",
+          "preciso de polimento"
+        ],
+        "answer": "A Aurora oferece polimento técnico.",
+        "next_action": "perguntar o objetivo",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish"
+        ],
+        "source_node_id": "aurora-product-polish",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polimento-tecnico-disponivel"
+            ],
+            "source_node_id": "aurora-product-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-polimento-espelhamento",
+      "node_type": "faq",
+      "slug": "faq-polimento-espelhamento",
+      "label": "Vocês fazem espelhamento?",
+      "parent_id": "aurora-product-polish",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Vocês fazem espelhamento?",
+        "question_aliases": [
+          "vocês fazem espelhamento",
+          "minha pintura está opaca",
+          "quero mais brilho",
+          "carro sem brilho",
+          "como recuperar brilho"
+        ],
+        "answer": "“Espelhamento”, “pintura opaca” e “melhorar o brilho” são tratados como formas de descrever uma necessidade de polimento, sujeita a avaliação.",
+        "next_action": "confirmar a necessidade sem criar serviço novo",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish"
+        ],
+        "source_node_id": "aurora-product-polish",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "intent_alias",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polimento-espelhamento"
+            ],
+            "source_node_id": "aurora-product-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-polimento-anterior",
+      "node_type": "faq",
+      "slug": "faq-polimento-anterior",
+      "label": "Já poli antes importa?",
+      "parent_id": "aurora-product-polish",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Já poli antes importa?",
+        "question_aliases": [
+          "já poli antes importa",
+          "precisa saber serviço anterior",
+          "pintura já tratada muda",
+          "procedimento antigo influencia",
+          "por que pergunta histórico"
+        ],
+        "answer": "A equipe precisa saber se já houve procedimento anterior na pintura para contextualizar a avaliação do polimento.",
+        "next_action": "coletar `procedimento_anterior`",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish"
+        ],
+        "source_node_id": "aurora-product-polish",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "qualification_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polimento-anterior"
+            ],
+            "source_node_id": "aurora-product-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-polimento-foco",
+      "node_type": "faq",
+      "slug": "faq-polimento-foco",
+      "label": "Quero tirar riscos?",
+      "parent_id": "aurora-product-polish",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Quero tirar riscos?",
+        "question_aliases": [
+          "quero tirar riscos",
+          "quero só brilho",
+          "polimento resolve os dois",
+          "qual meu foco",
+          "diferença entre brilho e risco"
+        ],
+        "answer": "Na qualificação do polimento, a Lia diferencia se o foco principal é brilho, riscos ou ambos.",
+        "next_action": "coletar `foco_brilho_riscos`",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish"
+        ],
+        "source_node_id": "aurora-product-polish",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "qualification_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polimento-foco"
+            ],
+            "source_node_id": "aurora-product-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-polimento-avaliacao",
+      "node_type": "faq",
+      "slug": "faq-polimento-avaliacao",
+      "label": "Precisa avaliar para polir?",
+      "parent_id": "aurora-product-polish",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Precisa avaliar para polir?",
+        "question_aliases": [
+          "precisa avaliar para polir",
+          "dá para orçar sem ver",
+          "avaliação do polimento",
+          "posso mandar fotos",
+          "como decidem o polimento"
+        ],
+        "answer": "O polimento requer avaliação para relacionar objetivo, histórico e condição da pintura antes do orçamento.",
+        "next_action": "perguntar se pode comparecer",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish"
+        ],
+        "source_node_id": "aurora-product-polish",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "evaluation_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polimento-avaliacao"
+            ],
+            "source_node_id": "aurora-product-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-polimento-comercial-diferenca",
+      "node_type": "faq",
+      "slug": "faq-polimento-comercial-diferenca",
+      "label": "Comercial ou técnico?",
+      "parent_id": "aurora-product-polish-commercial",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Comercial ou técnico?",
+        "question_aliases": [
+          "comercial ou técnico",
+          "qual polimento escolher",
+          "diferença entre os polimentos",
+          "preciso do técnico",
+          "comercial serve para mim"
+        ],
+        "answer": "A escolha entre polimento comercial e técnico depende do objetivo e da condição observada; a equipe orienta após a avaliação.",
+        "next_action": "coletar foco e avaliação",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish-commercial"
+        ],
+        "source_node_id": "aurora-product-polish-commercial",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "service_selection",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polimento-comercial-diferenca"
+            ],
+            "source_node_id": "aurora-product-polish-commercial",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-commercial"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-polimento-subtipos",
+      "node_type": "faq",
+      "slug": "faq-polimento-subtipos",
+      "label": "Fazem one step?",
+      "parent_id": "aurora-product-polish",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Fazem one step?",
+        "question_aliases": [
+          "fazem one step",
+          "tem polimento localizado",
+          "oferecem lustro",
+          "polimento em etapas existe",
+          "só quero uma peça"
+        ],
+        "answer": "One-step, múltiplas etapas, localizado e acabamento/lustro não são ofertas publicadas nesta revisão; a equipe pode avaliar a necessidade dentro dos serviços sustentados.",
+        "next_action": "encaminhar avaliação humana",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish"
+        ],
+        "source_node_id": "aurora-product-polish",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "catalog_boundary",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-polimento-subtipos"
+            ],
+            "source_node_id": "aurora-product-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-vitrificacao-disponivel",
+      "node_type": "faq",
+      "slug": "faq-vitrificacao-disponivel",
+      "label": "Fazem vitrificação?",
+      "parent_id": "aurora-product-vitrification",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Fazem vitrificação?",
+        "question_aliases": [
+          "fazem vitrificação",
+          "quero vitrificar",
+          "tem proteção vitrificada",
+          "vitrificação está disponível",
+          "vocês aplicam vitrificador"
+        ],
+        "answer": "A vitrificação faz parte do catálogo da Aurora.",
+        "next_action": "perguntar objetivo e condição",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-vitrification"
+        ],
+        "source_node_id": "aurora-product-vitrification",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-vitrificacao-disponivel"
+            ],
+            "source_node_id": "aurora-product-vitrification",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-vitrification"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-vitrificacao-avaliacao",
+      "node_type": "faq",
+      "slug": "faq-vitrificacao-avaliacao",
+      "label": "Precisa avaliar para vitrificar?",
+      "parent_id": "aurora-product-vitrification",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Precisa avaliar para vitrificar?",
+        "question_aliases": [
+          "precisa avaliar para vitrificar",
+          "vitrificação serve para mim",
+          "orçamento sem ver o carro",
+          "como saber se indica",
+          "podem avaliar a pintura"
+        ],
+        "answer": "A indicação e o orçamento da vitrificação dependem da avaliação do veículo e do objetivo do cliente.",
+        "next_action": "coletar objetivo e rota de avaliação",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-vitrification"
+        ],
+        "source_node_id": "aurora-product-vitrification",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "evaluation_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-vitrificacao-avaliacao"
+            ],
+            "source_node_id": "aurora-product-vitrification",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-vitrification"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-vitrificacao-preco-tempo",
+      "node_type": "faq",
+      "slug": "faq-vitrificacao-preco-tempo",
+      "label": "Valor da vitrificação?",
+      "parent_id": "aurora-product-vitrification",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Valor da vitrificação?",
+        "question_aliases": [
+          "valor da vitrificação",
+          "demora quanto",
+          "preço para vitrificar",
+          "prazo do vitrificador",
+          "tabela de vitrificação"
+        ],
+        "answer": "Preço e duração da vitrificação são confirmados pela equipe humana; a Lia não publica estimativa estática.",
+        "next_action": "handoff após qualificação",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-vitrification"
+        ],
+        "source_node_id": "aurora-product-vitrification",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "price",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-vitrificacao-preco-tempo"
+            ],
+            "source_node_id": "aurora-product-vitrification",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-vitrification"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-ppf-disponivel",
+      "node_type": "faq",
+      "slug": "faq-ppf-disponivel",
+      "label": "Aplicam ppf?",
+      "parent_id": "aurora-product-ppf",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Aplicam ppf?",
+        "question_aliases": [
+          "aplicam ppf",
+          "tem película de proteção",
+          "quero colocar ppf",
+          "vocês trabalham com ppf",
+          "ppf está disponível"
+        ],
+        "answer": "O PPF faz parte do catálogo da Aurora.",
+        "next_action": "perguntar objetivo e área de interesse",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-ppf"
+        ],
+        "source_node_id": "aurora-product-ppf",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-ppf-disponivel"
+            ],
+            "source_node_id": "aurora-product-ppf",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-ppf"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-ppf-avaliacao",
+      "node_type": "faq",
+      "slug": "faq-ppf-avaliacao",
+      "label": "Ppf serve no meu carro?",
+      "parent_id": "aurora-product-ppf",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Ppf serve no meu carro?",
+        "question_aliases": [
+          "ppf serve no meu carro",
+          "onde aplicar",
+          "precisa avaliar",
+          "posso escolher a área",
+          "como funciona a indicação"
+        ],
+        "answer": "A aplicação de PPF precisa ser orientada pela equipe conforme o veículo, a condição e o objetivo informado.",
+        "next_action": "coletar dados e encaminhar",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-ppf"
+        ],
+        "source_node_id": "aurora-product-ppf",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "evaluation_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-ppf-avaliacao"
+            ],
+            "source_node_id": "aurora-product-ppf",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-ppf"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-ppf-preco-tempo",
+      "node_type": "faq",
+      "slug": "faq-ppf-preco-tempo",
+      "label": "Quanto custa ppf?",
+      "parent_id": "aurora-product-ppf",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Quanto custa ppf?",
+        "question_aliases": [
+          "quanto custa ppf",
+          "prazo da película",
+          "valor para aplicar",
+          "demora a instalação",
+          "orçamento de ppf"
+        ],
+        "answer": "O orçamento e o prazo do PPF são confirmados pela equipe após a avaliação necessária.",
+        "next_action": "handoff humano",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-ppf"
+        ],
+        "source_node_id": "aurora-product-ppf",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "price",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-ppf-preco-tempo"
+            ],
+            "source_node_id": "aurora-product-ppf",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-ppf"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-vidros-disponivel",
+      "node_type": "faq",
+      "slug": "faq-vidros-disponivel",
+      "label": "Fazem polimento no vidro?",
+      "parent_id": "aurora-product-glass-polish",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Fazem polimento no vidro?",
+        "question_aliases": [
+          "fazem polimento no vidro",
+          "polir para-brisa",
+          "tem serviço para vidros",
+          "quero polimento de vidro",
+          "vocês cuidam dos vidros"
+        ],
+        "answer": "A Aurora oferece polimento de vidros.",
+        "next_action": "perguntar condição e objetivo",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-glass-polish"
+        ],
+        "source_node_id": "aurora-product-glass-polish",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-vidros-disponivel"
+            ],
+            "source_node_id": "aurora-product-glass-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-glass-polish"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-vidros-orcamento",
+      "node_type": "faq",
+      "slug": "faq-vidros-orcamento",
+      "label": "Polimento tira minha mancha?",
+      "parent_id": "aurora-product-glass-polish",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Polimento tira minha mancha?",
+        "question_aliases": [
+          "polimento tira minha mancha",
+          "quanto custa o vidro",
+          "tempo do polimento",
+          "dá para garantir resultado",
+          "orçamento do para-brisa"
+        ],
+        "answer": "Resultado esperado, preço e duração do polimento de vidros dependem da avaliação e são confirmados pela equipe.",
+        "next_action": "encaminhar avaliação",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-glass-polish"
+        ],
+        "source_node_id": "aurora-product-glass-polish",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "evaluation_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-vidros-orcamento"
+            ],
+            "source_node_id": "aurora-product-glass-polish",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-glass-polish"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-farois-disponivel",
+      "node_type": "faq",
+      "slug": "faq-farois-disponivel",
+      "label": "Restauram farol?",
+      "parent_id": "aurora-product-polish-headlight",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Restauram farol?",
+        "question_aliases": [
+          "restauram farol",
+          "fazem revitalização",
+          "farol opaco tem serviço",
+          "recuperam faróis",
+          "quero polir o farol"
+        ],
+        "answer": "A Aurora oferece revitalização ou restauração de faróis.",
+        "next_action": "perguntar a condição",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish-headlight"
+        ],
+        "source_node_id": "aurora-product-polish-headlight",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-farois-disponivel"
+            ],
+            "source_node_id": "aurora-product-polish-headlight",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-headlight"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-farois-resultado",
+      "node_type": "faq",
+      "slug": "faq-farois-resultado",
+      "label": "Farol fica novo?",
+      "parent_id": "aurora-product-polish-headlight",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Farol fica novo?",
+        "question_aliases": [
+          "farol fica novo",
+          "remove amarelado",
+          "garante transparência",
+          "qual resultado esperar",
+          "meu farol opaco resolve"
+        ],
+        "answer": "O resultado possível na restauração de faróis depende da condição observada e não é garantido automaticamente pela Lia.",
+        "next_action": "pedir avaliação da condição",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish-headlight"
+        ],
+        "source_node_id": "aurora-product-polish-headlight",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "result_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-farois-resultado"
+            ],
+            "source_node_id": "aurora-product-polish-headlight",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-headlight"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-farois-uv",
+      "node_type": "faq",
+      "slug": "faq-farois-uv",
+      "label": "Tem proteção uv?",
+      "parent_id": "aurora-product-polish-headlight",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Tem proteção uv?",
+        "question_aliases": [
+          "tem proteção uv",
+          "passa verniz uv",
+          "protege do sol",
+          "farol não amarela de novo",
+          "qual proteção recebe"
+        ],
+        "answer": "Proteção UV não é uma alegação publicada nesta revisão; a equipe deve confirmar qualquer proteção ou acabamento aplicável.",
+        "next_action": "handoff para detalhe técnico",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-polish-headlight"
+        ],
+        "source_node_id": "aurora-product-polish-headlight",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "catalog_boundary",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-farois-uv"
+            ],
+            "source_node_id": "aurora-product-polish-headlight",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-polish-headlight"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-chapeacao-disponivel",
+      "node_type": "faq",
+      "slug": "faq-chapeacao-disponivel",
+      "label": "Fazem chapeação?",
+      "parent_id": "aurora-product-bodywork",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Fazem chapeação?",
+        "question_aliases": [
+          "fazem chapeação",
+          "consertam lataria",
+          "preciso chapear",
+          "tem funilaria",
+          "arrumam amassado"
+        ],
+        "answer": "A chapeação faz parte do catálogo da Aurora e exige avaliação da condição do veículo.",
+        "next_action": "escolher rota presencial ou remota",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-bodywork"
+        ],
+        "source_node_id": "aurora-product-bodywork",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-chapeacao-disponivel"
+            ],
+            "source_node_id": "aurora-product-bodywork",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-bodywork"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-chapeacao-remota",
+      "node_type": "faq",
+      "slug": "faq-chapeacao-remota",
+      "label": "Orçamento de chapeação por foto?",
+      "parent_id": "aurora-product-bodywork",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Orçamento de chapeação por foto?",
+        "question_aliases": [
+          "orçamento de chapeação por foto",
+          "posso mandar vídeo",
+          "avaliam amassado online",
+          "não consigo levar agora",
+          "foto da lataria serve"
+        ],
+        "answer": "A avaliação inicial de chapeação pode começar com fotos e vídeos, mas a equipe confirma o diagnóstico e o orçamento.",
+        "next_action": "solicitar mídia na rota remota",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-bodywork"
+        ],
+        "source_node_id": "aurora-product-bodywork",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "media_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-chapeacao-remota"
+            ],
+            "source_node_id": "aurora-product-bodywork",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-bodywork"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-chapeacao-preco-tempo",
+      "node_type": "faq",
+      "slug": "faq-chapeacao-preco-tempo",
+      "label": "Quanto custa chapeação?",
+      "parent_id": "aurora-product-bodywork",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Quanto custa chapeação?",
+        "question_aliases": [
+          "quanto custa chapeação",
+          "prazo da funilaria",
+          "valor do amassado",
+          "tem vaga para chapear",
+          "quando fica pronto"
+        ],
+        "answer": "Preço, prazo e disponibilidade da chapeação são confirmados pela equipe após a avaliação.",
+        "next_action": "handoff humano",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-bodywork"
+        ],
+        "source_node_id": "aurora-product-bodywork",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "price",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-chapeacao-preco-tempo"
+            ],
+            "source_node_id": "aurora-product-bodywork",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-bodywork"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-pintura-disponivel",
+      "node_type": "faq",
+      "slug": "faq-pintura-disponivel",
+      "label": "Vocês fazem pintura?",
+      "parent_id": "aurora-product-paint",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Vocês fazem pintura?",
+        "question_aliases": [
+          "vocês fazem pintura",
+          "quero repintar",
+          "pintura automotiva disponível",
+          "pintam uma área",
+          "preciso pintar o carro"
+        ],
+        "answer": "A pintura faz parte do catálogo da Aurora e requer avaliação do veículo.",
+        "next_action": "escolher rota de avaliação",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-paint"
+        ],
+        "source_node_id": "aurora-product-paint",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-pintura-disponivel"
+            ],
+            "source_node_id": "aurora-product-paint",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-paint"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-pintura-remota",
+      "node_type": "faq",
+      "slug": "faq-pintura-remota",
+      "label": "Orçamento de pintura por foto?",
+      "parent_id": "aurora-product-paint",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Orçamento de pintura por foto?",
+        "question_aliases": [
+          "orçamento de pintura por foto",
+          "posso mandar vídeo da pintura",
+          "avaliam cor pelo whatsapp",
+          "pintura opaca por imagem",
+          "não posso ir presencialmente"
+        ],
+        "answer": "A avaliação inicial de pintura pode começar com fotos e vídeos; cor, condição, modelo e ano precisam ser registrados, e a equipe confirma o diagnóstico.",
+        "next_action": "solicitar mídia e dados do veículo",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-paint"
+        ],
+        "source_node_id": "aurora-product-paint",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "media_policy",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-pintura-remota"
+            ],
+            "source_node_id": "aurora-product-paint",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-paint"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aurora-faq-pintura-preco-tempo",
+      "node_type": "faq",
+      "slug": "faq-pintura-preco-tempo",
+      "label": "Quanto custa pintar?",
+      "parent_id": "aurora-product-paint",
+      "data": {
+        "source": "aurora_review_plan_2026_08_21",
+        "status": "pending_validation",
+        "question": "Quanto custa pintar?",
+        "question_aliases": [
+          "quanto custa pintar",
+          "demora para pintar",
+          "agenda da pintura",
+          "garante a cor",
+          "orçamento de repintura"
+        ],
+        "answer": "Preço, prazo, agenda e resultado da pintura não são confirmados automaticamente; dependem da avaliação e da equipe humana.",
+        "next_action": "handoff humano",
+        "branch_path": [
+          "aurora-persona",
+          "aurora-brand",
+          "aurora-briefing",
+          "aurora-campaign",
+          "aurora-audience",
+          "aurora-services",
+          "aurora-product-paint"
+        ],
+        "source_node_id": "aurora-product-paint",
+        "source_node_type": "product",
+        "markdown_document": true,
+        "question_count": 6,
+        "claims": [
+          {
+            "claim_type": "price",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "aurora-faq-pintura-preco-tempo"
+            ],
+            "source_node_id": "aurora-product-paint",
+            "branch_path": [
+              "aurora-persona",
+              "aurora-brand",
+              "aurora-briefing",
+              "aurora-campaign",
+              "aurora-audience",
+              "aurora-services",
+              "aurora-product-paint"
+            ]
+          }
+        ]
       }
     }
   ],
@@ -3911,14 +6908,6 @@
       "metadata": {}
     },
     {
-      "id": "aurora-e-one-step-embedded",
-      "source": "aurora-faq-polish-one-step",
-      "target": "aurora-embedded",
-      "relation": "visible_to_agent",
-      "primary_tree": false,
-      "metadata": {}
-    },
-    {
       "id": "aurora-e-services-multi-step",
       "source": "aurora-services",
       "target": "aurora-product-polish-multi-step",
@@ -3940,14 +6929,6 @@
       "target": "aurora-faq-polish-multi-step",
       "relation": "answers_question",
       "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-multi-step-embedded",
-      "source": "aurora-faq-polish-multi-step",
-      "target": "aurora-embedded",
-      "relation": "visible_to_agent",
-      "primary_tree": false,
       "metadata": {}
     },
     {
@@ -3975,14 +6956,6 @@
       "metadata": {}
     },
     {
-      "id": "aurora-e-localized-embedded",
-      "source": "aurora-faq-polish-localized",
-      "target": "aurora-embedded",
-      "relation": "visible_to_agent",
-      "primary_tree": false,
-      "metadata": {}
-    },
-    {
       "id": "aurora-e-services-finish",
       "source": "aurora-services",
       "target": "aurora-product-polish-finish",
@@ -4004,14 +6977,6 @@
       "target": "aurora-faq-polish-finish",
       "relation": "answers_question",
       "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-finish-embedded",
-      "source": "aurora-faq-polish-finish",
-      "target": "aurora-embedded",
-      "relation": "visible_to_agent",
-      "primary_tree": false,
       "metadata": {}
     },
     {
@@ -4052,14 +7017,6 @@
       "target": "aurora-faq-polimento-tipos",
       "relation": "contains",
       "primary_tree": true,
-      "metadata": {}
-    },
-    {
-      "id": "aurora-e-polimento-tipos-embedded",
-      "source": "aurora-faq-polimento-tipos",
-      "target": "aurora-embedded",
-      "relation": "visible_to_agent",
-      "primary_tree": false,
       "metadata": {}
     },
     {
@@ -4140,6 +7097,446 @@
       "target": "aurora-embedded",
       "relation": "visible_to_agent",
       "primary_tree": false,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-services-engine-wash",
+      "source": "aurora-services",
+      "target": "aurora-product-engine-wash",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-engine-wash-copy",
+      "source": "aurora-product-engine-wash",
+      "target": "aurora-copy-engine-wash",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-catalogo",
+      "source": "aurora-services",
+      "target": "aurora-faq-catalogo",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-orcamento",
+      "source": "aurora-rule-price-human-only",
+      "target": "aurora-faq-orcamento",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-pix-dinheiro",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-pix-dinheiro",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-quatro-vezes",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-quatro-vezes",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-dez-vezes",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-dez-vezes",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-sinal",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-sinal",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-cancelamento",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-cancelamento",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-capacidade",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-capacidade",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-agendamento-humano",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-agendamento-humano",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-disponibilidade",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-disponibilidade",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-duracao",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-duracao",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-rota-remota",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-rota-remota",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-fotos-videos",
+      "source": "aurora-rule-operation",
+      "target": "aurora-faq-fotos-videos",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-multiplos-servicos",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-multiplos-servicos",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-desconto-pacote",
+      "source": "aurora-rule-price-human-only",
+      "target": "aurora-faq-desconto-pacote",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-audio",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-audio",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-objetivo",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-objetivo",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-nome",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-nome",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-memoria",
+      "source": "aurora-rule-atendimento",
+      "target": "aurora-faq-memoria",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-lavagem-detalhada-disponivel",
+      "source": "aurora-product-wash",
+      "target": "aurora-faq-lavagem-detalhada-disponivel",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-lavagem-detalhada-objetivo",
+      "source": "aurora-product-wash",
+      "target": "aurora-faq-lavagem-detalhada-objetivo",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-lavagem-detalhada-preco",
+      "source": "aurora-product-wash",
+      "target": "aurora-faq-lavagem-detalhada-preco",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-motor-disponivel",
+      "source": "aurora-product-engine-wash",
+      "target": "aurora-faq-motor-disponivel",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-motor-vazamento",
+      "source": "aurora-product-engine-wash",
+      "target": "aurora-faq-motor-vazamento",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-motor-estrada",
+      "source": "aurora-product-engine-wash",
+      "target": "aurora-faq-motor-estrada",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-higienizacao-disponivel",
+      "source": "aurora-product-interior",
+      "target": "aurora-faq-higienizacao-disponivel",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-higienizacao-revestimento",
+      "source": "aurora-product-interior",
+      "target": "aurora-faq-higienizacao-revestimento",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-higienizacao-estrada",
+      "source": "aurora-product-interior",
+      "target": "aurora-faq-higienizacao-estrada",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-higienizacao-preco-tempo",
+      "source": "aurora-product-interior",
+      "target": "aurora-faq-higienizacao-preco-tempo",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-polimento-tecnico-disponivel",
+      "source": "aurora-product-polish",
+      "target": "aurora-faq-polimento-tecnico-disponivel",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-polimento-espelhamento",
+      "source": "aurora-product-polish",
+      "target": "aurora-faq-polimento-espelhamento",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-polimento-anterior",
+      "source": "aurora-product-polish",
+      "target": "aurora-faq-polimento-anterior",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-polimento-foco",
+      "source": "aurora-product-polish",
+      "target": "aurora-faq-polimento-foco",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-polimento-avaliacao",
+      "source": "aurora-product-polish",
+      "target": "aurora-faq-polimento-avaliacao",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-polimento-comercial-diferenca",
+      "source": "aurora-product-polish-commercial",
+      "target": "aurora-faq-polimento-comercial-diferenca",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-polimento-subtipos",
+      "source": "aurora-product-polish",
+      "target": "aurora-faq-polimento-subtipos",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-vitrificacao-disponivel",
+      "source": "aurora-product-vitrification",
+      "target": "aurora-faq-vitrificacao-disponivel",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-vitrificacao-avaliacao",
+      "source": "aurora-product-vitrification",
+      "target": "aurora-faq-vitrificacao-avaliacao",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-vitrificacao-preco-tempo",
+      "source": "aurora-product-vitrification",
+      "target": "aurora-faq-vitrificacao-preco-tempo",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-ppf-disponivel",
+      "source": "aurora-product-ppf",
+      "target": "aurora-faq-ppf-disponivel",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-ppf-avaliacao",
+      "source": "aurora-product-ppf",
+      "target": "aurora-faq-ppf-avaliacao",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-ppf-preco-tempo",
+      "source": "aurora-product-ppf",
+      "target": "aurora-faq-ppf-preco-tempo",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-vidros-disponivel",
+      "source": "aurora-product-glass-polish",
+      "target": "aurora-faq-vidros-disponivel",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-vidros-orcamento",
+      "source": "aurora-product-glass-polish",
+      "target": "aurora-faq-vidros-orcamento",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-farois-disponivel",
+      "source": "aurora-product-polish-headlight",
+      "target": "aurora-faq-farois-disponivel",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-farois-resultado",
+      "source": "aurora-product-polish-headlight",
+      "target": "aurora-faq-farois-resultado",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-farois-uv",
+      "source": "aurora-product-polish-headlight",
+      "target": "aurora-faq-farois-uv",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-chapeacao-disponivel",
+      "source": "aurora-product-bodywork",
+      "target": "aurora-faq-chapeacao-disponivel",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-chapeacao-remota",
+      "source": "aurora-product-bodywork",
+      "target": "aurora-faq-chapeacao-remota",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-chapeacao-preco-tempo",
+      "source": "aurora-product-bodywork",
+      "target": "aurora-faq-chapeacao-preco-tempo",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-pintura-disponivel",
+      "source": "aurora-product-paint",
+      "target": "aurora-faq-pintura-disponivel",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-pintura-remota",
+      "source": "aurora-product-paint",
+      "target": "aurora-faq-pintura-remota",
+      "relation": "contains",
+      "primary_tree": true,
+      "metadata": {}
+    },
+    {
+      "id": "aurora-e-faq-pintura-preco-tempo",
+      "source": "aurora-product-paint",
+      "target": "aurora-faq-pintura-preco-tempo",
+      "relation": "contains",
+      "primary_tree": true,
       "metadata": {}
     }
   ],
