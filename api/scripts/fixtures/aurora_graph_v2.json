@@ -194,8 +194,7 @@
             "revestimento_bancos": "Os bancos são de couro ou tecido?",
             "estrada_de_chao": "O veículo circula com frequência em estrada de chão?",
             "vazamento_oleo": "Há sinal de vazamento de óleo no motor ou no cofre?",
-            "evaluation_route": "Você prefere avaliação presencial ou seguir a avaliação inicial por fotos e vídeos?",
-            "media_requested": "Pode enviar fotos e vídeos nítidos das áreas que precisam de avaliação?"
+            "evaluation_route": "Você prefere avaliação presencial ou seguir a avaliação inicial por fotos e vídeos?"
           },
           "field_labels": {
             "nome_cliente": "nome",
@@ -212,8 +211,7 @@
             "revestimento_bancos": "revestimento dos bancos",
             "estrada_de_chao": "uso em estrada de chão",
             "vazamento_oleo": "sinal de vazamento de óleo",
-            "evaluation_route": "rota de avaliação",
-            "media_requested": "fotos e vídeos para avaliação remota"
+            "evaluation_route": "rota de avaliação"
           },
           "confirmation_templates": {
             "fact": [

@@ -19,9 +19,9 @@ Nenhum bundle Aurora foi criado e o backend/n8n não recebeu regra de negócio.
 
 | Artefato | Checksum | Contagem |
 |---|---|---|
-| Graph JSON 2.1 canônico | `sha256:32a3f86727516056fe45022d597dea69ec74d0031747067c197dd2310309eddd` | 153 nodes / 234 edges |
-| Documento compilado v3.6.2 | `sha256:143696804f18d04dc164ae5e5c792a2495fc7bfbfc47d6465e02ac982b1aba7b` | 14 branches / 30 FAQs elegíveis |
-| Fixture em disco | `sha256:268db0f71bd0bfa1f5688ee3c33ef7a03b69969a4b1cf6ed018e763ef69989b0` | JSON de autoria |
+| Graph JSON 2.1 canônico | `sha256:97fd66ab04d9618ef99dd7cb0ec99a6d8a7a8f117e658e66dbc76dbf5bd9def6` | 153 nodes / 234 edges |
+| Documento compilado v3.6.2 | `sha256:f40a29b5b8fdc8373948b7e281c0f96e8487084d8e92e81ae9ec367d70bc1b40` | 14 branches / 30 FAQs elegíveis |
+| Fixture em disco | `sha256:80e66e5909ca67d6a8e920fa4743f4d172bba442925850459e431aa928d37ade` | JSON de autoria |
 | Corpus humano | `sha256:0b7db4cf1672298a5814189ea3f6157fd62394697a851956578a3813219dee08` | 55 entradas / 5 aliases cada |
 
 O checksum canônico difere do hash do arquivo porque o pipeline atualiza o
@@ -56,8 +56,8 @@ forma determinística antes da publicação.
 
 ## Validação local
 
-- `69 passed` em `test_publish_aurora_graph_v21.py` e
-  `test_aurora_appointment_runtime.py`.
+- `70 passed` no gate focado, incluindo o contrato de materialização das
+  perguntas e as suítes Aurora.
 - Graph JSON 2.1 válido.
 - Todas as chaves obrigatórias possuem pergunta não vazia no node Persona.
 - 53 FAQs pendentes com exatamente cinco aliases e zero grant ao Embedded.
