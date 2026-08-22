@@ -789,15 +789,34 @@ def compile_graph(
         # product closures through that shared sink.
         frontier = set(reasons)
         for edge in edges:
+            metadata = edge.get("metadata") or {}
+            subtree = metadata.get("include_subtree_in_branch") is True
             if edge["primary"] or not (
-                (edge.get("metadata") or {}).get("include_in_branch") is True
+                metadata.get("include_in_branch") is True
+                or subtree
                 or edge["relation_type"] == "applies_to"
             ):
                 continue
+
+            def admit(node_id: str, relation: str = edge["relation_type"]) -> None:
+                # `include_in_branch` admits exactly the node it points at.
+                # `include_subtree_in_branch` admits the node AND everything
+                # below it in the primary tree, so one edge can scope a whole
+                # shared catalog to a branch instead of needing one edge per
+                # node -- the pattern that made a persona-rooted repair leak
+                # every node into every branch and erase the branches'
+                # differences.
+                for member in (descendants(node_id) if subtree else {node_id}):
+                    if member not in reasons:
+                        reasons[member] = (
+                            f"semantic_subtree:{relation}" if subtree
+                            else f"semantic:{relation}"
+                        )
+
             if edge["source"] in frontier and edge["target"] not in reasons:
-                reasons[edge["target"]] = f"semantic:{edge['relation_type']}"
+                admit(edge["target"])
             elif edge["target"] in frontier and edge["source"] not in reasons:
-                reasons[edge["source"]] = f"semantic:{edge['relation_type']}"
+                admit(edge["source"])
 
         fields_by_key: dict[str, dict[str, Any]] = {}
         for node_id in sorted(reasons):
