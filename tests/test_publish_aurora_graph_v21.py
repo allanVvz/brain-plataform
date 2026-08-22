@@ -290,6 +290,24 @@ def test_every_aurora_review_booking_field_has_a_graph_owned_question() -> None:
     ]
 
 
+def test_new_aurora_fields_publish_specific_validation_examples() -> None:
+    graph = build_graph()
+    fields = {
+        field["key"]: field
+        for node in graph.nodes
+        for field in ((node.data or {}).get("qualification") or {}).get("fields") or []
+    }
+
+    previous = fields["procedimento_anterior"]["validation"]
+    assert previous["mode"] == "semantic"
+    assert "Nunca foi feito procedimento nessa pintura" in previous["examples"]
+    assert fields["foco_brilho_riscos"]["validation"]["mode"] == "enum"
+    assert fields["revestimento_bancos"]["validation"]["mode"] == "enum"
+    assert fields["vazamento_oleo"]["validation"]["mode"] == "enum"
+    assert fields["estrada_de_chao"]["validation"]["mode"] == "enum"
+    assert fields["evaluation_route"]["validation"]["mode"] == "enum"
+
+
 def test_shared_qualification_fields_share_one_owner_across_products() -> None:
     """Regression test for the Aurora repeated-question bug (2026-08-08).
 
