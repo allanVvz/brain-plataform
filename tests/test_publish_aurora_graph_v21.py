@@ -306,6 +306,11 @@ def test_new_aurora_fields_publish_specific_validation_examples() -> None:
     assert fields["vazamento_oleo"]["validation"]["mode"] == "enum"
     assert fields["estrada_de_chao"]["validation"]["mode"] == "enum"
     assert fields["evaluation_route"]["validation"]["mode"] == "enum"
+    remote = next(
+        value for value in fields["evaluation_route"]["validation"]["values"]
+        if value["value"] == "remota"
+    )
+    assert "prefiro começar a avaliação por fotos e vídeos" in remote["aliases"]
 
 
 def test_shared_qualification_fields_share_one_owner_across_products() -> None:

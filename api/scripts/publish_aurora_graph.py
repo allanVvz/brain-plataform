@@ -167,10 +167,22 @@ def build_graph() -> GraphJson:
             return {
                 "mode": "enum",
                 "values": [
-                    {"value": "presencial", "aliases": ["presencial", "levar o carro"]},
+                    {
+                        "value": "presencial",
+                        "aliases": [
+                            "presencial",
+                            "levar o carro",
+                            "prefiro levar o carro para avaliação presencial",
+                        ],
+                    },
                     {
                         "value": "remota",
-                        "aliases": ["remota", "por fotos e vídeos", "começar por fotos e vídeos"],
+                        "aliases": [
+                            "remota",
+                            "por fotos e vídeos",
+                            "começar por fotos e vídeos",
+                            "prefiro começar a avaliação por fotos e vídeos",
+                        ],
                     },
                 ],
                 "invalid_response": invalid_response,
