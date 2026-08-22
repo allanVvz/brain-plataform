@@ -111,12 +111,24 @@ def build_graph() -> GraphJson:
             }
         if field_key == "procedimento_anterior":
             return {
-                "mode": "semantic",
-                "description": "Histórico declarado de procedimento anterior na pintura, inclusive resposta negativa.",
-                "examples": [
-                    "Nunca foi feito procedimento nessa pintura",
-                    "Já fizeram polimento antes",
-                    "Não sei se houve procedimento anterior",
+                "mode": "enum",
+                "values": [
+                    {
+                        "value": "nenhum",
+                        "aliases": [
+                            "nunca foi feito procedimento nessa pintura",
+                            "não foi feito nenhum procedimento",
+                            "nenhum procedimento anterior",
+                        ],
+                    },
+                    {
+                        "value": "realizado",
+                        "aliases": ["já fizeram polimento antes", "já houve procedimento anterior"],
+                    },
+                    {
+                        "value": "desconhecido",
+                        "aliases": ["não sei", "não sei se houve procedimento anterior"],
+                    },
                 ],
                 "invalid_response": invalid_response,
             }

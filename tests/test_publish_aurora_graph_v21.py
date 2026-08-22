@@ -299,8 +299,8 @@ def test_new_aurora_fields_publish_specific_validation_examples() -> None:
     }
 
     previous = fields["procedimento_anterior"]["validation"]
-    assert previous["mode"] == "semantic"
-    assert "Nunca foi feito procedimento nessa pintura" in previous["examples"]
+    assert previous["mode"] == "enum"
+    assert any(value["value"] == "nenhum" for value in previous["values"])
     assert fields["foco_brilho_riscos"]["validation"]["mode"] == "enum"
     assert fields["revestimento_bancos"]["validation"]["mode"] == "enum"
     assert fields["vazamento_oleo"]["validation"]["mode"] == "enum"
