@@ -8,7 +8,7 @@ API_ROOT = Path(__file__).resolve().parents[1] / "api"
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
-from scripts.publish_aurora_graph import build_graph
+from scripts.publish_aurora_graph import build_graph, build_v3_source_rows
 from routes.conversations import ContextRequest
 from services import (
     graph_agent_runtime_v3,
@@ -44,6 +44,82 @@ def _compile(graph) -> dict:
     persona_node = next(node for node in graph.nodes if node.node_type == "persona")
     persona = {"id": persona_node.id, "slug": graph.persona_slug}
     return graph_compiler_v3.compile_graph(persona=persona, node_rows=node_rows, edge_rows=edge_rows)
+
+
+def test_aurora_v3_source_isolated_from_runtime_assets_and_duplicate_projection_rows() -> None:
+    graph = graph_markdown.canonicalize_graph(build_graph())
+    projection_nodes = [{
+        "id": f"db:{node.id}",
+        "node_type": "embed" if node.node_type == "embedded" else node.node_type,
+        "slug": node.slug,
+        "status": "approved",
+        "metadata": {
+            "graph_json_import": True,
+            "graph_json_node_id": node.id,
+            "active": True,
+        },
+    } for node in graph.nodes]
+    duplicate_ids = {
+        "aurora-faq-evaluation": "faq-avaliacao-inicial",
+        "aurora-faq-vitrification": "faq-vitrificacao",
+        "aurora-faq-ppf": "faq-ppf",
+    }
+    projection_nodes.extend({
+        "id": f"duplicate:{stable_id}",
+        "node_type": "faq",
+        "slug": slug,
+        "status": "pending_regeneration",
+        "metadata": {
+            "graph_json_import": True,
+            "graph_json_node_id": stable_id,
+            "active": True,
+        },
+    } for stable_id, slug in duplicate_ids.items())
+    projection_nodes.append({
+        "id": "external-asset",
+        "node_type": "asset",
+        "slug": "customer-media",
+        "status": "active",
+        "metadata": {"active": True},
+    })
+    projection_edges = [{
+        "id": f"db:{edge.id}",
+        "source_node_id": f"db:{edge.source}",
+        "target_node_id": f"db:{edge.target}",
+        "relation_type": edge.relation_type,
+        "metadata": {"graph_json_edge_id": edge.id, "active": True},
+    } for edge in graph.edges if edge.lifecycle.status == "active"]
+
+    rows, edges, duplicates = build_v3_source_rows(
+        graph,
+        projection_nodes=list(reversed(projection_nodes)),
+        projection_edges=list(reversed(projection_edges)),
+    )
+
+    assert len(rows) == len(graph.nodes) == 153
+    assert len(edges) == len(graph.edges) == 234
+    assert {row["id"] for row in duplicates} == {
+        f"duplicate:{stable_id}" for stable_id in duplicate_ids
+    }
+    assert "external-asset" not in {row["id"] for row in rows}
+    selected = {
+        (row["metadata"] or {}).get("graph_json_node_id"): row
+        for row in rows
+    }
+    assert all(
+        selected[stable_id]["id"] == f"db:{stable_id}"
+        for stable_id in duplicate_ids
+    )
+
+    compiled = graph_compiler_v3.compile_graph(
+        persona={"id": "00000000-0000-4000-8000-000000000001", "slug": "aurora"},
+        node_rows=rows,
+        edge_rows=edges,
+    )
+    assert len(compiled["node_by_id"]) == 87
+    assert len(compiled["edges"]) == 168
+    assert len(compiled["branch_contracts"]) == 14
+    assert len(compiled["eligible_faq_node_ids"]) == 30
 
 
 def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
