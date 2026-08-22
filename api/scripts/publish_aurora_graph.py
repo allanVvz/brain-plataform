@@ -191,9 +191,11 @@ def build_graph() -> GraphJson:
             return {"mode": "schema", "invalid_response": invalid_response}
         semantic = {
             "nome_cliente": {
-                "semantic_type": "human_full_name",
-                "description": "Nome e sobrenome completos informados pelo cliente.",
-                "examples": ["Beatriz Souza", "José da Silva", "Ana Paula Lima"],
+                "semantic_type": "human_name",
+                "description": (
+                    "Nome pelo qual o cliente prefere ser chamado; o sobrenome é opcional."
+                ),
+                "examples": ["Beatriz", "José da Silva", "Ana Paula Lima"],
                 # The model reads a name far better than any string
                 # comparison can. Above this confidence its reading stands on
                 # its own (evidence and shape are still proved by the
@@ -202,7 +204,7 @@ def build_graph() -> GraphJson:
                 # 2026-08-19, when "allan rodrigues" could not match the
                 # model's own "Allan Rodrigues".
                 "model_confidence_min": 0.90,
-                "min_tokens": 2,
+                "min_tokens": 1,
                 "max_tokens": 6,
                 "confirmation_policy": "last_resort",
             },

@@ -209,6 +209,10 @@ def technical_failure(
     """Quarantine a failed turn without inventing a commercial handoff."""
     _authorize(x_webhook_token)
     lead = conversation_runtime.supabase_client.get_lead_by_ref(body.lead_ref) or {}
+    commit_failure = conversation_runtime.supabase_client.fail_conversation_commit(
+        body.buffer_id,
+        body.reason,
+    )
     conversation_runtime.supabase_client.complete_whatsapp_buffer(
         body.buffer_id,
         "dead_letter",
@@ -237,6 +241,8 @@ def technical_failure(
     return {
         "ok": False,
         "technical_failure": True,
+        "workflow_outcome": "technical_failure",
+        "commit_state": commit_failure.get("status"),
         "handoff": False,
         "ai_paused": bool(lead.get("ai_paused")),
     }
