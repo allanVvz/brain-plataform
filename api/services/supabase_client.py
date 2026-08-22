@@ -5414,6 +5414,50 @@ def complete_whatsapp_buffer(buffer_id: str, status: str, error: str | None = No
                 )
 
 
+def fail_conversation_commit(inbound_buffer_id: str, reason: str) -> dict:
+    """Finalize an already-claimed inbound commit after a terminal failure.
+
+    The update is conditional on the commit still being ``processing`` so a
+    late fail-safe can never overwrite a concurrent successful commit.  This
+    uses the existing lead_buffer payload ledger and requires no new storage.
+    """
+    from datetime import datetime, timezone
+
+    row = _one(
+        get_client().table("lead_buffer")
+        .select("payload")
+        .eq("id", inbound_buffer_id)
+        .maybe_single()
+    ) or {}
+    payload = dict(row.get("payload") or {})
+    commit = dict(payload.get("conversation_commit") or {})
+    if str(commit.get("status") or "") != "processing":
+        return {"updated": False, "status": commit.get("status")}
+    failed = {
+        **commit,
+        "status": "failed",
+        "failed_at": datetime.now(timezone.utc).isoformat(),
+        "failure_reason": str(reason or "technical_failure")[:1000],
+    }
+    _execute_with_retry(
+        get_client().table("lead_buffer")
+        .update({"payload": {**payload, "conversation_commit": failed}})
+        .eq("id", inbound_buffer_id)
+        .eq("payload->conversation_commit->>status", "processing")
+    )
+    current = _one(
+        get_client().table("lead_buffer")
+        .select("payload")
+        .eq("id", inbound_buffer_id)
+        .maybe_single()
+    ) or {}
+    current_status = str(
+        (((current.get("payload") or {}).get("conversation_commit") or {}).get("status"))
+        or "unknown"
+    )
+    return {"updated": current_status == "failed", "status": current_status}
+
+
 def release_whatsapp_buffer(buffer_id: str, status: str, *, delay_seconds: int, error: str | None, decrement_attempt: bool = False) -> None:
     from datetime import datetime, timedelta, timezone
     payload = {

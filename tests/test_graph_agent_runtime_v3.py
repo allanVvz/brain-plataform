@@ -900,6 +900,11 @@ def test_strict_model_parse_failure_emits_only_published_fallback():
     assert decision.intent == "published_fallback"
     assert response.reply_text == "Qual é a metragem?"
     assert response.handoff_required is False
+    assert response.proof["valid"] is True
+    assert response.proof["errors"] == []
+    assert response.proof["model_proposal_errors"] == ["missing:claims"]
+    assert response.proof["fallback_used"] is True
+    assert response.proof["fallback_applied"] == "published_invalid_proposal"
 
 
 def test_published_question_is_composed_not_required_in_model_reply():
@@ -1868,6 +1873,34 @@ def test_blank_model_keep_operation_is_discarded_before_proposal_validation():
         "cited_node_ids": [],
         "cited_chunk_ids": [],
         "reply": "Qual é a condição?",
+        "qualification_complete": False,
+        "handoff_requested": False,
+    }
+
+    sanitized = graph_agent_runtime_v3._sanitize_untrusted_service_operations(raw)
+    proposal = ConversationProposal.model_validate(sanitized)
+
+    assert proposal.service_operations == []
+
+
+def test_model_service_operation_with_blank_checksum_is_discarded_before_validation():
+    raw = {
+        "branch_action": "add",
+        "branch_anchor_node_id": "branch:engine-wash",
+        "branch_path_checksum": None,
+        "branch_evidence_span": "lavar o motor",
+        "service_operations": [{
+            "action": "add",
+            "branch_anchor_node_id": "branch:engine-wash",
+            "branch_path_checksum": "",
+            "evidence_span": "lavar o motor",
+        }],
+        "extracted_facts": [],
+        "claims": [],
+        "next_question_node_id": None,
+        "cited_node_ids": [],
+        "cited_chunk_ids": [],
+        "reply": "Posso explicar o serviço.",
         "qualification_complete": False,
         "handoff_requested": False,
     }

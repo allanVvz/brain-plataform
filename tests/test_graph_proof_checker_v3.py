@@ -591,6 +591,33 @@ def test_human_full_name_rejects_incomplete_or_non_name_values(value):
     assert not graph_proof_checker_v3.is_human_full_name(value)
 
 
+@pytest.mark.parametrize("value", ["Allan", "Allan Rodrigues", "José da Silva"])
+def test_human_name_accepts_preferred_or_complete_name(value):
+    canonical, error = graph_proof_checker_v3._canonical_field_value(
+        {
+            "validation": {"mode": "semantic", "semantic_type": "human_name"},
+            "value_schema": {"type": "string", "minLength": 1},
+        },
+        value,
+        value,
+    )
+    assert canonical == value
+    assert error is None
+
+
+@pytest.mark.parametrize("value", ["oi", "bom dia", "123", "https://example.com", "quero polimento"])
+def test_human_name_rejects_greetings_numbers_urls_and_non_names(value):
+    _, error = graph_proof_checker_v3._canonical_field_value(
+        {
+            "validation": {"mode": "semantic", "semantic_type": "human_name"},
+            "value_schema": {"type": "string", "minLength": 1},
+        },
+        value,
+        value,
+    )
+    assert error == "value is not a plausible human name"
+
+
 def test_pending_name_confirmation_never_resolves_a_required_field():
     field = {
         "accepted_statuses": ["known", "needs_confirmation", "invalid"],

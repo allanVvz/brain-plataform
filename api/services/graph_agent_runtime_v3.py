@@ -345,11 +345,18 @@ def _invalid_proposal_fallback(
             reply = laddered
         else:
             repetition_action = "allowed_never_silent"
+    model_errors = list(dict.fromkeys(errors))
+    fallback_valid = bool(str(reply or "").strip())
     proof = {
-        "valid": False,
-        "errors": list(dict.fromkeys(errors)),
+        "valid": fallback_valid,
+        "errors": [] if fallback_valid else model_errors,
         "repair_required": False,
         "fallback_used": True,
+        "fallback_applied": (
+            "published_invalid_proposal" if fallback_valid else None
+        ),
+        "mode": "published_fallback",
+        "model_proposal_errors": model_errors,
         "model_proposal": raw if isinstance(raw, dict) else {"raw_type": type(raw).__name__},
         "missing_fields": [field["key"] for field in unconfirmed],
         "qualification_complete": not unconfirmed,
@@ -5373,7 +5380,10 @@ def _sanitize_untrusted_service_operations(raw: Any) -> Any:
         operation
         for operation in raw["service_operations"]
         if not isinstance(operation, dict)
-        or str(operation.get("evidence_span") or "").strip()
+        or (
+            str(operation.get("evidence_span") or "").strip()
+            and str(operation.get("branch_path_checksum") or "").strip()
+        )
     ]
     return {**raw, "service_operations": operations}
 

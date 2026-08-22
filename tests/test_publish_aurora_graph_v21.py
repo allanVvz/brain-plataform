@@ -290,6 +290,56 @@ def test_every_aurora_review_booking_field_has_a_graph_owned_question() -> None:
     ]
 
 
+def test_aurora_preferred_name_accepts_one_token_and_surname_is_optional() -> None:
+    graph = build_graph()
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    policy = (persona.data or {})["appointment_policy"]
+    question = policy["field_questions"]["nome_cliente"]
+    paraphrases = policy["field_question_paraphrases"]["nome_cliente"]
+    name_fields = [
+        field
+        for node in graph.nodes
+        for field in ((node.data or {}).get("qualification") or {}).get("fields") or []
+        if field.get("key") == "nome_cliente"
+    ]
+
+    assert "sobrenome é opcional" in question.lower()
+    assert question.count("?") == 1
+    assert all(value.count("?") <= 1 for value in paraphrases)
+    generated_name_fields = [field for field in name_fields if "carry_over" in field]
+    assert generated_name_fields
+    assert all(
+        field["validation"]["semantic_type"] == "human_name"
+        and field["validation"]["min_tokens"] == 1
+        and field["carry_over"] is True
+        and field["overwrite_policy"] == "explicit_correction"
+        for field in generated_name_fields
+    )
+
+
+def test_specific_engine_wash_phrase_beats_generic_vehicle_wash() -> None:
+    document = _compile(graph_markdown.canonicalize_graph(build_graph()))
+
+    engine = graph_agent_runtime_v3._resolve_service_operations(
+        document,
+        "to pensando em lavar o motor como funciona",
+        active_branch_node_id=None,
+        active_branch_node_ids=[],
+    )
+    vehicle = graph_agent_runtime_v3._resolve_service_operations(
+        document,
+        "quero lavar o carro",
+        active_branch_node_id=None,
+        active_branch_node_ids=[],
+    )
+
+    assert engine["status"] == "needs_confirmation"
+    assert engine["candidate"]["branch_anchor_node_id"] == "aurora-product-engine-wash"
+    assert engine["candidate"]["evidence_span"] == "lavar o motor"
+    assert vehicle["status"] == "resolved"
+    assert vehicle["operations"][0]["branch_anchor_node_id"] == "aurora-product-wash"
+
+
 def test_new_aurora_fields_publish_specific_validation_examples() -> None:
     graph = build_graph()
     fields = {
