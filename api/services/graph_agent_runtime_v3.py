@@ -5868,22 +5868,46 @@ def _decide(
         == "ambiguous"
     ):
         return _service_disambiguation_response(context)
-    raw = observation.get("proposal") if isinstance(observation.get("proposal"), dict) else observation
-    raw = _sanitize_untrusted_service_operations(raw)
-    parse_errors = [str(value) for value in observation.get("proposal_parse_errors") or []]
-    try:
-        proposal = ConversationProposal.model_validate(raw)
-    except ValidationError as exc:
-        return _invalid_proposal_fallback(
-            context, raw, [*parse_errors, f"proposal_schema_invalid:{exc.errors(include_url=False)}"]
+    parse_errors = [
+        str(value) for value in (
+            observation.get("proposal_parse_errors")
+            or observation.get("interpretation_parse_errors")
+            or []
         )
-    if parse_errors:
-        return _invalid_proposal_fallback(context, raw, parse_errors)
+    ]
     persona = supabase_client.get_persona(context.persona_slug) or {}
     publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
     if str(publication.get("id")) != str(context.publication_id) or publication.get("checksum") != context.graph_checksum:
         raise RuntimeError("GraphRAG publication changed during turn")
     document = publication.get("document_json") or {}
+    # A turn on the semantic contract carries `interpretation`, never a
+    # `proposal`. Translating it here keeps ONE decision path: everything below
+    # -- branch resolution, fact reconciliation, proof, commit -- is the same
+    # well-covered machinery, now sourced from the model's proved reading.
+    # The graph is loaded first on purpose: validated without a document and a
+    # contract, every fact and anchor would be dropped as unknown.
+    validation = _validated_interpretation(
+        context, observation, document, context.graph_contract,
+    )
+    if validation is not None:
+        proposal = semantic_conversation_policy.interpretation_to_proposal(
+            validation.interpretation
+        )
+        raw = proposal.model_dump(mode="json")
+        parse_errors = [*parse_errors, *validation.errors]
+        if parse_errors:
+            return _invalid_proposal_fallback(context, raw, parse_errors)
+    else:
+        raw = observation.get("proposal") if isinstance(observation.get("proposal"), dict) else observation
+        raw = _sanitize_untrusted_service_operations(raw)
+        try:
+            proposal = ConversationProposal.model_validate(raw)
+        except ValidationError as exc:
+            return _invalid_proposal_fallback(
+                context, raw, [*parse_errors, f"proposal_schema_invalid:{exc.errors(include_url=False)}"]
+            )
+        if parse_errors:
+            return _invalid_proposal_fallback(context, raw, parse_errors)
     model_proposed_service_operations = [
         item.model_dump(mode="json") for item in proposal.service_operations
     ]

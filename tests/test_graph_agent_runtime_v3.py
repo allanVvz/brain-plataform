@@ -5298,3 +5298,59 @@ def test_system_prompt_carries_no_persona_copy():
     prompt = graph_agent_runtime_v3.SYSTEM_PROMPT
     for forbidden in ("Lia", "Aurora", "Tock", "Vitória"):
         assert forbidden not in prompt
+
+
+def test_semantic_interpretation_payload_reaches_a_real_decision(monkeypatch):
+    """The live workflow sends `interpretation`, never `proposal`.
+
+    `_decide` used to read `observation.get("proposal")` and, finding none,
+    validate the WHOLE observation dict as ConversationProposal -- a
+    StrictModel with extra="forbid". Every key (`interpretation`,
+    `repair_attempt`, ...) came back `extra_forbidden`, so every turn no
+    deterministic short-circuit caught fell into `_invalid_proposal_fallback`.
+    The main decision path was dead for the shape production actually sends.
+    """
+    document = compiled_fixture()
+    persona_row = {**PERSONA, "config": {}}
+    pub = publication(document)
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: persona_row)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub
+    )
+    contract_b = document["branch_contracts"]["branch:b"]
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], messages=[{
+            "message_id": "msg:1", "role": "user", "texto": "vou levar pra loja",
+        }],
+        cart={"facts": {}},
+        rag_nodes=[], rag_paths=[],
+        graph_contract=contract_b,
+        active_branch_node_id="branch:b", active_branch_node_ids=["branch:b"],
+        branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
+        publication_id=pub["id"],
+        retrieval_trace={"retrieval_branch_node_id": "branch:b"},
+    )
+    observation = {
+        "interpretation": {
+            "intents": [{"kind": "spontaneous_info", "evidence_span": "vou levar pra loja"}],
+            "state_relation": "continue",
+            "reply": "Entendi. Quantas unidades voce quer?",
+            "recommended_next_action": "ask_field",
+        },
+        "repair_attempt": 0,
+        "interpretation_parse_errors": [],
+        "token_usage": {"model": "fixture-model"},
+    }
+
+    _decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation=observation,
+    )
+
+    # The bug's signature: the fallback stamps a schema error and throws the
+    # model's whole reading away before any of it is used.
+    assert "proposal_schema_invalid" not in str(response.proof.get("errors") or [])
+    assert response.proof.get("valid"), response.proof.get("errors")
+    # Proof that the interpretation was really consumed, not merely tolerated.
+    assert response.proof.get("semantic_validation", {}).get("valid") is True
+    assert response.reply_text

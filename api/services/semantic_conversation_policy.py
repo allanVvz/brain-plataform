@@ -23,9 +23,78 @@ from typing import Any
 from schemas.conversation import (
     ConfirmationState,
     ConversationContext,
+    ConversationProposal,
     CustomerQuestionKind,
+    InteractionKind,
     SemanticInterpretation,
 )
+
+# How a customer act maps onto the interaction vocabulary the proof checker and
+# journey policy already speak. Anything unlisted stays UNCLEAR, which is the
+# conservative reading -- it never opens a journey on its own.
+_INTENT_TO_INTERACTION = {
+    "commercial_question": InteractionKind.POST_COMPLETION_QUESTION,
+    "product_change": InteractionKind.NEW_DEMAND,
+    "audience_change": InteractionKind.NEW_DEMAND,
+    "resume": InteractionKind.CONTINUE_CURRENT,
+    "answer_pending_field": InteractionKind.CONTINUE_CURRENT,
+    "confirmation": InteractionKind.CONTINUE_CURRENT,
+    "correction": InteractionKind.CONTINUE_CURRENT,
+    "spontaneous_info": InteractionKind.CONTINUE_CURRENT,
+    "small_talk": InteractionKind.COURTESY_CLOSE,
+}
+
+
+def interpretation_to_proposal(
+    interpretation: SemanticInterpretation,
+    *,
+    service_operations: list[dict[str, Any]] | None = None,
+) -> ConversationProposal:
+    """Express a validated interpretation in the proposal shape `_decide` speaks.
+
+    The runtime's decision machinery -- multi-branch service operations, fact
+    reconciliation, proof checking, commit -- is built around
+    ``ConversationProposal`` and well covered by tests. Rather than grow a
+    second decision path beside it, the semantic contract becomes its source:
+    the model's reading is translated here, once, after validation.
+
+    Only fields the interpretation actually carries are set. Branch routing is
+    deliberately NOT derived here -- the backend re-resolves it against the
+    graph and overwrites it in ``_apply_authoritative_branch_resolution``.
+    """
+    intent_kinds = [str(intent.kind.value) for intent in interpretation.intents]
+    interaction = next(
+        (
+            _INTENT_TO_INTERACTION[kind]
+            for kind in intent_kinds
+            if kind in _INTENT_TO_INTERACTION
+        ),
+        InteractionKind.UNCLEAR,
+    )
+    evidence = next(
+        (intent.evidence_span for intent in interpretation.intents), ""
+    )
+    return ConversationProposal(
+        interaction_observation={
+            "kind": interaction,
+            "evidence_span": evidence,
+            # The contract carries no numeric confidence by design; the proof
+            # checker only ever compares this against zero, so a proved
+            # observation reports full certainty and the evidence span is what
+            # actually explains it.
+            "confidence": 1.0 if interpretation.intents else 0.0,
+        },
+        service_operations=service_operations or [],
+        extracted_facts=[fact.model_dump() for fact in interpretation.facts],
+        claims=[claim.model_dump() for claim in interpretation.claims],
+        cited_node_ids=list(interpretation.cited_node_ids),
+        cited_chunk_ids=list(interpretation.cited_chunk_ids),
+        reply=interpretation.reply,
+        qualification_complete=(
+            interpretation.recommended_next_action.value in {"handoff", "close"}
+        ),
+        handoff_requested=interpretation.handoff_requested,
+    )
 
 # Questions whose answer is a published commercial commitment. The runtime may
 # never answer one from the model's own words -- only from an approved node, or

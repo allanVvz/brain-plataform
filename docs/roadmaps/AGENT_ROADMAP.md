@@ -80,10 +80,11 @@ paralelo seguro.
 | 1 | Publisher genérico, PublicationPlan, embeddings incrementais | **em progresso — GraphBundle + PublicationPlan + staging/ativação em duas fases já existem e publicaram a Tock Fatal real; falta embeddings incrementais por chunk e o publisher completo de edição/remoção** | `bundle-migrator`, `graph-publisher`, `release-gate` |
 | 2 | Cards editáveis alteram o agente de verdade | a fazer | `card-editor` |
 | 3 | Sofia produz dados declarativos, não código | a fazer | `faq-coverage`, `sdr-evaluator` |
-| 4 | Tock Fatal nasce no pipeline novo | **em progresso — bundle nominal (`sdr-qualification-v1`, 2 galhos de audiência) ativo em produção e provado via WA Validator (varejo, revenda, troca de galho, lacuna de conhecimento); falta conteúdo comercial real (produto/preço/atacado-varejo) — ver item 4a** | `graph-publisher` |
+| 4 | Tock Fatal nasce no pipeline novo | **em progresso — v8 ativa (182 nós, catálogo estrutural sem preço); falta escopo de ramo real e os 220 nós comerciais — ver item 4a e a seção "Runtime semantic-first" (2026-08-22)** | `graph-publisher` |
 | 5 | n8n estável e desacoplado do conteúdo | a fazer | — |
 | 6 | Aurora migra para o bundle | a fazer | `bundle-migrator` |
-| 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20, ver seção própria abaixo** | `graph-publisher`, `card-editor` |
+| 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20; decisão nova 2026-08-22: escopo de conhecimento por agente via cards Embedded — ver seção própria abaixo** | `graph-publisher`, `card-editor` |
+| 8 | Runtime semantic-first (interpretação pelo modelo, prova pelo backend) | **em progresso 2026-08-22, branch `agent/sofia-vitoria-audit` — ver seção própria** | `graph-publisher` |
 
 ### Progresso local do pipeline novo — 2026-08-20
 
@@ -105,6 +106,53 @@ incrementais por `chunk_checksum` (compilação hoje reembeda tudo a cada
 publish) e o publisher completo de edição/remoção (hoje só cobre
 materialização inicial). Roadmap incremental e gates completos:
 `docs/architecture/GRAPH_BUNDLE_PUBLICATION_PLAN.md`.
+
+### Runtime semantic-first e escopo bidimensional — 2026-08-22
+
+Decisões desta sessão, implementadas ou aprovadas na branch
+`agent/sofia-vitoria-audit`. Handoff completo:
+`docs/handoffs/SESSAO_2026-08-22_SEMANTIC_RUNTIME_E_ESCOPO.md`.
+
+**Interpretar é do modelo; provar é do backend.** Uma auditoria ao vivo em
+produção (2026-08-21) provou que o modelo lia certo e o backend descartava a
+leitura correta por não bater com lista de frases: `"uso próprio mesmo"` não
+selecionava público e `"sim, tá correto"` não fechava a qualificação — o
+primeiro e o último passo do funil quebravam por fraseado. `_EXPLICIT_CONFIRMATIONS`
+e os markers de serviço deixaram de ser autoridade; sobrevivem só como
+normalizadores auxiliares. O contrato novo é `SemanticInterpretation`
+(`api/schemas/conversation.py`), **sem confiança numérica** — todo elemento
+carrega o trecho literal da mensagem, e o backend reconfere contra a mensagem e
+o grafo (`api/services/semantic_interpretation_validator.py`).
+
+**Escopo passa a ser bidimensional: ramos ativos × agente que responde.**
+- *Ramo* decide de quem é o conhecimento (varejo vs. atacado).
+- *Agente* decide o que pode ser afirmado. Preço não é regra global da persona,
+  é competência do agente — hoje só existe o SDR, amanhã haverá outros. Isso
+  se declara em **vários cards `Embedded`, um por agente** (`data.agent_slug`);
+  card sem `agent_slug` continua valendo para todos, então nada existente
+  quebra. O Embedded já governa "o que pode ser afirmado" (a aresta
+  `faq → embedded` decide quais FAQs viram claim autorizada,
+  `graph_compiler_v3.py:746-752,955-972`) — passa a governar também "por quem".
+  Isso substitui `commercial_claims_allowed`,
+  `forbid_unpublished_price_stock_deadline_policy` e
+  `unsupported_commercial_claim`, **confirmados inertes**: não são lidos por
+  nenhum caminho de execução.
+
+**Fatos de arquitetura levantados nesta sessão (não repetir a investigação):**
+- O fechamento de ramo é de **passo único e não transitivo**
+  (`graph_compiler_v3.py:788-799`): a aresta semântica traz só o nó-alvo, nunca
+  a subárvore `contains`. Foi por isso que a v8 precisou de 165 arestas
+  `persona → nó` — e é por isso que os dois ramos hoje enxergam 176 dos 182
+  nós, ou seja, **a diferenciação de ramo não existe na prática**.
+- Multi-ramo já é real no runtime **menos na recuperação**:
+  `active_branch_node_ids`, `check_service_operations` e os `aggregate_*`
+  (`graph_proof_checker_v3.py:213-300,392`) já trabalham com lista, mas
+  `_retrieval_branch_for_turn` resolve **um** ramo e só os chunks dele viram
+  `context_cards`.
+- A trava de preço em texto livre **já existe, no pipeline legado**
+  (`graph_conversation_contract.py:587-606,746-763`, testes em
+  `tests/test_graph_conversation_contract.py:404-457`). O v3 não a chama. É
+  código para portar, não para inventar.
 
 ### Item 4a — o que falta pra Tock Fatal ser uma persona real, não uma prova
 
