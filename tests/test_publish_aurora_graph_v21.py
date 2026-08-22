@@ -120,6 +120,11 @@ def test_aurora_v3_source_isolated_from_runtime_assets_and_duplicate_projection_
     assert len(compiled["edges"]) == 168
     assert len(compiled["branch_contracts"]) == 14
     assert len(compiled["eligible_faq_node_ids"]) == 30
+    common_question_ids = [
+        node_id for node_id in compiled["common_contract"]["closure_node_ids"]
+        if node_id.startswith("faq:qualification:")
+    ]
+    assert common_question_ids == sorted(common_question_ids)
 
 
 def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
