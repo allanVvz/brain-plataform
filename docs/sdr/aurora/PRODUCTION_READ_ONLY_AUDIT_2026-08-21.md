@@ -8,8 +8,8 @@ executada.
 ## Identidade e saúde
 
 - HEAD local observado: `29f6ba0616fdb1c53465b06820d87a69d9bb23db`.
-- Release API instalado: `09b6c9c7618c6bf31caa86f9a43758ae72af52ec`.
-- Imagem workers: `c5936b648327ba0e65a71c71b3013a000beb4e7e`.
+- Release API instalado: `09b6c9c7618c…`.
+- Imagem workers: `c5936b648327…`.
 - Existe skew de SHA entre API e workers.
 - `/health/live`: `status=ok`, `workers_embedded=false`.
 - `/health/ready`: `status=ready`, Supabase disponível.
