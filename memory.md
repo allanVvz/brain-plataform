@@ -1,10 +1,227 @@
 # Brain Platform Memory
 
-Updated: 2026-08-18
+Updated: 2026-08-20
 
-> Estado corrente: Aurora religada em produção no número estável da VZ Lupas,
-> após várias rodadas de correção ao vivo (descritas abaixo). O handoff antigo
-> do WA Validator foi arquivado — ver "Histórico arquivado" no fim deste arquivo.
+> Estado corrente: hotfix de áudio (PR #50) foi deployado, testado ao vivo
+> via WA Validator e **revertido** — `quality_pass=false` nas duas sessões,
+> rollback aplicado (`ops/vps/rollback.sh`, run `32428992506`, voltou pra
+> `d3ef93f2…`). **Aurora e Tock Fatal seguem `safety_paused`, workers
+> parados.** Registro técnico completo, com evidência de deploy/rollback:
+> `docs/reports/AUDIO_HOTFIX_AURORA_TOCK_2026-08-20.md`. Não religar nenhuma
+> das duas sem completar o checklist "Critério para novo rollout" desse
+> relatório (item 1, fix do WA Validator, já mesclado em `main` via PR #52,
+> commit `2e8e2fe`; itens 2-4 — gate de identidade do rollback, repetir
+> auditoria/deploy/ressync, exigir technical+quality pass — seguem abertos).
+
+## Handoff atual — conversas reais, memória e próximo hotfix (2026-08-20)
+
+Este é o ponto de retomada depois da limpeza de contexto. A tarefa executada
+nesta rodada foi somente leitura de produção e documentação. Não houve correção
+de código, republicação de grafo, envio de mensagem ou retomada de IA/transporte.
+
+### Estado que deve ser preservado ao retomar
+
+- `main` avançou desde esta auditoria: hotfix de áudio deployado/testado/
+  revertido (PR #50, rollback), fix do WA Validator (PR #52), e item 7a/7b
+  do roadmap (pontuação de qualificação + rótulo `sdr`/`closer`/`cs`, commit
+  `0c55a67` — já commitado e no ar, não é mais "alteração local").
+- Aurora: publicação GraphRAG v3 ativa versão 66, checksum
+  `sha256:f2010106aec0788c3610c8b3be643a31c6a7d9bb3c7f1cd1633b9e175535dcc0`.
+- Tock Fatal: publicação GraphRAG v3 ativa versão 6, checksum
+  `sha256:ad330d4897a2a77a7a99b5c506b35e68de82b35f14932ee3e5489c800675d49d`.
+- Os dois bindings continuam ativos como cadastro e apontam para
+  `n8n_agents`, mas estão em `safety_paused=true`; o worker está parado. Isso
+  impede novos atendimentos enquanto se corrige o comportamento.
+- Leads auditados (IDs internos, sem telefone): Allan/Tock Fatal = `33`;
+  Allan Rodrigues/Aurora = `34`; Luiza Camargo/Aurora = `32`.
+- Não usar WhatsApp real na correção. Primeiro reproduzir no WA Validator
+  interno com o mesmo evento canônico, provar uma decisão/uma resposta e só
+  então pedir autorização separada para retomar.
+
+### Julgamento geral
+
+O sistema está seguro contra invenção em alguns pontos, mas conversa como um
+formulário. Ele confunde “não inventar” com “não conversar”: pergunta campos,
+repete resumos e transfere dúvidas que o próprio conhecimento deveria responder.
+Os nodes de tom e voz ajudam apenas quando a resposta passa pelo modelo. Vários
+turnos importantes são decididos sem modelo (`model_calls=0`), portanto o texto
+continua rígido mesmo com tom de voz publicado.
+
+O problema não se resolve colocando frases específicas no código. A regra deve
+ser geral: compreender o ato do usuário, recuperar memória e conhecimento
+permitidos, reconhecer o que ele disse, responder o assunto quando houver base
+e fazer no máximo uma próxima pergunta útil. O grafo fornece diretrizes,
+conhecimento, voz e limites; o atendimento compõe a frase para aquele contexto.
+
+### Allan em Tock Fatal — sequência e erros estruturais
+
+Fonte: mensagens reais do lead `33`, publicação Tock v6.
+
+1. `e ae` + `ooi` geraram uma resposta empilhada:
+   `Olá! Vou te ajudar por aqui. / Oi! / Você procura para uso próprio ou para
+   revender?`. Três saudações recuperadas viraram uma única fala. O sistema deve
+   escolher uma saudação coerente, não concatenar opções de FAQ.
+2. Allan respondeu `uso proprio`; Vitória repetiu exatamente
+   `Você procura para uso próprio ou para revender?`. A evidência já apontava
+   para o público de uso próprio, mas a pergunta não avançou para a necessidade.
+3. Ao repetir `uso proprio`, a resposta foi só `Entendi, uso próprio!`. Isso é
+   um silêncio conversacional: existe uma mensagem de saída, mas ela não responde
+   nem conduz o próximo passo.
+4. Allan então disse `sim`, sem haver uma pergunta aberta clara. O sistema
+   interpretou o “sim” no caminho oposto e perguntou
+   `você já revende ou está começando agora?`. Houve contaminação de público:
+   uso próprio virou revenda.
+5. `comecando agora?` foi tratado como dúvida de preço/estoque/prazo/política ou
+   pedido mínimo. A resposta transferiu para a equipe e ainda afirmou que faltava
+   `tipo de compra`, embora Allan já tivesse informado uso próprio. A classificação
+   da intenção e a memória do campo divergiram.
+6. Um novo `oii` recebeu apenas `Oi! Que bom ter você por aqui.` e não retomou
+   a conversa. Novamente houve saída sem continuidade.
+7. `ahahaa simm`, `gosto muito` e `quero uma roupa` não receberam resposta.
+   Esses três inbounds estão em `dead_letter`; não são silêncio criativo do
+   modelo, porque nenhum atendimento foi concluído. Mesmo assim, o produto não
+   pode deixar esse tipo de falha invisível na tela.
+8. Dois `ola` antigos e o primeiro `e ae` ficaram `ignored` durante janelas de
+   pausa. Isso é silêncio operacional, diferente dos erros de resposta acima.
+
+Causa estrutural do vazio comercial da Tock: o bundle publicado contém Persona,
+Campanha, Públicos, Tom, FAQs de saudação/qualificação e Regra, mas não contém
+produto, oferta ou FAQ de produto validado. Portanto Vitória só consegue escolher
+entre varejo/revenda, perguntar campos e transferir. Ela não precisa informar
+preço sem fonte, mas precisa falar do produto. Para isso o grafo deve receber
+conteúdo aprovado sobre produtos, características, materiais, usos, diferenças,
+benefícios demonstráveis e perguntas frequentes. Até existir fonte aprovada,
+preço, estoque, prazo e pedido mínimo continuam como lacuna — sem impedir uma
+conversa útil sobre o que já estiver validado.
+
+### Allan Rodrigues em Aurora — sequência e erros estruturais
+
+Fonte: mensagens reais do lead `34`, publicação Aurora v66.
+
+1. Lia apresentou uma lista de oito serviços, mas não explicou nenhum. Quando
+   Allan perguntou `chapeacao como fuciona?`, respondeu que o atendente explicaria
+   depois e voltou a perguntar se queria seguir. É silêncio semântico: o usuário
+   pediu conhecimento de produto/serviço e recebeu um desvio de formulário.
+2. Allan acrescentou lavagem técnica e o sistema anotou, mas seguiu imediatamente
+   para perguntas de qualificação. Não explicou o serviço, o resultado esperado
+   ou a diferença entre lavagem e o reparo citado.
+3. Após o resumo completo, `ok` não foi reconhecido como confirmação. Lia repetiu
+   o mesmo resumo e a mesma pergunta. O estado de confirmação e a interpretação
+   de concordância estão desalinhados.
+4. `quero pintura po` e `nao ta certo` chegaram em momentos separados. O primeiro
+   foi ignorado no buffer; o segundo só foi processado horas depois, quando o
+   sistema devolveu outro resumo. A correção do cliente foi convertida em uma
+   lista de serviços, não em uma conversa sobre o que estava errado.
+5. Depois de `ooi`, Lia repetiu novamente o resumo inteiro em vez de reconhecer
+   a saudação e retomar a pendência. Esse é um exemplo de estado antigo dominando
+   a intenção atual.
+6. Em uma nova necessidade (`to querendo lavar meu carro`), Lia reconheceu
+   Lavagem detalhada, mas só perguntou se queria seguir. De novo não falou do
+   serviço ou de como ele ajuda.
+7. Depois da confirmação, Lia perguntou outra vez se Allan pretendia vender o
+   carro ou continuar com ele, apesar de a conversa anterior já registrar
+   `continuar com o veículo e cuidar bem dele`. A pergunta soou como falta de
+   memória.
+8. Quando Allan mudou a resposta para `vender`, Lia lembrou corretamente do
+   Ford Ka, mas perguntou de novo se ele poderia levar o carro, apesar da resposta
+   histórica `não`. No resumo seguinte, modelo, ano e condição sobreviveram, mas
+   a cor branca desapareceu. A memória fica desigual conforme o campo e o novo
+   caminho escolhido.
+9. Há respostas de saudação como `Oi de novo! Aqui é a Lia.` que terminam ali.
+   Uma saudação ou brincadeira deve receber uma reação curta e natural e, quando
+   houver conversa pendente, uma continuação útil. Não deve haver turno vazio.
+
+### Como a memória deve funcionar sem frase fixa
+
+A correção antiga escolheu não carregar `objective` e `can_visit_in_person`
+automaticamente para uma nova jornada, porque esses valores podem mudar. Essa
+decisão evita tratar intenção antiga como verdade atual, mas hoje o efeito é o
+oposto: o histórico some da conversa e a IA pergunta como se nunca tivesse visto
+o cliente.
+
+O comportamento desejado tem três estados, usando as tabelas de fatos e jornadas
+já existentes (não criar tabela nova):
+
+- fato atual confirmado: pode ser usado diretamente;
+- lembrança histórica relevante: deve aparecer como hipótese contextual e ser
+  confirmada de forma natural;
+- desconhecido: perguntar do zero.
+
+Exemplo aprovado apenas como resultado esperado, nunca como texto fixo:
+`Vi que no atendimento anterior você não pretendia vender o carro e queria
+investir em cuidado e proteção. Continua sendo isso?` O conteúdo deve ser montado
+a partir do último fato, sua origem, sua idade e o assunto atual. Se o cliente
+disser `vender`, o valor atual substitui a hipótese histórica. A mesma regra vale
+para disponibilidade presencial e qualquer campo que o grafo marque como
+“lembrar, mas confirmar em uma nova necessidade”.
+
+O grafo/contrato deve declarar a política de memória de cada campo, sem nomes de
+cliente ou frases comerciais no código: estável e reutilizável; histórico que
+precisa confirmação; ou exclusivo daquela jornada. Os dados continuam em
+`conversation_facts`/`conversation_journeys` e em metadata existente.
+
+### Regras de conversa a implementar e validar depois
+
+- Cada inbound efetivamente assumido deve terminar em uma resposta persistida ou
+  em transferência explícita e visível. Duplicata, pausa e falha podem não enviar,
+  mas precisam de estado claro; nunca parecer que o agente “escolheu ficar mudo”.
+- Responder primeiro ao que foi dito. Só depois avançar a qualificação, com no
+  máximo uma pergunta relevante.
+- Um `sim`, `não`, `ok` ou brincadeira só pode alterar um fato se houver uma
+  pergunta aberta inequívoca. Sem isso, pedir esclarecimento de modo natural.
+- A escolha de um público nunca pode ativar perguntas do público oposto sem nova
+  evidência explícita.
+- Saudações em FAQ são alternativas, não blocos concatenáveis.
+- Tom e voz também devem alcançar respostas sem chamada ao modelo; hoje caminhos
+  determinísticos ignoram boa parte dessas diretrizes.
+- O SDR pode omitir preço não validado, mas deve apresentar produto/serviço com
+  base no grafo: o que é, para quem serve, benefício aprovado e uma pergunta de
+  descoberta. Transferir somente a lacuna específica.
+- Correção do usuário tem prioridade sobre resumo pendente. Não repetir o resumo
+  até incorporar e reconhecer a correção.
+- Resumo deve usar apenas fatos atuais do caminho e indicar claramente qualquer
+  lembrança ainda não confirmada.
+- Testar humor, saudação repetida, mensagens em rajada, mudança de intenção,
+  pergunta de produto, concordância curta, correção e retorno após jornada.
+
+### Hotfix de áudio — executado, testado, revertido (atualização 2026-08-20)
+
+O item acima (mensagem `635`/lead `32`, `polimendo os vidros`, `dead_letter` com
+`workflow_step_failed:unknown`) motivou o hotfix implementado no PR #50:
+compactar o prompt do template n8n (remoção preventiva de memória opcional
+até 22 mil tokens, `agent_activity`→`journey_outcomes`→`recent_messages`→
+`historical_facts`, nessa ordem) sem alterar o Whisper nem inventar
+correção de palavra/frase fixa — exatamente como orientado abaixo.
+
+Deployado, ressincronizado (Aurora `k5JWkvpQyb8EB3Vw`, Tock
+`WDUxL74OUctQHWwG`) e testado com 2 sessões WA Validator reais (áudio
+transcrito, nunca WhatsApp real). Resultado: `technical_pass=true` nas duas,
+mas `quality_pass=false` — o driver semântico do Validator ainda não trata
+confirmação de galho graph-driven como estado válido (exige
+`active_branch_node_id` prematuro; a pergunta determinística de confirmação
+não tem `question_node_id` mapeável). **Rollback aplicado** de volta pra
+`d3ef93f2…`. Detalhe técnico completo, com todos os checksums/runs:
+`docs/reports/AUDIO_HOTFIX_AURORA_TOCK_2026-08-20.md`.
+
+**Achado real que bloqueia qualquer retomada, não só deste hotfix**:
+`ops/vps/rollback.sh` delega pra `deploy.sh` mas nunca escreve
+`.deploy/release-source-sha`/`.deploy/release-directory` (só
+`install-release-artifact.sh` faz isso, e o caminho de rollback nunca chama
+esse script) — então o validador de produção falha fechado em
+`release_source_identity` depois de qualquer rollback, mesmo com a imagem
+certa rodando. Esse é o item 2 do "Critério para novo rollout" do relatório.
+
+**Checklist restante antes de religar Aurora/Tock** (relatório, seção
+"Critério para novo rollout"):
+1. ~~Corrigir o WA Validator pra aceitar confirmação de galho graph-driven~~
+   — feito, PR #52, commit `2e8e2fe`.
+2. Corrigir o gate de identidade do rollback (`release-source-sha`/
+   `release-directory` não atualizados) — **aberto**.
+3. Repetir auditoria quieta, deploy, ressincronização e as duas sessões de
+   validação (Aurora + Tock).
+4. Exigir `technical_pass=true` **e** `quality_pass=true` nas duas antes de
+   qualquer retomada — uma autorização (deploy) não implica as demais
+   (migração, retomada de binding/workers).
 
 ## Correção de multi-serviço e perda de memória entre ciclos (2026-08-18)
 

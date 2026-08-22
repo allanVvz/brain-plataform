@@ -22,6 +22,7 @@ from services.deterministic_sdr import catalog_from_graph
 # purpose: nodes carried over untouched from the earlier authorized briefing
 # keep their original provenance instead of being relabelled.
 AURORA_SOURCES = {
+    "aurora_review_plan_2026_08_21",
     "briefing_atendimento_conversacional_aurora_2026_08_07",
     "briefing_atendimento_conversacional_aurora_2026_08_09",
     "user_authorized_demo_briefing_2026_07_29",
@@ -120,7 +121,9 @@ def test_aurora_graph_is_published_valid_and_every_faq_reaches_embedded_once():
     valid, errors = graph_json_v2_validator.validate_graph_json(graph)
     assert valid, errors
     assert graph.status == "published"
-    assert all(node.data.get("status") == "validated" for node in graph.nodes)
+    assert {
+        node.data.get("status") for node in graph.nodes
+    } <= {"validated", "pending_validation", "archived"}
     assert all(node.data.get("source") in AURORA_SOURCES for node in graph.nodes)
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
     faqs = [node for node in graph.nodes if node.node_type == "faq"]
@@ -133,7 +136,8 @@ def test_aurora_graph_is_published_valid_and_every_faq_reaches_embedded_once():
             and edge.relation == "visible_to_agent"
             and edge.primary_tree is False
         ]
-        assert len(links) == 1
+        expected_links = 1 if faq.data.get("status") == "validated" else 0
+        assert len(links) == expected_links
     gallery = next(node for node in graph.nodes if node.node_type == "gallery")
     assert gallery.data["empty"] is True
     assert not any(
@@ -216,7 +220,10 @@ def test_appointment_collects_partial_request_and_always_hands_confirmation_to_h
     assert result.handoff is False
     assert result.state["missing_fields"][0] == "nome_cliente"
 
-    for answer in ("Allan", "Quero vender em breve", "Consigo levar até a Aurora", "Onix", "2020"):
+    for answer in (
+        "Allan", "Quero vender em breve", "Consigo levar até a Aurora",
+        "Couro", "Não", "Onix", "2020",
+    ):
         result = engine.handle(answer, state=result.state)
         assert result.handoff is False
     result = engine.handle("Bancos meio manchados", state=result.state)
@@ -232,6 +239,8 @@ def test_appointment_collects_partial_request_and_always_hands_confirmation_to_h
         "vehicle_year": "2020",
         "objective": "Quero vender em breve",
         "can_visit_in_person": "Consigo levar até a Aurora",
+        "revestimento_bancos": "Couro",
+        "estrada_de_chao": "Não",
         "condicao": "Bancos meio manchados",
     }
     assert result.reply == (
@@ -361,6 +370,8 @@ def test_runtime_selects_appointment_classifier_stage_and_graph_evidence(monkeyp
                     "modelo_veiculo": "Onix",
                     "vehicle_year": "2020",
                     "objective": "Quero vender em breve",
+                    "revestimento_bancos": "Couro",
+                    "estrada_de_chao": "Não",
                     "condicao": "bancos manchados",
                 },
                 "missing_fields": ["can_visit_in_person"],
@@ -391,10 +402,12 @@ def test_list_services_records_every_product_and_faq_as_graph_evidence(monkeypat
     assert decision.intent == "list_services"
     assert decision.route == ConversationRoute.SDR
     assert {"product", "faq", "rule"}.issubset(evidence_types)
-    assert sum(
-        node.node_type == "product" and node.id in decision.evidence_node_ids
-        for node in graph.nodes
-    ) == 15
+    active_products = {
+        node.id for node in graph.nodes
+        if node.node_type == "product" and node.data.get("status") == "validated"
+    }
+    assert active_products <= set(decision.evidence_node_ids)
+    assert len(active_products) == 12
     assert "Serviços da Aurora:" in (response.reply_text or "")
 
 
@@ -986,7 +999,7 @@ def test_next_field_question_reads_from_the_graph():
         "missing_fields": ["nome_cliente", "modelo_veiculo"],
     }
     assert conversation_runtime._next_field_question(cart_state, context) == (
-        "Antes de tudo, qual é o seu nome e sobrenome?"
+        "Qual é o seu nome, por favor?"
     )
 
 
@@ -1024,7 +1037,7 @@ def test_ensure_trailing_question_appends_the_next_graph_question():
     )
     assert result == (
         "Polimento técnico leva cerca de 4 horas e parte de R$ 650,00. "
-        "Antes de tudo, qual é o seu nome e sobrenome?"
+        "Qual é o seu nome, por favor?"
     )
 
 
@@ -1073,6 +1086,8 @@ def test_no_published_node_states_a_service_price_duration_or_business_hours():
     """The single invariant this whole rewrite exists to hold."""
     graph = published_aurora_graph()
     for node in graph.nodes:
+        if node.lifecycle.status != "approved":
+            continue
         text = node_texts(node)
         if node.id not in PAYMENT_POLICY_NODE_IDS:
             for pattern in MONEY_PATTERNS:
@@ -1087,6 +1102,7 @@ def test_no_published_node_states_a_service_price_duration_or_business_hours():
     claim_owners = {
         (node.node_type, claim.get("claim_type"))
         for node in graph.nodes
+        if node.lifecycle.status == "approved"
         for claim in (node.data or {}).get("claims") or []
     }
     assert not ({("product", "price"), ("product", "duration")} & claim_owners)
