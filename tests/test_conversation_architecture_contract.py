@@ -236,14 +236,12 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
     initial = _node("Build graph grounded agent request")["parameters"]["jsCode"]
     initial_validator = _node("Validate agent response")["parameters"]["jsCode"]
     repair_validator = _node("Validate repaired agent response")["parameters"]["jsCode"]
-    assert "['none','keep','select','switch','add']" in initial
-    assert "required: ['action','branch_anchor_node_id','branch_path_checksum','evidence_span']" in initial
-    assert "'service_operations'" in initial
-    assert "'service_operations'" in initial_validator
-    assert "'service_operations'" in repair_validator
-    assert "'service_observations'" in initial
-    assert "'service_observations'" in initial_validator
-    assert "'service_observations'" in repair_validator
+    # branch_action + service_operations (multi-op array, actions
+    # ['add','keep','drop']) were folded into the single semantic
+    # branch_selection object; its action enum is the superset of both
+    # (service_operations contributed 'drop', branch_action the rest).
+    assert "['none','keep','select','switch','add','drop']" in initial
+    assert "required: ['action','branch_anchor_node_id','evidence_span']" in initial
     assert "active_branch_node_ids: context.active_branch_node_ids" in initial
     assert "facts_by_key: context.cart && context.cart.facts_by_key" in initial
     assert "known_facts: context.known_facts" not in initial
@@ -258,8 +256,9 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
         "operational_mode: context.operational_mode",
         "service_catalog: context.available_services",
         "service_resolution: context.retrieval_trace",
-        "semantic_score_min: 0.78",
-        "semantic_margin_min: 0.08",
+        # semantic_score_min/semantic_margin_min lived on the removed
+        # service_observations_policy object -- service_observations has no
+        # successor field in the semantic interpretation contract.
         "consumed_service_spans:",
         "reserved_spans:",
         "common_contract:",

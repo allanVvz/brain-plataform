@@ -370,7 +370,11 @@ def test_canonical_agentic_workflow_forwards_semantic_observations():
     request = next(node for node in workflow["nodes"] if node["name"] == "Build graph grounded agent request")["parameters"]["jsCode"]
     validate = next(node for node in workflow["nodes"] if node["name"] == "Validate agent response")["parameters"]["jsCode"]
     persist = next(node for node in workflow["nodes"] if node["name"] == "Persist once and enqueue send")["parameters"]["body"]
-    assert "extracted_facts" in request and "extracted_facts" in validate
+    # `facts` alone would also match facts_by_key/accepted_facts, so assert the
+    # interpretation contract itself: the schema the model is handed and the
+    # parse that turns its answer back into facts.
+    assert "'intents','state_relation'" in request
+    assert "Array.isArray(parsed.facts)" in validate
     assert "response: $json.response" in persist
 
 

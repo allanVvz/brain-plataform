@@ -274,9 +274,26 @@ def test_repetir_o_candidato_pendente_confirma_e_avanca(monkeypatch):
             "content": "Entendi. Allan Rodrigues e o seu nome completo?",
         }],
         message_id="msg:2",
-    )
+    ).model_copy(update={"pending_confirmation_ref": "fact:nome:persona:generic"})
 
-    _decision, response = _decide(context, _name_proposal("Allan Rodrigues", "allan rodrigues"))
+    # Repeating the pending candidate value used to confirm it on its own
+    # (`_restates_pending_candidate`, now dead code). Confirmation now comes
+    # from the model's semantic reading of the same message, so the customer
+    # restating "allan rodrigues" must surface as an explicit confirmation
+    # intent bound to the pending fact's ref.
+    _decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={
+            "interpretation": {
+                "intents": [{"kind": "confirmation", "evidence_span": "allan rodrigues"}],
+                "state_relation": "continue",
+                "confirmation": {
+                    "state": "affirm",
+                    "target_ref": "fact:nome:persona:generic",
+                    "evidence_span": "allan rodrigues",
+                },
+            },
+        },
+    )
 
     assert response.proof["mode"] == "deterministic_field_confirmation"
     fact = next(
