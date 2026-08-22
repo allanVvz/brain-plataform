@@ -585,7 +585,7 @@ def _common_persona_contract(
     closure = list(dict.fromkeys([
         persona_id,
         *[str(field.get("owner_node_id") or "") for field in shared],
-        *question_ids,
+        *sorted(question_ids),
         *sorted(shared_closure & claim_evidence),
     ]))
     required = [
