@@ -441,3 +441,41 @@ evitar. Não é regressão desta sessão e não bloqueia o funil.
 `117, 118, 119` (tock-fatal) e `120` (aurora), todos `TESTE_*` com telefone
 falso e `metadata.synthetic=true`. Removíveis com
 `delete from leads where id in (117,118,119,120);`
+
+---
+
+## Incidente — nenhuma persona respondia (2026-08-23 19:00)
+
+**Causa: `brain-ai-workers-1` estava parado havia 22 horas.** Não era binding,
+não era safety, não era o deploy e não era a limpeza de leads.
+
+Diagnóstico: o inbound **chegava** (lead criado, linha em `lead_buffer`), mas
+ficava preso em `status='buffered'` — ninguém despachava. O worker é quem drena
+o buffer; sem ele a conversa morre em silêncio, com o WhatsApp entregando
+normalmente e nada respondendo.
+
+- `exit=137` com **`OOMKilled=false`** → SIGKILL externo, não estouro de
+  memória. Os logs terminam limpos no meio de um heartbeat, sem erro.
+- `RestartPolicy=unless-stopped` → foi parado deliberadamente em algum momento,
+  e por isso o Docker não o trouxe de volta em nenhum restart posterior. Os
+  deploys de hoje reiniciaram a `api` e não tocaram no `workers`.
+- Memória sobrando (4.3Gi livres), então não havia pressão.
+
+Corrigido com `docker compose up -d workers`. O buffer drenou sozinho e as duas
+personas responderam de verdade (Aurora: "Prazer, Allan! Qual serviço você
+procura para o veículo?"; Tock processou `uso proprio` e a pergunta seguinte,
+outbound `delivered`).
+
+Estado dos gates, conferido e **já correto antes da correção** — nada aqui era
+a causa: os dois bindings `active` + `connected`, `safety_paused=false`, zero
+leads com `ai_paused`. (`ai_paused` é coluna **gerada**; não se escreve nela
+direto.) A Aurora tem `metadata.mode` nulo, o que `whatsapp._allowed` já trata
+como `"active"` por padrão.
+
+### Lacuna operacional que isso revela
+
+O deploy não garante que o `workers` esteja de pé, e `unless-stopped` faz um
+stop manual sobreviver a todo restart seguinte. Um worker parado é uma falha
+**silenciosa**: nada alerta, o buffer só cresce. Vale um healthcheck que olhe
+idade da linha mais antiga em `lead_buffer` com `status='buffered'` — é o sinal
+direto de "chegou e ninguém atendeu".
