@@ -133,11 +133,21 @@ off mín. 3) e duas copies. As marcas estão **vazias**
 desconto). As 5 arestas `visible_to_agent` do rascunho estão com
 `metadata: null` — hoje não fazem nada.
 
-**Armadilha de arquivo.** Os bundles da Tock Fatal são **untracked** e existem só
-em `C:\Repositores\brain-plataform\data\graph_bundles\tock-fatal\` (diretório
-compartilhado com outra sessão). **Não vieram para esta worktree**, que só tem
-`sdr-qualification-v1.json`. Primeiro passo de quem continuar: copiar para a
-worktree e commitar. Nada é escrito no diretório compartilhado.
+**Armadilha de arquivo — resolvida em `04d2955`.** Os bundles da Tock Fatal e os
+handoffs anteriores eram **untracked** e existiam só em
+`C:\Repositores\brain-plataform\data\graph_bundles\tock-fatal\`. Foram
+**copiados** (nunca movidos) para esta worktree e versionados. Nada foi escrito
+no diretório compartilhado.
+
+**Estado do diretório compartilhado — não é mais meu.** A outra sessão assumiu
+`C:\Repositores\brain-plataform`: a branch `audit/sofia-authoring-and-vitoria-runtime-2026-08-21`
+recebeu três commits de Aurora que não são meus (`ddf807c`, `0ec5b2f`,
+`468baa9`) e o diretório tem trabalho de Aurora não commitado
+(`publish_aurora_graph.py`, `test_publish_aurora_graph_v21.py`) misturado com
+restos do meu trabalho antigo (harness da Sofia, `graph_bundle_adapter.py`,
+`faq_bulk_generator.py`, persona tirzepatida). **Não desfaça nada lá sem falar
+com a outra sessão** — o que é meu já está salvo aqui; o que é de Aurora não é
+meu para mexer.
 
 ---
 
@@ -215,14 +225,14 @@ Ordem importa; o plano aprovado está em
 |---|---|---|
 | A | Ponte interpretação→proposal | **concluída** (`65a3bc6`) — com teste de regressão verificado (falha sem a correção) |
 | B | `branch_selections` como **lista** (um, dois ou ambos os ramos por turno) | **concluída** (`83a47ec`) — validação item a item, contradição `add`+`drop` é erro do turno, N operações no mesmo formato do resolvedor literal, template n8n como array |
-| C | Recuperação **unida** entre ramos ativos | a fazer — é o que falta para "receber mais de uma branch" de verdade; respeitar o orçamento de 24000 tokens com poda por ramo |
+| C | Recuperação **unida** entre ramos ativos | **concluída** (`a651ecb`) — cada ramo ativo é consultado e unido, dedup por chunk; o ramo em foco mantém prioridade porque só o conteúdo dele é obrigatório, então um segundo ramo nunca desloca o que a próxima pergunta precisa |
 | D | `include_subtree_in_branch` no compilador | **concluída** (`fa43939`) — 3 testes fixam subárvore / nó único / aresta sem escopo |
-| E | Bundle: `offer`/`copy` de canal penduradas na **marca** certa, 4 arestas de escopo, remover as 165 arestas `persona → nó` | **próximo** — decisão do usuário confirmada; depende de copiar os bundles untracked para a worktree |
-| F | **v9** — estrutura e escopo, **sem preço** | a fazer, depois de E |
+| E | Bundle: `offer`/`copy` de canal penduradas na **marca** certa, 4 arestas de escopo | **concluída** (`2041000`) — 292 nós reparentados por `api/scripts/restructure_tock_fatal_brand_scope.py` (puro, com `--check`); verificado por compilação: varejo enxerga 73 ofertas de varejo e **zero** de atacado, atacado o inverso, 73 produtos compartilhados |
+| F | **v9** — estrutura e escopo, **sem preço** | **bundle gerado e verificado**, `data/graph_bundles/tock-fatal/sdr-qualification-v9-brand-scope.json` (255 nós, zero `offer`) — **falta publicar**, o que exige autorização específica |
 | G | Cards `Embedded` por agente + portar a trava de preço para rodar contra a política do agente | a fazer |
 | H | **v10** — catálogo comercial completo (146 `offer`, 146 `copy`, regra de desconto) | a fazer, só depois de F e G |
 
-**Suíte na última verificação: 1298 passando / 2 falhando** — as duas
+**Suíte na última verificação: 1306 passando / 2 falhando** — as duas
 pré-existentes já confirmadas no commit base.
 
 **Decisões do usuário já tomadas, não reabrir:**
