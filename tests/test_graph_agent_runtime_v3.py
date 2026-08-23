@@ -3500,6 +3500,42 @@ def test_normalize_servico_owner_is_a_noop_without_a_servico_field_or_mismatch()
     assert graph_agent_runtime_v3._normalize_servico_owner(mismatched, contract_without_servico_convention) is mismatched
 
 
+def test_normalize_unique_published_field_owner_reconciles_model_scope_hint():
+    proposal = ConversationProposal(
+        extracted_facts=[ExtractedFact(
+            field_key="procedimento_anterior",
+            value="nenhum",
+            owner_node_id="branch:polish",
+            evidence_span="Nunca foi feito procedimento nessa pintura",
+        )],
+    )
+    contract = {"fields": [{
+        "key": "procedimento_anterior", "owner_node_id": "persona:generic",
+    }]}
+
+    normalized = graph_agent_runtime_v3._normalize_unique_published_field_owners(
+        proposal, contract,
+    )
+
+    assert normalized.extracted_facts[0].owner_node_id == "persona:generic"
+
+
+def test_normalize_unique_published_field_owner_stays_fail_closed_when_ambiguous():
+    proposal = ConversationProposal(extracted_facts=[ExtractedFact(
+        field_key="servico", value="polimento", owner_node_id="model:guess",
+    )])
+    contract = {"fields": [
+        {"key": "servico", "owner_node_id": "branch:a"},
+        {"key": "servico", "owner_node_id": "branch:b"},
+    ]}
+
+    normalized = graph_agent_runtime_v3._normalize_unique_published_field_owners(
+        proposal, contract,
+    )
+
+    assert normalized is proposal
+
+
 def test_normalize_premature_servico_requestion_repoints_to_the_real_pending_field():
     """Regression test for a gap re-surfaced live 2026-08-08 while validating the report's fixes.
 
