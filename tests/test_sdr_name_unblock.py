@@ -192,7 +192,10 @@ def _context(document, pub, message, *, asked=("q:nome",), facts_by_key=None,
     )
 
 
-def _name_proposal(value, evidence, *, confidence=0.95, reply="Entendi."):
+def _name_proposal(
+    value, evidence, *, confidence=0.95,
+    reply=f"Entendi. {SERVICE_QUESTION}",
+):
     return {
         "branch_action": "none",
         "branch_anchor_node_id": None,
@@ -304,8 +307,7 @@ def test_repetir_o_candidato_pendente_confirma_e_avanca(monkeypatch):
     assert fact["value"] == "Allan Rodrigues"
 
 
-def test_turno_de_coleta_nunca_termina_so_em_reconhecimento(monkeypatch):
-    """"Entendi." sozinho nao e um turno -- e um silencio disfarcado."""
+def test_turno_invalido_explicita_por_que_o_dado_nao_foi_aceito(monkeypatch):
     document, pub = _fixture(monkeypatch)
     # O modelo nao consegue ler nada util e devolve so um reconhecimento.
     proposal = {
@@ -332,7 +334,8 @@ def test_turno_de_coleta_nunca_termina_so_em_reconhecimento(monkeypatch):
 
     reply = response.reply_text or ""
     assert reply.strip() not in {"", "Entendi."}
-    assert "?" in reply, reply
+    assert "nao consegui ler esse nome" in reply.casefold(), reply
+    assert response.proof["next_question_node_id"] is None
 
 
 def test_nome_invalido_nao_vira_fato_e_o_turno_continua_util(monkeypatch):

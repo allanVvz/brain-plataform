@@ -22,12 +22,12 @@ Require the template to:
 
 1. Validate `persona_slug`, `lead_ref`, `buffer_id`, `correlation_id` and `channel_binding_id`.
 2. Load the published graph context from the backend.
-3. Resolve policy through a generic backend contract.
-4. Build model input only from the canonical event, approved context and technical model configuration.
-5. Validate structured model output.
-6. Re-run deterministic policy with model extraction as an observation.
-7. Align the candidate reply with the graph-defined first missing field.
-8. Commit once using the canonical inbound correlation/buffer identity.
+3. Resolve the published graph context: authorized knowledge, commercial facts/limits, qualification completion state and persona/agent scope.
+4. Build model input only from the canonical event, published context, approved context and technical model configuration.
+5. Validate structured model output and the citations it supplies.
+6. Preserve a valid grounded model reply: the model owns explanation, recommendation, language, conversational flow and its next natural question.
+7. Proof-check cited published evidence plus persona/agent isolation; do not deterministically select FAQ, force `missing_fields[0]`, or rewrite a valid reply into a scripted question.
+8. Commit once using the canonical inbound correlation/buffer identity (CAS/atomic claim).
 9. Route every node failure to a generic fail-safe handoff with non-secret diagnostics.
 10. Start inactive and contain no production URL, phone, token or customer-specific credential.
 
@@ -58,6 +58,13 @@ During review, search the changed production files for newly introduced commerci
 - Resume only inbound rows without `payload.conversation_commit`; a completed or processing commit is not safe to replay.
 - On graph version change, atomically migrate or reset incompatible conversation state before asking the next question.
 - When an explicit new service is detected, replace incompatible historical service state and recalculate missing fields.
+- Treat `missing_fields` as completeness/eligibility, not as a mandatory prompt sequence. Product, Offer and Copy belong to the published compiled bundle and must not be rebuilt per inbound.
+- Preserve exactly one canonical inbound -> one decision -> one commit -> at most one outbound. Exactly-once prevents duplicate processing; it does not decide conversational content.
+
+## Publication boundary
+
+- Before publication, validate active top-down FAQ accumulation from Persona through the hierarchy to every FAQ used as commercial evidence, including source/status and persona/agent scope.
+- Tock Fatal runs on GraphBundle. Aurora remains on its isolated legacy contract until an explicit, audited GraphBundle migration retires that debt; the template/runtime must not blend the two publication contracts.
 
 ## Required regression matrix
 

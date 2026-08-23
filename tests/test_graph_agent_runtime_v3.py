@@ -194,30 +194,6 @@ def test_compiler_projects_global_faq_subtree_to_every_branch_and_normalizes_emb
     assert "Resposta: Aceitamos as formas publicadas pela empresa." in faq_chunk["text"]
 
 
-def test_compound_message_faq_selection_prefers_exact_question_and_defers_ambiguity():
-    clause = graph_agent_runtime_v3._interrogative_clause(
-        "Quero continuar com o veículo… Onde o PPF é aplicado?"
-    )
-    assert clause == "Onde o PPF é aplicado?"
-    exact, method, _trace = graph_agent_runtime_v3._select_faq_candidate(clause, [{
-        "faq_node_id": "faq:ppf", "chunk_id": "chunk:ppf",
-        "question": "Onde o PPF é aplicado?", "aliases": [],
-        "semantic_score": 0.19,
-    }])
-    assert exact and exact["faq_node_id"] == "faq:ppf"
-    assert method == "exact_normalized"
-
-    selected, method, _trace = graph_agent_runtime_v3._select_faq_candidate(
-        "Onde é aplicado?",
-        [
-            {"faq_node_id": "faq:a", "chunk_id": "a", "question": "A?", "semantic_score": 0.31},
-            {"faq_node_id": "faq:b", "chunk_id": "b", "question": "B?", "semantic_score": 0.29},
-        ],
-    )
-    assert selected is None
-    assert method == "semantic_ambiguous_margin"
-
-
 def test_compiler_rejects_primary_ambiguity_and_dependency_cycle():
     root = node(1, "root")
     other = node(2, "other")
@@ -405,39 +381,6 @@ def greeting_document(responses=None, nodes=None):
             *(nodes or []),
         ]
     }
-
-
-def test_graph_owned_greeting_is_short_and_model_free():
-    document = greeting_document()
-    greeting = graph_agent_runtime_v3._greeting_policy(document, contract={}, facts={})
-    assert graph_agent_runtime_v3._is_greeting("Olá") is True
-    assert graph_agent_runtime_v3._is_greeting("Olá, quero branch a") is True
-    assert greeting == {
-        "response": "Olá! Bem-vindo.", "response_node_id": None,
-        "question": "Como você se chama?",
-        "question_node_id": None, "asked_field_key": "nome_cliente",
-        "missing_fields": ["nome_cliente"],
-    }
-
-    context = ConversationContext(
-        persona_slug="generic", agent_slug="agent", graph_version=1,
-        graph_checksum="sha256:test", messages=[{"role": "user", "content": "Olá"}],
-        cart={"facts": {}, "asked_question_node_ids": []}, rag_nodes=[], rag_paths=[],
-        rag_chunks=[], context_cards=[], system_prompt="", available_services=[],
-        active_branch_node_id=None, active_branch_node_ids=[], active_path_checksum=None,
-        branch_node_ids=[], graph_contract={}, publication_id="publication-1",
-        runtime_version=graph_agent_runtime_v3.RUNTIME_VERSION,
-        retrieval_trace={
-            "deterministic_intent": "greeting",
-            "deterministic_reply": "Olá! Bem-vindo.\n\nComo você se chama?",
-            "asked_field_key": "nome_cliente", "missing_fields": ["nome_cliente"],
-            "ledger_revision": 0,
-        },
-    )
-    decision, response = graph_agent_runtime_v3.decide(context, model_observation=None)
-    assert decision.intent == "greeting"
-    assert response.reply_text.endswith("Como você se chama?")
-    assert response.token_usage["model_calls"] == 0
 
 
 def test_graph_faq_greeting_is_selected_by_the_customer_words_and_proven():
@@ -750,65 +693,6 @@ def test_greeting_does_not_reintroduce_a_customer_already_known():
     assert returning["response"] == "Oi de novo! Aqui é a Lia."
 
 
-def test_greeting_resolves_the_published_name_question_without_a_contract():
-    """Without this the ask-once guard never sees the greeting's question.
-
-    A first-contact greeting has no active branch, so contract["questions"]
-    is empty and question_node_id used to come back None -- _decide then
-    recorded nothing in asked_question_node_ids and the name could be asked
-    again on a later turn.
-    """
-    document = greeting_document(nodes=[{
-        "id": "faq:qualification:generic:nome_cliente", "node_type": "faq",
-        "data": {"metadata": {
-            "role": "qualification_question", "field_key": "nome_cliente",
-        }},
-    }])
-    greeting = graph_agent_runtime_v3._greeting_policy(document, contract={}, facts={})
-    assert greeting["question_node_id"] == "faq:qualification:generic:nome_cliente"
-
-    context = ConversationContext(
-        persona_slug="generic", agent_slug="agent", graph_version=1,
-        graph_checksum="sha256:test", messages=[{"role": "user", "content": "Olá"}],
-        cart={"facts": {}, "asked_question_node_ids": []}, rag_nodes=[], rag_paths=[],
-        rag_chunks=[], context_cards=[], system_prompt="", available_services=[],
-        active_branch_node_id=None, active_branch_node_ids=[], active_path_checksum=None,
-        branch_node_ids=[], graph_contract={}, publication_id="publication-1",
-        runtime_version=graph_agent_runtime_v3.RUNTIME_VERSION,
-        retrieval_trace={
-            "deterministic_intent": "greeting",
-            "deterministic_reply": "Olá! Bem-vindo.\n\nComo você se chama?",
-            "asked_field_key": "nome_cliente", "missing_fields": ["nome_cliente"],
-            "next_question_node_id": greeting["question_node_id"],
-            "ledger_revision": 0,
-        },
-    )
-    decision, _ = graph_agent_runtime_v3.decide(context, model_observation=None)
-    assert decision.evidence_node_ids == ["faq:qualification:generic:nome_cliente"]
-
-
-def test_greeting_follows_the_first_missing_field_from_contract_order():
-    """The greeting cannot create an order different from the proof checker."""
-    contract = {
-        "fields": [
-            {"key": "servico", "owner_node_id": "branch:a",
-             "question_node_id": "question:servico", "required": True},
-            {"key": "nome_cliente", "owner_node_id": "persona:generic",
-             "question_node_id": "question:nome", "required": True},
-        ],
-        "questions": {
-            "question:servico": {"field_key": "servico", "text": "Qual serviço?"},
-            "question:nome": {"field_key": "nome_cliente", "text": "Como você se chama?"},
-        },
-    }
-    greeting = graph_agent_runtime_v3._greeting_policy(
-        greeting_document(), contract=contract, facts={},
-    )
-    assert greeting["asked_field_key"] == "servico"
-    assert greeting["question_node_id"] == "question:servico"
-    assert greeting["question"] == "Qual serviço?"
-
-
 def test_claims_and_handoff_need_published_policy():
     document = compiled_fixture()
     value = proposal(document, claims=[{
@@ -883,40 +767,6 @@ def test_dependencies_and_conditions_are_checked_without_field_hardcodes():
     proof = check(document, value, active="branch:a", message="value")
     assert "fact_dependency_unsatisfied:conditional:base" in proof["errors"]
     assert "fact_condition_not_met:conditional" in proof["errors"]
-
-
-def test_strict_model_parse_failure_emits_only_published_fallback():
-    document = compiled_fixture()
-    context = ConversationContext(
-        persona_slug="generic", agent_slug="agent", graph_version=1,
-        graph_checksum=document["checksum"], messages=[], cart={"facts": {}},
-        rag_nodes=[], rag_paths=[], graph_contract=document["branch_contracts"]["branch:a"],
-        active_branch_node_id="branch:a", branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
-    )
-    decision, response = graph_agent_runtime_v3.decide(
-        context,
-        model_observation={"proposal": proposal(document), "proposal_parse_errors": ["missing:claims"]},
-    )
-    assert decision.intent == "published_fallback"
-    assert response.reply_text == "Qual é a metragem?"
-    assert response.handoff_required is False
-    assert response.proof["valid"] is True
-    assert response.proof["errors"] == []
-    assert response.proof["model_proposal_errors"] == ["missing:claims"]
-    assert response.proof["fallback_used"] is True
-    assert response.proof["fallback_applied"] == "published_invalid_proposal"
-
-
-def test_published_question_is_composed_not_required_in_model_reply():
-    document = compiled_fixture()
-    value = proposal(document, reply="Certo.")
-    proof = check(document, value)
-    assert proof["valid"], proof["errors"]
-    emitted = graph_proof_checker_v3.compose_published_question(
-        reply=value["reply"], next_question_node_id="question:a",
-        contract=document["branch_contracts"]["branch:a"],
-    )
-    assert emitted == "Certo.\n\nQual é a metragem?"
 
 
 def test_active_service_branch_authorizes_boolean_service_availability():
@@ -1004,23 +854,24 @@ def test_published_question_is_not_duplicated_when_model_personalizes_it():
     assert emitted == "Perfeito! E qual é a metragem do seu apartamento, você sabe me dizer?"
 
 
-def test_published_question_is_still_appended_for_a_genuinely_different_reply():
-    document = compiled_fixture()
-    contract = document["branch_contracts"]["branch:a"]
-    emitted = graph_proof_checker_v3.compose_published_question(
-        reply="Perfeito, anotado!", next_question_node_id="question:a", contract=contract,
+def test_grounded_model_reply_survives_question_composition_byte_for_byte():
+    reply = (
+        "A lavagem técnica cuida do motor e do cofre conforme a condição atual. "
+        "Você percebe algum vazamento de óleo?"
     )
-    assert emitted == "Perfeito, anotado!\n\nQual é a metragem?"
-
-
-def test_published_question_replaces_a_model_question_for_the_wrong_field():
-    document = compiled_fixture()
-    contract = document["branch_contracts"]["branch:a"]
     emitted = graph_proof_checker_v3.compose_published_question(
-        reply="Entendi o dado informado. Qual é a quantidade?",
-        next_question_node_id="question:a", contract=contract,
+        reply=reply,
+        next_question_node_id="q:engine-leak",
+        contract={
+            "questions": {
+                "q:engine-leak": {
+                    "field_key": "engine_leak",
+                    "text": "Existe vazamento de óleo?",
+                }
+            }
+        },
     )
-    assert emitted == "Entendi o dado informado.\n\nQual é a metragem?"
+    assert emitted == reply
 
 
 def test_published_question_is_not_duplicated_when_its_only_content_word_is_swapped():
@@ -1039,55 +890,6 @@ def test_published_question_is_not_duplicated_when_its_only_content_word_is_swap
         next_question_node_id="q:color", contract=contract,
     )
     assert "Qual é a cor do veículo?" not in emitted
-
-
-def test_published_question_still_appends_for_a_similarly_worded_different_question():
-    """The character-run signal must not blur two genuinely different questions."""
-    contract = {"questions": {"q:color": {"text": "Qual é a cor do veículo?", "field_key": "vehicle_color"}}}
-    emitted = graph_proof_checker_v3.compose_published_question(
-        reply="Perfeito! Anotado.", next_question_node_id="q:color", contract=contract,
-    )
-    assert emitted == "Perfeito! Anotado.\n\nQual é a cor do veículo?"
-
-
-def test_published_question_replaces_repeated_name_question_after_name_was_captured():
-    contract = {
-        "questions": {
-            "q:objective": {
-                "text": (
-                    "Você pretende vender o carro em breve ou vai continuar com ele "
-                    "e quer investir em cuidado e proteção?"
-                ),
-                "field_key": "objective",
-            }
-        }
-    }
-    emitted = graph_proof_checker_v3.compose_published_question(
-        reply="Antes de tudo, como você se chama?",
-        next_question_node_id="q:objective",
-        contract=contract,
-    )
-    assert emitted == contract["questions"]["q:objective"]["text"]
-
-
-def test_published_question_replaces_objective_question_when_visit_is_next():
-    contract = {
-        "questions": {
-            "q:visit": {
-                "text": "Você consegue trazer o carro até nossa unidade?",
-                "field_key": "can_visit_in_person",
-            }
-        }
-    }
-    emitted = graph_proof_checker_v3.compose_published_question(
-        reply=(
-            "Perfeito. Você pretende vender o carro em breve ou vai continuar com ele "
-            "e quer investir em cuidado e proteção?"
-        ),
-        next_question_node_id="q:visit",
-        contract=contract,
-    )
-    assert emitted == "Perfeito.\n\nVocê consegue trazer o carro até nossa unidade?"
 
 
 def test_qualification_complete_is_derived_not_validated_against_the_model():
@@ -1499,13 +1301,13 @@ def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypat
 
     unknown = second_response.cart_state["facts_by_key"]["name"][0]
     assert unknown["status"] == "unknown"
-    assert unknown["reason"] == "ignored_twice"
+    assert unknown["reason"] == "explicit_unknown"
     proof_unknown = next(
         fact for fact in second_response.proof["accepted_facts"]
         if fact["field_key"] == "name"
     )
-    assert proof_unknown["reason"] == "ignored_twice"
-    assert proof_unknown["metadata"] == {"reason": "ignored_twice"}
+    assert proof_unknown["reason"] == "explicit_unknown"
+    assert proof_unknown["metadata"] == {"reason": "explicit_unknown"}
     assert second_decision.intent == "qualification_incomplete"
     assert second_decision.route.value == "HUMAN"
     assert second_response.handoff_required is True
@@ -1564,64 +1366,6 @@ def test_explicit_unknown_marks_field_unknown_immediately():
 
     assert fact and fact["status"] == "unknown"
     assert fact["metadata"] == {"reason": "explicit_unknown"}
-
-
-def test_request_to_continue_without_pending_answer_is_not_a_faq():
-    faq = {
-        "id": "faq:schedule", "node_type": "faq", "status": "validated",
-        "data": {
-            "answer": "Appointments depend on human confirmation.",
-            "claims": [{
-                "claim_type": "schedule", "policy": {"mode": "informational"},
-                "evidence_node_ids": ["faq:schedule"],
-            }],
-        },
-    }
-    persona_node = {
-        "id": "persona:generic", "node_type": "persona", "data": {
-            "conversation_policy": {"doubt_handling": {
-                "answer_before_qualification": "Answer first.",
-                "continue_with_first_missing_field": "Continue with the pending field.",
-                "deferred_response": "The team will explain the published detail.",
-            }},
-        },
-    }
-    document = {
-        "nodes": [persona_node, faq],
-        "node_by_id": {"persona:generic": persona_node, "faq:schedule": faq},
-    }
-    context = ConversationContext(
-        persona_slug="generic", agent_slug="agent", graph_version=1,
-        graph_checksum="sha256:test",
-        messages=[{
-            "role": "user", "content": "Podemos seguir sem essa informação?",
-            "message_id": "msg-defer",
-        }],
-        cart={"asked_question_node_ids": ["q:pending"]},
-        rag_nodes=[faq], rag_paths=[], graph_contract={},
-        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
-        retrieval_trace={
-            "faq_selection_method": "semantic",
-            "interrogative_clause": "Podemos seguir sem essa informação?",
-            "selected_faq_node_id": "faq:schedule",
-            "selected_faq_chunk_id": "chunk:schedule",
-        },
-    )
-    proposed = ConversationProposal(
-        branch_action="keep", branch_anchor_node_id="branch:a",
-        branch_path_checksum="sha256:path", extracted_facts=[], claims=[],
-        next_question_node_id="q:pending", cited_node_ids=[], cited_chunk_ids=[],
-        reply="", qualification_complete=False, handoff_requested=False,
-    )
-
-    resolution = graph_agent_runtime_v3._doubt_resolution(
-        context=context, document=document, proposal=proposed,
-        contract={"closure_node_ids": ["branch:a", "faq:schedule"]},
-        chunk_sources={"chunk:schedule": "faq:schedule"},
-        package_node_ids={"branch:a", "faq:schedule"},
-    )
-
-    assert resolution is None
 
 
 def test_request_to_continue_without_pending_answer_marks_it_unknown():
@@ -2111,30 +1855,6 @@ def test_active_branch_forces_keep_when_message_has_no_explicit_graph_alias():
     assert resolved.branch_action.value == "keep"
     assert resolved.branch_anchor_node_id == "branch:a"
     assert resolved.extracted_facts == []
-
-
-def test_next_question_is_reconciled_to_first_missing_graph_field():
-    contract = {
-        "fields": [
-            {"key": "first", "owner_node_id": "persona", "required": True,
-             "accepted_statuses": ["known"], "question_node_id": "q:first"},
-            {"key": "second", "owner_node_id": "persona", "required": True,
-             "accepted_statuses": ["known"], "question_node_id": "q:second"},
-        ]
-    }
-    model = ConversationProposal(
-        branch_action="keep", branch_anchor_node_id="branch:a",
-        branch_path_checksum="checksum:a", branch_evidence_span="",
-        extracted_facts=[], claims=[], next_question_node_id="q:second",
-        cited_node_ids=[], cited_chunk_ids=[], reply="Qual é o segundo?",
-        qualification_complete=False, handoff_requested=False,
-    )
-
-    reconciled = graph_agent_runtime_v3._normalize_next_question_to_first_missing(
-        model, contract, {},
-    )
-
-    assert reconciled.next_question_node_id == "q:first"
 
 
 def test_ambiguous_alias_never_selects_a_branch_deterministically():
@@ -2787,6 +2507,12 @@ def test_name_candidate_confirmation_is_resolved_before_final_confirmation(
                     "target_ref": "fact:nome:persona:generic",
                     "evidence_span": answer,
                 },
+                "next_question_node_id": expected_question,
+                "reply": (
+                    "Certo. Qual serviço você procura?"
+                    if answer == "sim"
+                    else "Tudo bem. Como você prefere ser chamado?"
+                ),
             },
         },
     )
@@ -2919,6 +2645,8 @@ def test_positive_service_candidate_confirmation_applies_bound_operation_only(mo
                     "action": "add", "branch_anchor_node_id": "branch:v",
                     "evidence_span": "sim",
                 }],
+                "next_question_node_id": "q:objective",
+                "reply": "Perfeito, vou considerar a vitrificação. Qual é seu objetivo?",
             },
         },
     )
@@ -2929,6 +2657,9 @@ def test_positive_service_candidate_confirmation_applies_bound_operation_only(mo
     assert operation["evidence_type"] == "confirmed_candidate"
     assert response.proof["service_operation_proof"]["valid"]
     assert response.proof["next_question_node_id"] == "q:objective"
+    assert response.reply_text == (
+        "Perfeito, vou considerar a vitrificação. Qual é seu objetivo?"
+    )
     assert response.proof["explicit_confirmation"] is False
 
 
@@ -3369,33 +3100,6 @@ def test_recent_messages_and_chunks_are_projected_to_minimum_prompt_contract():
     assert chunk["metadata"] == {"provenance": {"source": "graph", "status": "validated"}}
 
 
-def test_retrieval_structural_package_uses_only_the_next_missing_question():
-    document = {
-        "coordinates": {"branch:a": {"path_node_ids": [f"path:{i}" for i in range(7)]}},
-    }
-    contract = {
-        "fields": [
-            {"key": f"field:{i}", "question_node_id": f"question:{i}"}
-            for i in range(8)
-        ],
-        "handoff_rule_node_ids": ["rule:1", "rule:2", "rule:3"],
-    }
-    required = graph_agent_runtime_v3._required_retrieval_node_ids(
-        document,
-        "branch:a",
-        contract,
-        [f"field:{i}" for i in range(8)],
-    )
-    assert required == [
-        *[f"path:{i}" for i in range(7)],
-        "question:0",
-        "rule:1",
-        "rule:2",
-        "rule:3",
-    ]
-    assert len(required) <= graph_agent_runtime_v3.RAG_CHUNK_LIMIT
-
-
 def test_retrieval_reserves_one_authorized_faq_beyond_full_structural_package():
     structural = [
         {"chunk_id": f"structural:{index}"}
@@ -3699,34 +3403,6 @@ def test_normalize_premature_servico_requestion_is_a_noop_when_not_applicable():
     assert graph_agent_runtime_v3._normalize_premature_servico_requestion(
         other_question, contract, ledger_facts
     ) is other_question
-
-
-def test_focused_question_normalization_preserves_two_service_owners():
-    """Adding a service advances using the same focused contract as proof."""
-    focused_contract = {"fields": [
-        {"key": "servico", "question_node_id": "faq:servico",
-         "owner_node_id": "branch:interior", "accepted_statuses": ["known"]},
-        {"key": "objective", "question_node_id": "faq:objective",
-         "owner_node_id": "persona:generic", "accepted_statuses": ["known"]},
-    ]}
-    proposal = ConversationProposal(
-        branch_action="add", branch_anchor_node_id="branch:interior",
-        branch_path_checksum="checksum", next_question_node_id="faq:servico",
-        extracted_facts=[ExtractedFact(
-            field_key="servico", value="interior", owner_node_id="branch:interior",
-            evidence_span="higienização interna",
-        )],
-    )
-    focused_facts = {"servico": {
-        "field_key": "servico", "value": "interior", "status": "known",
-        "owner_node_id": "branch:interior",
-    }}
-
-    normalized = graph_agent_runtime_v3._normalize_next_question_to_first_missing(
-        proposal, focused_contract, focused_facts,
-    )
-
-    assert normalized.next_question_node_id == "faq:objective"
 
 
 def _switch_proposal(*, cited_node_ids: list[str], cited_chunk_ids: list[str]) -> ConversationProposal:
@@ -4440,87 +4116,6 @@ def test_seed_carried_facts_carries_vehicle_not_just_name(monkeypatch):
     assert "servico" not in seeded["facts"]
 
 
-def test_rejected_proposal_reopens_pending_branch_confirmation_instead_of_silence(monkeypatch):
-    """Regression: the *fallback* path (model proposal rejected by check())
-    computed fallback_post_support without the pending_branch_confirmation /
-    _explicit_change_requested guard that the accepted-proposal path above
-    already uses, so a customer's correction to a multi-service confirmation
-    -- landing while the journey was already post_qualification_support from
-    an earlier branch's confirmation, and whose proposal check() rejects for
-    any reason -- fell straight into `fallback = ""` with no further floor
-    catching it: zero outbound reply. Confirmed live 2026-08-17/18.
-    """
-    document = compiled_fixture()
-    persona_row = {**PERSONA, "config": {}}
-    pub = publication(document)
-    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: persona_row)
-    monkeypatch.setattr(
-        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub
-    )
-    # The proposal below would otherwise be accepted outright by check() --
-    # what matters for this regression is exclusively what _decide does
-    # once check() rejects a proposal while post_qualification_support and
-    # a branch is still pending confirmation, not which real-world defect
-    # trips check() up. Force the rejection deterministically instead of
-    # relying on an incidental validation failure elsewhere.
-    real_check = graph_proof_checker_v3.check
-
-    def _rejecting_check(*args, **kwargs):
-        result = dict(real_check(*args, **kwargs))
-        result["valid"] = False
-        result["errors"] = [*(result.get("errors") or []), "forced_test_rejection"]
-        return result
-
-    monkeypatch.setattr(graph_agent_runtime_v3.graph_proof_checker_v3, "check", _rejecting_check)
-
-    contract_b = document["branch_contracts"]["branch:b"]
-    context = ConversationContext(
-        persona_slug="generic", agent_slug="agent", graph_version=1,
-        graph_checksum=document["checksum"], messages=[{
-            "message_id": "msg:correction", "role": "user", "texto": "não, eu pedi os dois servicos",
-        }],
-        cart={
-            "facts": {"metragem": {"status": "known", "value": 20, "owner_node_id": "branch:a"}},
-            "facts_by_key": {"metragem": [
-                {"status": "known", "value": 20, "owner_node_id": "branch:a"},
-            ]},
-        },
-        rag_nodes=[], rag_paths=[],
-        graph_contract=contract_b,
-        active_branch_node_id="branch:b", active_branch_node_ids=["branch:a", "branch:b"],
-        completed_branch_node_ids=["branch:a"],
-        branch_node_ids=[], runtime_version="graph_agent_runtime_v3",
-        publication_id=pub["id"],
-        journey_state="handed_off", operational_mode="post_qualification_support",
-        retrieval_trace={"retrieval_branch_node_id": "branch:b"},
-    )
-    proposal = {
-        "branch_action": "keep", "branch_anchor_node_id": "branch:b",
-        "branch_path_checksum": contract_b["branch_path_checksum"],
-        "branch_evidence_span": "5 unidades",
-        "extracted_facts": [{
-            "field_key": "quantidade", "owner_node_id": "branch:b",
-            "status": "known", "value": 5, "source_message_id": "msg:correction",
-            "evidence_span": "5 unidades", "confidence": 1,
-        }],
-        "claims": [], "next_question_node_id": None,
-        "cited_node_ids": [], "cited_chunk_ids": [],
-        "reply": "Perfeito, ficam 20 e 5 no pedido. Posso confirmar?",
-        "qualification_complete": True, "handoff_requested": False,
-    }
-    decision, response = graph_agent_runtime_v3.decide(
-        context, model_observation={"proposal": proposal},
-    )
-    # Without the fix, fallback_post_support stayed True regardless of the
-    # pending branch:b confirmation, so `fallback` (and therefore reply_text)
-    # was forced to "" here -- proof["valid"] reflects "did the fallback
-    # produce text", not "did check() accept the proposal", so it stays True
-    # once text comes back; what matters is that text comes back at all.
-    assert response.proof.get("model_proposal_errors")
-    assert response.reply_text, "must never go fully silent on a pending branch correction"
-    assert response.proof["confirmation_state"] != "post_qualification_support"
-
-
 def test_qualification_complete_turn_citing_persona_root_is_not_rejected(monkeypatch):
     """Regression for José's silence: the persona root node is
     unconditionally in every branch's closure (it owns identity-level
@@ -4724,7 +4319,10 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
         "aurora-product-polish-localized",
     }
     assert "objective" not in response.cart_state["facts_by_key"]
-    assert response.proof["next_question_node_id"] == "q:objective"
+    assert response.proof["next_question_node_id"] is None
+    assert response.proof["question_component_discarded"] is True
+    assert response.reply_text.startswith("Agora temos dois serviços.")
+    assert "identificar seu objetivo" in response.reply_text
     assert response.proof["service_operations"] == []
     assert response.proof["service_candidate"] is None
     assert response.proof["service_candidate_rejection_reason"] == "no_service_candidate"
@@ -5139,184 +4737,6 @@ def test_direct_reconciliation_does_not_turn_a_supported_doubt_into_a_fact():
     )
 
     assert reconciled.extracted_facts == []
-
-
-def test_doubt_resolution_uses_only_self_authorized_faq_in_active_package():
-    faq = {
-        "id": "faq:detail", "node_type": "faq", "status": "validated",
-        "data": {
-            "answer": "Inclui a etapa aprovada. Qual é o seu nome?",
-            "claims": [{
-                "claim_type": "service_detail", "policy": {"mode": "informational"},
-                "evidence_node_ids": ["faq:detail"],
-            }],
-        },
-    }
-    persona_node = {
-            "id": "persona:generic", "node_type": "persona", "data": {
-                "conversation_policy": {"doubt_handling": {
-                    "answer_before_qualification": "Responda primeiro.",
-                    "continue_with_first_missing_field": "Continue com missing_fields[0].",
-                    "deferred_response": "O atendente vai passar o detalhe depois das perguntas.",
-                }},
-            },
-        }
-    document = {"nodes": [persona_node, faq], "node_by_id": {
-        "persona:generic": persona_node,
-        "faq:detail": faq,
-    }}
-    context = ConversationContext(
-        persona_slug="generic", agent_slug="agent", graph_version=1,
-        graph_checksum="sha256:test",
-        messages=[{"role": "user", "content": "O que inclui?", "message_id": "msg-doubt"}],
-        cart={}, rag_nodes=[faq], rag_paths=[], graph_contract={},
-        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
-        retrieval_trace={
-            "faq_selection_method": "exact_normalized",
-            "interrogative_clause": "O que inclui?",
-            "selected_faq_node_id": "faq:detail",
-            "selected_faq_chunk_id": "chunk:detail",
-            "faq_candidates": [{"faq_node_id": "faq:detail", "exact": True}],
-        },
-    )
-    proposed = ConversationProposal(
-        branch_action="keep", branch_anchor_node_id="branch:a",
-        branch_path_checksum="sha256:path", extracted_facts=[],
-        claims=[], next_question_node_id="q:name", cited_node_ids=[],
-        cited_chunk_ids=[], reply="Texto do modelo.",
-        qualification_complete=False, handoff_requested=False,
-    )
-
-    resolution = graph_agent_runtime_v3._doubt_resolution(
-        context=context, document=document, proposal=proposed,
-        contract={"closure_node_ids": ["branch:a", "faq:detail"]},
-        chunk_sources={"chunk:detail": "faq:detail"},
-        package_node_ids={"branch:a", "faq:detail"},
-    )
-
-    assert resolution["doubt_resolution"] == "answered"
-    assert resolution["text"] == "Inclui a etapa aprovada."
-    assert resolution["faq_node_id"] == "faq:detail"
-    assert resolution["doubt_chunk_ids"] == ["chunk:detail"]
-    assert resolution["faq_selection_method"] == "exact_normalized"
-
-
-def test_doubt_resolution_defers_from_graph_when_no_authorized_faq_exists():
-    persona_node = {
-        "id": "persona:generic", "node_type": "persona", "data": {
-            "conversation_policy": {"doubt_handling": {
-                "answer_before_qualification": "Responda primeiro.",
-                "continue_with_first_missing_field": "Continue com missing_fields[0].",
-                "deferred_response": "O atendente vai passar o detalhe depois das perguntas.",
-            }},
-        },
-    }
-    document = {"nodes": [persona_node], "node_by_id": {"persona:generic": persona_node}}
-    context = ConversationContext(
-        persona_slug="generic", agent_slug="agent", graph_version=1,
-        graph_checksum="sha256:test",
-        messages=[{"role": "user", "content": "Tem garantia?", "message_id": "msg-doubt"}],
-        cart={}, rag_nodes=[], rag_paths=[], graph_contract={},
-        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
-    )
-    proposed = ConversationProposal(
-        branch_action="keep", branch_anchor_node_id="branch:a",
-        branch_path_checksum="sha256:path", extracted_facts=[], claims=[],
-        next_question_node_id="q:name", cited_node_ids=[], cited_chunk_ids=[],
-        reply="", qualification_complete=False, handoff_requested=False,
-    )
-
-    resolution = graph_agent_runtime_v3._doubt_resolution(
-        context=context, document=document, proposal=proposed,
-        contract={"closure_node_ids": ["branch:a"]}, chunk_sources={},
-        package_node_ids={"branch:a"},
-    )
-
-    assert resolution["doubt_resolution"] == "deferred"
-    assert resolution["text"].startswith("O atendente vai passar")
-
-
-def test_decide_reconciles_faq_answer_before_exact_next_question_without_fallback(monkeypatch):
-    root = node(1, "persona:generic", parent_type="persona", data={
-        "conversation_policy": {"doubt_handling": {
-            "answer_before_qualification": "Responda primeiro.",
-            "continue_with_first_missing_field": "Continue com missing_fields[0].",
-            "deferred_response": "O atendente vai passar o detalhe depois das perguntas.",
-        }},
-    })
-    branch = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
-    question = node(3, "q:name", parent_type="faq", data={"question": "Como você se chama?"})
-    faq = node(4, "faq:detail", parent_type="faq", data={
-        "question": "O que inclui?", "answer": "Inclui a etapa aprovada.",
-        "claims": [{
-            "claim_type": "service_detail", "policy": {"mode": "informational"},
-            "evidence_node_ids": ["faq:detail"],
-        }],
-    })
-    branch["metadata"]["qualification"] = {"fields": [{
-        "key": "name", "owner_node_id": "branch:a", "question_node_id": "q:name",
-        "required": True, "accepted_statuses": ["known"],
-        "value_schema": {"type": "string", "minLength": 1},
-    }]}
-    document = graph_compiler_v3.compile_graph(
-        persona=PERSONA, node_rows=[root, branch, question, faq],
-        edge_rows=[edge(1, root, branch), edge(2, branch, question), edge(3, branch, faq)],
-    )
-    contract = document["branch_contracts"]["branch:a"]
-    pub = publication(document)
-    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client, "get_persona", lambda slug: PERSONA)
-    monkeypatch.setattr(
-        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication", lambda persona_id: pub,
-    )
-    cards = [
-        ContextCard(
-            id=node_id, node_type="faq", slug=node_id.replace(":", "-"), title=node_id,
-            rendered_content="published", content_checksum=f"sha256:{node_id}", revision=1,
-            graph_version=1, graph_checksum=document["checksum"], context_role="branch_retrieval",
-            position=index,
-        )
-        for index, node_id in enumerate(("q:name", "faq:detail"))
-    ]
-    context = ConversationContext(
-        persona_slug="generic", agent_slug="agent", graph_version=1,
-        graph_checksum=document["checksum"],
-        messages=[{"role": "user", "content": "O que inclui?", "message_id": "msg-1"}],
-        cart={"facts": {}, "facts_by_key": {}}, rag_nodes=[], rag_paths=[],
-        rag_chunks=[{"chunk_id": "chunk:detail", "source_node_id": "faq:detail"}],
-        context_cards=cards, graph_contract=contract,
-        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
-        publication_id=pub["id"], retrieval_trace={"retrieval_branch_node_id": "branch:a"},
-    )
-    proposed = proposal(document,
-        branch_action="keep", branch_evidence_span="",
-        claims=[{"claim_type": "other", "value": {},
-                 "evidence_node_ids": ["faq:detail"], "evidence_chunk_ids": ["chunk:detail"]}],
-        next_question_node_id="q:name", cited_node_ids=["faq:detail"],
-        cited_chunk_ids=["chunk:detail"], reply="Resposta inventada do modelo.",
-    )
-
-    # Regression (live 2026-08-18): this used to require a second call with
-    # repair_attempt=1 (a real round trip orchestrated outside Python by
-    # n8n) before resolving -- the FIRST call returned intent=
-    # "repair_retrieval" with reply_text=None, and that round trip could
-    # simply never complete, leaving the customer with total silence
-    # despite the graph already having computed the correct answer with
-    # zero model calls. The very first call must now resolve immediately.
-    decision, response = graph_agent_runtime_v3.decide(
-        context, model_observation={"proposal": proposed},
-    )
-    assert response.proof["policy_feedback"]["kind"] == "claim_not_authorized"
-
-    assert decision.intent == "collect_graph_fields"
-    assert response.reply_text == "Inclui a etapa aprovada.\n\nComo você se chama?"
-    assert response.reply_text.count("?") == 1
-    assert response.proof["customer_doubt_detected"] is True
-    assert response.proof["doubt_resolution"] == "answered"
-    assert response.proof["faq_node_id"] == "faq:detail"
-    assert response.proof["next_question_node_id"] == "q:name"
-    assert response.proof["asked_field_key"] == "name"
-    assert "claim_not_authorized:other" in response.proof["model_proposal_errors"]
-    assert response.proof["fallback_used"] is True
 
 
 def test_direct_reconciliation_rejects_question_without_question_mark():

@@ -89,6 +89,7 @@ def interpretation_to_proposal(
         claims=[claim.model_dump() for claim in interpretation.claims],
         cited_node_ids=list(interpretation.cited_node_ids),
         cited_chunk_ids=list(interpretation.cited_chunk_ids),
+        next_question_node_id=interpretation.next_question_node_id,
         reply=interpretation.reply,
         qualification_complete=(
             interpretation.recommended_next_action.value in {"handoff", "close"}

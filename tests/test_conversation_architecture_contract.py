@@ -161,17 +161,20 @@ def test_model_prompt_is_compact_and_budgeted_before_both_calls():
         "graph_and_cards: 'top_level_graph_contract_approved_nodes_approved_chunks', "
         "memory: boundedMemory"
     ) not in initial
-    assert "agent_behavior: 'system_message'" in initial
-    assert "graph_and_cards: 'top_level_graph_contract_approved_nodes_approved_chunks'" in initial
-    assert "memory: 'top_level_shared_memory'" in initial
-    assert "persona_policy: { '$ref': 'graph_contract.conversation_policy' }" in initial
-    assert "common_contract: commonContractPrompt" in initial
-    assert "['agent_activity','journey_outcomes','recent_messages','historical_facts']" in initial
+    assert "const usefulMemory" in initial
+    assert "approved_nodes: approvedNodes" in initial
+    assert "approved_chunks: approvedChunks" in initial
+    assert "commercial_limits:" in initial
+    assert "commonContractPrompt" not in initial
+    assert "service_catalog:" not in initial
+    assert "agent_activity" not in initial
+    assert "journey_outcomes" not in initial
+    assert "historical_facts" not in initial
     assert "promptEstimatedTokens > 22000" in initial
     assert "messages: [...original.messages" not in repair
-    assert "const originalContext = JSON.parse(original.messages[1].content" in repair
-    assert "facts_by_key: originalContext.facts_by_key" in repair
-    assert "shared_memory: originalContext.shared_memory" in repair
+    assert "const originalPrompt = JSON.parse(original.messages[1].content" in repair
+    assert "Correct only invalid components" in repair
+    assert "approved_faq" not in repair
 
 
 def test_aurora_sized_audio_prompt_stays_below_preventive_budget_without_losing_evidence():
@@ -180,42 +183,18 @@ def test_aurora_sized_audio_prompt_stays_below_preventive_budget_without_losing_
 
     result = _run_prompt_builder(context, binding)
     prompt = json.loads(result["request_body"]["messages"][1]["content"])
-    legacy_prompt = {
-        **prompt,
-        "common_contract": context["retrieval_trace"]["common_contract"],
-        "prompt_layers": {
-            **prompt["prompt_layers"],
-            "persona_policy": context["graph_contract"]["conversation_policy"],
-        },
-    }
-    legacy_messages = [
-        result["request_body"]["messages"][0],
-        {"role": "user", "content": json.dumps(legacy_prompt, ensure_ascii=False, separators=(",", ":"))},
-    ]
-    legacy_estimate = (len(json.dumps(legacy_messages, ensure_ascii=False, separators=(",", ":"))) + 3) // 4
-
-    assert legacy_estimate > 24_000
     assert result["prompt_estimated_tokens"] <= 22_000
     assert prompt["customer_message"] == message
-    assert prompt["prompt_layers"]["turn"]["customer_message"] == message
     assert prompt["source_message_id"] == "wamid-audio-1"
     assert prompt["graph_contract"] == context["graph_contract"]
     assert prompt["approved_nodes"][0]["node_id"] == "faq-polimento"
     assert prompt["approved_chunks"][0]["text"] == context["rag_chunks"][0]["chunk_text"]
     assert prompt["facts_by_key"] == context["cart"]["facts_by_key"]
-    assert prompt["shared_memory"]["profile_facts"] == context["shared_memory"]["profile_facts"]
-    assert prompt["shared_memory"]["current_journey"] == context["shared_memory"]["current_journey"]
-    assert prompt["shared_memory"]["pending_items"] == context["shared_memory"]["pending_items"]
-    assert prompt["common_contract"] == {
-        "$ref": "graph_contract", "scope": "common_fields_questions_claims",
-    }
-    assert prompt["prompt_layers"]["persona_policy"] == {
-        "$ref": "graph_contract.conversation_policy",
-    }
-    optional = prompt["shared_memory"]
-    order = ["agent_activity", "journey_outcomes", "recent_messages", "historical_facts"]
-    first_retained = next((index for index, key in enumerate(order) if optional[key]), len(order))
-    assert all(not optional[key] for key in order[:first_retained])
+    assert prompt["memory"]["profile_facts"] == context["shared_memory"]["profile_facts"]
+    assert prompt["memory"]["current_journey"] == context["shared_memory"]["current_journey"]
+    assert prompt["memory"]["pending_items"] == context["shared_memory"]["pending_items"]
+    assert "common_contract" not in prompt
+    assert "prompt_layers" not in prompt
 
 
 def test_tock_sized_audio_prompt_preserves_current_behavior_and_full_transcription():
@@ -227,9 +206,11 @@ def test_tock_sized_audio_prompt_preserves_current_behavior_and_full_transcripti
 
     assert result["prompt_estimated_tokens"] < 22_000
     assert prompt["customer_message"] == message
-    assert prompt["prompt_layers"]["turn"]["customer_message"] == message
-    for key in ("agent_activity", "journey_outcomes", "recent_messages", "historical_facts"):
-        assert prompt["shared_memory"][key] == context["shared_memory"][key]
+    assert prompt["memory"]["recent_messages"] == context["shared_memory"]["recent_messages"]
+    assert set(prompt["memory"]) == {
+        "profile_facts", "current_journey", "pending_items", "recent_messages",
+        "last_handoff",
+    }
 
 
 def test_model_prompt_receives_complete_multi_service_memory_contract():
@@ -245,25 +226,16 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
     assert "active_branch_node_ids: context.active_branch_node_ids" in initial
     assert "facts_by_key: context.cart && context.cart.facts_by_key" in initial
     assert "known_facts: context.known_facts" not in initial
-    assert "shared_memory: boundedMemory" in initial
+    assert "memory: usefulMemory" in initial
     for field in (
-        "journey: { id: context.journey_id",
-        "pending_field_key: context.pending_field_key",
-        "pending_question_node_id: context.pending_question_node_id",
-        "last_handoff: context.last_handoff",
-        "pending_reconfirmation: context.pending_reconfirmation",
-        "time_since_last_client_message: context.time_since_last_client_message",
-        "operational_mode: context.operational_mode",
-        "service_catalog: context.available_services",
-        "service_resolution: context.retrieval_trace",
-        # semantic_score_min/semantic_margin_min lived on the removed
-        # service_observations_policy object -- service_observations has no
-        # successor field in the semantic interpretation contract.
-        "consumed_service_spans:",
-        "reserved_spans:",
-        "common_contract:",
-        "pending_confirmation:",
-        "confirmation_templates:",
+        "identity: { agent_slug: context.agent_slug",
+        "publication: { id: context.publication_id",
+        "customer_message: binding.message",
+        "branch_candidates: context.retrieval_trace",
+        "graph_contract: context.graph_contract",
+        "approved_nodes: approvedNodes",
+        "approved_chunks: approvedChunks",
+        "pending_confirmation_ref: context.pending_confirmation_ref",
     ):
         assert field in initial
 

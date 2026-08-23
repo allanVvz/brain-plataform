@@ -3,6 +3,27 @@
 Substitui a camada de interpretação literal do runtime de conversa por uma
 camada semântica. Documento de arquitetura da branch `agent/sofia-vitoria-audit`.
 
+## Limite central
+
+O GraphBundle publicado fornece conhecimento, fatos comerciais e limites
+autorizados. Produto, Offer, Copy e FAQ sao compilados/publicados e recuperados
+por escopo; nunca sao reconstruidos por turno. O modelo possui explicacao,
+recomendacao, linguagem, fluxo natural da conversa e a proxima pergunta. Ele
+nao pode inventar fato comercial ou limite ausente.
+
+Proof valida somente a evidencia publicada citada e o isolamento de
+persona/agente. Ele nao seleciona FAQ, nao forca `missing_fields[0]` e nao
+substitui uma resposta valida do modelo. `missing_fields` e sinal de
+completude/eligibilidade, nao roteiro. CAS, claim atomico e ledger preservam
+um inbound canonico -> uma decisao -> um commit -> no maximo um outbound;
+exactly-once previne duplicidade, nao torna o dialogo deterministico.
+
+Antes de publicar, validar acumulacao top-down de FAQs: cada FAQ de evidencia
+precisa de caminho hierarquico ativo da Persona, fonte/status validos e escopo
+persona/agente intacto. Aurora continua em contrato legado isolado; Tock Fatal
+usa GraphBundle. A migracao da divida Aurora para GraphBundle e explicita e
+auditavel, nunca uma mistura de contratos no runtime.
+
 ## Por que
 
 A auditoria ao vivo de 2026-08-21
@@ -113,13 +134,11 @@ anterior (o modo de falha do matcher literal).
 
 ## Compatibilidade com a skill de E2E
 
-`.agents/skills/brain-agent-e2e/SKILL.md` diz que o modelo "never owns routing,
-required fields, the next question, handoff or confirmation policy". Continua
-valendo, e este desenho reforça: o modelo **interpreta**; quem decide rota,
-campos obrigatórios, próxima pergunta (sempre
-`field_questions[missing_fields[0]]`), handoff e política de confirmação
-continua sendo o backend determinístico. O que mudou é só a fonte da
-interpretação — do matcher literal para o modelo — não a fonte da política.
+Esta arquitetura segue o contrato atual de E2E: GraphBundle fornece fatos e
+limites publicados; o modelo explica, recomenda e conduz a conversa com a
+próxima pergunta natural; proof valida citações e isolamento. `missing_fields`
+não determina a fala, e nenhuma camada pode substituir uma resposta válida do
+modelo por FAQ ou pergunta determinística.
 
 ## Regra anti-hardcoded
 

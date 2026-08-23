@@ -5,15 +5,15 @@ description: Build, review, or repair graph-backed appointment qualification pol
 
 # Brain Appointment Graph
 
-Make the published Graph JSON the only authority for qualification fields and questions.
+Make the published Graph JSON the authority for qualification fields, published facts and commercial limits. It constrains the conversation; it does not turn it into a fixed script.
 
 ## Contract
 
 Preserve this chain:
 
-`published persona node -> appointment_policy.required_fields -> appointment_policy.field_questions -> runtime missing_fields -> next graph question`
+`published persona node -> appointment_policy.required_fields + field_questions -> runtime missing_fields -> model's grounded natural next question`
 
-The backend iterates this contract. It must not invent field names or commercial questions.
+The backend uses this contract for completeness and safety. The model owns explanation, recommendation, language and next-question choice; it must remain grounded in the published graph and cannot invent field names, commercial facts or questions.
 
 ## Construct with Sofia
 
@@ -35,17 +35,18 @@ Reject publication when:
 - `field_questions` is absent or not an object;
 - a common or product-specific required field has no non-empty question;
 - a runtime or n8n change embeds a fixture question as fallback/condition;
-- model output selects the next question without deterministic reconciliation.
+- a model reply cites unpublished commercial evidence or a node outside its persona/agent scope;
+- runtime/n8n forces `missing_fields[0]`, deterministically selects a FAQ, replaces a valid model reply, or rebuilds Product/Offer/Copy per turn.
 
-Test behavior by deriving the assertion dynamically:
+Test behavior by deriving the assertion dynamically, without asserting an exact scripted question:
 
 ```python
-pending = result.state["missing_fields"][0]
-expected = appointment_policy["field_questions"][pending]
-assert result.reply.endswith(expected)
+assert set(result.state["missing_fields"]).issubset(appointment_policy["field_questions"])
+assert result.proof.cited_node_ids <= result.context.authorized_node_ids
+assert result.proof.persona_isolated and result.proof.agent_isolated
 ```
 
-Fixture literals may prove a fixture, but must never become production decision logic.
+Fixture literals may prove a fixture, but must never become production decision logic. Pre-publication validation must also prove top-down FAQ accumulation: every evidence FAQ has an active Persona-to-FAQ hierarchy, valid source/status and no cross-persona/agent path.
 
 ## Handoff to E2E
 

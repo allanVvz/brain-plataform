@@ -97,7 +97,7 @@ def test_aurora_v3_source_isolated_from_runtime_assets_and_duplicate_projection_
     )
 
     assert len(rows) == len(graph.nodes) == 153
-    assert len(edges) == len(graph.edges) == 234
+    assert len(edges) == len(graph.edges) == 287
     assert {row["id"] for row in duplicates} == {
         f"duplicate:{stable_id}" for stable_id in duplicate_ids
     }
@@ -116,10 +116,10 @@ def test_aurora_v3_source_isolated_from_runtime_assets_and_duplicate_projection_
         node_rows=rows,
         edge_rows=edges,
     )
-    assert len(compiled["node_by_id"]) == 87
-    assert len(compiled["edges"]) == 168
+    assert len(compiled["node_by_id"]) == 140
+    assert len(compiled["edges"]) == 274
     assert len(compiled["branch_contracts"]) == 14
-    assert len(compiled["eligible_faq_node_ids"]) == 30
+    assert len(compiled["eligible_faq_node_ids"]) == 83
     common_question_ids = [
         node_id for node_id in compiled["common_contract"]["closure_node_ids"]
         if node_id.startswith("faq:qualification:")
@@ -133,10 +133,11 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
 
     assert valid, errors
     assert graph.schema_version == "2.1"
-    # Revisao 2026-08-21: 53 FAQs novas ficam pending_validation, lavagem de
-    # motor/cofre entra no catalogo e 13 nodes sem fonte ficam arquivados.
+    # Revisao 2026-08-23: as 53 FAQs autorizadas ficam aprovadas e publicadas;
+    # lavagem de motor/cofre entra no catalogo e 13 nodes sem fonte seguem
+    # arquivados.
     assert len(graph.nodes) == 153
-    assert len(graph.edges) == 234
+    assert len(graph.edges) == 287
 
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
     assert embedded.action is not None
@@ -149,7 +150,7 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
         and edge.relation_type == "publishes_to"
         and edge.lifecycle.status == "active"
     ]
-    assert len(grants) == 84
+    assert len(grants) == 137
     assert {edge.source for edge in grants} == {
         node.id
         for node in graph.nodes
@@ -229,7 +230,7 @@ def test_all_aurora_factual_faqs_receive_v34_projection_membership() -> None:
 
     assert document["compiler_version"] == "graph-compiler-v3.6.2"
     assert document["faq_projection_contract"] == "v1"
-    assert len(document["eligible_faq_node_ids"]) == 30
+    assert len(document["eligible_faq_node_ids"]) == 83
     # Thirteen portfolio/global FAQs are available in every branch; a branch
     # may additionally own service-specific FAQs.
     assert all(
@@ -238,23 +239,28 @@ def test_all_aurora_factual_faqs_receive_v34_projection_membership() -> None:
     )
 
 
-def test_aurora_review_keeps_new_faqs_pending_and_unsupported_nodes_archived() -> None:
+def test_aurora_review_publishes_authorized_faqs_and_keeps_unsupported_nodes_archived() -> None:
     graph = graph_markdown.canonicalize_graph(build_graph())
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
 
-    pending_faqs = [
+    approved_review_faqs = [
         node for node in graph.nodes
-        if node.node_type == "faq" and node.lifecycle.status == "pending_validation"
+        if node.node_type == "faq"
+        and node.lifecycle.status == "approved"
+        and (node.data or {}).get("source") == "aurora_review_plan_2026_08_21"
     ]
-    assert len(pending_faqs) == 53
-    assert all(len((node.data or {}).get("question_aliases") or []) == 5 for node in pending_faqs)
-    assert not any(
-        edge.source in {node.id for node in pending_faqs}
+    assert len(approved_review_faqs) == 53
+    assert all(
+        len((node.data or {}).get("question_aliases") or []) == 5
+        for node in approved_review_faqs
+    )
+    assert all(any(
+        edge.source == node.id
         and edge.target == embedded.id
         and edge.relation_type == "publishes_to"
         and edge.lifecycle.status == "active"
         for edge in graph.edges
-    )
+    ) for node in approved_review_faqs)
 
     archived = {node.id for node in graph.nodes if node.lifecycle.status == "archived"}
     assert archived == {

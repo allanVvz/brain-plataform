@@ -18,7 +18,8 @@ Record:
 - actual customer intent or graph field asked by the agent;
 - every fact present in the customer message and whether each became current;
 - whether a doubt was answered before qualification resumed;
-- acknowledgement evidence and the exact `missing_fields[0]` question;
+- acknowledgement evidence and one natural question mapped to an askable,
+  unresolved graph field;
 - comparison with recent replies and current facts for repetition/re-asking;
 - independent technical and semantic verdicts for the turn.
 

@@ -154,6 +154,22 @@ o grafo (`api/services/semantic_interpretation_validator.py`).
   `tests/test_graph_conversation_contract.py:404-457`). O v3 não a chama. É
   código para portar, não para inventar.
 
+### Fronteira central de runtime
+
+O GraphBundle publicado fornece conhecimento, fatos comerciais e limites. O
+modelo possui explicacao, recomendacao, linguagem, fluxo conversacional e a
+proxima pergunta natural; nao pode inventar fatos. `missing_fields` indica
+completude, nao um roteiro: runtime/proof nao podem forcar `missing_fields[0]`,
+selecionar FAQ deterministicamente, substituir resposta valida do modelo ou
+reconstruir Product/Offer/Copy por turno.
+
+Proof confere somente evidencia publicada citada e isolamento persona/agente.
+CAS e exactly-once continuam obrigatorios para um inbound -> uma decisao -> um
+commit -> no maximo um outbound, sem escolher conteudo da conversa. O gate de
+publicacao deve validar acumulacao top-down de cada FAQ de evidencia, com caminho
+ativo da Persona, fonte/status e escopo intactos. Tock Fatal segue GraphBundle;
+Aurora permanece no legado isolado ate sua migracao explicita e auditavel.
+
 ### Comportamento do SDR — prioridade corrente (2026-08-23)
 
 Tock e Aurora estão publicadas e respondendo, mas **as duas estão ruins em
@@ -434,6 +450,10 @@ governança 7 abaixo).
 ## Arquitetura alvo — GraphBundle
 
 Uma única fonte autoral declarativa por persona. Todo o resto é derivado.
+
+Tock Fatal e o caminho GraphBundle. Aurora continua isolada no legado ate uma
+migracao explicita e auditavel do seu debito; nao misturar fallback legado e
+contrato GraphBundle no mesmo runtime.
 
 ```
 GraphBundle (banco, versionado)

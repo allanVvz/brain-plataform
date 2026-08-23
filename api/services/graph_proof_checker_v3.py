@@ -716,20 +716,42 @@ def check(
     question_id = proposal.get("next_question_node_id")
     questions = contract.get("questions") or {}
     askable = askable_pending_fields(contract, facts)
+    question_error_count = len(errors)
     if askable:
-        expected_question_id = askable[0].get("question_node_id")
+        askable_by_question = {
+            str(field.get("question_node_id") or ""): field
+            for field in askable if field.get("question_node_id")
+        }
         question = questions.get(str(question_id or ""))
-        if question_id != expected_question_id:
-            errors.append("next_question_not_first_missing_field")
-        elif not question or question.get("field_key") != askable[0].get("key"):
+        selected_field = askable_by_question.get(str(question_id or ""))
+        if question_id and not selected_field:
+            errors.append("next_question_not_askable")
+        elif question_id and (
+            not question or question.get("field_key") != selected_field.get("key")
+        ):
             errors.append("next_question_not_for_pending_field")
-        else:
+        elif question_id:
             if any(dependency in missing_keys for dependency in question.get("depends_on") or []):
                 errors.append("next_question_dependencies_unsatisfied")
     elif missing and question_id:
         errors.append("question_after_all_pending_fields_deferred")
     elif question_id:
         errors.append("question_after_completion")
+    question_count = str(proposal.get("reply") or "").count("?")
+    if len(errors) > question_error_count and question_count == 0:
+        # A stale structural selection is independently discardable when the
+        # model did not actually emit a question. If an unproved question is
+        # present in the reply, keep the proof error: proof must never silently
+        # authorize conversational content outside the published contract.
+        del errors[question_error_count:]
+        question_id = None
+    if question_count > 1:
+        errors.append("multiple_questions_in_reply")
+    elif question_id and question_count == 0:
+        # The answer can still be valid when the model omitted the optional
+        # follow-up. Discard only that component; never append canonical copy
+        # or reject the supported explanation with it.
+        question_id = None
     # qualification_complete is 100% derivable from `missing` -- the same
     # reasoning as re-deriving "servico" from active_branch_node_id
     # server-side (graph_agent_runtime_v3.decide()) rather than trusting a
@@ -817,6 +839,9 @@ def check(
         "repair_requirements": repair, "ledger": next_ledger,
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
         "next_question_node_id": question_id,
+        "question_component_discarded": bool(
+            proposal.get("next_question_node_id") and not question_id
+        ),
         "qualification_complete": not missing,
         "handoff_required": handoff_required,
         "required_field_count": required_field_count(contract, facts),
@@ -831,38 +856,16 @@ def _fold(value: str) -> str:
 
 
 def _question_already_asked(question: str, text: str) -> bool:
-    """True when `text` already asks `question`, even personalized/reworded.
+    """Detect a prior natural rendering for memory/repetition accounting.
 
-    Confirmed live 2026-08-08: a literal substring match breaks the moment
-    the model personalizes the canonical question -- swapping "o carro" for
-    the customer's actual model ("o Onix", "o Civic") -- so the same
-    question got silently appended a second time in the same message.
-    Content-word overlap alone (first attempt at this fix, same day) still
-    missed a short question whose *only* real content word is exactly the
-    one that gets personalized away (e.g. "Qual é a cor do veículo?" ->
-    "...a cor do seu Onix?" -- "veículo" is the one content word, and it's
-    gone). Matching contiguous character runs between the two folded
-    strings catches that: the shared prefix/suffix around the swapped word
-    still accounts for most of the question's length, even when word-level
-    overlap alone would not. Checking both signals (word overlap OR
-    character-run coverage) covers substitutions in either a single word or
-    the sentence's structure, without weakening detection of a genuinely
-    different question -- unrelated questions share only a few short/
-    common words either way.
+    This never selects or appends canonical copy. It only prevents the ledger
+    from treating a personalized rendering of the same graph question as new.
     """
     if question.casefold() in text.casefold():
         return True
     q_folded = _fold(question)
     if not q_folded:
         return False
-    # Compare each interrogative sentence, never the whole reply. Summing
-    # every matching character run across an acknowledgement plus an
-    # unrelated question made ordinary Portuguese glue words look like a
-    # match (for example, the graph expected the objective while the model
-    # repeated "como voce se chama?"). SequenceMatcher.ratio keeps order
-    # and penalizes those scattered coincidences, while still recognizing a
-    # personalized noun substitution such as "cor do veiculo" ->
-    # "cor do seu Onix".
     candidates = [
         sentence.strip()
         for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(text or ""))
@@ -887,25 +890,14 @@ def _question_already_asked(question: str, text: str) -> bool:
 def compose_published_question(
     *, reply: str, next_question_node_id: str | None, contract: dict[str, Any]
 ) -> str:
-    """Preserve acknowledgement/answer prose and emit exactly one graph question."""
-    text = str(reply or "").strip()
-    if not next_question_node_id:
-        return text
-    question = str(((contract.get("questions") or {}).get(next_question_node_id) or {}).get("text") or "").strip()
-    if not question:
-        return text
-    if _question_already_asked(question, text) and text.count("?") <= 1:
-        return text
-    # The model may have drafted a natural acknowledgement followed by a
-    # question for a different field. Routing/field order belongs to the
-    # graph, so retain declarative sentences but discard every interrogative
-    # sentence before appending the single authorized question.
-    sentences = re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
-    declarative = " ".join(
-        sentence.strip() for sentence in sentences
-        if sentence.strip() and "?" not in sentence
-    ).strip()
-    return f"{declarative}\n\n{question}".strip()
+    """Compatibility facade that never rewrites model-authored language.
+
+    Membership, pending state and the one-question limit are proof concerns.
+    Existing callers may keep using this helper while structural paths are
+    progressively extracted, but canonical graph copy is never appended or
+    substituted here.
+    """
+    return str(reply or "").strip()
 
 
 def validate_natural_summary(reply: str, *, informed_values: list[str]) -> bool:

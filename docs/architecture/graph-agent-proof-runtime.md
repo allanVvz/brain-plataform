@@ -1,5 +1,22 @@
 # Runtime de conversa orientado pelo grafo
 
+## Limite de autoridade
+
+O GraphBundle publicado e a autoridade para conhecimento, fatos comerciais e
+limites. Produto, Offer, Copy e FAQ pertencem a publicacao compilada e nao sao
+reconstruidos por turno. O modelo e dono de explicacao, recomendacao, linguagem,
+fluxo natural e proxima pergunta; ele nao pode inventar fato ou limite.
+
+Proof valida somente a evidencia publicada que a resposta cita e o isolamento de
+persona/agente. Ele nao seleciona FAQ, nao forca `missing_fields[0]` e nao
+substitui resposta valida do modelo. `missing_fields` e completude, nao roteiro.
+CAS e exactly-once preservam um inbound canonico -> uma decisao -> um commit ->
+no maximo um outbound, sem decidir o conteudo da conversa.
+
+Pre-publicacao valida acumulacao top-down de FAQs de evidencia (caminho ativo
+da Persona, fonte/status e escopo persona/agente). Tock Fatal usa GraphBundle;
+Aurora continua no contrato legado isolado ate migracao explicita e auditavel.
+
 O runtime de conversa usa o Graph JSON publicado como autoridade estrutural.
 O modelo continua escolhendo como conversar; o backend apenas valida a
 proposta antes do commit.
@@ -72,14 +89,17 @@ declaração correspondente usa `accepts_unknown=true`.
 
 ## Proof checker e reparo
 
-O modelo retorna `ConversationProposal`. O checker comprova branch e checksum,
-escopo dos nodes citados, ownership dos fatos, pergunta pendente, dependências,
-conclusão, autorização de handoff e evidência de preço.
+O modelo retorna `ConversationProposal`. O checker comprova checksum, escopo
+persona/agente dos nodes citados e evidência publicada para fatos e limites
+comerciais. Ele preserva CAS e o limite de um inbound canônico -> uma decisão ->
+um commit -> no máximo um outbound; não seleciona FAQ, não impõe a primeira
+pergunta pendente e não reescreve uma resposta válida do modelo.
 
 Uma citação válida que ficou fora do pacote dispara uma expansão do mesmo
-galho e uma segunda chamada ao modelo. Se a segunda proposta ainda falhar, o
-runtime usa exatamente a pergunta publicada do primeiro campo pendente e
-registra `fallback_used`; falha de retrieval não cria handoff comercial.
+galho e uma segunda chamada ao modelo. Se continuar sem prova, o runtime pede
+clarificação neutra ou faz handoff seguro quando a política publicada autorizar;
+falha de retrieval não cria fato comercial, FAQ selecionada por algoritmo ou
+resposta substituta.
 
 O template canônico é
 `api/n8n-workflows/persona-conversation-template.json` (`graph_agentic_v3`) e

@@ -1091,10 +1091,15 @@ def compile_graph(
     if errors:
         raise GraphCompilationError(errors)
     contract_markdown = CONTRACT_DOCUMENT.read_text(encoding="utf-8")
+    # The conversational RAG is the publication's approved FAQ projection.
+    # Product/Offer/Copy remain the authored source of truth and are folded
+    # into each descendant FAQ before publication; runtime retrieval does not
+    # rebuild that hierarchy on every turn.
     projected_nodes = {
         node_id: semantic_chunks(node)
         for node_id, node in node_by_id.items()
-        if any(node_id in members for members in memberships.values())
+        if node_id in eligible_faq_ids
+        and any(node_id in members for members in memberships.values())
     }
     branch_chunk_counts = {
         branch: sum(len(projected_nodes.get(node_id) or []) for node_id in members)
@@ -1180,7 +1185,45 @@ def semantic_chunks(node: dict[str, Any]) -> list[dict[str, Any]]:
     values: list[tuple[str, str]] = []
     faq_question, faq_answer = _faq_question_answer(node)
     if node.get("node_type") == "faq" and faq_question and faq_answer:
-        values.append(("faq", f"Pergunta: {faq_question}\nResposta: {faq_answer}"))
+        aliases = data.get("question_aliases") or data.get("aliases") or []
+        sources = data.get("sources") or data.get("source") or []
+        branch_path = data.get("branch_path") or []
+        channel = str(data.get("channel") or "").strip()
+        source_node_id = str(data.get("source_node_id") or "").strip()
+        source_node_type = str(data.get("source_node_type") or "").strip()
+        claims = data.get("claims") or []
+        text = "\n".join(filter(None, [
+            f"Pergunta: {faq_question}",
+            (
+                "Variações naturais: "
+                + " | ".join(str(value) for value in aliases if value)
+                if isinstance(aliases, list) and aliases else ""
+            ),
+            f"Resposta: {faq_answer}",
+            f"Canal: {channel}" if channel else "",
+            (
+                f"Origem acumulada: {source_node_type}:{source_node_id}"
+                if source_node_id else ""
+            ),
+            (
+                "Caminho publicado: " + " -> ".join(str(value) for value in branch_path)
+                if isinstance(branch_path, list) and branch_path else ""
+            ),
+            (
+                "Fontes: " + json.dumps(sources, ensure_ascii=False, sort_keys=True)
+                if sources else ""
+            ),
+            (
+                "Claims comprováveis: "
+                + json.dumps(claims, ensure_ascii=False, sort_keys=True)
+                if claims else ""
+            ),
+        ]))
+        checksum = canonical_checksum({"kind": "faq", "text": text})
+        # Approved FAQs are already the accumulated conversational view of
+        # Product + Offer + Copy. Emit one self-sufficient vector chunk so the
+        # runtime never retrieves an alias/claim fragment without its answer.
+        return [{"kind": "faq", "text": text, "checksum": checksum}]
     question = _question_text(node)
     if question:
         values.append(("question", question))

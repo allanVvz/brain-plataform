@@ -51,6 +51,11 @@ PROTECTED_PERSONA_CHILDREN: set[str] = {"gallery"}
 FAQ_APPROVED_STATUSES: set[str] = {"approved", "validated", "embedded", "active", "ativo"}
 ALLOWED_CLAIM_TYPES = {
     "price", "availability", "schedule", "stock", "duration", "service_detail", "other",
+    "payment", "payment_policy", "cancellation_policy", "capacity",
+    "schedule_policy", "availability_policy", "duration_policy",
+    "evaluation_policy", "media_policy", "service_bundle", "price_policy",
+    "channel_policy", "qualification_policy", "conversation_policy", "risk",
+    "intent_alias", "service_selection", "catalog_boundary", "result_policy",
 }
 
 V21_KNOWLEDGE_TYPES = {

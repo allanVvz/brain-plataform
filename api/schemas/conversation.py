@@ -183,7 +183,10 @@ class ExtractedFact(StrictModel):
 
 
 class CommercialClaim(StrictModel):
-    claim_type: str = Field(pattern="^(price|availability|schedule|stock|duration|service_detail|other)$")
+    # Claim taxonomy is graph-authored. Runtime proof checks the cited
+    # published policy/chunks instead of rejecting valid domain-specific
+    # knowledge because it is absent from a backend enum.
+    claim_type: str = Field(min_length=1)
     value: dict[str, Any] = Field(default_factory=dict)
     evidence_node_ids: list[str] = Field(default_factory=list)
     evidence_chunk_ids: list[str] = Field(default_factory=list)
@@ -377,6 +380,10 @@ class SemanticInterpretation(StrictModel):
     recommended_next_action: RecommendedNextAction = RecommendedNextAction.CLARIFY
     cited_node_ids: list[str] = Field(default_factory=list)
     cited_chunk_ids: list[str] = Field(default_factory=list)
+    # Ephemeral reference to an existing graph question. This carries the
+    # model's natural choice through the established proof/ledger path and is
+    # not a persistent schema field.
+    next_question_node_id: str | None = None
     reply: str = ""
     handoff_requested: bool = False
 

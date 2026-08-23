@@ -638,9 +638,33 @@ Se nao aparece no grafo, esta incompleto.
   `data.appointment_policy.field_questions`.
 - Cada campo obrigatorio comum ou presente em `product.data.booking.required_fields`
   deve ter uma pergunta nao vazia no mapa da Persona.
-- A proxima pergunta e sempre resolvida por
-  `field_questions[missing_fields[0]]`; o backend nao pode conter fallback de
-  copy comercial, nome de campo ou pergunta de fixture.
+- `missing_fields` define completude e elegibilidade, nao um roteiro de fala:
+  o modelo escolhe a proxima pergunta natural, explicacao, recomendacao e
+  linguagem dentro dos fatos/limites publicados. O runtime nao pode forcar
+  `missing_fields[0]`, selecionar deterministicamente uma FAQ, nem substituir
+  uma resposta valida do modelo por uma pergunta pronta.
 - Grafo de agendamento incompleto deve falhar na validacao antes da publicacao.
 - Sofia deve auxiliar o operador a preencher a matriz campo/pergunta, preservar
   fonte/status e nao copiar perguntas de outra persona ou exemplo.
+
+## 28. Limite central do runtime conversacional
+
+- O GraphBundle publicado fornece conhecimento, fatos comerciais e limites
+  autorizados; produto, oferta, copy e FAQ sao compilados/publicados, nunca
+  recriados a cada turno.
+- O modelo e dono da explicacao, recomendacao, linguagem, fluxo natural da
+  conversa e proxima pergunta. Ele nao pode inventar fato, preco, estoque,
+  prazo, politica ou limite ausente do grafo publicado.
+- Proof valida apenas evidencias publicadas citadas e isolamento de
+  persona/agente; nao escolhe FAQ, nao roteiriza a conversa e nao reescreve uma
+  resposta valida do modelo.
+- CAS, claim atomico e ledger preservam exatamente um inbound -> uma decisao ->
+  um commit -> no maximo um outbound. Exactly-once previne duplicidade; nao e
+  licenca para tornar a conversa deterministica.
+- Antes de publicar, validar acumulacao top-down de FAQs: cada FAQ aprovada
+  precisa de caminho hierarquico ativo da Persona ate ela, fontes/status
+  validos e escopo de persona/agente sem cruzamento. FAQ fora desse caminho nao
+  vira evidencia comercial.
+- Aurora permanece no contrato legado isolado. Tock Fatal usa GraphBundle;
+  migrar o debito da Aurora para GraphBundle e uma etapa explicita, auditavel e
+  nao uma mistura de contratos em runtime.

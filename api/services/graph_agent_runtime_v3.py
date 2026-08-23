@@ -43,8 +43,6 @@ logger = logging.getLogger("graph_agent_runtime_v3")
 
 RUNTIME_VERSION = "graph_agent_runtime_v3"
 CONTRACT_VERSION = "graph_agent_contract_v4"
-FAQ_SEMANTIC_MIN_SCORE = 0.18
-FAQ_SEMANTIC_MIN_MARGIN = 0.03
 SERVICE_MAX_EDIT_DISTANCE = 3
 SERVICE_TEXT_MIN_SIMILARITY = 0.80
 SERVICE_SEMANTIC_MIN_SCORE = 0.78
@@ -663,28 +661,17 @@ def _required_retrieval_node_ids(
 ) -> list[str]:
     """Return the executable structural package for one turn.
 
-    The published branch contract already carries every question and handoff
-    rule verbatim.  The chunk package therefore needs the full active path,
-    the *next* graph-owned question (missing_fields[0]), and the handoff rule
-    nodes.  Loading a chunk for every later question duplicated the contract
-    and made every real appointment branch exceed the 12-chunk hard limit.
+    The published branch contract already carries pending question identity
+    and handoff rules. Retrieval therefore reserves structural context for the
+    active path and handoff only; relevant conversational knowledge comes from
+    vector-selected FAQ chunks, never a forced first-pending question chunk.
     """
     path = (
         ((document.get("coordinates") or {}).get(branch_node_id) or {})
         .get("path_node_ids") or []
     )
-    next_field = missing_fields[0] if missing_fields else None
-    next_question = next(
-        (
-            field.get("question_node_id")
-            for field in contract.get("fields") or []
-            if field.get("key") == next_field
-        ),
-        None,
-    )
     return list(dict.fromkeys([
         *path,
-        *([next_question] if next_question else []),
         *(contract.get("handoff_rule_node_ids") or []),
     ]))
 
@@ -810,58 +797,6 @@ def _interrogative_clause(message: str) -> str:
     return raw if _looks_like_customer_question(raw) else ""
 
 
-def _select_faq_candidate(
-    interrogative_clause: str, rows: list[dict[str, Any]]
-) -> tuple[dict[str, Any] | None, str, list[dict[str, Any]]]:
-    """Select an exact FAQ or a safely separated semantic winner."""
-    normalized_query = _normalized_phrase(interrogative_clause)
-    candidates: list[dict[str, Any]] = []
-    exact_by_node: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        aliases = row.get("aliases") or []
-        if isinstance(aliases, str):
-            try:
-                aliases = json.loads(aliases)
-            except (TypeError, ValueError):
-                aliases = []
-        phrases = [row.get("question"), *(aliases if isinstance(aliases, list) else [])]
-        exact = bool(normalized_query) and normalized_query in {
-            _normalized_phrase(value) for value in phrases if value
-        }
-        candidate = {
-            "faq_node_id": str(row.get("faq_node_id") or row.get("source_node_id") or ""),
-            "chunk_id": str(row.get("chunk_id") or row.get("id") or ""),
-            "question": str(row.get("question") or ""),
-            "semantic_score": round(float(row.get("semantic_score") or 0), 6),
-            "lexical_score": round(float(row.get("lexical_score") or 0), 6),
-            "exact": exact,
-        }
-        candidates.append(candidate)
-        if exact and candidate["faq_node_id"]:
-            exact_by_node[candidate["faq_node_id"]] = row
-    if len(exact_by_node) == 1:
-        return next(iter(exact_by_node.values())), "exact_normalized", candidates
-    if len(exact_by_node) > 1:
-        return None, "ambiguous_exact", candidates
-
-    ranked = sorted(
-        rows,
-        key=lambda row: (
-            -float(row.get("semantic_score") or 0),
-            str(row.get("faq_node_id") or row.get("source_node_id") or ""),
-        ),
-    )
-    if not ranked:
-        return None, "no_candidates", candidates
-    top = float(ranked[0].get("semantic_score") or 0)
-    second = float(ranked[1].get("semantic_score") or 0) if len(ranked) > 1 else 0.0
-    if top < FAQ_SEMANTIC_MIN_SCORE:
-        return None, "semantic_below_threshold", candidates
-    if top - second < FAQ_SEMANTIC_MIN_MARGIN:
-        return None, "semantic_ambiguous_margin", candidates
-    return ranked[0], "semantic_margin", candidates
-
-
 _ADDITIVE_SERVICE_MARKER = re.compile(
     r"\b(?:tamb[eé]m|al[eé]m(?:\s+de)?|junto(?:s|\s+com)?|adiciona(?:r|ndo)?|"
     r"incluir|inclui(?:r|ndo)?|mais\s+um|also|too)\b",
@@ -984,25 +919,23 @@ def _is_direct_answer_to_pending_non_service_field(
         or _message_explicitly_changes_service(message)
     ):
         return False
-    first_missing = str(missing_fields[0] or "")
     # The branch selector is never a "non-service field": answering it IS the
-    # service selection, so suppressing it strands the customer on the question
-    # they just answered. Its key comes from the graph
-    # (conversation_policy.branch_selection.field_key), not from a literal --
-    # Aurora's really is "servico", but Tock Fatal's is "purchase_profile", and
-    # hardcoding the former silently broke the latter.
+    # service selection. Resolve the field from the question actually asked,
+    # not from list position; the model may choose any askable pending field.
     selection_field = _service_selection_field(contract) or {}
     selector_key = str(selection_field.get("key") or "servico")
-    if not first_missing or first_missing == selector_key:
-        return False
     field = next(
         (
             row for row in contract.get("fields") or []
-            if str(row.get("key") or "") == first_missing
+            if str(row.get("key") or "") in set(missing_fields)
+            and str(row.get("question_node_id") or "")
+            == str(asked_question_node_ids[-1] or "")
         ),
         None,
     )
     if not field:
+        return False
+    if str(field.get("key") or "") == selector_key:
         return False
     expected_question = str(field.get("question_node_id") or "")
     return bool(
@@ -1623,8 +1556,25 @@ def _apply_authoritative_branch_resolution(
             ),
             {},
         )
+        # A remaining active branch after a drop-only operation is state, not
+        # fresh customer evidence. Only synthesize selection evidence when the
+        # resolver actually selected the focus in this inbound.
+        resolved_focus_this_turn = bool(focused_operation) or (
+            str(service_resolution.get("status") or "") == "resolved"
+            and not operations
+        )
         evidence_span = str(
             focused_operation.get("evidence_span")
+            or service_resolution.get("evidence_span")
+            or next(
+                (
+                    item.get("span") or item.get("evidence_span")
+                    for item in reversed(service_resolution.get("matches") or [])
+                    if item.get("branch_anchor_node_id") == anchor
+                ),
+                "",
+            )
+            or (_latest_user_message(context) if resolved_focus_this_turn else "")
             or ""
         )
     elif active:
@@ -2086,15 +2036,20 @@ def _explicitly_defers_pending_field(message: str) -> bool:
         r"(?:seguir|continuar|prosseguir)\s+sem\s+"
         r"(?:essa|esta|a)\s+(?:informacao|resposta|dado)(?:\s+agora)?",
         normalized,
+    )) or bool(re.fullmatch(
+        r"(?:can\s+we|could\s+we|may\s+we|i(?:d|\s+would)\s+prefer\s+to)\s+"
+        r"(?:move\s+on|continue|proceed)\s+without\s+"
+        r"(?:that|this|the\s+(?:information|answer|detail))",
+        normalized,
     ))
 
 
-def _normalize_next_question_to_first_missing(
+def _preserve_askable_next_question(
     proposal: ConversationProposal,
     contract: dict[str, Any],
     ledger_facts: dict[str, Any],
 ) -> ConversationProposal:
-    """Resolve the next question from the first graph-owned missing field."""
+    """Keep a model-selected askable question; drop only an invalid choice."""
     effective_facts = dict(ledger_facts)
     for fact in proposal.extracted_facts:
         effective_facts[fact.field_key] = {
@@ -2103,10 +2058,13 @@ def _normalize_next_question_to_first_missing(
             "owner_node_id": fact.owner_node_id,
         }
     pending = graph_proof_checker_v3.askable_pending_fields(contract, effective_facts)
-    expected = pending[0].get("question_node_id") if pending else None
-    if proposal.next_question_node_id == expected:
+    askable_ids = {
+        str(field.get("question_node_id") or "")
+        for field in pending if field.get("question_node_id")
+    }
+    if proposal.next_question_node_id in askable_ids:
         return proposal
-    return proposal.model_copy(update={"next_question_node_id": expected})
+    return proposal.model_copy(update={"next_question_node_id": None})
 
 
 def _coerce_direct_field_value(message: str, field: dict[str, Any]) -> Any:
@@ -2179,146 +2137,6 @@ def _looks_like_customer_question(message: str) -> bool:
         "gostaria de saber ", "queria saber ", "quero saber ", "sera que ",
     )
     return normalized.startswith(question_prefixes)
-
-
-def _factual_answer_only(value: Any) -> str:
-    """Remove qualification questions embedded in legacy FAQ answers."""
-    return " ".join(
-        sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(value or ""))
-        if sentence.strip() and "?" not in sentence
-    ).strip()
-
-
-def _doubt_resolution(
-    *, context: ConversationContext, document: dict[str, Any],
-    proposal: ConversationProposal, contract: dict[str, Any],
-    chunk_sources: dict[str, str], package_node_ids: set[str],
-) -> dict[str, Any] | None:
-    message = _latest_user_message(context)
-    if _explicitly_defers_pending_field(message):
-        return None
-    closure = set(contract.get("closure_node_ids") or [])
-    selected_faq_node_id = str(
-        context.retrieval_trace.get("selected_faq_node_id") or ""
-    )
-    selected_faq_chunk_id = str(
-        context.retrieval_trace.get("selected_faq_chunk_id") or ""
-    )
-    deterministic_faq_trace = "faq_selection_method" in context.retrieval_trace
-    cited = [selected_faq_node_id] if selected_faq_node_id else []
-    if not deterministic_faq_trace:
-        cited.extend(proposal.cited_node_ids)
-        cited.extend(
-            chunk_sources.get(chunk_id, "") for chunk_id in proposal.cited_chunk_ids
-        )
-    factual_faqs: list[dict[str, Any]] = []
-    for node_id in dict.fromkeys(value for value in cited if value):
-        node = (document.get("node_by_id") or {}).get(node_id) or {}
-        data = node.get("data") or {}
-        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-        claims = data.get("claims")
-        if (
-            node.get("node_type") == "faq"
-            and node_id in closure
-            and node_id in package_node_ids
-            and (metadata.get("role") or data.get("role")) != "qualification_question"
-            and str(data.get("answer") or "").strip()
-            and isinstance(claims, list)
-            and any(
-                isinstance(claim, dict)
-                and claim.get("policy")
-                and [str(value) for value in claim.get("evidence_node_ids") or []] == [node_id]
-                for claim in claims
-            )
-        ):
-            factual_faqs.append(node)
-    detected = bool(
-        context.retrieval_trace.get("interrogative_clause")
-        or _looks_like_customer_question(message)
-        or proposal.claims
-        or factual_faqs
-    )
-    if not detected:
-        return None
-    conversation_policy, _field_labels = _published_conversation_policies(
-        document, contract,
-    )
-    doubt_policy = conversation_policy.get("doubt_handling")
-    if not isinstance(doubt_policy, dict):
-        raise RuntimeError("published appointment graph missing conversation_policy.doubt_handling")
-    if factual_faqs:
-        faq = factual_faqs[0]
-        answer = _factual_answer_only((faq.get("data") or {}).get("answer"))
-        if answer:
-            used_chunks = (
-                [selected_faq_chunk_id] if selected_faq_chunk_id
-                else [
-                    chunk_id for chunk_id, source_id in chunk_sources.items()
-                    if source_id == faq.get("id")
-                ]
-            )
-            if not used_chunks or any(
-                chunk_sources.get(chunk_id) != faq.get("id") for chunk_id in used_chunks
-            ):
-                raise RuntimeError("selected FAQ evidence is outside the proof package")
-            return {
-                "customer_doubt_detected": True,
-                "doubt_resolution": "answered",
-                "text": answer,
-                "faq_node_id": faq.get("id"),
-                "doubt_node_ids": [faq.get("id")],
-                "doubt_chunk_ids": used_chunks,
-                "interrogative_clause": context.retrieval_trace.get("interrogative_clause"),
-                "faq_candidates": context.retrieval_trace.get("faq_candidates") or [],
-                "faq_selection_method": context.retrieval_trace.get("faq_selection_method"),
-            }
-    deferred = str(doubt_policy.get("deferred_response") or "").strip()
-    if not deferred:
-        raise RuntimeError("published appointment graph missing doubt deferral text")
-    return {
-        "customer_doubt_detected": True,
-        "doubt_resolution": "deferred",
-        "text": deferred,
-        "faq_node_id": None,
-        "doubt_node_ids": [],
-        "doubt_chunk_ids": [],
-        "interrogative_clause": context.retrieval_trace.get("interrogative_clause"),
-        "faq_candidates": context.retrieval_trace.get("faq_candidates") or [],
-        "faq_selection_method": context.retrieval_trace.get("faq_selection_method"),
-        "faq_deferral_reason": context.retrieval_trace.get("faq_deferral_reason") or "no_safe_match",
-    }
-
-
-def _doubt_policy_feedback(
-    *, doubt: dict[str, Any], errors: list[str], contract: dict[str, Any], facts: dict[str, Any]
-) -> dict[str, Any]:
-    """Give one bounded correction turn enough deterministic context.
-
-    This is advisory input to the model, never an authorization for a claim.
-    The proof checker remains the sole authority on facts and the next field.
-    """
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, facts)
-    return {
-        "kind": "claim_not_authorized",
-        "validation_errors": errors,
-        "customer_doubt_detected": True,
-        "instruction": (
-            "Responda primeiro a duvida usando somente a FAQ aprovada indicada; "
-            "depois faca apenas a pergunta do primeiro campo pendente. "
-            "Nao repita nem invente claims."
-        ),
-        "approved_faq": {
-            "node_id": doubt.get("faq_node_id"),
-            "chunk_ids": doubt.get("doubt_chunk_ids") or [],
-            "answer": doubt.get("text"),
-        },
-        "faq_candidates": doubt.get("faq_candidates") or [],
-        "pending_field": (pending[0].get("key") if pending else None),
-        "pending_question_node_id": (
-            pending[0].get("question_node_id") if pending else None
-        ),
-    }
 
 
 def _reconcile_direct_answer_to_pending_field(
@@ -3236,32 +3054,6 @@ def _persona_node(document: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _qualification_question_node_id(document: dict[str, Any], field_key: str) -> str | None:
-    """Find the published question node for a field outside any branch contract.
-
-    On a first-contact greeting there is no active branch yet, so
-    contract["questions"] is empty and the greeting turn used to carry
-    question_node_id=None -- which meant _decide never recorded the question
-    in asked_question_node_ids, leaving the graph-budgeted repetition guard
-    with nothing but a fuzzy text match to
-    work from. The nodes exist regardless of contract: they are the FAQs
-    materialized by graph_conversation_contract.materialize_qualification_questions,
-    carrying the same data.metadata.role/field_key contract read here.
-    """
-    if not field_key:
-        return None
-    for node in document.get("nodes") or []:
-        if node.get("node_type") != "faq":
-            continue
-        data = node.get("data") or {}
-        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-        role = metadata.get("role") or data.get("role")
-        key = str(metadata.get("field_key") or data.get("field_key") or "").strip()
-        if role == "qualification_question" and key == field_key:
-            return str(node.get("id") or "") or None
-    return None
-
-
 def _greeting_policy(
     document: dict[str, Any], *, contract: dict[str, Any], facts: dict[str, Any],
     lead_ref: int = 0, recent_replies: Sequence[str] = (), message: str = "",
@@ -3335,36 +3127,14 @@ def _greeting_policy(
     if not response:
         return None
     pending = graph_proof_checker_v3.pending_fields(contract, facts) if contract else []
-    askable = graph_proof_checker_v3.askable_pending_fields(contract, facts) if contract else []
-    # The published contract is the sole owner of qualification order. The
-    # graph validator guarantees that a declared identity_field is the first
-    # required field, so the greeting must never bypass missing_fields[0].
-    chosen = askable[0] if askable else None
-    question_id = chosen.get("question_node_id") if chosen else None
-    question = str(
-        (((contract.get("questions") or {}).get(str(question_id or "")) or {}).get("text"))
-        or ""
-    ).strip()
-    field_key = chosen.get("key") if chosen else None
-    if not contract:
-        appointment = persona_data.get("appointment_policy") or {}
-        required = [str(value) for value in appointment.get("required_fields") or [] if value]
-        questions = appointment.get("field_questions") or {}
-        unresolved = [
-            key for key in required
-            if not graph_proof_checker_v3.field_resolved({}, facts.get(key))
-        ]
-        field_key = next(iter(unresolved), None)
-        question = str(questions.get(field_key) or "").strip() if field_key else ""
-        question_id = _qualification_question_node_id(document, str(field_key or ""))
     return {
         "response": response,
         "response_node_id": response_node_id,
-        "question": question,
-        "question_node_id": question_id,
-        "asked_field_key": field_key,
+        "question": "",
+        "question_node_id": None,
+        "asked_field_key": None,
         "missing_fields": [field.get("key") for field in pending]
-        if pending else ([field_key] if field_key else []),
+        if pending else [],
     }
 
 
@@ -3372,10 +3142,12 @@ SYSTEM_PROMPT = (
     "Três camadas, e cada uma manda no que é dela. VOCÊ entende: o que o "
     "cliente quis dizer, tudo o que ele informou de uma vez, com que "
     "confiança, e em que voz responder. O BACKEND prova: evidência "
-    "literal, escopo do galho, idempotência e segurança -- ele valida a "
-    "sua proposta contra a publicação e substitui o que não puder provar. "
-    "O GRAFO manda no conteúdo: serviços, perguntas, regras, identidade e "
-    "copy. Proponha com convicção dentro da sua camada e não invente nada "
+    "literal, conhecimento publicado e idempotência -- ele valida a "
+    "proposta sem reescrever uma resposta apoiada no RAG. O GRAFO fornece "
+    "fatos, catálogo, regras, serviços e limites de atuação. VOCÊ conduz "
+    "a conversa, explica, recomenda, adapta a linguagem e escolhe a próxima "
+    "pergunta com naturalidade. Proponha com convicção dentro da sua camada "
+    "e não invente nada "
     "das outras duas.\n\n"
 
     "Antes de propor qualquer mutação, descreva a interação atual em "
@@ -3440,8 +3212,8 @@ SYSTEM_PROMPT = (
     "conteúdo e nunca deixe a conversa parada esperando que o cliente se "
     "explique melhor sozinho.\n\n"
 
-    "Você propõe a conversa; o backend apenas prova o GraphRAG "
-    "publicado. Use somente nodes/chunks do pacote, preserve o galho em "
+    "Você conduz a conversa; o backend apenas prova o GraphRAG publicado e "
+    "impede duplicidade. Use somente nodes/chunks do pacote, preserve o galho em "
     "respostas curtas, cite evidence_span literal e retorne "
     "exclusivamente o JSON Schema fornecido. Se a resposta não estiver "
     "no pacote que você recebeu, não preencha a lacuna de memória: cite "
@@ -3920,7 +3692,16 @@ def build_context(
         active_contract, ledger.get("facts") or {},
     )
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(active_contract, ledger.get("facts") or {})]
-    pending_field = pending_fields[0] if pending_fields else {}
+    last_asked_question_id = str(
+        ((ledger.get("asked_question_node_ids") or [""])[-1]) or ""
+    )
+    pending_field = next(
+        (
+            field for field in pending_fields
+            if str(field.get("question_node_id") or "") == last_asked_question_id
+        ),
+        {},
+    )
     active_path = ((document.get("coordinates") or {}).get(active_branch) or {}).get("path_node_ids") or []
     # A direct answer to the last published non-service question can contain a
     # service title as part of the value (for example, a vehicle condition).
@@ -3963,11 +3744,9 @@ def build_context(
     # Only a greeting that asks nothing and names no service skips the model.
     # Anything else -- a doubt, a service, both -- has to be answered, with
     # the greeting riding along as a prefix instead.
-    greeting = greeting_prefix if (
-        greeting_eligible
-        and _is_bare_greeting(message)
-        and not deterministic_candidates
-    ) else None
+    # Greeting copy may prefix the model context, but never short-circuits the
+    # RAG/model/proof path or chooses a qualification question itself.
+    greeting = None
     if greeting:
         persona_node = _persona_node(document)
         reply = "\n\n".join(
@@ -4130,24 +3909,6 @@ def build_context(
     contract = (document.get("branch_contracts") or {}).get(retrieval_branch) or {}
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(contract, ledger.get("facts") or {})]
     interrogative_clause = _interrogative_clause(message)
-    faq_rows: list[dict[str, Any]] = []
-    selected_faq_row: dict[str, Any] | None = None
-    faq_selection_method = "no_interrogative_clause"
-    faq_candidates: list[dict[str, Any]] = []
-    eligible_faq_node_ids = [
-        str(node_id) for node_id in contract.get("eligible_faq_node_ids") or [] if node_id
-    ]
-    if interrogative_clause and eligible_faq_node_ids:
-        faq_embedding = graph_compiler_v3.query_embeddings([interrogative_clause])[0]
-        faq_rows = supabase_client.search_graph_faq_v3(
-            persona_id=str(persona["id"]), publication_id=publication["id"],
-            branch_node_id=retrieval_branch, query=interrogative_clause,
-            query_embedding=faq_embedding,
-            eligible_faq_node_ids=eligible_faq_node_ids, limit=64,
-        )
-        selected_faq_row, faq_selection_method, faq_candidates = _select_faq_candidate(
-            interrogative_clause, faq_rows,
-        )
     branch_package_started = time.perf_counter()
     # A customer can have two branches open at once ("é pra mim e também quero
     # revender"). Retrieving only the focused one left the second branch's
@@ -4195,28 +3956,13 @@ def build_context(
     )
     structural = branch_package.get("chunks") or []
     branch_package_ms = round((time.perf_counter() - branch_package_started) * 1000, 3)
-    selected_faq_chunk: dict[str, Any] | None = None
-    if selected_faq_row:
-        selected_faq_chunk = {
-            **selected_faq_row,
-            "source_node_id": str(
-                selected_faq_row.get("faq_node_id")
-                or selected_faq_row.get("source_node_id") or ""
-            ),
-            "chunk_kind": "faq",
-            "hybrid_score": float(selected_faq_row.get("faq_score") or 1),
-        }
-        if not selected_faq_chunk.get("chunk_id") or not selected_faq_chunk.get("source_node_id"):
-            raise RuntimeError("selected FAQ evidence is missing its chunk or node identity")
     merged = {
         str(row.get("chunk_id") or row.get("id")): row
-        for row in [*rows, *structural, *([selected_faq_chunk] if selected_faq_chunk else [])]
+        for row in [*rows, *structural]
     }
     required_structural = _required_structural_chunks(structural)
-    reserved = [selected_faq_chunk] if selected_faq_chunk else []
-    reserved_ids = {
-        str(row.get("chunk_id") or row.get("id")) for row in reserved
-    }
+    reserved: list[dict[str, Any]] = []
+    reserved_ids: set[str] = set()
     optional_chunk_slots = _optional_retrieval_chunk_slots(
         required_structural, reserved,
     )
@@ -4297,16 +4043,7 @@ def build_context(
         ),
         "retrieval_branch_node_id": retrieval_branch,
         "interrogative_clause": interrogative_clause or None,
-        "faq_candidates": faq_candidates,
-        "selected_faq_node_id": (
-            str(selected_faq_chunk.get("source_node_id")) if selected_faq_chunk else None
-        ),
-        "selected_faq_chunk_id": (
-            str(selected_faq_chunk.get("chunk_id") or selected_faq_chunk.get("id"))
-            if selected_faq_chunk else None
-        ),
-        "faq_selection_method": faq_selection_method,
-        "faq_deferral_reason": faq_selection_method if interrogative_clause and not selected_faq_chunk else None,
+        "faq_selection_method": "vector_rag",
         "branch_candidates": _evidenced_branch_candidates(candidates),
         "possible_switches": possible_switches,
         "journey_state": journey_state,
@@ -5153,24 +4890,18 @@ def _deterministic_pending_fact_confirmation(
     missing, askable, required_count, question_contract = _aggregate_confirmation_state(
         document, active, grouped,
     )
-    next_question_id = str((askable[0] if askable else {}).get("question_node_id") or "") or None
-    if rejected_confirmation:
-        if capability in {"name", "common_fact"}:
-            next_question_id = str(
-                next(
-                    (
-                        field.get("question_node_id")
-                        for field in (document.get("common_contract") or {}).get("fields") or []
-                        if str(field.get("key") or "") == str(pending.get("field_key") or "")
-                    ),
-                    "",
-                ) or ""
-            ) or None
-            question_contract = document.get("common_contract") or question_contract
-        else:
-            selection_field = _service_selection_field(document.get("common_contract") or {})
-            next_question_id = str((selection_field or {}).get("question_node_id") or "") or None
-            question_contract = document.get("common_contract") or question_contract
+    askable_question_ids = {
+        str(field.get("question_node_id") or "")
+        for field in askable if field.get("question_node_id")
+    }
+    requested_question_id = str(
+        interpretation.next_question_node_id or ""
+    ) or None
+    next_question_id = (
+        requested_question_id
+        if requested_question_id in askable_question_ids
+        else None
+    )
     complete = bool(active and not missing and not remaining_pending)
     final_confirmation_pending = complete and accepted_confirmation
     if remaining_pending:
@@ -5190,7 +4921,9 @@ def _deterministic_pending_fact_confirmation(
         )
     else:
         reply = graph_proof_checker_v3.compose_published_question(
-            reply="", next_question_node_id=next_question_id, contract=question_contract,
+            reply=interpretation.reply,
+            next_question_node_id=next_question_id,
+            contract=question_contract,
         )
     if operations:
         summary = _service_request_summary(document, active)
@@ -6221,7 +5954,7 @@ def _decide(
     proposal = _normalize_stale_next_question_after_branch_change(
         proposal, contract, projected_contract_facts,
     )
-    proposal = _normalize_next_question_to_first_missing(
+    proposal = _preserve_askable_next_question(
         proposal, contract, projected_contract_facts,
     )
     chunk_sources = {
@@ -6233,28 +5966,6 @@ def _decide(
         str(chunk_id): str(source_id)
         for chunk_id, source_id in (observation.get("repair_context_chunk_sources") or {}).items()
     }
-    selected_faq_node_id = str(
-        context.retrieval_trace.get("selected_faq_node_id") or ""
-    )
-    selected_faq_chunk_id = str(
-        context.retrieval_trace.get("selected_faq_chunk_id") or ""
-    )
-    if selected_faq_node_id and selected_faq_chunk_id:
-        node_by_id = document.get("node_by_id") or {}
-        cited_nodes = [
-            node_id for node_id in proposal.cited_node_ids
-            if (node_by_id.get(node_id) or {}).get("node_type") != "faq"
-            or node_id == selected_faq_node_id
-        ]
-        cited_chunks = [
-            chunk_id for chunk_id in proposal.cited_chunk_ids
-            if (node_by_id.get(chunk_sources.get(chunk_id, "")) or {}).get("node_type") != "faq"
-            or chunk_id == selected_faq_chunk_id
-        ]
-        proposal = proposal.model_copy(update={
-            "cited_node_ids": list(dict.fromkeys([*cited_nodes, selected_faq_node_id])),
-            "cited_chunk_ids": list(dict.fromkeys([*cited_chunks, selected_faq_chunk_id])),
-        })
     if (
         proposal.branch_action.value == "switch"
         and context.active_branch_node_id
@@ -6365,58 +6076,10 @@ def _decide(
     package_node_ids = {card.id for card in context.context_cards} | {
         str(value) for value in observation.get("repair_context_node_ids") or [] if value
     } | persona_root_ids
-    doubt = _doubt_resolution(
-        context=context,
-        document=document,
-        proposal=proposal,
-        contract=contract,
-        chunk_sources=chunk_sources,
-        package_node_ids=package_node_ids,
-    )
-    if doubt:
-        original_errors = [str(error) for error in proof.get("errors") or []]
-        non_claim_errors = [
-            error for error in original_errors
-            if not error.startswith((
-                "claim_not_authorized:",
-                "claim_without_evidence:",
-                "claim_node_evidence_outside_package:",
-                "claim_chunk_evidence_outside_package:",
-                "claim_evidence_not_authorized:",
-            ))
-            and error != "keep_without_active_branch"
-        ]
-        if any(error.startswith("claim_") for error in original_errors) and not non_claim_errors:
-            # A factual FAQ may be perfectly grounded even when the model put
-            # an unauthorized claim type beside it. repair_requirements is
-            # always empty in this branch -- there's never anything to fetch,
-            # since the graph's own doubt resolution already computed the
-            # approved answer with zero model calls (doubt["text"]). This
-            # used to wait for a second model call (repair_attempt>=1,
-            # orchestrated outside Python by n8n) before resolving, returning
-            # reply_text=None in the meantime -- confirmed live 2026-08-18
-            # that round trip can simply not complete, leaving the customer
-            # with total silence despite the correct answer already being in
-            # hand. Resolve immediately with the graph-approved text instead;
-            # this is the exact same terminal state the code already forced
-            # on a hypothetical second attempt, just without the avoidable,
-            # silently-failure-prone round trip in between.
-            feedback = _doubt_policy_feedback(
-                doubt=doubt, errors=original_errors, contract=contract,
-                facts=contract_facts,
-            )
-            proof.update({
-                "valid": True,
-                "errors": [],
-                "repair_required": False,
-                "repair_requirements": [],
-                "policy_feedback": feedback,
-                "model_proposal_errors": original_errors,
-                "fallback_used": True,
-                "fallback_applied": "published_faq_immediate",
-                "model_attempts": 1,
-                **doubt,
-            })
+    # FAQ selection and wording belong to vector retrieval + the model. Proof
+    # below validates cited published evidence; it never substitutes a
+    # canonical FAQ answer for a grounded model response.
+    doubt = None
     # An explicit switch/add is only a Phase-A decision on the first pass.
     # Force one directed Phase-B retrieval for the selected branch before
     # any reply or fact can be committed, even if an anchor snippet
@@ -6642,11 +6305,14 @@ def _decide(
             ledger_facts=contract_facts,
             proposal=proposal,
             max_attempts=_question_repetition_max_attempts(contract),
-            # Only a doubt the graph actually answered. A deferred doubt gave
-            # the customer nothing, so it stays a spent attempt and the
-            # conversation still escalates to a human.
-            doubt_answered=bool(
-                doubt and str(doubt.get("doubt_resolution") or "") == "answered"
+            # A customer question is a conversational detour, not refusal to
+            # answer the pending field. The model answers it from retrieved
+            # knowledge and the qualification budget remains unchanged.
+            doubt_answered=(
+                _looks_like_customer_question(_latest_user_message(context))
+                and not _explicitly_defers_pending_field(
+                    _latest_user_message(context)
+                )
             ),
         )
         if unanswered_fact:
@@ -6720,10 +6386,15 @@ def _decide(
             *aggregate_missing,
             *_unknown_fields(active_fields, next_grouped),
         ])
-        next_question_id = next(
-            (field.get("question_node_id") for field in aggregate_askable if field.get("question_node_id")),
-            None,
-        )
+        # Proof has already established membership, dependencies and pending
+        # state for the model's choice. No backend ordering or first-missing
+        # fallback is applied here.
+        proved_question_id = proof.get("next_question_node_id")
+        next_question_id = proved_question_id if any(
+            str(field.get("question_node_id") or "")
+            == str(proved_question_id or "")
+            for field in aggregate_askable
+        ) else None
         question_contract = next(
             (
                 candidate for candidate in (document.get("branch_contracts") or {}).values()
@@ -6776,14 +6447,6 @@ def _decide(
             reply_seed = " ".join(
                 part for part in (reply_seed, invalid_response) if part
             )
-        if (
-            not accepted_facts
-            and next_question_id
-            and not doubt
-            and not context.retrieval_trace.get("deterministic_branch_resolution")
-            and len(_latest_user_message(context).split()) <= 3
-        ):
-            reply_seed = ""
         pending_confirmation_fact = next(
             (
                 fact for fact in accepted_facts
@@ -6947,40 +6610,6 @@ def _decide(
                 # new to say by definition.
                 repetition_action = "allowed_never_silent"
 
-        # And a collection turn never ends as a bare acknowledgement. The
-        # ladder's last rung emits only its prefix, which is how a suppressed
-        # confirmation reached the customer as "Entendi." and nothing else
-        # (live 2026-08-19): indistinguishable from a broken agent, with
-        # nothing to answer. While a field is still askable, the published
-        # question comes back instead.
-        # A doubt answered by the graph is content: that turn gave the customer
-        # something, and re-appending the ask it just suppressed would spend an
-        # emission the budget deliberately withheld.
-        if (
-            not terminal_intent
-            and not post_support
-            and not doubt
-            and aggregate_askable
-            and "?" not in reply
-        ):
-            recovery_question_id = next_question_id or next(
-                (
-                    field.get("question_node_id")
-                    for field in aggregate_askable
-                    if field.get("question_node_id")
-                ),
-                None,
-            )
-            recovered = graph_proof_checker_v3.compose_published_question(
-                reply=reply,
-                next_question_node_id=recovery_question_id,
-                contract=question_contract,
-            ).strip()
-            if recovered and recovered != reply.strip():
-                reply = recovered
-                next_question_id = recovery_question_id
-                repetition_action = "repaired_never_acknowledge_only"
-
         projection_contract = (
             (document.get("branch_contracts") or {}).get(committed_branch)
             or document.get("common_contract")
@@ -7006,9 +6635,7 @@ def _decide(
                 # emission on an outbound that was never sent.
                 *(
                     [next_question_id]
-                    if next_question_id and repetition_action in {
-                        "allowed", "repaired_never_acknowledge_only",
-                    }
+                    if next_question_id and repetition_action == "allowed"
                     else []
                 ),
             ],
