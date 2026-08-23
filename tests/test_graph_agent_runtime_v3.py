@@ -4921,6 +4921,46 @@ def test_direct_enum_answer_accepts_published_alias_inside_natural_sentence():
     assert value == "both"
 
 
+def test_direct_answer_reconciles_the_last_asked_pending_field_after_order_shift():
+    contract = {"fields": [
+        {
+            "key": "color", "owner_node_id": "persona:generic",
+            "accepted_statuses": ["known"], "question_node_id": "q:color",
+            "value_schema": {"type": "string", "minLength": 1},
+        },
+        {
+            "key": "focus", "owner_node_id": "persona:generic",
+            "accepted_statuses": ["known"], "question_node_id": "q:focus",
+            "validation": {"mode": "enum", "values": [{
+                "value": "both", "aliases": ["melhorar o brilho e reduzir os riscos"],
+            }]},
+            "value_schema": {"type": "string", "minLength": 1},
+        },
+    ]}
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test", messages=[{
+            "role": "user", "content": "Quero melhorar o brilho e reduzir os riscos",
+            "message_id": "msg-focus",
+        }],
+        cart={"facts": {}, "asked_question_node_ids": ["q:focus"]},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="sha256:path", next_question_node_id="q:color",
+    )
+
+    reconciled = graph_agent_runtime_v3._reconcile_direct_answer_to_pending_field(
+        proposal, context, contract, {},
+    )
+
+    assert [(fact.field_key, fact.value) for fact in reconciled.extracted_facts] == [
+        ("focus", "both"),
+    ]
+
+
 def test_fact_source_message_id_is_normalized_to_backend_inbound_identity():
     context = ConversationContext(
         persona_slug="generic", agent_slug="agent", graph_version=1,

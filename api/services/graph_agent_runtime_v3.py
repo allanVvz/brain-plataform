@@ -2332,10 +2332,17 @@ def _reconcile_direct_answer_to_pending_field(
     pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
     if not pending:
         return proposal
-    field = pending[0]
-    question_id = str(field.get("question_node_id") or "")
     asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
-    if not question_id or not asked or asked[-1] != question_id:
+    if not asked:
+        return proposal
+    field = next(
+        (
+            item for item in pending
+            if str(item.get("question_node_id") or "") == asked[-1]
+        ),
+        None,
+    )
+    if field is None:
         return proposal
     key = str(field.get("key") or "")
     if not key or any(fact.field_key == key for fact in proposal.extracted_facts):
