@@ -322,3 +322,65 @@ Mitigação pronta para portar: `graph_conversation_contract.py:587-606,746-763`
 `tests/test_graph_conversation_contract.py:404-457`.
 
 **Próximo passo recomendado:** seção G antes de reprovisionar o n8n.
+
+---
+
+## Duplicata do n8n — criada, testada, NÃO promovida
+
+`02T5wStlpCsdEHcc` — "Brain — Tock Fatal — Conversacao (semantic v2)", ativa no
+path **`tock-fatal/conversation-semantic`**, contrato semântico verificado
+(`branch_selections` + `interpretation` presentes no template renderizado).
+
+**O binding da Tock continua em `WDUxL74OUctQHWwG`
+(`tock-fatal/conversation`).** Não promovi — e o motivo está abaixo. Trocar é um
+campo; reverter também.
+
+### O que o teste ao vivo revelou (e por isso ele existiu)
+
+Rodei conversa real pela duplicata, com lead sintético (`leads.id` 117 e 118,
+telefone falso). Três defeitos em sequência, todos meus:
+
+1. **`available_services` tipado `dict[str, str]`** — mas cada anchor passou a
+   carregar a lista `aliases` do grafo. Toda conversa morria na validação do
+   `ConversationContext` antes de chegar ao runtime. Corrigido + teste na
+   fronteira que nenhum teste cobria (nenhum construía contexto como o
+   `build_context` constrói).
+2. **`decide()` validava a interpretação sem documento e sem contrato** — então
+   todo anchor e field key voltava "unknown" e a leitura inteira era descartada.
+   Exatamente a falha que esta camada existe para remover. Agora valida contra
+   os anchors e o closure que o próprio turno já carrega, sem round trip extra.
+3. **`needs_confirmation` tratado como resolvido** — esse status é o matcher
+   literal dizendo que **não** tem certeza. A leitura semântica provada agora
+   vence a hesitação dele (mas nunca um `resolved`, e nunca cala um `ambiguous`
+   real entre dois anchors).
+
+Depois dos três: `semantic_validation.valid = true`, **`dropped: []`** — a
+leitura do modelo sobrevive inteira. O modelo devolve exatamente o certo:
+`branch_selections: [{action: add, branch_anchor_node_id: "audience:tock-retail",
+evidence_span: "uso próprio"}]`.
+
+### BLOQUEADOR restante — por que não promovi
+
+`"uso próprio mesmo"` **ainda repete a mesma pergunta**. Causa localizada:
+`resolution_method: suppressed_for_pending_non_service_field`
+(`_reserve_message_for_pending_field`, `graph_agent_runtime_v3.py:971-987`).
+
+Esse guarda suprime a resolução de serviço quando há um campo não-de-serviço
+pendente. Só que aqui o campo pendente **é `purchase_profile` — o próprio
+seletor de ramo**. Responder a pergunta de seleção de ramo é classificado como
+"resposta a campo não-de-serviço" e a seleção é suprimida.
+
+O guarda precisa reconhecer `conversation_policy.branch_selection.field_key`
+como campo DE serviço. Não fiz na correria: mexer nele afeta o caminho legado
+que hoje atende Aurora, Baita e a própria Tock em produção, e não vou arriscar
+isso sem a matriz do WA Validator.
+
+Segundo defeito observado, menor: saudação concatenada no turno 1
+("Oi! Que bom ter você por aqui." + a saudação do modelo) — a matriz lista isso
+explicitamente como algo a evitar.
+
+### Estado seguro atual
+
+- Tráfego real: workflow original, caminho legado, **funcionando**.
+- Duplicata: isolada, sem tráfego, pronta para retomar o debug.
+- Publicação v9 com catálogo completo: ativa e servindo os dois caminhos.
