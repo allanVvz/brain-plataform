@@ -5839,7 +5839,19 @@ def _decide(
     )
     proposal = _normalize_referential_service_fact(proposal, context, document)
     proposal = _normalize_servico_owner(proposal, contract)
-    proposal = _normalize_unique_published_field_owners(proposal, contract)
+    owner_scope_branch_ids = list(dict.fromkeys([
+        *context.active_branch_node_ids,
+        *([context.active_branch_node_id] if context.active_branch_node_id else []),
+        *([proposal.branch_anchor_node_id] if proposal.branch_anchor_node_id else []),
+    ]))
+    owner_scope_contract = {
+        "fields": _active_contract_fields(
+            document, owner_scope_branch_ids, contract,
+        ),
+    }
+    proposal = _normalize_unique_published_field_owners(
+        proposal, owner_scope_contract,
+    )
     proposal = _normalize_fact_source_message_ids(proposal, context)
     proposal, name_field_validation = _reconcile_human_full_name_facts(
         proposal, context=context, contract=contract,

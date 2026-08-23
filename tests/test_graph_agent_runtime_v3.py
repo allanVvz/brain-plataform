@@ -3536,6 +3536,32 @@ def test_normalize_unique_published_field_owner_stays_fail_closed_when_ambiguous
     assert normalized is proposal
 
 
+def test_normalize_unique_owner_can_use_union_of_active_branch_fields():
+    proposal = ConversationProposal(extracted_facts=[ExtractedFact(
+        field_key="foco_brilho_riscos",
+        value="brilho_e_riscos",
+        owner_node_id="branch:polish",
+        evidence_span="brilho e riscos",
+    )])
+    document = {"branch_contracts": {
+        "branch:interior": {"fields": [{
+            "key": "revestimento", "owner_node_id": "persona:generic",
+        }]},
+        "branch:polish": {"fields": [{
+            "key": "foco_brilho_riscos", "owner_node_id": "persona:generic",
+        }]},
+    }}
+    fields = graph_agent_runtime_v3._active_contract_fields(
+        document, ["branch:interior", "branch:polish"], {},
+    )
+
+    normalized = graph_agent_runtime_v3._normalize_unique_published_field_owners(
+        proposal, {"fields": fields},
+    )
+
+    assert normalized.extracted_facts[0].owner_node_id == "persona:generic"
+
+
 def test_normalize_premature_servico_requestion_repoints_to_the_real_pending_field():
     """Regression test for a gap re-surfaced live 2026-08-08 while validating the report's fixes.
 
