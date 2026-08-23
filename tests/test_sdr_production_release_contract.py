@@ -59,3 +59,12 @@ def test_sdr_corpus_is_packaged_inside_the_production_api_image():
     assert '_API_DIR / "evaluation" / "sdr_flow_cases.json"' in WA_VALIDATOR
     assert "COPY --chown=appuser:appuser api/ /app/" in API_DOCKERFILE
     assert 'ROOT_DIR / "tests" / "fixtures"' not in WA_VALIDATOR
+
+
+def test_api_image_application_layer_is_keyed_by_release_sha():
+    assert "SOURCE_SHA=${{ env.TARGET_SHA }}" in WORKFLOW
+    marker = 'RUN printf \'%s\' "${SOURCE_SHA}" > /image-source-sha'
+    assert marker in API_DOCKERFILE
+    assert API_DOCKERFILE.index(marker) < API_DOCKERFILE.index(
+        "COPY --chown=appuser:appuser api/ /app/"
+    )
