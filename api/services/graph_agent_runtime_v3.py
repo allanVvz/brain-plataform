@@ -985,7 +985,15 @@ def _is_direct_answer_to_pending_non_service_field(
     ):
         return False
     first_missing = str(missing_fields[0] or "")
-    if not first_missing or first_missing == "servico":
+    # The branch selector is never a "non-service field": answering it IS the
+    # service selection, so suppressing it strands the customer on the question
+    # they just answered. Its key comes from the graph
+    # (conversation_policy.branch_selection.field_key), not from a literal --
+    # Aurora's really is "servico", but Tock Fatal's is "purchase_profile", and
+    # hardcoding the former silently broke the latter.
+    selection_field = _service_selection_field(contract) or {}
+    selector_key = str(selection_field.get("key") or "servico")
+    if not first_missing or first_missing == selector_key:
         return False
     field = next(
         (

@@ -5576,3 +5576,44 @@ def test_secondary_retrieval_branches_dedupes_and_keeps_order():
         active_branch_node_ids=["branch:b", "branch:c", "branch:b"],
         branch_anchors=["branch:a", "branch:b", "branch:c"],
     ) == ["branch:b", "branch:c"]
+
+
+# ---------------------------------------------------------------------------
+# The branch selector is never a "non-service field".
+# ---------------------------------------------------------------------------
+
+def _selector_contract(selector_key: str) -> dict:
+    return {
+        "fields": [
+            {"key": selector_key, "question_node_id": "q:selector",
+             "branch_selection_field": True},
+            {"key": "outro_campo", "question_node_id": "q:outro"},
+        ],
+    }
+
+
+@pytest.mark.parametrize("selector_key", ["servico", "purchase_profile", "modalidade"])
+def test_answering_the_branch_selector_is_never_suppressed(selector_key):
+    """Suppressing it strands the customer on the question they just answered.
+
+    The key is graph-declared: Aurora's is "servico", Tock Fatal's is
+    "purchase_profile". Comparing against the literal "servico" silently broke
+    every persona that named it anything else.
+    """
+    assert graph_agent_runtime_v3._is_direct_answer_to_pending_non_service_field(
+        message="uso próprio mesmo",
+        contract=_selector_contract(selector_key),
+        missing_fields=[selector_key],
+        asked_question_node_ids=["q:selector"],
+    ) is False
+
+
+def test_a_genuine_non_service_field_answer_is_still_suppressed():
+    """The guard's real job survives: service words inside a field answer
+    must not hijack branch focus."""
+    assert graph_agent_runtime_v3._is_direct_answer_to_pending_non_service_field(
+        message="a pintura perdeu o brilho",
+        contract=_selector_contract("servico"),
+        missing_fields=["outro_campo"],
+        asked_question_node_ids=["q:outro"],
+    ) is True
