@@ -14,8 +14,10 @@ from services import (
     graph_compiler_v3,
     graph_conversation_contract,
     graph_document_publisher,
+    graph_json_v2_validator,
     graph_json_v21_adapter,
     graph_json_v2_store,
+    graph_markdown,
     supabase_client,
 )
 
@@ -23,7 +25,7 @@ from services import (
 FIXTURE = ROOT / "scripts" / "fixtures" / "aurora_graph_v2.json"
 
 
-def build_graph() -> GraphJson:
+def _build_authored_graph() -> GraphJson:
     """Build Aurora's v2.1 graph and preserve the 44-node agent dataset.
 
     The historical fixture published every approved factual node into the
@@ -453,6 +455,96 @@ def build_graph() -> GraphJson:
             )
         )
     return graph
+
+
+def _materialize_approved_faq_projection(graph: GraphJson) -> GraphJson:
+    """Produce one logical FAQ -> Embedded projection per approved FAQ.
+
+    This is an authoring/publication preparation step, never a conversational
+    runtime repair. Pending, archived and revoked FAQ projections are omitted;
+    duplicate logical grants collapse deterministically to their first active
+    edge. The content and copy of every node remain untouched.
+    """
+    embedded_nodes = [node for node in graph.nodes if node.node_type == "embedded"]
+    if len(embedded_nodes) != 1:
+        raise RuntimeError("aurora_requires_exactly_one_embedded_node")
+    embedded = embedded_nodes[0]
+    node_by_id = {node.id: node for node in graph.nodes}
+    seen_faq_projections: set[tuple[str, str, str]] = set()
+    prepared_edges: list[Edge] = []
+
+    for edge in graph.edges:
+        source = node_by_id.get(edge.source)
+        is_faq_projection = (
+            edge.target == embedded.id
+            and source is not None
+            and source.node_type == "faq"
+        )
+        if not is_faq_projection:
+            prepared_edges.append(edge)
+            continue
+        if source.lifecycle.status != "approved" or edge.lifecycle.status != "active":
+            continue
+        logical_key = (source.id, embedded.id, "publishes_to")
+        if logical_key in seen_faq_projections:
+            continue
+        edge.relation_type = "publishes_to"
+        edge.relation = "publishes_to"
+        edge.relation_class = "publication"
+        edge.primary_tree = False
+        prepared_edges.append(edge)
+        seen_faq_projections.add(logical_key)
+
+    for faq in sorted(
+        (
+            node for node in graph.nodes
+            if node.node_type == "faq" and node.lifecycle.status == "approved"
+        ),
+        key=lambda node: node.id,
+    ):
+        logical_key = (faq.id, embedded.id, "publishes_to")
+        if logical_key in seen_faq_projections:
+            continue
+        prepared_edges.append(
+            Edge(
+                id=f"edge:publish:{faq.id}:sdr-aurora",
+                source=faq.id,
+                target=embedded.id,
+                relation_type="publishes_to",
+                relation_class="publication",
+                primary_tree=False,
+                lifecycle=EdgeLifecycle(status="active"),
+                grant=PublicationGrant(
+                    mode="manual",
+                    actor="production-release",
+                    reason="Publish approved Aurora FAQ to its isolated agent dataset",
+                ),
+                metadata={"canonical_projection": "approved_faq_to_embedded_v1"},
+            )
+        )
+        seen_faq_projections.add(logical_key)
+
+    graph.edges = prepared_edges
+    return graph
+
+
+def prepare_canonical_graph() -> GraphJson:
+    """Return the exact deterministic candidate shared by tests and publish."""
+    graph = _materialize_approved_faq_projection(_build_authored_graph())
+    graph = graph_markdown.canonicalize_graph(graph)
+    valid, errors = graph_json_v2_validator.validate_graph_json(graph)
+    if not valid:
+        raise RuntimeError("aurora_canonical_graph_invalid:" + "|".join(errors))
+    graph.status = "validated"
+    graph.validation.is_valid = True
+    graph.validation.errors = []
+    graph.content_checksum = graph_json_v2_store.checksum_graph(graph)
+    return graph
+
+
+def build_graph() -> GraphJson:
+    """Compatibility facade for Aurora's canonical publication candidate."""
+    return prepare_canonical_graph()
 
 
 def publish(*, expected_version: int | None = None) -> dict:
