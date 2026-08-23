@@ -5354,3 +5354,44 @@ def test_semantic_interpretation_payload_reaches_a_real_decision(monkeypatch):
     # Proof that the interpretation was really consumed, not merely tolerated.
     assert response.proof.get("semantic_validation", {}).get("valid") is True
     assert response.reply_text
+
+
+# ---------------------------------------------------------------------------
+# Multi-branch retrieval: a turn with two branches open must see both.
+# ---------------------------------------------------------------------------
+
+def test_secondary_retrieval_branches_excludes_the_focused_one():
+    assert graph_agent_runtime_v3._secondary_retrieval_branches(
+        "branch:a",
+        active_branch_node_id="branch:a",
+        active_branch_node_ids=["branch:a", "branch:b"],
+        branch_anchors=["branch:a", "branch:b"],
+    ) == ["branch:b"]
+
+
+def test_secondary_retrieval_branches_is_empty_with_one_branch_open():
+    assert graph_agent_runtime_v3._secondary_retrieval_branches(
+        "branch:a",
+        active_branch_node_id="branch:a",
+        active_branch_node_ids=["branch:a"],
+        branch_anchors=["branch:a", "branch:b"],
+    ) == []
+
+
+def test_secondary_retrieval_branches_drops_an_unpublished_anchor():
+    """A stale ledger row from a rolled-back publication must not be queried."""
+    assert graph_agent_runtime_v3._secondary_retrieval_branches(
+        "branch:a",
+        active_branch_node_id="branch:a",
+        active_branch_node_ids=["branch:a", "branch:gone"],
+        branch_anchors=["branch:a", "branch:b"],
+    ) == []
+
+
+def test_secondary_retrieval_branches_dedupes_and_keeps_order():
+    assert graph_agent_runtime_v3._secondary_retrieval_branches(
+        "branch:a",
+        active_branch_node_id="branch:b",
+        active_branch_node_ids=["branch:b", "branch:c", "branch:b"],
+        branch_anchors=["branch:a", "branch:b", "branch:c"],
+    ) == ["branch:b", "branch:c"]

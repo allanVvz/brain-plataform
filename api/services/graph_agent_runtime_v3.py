@@ -4073,12 +4073,41 @@ def build_context(
             interrogative_clause, faq_rows,
         )
     branch_package_started = time.perf_counter()
-    rows = supabase_client.search_graph_rag_v3(
-        persona_id=str(persona["id"]), publication_id=publication["id"],
-        branch_node_id=retrieval_branch, query=message, query_embedding=embedding,
-        active_path_node_ids=((document.get("coordinates") or {}).get(retrieval_branch) or {}).get("path_node_ids") or [],
-        missing_fields=missing, limit=48,
+    # A customer can have two branches open at once ("é pra mim e também quero
+    # revender"). Retrieving only the focused one left the second branch's
+    # knowledge invisible for the whole turn, so the agent could not answer
+    # about something it had just agreed to talk about.
+    #
+    # The focused branch keeps priority: only ITS structural content is
+    # required, so a second branch can never displace the knowledge the next
+    # question depends on. The extra branches contribute optional candidates
+    # that compete for whatever slots and tokens remain, which is the
+    # per-branch pruning the shared prompt budget needs.
+    secondary_branches = _secondary_retrieval_branches(
+        retrieval_branch,
+        active_branch_node_id=active_branch,
+        active_branch_node_ids=active_branches,
+        branch_anchors=document.get("branch_anchors") or [],
     )
+
+    def _search(anchor: str) -> list[dict[str, Any]]:
+        return supabase_client.search_graph_rag_v3(
+            persona_id=str(persona["id"]), publication_id=publication["id"],
+            branch_node_id=anchor, query=message, query_embedding=embedding,
+            active_path_node_ids=((document.get("coordinates") or {}).get(anchor) or {}).get("path_node_ids") or [],
+            missing_fields=missing, limit=48,
+        )
+
+    rows = list(_search(retrieval_branch))
+    seen_chunk_ids = {
+        str(row.get("chunk_id") or row.get("id")) for row in rows
+    }
+    for anchor in secondary_branches:
+        for row in _search(anchor):
+            chunk_id = str(row.get("chunk_id") or row.get("id"))
+            if chunk_id and chunk_id not in seen_chunk_ids:
+                seen_chunk_ids.add(chunk_id)
+                rows.append({**row, "retrieved_from_branch_node_id": anchor})
     required_nodes = _required_retrieval_node_ids(
         document, retrieval_branch, contract, missing,
     )
@@ -4297,6 +4326,32 @@ def build_context(
             ),
         },
     )
+
+
+def _secondary_retrieval_branches(
+    retrieval_branch: str,
+    *,
+    active_branch_node_id: str | None,
+    active_branch_node_ids: Sequence[str],
+    branch_anchors: Sequence[str],
+) -> list[str]:
+    """Active branches whose knowledge the turn should also see.
+
+    The focused branch is excluded because it is retrieved first and keeps
+    priority: only its content is required, so a second branch can never
+    displace the knowledge the next question depends on.
+
+    An anchor no longer published is dropped rather than queried -- a stale
+    ledger row from a rolled-back publication must not resurrect its content.
+    """
+    published = set(branch_anchors)
+    return [
+        anchor for anchor in dict.fromkeys([
+            *([active_branch_node_id] if active_branch_node_id else []),
+            *active_branch_node_ids,
+        ])
+        if anchor and anchor != retrieval_branch and anchor in published
+    ]
 
 
 def _validated_interpretation(
