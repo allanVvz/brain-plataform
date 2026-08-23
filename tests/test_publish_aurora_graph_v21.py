@@ -11,11 +11,26 @@ if str(API_ROOT) not in sys.path:
 from scripts.publish_aurora_graph import build_graph, build_v3_source_rows
 from routes.conversations import ContextRequest
 from services import (
+    graph_action_policy,
     graph_agent_runtime_v3,
     graph_compiler_v3,
     graph_json_v2_validator,
     graph_markdown,
 )
+
+
+def test_aurora_candidate_is_a_markdown_fixed_point_for_immutable_publish() -> None:
+    graph = build_graph(expected_version=14)
+
+    graph, _changes = graph_action_policy.apply(graph)
+
+    before = {node.id: (node.markdown.content if node.markdown else "") for node in graph.nodes}
+    canonical = graph_markdown.canonicalize_graph(graph, reject_markdown_drift=False)
+    changed = [
+        node.id for node in canonical.nodes
+        if before.get(node.id) != (node.markdown.content if node.markdown else "")
+    ]
+    assert changed == [], changed
 
 
 def _compile(graph) -> dict:

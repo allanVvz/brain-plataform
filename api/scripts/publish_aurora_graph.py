@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from schemas.graph_json_v2 import Edge, EdgeLifecycle, GraphJson, PublicationGrant
 from services import (
+    graph_action_policy,
     graph_compiler_v3,
     graph_conversation_contract,
     graph_document_publisher,
@@ -23,6 +24,11 @@ from services import (
 
 
 FIXTURE = ROOT / "scripts" / "fixtures" / "aurora_graph_v2.json"
+PERSONA_SLUG = "aurora"
+BRAND_SLUG = "aurora-estetica-automotiva"
+PUBLISH_SOURCE = "aurora_markdown_release"
+PUBLISH_REASON = "Aurora Graph JSON v2.1 canonical rollout"
+PUBLISH_ACTOR = "production-release"
 
 
 def _build_authored_graph() -> GraphJson:
@@ -528,37 +534,50 @@ def _materialize_approved_faq_projection(graph: GraphJson) -> GraphJson:
     return graph
 
 
-def prepare_canonical_graph() -> GraphJson:
+def prepare_canonical_graph(*, expected_version: int | None = None) -> GraphJson:
     """Return the exact deterministic candidate shared by tests and publish."""
     graph = _materialize_approved_faq_projection(_build_authored_graph())
+    if expected_version is not None:
+        graph.graph_version = expected_version + 1
+        graph.status = "committed"
+        graph.provenance.base_version = expected_version
+        graph.provenance.reason = PUBLISH_REASON
+        graph.provenance.source = PUBLISH_SOURCE
+        graph.provenance.authored_by = PUBLISH_ACTOR
+    # The immutable publisher applies this policy immediately before its own
+    # canonical Markdown gate. Apply it here too so the reviewed candidate is
+    # already the publisher's fixed point; the second application is
+    # idempotent and cannot create Markdown drift.
+    graph, _policy_changes = graph_action_policy.apply(graph)
     graph = graph_markdown.canonicalize_graph(graph)
     valid, errors = graph_json_v2_validator.validate_graph_json(graph)
     if not valid:
         raise RuntimeError("aurora_canonical_graph_invalid:" + "|".join(errors))
-    graph.status = "validated"
+    if expected_version is None:
+        graph.status = "validated"
     graph.validation.is_valid = True
     graph.validation.errors = []
     graph.content_checksum = graph_json_v2_store.checksum_graph(graph)
     return graph
 
 
-def build_graph() -> GraphJson:
+def build_graph(*, expected_version: int | None = None) -> GraphJson:
     """Compatibility facade for Aurora's canonical publication candidate."""
-    return prepare_canonical_graph()
+    return prepare_canonical_graph(expected_version=expected_version)
 
 
 def publish(*, expected_version: int | None = None) -> dict:
-    graph = build_graph()
-    current = graph_json_v2_store.load_current("aurora", graph.brand_slug)
+    current = graph_json_v2_store.load_current(PERSONA_SLUG, BRAND_SLUG)
     base_version = int(expected_version) if expected_version is not None else (int(current[0]) if current else 0)
+    graph = build_graph(expected_version=base_version)
     checksum = graph_json_v2_store.checksum_graph(graph)
     return graph_document_publisher.commit(
         graph=graph,
-        persona_slug="aurora",
+        persona_slug=PERSONA_SLUG,
         brand_slug=graph.brand_slug,
-        source="aurora_markdown_release",
-        reason="Aurora Graph JSON v2.1 canonical rollout",
-        published_by="production-release",
+        source=PUBLISH_SOURCE,
+        reason=PUBLISH_REASON,
+        published_by=PUBLISH_ACTOR,
         expected_version=base_version,
         idempotency_key=f"aurora-graph-v21:{checksum}",
     )
