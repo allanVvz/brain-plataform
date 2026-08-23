@@ -2206,7 +2206,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "E se eu não conseguir levar o carro aí?",
-        "answer": "Sem problema — nesse caso consigo te orientar à distância. Me diz o modelo e o ano do carro, a cor, se você costuma rodar em estrada de chão ou carregar algo que suja e, se possível, me manda fotos das áreas que mais te incomodam.",
+        "answer": "Sem problema — a avaliação também pode seguir à distância com as informações e imagens do veículo.",
         "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
         "markdown_document": true,

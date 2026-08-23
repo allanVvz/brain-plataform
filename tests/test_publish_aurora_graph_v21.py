@@ -340,6 +340,16 @@ def test_specific_engine_wash_phrase_beats_generic_vehicle_wash() -> None:
     assert vehicle["operations"][0]["branch_anchor_node_id"] == "aurora-product-wash"
 
 
+def test_aurora_remote_faq_does_not_embed_qualification_questions() -> None:
+    graph = build_graph()
+    faq = next(node for node in graph.nodes if node.id == "aurora-faq-remote")
+    answer = faq.data["answer"]
+
+    assert "?" not in answer
+    assert "me diz" not in answer.lower()
+    assert "me manda" not in answer.lower()
+
+
 def test_new_aurora_fields_publish_specific_validation_examples() -> None:
     graph = build_graph()
     fields = {
