@@ -4396,6 +4396,42 @@ def build_context(
     )
 
 
+def _publication_document_and_contract(
+    context: ConversationContext,
+    model_observation: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The live graph document and this turn's contract, for validation.
+
+    Returns empties when the turn carries no interpretation, so a legacy
+    proposal turn never pays for a publication fetch.
+    """
+    if not isinstance((model_observation or {}).get("interpretation"), dict):
+        return {}, {}
+    # Built from what the turn already carries rather than re-fetching the
+    # publication: `available_services` is every published anchor and
+    # `branch_node_ids` is the branch closure, so the ids the validator checks
+    # against are the same ones this turn was actually built from -- and the
+    # check costs no round trip.
+    anchors = [
+        str(service.get("branch_anchor_node_id") or "")
+        for service in context.available_services
+        if service.get("branch_anchor_node_id")
+    ]
+    known_ids = dict.fromkeys([
+        *anchors,
+        *[str(node_id) for node_id in context.branch_node_ids if node_id],
+        *[str(card.id) for card in context.context_cards],
+        *([context.active_branch_node_id] if context.active_branch_node_id else []),
+        *context.active_branch_node_ids,
+    ])
+    document = {
+        "branch_anchors": anchors,
+        "node_by_id": {node_id: {"id": node_id} for node_id in known_ids},
+        "coordinates": {},
+    }
+    return document, context.graph_contract or {}
+
+
 def _secondary_retrieval_branches(
     retrieval_branch: str,
     *,
@@ -4471,7 +4507,15 @@ def _with_semantic_branch_fallback(
     is mutated here.
     """
     existing = context.retrieval_trace.get("service_resolution") or {}
-    if existing.get("status") in {"resolved", "ambiguous", "needs_confirmation"}:
+    # `needs_confirmation` is the literal matcher saying it is NOT sure -- a
+    # fuzzy or merely-mentioned candidate. Treating that as settled is what
+    # kept "uso próprio mesmo" looping: the model had already read it exactly
+    # right, with a span from the message and a real anchor, and was ignored in
+    # favour of the matcher's hesitation. A proved semantic reading outranks
+    # uncertainty; it never overrides a confident `resolved`, and never
+    # silences a genuine `ambiguous` between two anchors, which still deserves
+    # a question rather than a guess.
+    if existing.get("status") in {"resolved", "ambiguous"}:
         return context
     validation = _validated_interpretation(context, model_observation, document)
     if validation is None:
@@ -5556,7 +5600,15 @@ def _seed_profile_facts_for_open_journey(
 def decide(
     context: ConversationContext, *, model_observation: dict[str, Any] | None
 ) -> tuple[ConversationDecision, AgentResponse]:
-    validation = _validated_interpretation(context, model_observation)
+    # Validated against the live graph, not in a vacuum: without a document and
+    # a contract every anchor and field key is "unknown" and the model's whole
+    # reading is discarded -- which is exactly the failure this layer exists to
+    # remove. The publication is only fetched for a turn that actually carries
+    # an interpretation.
+    validation = _validated_interpretation(
+        context, model_observation,
+        *_publication_document_and_contract(context, model_observation),
+    )
     interpretation = validation.interpretation if validation else None
     deterministic = (
         _deterministic_pending_service_clarification(context, interpretation)
