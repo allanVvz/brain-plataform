@@ -263,3 +263,62 @@ autorizado é **backend primeiro, template depois**.
   AGENTS.md §26, sem relação com este trabalho.
 - Leads sintéticos `69` e `70` seguem em produção para inspeção; removíveis com
   `delete from leads where id in (69,70);`.
+
+---
+
+## ESTADO FINAL — 2026-08-23: EM PRODUÇÃO
+
+Merge das duas sessões + merge de `main` (33 commits) + deploy + publicação
+concluídos. Suíte no merge final: **1333 passando, 2 falhando** (pré-existentes).
+
+**Publicação ativa: v9** (`af9831cb-9162-43d0-bf46-a56b0154e6b9`), 400 entradas,
+1025 chunks. Isolamento verificado na publicação viva:
+
+| ramo | nós | ofertas varejo | ofertas atacado |
+|---|---|---|---|
+| `audience:tock-retail` | 248 | **73** | **0** |
+| `audience:tock-reseller` | 249 | **0** | **73** |
+
+73 produtos compartilhados; regra de 30% só no atacado. O catálogo comercial
+completo (146 ofertas com preço real, 146 copies) está publicado com o preço de
+cada canal alcançável **apenas** pelo seu próprio ramo.
+
+### Bug de produção encontrado e corrigido no caminho
+
+`list_all_knowledge_graph` filtrava arestas com `in_(source_node_id, node_ids)`,
+renderizando todo id na query string. Acima de algumas centenas de nós o gateway
+rejeita a URL, e um `except` nu transformava isso em **lista vazia de arestas** —
+indistinguível de um grafo sem arestas.
+
+Isso **desliga uma trava de segurança**: o preflight do
+`graph_bundle_publisher` compara o bundle com as arestas *existentes*, então um
+resultado vazio aprova um bundle que orfana todas as arestas vivas. Aconteceu de
+verdade aqui: o preflight passou porque não viu nada, e os fechamentos de ramo
+colapsaram para 8 nós com zero produtos. Corrigido com batching + falha explícita
+(`api/services/supabase_client.py`), com teste de regressão no tamanho real (403
+nós). Redeploy feito e verificado.
+
+### O que está ativo e o que não está
+
+- **Backend semantic-first**: deployado. Aceita os dois contratos.
+- **Template n8n**: **não reprovisionado** em produção. O workflow vivo ainda
+  envia `proposal`, então o runtime segue pelo caminho legado. É por isso que o
+  deploy foi seguro. As capacidades semânticas (seleção multi-ramo, confirmação
+  semântica) **só entram quando o workflow for reprovisionado** — passo
+  deliberadamente não executado.
+- **Arestas obsoletas**: 234 soft-deleted (161 `visible_to_agent` da v8 +
+  73 `contains` produto→copy), auditáveis via `metadata.active=false`.
+
+### RISCO ABERTO — seção G não feita
+
+Os 146 preços estão publicados, e a trava de preço em texto livre **não existe
+no v3**. O proof-checker valida `claims`, não a prosa da resposta. O escopo por
+marca impede o pior caso (preço de atacado para cliente de varejo) — isso está
+verificado. O que resta sem guarda é o modelo parafrasear um número errado no
+texto livre.
+
+Mitigação pronta para portar: `graph_conversation_contract.py:587-606,746-763`
+(`_MONETARY_FIGURE`, `check_proposal`), com testes em
+`tests/test_graph_conversation_contract.py:404-457`.
+
+**Próximo passo recomendado:** seção G antes de reprovisionar o n8n.
