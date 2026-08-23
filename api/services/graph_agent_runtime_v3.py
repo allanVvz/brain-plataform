@@ -2098,53 +2098,6 @@ def _normalize_next_question_to_first_missing(
     return proposal.model_copy(update={"next_question_node_id": expected})
 
 
-def _normalize_next_question_to_aggregate_first_missing(
-    proposal: ConversationProposal,
-    document: dict[str, Any],
-    active_branch_node_ids: list[str],
-    facts_by_key: dict[str, list[dict[str, Any]]],
-) -> ConversationProposal:
-    """Resolve question order without flattening facts from multiple services.
-
-    A flat ``field_key -> fact`` view cannot represent two simultaneous
-    service-selector facts because each branch owns its own ``servico`` fact.
-    Preserve every owner here, project only this turn's proposed facts, and
-    use the proof checker's aggregate contract ordering. The projection is
-    used solely to select the graph-owned next question; proof remains the
-    authority that accepts and commits the facts.
-    """
-    branch_ids = list(dict.fromkeys(
-        str(value) for value in active_branch_node_ids if str(value)
-    ))
-    if not branch_ids or not facts_by_key:
-        return proposal
-    projected = {
-        str(key): [dict(row) for row in rows]
-        for key, rows in (facts_by_key or {}).items()
-    }
-    for fact in proposal.extracted_facts:
-        key = str(fact.field_key)
-        owner = str(fact.owner_node_id)
-        rows = [
-            row for row in projected.get(key, [])
-            if str(row.get("owner_node_id") or "") != owner
-        ]
-        rows.append({
-            "field_key": key,
-            "owner_node_id": owner,
-            "status": fact.status.value,
-            "value": fact.value,
-        })
-        projected[key] = rows
-    pending = graph_proof_checker_v3.aggregate_askable_fields(
-        document.get("branch_contracts") or {}, branch_ids, projected,
-    )
-    expected = pending[0].get("question_node_id") if pending else None
-    if proposal.next_question_node_id == expected:
-        return proposal
-    return proposal.model_copy(update={"next_question_node_id": expected})
-
-
 def _coerce_direct_field_value(message: str, field: dict[str, Any]) -> Any:
     """Conservatively coerce a literal reply for one graph-declared field."""
     literal = str(message or "").strip()
@@ -5932,29 +5885,22 @@ def _decide(
     proposal = _reconcile_direct_answer_to_pending_field(
         proposal, context, reconciliation_contract, reconciliation_facts,
     )
-    projected_reconciliation_facts = dict(reconciliation_facts)
+    projected_contract_facts = dict(contract_facts)
     for proposed_fact in proposal.extracted_facts:
-        projected_reconciliation_facts[proposed_fact.field_key] = {
+        projected_contract_facts[proposed_fact.field_key] = {
             "field_key": proposed_fact.field_key,
             "owner_node_id": proposed_fact.owner_node_id,
             "status": proposed_fact.status.value,
             "value": proposed_fact.value,
         }
     proposal = _normalize_premature_servico_requestion(
-        proposal, reconciliation_contract, projected_reconciliation_facts,
+        proposal, contract, projected_contract_facts,
     )
     proposal = _normalize_stale_next_question_after_branch_change(
-        proposal, reconciliation_contract, projected_reconciliation_facts,
+        proposal, contract, projected_contract_facts,
     )
     proposal = _normalize_next_question_to_first_missing(
-        proposal, reconciliation_contract, projected_reconciliation_facts,
-    )
-    resolution = context.retrieval_trace.get("service_resolution") or {}
-    question_scope_branch_ids = list(
-        resolution.get("next_active_branch_node_ids") or owner_scope_branch_ids
-    )
-    proposal = _normalize_next_question_to_aggregate_first_missing(
-        proposal, document, question_scope_branch_ids, grouped_facts,
+        proposal, contract, projected_contract_facts,
     )
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(

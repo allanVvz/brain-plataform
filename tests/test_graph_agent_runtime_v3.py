@@ -3612,24 +3612,14 @@ def test_normalize_premature_servico_requestion_is_a_noop_when_not_applicable():
     ) is other_question
 
 
-def test_aggregate_question_normalization_preserves_two_service_owners():
-    """Adding a service must advance past both graph-owned selector facts."""
-    shared_objective = {
-        "key": "objective", "question_node_id": "faq:objective",
-        "owner_node_id": "persona:generic", "accepted_statuses": ["known"],
-    }
-    document = {"branch_contracts": {
-        "branch:polish": {"fields": [
-            {"key": "servico", "question_node_id": "faq:servico",
-             "owner_node_id": "branch:polish", "accepted_statuses": ["known"]},
-            shared_objective,
-        ]},
-        "branch:interior": {"fields": [
-            {"key": "servico", "question_node_id": "faq:servico",
-             "owner_node_id": "branch:interior", "accepted_statuses": ["known"]},
-            shared_objective,
-        ]},
-    }}
+def test_focused_question_normalization_preserves_two_service_owners():
+    """Adding a service advances using the same focused contract as proof."""
+    focused_contract = {"fields": [
+        {"key": "servico", "question_node_id": "faq:servico",
+         "owner_node_id": "branch:interior", "accepted_statuses": ["known"]},
+        {"key": "objective", "question_node_id": "faq:objective",
+         "owner_node_id": "persona:generic", "accepted_statuses": ["known"]},
+    ]}
     proposal = ConversationProposal(
         branch_action="add", branch_anchor_node_id="branch:interior",
         branch_path_checksum="checksum", next_question_node_id="faq:servico",
@@ -3638,20 +3628,16 @@ def test_aggregate_question_normalization_preserves_two_service_owners():
             evidence_span="higienização interna",
         )],
     )
-    facts_by_key = {"servico": [{
-        "field_key": "servico", "value": "polish", "status": "known",
-        "owner_node_id": "branch:polish",
-    }]}
+    focused_facts = {"servico": {
+        "field_key": "servico", "value": "interior", "status": "known",
+        "owner_node_id": "branch:interior",
+    }}
 
-    normalized = graph_agent_runtime_v3._normalize_next_question_to_aggregate_first_missing(
-        proposal, document, ["branch:polish", "branch:interior"], facts_by_key,
+    normalized = graph_agent_runtime_v3._normalize_next_question_to_first_missing(
+        proposal, focused_contract, focused_facts,
     )
 
     assert normalized.next_question_node_id == "faq:objective"
-    assert facts_by_key["servico"] == [{
-        "field_key": "servico", "value": "polish", "status": "known",
-        "owner_node_id": "branch:polish",
-    }]
 
 
 def _switch_proposal(*, cited_node_ids: list[str], cited_chunk_ids: list[str]) -> ConversationProposal:
