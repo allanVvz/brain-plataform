@@ -52,10 +52,10 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
 
     assert valid, errors
     assert graph.schema_version == "2.1"
-    # 92 desde a politica de reabertura/multisservico: quatro FAQs gerais
-    # aprovadas explicam adicionar, trocar, remover e reabrir um pedido.
-    assert len(graph.nodes) == 92
-    assert len(graph.edges) == 178
+    # Revisao 2026-08-21: 53 FAQs novas ficam pending_validation, lavagem de
+    # motor/cofre entra no catalogo e 13 nodes sem fonte ficam arquivados.
+    assert len(graph.nodes) == 153
+    assert len(graph.edges) == 234
 
     embedded = next(node for node in graph.nodes if node.node_type == "embedded")
     assert embedded.action is not None
@@ -68,7 +68,7 @@ def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
         and edge.relation_type == "publishes_to"
         and edge.lifecycle.status == "active"
     ]
-    assert len(grants) == 89
+    assert len(grants) == 84
     assert {edge.source for edge in grants} == {
         node.id
         for node in graph.nodes
@@ -148,13 +148,65 @@ def test_all_aurora_factual_faqs_receive_v34_projection_membership() -> None:
 
     assert document["compiler_version"] == "graph-compiler-v3.6.2"
     assert document["faq_projection_contract"] == "v1"
-    assert len(document["eligible_faq_node_ids"]) == 35
+    assert len(document["eligible_faq_node_ids"]) == 30
     # Thirteen portfolio/global FAQs are available in every branch; a branch
     # may additionally own service-specific FAQs.
     assert all(
         len(contract["eligible_faq_node_ids"]) >= 13
         for contract in document["branch_contracts"].values()
     )
+
+
+def test_aurora_review_keeps_new_faqs_pending_and_unsupported_nodes_archived() -> None:
+    graph = graph_markdown.canonicalize_graph(build_graph())
+    embedded = next(node for node in graph.nodes if node.node_type == "embedded")
+
+    pending_faqs = [
+        node for node in graph.nodes
+        if node.node_type == "faq" and node.lifecycle.status == "pending_validation"
+    ]
+    assert len(pending_faqs) == 53
+    assert all(len((node.data or {}).get("question_aliases") or []) == 5 for node in pending_faqs)
+    assert not any(
+        edge.source in {node.id for node in pending_faqs}
+        and edge.target == embedded.id
+        and edge.relation_type == "publishes_to"
+        and edge.lifecycle.status == "active"
+        for edge in graph.edges
+    )
+
+    archived = {node.id for node in graph.nodes if node.lifecycle.status == "archived"}
+    assert archived == {
+        "aurora-product-polish-one-step", "aurora-copy-polish-one-step",
+        "aurora-faq-polish-one-step", "aurora-product-polish-multi-step",
+        "aurora-copy-polish-multi-step", "aurora-faq-polish-multi-step",
+        "aurora-product-polish-localized", "aurora-copy-polish-localized",
+        "aurora-faq-polish-localized", "aurora-product-polish-finish",
+        "aurora-copy-polish-finish", "aurora-faq-polish-finish",
+        "aurora-faq-polimento-tipos",
+    }
+
+
+def test_every_aurora_review_booking_field_has_a_graph_owned_question() -> None:
+    graph = build_graph()
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    policy = (persona.data or {})["appointment_policy"]
+    assert policy["required_fields"] == ["nome_cliente", "servico"]
+
+    required = set(policy["required_fields"])
+    for product in (node for node in graph.nodes if node.node_type == "product"):
+        if product.lifecycle.status != "approved":
+            continue
+        required.update((product.data or {}).get("booking", {}).get("required_fields") or [])
+    assert required
+    assert all(str(policy["field_questions"].get(key) or "").strip() for key in required)
+
+    by_slug = {node.slug: node for node in graph.nodes}
+    assert by_slug["lavagem-motor-cofre"].lifecycle.status == "approved"
+    assert by_slug["lavagem-motor-cofre"].data["booking"]["required_fields"] == [
+        "nome_cliente", "servico", "vazamento_oleo", "estrada_de_chao",
+        "modelo_veiculo", "vehicle_year", "condicao",
+    ]
 
 
 def test_shared_qualification_fields_share_one_owner_across_products() -> None:
@@ -225,7 +277,7 @@ def test_carry_over_generalizes_beyond_the_single_identity_field() -> None:
     assert carry_over_by_key["can_visit_in_person"] is False
 
 
-def test_color_is_required_only_for_paint_and_bodywork_and_polish_has_simple_alias() -> None:
+def test_color_is_required_for_paint_bodywork_and_published_polish_branches() -> None:
     graph = build_graph()
     by_slug = {node.slug: node for node in graph.nodes}
     assert "polimento" in (by_slug["polimento-tecnico"].data or {}).get("aliases", [])
@@ -238,7 +290,8 @@ def test_color_is_required_only_for_paint_and_bodywork_and_polish_has_simple_ali
     }
     assert ("pintura", "vehicle_color") in fields
     assert ("chapeacao", "vehicle_color") in fields
-    assert ("polimento-tecnico", "vehicle_color") not in fields
+    assert ("polimento-tecnico", "vehicle_color") in fields
+    assert ("polimento-comercial", "vehicle_color") in fields
     assert ("vitrificacao", "vehicle_color") not in fields
     assert "correspondência" in fields[("pintura", "vehicle_color")]["context_guidance"]
     assert "correspondência" in fields[("chapeacao", "vehicle_color")]["context_guidance"]
