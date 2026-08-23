@@ -154,6 +154,26 @@ o grafo (`api/services/semantic_interpretation_validator.py`).
   `tests/test_graph_conversation_contract.py:404-457`). O v3 não a chama. É
   código para portar, não para inventar.
 
+### Comportamento do SDR — prioridade corrente (2026-08-23)
+
+Tock e Aurora estão publicadas e respondendo, mas **as duas estão ruins em
+comportamento**, por motivos diferentes e já diagnosticados com dados reais de
+produção. Plano completo, com transcrições e causas exatas:
+`docs/handoffs/PROXIMA_SESSAO_SDR_INTELIGENTE.md`.
+
+- **Tock**: loop por deadlock de dependência (ramo resolve, mas o fato do campo
+  seletor grava `unknown/ignored_twice`, e todo campo que depende dele é
+  rejeitado para sempre) + **`eligible_faq = 0`**, ou seja, 365 nós de catálogo
+  publicados e **nenhum** capaz de sustentar uma resposta.
+- **Aurora**: tem o conhecimento e não o usa — só libera depois que o cliente
+  nomeia o serviço, quando o trabalho do SDR é justamente mapear necessidade →
+  solução. Confirmação de serviço também não vira fato.
+- **Ordem**: corrigir o backend da Tock primeiro; na Aurora só correções
+  pequenas no fluxo atual; migrar Aurora para o pipeline novo (item 6) só
+  depois da Tock validada.
+- **Adiado**: cards `Embedded` por agente (seção G). Hoje só existe o SDR; a
+  única diferença prevista é SDR sem preço / Closer com preço.
+
 ### Item 4a — o que falta pra Tock Fatal ser uma persona real, não uma prova
 
 O bundle ativo hoje é deliberadamente nominal: **"não declara produto, preço,
