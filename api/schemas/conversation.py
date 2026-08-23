@@ -393,7 +393,10 @@ class ConversationContext(StrictModel):
     rag_chunks: list[dict[str, Any]] = Field(default_factory=list)
     context_cards: list[ContextCard] = Field(default_factory=list)
     system_prompt: str = ""
-    available_services: list[dict[str, str]] = Field(default_factory=list)
+    # Values are not all strings: each anchor carries the graph's own `aliases`
+    # list, which is what lets the model map natural wording onto a real anchor
+    # id instead of the backend matching phrases itself.
+    available_services: list[dict[str, Any]] = Field(default_factory=list)
     active_branch_node_id: str | None = None
     active_branch_node_ids: list[str] = Field(default_factory=list)
     # Branches (any offering -- service or product) already confirmed in this

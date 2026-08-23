@@ -989,3 +989,24 @@ def test_no_branch_selection_is_not_an_error():
     result = run(make_interpretation(branch_selections=[]), "bom dia")
     assert result.valid, result.errors
     assert result.interpretation.branch_selections == []
+
+
+def test_context_accepts_the_graphs_alias_lists():
+    """available_services carries each anchor's alias list, not just strings.
+
+    Typed `dict[str, str]`, the alias list failed ConversationContext
+    validation and every turn died before reaching the runtime -- caught only
+    by driving a real conversation, because no test built a context the way
+    build_context does.
+    """
+    context = ConversationContext.model_validate({
+        "persona_slug": "aria", "agent_slug": "agent",
+        "graph_version": 1, "graph_checksum": "sha256:x",
+        "messages": [], "cart": {}, "rag_nodes": [], "rag_paths": [],
+        "available_services": [{
+            "branch_anchor_node_id": BRANCH_RETAIL,
+            "slug": "retail", "label": "Retail",
+            "aliases": ["pra mim", "uso proprio"],
+        }],
+    })
+    assert context.available_services[0]["aliases"] == ["pra mim", "uso proprio"]
