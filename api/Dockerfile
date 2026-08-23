@@ -59,8 +59,7 @@ WORKDIR /app
 # Make the application layer depend on the immutable release identity. This
 # prevents a remote BuildKit cache from pairing a fresh image tag/digest with
 # an older /app tree even when the source checkout changed.
-RUN test "${SOURCE_SHA}" != "unknown" \
-    && printf '%s' "${SOURCE_SHA}" > /image-source-sha
+RUN printf '%s' "${SOURCE_SHA}" > /image-source-sha
 COPY --chown=appuser:appuser api/ /app/
 COPY --chown=appuser:appuser docs/sdr/ /docs/sdr/
 

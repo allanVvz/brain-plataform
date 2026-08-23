@@ -63,7 +63,7 @@ def test_sdr_corpus_is_packaged_inside_the_production_api_image():
 
 def test_api_image_application_layer_is_keyed_by_release_sha():
     assert "SOURCE_SHA=${{ env.TARGET_SHA }}" in WORKFLOW
-    marker = 'printf \'%s\' "${SOURCE_SHA}" > /image-source-sha'
+    marker = 'RUN printf \'%s\' "${SOURCE_SHA}" > /image-source-sha'
     assert marker in API_DOCKERFILE
     assert API_DOCKERFILE.index(marker) < API_DOCKERFILE.index(
         "COPY --chown=appuser:appuser api/ /app/"
