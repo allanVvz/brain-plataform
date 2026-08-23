@@ -2103,6 +2103,26 @@ def _coerce_direct_field_value(message: str, field: dict[str, Any]) -> Any:
     literal = str(message or "").strip()
     if not literal:
         return None
+    validation = field.get("validation") or {}
+    if str(validation.get("mode") or "") == "enum":
+        folded_literal = f" {_normalized_phrase(literal)} "
+        matches: list[tuple[int, Any]] = []
+        for item in validation.get("values") or []:
+            if not isinstance(item, dict):
+                continue
+            canonical = item.get("value")
+            for published in [canonical, *(item.get("aliases") or [])]:
+                folded = _normalized_phrase(str(published or ""))
+                if folded and f" {folded} " in folded_literal:
+                    matches.append((len(folded), canonical))
+        if matches:
+            longest = max(length for length, _value in matches)
+            winners = {
+                json.dumps(value, ensure_ascii=False, sort_keys=True): value
+                for length, value in matches if length == longest
+            }
+            if len(winners) == 1:
+                return next(iter(winners.values()))
     schema = field.get("value_schema") or {}
     candidates = schema.get("anyOf") or [schema]
     for candidate in candidates:

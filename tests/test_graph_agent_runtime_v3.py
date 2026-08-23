@@ -4903,6 +4903,24 @@ def test_direct_literal_answer_is_reconciled_to_last_published_missing_field():
     assert fact.source_message_id == "msg-objective"
 
 
+def test_direct_enum_answer_accepts_published_alias_inside_natural_sentence():
+    field = {
+        "key": "focus",
+        "validation": {"mode": "enum", "values": [
+            {"value": "shine", "aliases": ["melhorar o brilho"]},
+            {"value": "scratches", "aliases": ["reduzir os riscos"]},
+            {"value": "both", "aliases": ["melhorar o brilho e reduzir os riscos"]},
+        ]},
+        "value_schema": {"type": "string", "minLength": 1},
+    }
+
+    value = graph_agent_runtime_v3._coerce_direct_field_value(
+        "Quero melhorar o brilho e reduzir os riscos", field,
+    )
+
+    assert value == "both"
+
+
 def test_fact_source_message_id_is_normalized_to_backend_inbound_identity():
     context = ConversationContext(
         persona_slug="generic", agent_slug="agent", graph_version=1,
