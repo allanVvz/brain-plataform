@@ -5885,14 +5885,22 @@ def _decide(
     proposal = _reconcile_direct_answer_to_pending_field(
         proposal, context, reconciliation_contract, reconciliation_facts,
     )
+    projected_reconciliation_facts = dict(reconciliation_facts)
+    for proposed_fact in proposal.extracted_facts:
+        projected_reconciliation_facts[proposed_fact.field_key] = {
+            "field_key": proposed_fact.field_key,
+            "owner_node_id": proposed_fact.owner_node_id,
+            "status": proposed_fact.status.value,
+            "value": proposed_fact.value,
+        }
     proposal = _normalize_premature_servico_requestion(
-        proposal, reconciliation_contract, reconciliation_facts,
+        proposal, reconciliation_contract, projected_reconciliation_facts,
     )
     proposal = _normalize_stale_next_question_after_branch_change(
-        proposal, reconciliation_contract, reconciliation_facts,
+        proposal, reconciliation_contract, projected_reconciliation_facts,
     )
     proposal = _normalize_next_question_to_first_missing(
-        proposal, reconciliation_contract, reconciliation_facts,
+        proposal, reconciliation_contract, projected_reconciliation_facts,
     )
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(
