@@ -1093,6 +1093,26 @@ def test_semantic_turn_audit_uses_singular_active_branch_at_terminal_commit():
     assert audit["criteria"]["expected_active_branches_persisted"] is True
 
 
+def test_semantic_turn_audit_accepts_all_confirmed_branches_at_terminal_handoff():
+    inputs = _semantic_audit_inputs()
+    expected = ["branch:one", "branch:two"]
+    inputs["customer_step"]["expected_active_branch_node_ids"] = expected
+    inputs["ledger_after"]["active_branch_node_ids"] = ["branch:one"]
+    proof = inputs["proof_record"]["proof_result"]
+    proof.update({
+        "qualification_complete": True,
+        "missing_fields": [],
+        "next_question_node_id": None,
+        "confirmed_branch_node_ids": expected,
+    })
+    inputs["turn"].update({"route": "HUMAN", "handoff": True})
+    inputs["expected_handoff"] = True
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["expected_active_branches_persisted"] is True
+
+
 def test_analyze_gaps_never_promotes_legacy_sequence_to_quality_evidence(monkeypatch):
     session = {
         "id": "legacy-session",
