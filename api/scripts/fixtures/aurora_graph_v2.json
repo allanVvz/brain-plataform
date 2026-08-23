@@ -142,8 +142,8 @@
           "conditional_fields": {},
           "field_question_paraphrases": {
             "nome_cliente": [
-              "Como você prefere que eu te chame?",
-              "Me diz seu nome completo, por favor."
+              "Qual nome você prefere usar no atendimento?",
+              "Como você prefere que eu te chame? O sobrenome é opcional."
             ],
             "servico": [
               "Qual desses serviços faz mais sentido pra você agora?",
@@ -180,7 +180,7 @@
             ]
           },
           "field_questions": {
-            "nome_cliente": "Qual é o seu nome, por favor?",
+            "nome_cliente": "Como você prefere que eu te chame? O sobrenome é opcional.",
             "servico": "Qual serviço você procura para o veículo?",
             "objective": "O que você espera melhorar ou proteger no veículo?",
             "can_visit_in_person": "Você consegue trazer o veículo para uma avaliação presencial?",
@@ -220,9 +220,9 @@
               "Deixa eu confirmar: {candidate}, certo?"
             ],
             "name": [
-              "Entendi. {candidate} é o seu nome completo?",
+              "Posso te chamar de {candidate}?",
               "Só pra eu anotar certo: é {candidate} mesmo?",
-              "Anotei {candidate} — escrevi do jeito certo?"
+              "Anotei {candidate} — está certo assim?"
             ],
             "service_selection": "Você quer seguir com {candidate}?",
             "service_addition": "Você quer adicionar {candidate} aos serviços do pedido?",
@@ -2206,7 +2206,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "E se eu não conseguir levar o carro aí?",
-        "answer": "Sem problema — nesse caso consigo te orientar à distância. Me diz o modelo e o ano do carro, a cor, se você costuma rodar em estrada de chão ou carregar algo que suja e, se possível, me manda fotos das áreas que mais te incomodam.",
+        "answer": "Sem problema — a avaliação também pode seguir à distância com as informações e imagens do veículo.",
         "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
         "markdown_document": true,
@@ -3361,8 +3361,14 @@
         "aliases": [
           "lavagem de motor",
           "lavagem do motor",
+          "lavar o motor",
+          "lavar motor",
+          "limpeza do motor",
+          "limpar motor",
+          "lavagem do cofre",
           "limpeza do cofre",
           "lavar o cofre",
+          "limpar o cofre",
           "limpar o motor"
         ],
         "summary": "Lavagem técnica do motor e do cofre, qualificada com atenção a vazamento de óleo, uso em estrada de chão e condição atual.",

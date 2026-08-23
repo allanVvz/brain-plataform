@@ -28,6 +28,8 @@ RUN python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_
 # ── Runtime ───────────────────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
+ARG SOURCE_SHA="unknown"
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080 \
@@ -54,6 +56,10 @@ COPY --from=builder /opt/venv /opt/venv
 RUN chown -R appuser:appuser /opt/venv/fastembed-cache
 
 WORKDIR /app
+# Make the application layer depend on the immutable release identity. This
+# prevents a remote BuildKit cache from pairing a fresh image tag/digest with
+# an older /app tree even when the source checkout changed.
+RUN printf '%s' "${SOURCE_SHA}" > /image-source-sha
 COPY --chown=appuser:appuser api/ /app/
 COPY --chown=appuser:appuser docs/sdr/ /docs/sdr/
 

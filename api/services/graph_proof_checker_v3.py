@@ -35,6 +35,10 @@ _NON_NAME_PHRASES = {
     "oi", "ola", "bom dia", "boa tarde", "boa noite", "tudo bem",
     "e ai", "e ae", "eai", "eae",
 }
+_NON_NAME_OPENING_WORDS = {
+    "quero", "preciso", "gostaria", "procuro", "procurando",
+    "interessado", "interessada",
+}
 
 
 def _literal_span(message: str, span: Any) -> bool:
@@ -380,9 +384,11 @@ def _canonical_field_value(
             if not is_human_full_name(value, min_tokens=minimum, max_tokens=maximum):
                 return value, "value is not a valid human full name"
         elif semantic_type == "human_name":
-            folded = _fold(value)
-            tokens = folded.split()
-            if not (1 <= len(tokens) <= 6) or any(any(char.isdigit() for char in token) for token in tokens):
+            tokens = value.split()
+            if (
+                not is_human_full_name(value, min_tokens=1, max_tokens=6)
+                or (tokens and _fold(tokens[0]) in _NON_NAME_OPENING_WORDS)
+            ):
                 return value, "value is not a plausible human name"
         schema_error = _schema_error(field.get("value_schema") or {}, value)
         return value.strip(), schema_error

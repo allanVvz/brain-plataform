@@ -128,6 +128,40 @@ def _normalize_servico_owner(
     return proposal.model_copy(update={"extracted_facts": normalized_facts})
 
 
+def _normalize_unique_published_field_owners(
+    proposal: ConversationProposal, contract: dict[str, Any]
+) -> ConversationProposal:
+    """Treat a model-provided fact owner as a hint, never as authority.
+
+    A field key that has exactly one owner in the materialized contract is
+    unambiguous.  Repoint that fact to the graph-owned identity before proof
+    validation; literal evidence, status and value validation still run
+    unchanged.  Keys published for multiple owners remain fail-closed because
+    choosing between branches would require inventing scope.
+    """
+    owners_by_key: dict[str, set[str]] = {}
+    for field in contract.get("fields") or []:
+        key = str(field.get("key") or "").strip()
+        owner = str(field.get("owner_node_id") or "").strip()
+        if key and owner:
+            owners_by_key.setdefault(key, set()).add(owner)
+    authoritative = {
+        key: next(iter(owners))
+        for key, owners in owners_by_key.items()
+        if len(owners) == 1
+    }
+    normalized_facts = [
+        fact.model_copy(update={"owner_node_id": authoritative[fact.field_key]})
+        if fact.field_key in authoritative
+        and fact.owner_node_id != authoritative[fact.field_key]
+        else fact
+        for fact in proposal.extracted_facts
+    ]
+    if normalized_facts == proposal.extracted_facts:
+        return proposal
+    return proposal.model_copy(update={"extracted_facts": normalized_facts})
+
+
 def _normalize_premature_servico_requestion(
     proposal: ConversationProposal, contract: dict[str, Any], ledger_facts: dict[str, Any],
 ) -> ConversationProposal:
@@ -348,11 +382,18 @@ def _invalid_proposal_fallback(
             reply = laddered
         else:
             repetition_action = "allowed_never_silent"
+    model_errors = list(dict.fromkeys(errors))
+    fallback_valid = bool(str(reply or "").strip())
     proof = {
-        "valid": False,
-        "errors": list(dict.fromkeys(errors)),
+        "valid": fallback_valid,
+        "errors": [] if fallback_valid else model_errors,
         "repair_required": False,
         "fallback_used": True,
+        "fallback_applied": (
+            "published_invalid_proposal" if fallback_valid else None
+        ),
+        "mode": "published_fallback",
+        "model_proposal_errors": model_errors,
         "model_proposal": raw if isinstance(raw, dict) else {"raw_type": type(raw).__name__},
         "missing_fields": [field["key"] for field in unconfirmed],
         "qualification_complete": not unconfirmed,
@@ -2065,6 +2106,26 @@ def _coerce_direct_field_value(message: str, field: dict[str, Any]) -> Any:
     literal = str(message or "").strip()
     if not literal:
         return None
+    validation = field.get("validation") or {}
+    if str(validation.get("mode") or "") == "enum":
+        folded_literal = f" {_normalized_phrase(literal)} "
+        matches: list[tuple[int, Any]] = []
+        for item in validation.get("values") or []:
+            if not isinstance(item, dict):
+                continue
+            canonical = item.get("value")
+            for published in [canonical, *(item.get("aliases") or [])]:
+                folded = _normalized_phrase(str(published or ""))
+                if folded and f" {folded} " in folded_literal:
+                    matches.append((len(folded), canonical))
+        if matches:
+            longest = max(length for length, _value in matches)
+            winners = {
+                json.dumps(value, ensure_ascii=False, sort_keys=True): value
+                for length, value in matches if length == longest
+            }
+            if len(winners) == 1:
+                return next(iter(winners.values()))
     schema = field.get("value_schema") or {}
     candidates = schema.get("anyOf") or [schema]
     for candidate in candidates:
@@ -2274,10 +2335,17 @@ def _reconcile_direct_answer_to_pending_field(
     pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
     if not pending:
         return proposal
-    field = pending[0]
-    question_id = str(field.get("question_node_id") or "")
     asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
-    if not question_id or not asked or asked[-1] != question_id:
+    if not asked:
+        return proposal
+    field = next(
+        (
+            item for item in pending
+            if str(item.get("question_node_id") or "") == asked[-1]
+        ),
+        None,
+    )
+    if field is None:
         return proposal
     key = str(field.get("key") or "")
     if not key or any(fact.field_key == key for fact in proposal.extracted_facts):
@@ -5566,7 +5634,10 @@ def _sanitize_untrusted_service_operations(raw: Any) -> Any:
         operation
         for operation in raw["service_operations"]
         if not isinstance(operation, dict)
-        or str(operation.get("evidence_span") or "").strip()
+        or (
+            str(operation.get("evidence_span") or "").strip()
+            and str(operation.get("branch_path_checksum") or "").strip()
+        )
     ]
     return {**raw, "service_operations": operations}
 
@@ -6030,15 +6101,36 @@ def _decide(
     )
     proposal = _normalize_referential_service_fact(proposal, context, document)
     proposal = _normalize_servico_owner(proposal, contract)
+    owner_scope_branch_ids = list(dict.fromkeys([
+        *context.active_branch_node_ids,
+        *([context.active_branch_node_id] if context.active_branch_node_id else []),
+        *([proposal.branch_anchor_node_id] if proposal.branch_anchor_node_id else []),
+    ]))
+    owner_scope_contract = {
+        "fields": _active_contract_fields(
+            document, owner_scope_branch_ids, contract,
+        ),
+    }
+    reconciliation_contract = {
+        **contract,
+        "fields": owner_scope_contract["fields"],
+    }
+    reconciliation_facts = (
+        _facts_for_contract(reconciliation_contract, grouped_facts)
+        if grouped_facts else contract_facts
+    )
+    proposal = _normalize_unique_published_field_owners(
+        proposal, owner_scope_contract,
+    )
     proposal = _normalize_fact_source_message_ids(proposal, context)
     proposal, name_field_validation = _reconcile_human_full_name_facts(
-        proposal, context=context, contract=contract,
+        proposal, context=context, contract=reconciliation_contract,
     )
     proposal, consumed_field_validation = _remove_consumed_service_facts(
         proposal, context=context, document=document,
     )
     proposal, invalid_field_validation = _remove_invalid_declared_facts(
-        proposal, contract,
+        proposal, reconciliation_contract,
     )
     rejected_field_validation = [
         *name_field_validation,
@@ -6053,12 +6145,24 @@ def _decide(
         max_attempts=_question_repetition_max_attempts(contract),
     )
     proposal = _reconcile_direct_answer_to_pending_field(
-        proposal, context, contract, contract_facts,
+        proposal, context, reconciliation_contract, reconciliation_facts,
     )
-    proposal = _normalize_premature_servico_requestion(proposal, contract, contract_facts)
-    proposal = _normalize_stale_next_question_after_branch_change(proposal, contract, contract_facts)
+    projected_contract_facts = dict(contract_facts)
+    for proposed_fact in proposal.extracted_facts:
+        projected_contract_facts[proposed_fact.field_key] = {
+            "field_key": proposed_fact.field_key,
+            "owner_node_id": proposed_fact.owner_node_id,
+            "status": proposed_fact.status.value,
+            "value": proposed_fact.value,
+        }
+    proposal = _normalize_premature_servico_requestion(
+        proposal, contract, projected_contract_facts,
+    )
+    proposal = _normalize_stale_next_question_after_branch_change(
+        proposal, contract, projected_contract_facts,
+    )
     proposal = _normalize_next_question_to_first_missing(
-        proposal, contract, contract_facts,
+        proposal, contract, projected_contract_facts,
     )
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(

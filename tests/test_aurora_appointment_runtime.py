@@ -999,7 +999,7 @@ def test_next_field_question_reads_from_the_graph():
         "missing_fields": ["nome_cliente", "modelo_veiculo"],
     }
     assert conversation_runtime._next_field_question(cart_state, context) == (
-        "Qual é o seu nome, por favor?"
+        "Como você prefere que eu te chame? O sobrenome é opcional."
     )
 
 
@@ -1037,7 +1037,7 @@ def test_ensure_trailing_question_appends_the_next_graph_question():
     )
     assert result == (
         "Polimento técnico leva cerca de 4 horas e parte de R$ 650,00. "
-        "Qual é o seu nome, por favor?"
+        "Como você prefere que eu te chame? O sobrenome é opcional."
     )
 
 

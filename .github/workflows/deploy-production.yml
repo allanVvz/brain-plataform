@@ -129,6 +129,8 @@ jobs:
         with:
           context: .
           file: ./api/Dockerfile
+          build-args: |
+            SOURCE_SHA=${{ env.TARGET_SHA }}
           push: true
           tags: ghcr.io/${{ steps.meta.outputs.repository }}/brain-api:${{ steps.meta.outputs.image_tag }}
           cache-from: type=gha,scope=api

@@ -2308,6 +2308,12 @@ def _semantic_turn_audit(
                 )
             )
             == set(customer_step.get("expected_active_branch_node_ids") or [])
+            or (
+                qualification_complete
+                and handoff_observed
+                and set(proof.get("confirmed_branch_node_ids") or [])
+                == set(customer_step.get("expected_active_branch_node_ids") or [])
+            )
         ),
         "question_advanced": (
             not previous_question_node_id

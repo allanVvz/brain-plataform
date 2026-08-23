@@ -900,6 +900,11 @@ def test_strict_model_parse_failure_emits_only_published_fallback():
     assert decision.intent == "published_fallback"
     assert response.reply_text == "Qual é a metragem?"
     assert response.handoff_required is False
+    assert response.proof["valid"] is True
+    assert response.proof["errors"] == []
+    assert response.proof["model_proposal_errors"] == ["missing:claims"]
+    assert response.proof["fallback_used"] is True
+    assert response.proof["fallback_applied"] == "published_invalid_proposal"
 
 
 def test_published_question_is_composed_not_required_in_model_reply():
@@ -1868,6 +1873,34 @@ def test_blank_model_keep_operation_is_discarded_before_proposal_validation():
         "cited_node_ids": [],
         "cited_chunk_ids": [],
         "reply": "Qual é a condição?",
+        "qualification_complete": False,
+        "handoff_requested": False,
+    }
+
+    sanitized = graph_agent_runtime_v3._sanitize_untrusted_service_operations(raw)
+    proposal = ConversationProposal.model_validate(sanitized)
+
+    assert proposal.service_operations == []
+
+
+def test_model_service_operation_with_blank_checksum_is_discarded_before_validation():
+    raw = {
+        "branch_action": "add",
+        "branch_anchor_node_id": "branch:engine-wash",
+        "branch_path_checksum": None,
+        "branch_evidence_span": "lavar o motor",
+        "service_operations": [{
+            "action": "add",
+            "branch_anchor_node_id": "branch:engine-wash",
+            "branch_path_checksum": "",
+            "evidence_span": "lavar o motor",
+        }],
+        "extracted_facts": [],
+        "claims": [],
+        "next_question_node_id": None,
+        "cited_node_ids": [],
+        "cited_chunk_ids": [],
+        "reply": "Posso explicar o serviço.",
         "qualification_complete": False,
         "handoff_requested": False,
     }
@@ -3556,6 +3589,68 @@ def test_normalize_servico_owner_is_a_noop_without_a_servico_field_or_mismatch()
     assert graph_agent_runtime_v3._normalize_servico_owner(mismatched, contract_without_servico_convention) is mismatched
 
 
+def test_normalize_unique_published_field_owner_reconciles_model_scope_hint():
+    proposal = ConversationProposal(
+        extracted_facts=[ExtractedFact(
+            field_key="procedimento_anterior",
+            value="nenhum",
+            owner_node_id="branch:polish",
+            evidence_span="Nunca foi feito procedimento nessa pintura",
+        )],
+    )
+    contract = {"fields": [{
+        "key": "procedimento_anterior", "owner_node_id": "persona:generic",
+    }]}
+
+    normalized = graph_agent_runtime_v3._normalize_unique_published_field_owners(
+        proposal, contract,
+    )
+
+    assert normalized.extracted_facts[0].owner_node_id == "persona:generic"
+
+
+def test_normalize_unique_published_field_owner_stays_fail_closed_when_ambiguous():
+    proposal = ConversationProposal(extracted_facts=[ExtractedFact(
+        field_key="servico", value="polimento", owner_node_id="model:guess",
+    )])
+    contract = {"fields": [
+        {"key": "servico", "owner_node_id": "branch:a"},
+        {"key": "servico", "owner_node_id": "branch:b"},
+    ]}
+
+    normalized = graph_agent_runtime_v3._normalize_unique_published_field_owners(
+        proposal, contract,
+    )
+
+    assert normalized is proposal
+
+
+def test_normalize_unique_owner_can_use_union_of_active_branch_fields():
+    proposal = ConversationProposal(extracted_facts=[ExtractedFact(
+        field_key="foco_brilho_riscos",
+        value="brilho_e_riscos",
+        owner_node_id="branch:polish",
+        evidence_span="brilho e riscos",
+    )])
+    document = {"branch_contracts": {
+        "branch:interior": {"fields": [{
+            "key": "revestimento", "owner_node_id": "persona:generic",
+        }]},
+        "branch:polish": {"fields": [{
+            "key": "foco_brilho_riscos", "owner_node_id": "persona:generic",
+        }]},
+    }}
+    fields = graph_agent_runtime_v3._active_contract_fields(
+        document, ["branch:interior", "branch:polish"], {},
+    )
+
+    normalized = graph_agent_runtime_v3._normalize_unique_published_field_owners(
+        proposal, {"fields": fields},
+    )
+
+    assert normalized.extracted_facts[0].owner_node_id == "persona:generic"
+
+
 def test_normalize_premature_servico_requestion_repoints_to_the_real_pending_field():
     """Regression test for a gap re-surfaced live 2026-08-08 while validating the report's fixes.
 
@@ -3604,6 +3699,34 @@ def test_normalize_premature_servico_requestion_is_a_noop_when_not_applicable():
     assert graph_agent_runtime_v3._normalize_premature_servico_requestion(
         other_question, contract, ledger_facts
     ) is other_question
+
+
+def test_focused_question_normalization_preserves_two_service_owners():
+    """Adding a service advances using the same focused contract as proof."""
+    focused_contract = {"fields": [
+        {"key": "servico", "question_node_id": "faq:servico",
+         "owner_node_id": "branch:interior", "accepted_statuses": ["known"]},
+        {"key": "objective", "question_node_id": "faq:objective",
+         "owner_node_id": "persona:generic", "accepted_statuses": ["known"]},
+    ]}
+    proposal = ConversationProposal(
+        branch_action="add", branch_anchor_node_id="branch:interior",
+        branch_path_checksum="checksum", next_question_node_id="faq:servico",
+        extracted_facts=[ExtractedFact(
+            field_key="servico", value="interior", owner_node_id="branch:interior",
+            evidence_span="higienização interna",
+        )],
+    )
+    focused_facts = {"servico": {
+        "field_key": "servico", "value": "interior", "status": "known",
+        "owner_node_id": "branch:interior",
+    }}
+
+    normalized = graph_agent_runtime_v3._normalize_next_question_to_first_missing(
+        proposal, focused_contract, focused_facts,
+    )
+
+    assert normalized.next_question_node_id == "faq:objective"
 
 
 def _switch_proposal(*, cited_node_ids: list[str], cited_chunk_ids: list[str]) -> ConversationProposal:
@@ -4878,6 +5001,64 @@ def test_direct_literal_answer_is_reconciled_to_last_published_missing_field():
     assert fact.field_key == "objective"
     assert fact.value == "Quero continuar com o veículo e cuidar bem dele"
     assert fact.source_message_id == "msg-objective"
+
+
+def test_direct_enum_answer_accepts_published_alias_inside_natural_sentence():
+    field = {
+        "key": "focus",
+        "validation": {"mode": "enum", "values": [
+            {"value": "shine", "aliases": ["melhorar o brilho"]},
+            {"value": "scratches", "aliases": ["reduzir os riscos"]},
+            {"value": "both", "aliases": ["melhorar o brilho e reduzir os riscos"]},
+        ]},
+        "value_schema": {"type": "string", "minLength": 1},
+    }
+
+    value = graph_agent_runtime_v3._coerce_direct_field_value(
+        "Quero melhorar o brilho e reduzir os riscos", field,
+    )
+
+    assert value == "both"
+
+
+def test_direct_answer_reconciles_the_last_asked_pending_field_after_order_shift():
+    contract = {"fields": [
+        {
+            "key": "color", "owner_node_id": "persona:generic",
+            "accepted_statuses": ["known"], "question_node_id": "q:color",
+            "value_schema": {"type": "string", "minLength": 1},
+        },
+        {
+            "key": "focus", "owner_node_id": "persona:generic",
+            "accepted_statuses": ["known"], "question_node_id": "q:focus",
+            "validation": {"mode": "enum", "values": [{
+                "value": "both", "aliases": ["melhorar o brilho e reduzir os riscos"],
+            }]},
+            "value_schema": {"type": "string", "minLength": 1},
+        },
+    ]}
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test", messages=[{
+            "role": "user", "content": "Quero melhorar o brilho e reduzir os riscos",
+            "message_id": "msg-focus",
+        }],
+        cart={"facts": {}, "asked_question_node_ids": ["q:focus"]},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
+    )
+    proposal = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="sha256:path", next_question_node_id="q:color",
+    )
+
+    reconciled = graph_agent_runtime_v3._reconcile_direct_answer_to_pending_field(
+        proposal, context, contract, {},
+    )
+
+    assert [(fact.field_key, fact.value) for fact in reconciled.extracted_facts] == [
+        ("focus", "both"),
+    ]
 
 
 def test_fact_source_message_id_is_normalized_to_backend_inbound_identity():

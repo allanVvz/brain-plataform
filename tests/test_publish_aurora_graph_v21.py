@@ -8,7 +8,7 @@ API_ROOT = Path(__file__).resolve().parents[1] / "api"
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
-from scripts.publish_aurora_graph import build_graph
+from scripts.publish_aurora_graph import build_graph, build_v3_source_rows
 from routes.conversations import ContextRequest
 from services import (
     graph_agent_runtime_v3,
@@ -44,6 +44,87 @@ def _compile(graph) -> dict:
     persona_node = next(node for node in graph.nodes if node.node_type == "persona")
     persona = {"id": persona_node.id, "slug": graph.persona_slug}
     return graph_compiler_v3.compile_graph(persona=persona, node_rows=node_rows, edge_rows=edge_rows)
+
+
+def test_aurora_v3_source_isolated_from_runtime_assets_and_duplicate_projection_rows() -> None:
+    graph = graph_markdown.canonicalize_graph(build_graph())
+    projection_nodes = [{
+        "id": f"db:{node.id}",
+        "node_type": "embed" if node.node_type == "embedded" else node.node_type,
+        "slug": node.slug,
+        "status": "approved",
+        "metadata": {
+            "graph_json_import": True,
+            "graph_json_node_id": node.id,
+            "active": True,
+        },
+    } for node in graph.nodes]
+    duplicate_ids = {
+        "aurora-faq-evaluation": "faq-avaliacao-inicial",
+        "aurora-faq-vitrification": "faq-vitrificacao",
+        "aurora-faq-ppf": "faq-ppf",
+    }
+    projection_nodes.extend({
+        "id": f"duplicate:{stable_id}",
+        "node_type": "faq",
+        "slug": slug,
+        "status": "pending_regeneration",
+        "metadata": {
+            "graph_json_import": True,
+            "graph_json_node_id": stable_id,
+            "active": True,
+        },
+    } for stable_id, slug in duplicate_ids.items())
+    projection_nodes.append({
+        "id": "external-asset",
+        "node_type": "asset",
+        "slug": "customer-media",
+        "status": "active",
+        "metadata": {"active": True},
+    })
+    projection_edges = [{
+        "id": f"db:{edge.id}",
+        "source_node_id": f"db:{edge.source}",
+        "target_node_id": f"db:{edge.target}",
+        "relation_type": edge.relation_type,
+        "metadata": {"graph_json_edge_id": edge.id, "active": True},
+    } for edge in graph.edges if edge.lifecycle.status == "active"]
+
+    rows, edges, duplicates = build_v3_source_rows(
+        graph,
+        projection_nodes=list(reversed(projection_nodes)),
+        projection_edges=list(reversed(projection_edges)),
+    )
+
+    assert len(rows) == len(graph.nodes) == 153
+    assert len(edges) == len(graph.edges) == 234
+    assert {row["id"] for row in duplicates} == {
+        f"duplicate:{stable_id}" for stable_id in duplicate_ids
+    }
+    assert "external-asset" not in {row["id"] for row in rows}
+    selected = {
+        (row["metadata"] or {}).get("graph_json_node_id"): row
+        for row in rows
+    }
+    assert all(
+        selected[stable_id]["id"] == f"db:{stable_id}"
+        for stable_id in duplicate_ids
+    )
+
+    compiled = graph_compiler_v3.compile_graph(
+        persona={"id": "00000000-0000-4000-8000-000000000001", "slug": "aurora"},
+        node_rows=rows,
+        edge_rows=edges,
+    )
+    assert len(compiled["node_by_id"]) == 87
+    assert len(compiled["edges"]) == 168
+    assert len(compiled["branch_contracts"]) == 14
+    assert len(compiled["eligible_faq_node_ids"]) == 30
+    common_question_ids = [
+        node_id for node_id in compiled["common_contract"]["closure_node_ids"]
+        if node_id.startswith("faq:qualification:")
+    ]
+    assert common_question_ids == sorted(common_question_ids)
 
 
 def test_aurora_rollout_builds_isolated_complete_agent_dataset() -> None:
@@ -207,6 +288,89 @@ def test_every_aurora_review_booking_field_has_a_graph_owned_question() -> None:
         "nome_cliente", "servico", "vazamento_oleo", "estrada_de_chao",
         "modelo_veiculo", "vehicle_year", "condicao",
     ]
+
+
+def test_aurora_preferred_name_accepts_one_token_and_surname_is_optional() -> None:
+    graph = build_graph()
+    persona = next(node for node in graph.nodes if node.node_type == "persona")
+    policy = (persona.data or {})["appointment_policy"]
+    question = policy["field_questions"]["nome_cliente"]
+    paraphrases = policy["field_question_paraphrases"]["nome_cliente"]
+    name_fields = [
+        field
+        for node in graph.nodes
+        for field in ((node.data or {}).get("qualification") or {}).get("fields") or []
+        if field.get("key") == "nome_cliente"
+    ]
+
+    assert "sobrenome é opcional" in question.lower()
+    assert question.count("?") == 1
+    assert all(value.count("?") <= 1 for value in paraphrases)
+    generated_name_fields = [field for field in name_fields if "carry_over" in field]
+    assert generated_name_fields
+    assert all(
+        field["validation"]["semantic_type"] == "human_name"
+        and field["validation"]["min_tokens"] == 1
+        and field["carry_over"] is True
+        and field["overwrite_policy"] == "explicit_correction"
+        for field in generated_name_fields
+    )
+
+
+def test_specific_engine_wash_phrase_beats_generic_vehicle_wash() -> None:
+    document = _compile(graph_markdown.canonicalize_graph(build_graph()))
+
+    engine = graph_agent_runtime_v3._resolve_service_operations(
+        document,
+        "to pensando em lavar o motor como funciona",
+        active_branch_node_id=None,
+        active_branch_node_ids=[],
+    )
+    vehicle = graph_agent_runtime_v3._resolve_service_operations(
+        document,
+        "quero lavar o carro",
+        active_branch_node_id=None,
+        active_branch_node_ids=[],
+    )
+
+    assert engine["status"] == "needs_confirmation"
+    assert engine["candidate"]["branch_anchor_node_id"] == "aurora-product-engine-wash"
+    assert engine["candidate"]["evidence_span"] == "lavar o motor"
+    assert vehicle["status"] == "resolved"
+    assert vehicle["operations"][0]["branch_anchor_node_id"] == "aurora-product-wash"
+
+
+def test_aurora_remote_faq_does_not_embed_qualification_questions() -> None:
+    graph = build_graph()
+    faq = next(node for node in graph.nodes if node.id == "aurora-faq-remote")
+    answer = faq.data["answer"]
+
+    assert "?" not in answer
+    assert "me diz" not in answer.lower()
+    assert "me manda" not in answer.lower()
+
+
+def test_new_aurora_fields_publish_specific_validation_examples() -> None:
+    graph = build_graph()
+    fields = {
+        field["key"]: field
+        for node in graph.nodes
+        for field in ((node.data or {}).get("qualification") or {}).get("fields") or []
+    }
+
+    previous = fields["procedimento_anterior"]["validation"]
+    assert previous["mode"] == "enum"
+    assert any(value["value"] == "nenhum" for value in previous["values"])
+    assert fields["foco_brilho_riscos"]["validation"]["mode"] == "enum"
+    assert fields["revestimento_bancos"]["validation"]["mode"] == "enum"
+    assert fields["vazamento_oleo"]["validation"]["mode"] == "enum"
+    assert fields["estrada_de_chao"]["validation"]["mode"] == "enum"
+    assert fields["evaluation_route"]["validation"]["mode"] == "enum"
+    remote = next(
+        value for value in fields["evaluation_route"]["validation"]["values"]
+        if value["value"] == "remota"
+    )
+    assert "prefiro começar a avaliação por fotos e vídeos" in remote["aliases"]
 
 
 def test_shared_qualification_fields_share_one_owner_across_products() -> None:
