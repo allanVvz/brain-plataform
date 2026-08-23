@@ -125,6 +125,40 @@ def _normalize_servico_owner(
     return proposal.model_copy(update={"extracted_facts": normalized_facts})
 
 
+def _normalize_unique_published_field_owners(
+    proposal: ConversationProposal, contract: dict[str, Any]
+) -> ConversationProposal:
+    """Treat a model-provided fact owner as a hint, never as authority.
+
+    A field key that has exactly one owner in the materialized contract is
+    unambiguous.  Repoint that fact to the graph-owned identity before proof
+    validation; literal evidence, status and value validation still run
+    unchanged.  Keys published for multiple owners remain fail-closed because
+    choosing between branches would require inventing scope.
+    """
+    owners_by_key: dict[str, set[str]] = {}
+    for field in contract.get("fields") or []:
+        key = str(field.get("key") or "").strip()
+        owner = str(field.get("owner_node_id") or "").strip()
+        if key and owner:
+            owners_by_key.setdefault(key, set()).add(owner)
+    authoritative = {
+        key: next(iter(owners))
+        for key, owners in owners_by_key.items()
+        if len(owners) == 1
+    }
+    normalized_facts = [
+        fact.model_copy(update={"owner_node_id": authoritative[fact.field_key]})
+        if fact.field_key in authoritative
+        and fact.owner_node_id != authoritative[fact.field_key]
+        else fact
+        for fact in proposal.extracted_facts
+    ]
+    if normalized_facts == proposal.extracted_facts:
+        return proposal
+    return proposal.model_copy(update={"extracted_facts": normalized_facts})
+
+
 def _normalize_premature_servico_requestion(
     proposal: ConversationProposal, contract: dict[str, Any], ledger_facts: dict[str, Any],
 ) -> ConversationProposal:
@@ -5805,6 +5839,7 @@ def _decide(
     )
     proposal = _normalize_referential_service_fact(proposal, context, document)
     proposal = _normalize_servico_owner(proposal, contract)
+    proposal = _normalize_unique_published_field_owners(proposal, contract)
     proposal = _normalize_fact_source_message_ids(proposal, context)
     proposal, name_field_validation = _reconcile_human_full_name_facts(
         proposal, context=context, contract=contract,
