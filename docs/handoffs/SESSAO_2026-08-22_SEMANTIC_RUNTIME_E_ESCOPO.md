@@ -384,3 +384,60 @@ explicitamente como algo a evitar.
 - Tráfego real: workflow original, caminho legado, **funcionando**.
 - Duplicata: isolada, sem tráfego, pronta para retomar o debug.
 - Publicação v9 com catálogo completo: ativa e servindo os dois caminhos.
+
+---
+
+## PROMOVIDO — Tock Fatal no fluxo semântico (2026-08-23)
+
+### O guard legado, corrigido
+
+`_is_direct_answer_to_pending_non_service_field` comparava o campo pendente com
+o literal `"servico"`. Responder a pergunta de seleção de ramo era classificado
+como resposta a campo não-de-serviço, e a seleção era suprimida — prendendo o
+cliente na pergunta que ele acabara de responder.
+
+A chave do seletor é declarada pelo grafo
+(`conversation_policy.branch_selection.field_key`) e agora é lida do contrato.
+A da Aurora **é** `"servico"`, e foi por isso que isso ficou invisível; a da
+Tock é `purchase_profile`. Ler do grafo conserta a Tock e deixa Aurora e Baita
+byte-idênticas — e remove um nome de campo hardcoded que o AGENTS.md §26 proíbe.
+O propósito real do guard (palavra de serviço dentro de resposta de campo não
+sequestra o foco) segue testado.
+
+### Os três defeitos originais, verificados em conversa real
+
+| entrada | antes | agora |
+|---|---|---|
+| `"uso próprio mesmo"` | repetia a pergunta em loop | **"Perfeito, uso próprio então!"** — ramo selecionado, avança |
+| `"quero um vestido em mousse, vocês tem?"` | virava valor bruto do campo | pergunta **deferida** à equipe + `vestido em mousse` extraído como necessidade + avança |
+| `"sim, tá correto"` | nunca dava handoff | **`handoff: true`, `route: HUMAN`, `stage: qualificado`** |
+
+### Roteamento
+
+`workflow_bindings.metadata.conversation_webhook_url` →
+`http://n8n:5678/webhook/tock-fatal/conversation-semantic`
+(workflow `02T5wStlpCsdEHcc`).
+
+**Rollback: um campo.** O valor anterior está gravado em
+`previous_conversation_webhook_url`; o workflow original `WDUxL74OUctQHWwG`
+continua ativo e intacto.
+
+### Aurora — sem mexer
+
+Binding ativo, não pausado, `decision_owner=n8n_agents`, publicação v73 ativa,
+workflow próprio inalterado (contrato legado, que o backend segue aceitando).
+`metadata.mode` nulo significa `"active"` por padrão (`whatsapp._allowed`),
+então aceita todo contato. Smoke test no backend deployado: seleciona o serviço
+e avança a qualificação normalmente.
+
+### Qualidade conhecida, não corrigida
+
+Saudação concatenada no turno 1 nas duas personas ("Oi! Que bom ter você por
+aqui." + a saudação do modelo). A matriz do WA Validator lista isso como algo a
+evitar. Não é regressão desta sessão e não bloqueia o funil.
+
+### Leads sintéticos deixados em produção
+
+`117, 118, 119` (tock-fatal) e `120` (aurora), todos `TESTE_*` com telefone
+falso e `metadata.synthetic=true`. Removíveis com
+`delete from leads where id in (117,118,119,120);`
