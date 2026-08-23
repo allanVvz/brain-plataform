@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.6.2"
+COMPILER_VERSION = "graph-compiler-v3.6.3"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -1385,6 +1385,16 @@ def query_embeddings(texts: list[str]) -> list[list[float]]:
     return generate_embeddings(texts, input_type="query")
 
 
+def publication_index_node_ids(document: dict[str, Any]) -> list[str]:
+    """Return the compiler-approved FAQ projection set for RAG persistence."""
+    node_by_id = document.get("node_by_id") or {}
+    node_ids = list(document.get("eligible_faq_node_ids") or [])
+    missing = [node_id for node_id in node_ids if node_id not in node_by_id]
+    if missing:
+        raise RuntimeError(f"eligible FAQ nodes missing from publication: {missing}")
+    return node_ids
+
+
 def compile_persona_publication(
     persona_slug: str,
     *,
@@ -1462,7 +1472,8 @@ def compile_persona_publication(
             ))
             if embedding_profile else openai_embeddings
         )
-        for node_id, node in document["node_by_id"].items():
+        for node_id in publication_index_node_ids(document):
+            node = document["node_by_id"][node_id]
             chunks = semantic_chunks(node)
             if not chunks:
                 continue

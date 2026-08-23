@@ -183,6 +183,7 @@ def test_compiler_projects_global_faq_subtree_to_every_branch_and_normalizes_emb
     assert document["node_by_id"]["embed:generic"]["node_type"] == "embedded"
     assert document["faq_projection_contract"] == "v1"
     assert document["eligible_faq_node_ids"] == ["faq:payment"]
+    assert graph_compiler_v3.publication_index_node_ids(document) == ["faq:payment"]
     for branch in ("branch:a", "branch:b"):
         assert document["branch_memberships"][branch]["faq:payment"]["inclusion_reason"] == "global_context_descendant"
         assert document["branch_contracts"][branch]["eligible_faq_node_ids"] == ["faq:payment"]
