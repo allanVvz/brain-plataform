@@ -5849,18 +5849,26 @@ def _decide(
             document, owner_scope_branch_ids, contract,
         ),
     }
+    reconciliation_contract = {
+        **contract,
+        "fields": owner_scope_contract["fields"],
+    }
+    reconciliation_facts = (
+        _facts_for_contract(reconciliation_contract, grouped_facts)
+        if grouped_facts else contract_facts
+    )
     proposal = _normalize_unique_published_field_owners(
         proposal, owner_scope_contract,
     )
     proposal = _normalize_fact_source_message_ids(proposal, context)
     proposal, name_field_validation = _reconcile_human_full_name_facts(
-        proposal, context=context, contract=contract,
+        proposal, context=context, contract=reconciliation_contract,
     )
     proposal, consumed_field_validation = _remove_consumed_service_facts(
         proposal, context=context, document=document,
     )
     proposal, invalid_field_validation = _remove_invalid_declared_facts(
-        proposal, contract,
+        proposal, reconciliation_contract,
     )
     rejected_field_validation = [
         *name_field_validation,
@@ -5875,12 +5883,16 @@ def _decide(
         max_attempts=_question_repetition_max_attempts(contract),
     )
     proposal = _reconcile_direct_answer_to_pending_field(
-        proposal, context, contract, contract_facts,
+        proposal, context, reconciliation_contract, reconciliation_facts,
     )
-    proposal = _normalize_premature_servico_requestion(proposal, contract, contract_facts)
-    proposal = _normalize_stale_next_question_after_branch_change(proposal, contract, contract_facts)
+    proposal = _normalize_premature_servico_requestion(
+        proposal, reconciliation_contract, reconciliation_facts,
+    )
+    proposal = _normalize_stale_next_question_after_branch_change(
+        proposal, reconciliation_contract, reconciliation_facts,
+    )
     proposal = _normalize_next_question_to_first_missing(
-        proposal, contract, contract_facts,
+        proposal, reconciliation_contract, reconciliation_facts,
     )
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(
