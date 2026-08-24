@@ -40,6 +40,13 @@ def test_first_split_image_release_bootstraps_from_existing_api_registry():
     assert "export API_IMAGE WORKER_IMAGE MIGRATE_IMAGE" in DEPLOY
 
 
+def test_abandoned_pre_pause_candidate_can_be_superseded_safely():
+    assert '"$existing_stage" =~ ^(prepared|images_pulled)$' in DEPLOY
+    assert '"$existing_previous" == "$CURRENT_SHA"' in DEPLOY
+    assert "prepare_args+=(--force)" in DEPLOY
+    assert "unfinished release cannot be superseded safely" in DEPLOY
+
+
 def test_resume_checks_digest_and_is_idempotent_after_verified():
     assert "image_digests_verified=true" in RESUME
     assert "workers already resumed and release verified" in RESUME

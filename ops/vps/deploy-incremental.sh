@@ -95,10 +95,29 @@ if [[ "$MODE" == "--dry-run" ]]; then
   exit 0
 fi
 
-python3 ops/vps/release_lifecycle.py prepare \
-  --candidate-sha "$TARGET_SHA" --previous-sha "$CURRENT_SHA" \
-  --impact-class "$IMPACT" \
-  --pause-reason "incremental $IMPACT deployment" >/dev/null
+prepare_args=(
+  prepare
+  --candidate-sha "$TARGET_SHA"
+  --previous-sha "$CURRENT_SHA"
+  --impact-class "$IMPACT"
+  --pause-reason "incremental $IMPACT deployment"
+)
+if [[ -s "$STATE_DIR/release-lifecycle.json" ]]; then
+  existing_candidate="$(python3 ops/vps/release_lifecycle.py show --field candidate_sha 2>/dev/null || true)"
+  existing_stage="$(python3 ops/vps/release_lifecycle.py show --field stage 2>/dev/null || true)"
+  existing_previous="$(python3 ops/vps/release_lifecycle.py show --field previous_sha 2>/dev/null || true)"
+  if [[ "$existing_candidate" != "$TARGET_SHA" ]]; then
+    if [[ "$existing_previous" == "$CURRENT_SHA" \
+      && "$existing_stage" =~ ^(prepared|images_pulled)$ ]]; then
+      echo "superseding pre-pause candidate $existing_candidate at $existing_stage"
+      prepare_args+=(--force)
+    else
+      echo "unfinished release cannot be superseded safely: candidate=$existing_candidate stage=$existing_stage" >&2
+      exit 1
+    fi
+  fi
+fi
+python3 ops/vps/release_lifecycle.py "${prepare_args[@]}" >/dev/null
 stage_rank() {
   case "$1" in
     prepared) echo 0 ;; images_pulled) echo 1 ;; claims_paused) echo 2 ;;
