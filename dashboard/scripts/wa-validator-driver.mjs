@@ -88,8 +88,8 @@ export function auditBrowserTurn({
   const criteria = {
     reply_not_repeated: !repetitionFailures.has("semantic_repetition")
       && !repetitionFailures.has("terminal_repetition"),
-    question_repetition_budget: !repetitionFailures.has("question_attempt_budget_exceeded"),
-    contextual_retry_valid: !repetitionFailures.has("contextual_bridge_required")
+    question_repetition_budget: !repetitionFailures.has("question_already_asked"),
+    contextual_retry_valid: !repetitionFailures.has("question_already_asked")
       && !repetitionFailures.has("question_field_not_pending"),
     terminal_not_repeated: !repetitionFailures.has("terminal_repetition"),
     question_matches_published_graph: Boolean(matchedQuestion) || allRequiredResolved,
