@@ -759,7 +759,8 @@ def _candidate_branches(
         candidates.append({
             "branch_anchor_node_id": anchor,
             "branch_path_checksum": ((document.get("coordinates") or {}).get(anchor) or {}).get("path_checksum"),
-            "title": node.get("title"), "aliases": (node.get("data") or {}).get("aliases") or [],
+            "title": node.get("title"), "node_type": node.get("node_type"),
+            "aliases": (node.get("data") or {}).get("aliases") or [],
             "score": round(score, 6),
             "snippet": str(rank.get("snippet") or "")[:240],
             "evidence_chunk_ids": [str(rank["chunk_id"])] if rank.get("chunk_id") else [],
@@ -1215,6 +1216,10 @@ def _deterministic_branch_candidates(
     return [{
         **item,
         "score": 1.0,
+        "node_type": str(
+            ((document.get("node_by_id") or {}).get(item["branch_anchor_node_id"]) or {})
+            .get("node_type") or ""
+        ),
         "snippet": item["span"],
         "branch_evidence_span": item["span"],
         "evidence_chunk_ids": [],
@@ -1274,6 +1279,7 @@ def _textual_service_candidates(
                     continue
                 candidate = {
                     "branch_anchor_node_id": anchor,
+                    "node_type": str(node.get("node_type") or ""),
                     "branch_path_checksum": (
                         ((document.get("coordinates") or {}).get(anchor) or {})
                         .get("path_checksum")
@@ -2833,6 +2839,7 @@ def _evidenced_branch_candidates(
         {
             "branch_anchor_node_id": item["branch_anchor_node_id"],
             "title": item.get("title"),
+            "node_type": item.get("node_type"),
             "score": item["score"],
             "branch_path_checksum": item.get("branch_path_checksum"),
             "snippet": str(item.get("snippet") or "")[:240],
@@ -4223,6 +4230,44 @@ def _validated_interpretation(
         contract=contract or {},
         context=context,
     )
+
+
+def _product_interest_nodes_from_validation(
+    result: semantic_interpretation_validator.ValidationResult | None,
+    document: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Project validated product/group entities into the existing cart JSON."""
+    if result is None:
+        return []
+    node_by_id = document.get("node_by_id") or {}
+    projected: list[dict[str, Any]] = []
+    for entity in result.interpretation.entities:
+        if entity.kind.value != "product" or not entity.node_id:
+            continue
+        node = node_by_id.get(str(entity.node_id)) or {}
+        if str(node.get("node_type") or "") not in {"product", "product_group"}:
+            continue
+        projected.append({
+            "node_id": str(entity.node_id),
+            "node_type": str(node.get("node_type")),
+            "value": entity.value,
+            "evidence_span": entity.evidence_span,
+        })
+    return projected
+
+
+def _merge_product_interest_nodes(
+    existing: Any, additions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Dedupe graph-backed product interests without inventing state."""
+    merged: dict[str, dict[str, Any]] = {}
+    for row in existing if isinstance(existing, list) else []:
+        if isinstance(row, dict) and row.get("node_id"):
+            merged[str(row["node_id"])] = row
+    for row in additions:
+        if row.get("node_id"):
+            merged[str(row["node_id"])] = row
+    return list(merged.values())
 
 
 def _with_semantic_branch_fallback(
@@ -5828,6 +5873,9 @@ def _decide(
     validation = _validated_interpretation(
         context, observation, document, context.graph_contract,
     )
+    validated_product_interest_nodes = _product_interest_nodes_from_validation(
+        validation, document,
+    )
     if validation is not None:
         proposal = semantic_conversation_policy.interpretation_to_proposal(
             validation.interpretation
@@ -5959,6 +6007,7 @@ def _decide(
     # The model owns conversational order. Proof may discard invalid
     # next-question metadata, but runtime never substitutes another graph
     # question (especially not the first pending field).
+    model_proposed_next_question_node_id = proposal.next_question_node_id
     proposal = _preserve_askable_next_question(
         proposal, contract, projected_contract_facts,
     )
@@ -6394,10 +6443,13 @@ def _decide(
             == str(proved_question_id or "")
             for field in aggregate_askable
         ) else None
+        audit_question_id = (
+            next_question_id or model_proposed_next_question_node_id
+        )
         question_contract = next(
             (
                 candidate for candidate in (document.get("branch_contracts") or {}).values()
-                if next_question_id in (candidate.get("questions") or {})
+                if audit_question_id in (candidate.get("questions") or {})
             ),
             contract,
         )
@@ -6454,18 +6506,18 @@ def _decide(
         # the prompt/RAG; runtime does not append or substitute them here.
         recent_replies = _assistant_replies(context.messages)
         question_text = str(
-            ((question_contract.get("questions") or {}).get(next_question_id or "") or {}).get("text")
+            ((question_contract.get("questions") or {}).get(audit_question_id or "") or {}).get("text")
             or ""
         )
         repetition = conversation_repetition.assess_repetition(
             current_reply=reply,
             recent_replies=recent_replies,
-            question_node_id=next_question_id,
+            question_node_id=audit_question_id,
             question_text=question_text,
             asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
             max_attempts=_question_repetition_max_attempts(question_contract),
             field_pending=any(
-                field.get("question_node_id") == next_question_id
+                field.get("question_node_id") == audit_question_id
                 for field in aggregate_askable
             ),
             terminal_intent=terminal_intent,
@@ -6478,6 +6530,11 @@ def _decide(
         # to rewrite or suppress a valid response.
         repetition_action = (
             "allowed" if repetition["passed"] else "observed_only"
+        )
+        quality_repair_required = bool(
+            not repetition["passed"]
+            and int(observation.get("repair_attempt") or 0) == 0
+            and str(reply or "").strip()
         )
         empty_reply_handoff = not str(reply or "").strip()
         if empty_reply_handoff:
@@ -6506,6 +6563,10 @@ def _decide(
             **context.cart,
             "facts": facts,
             "facts_by_key": next_grouped,
+            "product_interest_nodes": _merge_product_interest_nodes(
+                context.cart.get("product_interest_nodes"),
+                validated_product_interest_nodes,
+            ),
             "active_branch_node_id": committed_branch,
             "active_branch_node_ids": active_branch_ids,
             "commercial_note_projection": _commercial_note_projection(
@@ -6580,6 +6641,29 @@ def _decide(
             ),
             "repetition_audit": repetition,
             "repetition_action": repetition_action,
+            "repair_required": bool(proof.get("repair_required"))
+            or quality_repair_required,
+            "repair_requirements": [
+                *(proof.get("repair_requirements") or []),
+                *(
+                    [{
+                        "kind": "quality",
+                        "issue": "conversation_repetition",
+                        "failures": repetition.get("failures") or [],
+                        "instruction": (
+                            "Rewrite the reply without asking a fact already known "
+                            "or repeating a previous question. Preserve supported "
+                            "knowledge and choose a genuinely unresolved topic."
+                        ),
+                    }]
+                    if quality_repair_required else []
+                ),
+            ],
+            "model_proposed_next_question_node_id": (
+                model_proposed_next_question_node_id
+                if model_proposed_next_question_node_id != next_question_id
+                else None
+            ),
             "fallback_used": bool(proof.get("fallback_used")) or empty_reply_handoff,
             "context_failure_handoff": empty_reply_handoff,
             "model_proposal_errors": [
@@ -6747,6 +6831,10 @@ def _decide(
         **context.cart,
         "facts": fallback_facts,
         "facts_by_key": fallback_grouped,
+        "product_interest_nodes": _merge_product_interest_nodes(
+            context.cart.get("product_interest_nodes"),
+            validated_product_interest_nodes,
+        ),
         "active_branch_node_id": fallback_branch,
         "active_branch_node_ids": fallback_active_branches,
         "sdr_state": (

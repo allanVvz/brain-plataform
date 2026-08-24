@@ -1123,6 +1123,35 @@ def test_graph_title_or_alias_resolves_one_branch_without_model_repair():
     assert matches[0]["branch_evidence_span"] == "service alpha"
 
 
+def test_branch_candidates_expose_published_node_type_for_audience_product_split():
+    document = {
+        "branch_anchors": ["audience:resale", "product_group:dresses"],
+        "node_by_id": {
+            "audience:resale": {
+                "node_type": "audience", "title": "Atacado / revenda",
+                "slug": "atacado-revenda", "data": {"aliases": ["atacado"]},
+            },
+            "product_group:dresses": {
+                "node_type": "product_group", "title": "Vestidos",
+                "slug": "vestidos", "data": {"aliases": ["vestidos"]},
+            },
+        },
+        "coordinates": {
+            "audience:resale": {"path_checksum": "checksum:audience"},
+            "product_group:dresses": {"path_checksum": "checksum:group"},
+        },
+    }
+
+    audience = graph_agent_runtime_v3._deterministic_branch_candidates(
+        document, "Quero atacado",
+    )
+    group = graph_agent_runtime_v3._deterministic_branch_candidates(
+        document, "Quero vestidos",
+    )
+    assert audience[0]["node_type"] == "audience"
+    assert group[0]["node_type"] == "product_group"
+
+
 def test_short_explicit_service_phrase_remains_a_deterministic_switch_signal():
     """Exact graph aliases take precedence over the short-answer fuzzy-search gate."""
     document = {
