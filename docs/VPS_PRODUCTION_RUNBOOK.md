@@ -148,7 +148,8 @@ resposta real assim que o consumidor iniciar.
 
 Antes da retomada:
 
-1. confirme a tag em `.deploy/current-tag`, health/readiness da API, bindings e
+1. confirme a tag em `.deploy/current-tag`, confirme que `IMAGE_TAG` em
+   `.env.compose` tem exatamente o mesmo SHA, health/readiness da API, bindings e
    estado das IAs;
 2. inventarie buffers `buffered`, `processing`, `awaiting_proof` e
    `dead_letter`; nao repita um inbound com entrega ou processamento ambiguo;
@@ -163,6 +164,13 @@ IMAGE_TAG=<sha-de-.deploy/current-tag> docker compose --env-file .env.compose up
 docker compose --env-file .env.compose ps api workers
 docker inspect --format='{{.Config.Image}}' brain-ai-api-1 brain-ai-workers-1
 ```
+
+Nunca execute apenas `docker compose ... up -d workers` enquanto `IMAGE_TAG` em
+`.env.compose` estiver diferente de `.deploy/current-tag`: o Compose poderá
+baixar e iniciar silenciosamente uma imagem antiga. Corrija primeiro a tag do
+arquivo operacional ou forneça o SHA literal revisado, use `--no-deps` para não
+recriar a API durante a retomada e confirme também o digest, não apenas o nome
+da tag.
 
 Depois da retomada, acompanhe cada buffer preexistente ate um estado terminal.
 Para cada inbound, exija no maximo uma decisao, um proof valido, um commit e um
