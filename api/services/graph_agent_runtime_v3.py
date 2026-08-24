@@ -3815,7 +3815,13 @@ def build_context(
             },
         )
     embedding_started = time.perf_counter()
-    embedding = None if deterministic_candidates else graph_compiler_v3.query_embeddings([message])[0]
+    # Deterministic branch resolution only decides which published branch is
+    # in scope.  It must not disable semantic knowledge retrieval: compound
+    # messages frequently select an audience/product and ask a catalog
+    # question in the same turn (for example, "uso próprio; quais opções?").
+    # The vector remains available to RAG even when branch ranking itself can
+    # be skipped because an exact selector already won.
+    embedding = graph_compiler_v3.query_embeddings([message])[0]
     embedding_ms = round((time.perf_counter() - embedding_started) * 1000, 3)
     if (
         service_resolution.get("resolution_method") == "none"

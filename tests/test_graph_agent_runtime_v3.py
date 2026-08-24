@@ -1052,6 +1052,18 @@ def test_exact_graph_alias_retrieves_new_branch_before_model_call():
     ) == "branch:b"
 
 
+def test_exact_branch_match_does_not_disable_vector_rag_retrieval():
+    """Exact branch selection and semantic knowledge retrieval are independent.
+
+    A compound message can identify the published audience/product and ask a
+    knowledge question in the same turn.  The exact selector may skip branch
+    ranking, but it must never zero the embedding passed to the RAG search.
+    """
+    source = inspect.getsource(graph_agent_runtime_v3.build_context)
+    assert "embedding = graph_compiler_v3.query_embeddings([message])[0]" in source
+    assert "embedding = None if deterministic_candidates" not in source
+
+
 def test_fuzzy_candidate_does_not_replace_active_retrieval_branch():
     assert graph_agent_runtime_v3._retrieval_branch_for_turn(
         active_branch="branch:a",
