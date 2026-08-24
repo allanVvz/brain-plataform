@@ -4753,6 +4753,21 @@ def test_direct_enum_answer_accepts_published_alias_inside_natural_sentence():
     assert value == "both"
 
 
+def test_direct_answer_accepts_nullable_json_schema_type_list_without_crashing():
+    field = {
+        "key": "road_use",
+        "value_schema": {"type": ["boolean", "null"]},
+    }
+
+    assert graph_agent_runtime_v3._coerce_direct_field_value("não", field) is False
+    assert (
+        graph_agent_runtime_v3._coerce_direct_field_value(
+            "Somente quando viajo", field,
+        )
+        is None
+    )
+
+
 def test_direct_answer_reconciles_the_last_asked_pending_field_after_order_shift():
     contract = {"fields": [
         {

@@ -2111,9 +2111,17 @@ def _coerce_direct_field_value(message: str, field: dict[str, Any]) -> Any:
     schema = field.get("value_schema") or {}
     candidates = schema.get("anyOf") or [schema]
     for candidate in candidates:
-        expected = candidate.get("type")
+        raw_expected = candidate.get("type")
+        if isinstance(raw_expected, str):
+            expected_types = {raw_expected}
+        elif isinstance(raw_expected, (list, tuple, set)):
+            expected_types = {
+                item for item in raw_expected if isinstance(item, str)
+            }
+        else:
+            expected_types = set()
         value: Any = None
-        if expected == "string" or not expected:
+        if "string" in expected_types or not expected_types:
             value = literal
             enum = candidate.get("enum") or []
             if enum:
@@ -2122,12 +2130,13 @@ def _coerce_direct_field_value(message: str, field: dict[str, Any]) -> Any:
                     (item for item in enum if _normalized_phrase(item) == folded),
                     None,
                 )
-        elif expected in {"integer", "number"} and re.fullmatch(
+        elif expected_types.intersection({"integer", "number"}) and re.fullmatch(
             r"[-+]?\d+(?:[.,]\d+)?", literal,
         ):
+            expected = "integer" if "integer" in expected_types else "number"
             parsed = float(literal.replace(",", "."))
             value = int(parsed) if expected == "integer" and parsed.is_integer() else parsed
-        elif expected == "boolean":
+        elif "boolean" in expected_types:
             folded = _normalized_phrase(literal)
             if folded in {"sim", "yes", "verdadeiro"}:
                 value = True
