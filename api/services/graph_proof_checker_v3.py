@@ -727,19 +727,14 @@ def check(
     askable = askable_pending_fields(contract, facts)
     question_error_count = len(errors)
     if askable:
-        askable_by_question = {
-            str(field.get("question_node_id") or ""): field
-            for field in askable if field.get("question_node_id")
-        }
+        expected_field = askable[0]
+        expected_question_id = expected_field.get("question_node_id")
         question = questions.get(str(question_id or ""))
-        selected_field = askable_by_question.get(str(question_id or ""))
-        if question_id and not selected_field:
-            errors.append("next_question_not_askable")
-        elif question_id and (
-            not question or question.get("field_key") != selected_field.get("key")
-        ):
+        if question_id != expected_question_id:
+            errors.append("next_question_not_first_missing_field")
+        elif not question or question.get("field_key") != expected_field.get("key"):
             errors.append("next_question_not_for_pending_field")
-        elif question_id:
+        else:
             if any(dependency in missing_keys for dependency in question.get("depends_on") or []):
                 errors.append("next_question_dependencies_unsatisfied")
     elif missing and question_id:
@@ -921,8 +916,22 @@ def _question_already_asked(question: str, text: str) -> bool:
 def compose_published_question(
     *, reply: str, next_question_node_id: str | None, contract: dict[str, Any]
 ) -> str:
-    """Deprecated identity facade; proof never appends or rewrites copy."""
-    return str(reply or "").strip()
+    """Preserve grounded prose and end with the exact graph-owned question."""
+    text = str(reply or "").strip()
+    if not next_question_node_id:
+        return text
+    question = str(
+        ((contract.get("questions") or {}).get(next_question_node_id) or {}).get("text")
+        or ""
+    ).strip()
+    if not question:
+        return text
+    declarative = " ".join(
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
+        if sentence.strip() and "?" not in sentence
+    ).strip()
+    return f"{declarative}\n\n{question}".strip()
 
 
 def validate_natural_summary(reply: str, *, informed_values: list[str]) -> bool:

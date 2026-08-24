@@ -858,7 +858,7 @@ def test_service_branch_does_not_authorize_schedule_availability_payload():
     assert "claim_evidence_not_authorized:availability" in proof["errors"]
 
 
-def test_published_question_is_not_duplicated_when_model_personalizes_it():
+def test_published_question_replaces_model_personalization_with_graph_copy():
     """Regression test for the duplicate-question-in-one-message gap (2026-08-08 report).
 
     Evidence across several Aurora transcripts: the model asks a field
@@ -876,10 +876,10 @@ def test_published_question_is_not_duplicated_when_model_personalizes_it():
         reply="Perfeito! E qual é a metragem do seu apartamento, você sabe me dizer?",
         next_question_node_id="question:a", contract=contract,
     )
-    assert emitted == "Perfeito! E qual é a metragem do seu apartamento, você sabe me dizer?"
+    assert emitted == "Perfeito!\n\nQual é a metragem?"
 
 
-def test_grounded_model_reply_survives_question_composition_byte_for_byte():
+def test_grounded_prose_survives_but_question_uses_published_copy():
     reply = (
         "A lavagem técnica cuida do motor e do cofre conforme a condição atual. "
         "Você percebe algum vazamento de óleo?"
@@ -896,10 +896,13 @@ def test_grounded_model_reply_survives_question_composition_byte_for_byte():
             }
         },
     )
-    assert emitted == reply
+    assert emitted == (
+        "A lavagem técnica cuida do motor e do cofre conforme a condição atual.\n\n"
+        "Existe vazamento de óleo?"
+    )
 
 
-def test_published_question_is_not_duplicated_when_its_only_content_word_is_swapped():
+def test_published_question_replaces_personalized_vehicle_wording():
     """Regression test for a gap in the fix above, found live 2026-08-08.
 
     Word-overlap alone still missed a short question whose only real
@@ -914,7 +917,34 @@ def test_published_question_is_not_duplicated_when_its_only_content_word_is_swap
         reply="Entendi, Beatriz! Bancos manchados são comuns. Qual é a cor do seu Onix?",
         next_question_node_id="q:color", contract=contract,
     )
-    assert "Qual é a cor do veículo?" not in emitted
+    assert emitted == (
+        "Entendi, Beatriz! Bancos manchados são comuns.\n\n"
+        "Qual é a cor do veículo?"
+    )
+
+
+def test_next_question_is_reconciled_to_first_missing_graph_field():
+    contract = {
+        "fields": [
+            {"key": "first", "owner_node_id": "persona", "required": True,
+             "accepted_statuses": ["known"], "question_node_id": "q:first"},
+            {"key": "second", "owner_node_id": "persona", "required": True,
+             "accepted_statuses": ["known"], "question_node_id": "q:second"},
+        ]
+    }
+    model = ConversationProposal(
+        branch_action="keep", branch_anchor_node_id="branch:a",
+        branch_path_checksum="checksum:a", branch_evidence_span="",
+        extracted_facts=[], claims=[], next_question_node_id="q:second",
+        cited_node_ids=[], cited_chunk_ids=[], reply="Qual é o segundo?",
+        qualification_complete=False, handoff_requested=False,
+    )
+
+    reconciled = graph_agent_runtime_v3._normalize_next_question_to_first_missing(
+        model, contract, {},
+    )
+
+    assert reconciled.next_question_node_id == "q:first"
 
 
 def test_qualification_complete_is_derived_not_validated_against_the_model():
@@ -4468,8 +4498,8 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
     assert response.proof["next_question_node_id"] == "q:objective"
     assert response.proof["question_component_discarded"] is False
     assert response.reply_text == (
-        "Agora temos duas opcoes. Quer comparar os detalhes? "
-        "Qual delas chamou mais atencao?"
+        "Agora temos duas opcoes.\n\n"
+        "Você pretende vender o carro ou continuar cuidando dele?"
     )
     assert response.proof["observations"] == ["multiple_questions_in_reply"]
     assert response.proof["service_operations"] == []
