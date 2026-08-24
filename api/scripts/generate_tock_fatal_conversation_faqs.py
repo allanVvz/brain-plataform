@@ -32,7 +32,7 @@ def _faq(
     answer: str, source_node: dict[str, Any], branch_path: list[str],
     sources: list[dict[str, str]], claim_type: str, channel: str, approved: bool,
 ) -> dict[str, Any]:
-    status = "validated" if approved else "pending_validation"
+    status = "approved" if approved else "pending_validation"
     return {
         "id": faq_id,
         "node_type": "faq",
@@ -287,11 +287,54 @@ def generate(bundle: dict[str, Any], *, approved: bool) -> dict[str, Any]:
     ])
 
     result = {**bundle, "nodes": [*nodes, *generated], "edges": [*edges, *generated_edges]}
+    if approved:
+        for node in result["nodes"]:
+            if node.get("node_type") != "faq":
+                continue
+            node["status"] = "approved"
+            node["data"] = {**dict(node.get("data") or {}), "status": "approved"}
+
+    faq_status = {
+        str(node["id"]): str(node.get("status") or "")
+        for node in result["nodes"]
+        if node.get("node_type") == "faq"
+    }
+    embedded_id = str(embedded["id"])
+    canonical_edges: list[dict[str, Any]] = []
+    projected_faqs: set[str] = set()
+    for edge in result["edges"]:
+        source = str(edge.get("source") or "")
+        is_faq_projection = (
+            edge.get("relation_type") == "publishes_to"
+            and source in faq_status
+            and str(edge.get("target") or "") == embedded_id
+        )
+        if not is_faq_projection:
+            canonical_edges.append(edge)
+            continue
+        if faq_status[source] != "approved" or source in projected_faqs:
+            continue
+        canonical_edges.append(edge)
+        projected_faqs.add(source)
+    for faq_id in sorted(
+        node_id for node_id, status in faq_status.items() if status == "approved"
+    ):
+        if faq_id in projected_faqs:
+            continue
+        canonical_edges.append({
+            "id": f"edge:publishes:{faq_id}:{embedded_id}",
+            "source": faq_id,
+            "target": embedded_id,
+            "relation_type": "publishes_to",
+            "metadata": {"generator": GENERATOR, "canonical_projection": True},
+        })
+        projected_faqs.add(faq_id)
+    result["edges"] = canonical_edges
     result["metadata"] = {
         **dict(bundle.get("metadata") or {}),
         "conversation_faq_generator": GENERATOR,
         "conversation_faq_count": len(generated),
-        "conversation_faq_status": "validated" if approved else "pending_validation",
+        "conversation_faq_status": "approved" if approved else "pending_validation",
     }
     return result
 

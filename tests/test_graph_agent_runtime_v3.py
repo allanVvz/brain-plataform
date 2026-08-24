@@ -255,6 +255,27 @@ def test_compiler_rejects_factual_faq_without_self_authorized_claim():
             ],
         )
 
+
+def test_compiler_accepts_non_factual_greeting_faq_without_commercial_claim():
+    root = node(1, "persona:generic")
+    branch = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
+    faq = node(3, "faq:greeting", parent_type="faq", data={
+        "question": "Oi", "answer": "Oi! Como posso ajudar?", "role": "greeting_response",
+    })
+    embedded = node(4, "embedded:generic", parent_type="embedded")
+
+    document = graph_compiler_v3.compile_graph(
+        persona=PERSONA,
+        node_rows=[root, branch, faq, embedded],
+        edge_rows=[
+            edge(1, root, branch), edge(2, branch, faq),
+            edge(3, faq, embedded, relation="publishes_to"),
+        ],
+    )
+
+    assert document["eligible_faq_node_ids"] == ["faq:greeting"]
+
+
 @pytest.mark.parametrize("status", ["unknown", "declined"])
 def test_non_known_terminal_statuses_finish_collection_without_qualification(status):
     document = compiled_fixture(accepted=["known", status])

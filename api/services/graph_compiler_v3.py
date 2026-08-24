@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.6.3"
+COMPILER_VERSION = "graph-compiler-v3.6.4"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -759,7 +759,7 @@ def compile_graph(
             node.get("node_type") == "faq"
             and role != "qualification_question"
             and all(_faq_question_answer(node))
-            and _self_evidenced_faq(node)
+            and (role == "greeting_response" or _self_evidenced_faq(node))
         ):
             eligible_faq_ids.add(node_id)
     global_context_members: set[str] = set()
@@ -977,7 +977,7 @@ def compile_graph(
             metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
             if node.get("node_type") != "faq" or node_id not in embedded_faq_ids or (
                 metadata.get("role") or data.get("role")
-            ) == "qualification_question":
+            ) in {"qualification_question", "greeting_response"}:
                 continue
             if not str(data.get("answer") or "").strip():
                 continue

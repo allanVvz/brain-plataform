@@ -30,6 +30,7 @@ from restructure_tock_fatal_brand_scope import (  # noqa: E402
 )
 
 DRAFT = REPO_ROOT / "data" / "graph_bundles" / "tock-fatal" / "sdr-qualification-v3-draft-two-brands.json"
+PUBLISHABLE = REPO_ROOT / "data" / "graph_bundles" / "tock-fatal" / "sdr-qualification-v10-full-catalog.json"
 
 
 @pytest.fixture(scope="module")
@@ -85,3 +86,33 @@ def test_restructure_does_not_mutate_its_input():
     before = json.dumps(bundle, sort_keys=True)
     restructure(bundle)
     assert json.dumps(bundle, sort_keys=True) == before
+
+
+def test_publishable_bundle_approves_every_faq_and_projects_it_once():
+    bundle = json.loads(PUBLISHABLE.read_text(encoding="utf-8"))
+    faq_ids = {
+        str(node["id"])
+        for node in bundle["nodes"]
+        if node.get("node_type") == "faq"
+    }
+    embedded_ids = {
+        str(node["id"])
+        for node in bundle["nodes"]
+        if node.get("node_type") in {"embed", "embedded"}
+    }
+    projections = [
+        edge for edge in bundle["edges"]
+        if edge.get("relation_type") == "publishes_to"
+        and str(edge.get("source")) in faq_ids
+        and str(edge.get("target")) in embedded_ids
+    ]
+
+    assert faq_ids
+    assert all(
+        node.get("status") == "approved"
+        and (node.get("data") or {}).get("status") == "approved"
+        for node in bundle["nodes"]
+        if node.get("node_type") == "faq"
+    )
+    assert len(projections) == len(faq_ids)
+    assert len({(edge["source"], edge["target"]) for edge in projections}) == len(faq_ids)
