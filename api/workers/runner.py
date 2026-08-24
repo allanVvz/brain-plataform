@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import signal
 
 from workers.flow_validator_worker import FlowValidatorWorker
 from workers.health_check_worker import HealthCheckWorker
@@ -26,12 +27,28 @@ WORKERS = {
 
 
 async def _run(selected: list[str]) -> None:
-    tasks = [asyncio.create_task(WORKERS[name]().start()) for name in selected]
+    instances = [WORKERS[name]() for name in selected]
+    tasks = [asyncio.create_task(worker.start()) for worker in instances]
+    shutdown = asyncio.Event()
+
+    def request_shutdown() -> None:
+        if shutdown.is_set():
+            return
+        shutdown.set()
+        for worker in instances:
+            worker.request_stop()
+
+    loop = asyncio.get_running_loop()
+    for signal_name in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(signal_name, request_shutdown)
+        except (NotImplementedError, RuntimeError):
+            signal.signal(signal_name, lambda *_: request_shutdown())
     try:
         await asyncio.gather(*tasks)
     finally:
-        for task in tasks:
-            task.cancel()
+        request_shutdown()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def main() -> None:

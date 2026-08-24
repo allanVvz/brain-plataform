@@ -11,6 +11,9 @@ on:
       image_tag:
         description: Existing immutable SHA tag (optional; current commit for deploy, recorded previous for rollback)
         required: false
+      base_sha:
+        description: Previously deployed full SHA used for automatic impact classification (optional; defaults to parent commit)
+        required: false
 
 permissions:
   contents: read
@@ -27,7 +30,44 @@ env:
   TARGET_SHA: ${{ github.sha }}
 
 jobs:
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      class: ${{ steps.impact.outputs.class }}
+      touch_vps: ${{ steps.impact.outputs.touch_vps }}
+      publish_api: ${{ steps.impact.outputs.publish_api }}
+      publish_worker: ${{ steps.impact.outputs.publish_worker }}
+      publish_migrate: ${{ steps.impact.outputs.publish_migrate }}
+      pause_claims: ${{ steps.impact.outputs.pause_claims }}
+      backup: ${{ steps.impact.outputs.backup }}
+      wa_validator: ${{ steps.impact.outputs.wa_validator }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+      - name: Classify release impact
+        id: impact
+        shell: bash
+        env:
+          REQUESTED_BASE_SHA: ${{ inputs.base_sha }}
+          DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
+        run: |
+          set -Eeuo pipefail
+          if [ "$DEPLOY_ACTION" = "rollback" ]; then
+            for value in class=migration touch_vps=true publish_api=false publish_worker=false publish_migrate=false pause_claims=true backup=false wa_validator=false; do
+              echo "$value" >> "$GITHUB_OUTPUT"
+            done
+            exit 0
+          fi
+          base="$REQUESTED_BASE_SHA"
+          if [ -z "$base" ]; then base="$(git rev-parse "${TARGET_SHA}^")"; fi
+          git cat-file -e "${base}^{commit}"
+          python scripts/classify_deploy_impact.py --base "$base" --head "$TARGET_SHA" --github-output "$GITHUB_OUTPUT"
+
   validate:
+    needs: classify
+    if: inputs.action == 'rollback' || needs.classify.outputs.touch_vps == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -97,13 +137,15 @@ jobs:
 
   publish:
     if: inputs.action != 'rollback'
-    needs: validate
+    needs: [classify, validate]
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.meta.outputs.image_tag }}
       repository: ${{ steps.meta.outputs.repository }}
       api_digest: ${{ steps.build_api.outputs.digest }}
+      worker_digest: ${{ steps.build_worker.outputs.digest }}
       migrate_digest: ${{ steps.build_migrate.outputs.digest }}
+      runtime_base_digest: ${{ steps.build_runtime_base.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -123,12 +165,29 @@ jobs:
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Publish API and worker image
+      - name: Publish shared runtime base
+        if: needs.classify.outputs.publish_api == 'true' || needs.classify.outputs.publish_worker == 'true'
+        id: build_runtime_base
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./api/Dockerfile
+          target: runtime-base
+          build-args: |
+            SOURCE_SHA=${{ env.TARGET_SHA }}
+          push: true
+          tags: ghcr.io/${{ steps.meta.outputs.repository }}/brain-runtime-base:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=gha,scope=runtime-base
+          cache-to: type=gha,mode=max,scope=runtime-base
+
+      - name: Publish API image
+        if: needs.classify.outputs.publish_api == 'true'
         id: build_api
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ./api/Dockerfile
+          target: api
           build-args: |
             SOURCE_SHA=${{ env.TARGET_SHA }}
           push: true
@@ -136,7 +195,23 @@ jobs:
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
 
+      - name: Publish worker image
+        if: needs.classify.outputs.publish_worker == 'true'
+        id: build_worker
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./api/Dockerfile
+          target: workers
+          build-args: |
+            SOURCE_SHA=${{ env.TARGET_SHA }}
+          push: true
+          tags: ghcr.io/${{ steps.meta.outputs.repository }}/brain-workers:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=gha,scope=workers
+          cache-to: type=gha,mode=max,scope=workers
+
       - name: Publish migration runner image
+        if: needs.classify.outputs.publish_migrate == 'true'
         id: build_migrate
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -148,8 +223,12 @@ jobs:
           cache-to: type=gha,mode=max,scope=migrate
 
   deploy:
-    needs: [validate, publish]
-    if: always() && needs.validate.result == 'success' && (needs.publish.result == 'success' || inputs.action == 'rollback')
+    needs: [classify, validate, publish]
+    if: >-
+      always() &&
+      (inputs.action == 'rollback' || needs.classify.outputs.touch_vps == 'true') &&
+      needs.validate.result == 'success' &&
+      (needs.publish.result == 'success' || inputs.action == 'rollback')
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -169,7 +248,9 @@ jobs:
         shell: bash
         env:
           API_IMAGE_DIGEST: ${{ needs.publish.outputs.api_digest }}
+          WORKER_IMAGE_DIGEST: ${{ needs.publish.outputs.worker_digest }}
           MIGRATE_IMAGE_DIGEST: ${{ needs.publish.outputs.migrate_digest }}
+          RUNTIME_BASE_IMAGE_DIGEST: ${{ needs.publish.outputs.runtime_base_digest }}
         run: bash ops/release/build-artifact.sh "$TARGET_SHA"
 
       # The GitHub-hosted runner's outbound connection to the VPS
@@ -226,8 +307,8 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
+          IMPACT_CLASS: ${{ needs.classify.outputs.class }}
           REQUESTED_TAG: ${{ inputs.action == 'rollback' && inputs.image_tag || needs.publish.outputs.image_tag }}
-          KEEP_WORKERS_PAUSED: "true"
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -238,18 +319,19 @@ jobs:
           # which can terminate a healthy rollout after migrations but before
           # the worker and post-deploy audits are restored.
           command_timeout: 30m
-          envs: GHCR_USERNAME,GHCR_TOKEN,VPS_APP_DIR,DEPLOY_ACTION,REQUESTED_TAG,KEEP_WORKERS_PAUSED
+          envs: GHCR_USERNAME,GHCR_TOKEN,VPS_APP_DIR,DEPLOY_ACTION,IMPACT_CLASS,REQUESTED_TAG
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            bash ops/vps/audit.sh
             if [ "$DEPLOY_ACTION" = "rollback" ]; then
               bash ops/vps/rollback.sh "$REQUESTED_TAG"
             else
               bash ops/vps/install-release-artifact.sh \
                 ".release/brain-release-${REQUESTED_TAG}.tar.gz" "$REQUESTED_TAG"
-              bash ops/vps/backup.sh
-              bash ops/vps/deploy.sh "$REQUESTED_TAG"
+              bash ops/vps/deploy-incremental.sh "$IMPACT_CLASS" "$REQUESTED_TAG" --dry-run
+              bash ops/vps/deploy-incremental.sh "$IMPACT_CLASS" "$REQUESTED_TAG" --apply
               bash ops/vps/release-checkpoint.sh "${REQUESTED_TAG:0:12}"
               # Content-contract validation is a separate concern from "did
               # the deploy succeed" — captured here instead of letting it

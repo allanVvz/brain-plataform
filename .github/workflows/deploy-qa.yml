@@ -148,16 +148,33 @@ jobs:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         if: inputs.image_tag == ''
 
-      - name: Publish API and worker image
+      - name: Publish API image
         if: inputs.image_tag == ''
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ./api/Dockerfile
+          target: api
+          build-args: |
+            SOURCE_SHA=${{ steps.meta.outputs.image_tag }}
           push: true
           tags: ghcr.io/${{ steps.meta.outputs.repository }}/brain-api:${{ steps.meta.outputs.image_tag }}
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
+
+      - name: Publish worker image
+        if: inputs.image_tag == ''
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./api/Dockerfile
+          target: workers
+          build-args: |
+            SOURCE_SHA=${{ steps.meta.outputs.image_tag }}
+          push: true
+          tags: ghcr.io/${{ steps.meta.outputs.repository }}/brain-workers:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=gha,scope=workers
+          cache-to: type=gha,mode=max,scope=workers
 
       - name: Publish migration runner image
         if: inputs.image_tag == ''

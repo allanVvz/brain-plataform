@@ -3,6 +3,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 DEPLOY = (ROOT / "ops" / "vps" / "deploy.sh").read_text(encoding="utf-8")
+INCREMENTAL_DEPLOY = (
+    ROOT / "ops" / "vps" / "deploy-incremental.sh"
+).read_text(encoding="utf-8")
+RESUME_WORKFLOW = (
+    ROOT / ".github" / "workflows" / "resume-production-workers.yml"
+).read_text(encoding="utf-8")
 VALIDATOR = (
     ROOT / "ops" / "vps" / "validate-production-release.sh"
 ).read_text(encoding="utf-8")
@@ -18,11 +24,12 @@ WA_VALIDATOR = (
 API_DOCKERFILE = (ROOT / "api" / "Dockerfile").read_text(encoding="utf-8")
 
 
-def test_production_deploy_leaves_workers_paused_for_controlled_validation():
-    assert 'KEEP_WORKERS_PAUSED:-false' in DEPLOY
-    assert '"${COMPOSE[@]}" stop workers' in DEPLOY
-    assert 'KEEP_WORKERS_PAUSED: "true"' in WORKFLOW
-    assert "REQUESTED_TAG,KEEP_WORKERS_PAUSED" in WORKFLOW
+def test_incremental_deploy_pauses_claims_and_requires_explicit_resume():
+    assert "release_lifecycle.py pause-claims" in INCREMENTAL_DEPLOY
+    assert "drain-worker-claims.sh" in INCREMENTAL_DEPLOY
+    assert "awaiting_resume_authorization" in INCREMENTAL_DEPLOY
+    assert "resume-production-workers.sh" in RESUME_WORKFLOW
+    assert "authorize-resume" in RESUME_WORKFLOW
 
 
 def test_release_validator_requires_this_release_migration_and_exact_sha():

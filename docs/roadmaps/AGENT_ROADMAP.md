@@ -88,6 +88,44 @@ paralelo seguro.
 | 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20; decisão nova 2026-08-22: escopo de conhecimento por agente via cards Embedded — ver seção própria abaixo** | `graph-publisher`, `card-editor` |
 | 8 | Runtime semantic-first (interpretação pelo modelo, prova pelo backend) | **em progresso 2026-08-22, branch `agent/sofia-vitoria-audit` — ver seção própria** | `graph-publisher` |
 | 8a | Navegação consultiva de catálogo e mídia no SDR | **FAQ por ProductGroup entregue no candidato 2026-08-24; falta assets/fotos/vídeos/links e avaliação offline de qualidade** | `faq-coverage`, `sdr-evaluator` |
+| 9 | Deploy incremental, leve e retomável | **em progresso 2026-08-24 — lifecycle durável, classificação, pausa/drain/resume, proof do primeiro claim, blue-green da API, imagens separadas, retenção autorizada e gates semânticos implementados no candidato; medição real e prova em QA/produção ainda pendentes** | `release-gate` |
+
+### 9 — Deploy incremental, leve e retomável
+
+O deploy é classificado automaticamente em `documentation`, `dashboard`,
+`graph`, `api`, `worker`, `conversational` ou `migration`. Documentação e grafo
+não fazem deploy de código; dashboard fica no fluxo Vercel; API isolada não
+toca workers; worker isolado pausa novos claims, drena e troca apenas o worker.
+
+O lifecycle persistido em `.deploy/lifecycle.json` é atômico e retomável:
+
+`prepared -> images_pulled -> claims_paused -> queue_drained -> migration_complete -> candidate_healthy -> validator_complete -> soak_complete -> awaiting_resume_authorization -> workers_resumed -> verified`
+
+Etapas não aplicáveis podem ser puladas, mas uma regressão só é permitida para
+`claims_paused` como safety stop. A retomada é uma operação separada, exige
+autorização durável e prova um inbound canônico com uma decisão, um proof, um
+commit e no máximo um outbound. Webhooks continuam gravando durante a pausa.
+
+API e worker têm imagens e SHAs de componente independentes. Um deploy isolado
+portanto pode produzir SHAs diferentes sem reiniciar o outro processo; o
+manifesto aprovado é a autoridade e a divergência fica alertada. Exigir SHA
+literal igual e simultaneamente proibir o restart do componente não alterado é
+um contrato impossível, por isso o gate correto compara cada container ao seu
+SHA/digest aprovado no release.
+
+Retenção preserva atual, rollback e imagens em uso. Apply de limpeza continua
+separado do deploy e exige autorização própria. O limite de disco é `<35%`.
+O soak conversacional de no mínimo 30 minutos é durável e não entra no tempo
+ativo do deploy: a instalação chega a `candidate_healthy`, o validador interno
+é registrado, e outra operação completa o soak e pede autorização de resume.
+
+Pendências para concluir o item:
+
+- provar em QA a alternância blue-green e o rollback automático do upstream;
+- provar API e worker abaixo de 1,5 GB no registry/host;
+- medir p95 de deploy comum abaixo de 3 minutos e candidato conversacional
+  abaixo de 8 minutos, excluindo soak e espera humana;
+- validar os novos workflows em QA e depois em janela produtiva autorizada.
 
 ### 2a — Ordem visual das perguntas e autoria pela Sofia
 

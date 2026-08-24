@@ -1,0 +1,63 @@
+name: Resume production workers
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Full installed production Git SHA
+        required: true
+      authorization_reason:
+        description: Reviewed reason authorizing claims and workers to resume
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate input
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "release_sha must be a full lowercase Git SHA" >&2
+            exit 2
+          }
+
+      - name: Authorize and resume the installed release
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          AUTHORIZATION_ACTOR: ${{ github.actor }}
+          AUTHORIZATION_REASON: ${{ inputs.authorization_reason }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 10m
+          envs: VPS_APP_DIR,RELEASE_SHA,AUTHORIZATION_ACTOR,AUTHORIZATION_REASON
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            bash ops/vps/audit.sh
+            stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
+            if [ "$stage" = "awaiting_resume_authorization" ]; then
+              python3 ops/vps/release_lifecycle.py authorize-resume \
+                --actor "$AUTHORIZATION_ACTOR" \
+                --reason "$AUTHORIZATION_REASON"
+            elif [ "$stage" != "workers_resumed" ] && [ "$stage" != "verified" ]; then
+              echo "release is not resumable from stage=$stage" >&2
+              exit 1
+            fi
+            bash ops/vps/resume-production-workers.sh "$RELEASE_SHA"

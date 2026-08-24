@@ -2060,26 +2060,6 @@ def _explicitly_defers_pending_field(message: str) -> bool:
     ))
 
 
-def _normalize_next_question_to_first_missing(
-    proposal: ConversationProposal,
-    contract: dict[str, Any],
-    ledger_facts: dict[str, Any],
-) -> ConversationProposal:
-    """Resolve the next question from the first graph-owned missing field."""
-    effective_facts = dict(ledger_facts)
-    for fact in proposal.extracted_facts:
-        effective_facts[fact.field_key] = {
-            "status": fact.status.value if hasattr(fact.status, "value") else fact.status,
-            "value": fact.value,
-            "owner_node_id": fact.owner_node_id,
-        }
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, effective_facts)
-    expected = pending[0].get("question_node_id") if pending else None
-    if proposal.next_question_node_id == expected:
-        return proposal
-    return proposal.model_copy(update={"next_question_node_id": expected})
-
-
 def _coerce_direct_field_value(message: str, field: dict[str, Any]) -> Any:
     """Conservatively coerce a literal reply for one graph-declared field."""
     literal = str(message or "").strip()
@@ -6002,18 +5982,7 @@ def _decide(
     proposal = _reconcile_direct_answer_to_pending_field(
         proposal, context, reconciliation_contract, reconciliation_facts,
     )
-    projected_contract_facts = dict(contract_facts)
-    for proposed_fact in proposal.extracted_facts:
-        projected_contract_facts[proposed_fact.field_key] = {
-            "field_key": proposed_fact.field_key,
-            "owner_node_id": proposed_fact.owner_node_id,
-            "status": proposed_fact.status.value,
-            "value": proposed_fact.value,
-        }
     model_proposed_next_question_node_id = proposal.next_question_node_id
-    proposal = _normalize_next_question_to_first_missing(
-        proposal, contract, projected_contract_facts,
-    )
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(
             row.get("source_node_id") or row.get("source_graph_node_id") or ""
@@ -6504,6 +6473,9 @@ def _decide(
                 reply=reply_seed,
                 next_question_node_id=next_question_id,
                 contract=question_contract,
+                discard_unproved_questions=bool(
+                    proof.get("question_component_discarded")
+                ),
             )
         recent_replies = _assistant_replies(context.messages)
         question_text = str(

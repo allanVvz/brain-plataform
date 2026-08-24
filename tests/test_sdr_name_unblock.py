@@ -307,7 +307,7 @@ def test_repetir_o_candidato_pendente_confirma_e_avanca(monkeypatch):
     assert fact["value"] == "Allan Rodrigues"
 
 
-def test_saudacao_livre_termina_com_primeira_pergunta_publicada(monkeypatch):
+def test_saudacao_livre_descarta_pergunta_ainda_nao_perguntavel(monkeypatch):
     document, pub = _fixture(monkeypatch)
     reply = (
         "Oi! Que bom falar com voce. "
@@ -333,11 +333,9 @@ def test_saudacao_livre_termina_com_primeira_pergunta_publicada(monkeypatch):
     _decision, response = _decide(context, proposal)
 
     assert response.proof["valid"], response.proof["errors"]
-    assert response.reply_text == (
-        "Oi! Que bom falar com voce.\n\n"
-        "Antes de tudo, qual e o seu nome e sobrenome?"
-    )
-    assert response.proof["next_question_node_id"] == "q:nome"
+    assert response.reply_text == "Oi! Que bom falar com voce."
+    assert response.proof["next_question_node_id"] is None
+    assert response.proof["question_component_discarded"] is True
 
 
 def test_nome_invalido_nao_vira_fato_e_o_turno_continua_util(monkeypatch):

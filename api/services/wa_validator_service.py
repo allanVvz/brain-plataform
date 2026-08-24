@@ -1979,21 +1979,21 @@ def _semantic_turn_audit(
     missing = [str(value) for value in proof.get("missing_fields") or []]
     question_id = str(proof.get("next_question_node_id") or "") or None
     first_missing = missing[0] if missing else None
-    first_field = next(
-        (
-            field for field in contract.get("fields") or []
-            if str(field.get("key") or "") in missing
-            and not any(
-                fact.get("status") == "unknown"
-                and str(fact.get("owner_node_id") or "")
-                == str(field.get("owner_node_id") or "")
-                for fact in facts_by_key.get(str(field.get("key") or "")) or []
-            )
-        ),
-        None,
+    askable_fields = [
+        field
+        for field in graph_proof_checker_v3.askable_pending_fields(
+            contract, facts_after,
+        )
+        if str(field.get("key") or "") in set(missing)
+    ]
+    askable_question_ids = {
+        str(field.get("question_node_id") or "")
+        for field in askable_fields
+        if str(field.get("question_node_id") or "")
+    }
+    first_askable = (
+        str(askable_fields[0].get("key") or "") if askable_fields else None
     )
-    first_askable = str((first_field or {}).get("key") or "") or None
-    expected_question_id = str((first_field or {}).get("question_node_id") or "") or None
     question = (contract.get("questions") or {}).get(question_id or "") or {}
     previous_question = (
         (contract.get("questions") or {}).get(previous_question_node_id or "") or {}
@@ -2010,7 +2010,18 @@ def _semantic_turn_audit(
     actual_evidence = set(turn.get("evidence_node_ids") or []) | set(
         decision.get("evidence_node_ids") or []
     )
-    asked_owner = str(question.get("owner_node_id") or (first_field or {}).get("owner_node_id") or "")
+    asked_field_contract = next(
+        (
+            field for field in askable_fields
+            if str(field.get("question_node_id") or "") == str(question_id or "")
+        ),
+        {},
+    )
+    asked_owner = str(
+        question.get("owner_node_id")
+        or asked_field_contract.get("owner_node_id")
+        or ""
+    )
     asked_fact_already_known = any(
         fact.get("status") == "known"
         and (not asked_owner or str(fact.get("owner_node_id") or "") == asked_owner)
@@ -2206,7 +2217,7 @@ def _semantic_turn_audit(
         question_text=question_text,
         asked_question_node_ids=ledger_before.get("asked_question_node_ids") or [],
         max_attempts=repetition_policy.get("max_attempts", 0),
-        field_pending=bool(first_askable and question_id == expected_question_id),
+        field_pending=bool(question_id and question_id in askable_question_ids),
         terminal_intent=terminal_intent,
         previous_terminal_intent=str(
             ((ledger_before.get("terminal_handoff") or {}).get("intent") or "")
@@ -2235,7 +2246,7 @@ def _semantic_turn_audit(
             and proof.get("explicit_confirmation") is True
         ),
         "received_content_acknowledged": not intended or bool(declarative_parts),
-        "first_missing_field_only": (
+        "question_semantically_askable": (
             (not missing and question_id is None)
             or (
                 proof.get("confirmation_state") == "field_confirmation"
@@ -2248,7 +2259,7 @@ def _semantic_turn_audit(
                 and first_askable is None
             )
             or (
-                question_id == expected_question_id
+                question_id in askable_question_ids
                 and bool(question_text)
                 and graph_proof_checker_v3._question_already_asked(question_text, reply)
             )

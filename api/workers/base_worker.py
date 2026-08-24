@@ -20,10 +20,30 @@ class BaseWorker:
 
     def __init__(self):
         self._failures = 0
+        self._stop_event: asyncio.Event | None = None
+        self._stop_requested = False
+
+    def request_stop(self) -> None:
+        self._stop_requested = True
+        if self._stop_event is not None:
+            self._stop_event.set()
+
+    async def _wait_or_stop(self, delay: float) -> None:
+        if self._stop_event is None:
+            return
+        try:
+            await asyncio.wait_for(
+                self._stop_event.wait(), timeout=max(0.0, delay),
+            )
+        except TimeoutError:
+            pass
 
     async def start(self) -> None:
+        self._stop_event = asyncio.Event()
+        if self._stop_requested:
+            self._stop_event.set()
         sre_logger.info(self.name, f"started — interval={self.interval}s")
-        while True:
+        while not self._stop_event.is_set():
             try:
                 await asyncio.to_thread(self._run_cycle)
                 if self._failures > 0:
@@ -42,11 +62,12 @@ class BaseWorker:
                         self.name,
                         f"too many consecutive failures — backing off {backoff}s",
                     )
-                    await asyncio.sleep(backoff)
+                    await self._wait_or_stop(backoff)
                     self._failures = 0
                     continue
 
-            await asyncio.sleep(self.interval)
+            await self._wait_or_stop(self.interval)
+        sre_logger.info(self.name, "stopped gracefully")
 
     def _run_cycle(self) -> None:
         raise NotImplementedError(f"{self.name}._run_cycle() must be implemented")

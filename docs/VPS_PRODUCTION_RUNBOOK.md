@@ -139,6 +139,15 @@ Migrations de producao precisam permanecer retrocompativeis com a imagem anterio
 
 ### Retomada controlada dos workers depois do deploy
 
+> Atualização 2026-08-24: o procedimento abaixo com `KEEP_WORKERS_PAUSED` e
+> `docker compose up workers` é legado. O fluxo oficial agora classifica o
+> impacto, mantém o processo vivo atrás do marker de pausa de claims e usa os
+> workflows `Complete production validation` e `Resume production workers`.
+> API isolada não toca workers. A autoridade de versão é
+> `.deploy/components.env` mais os digests aprovados, e a retomada deve chamar
+> `ops/vps/resume-production-workers.sh <sha-completo>` após WA Validator e soak.
+> Nunca retome diretamente pelo Compose.
+
 O workflow de producao publica API e workers com a mesma tag imutavel, mas
 mantem `KEEP_WORKERS_PAUSED=true` durante a validacao. Portanto, API saudavel e
 `audit.sh` verde nao significam que mensagens estejam sendo consumidas. A

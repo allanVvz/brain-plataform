@@ -197,13 +197,23 @@ def pending_fields(contract: dict[str, Any], facts: dict[str, Any]) -> list[dict
 def askable_pending_fields(
     contract: dict[str, Any], facts: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Pending fields that have not exhausted their published-question limit."""
+    """Pending fields whose graph dependencies are currently satisfied."""
+    pending = pending_fields(contract, facts)
+    pending_keys = {str(field.get("key") or "") for field in pending}
+    questions = contract.get("questions") or {}
     return [
-        field for field in pending_fields(contract, facts)
+        field for field in pending
         if not (
             (fact := facts.get(field["key"]))
             and fact.get("owner_node_id") == field.get("owner_node_id")
             and fact.get("status") in {"unknown", "declined"}
+        )
+        and all(
+            dependency not in pending_keys
+            for dependency in {
+                *(field.get("depends_on") or []),
+                *((questions.get(str(field.get("question_node_id") or "")) or {}).get("depends_on") or []),
+            }
         )
     ]
 
@@ -500,6 +510,7 @@ def check(
 ) -> dict[str, Any]:
     errors: list[str] = []
     repair: list[dict[str, Any]] = []
+    observations: list[str] = []
     document = publication.get("document_json") or {}
     branch = str(proposal.get("branch_anchor_node_id") or "")
     action = str(proposal.get("branch_action") or "keep")
@@ -725,35 +736,41 @@ def check(
     question_id = proposal.get("next_question_node_id")
     questions = contract.get("questions") or {}
     askable = askable_pending_fields(contract, facts)
-    question_error_count = len(errors)
-    if askable:
-        expected_field = askable[0]
-        expected_question_id = expected_field.get("question_node_id")
-        question = questions.get(str(question_id or ""))
-        if question_id != expected_question_id:
-            errors.append("next_question_not_first_missing_field")
-        elif not question or question.get("field_key") != expected_field.get("key"):
-            errors.append("next_question_not_for_pending_field")
-        else:
-            if any(dependency in missing_keys for dependency in question.get("depends_on") or []):
-                errors.append("next_question_dependencies_unsatisfied")
-    elif missing and question_id:
-        errors.append("question_after_all_pending_fields_deferred")
-    elif question_id:
-        errors.append("question_after_completion")
     question_count = str(proposal.get("reply") or "").count("?")
-    if len(errors) > question_error_count and question_count == 0:
-        # A stale structural selection is independently discardable when the
-        # model did not actually emit a question. If an unproved question is
-        # present in the reply, keep the proof error: proof must never silently
-        # authorize conversational content outside the published contract.
-        del errors[question_error_count:]
+    reply_text = str(proposal.get("reply") or "")
+    askable_by_question = {
+        str(field.get("question_node_id") or ""): field
+        for field in askable
+        if str(field.get("question_node_id") or "")
+    }
+    semantic_matches = [
+        candidate_id
+        for candidate_id in askable_by_question
+        if _question_already_asked(
+            str((questions.get(candidate_id) or {}).get("text") or ""), reply_text,
+        )
+    ]
+    if question_count > 0:
+        if question_id in semantic_matches:
+            pass
+        elif len(semantic_matches) == 1:
+            # The spoken question is the observable authority. A stale or
+            # missing model id is reconciled to the one graph-owned askable
+            # question it semantically matches; facts and memory remain valid.
+            question_id = semantic_matches[0]
+            observations.append("next_question_metadata_reconciled")
+        else:
+            errors.append("question_not_semantically_askable")
+            question_id = None
+    elif question_id:
+        observations.append("next_question_metadata_without_question")
         question_id = None
-    if question_id and question_count == 0:
-        # The answer can still be valid when the model omitted the optional
-        # follow-up. Discard only that component; never append canonical copy
-        # or reject the supported explanation with it.
-        question_id = None
+    if question_id:
+        selected_field = askable_by_question.get(str(question_id))
+        question = questions.get(str(question_id)) or {}
+        if not selected_field or question.get("field_key") != selected_field.get("key"):
+            errors.append("next_question_not_for_askable_field")
+            question_id = None
     # qualification_complete is 100% derivable from `missing` -- the same
     # reasoning as re-deriving "servico" from active_branch_node_id
     # server-side (graph_agent_runtime_v3.decide()) rather than trusting a
@@ -843,18 +860,17 @@ def check(
         "branch_", "none_with_branch_anchor", "keep_", "add_",
         "invalid_branch_action", "field_owner_", "undeclared_field:",
         "duplicate_extracted_fact:", "fact_", "non_known_fact_",
-        "next_question_", "question_after_",
+        "next_question_", "question_",
     )
     component_errors = [
         error for error in errors
         if error.startswith(component_prefixes) or error == "handoff_not_authorized"
     ]
     gating_errors = [error for error in errors if error not in component_errors]
-    if any(error.startswith(("next_question_", "question_after_")) for error in component_errors):
+    if any(error.startswith(("next_question_", "question_")) for error in component_errors):
         question_id = None
-    observations = (
-        ["multiple_questions_in_reply"] if question_count > 1 else []
-    )
+    if question_count > 1:
+        observations.append("multiple_questions_in_reply")
     repair = list({(item["kind"], item["id"]): item for item in repair if item.get("id")}.values())
     repair_only = bool(gating_errors) and all(
         "outside_package" in error for error in gating_errors
@@ -867,7 +883,12 @@ def check(
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
         "next_question_node_id": question_id,
         "question_component_discarded": bool(
-            proposal.get("next_question_node_id") and not question_id
+            not question_id
+            and question_count > 0
+            and any(
+                error.startswith(("next_question_", "question_"))
+                for error in component_errors
+            )
         ),
         "qualification_complete": not missing,
         "handoff_required": handoff_required,
@@ -897,16 +918,25 @@ def _question_already_asked(question: str, text: str) -> bool:
         for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(text or ""))
         if "?" in sentence
     ]
-    content_tokens = {token for token in q_folded.split() if len(token) >= 4}
+    generic_tokens = {
+        "qual", "quais", "quanto", "quantos", "como", "onde", "quando",
+        "voce", "voces", "pode", "sabe", "dizer", "meu", "minha", "seu",
+        "sua", "seus", "suas", "para", "com", "uma", "uns", "das", "dos",
+        "que", "tem", "the", "what", "which", "your", "you", "can", "tell",
+    }
+    content_tokens = {
+        token for token in q_folded.split()
+        if len(token) >= 3 and token not in generic_tokens
+    }
     for candidate in candidates:
         candidate_folded = _fold(candidate)
         candidate_tokens = set(candidate_folded.split())
         if (
-            len(content_tokens) >= 2
-            and len(content_tokens & candidate_tokens) / len(content_tokens) >= 0.7
+            content_tokens
+            and len(content_tokens & candidate_tokens) / len(content_tokens) >= 0.6
         ):
             return True
-        if difflib.SequenceMatcher(
+        if content_tokens & candidate_tokens and difflib.SequenceMatcher(
             None, q_folded, candidate_folded, autojunk=False,
         ).ratio() >= 0.68:
             return True
@@ -914,24 +944,26 @@ def _question_already_asked(question: str, text: str) -> bool:
 
 
 def compose_published_question(
-    *, reply: str, next_question_node_id: str | None, contract: dict[str, Any]
+    *, reply: str, next_question_node_id: str | None, contract: dict[str, Any],
+    discard_unproved_questions: bool = False,
 ) -> str:
-    """Preserve grounded prose and end with the exact graph-owned question."""
+    """Preserve natural proved wording and remove only an invalid question."""
     text = str(reply or "").strip()
+    if discard_unproved_questions:
+        return " ".join(
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
+            if sentence.strip() and "?" not in sentence
+        ).strip()
     if not next_question_node_id:
         return text
     question = str(
         ((contract.get("questions") or {}).get(next_question_node_id) or {}).get("text")
         or ""
     ).strip()
-    if not question:
+    if not question or not _question_already_asked(question, text):
         return text
-    declarative = " ".join(
-        sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
-        if sentence.strip() and "?" not in sentence
-    ).strip()
-    return f"{declarative}\n\n{question}".strip()
+    return text
 
 
 def validate_natural_summary(reply: str, *, informed_values: list[str]) -> bool:

@@ -1,5 +1,13 @@
 # Production release gates
 
+> Updated 2026-08-24: `KEEP_WORKERS_PAUSED` is the legacy full-deploy path.
+> The official incremental path classifies the change, leaves API-only releases
+> independent from workers, and pauses new conversational claims with a durable
+> marker while the worker process remains alive. Resume uses
+> `resume-production-workers.sh`, verifies each component SHA/digest, and proves
+> the first backlog claim. Component SHAs may intentionally differ after an
+> isolated deploy; each must match `.deploy/components.env`.
+
 Production deploy is manual and requires the GitHub `production` environment
 to have required reviewers. Protect `main` with pull requests, the CI workflow
 as a required check and at least one approval; these repository settings must

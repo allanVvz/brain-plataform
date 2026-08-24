@@ -858,7 +858,7 @@ def test_service_branch_does_not_authorize_schedule_availability_payload():
     assert "claim_evidence_not_authorized:availability" in proof["errors"]
 
 
-def test_published_question_replaces_model_personalization_with_graph_copy():
+def test_published_question_preserves_semantic_model_personalization():
     """Regression test for the duplicate-question-in-one-message gap (2026-08-08 report).
 
     Evidence across several Aurora transcripts: the model asks a field
@@ -876,10 +876,10 @@ def test_published_question_replaces_model_personalization_with_graph_copy():
         reply="Perfeito! E qual é a metragem do seu apartamento, você sabe me dizer?",
         next_question_node_id="question:a", contract=contract,
     )
-    assert emitted == "Perfeito!\n\nQual é a metragem?"
+    assert emitted == "Perfeito! E qual é a metragem do seu apartamento, você sabe me dizer?"
 
 
-def test_grounded_prose_survives_but_question_uses_published_copy():
+def test_grounded_prose_and_semantic_question_wording_survive():
     reply = (
         "A lavagem técnica cuida do motor e do cofre conforme a condição atual. "
         "Você percebe algum vazamento de óleo?"
@@ -896,13 +896,10 @@ def test_grounded_prose_survives_but_question_uses_published_copy():
             }
         },
     )
-    assert emitted == (
-        "A lavagem técnica cuida do motor e do cofre conforme a condição atual.\n\n"
-        "Existe vazamento de óleo?"
-    )
+    assert emitted == reply
 
 
-def test_published_question_replaces_personalized_vehicle_wording():
+def test_published_question_preserves_personalized_vehicle_wording():
     """Regression test for a gap in the fix above, found live 2026-08-08.
 
     Word-overlap alone still missed a short question whose only real
@@ -917,13 +914,10 @@ def test_published_question_replaces_personalized_vehicle_wording():
         reply="Entendi, Beatriz! Bancos manchados são comuns. Qual é a cor do seu Onix?",
         next_question_node_id="q:color", contract=contract,
     )
-    assert emitted == (
-        "Entendi, Beatriz! Bancos manchados são comuns.\n\n"
-        "Qual é a cor do veículo?"
-    )
+    assert emitted == "Entendi, Beatriz! Bancos manchados são comuns. Qual é a cor do seu Onix?"
 
 
-def test_next_question_is_reconciled_to_first_missing_graph_field():
+def test_model_question_is_not_reordered_to_first_missing_graph_field():
     contract = {
         "fields": [
             {"key": "first", "owner_node_id": "persona", "required": True,
@@ -940,11 +934,7 @@ def test_next_question_is_reconciled_to_first_missing_graph_field():
         qualification_complete=False, handoff_requested=False,
     )
 
-    reconciled = graph_agent_runtime_v3._normalize_next_question_to_first_missing(
-        model, contract, {},
-    )
-
-    assert reconciled.next_question_node_id == "q:first"
+    assert model.next_question_node_id == "q:second"
 
 
 def test_qualification_complete_is_derived_not_validated_against_the_model():
@@ -2794,6 +2784,7 @@ def test_positive_service_candidate_confirmation_applies_bound_operation_only(mo
     assert operation["evidence_type"] == "confirmed_candidate"
     assert response.proof["service_operation_proof"]["valid"]
     assert response.proof["next_question_node_id"] == "q:objective"
+    assert "objective" not in response.cart_state["facts_by_key"]
     assert response.reply_text == (
         "Perfeito, vou considerar a vitrificação. Qual é seu objetivo?"
     )
@@ -4495,12 +4486,9 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
         "aurora-product-polish-localized",
     }
     assert "objective" not in response.cart_state["facts_by_key"]
-    assert response.proof["next_question_node_id"] == "q:objective"
-    assert response.proof["question_component_discarded"] is False
-    assert response.reply_text == (
-        "Agora temos duas opcoes.\n\n"
-        "Você pretende vender o carro ou continuar cuidando dele?"
-    )
+    assert response.proof["next_question_node_id"] is None
+    assert response.proof["question_component_discarded"] is True
+    assert response.reply_text == "Agora temos duas opcoes."
     assert response.proof["observations"] == ["multiple_questions_in_reply"]
     assert response.proof["service_operations"] == []
     assert response.proof["service_candidate"] is None

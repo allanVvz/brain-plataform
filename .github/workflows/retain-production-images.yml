@@ -1,0 +1,40 @@
+name: Retain production release images
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the reviewed inventory (false remains read-only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production
+  cancel-in-progress: false
+
+jobs:
+  retain:
+    runs-on: ubuntu-latest
+    environment: production-cleanup
+    steps:
+      - name: Inventory or apply exact image retention
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          APPLY_CLEANUP: ${{ inputs.apply }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,APPLY_CLEANUP
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            bash ops/vps/retain-release-images.sh --dry-run
+            if [ "$APPLY_CLEANUP" = "true" ]; then
+              CLEANUP_AUTHORIZED=true bash ops/vps/retain-release-images.sh --apply
+            fi

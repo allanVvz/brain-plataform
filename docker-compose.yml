@@ -153,7 +153,7 @@ services:
     networks: [backend]
 
   migrate:
-    image: ${MIGRATE_IMAGE:-brain-migrate}:${IMAGE_TAG:-local}
+    image: ${MIGRATE_IMAGE:-brain-migrate}:${MIGRATE_TAG:-${IMAGE_TAG:-local}}
     build:
       context: .
       dockerfile: infra/migrate.Dockerfile
@@ -282,14 +282,16 @@ services:
         aliases: ["kong-${COMPOSE_PROJECT_NAME:-brain-ai}"]
 
   api:
-    image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
+    image: ${API_IMAGE:-brain-api}:${API_TAG:-${IMAGE_TAG:-local}}
     build:
       context: .
       dockerfile: api/Dockerfile
+      target: api
       args:
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     environment:
       <<: *backend-environment
+      SOURCE_SHA: ${API_TAG:-${IMAGE_TAG:-local}}
     volumes:
       - local-storage:/data/local-storage
       - vault-data:/data/vault
@@ -307,6 +309,8 @@ services:
       retries: 12
       start_period: 30s
     restart: unless-stopped
+    labels:
+      ai.brain.source-sha: ${API_TAG:-${IMAGE_TAG:-local}}
     mem_limit: ${API_MEMORY_LIMIT:-1536m}
     logging: *default-logging
     networks:
@@ -314,16 +318,17 @@ services:
       edge:
         aliases: ["api-${COMPOSE_PROJECT_NAME:-brain-ai}"]
 
-  workers:
-    image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
+  api-candidate:
+    image: ${API_IMAGE:-brain-api}:${CANDIDATE_API_TAG:-${API_TAG:-${IMAGE_TAG:-local}}}
     build:
       context: .
       dockerfile: api/Dockerfile
+      target: api
       args:
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
-    command: ["python", "-m", "workers.runner", "--all"]
     environment:
       <<: *backend-environment
+      SOURCE_SHA: ${CANDIDATE_API_TAG:-${API_TAG:-${IMAGE_TAG:-local}}}
     volumes:
       - local-storage:/data/local-storage
       - vault-data:/data/vault
@@ -332,23 +337,70 @@ services:
         condition: service_completed_successfully
       kong:
         condition: service_healthy
+    ports:
+      - "127.0.0.1:${API_CANDIDATE_PORT:-8081}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=4)"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+    restart: unless-stopped
+    labels:
+      ai.brain.source-sha: ${CANDIDATE_API_TAG:-${API_TAG:-${IMAGE_TAG:-local}}}
+      ai.brain.api-slot: candidate
+    mem_limit: ${API_MEMORY_LIMIT:-1536m}
+    logging: *default-logging
+    profiles: ["blue-green"]
+    networks:
+      backend: {}
+      edge:
+        aliases: ["api-candidate-${COMPOSE_PROJECT_NAME:-brain-ai}"]
+
+  workers:
+    image: ${WORKER_IMAGE:-brain-workers}:${WORKER_TAG:-${IMAGE_TAG:-local}}
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+      target: workers
+      args:
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
+    command: ["python", "-m", "workers.runner", "--all"]
+    volumes:
+      - local-storage:/data/local-storage
+      - vault-data:/data/vault
+      - ./.deploy/control:/run/brain-production:ro
+    environment:
+      <<: *backend-environment
+      SOURCE_SHA: ${WORKER_TAG:-${IMAGE_TAG:-local}}
+      PRODUCTION_CONTROL_DIR: /run/brain-production
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kong:
+        condition: service_healthy
     healthcheck:
       disable: true
     restart: unless-stopped
+    stop_grace_period: ${WORKERS_STOP_GRACE_PERIOD:-180s}
+    labels:
+      ai.brain.source-sha: ${WORKER_TAG:-${IMAGE_TAG:-local}}
     mem_limit: ${WORKERS_MEMORY_LIMIT:-1536m}
     logging: *default-logging
     networks: [backend]
 
   seed-admin:
-    image: ${API_IMAGE:-brain-api}:${IMAGE_TAG:-local}
+    image: ${API_IMAGE:-brain-api}:${API_TAG:-${IMAGE_TAG:-local}}
     build:
       context: .
       dockerfile: api/Dockerfile
+      target: api
       args:
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     command: ["python", "scripts/ensure_seed_admin.py"]
     environment:
       <<: *backend-environment
+      SOURCE_SHA: ${API_TAG:-${IMAGE_TAG:-local}}
       AI_BRAIN_SEED_ADMIN_EMAIL: ${AI_BRAIN_SEED_ADMIN_EMAIL:-}
       AI_BRAIN_SEED_ADMIN_USERNAME: ${AI_BRAIN_SEED_ADMIN_USERNAME:-admin}
       AI_BRAIN_SEED_ADMIN_PASSWORD: ${AI_BRAIN_SEED_ADMIN_PASSWORD:-}
@@ -565,12 +617,10 @@ services:
       - "443:443"
       - "443:443/udp"
     volumes:
-      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./.deploy/caddy:/etc/caddy:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
-      api:
-        condition: service_healthy
       kong:
         condition: service_healthy
       n8n:

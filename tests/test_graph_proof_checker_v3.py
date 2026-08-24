@@ -533,9 +533,45 @@ def test_unproved_question_text_is_not_authorized_when_selection_is_invalid():
     proof = graph_proof_checker_v3.check(**kwargs)
 
     assert proof["valid"] is True
-    assert "next_question_not_first_missing_field" in proof["errors"]
-    assert "next_question_not_first_missing_field" in proof["component_errors"]
+    assert "question_not_semantically_askable" in proof["errors"]
+    assert "question_not_semantically_askable" in proof["component_errors"]
     assert proof["next_question_node_id"] is None
+    assert proof["question_component_discarded"] is True
+
+
+def test_invalid_question_metadata_never_discards_valid_facts_or_memory():
+    kwargs = _base_check_kwargs()
+    kwargs["contract"] = {
+        "branch_path_checksum": "checksum:b",
+        "closure_node_ids": ["branch:b", "q:name"],
+        "fields": [{
+            "key": "name", "owner_node_id": "branch:b", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:name",
+            "value_schema": {"type": "string"},
+        }],
+        "questions": {
+            "q:name": {"field_key": "name", "text": "Como você se chama?"},
+        },
+    }
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "extracted_facts": [{
+            "field_key": "name", "owner_node_id": "branch:b",
+            "status": "known", "value": "Ana", "source_message_id": "msg-1",
+            "evidence_span": "Ana", "confidence": 1,
+        }],
+        "next_question_node_id": "q:stale",
+        "reply": "Prazer, Ana. Qual é o orçamento?",
+    }
+    kwargs["message"] = "Ana"
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert proof["accepted_facts"][0]["value"] == "Ana"
+    assert proof["ledger"]["facts"]["name"]["value"] == "Ana"
+    assert proof["next_question_node_id"] is None
+    assert proof["question_component_discarded"] is True
 
 
 def test_add_action_rejects_re_adding_an_already_active_branch():
@@ -550,7 +586,7 @@ def test_add_action_rejects_without_any_active_branch():
     assert "add_without_active_branch" in proof["errors"]
 
 
-def test_next_question_must_target_the_first_missing_graph_field():
+def test_next_question_may_target_any_currently_askable_graph_field():
     contract = {
         "branch_path_checksum": "checksum:a",
         "closure_node_ids": ["branch:a", "q:first", "q:second"],
@@ -585,7 +621,9 @@ def test_next_question_must_target_the_first_missing_graph_field():
         active_branch_node_id="branch:a", branch_selection_allowed=False,
         branch_switch_allowed=False,
     )
-    assert "next_question_not_first_missing_field" in proof["errors"]
+    assert proof["valid"] is True
+    assert proof["next_question_node_id"] == "q:second"
+    assert "question_not_semantically_askable" not in proof["errors"]
 
 
 def test_add_action_requires_literal_evidence():

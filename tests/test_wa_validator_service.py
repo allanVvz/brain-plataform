@@ -687,8 +687,8 @@ def test_semantic_turn_audit_rejects_final_confirmation_while_field_confirmation
     assert "field_confirmation_precedes_final_confirmation" in audit["failures"]
 
 
-def test_semantic_turn_audit_rejects_a_later_field_before_first_missing():
-    """The validator must enforce the same graph-owned order as proof."""
+def test_semantic_turn_audit_accepts_any_currently_askable_field():
+    """Graph scope and pending state matter; declaration order does not."""
     inputs = _semantic_audit_inputs()
     inputs["customer_step"]["intended_facts"] = {}
     inputs["turn"]["text"] = "Perfeito! Qual seu objetivo com o carro?"
@@ -701,9 +701,9 @@ def test_semantic_turn_audit_rejects_a_later_field_before_first_missing():
 
     audit = wv._semantic_turn_audit(**inputs)
 
-    assert audit["passed"] is False
+    assert audit["passed"] is True
     assert audit["asked_field"] == "objective"
-    assert "first_missing_field_only" in audit["failures"]
+    assert audit["criteria"]["question_semantically_askable"] is True
 
 
 def test_semantic_turn_audit_rejects_a_question_for_a_field_that_is_not_missing():
@@ -716,7 +716,7 @@ def test_semantic_turn_audit_rejects_a_question_for_a_field_that_is_not_missing(
     audit = wv._semantic_turn_audit(**inputs)
 
     assert audit["passed"] is False
-    assert "first_missing_field_only" in audit["failures"]
+    assert "question_semantically_askable" in audit["failures"]
 
 
 def test_semantic_turn_audit_rejects_repeated_reply_and_fallback():
