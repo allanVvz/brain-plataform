@@ -625,6 +625,54 @@ def test_availability_question_and_quantity_entity_survive_without_becoming_a_fa
     )
 
 
+def test_audience_node_cannot_survive_as_a_product_entity():
+    audience_id = "audience:aria-reseller"
+    document = make_document(node_by_id={
+        audience_id: {
+            "id": audience_id,
+            "node_type": "audience",
+            "slug": "reseller",
+        },
+    })
+    result = run(
+        make_interpretation(
+            entities=[_entity("product", "atacado", "atacado", audience_id)],
+            reply="Certo, seguimos no atacado.",
+        ),
+        "atacado",
+        document=document,
+    )
+
+    assert result.valid is True
+    assert result.interpretation.reply == "Certo, seguimos no atacado."
+    assert result.interpretation.entities == []
+    assert any(
+        item["kind"] == "entity" and item["reason"] == "node_type_mismatch"
+        for item in result.dropped
+    )
+
+
+def test_product_group_survives_as_product_interest_entity():
+    group_id = "product_group:aria-dresses"
+    document = make_document(node_by_id={
+        group_id: {
+            "id": group_id,
+            "node_type": "product_group",
+            "slug": "dresses",
+        },
+    })
+    result = run(
+        make_interpretation(
+            entities=[_entity("product", "vestidos", "vestidos", group_id)],
+        ),
+        "quero vestidos",
+        document=document,
+    )
+
+    assert [entity.node_id for entity in result.interpretation.entities] == [group_id]
+    assert not any(item["kind"] == "entity" for item in result.dropped)
+
+
 def test_claim_without_evidence_is_dropped():
     interpretation = make_interpretation(
         claims=[_claim("availability", evidence_node_ids=[])],

@@ -244,6 +244,16 @@ def validate_interpretation(
         if node_id and str(node_id) not in node_by_id:
             drop("entity", "unknown_node", entity)
             continue
+        kind_value = entity.get("kind")
+        entity_kind = str(getattr(kind_value, "value", kind_value) or "")
+        node_type = str((node_by_id.get(str(node_id)) or {}).get("node_type") or "")
+        compatible_types = {
+            "product": {"product", "product_group"},
+            "audience": {"audience"},
+        }.get(entity_kind)
+        if node_id and compatible_types is not None and node_type not in compatible_types:
+            drop("entity", "node_type_mismatch", entity)
+            continue
         if not _is_grounded(entity.get("evidence_span"), folded_message):
             drop("entity", "evidence_not_in_message", entity)
             continue

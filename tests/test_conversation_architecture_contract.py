@@ -43,6 +43,33 @@ process.stdout.write(JSON.stringify(result[0].json));
     return json.loads(completed.stdout)
 
 
+def _run_response_validator(node_name: str, model_payload: dict) -> dict:
+    if not shutil.which("node"):
+        pytest.skip("node is required to execute the canonical n8n code node")
+    javascript = _node(node_name)["parameters"]["jsCode"]
+    harness = """
+const fs = require('fs');
+const fixture = JSON.parse(fs.readFileSync(0, 'utf8'));
+const nodes = {
+  'Build graph grounded agent request': {llm_call_started_at: Date.now(), prompt_estimated_tokens: 1},
+  'Build graph repair request': {llm_call_started_at: Date.now(), prompt_estimated_tokens: 1, repair_context_node_ids: [], repair_context_chunk_ids: [], repair_context_chunk_sources: {}},
+  'Validate agent response': {model_observation: {token_usage: null}},
+  'Validate conversation binding': {model: 'fixture-model'},
+};
+const select = (name) => ({item: {json: nodes[name]}});
+const result = new Function('$', '$json', fixture.javascript)(select, fixture.modelPayload);
+process.stdout.write(JSON.stringify(result[0].json));
+"""
+    completed = subprocess.run(
+        ["node", "-e", harness],
+        input=json.dumps({"javascript": javascript, "modelPayload": model_payload}),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return json.loads(completed.stdout)
+
+
 def _prompt_fixture(*, large: bool, message: str) -> tuple[dict, dict]:
     policy = {"instructions": "politica-publicada " * (460 if large else 2)}
     fields = [
@@ -217,7 +244,7 @@ def test_tock_sized_audio_prompt_preserves_current_behavior_and_full_transcripti
     assert prompt["memory"]["recent_messages"] == context["shared_memory"]["recent_messages"]
     assert set(prompt["memory"]) == {
         "profile_facts", "current_journey", "pending_items", "recent_messages",
-        "last_handoff",
+        "last_handoff", "product_interests",
     }
 
 
@@ -274,6 +301,77 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
         "pending_confirmation_ref: context.pending_confirmation_ref",
     ):
         assert field in initial
+
+
+def test_model_contract_preserves_next_question_and_separates_audience_from_product():
+    initial = _node("Build graph grounded agent request")["parameters"]["jsCode"]
+    validators = [
+        _node("Validate agent response")["parameters"]["jsCode"],
+        _node("Validate repaired agent response")["parameters"]["jsCode"],
+    ]
+
+    # The model's selected question is part of the semantic envelope. If a
+    # parser omits it, the backend cannot remember what was emitted and may
+    # ask the same graph question on the next turn.
+    for validator in validators:
+        assert "'next_question_node_id'" in validator
+        assert "next_question_node_id: parsed.next_question_node_id" in validator
+
+    # Audience/channel nodes are context; product/group interest is a
+    # separate unresolved field. Keep this distinction portable instead of
+    # adding persona literals to runtime code.
+    assert "Never ask a field question that is already known" in initial
+    assert "audience node is purchase context/channel only, never a product" in initial
+    assert "product or product group of interest" in initial
+
+
+@pytest.mark.parametrize(
+    "node_name", ["Validate agent response", "Validate repaired agent response"]
+)
+def test_n8n_validators_forward_the_model_selected_question(node_name):
+    interpretation = {
+        "intents": [],
+        "state_relation": "continue",
+        "answers_field_key": None,
+        "confirmation": {
+            "state": "none", "target_ref": None, "evidence_span": "",
+            "correction_field_key": None, "correction_value": None,
+        },
+        "branch_selections": [],
+        "facts": [],
+        "invalidated_facts": [],
+        "entities": [],
+        "questions": [],
+        "claims": [],
+        "recommended_next_action": "ask_field",
+        "cited_node_ids": [],
+        "cited_chunk_ids": [],
+        "next_question_node_id": "faq:next-unresolved",
+        "reply": "Qual grupo de produtos voce quer conhecer?",
+        "handoff_requested": False,
+    }
+    result = _run_response_validator(node_name, {
+        "choices": [{"message": {"content": json.dumps(interpretation)}}],
+    })
+
+    assert result["model_observation"]["interpretation"]["next_question_node_id"] == (
+        "faq:next-unresolved"
+    )
+    assert result["model_observation"]["interpretation"]["reply"] == (
+        "Qual grupo de produtos voce quer conhecer?"
+    )
+
+
+def test_n8n_repairs_repetition_with_the_model_before_commit():
+    gate = _node("Graph proof needs repair")["parameters"]["conditions"]["conditions"][0][
+        "leftValue"
+    ]
+    repair = _node("Build graph repair request")["parameters"]["jsCode"]
+
+    assert "proof.repair_required" in gate
+    assert "proof.repetition_audit.passed === false" in gate
+    assert "conversation_repetition" in repair
+    assert "rewrite the reply itself" in repair
 
 
 def test_completed_commit_uses_the_status_key_consumed_by_the_claim_rpc():
