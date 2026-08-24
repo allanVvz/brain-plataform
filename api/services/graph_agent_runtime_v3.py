@@ -55,6 +55,14 @@ MODEL_FACT_CONFIDENCE_MIN = 0.90
 # speak when the AI is switched back on. Past it the agent waits for the
 # customer to start. Overridden by the persona graph.
 RESUME_ANSWER_WINDOW_SECONDS = 36000
+# Last-resort operational copy. It contains no commercial fact and exists only
+# so a globally untrusted proposal becomes an observable human handoff instead
+# of a committed silent turn. Persona-specific wording should be published in
+# conversation_policy.context_failure_handoff_reply.
+CONTEXT_FAILURE_HANDOFF_REPLY = (
+    "Não consegui confirmar o contexto com segurança. "
+    "Vou encaminhar para o atendimento humano."
+)
 
 
 def _normalize_initial_service_keep(
@@ -97,7 +105,7 @@ def _normalize_initial_service_keep(
 def _normalize_servico_owner(
     proposal: ConversationProposal, contract: dict[str, Any]
 ) -> ConversationProposal:
-    """Repoint a mismatched "servico" fact to the branch the model just picked.
+    """Repoint a mismatched branch-selector fact to the selected branch.
 
     Confirmed live 2026-08-08: the model sometimes copies a Phase-A candidate
     branch's owner_node_id into the "servico" extracted fact instead of its
@@ -113,11 +121,13 @@ def _normalize_servico_owner(
     auto-derivation block below, so personas that don't use it are
     unaffected.
     """
-    if not any(field.get("key") == "servico" for field in contract.get("fields") or []):
+    selection_field = _service_selection_field(contract)
+    selection_key = str((selection_field or {}).get("key") or "")
+    if not selection_key:
         return proposal
     normalized_facts = [
         fact.model_copy(update={"owner_node_id": proposal.branch_anchor_node_id})
-        if fact.field_key == "servico" and fact.owner_node_id != proposal.branch_anchor_node_id
+        if fact.field_key == selection_key and fact.owner_node_id != proposal.branch_anchor_node_id
         else fact
         for fact in proposal.extracted_facts
     ]
@@ -341,9 +351,19 @@ def _invalid_proposal_fallback(
             qualification_complete=not unconfirmed,
         )
     else:
-        reply = graph_proof_checker_v3.compose_published_question(
-            reply="", next_question_node_id=question_id, contract=contract
-        )
+        # Only used when the model output could not be parsed at all. The
+        # normal conversational path never substitutes canonical wording, but
+        # an invalid schema still needs one graph-published response instead of
+        # a silent commit.
+        reply = str(
+            ((contract.get("questions") or {}).get(question_id or "") or {})
+            .get("text") or ""
+        ).strip()
+        if not reply:
+            reply = str(
+                context.retrieval_trace.get("no_journey_fallback_reply") or ""
+            ).strip() or CONTEXT_FAILURE_HANDOFF_REPLY
+            terminal_intent = "invalid_model_output"
     recent_replies = _assistant_replies(context.messages)
     repetition = conversation_repetition.assess_repetition(
         current_reply=reply,
@@ -751,20 +771,6 @@ def _normalized_phrase(value: Any) -> str:
     folded = unicodedata.normalize("NFKD", str(value or "").casefold())
     ascii_text = "".join(char for char in folded if not unicodedata.combining(char))
     return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
-
-
-def _statements_only(text: Any) -> str:
-    """Drop the interrogative sentences, keep what the turn actually says.
-
-    Used when a reply may not carry its question -- either the field was just
-    given up on, or the question would be an unsafe duplicate. The statements
-    are still owned by the graph; only the ask is withheld.
-    """
-    return " ".join(
-        sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(text or ""))
-        if sentence.strip() and "?" not in sentence
-    ).strip()
 
 
 def _interrogative_clause(message: str) -> str:
@@ -1626,8 +1632,12 @@ def _normalize_referential_service_fact(
     context: ConversationContext,
     document: dict[str, Any],
 ) -> ConversationProposal:
-    """Bind ``servico`` to one published branch; arbitrary strings never qualify."""
-    service_facts = [fact for fact in proposal.extracted_facts if fact.field_key == "servico"]
+    """Bind the graph-declared branch selector to one published branch."""
+    selection_key = branch_selection_field_key(document)
+    service_facts = [
+        fact for fact in proposal.extracted_facts
+        if fact.field_key == selection_key
+    ]
     if not service_facts:
         return proposal
     message = _latest_user_message(context)
@@ -1655,10 +1665,13 @@ def _normalize_referential_service_fact(
             or (switching and anchor in candidate_ids and evidence_is_literal)
         )
     )
-    kept = [fact for fact in proposal.extracted_facts if fact.field_key != "servico"]
+    kept = [
+        fact for fact in proposal.extracted_facts
+        if fact.field_key != selection_key
+    ]
     if valid:
         kept.append(ExtractedFact(
-            field_key="servico",
+            field_key=selection_key,
             value=str(branch.get("slug") or branch.get("title") or anchor),
             status="known",
             source_message_id=_source_message_id(context.messages),
@@ -1674,7 +1687,7 @@ def _fact_consumes_service_evidence(
     service_resolution: dict[str, Any],
     document: dict[str, Any],
 ) -> bool:
-    if fact.field_key == "servico":
+    if fact.field_key == branch_selection_field_key(document):
         return False
     normalized_value = _normalized_phrase(fact.value)
     service_phrases = {
@@ -1827,10 +1840,7 @@ def _service_disambiguation_response(
         context.retrieval_trace.get("common_contract")
         or context.graph_contract or {}
     )
-    service_field = next(
-        (field for field in contract.get("fields") or [] if field.get("key") == "servico"),
-        None,
-    )
+    service_field = _service_selection_field(contract)
     question_id = str((service_field or {}).get("question_node_id") or "") or None
     resolution = context.retrieval_trace.get("service_resolution") or {}
     candidate_options = (
@@ -3933,6 +3943,7 @@ def build_context(
             branch_node_id=anchor, query=message, query_embedding=embedding,
             active_path_node_ids=((document.get("coordinates") or {}).get(anchor) or {}).get("path_node_ids") or [],
             missing_fields=missing, limit=48,
+            agent_slug=str((persona.get("config") or {}).get("agent_slug") or "agent"),
         )
 
     rows = list(_search(retrieval_branch))
@@ -4904,31 +4915,31 @@ def _deterministic_pending_fact_confirmation(
     )
     complete = bool(active and not missing and not remaining_pending)
     final_confirmation_pending = complete and accepted_confirmation
+    published_empty_reply_fallback = ""
     if remaining_pending:
-        reply, next_confirmation = _confirmation_prompt_for_fact(
+        published_empty_reply_fallback, next_confirmation = _confirmation_prompt_for_fact(
             document, remaining_pending, active,
             _assistant_replies(context.messages),
         )
         next_question_id = None
     elif final_confirmation_pending:
-        reply = _terminal_reply(
+        published_empty_reply_fallback = _terminal_reply(
             document=document,
-            contract=(document.get("branch_contracts") or {}).get(focus) or question_contract,
+            contract=(
+                (document.get("branch_contracts") or {}).get(focus)
+                or question_contract
+            ),
             active_branch_ids=active,
             facts_by_key=grouped,
             missing_fields=[],
             qualification_complete=True,
         )
-    else:
-        reply = graph_proof_checker_v3.compose_published_question(
-            reply=interpretation.reply,
-            next_question_node_id=next_question_id,
-            contract=question_contract,
-        )
-    if operations:
-        summary = _service_request_summary(document, active)
-        if summary and _normalized_phrase(summary) not in _normalized_phrase(reply):
-            reply = "\n\n".join(part for part in (summary, reply) if part)
+    # This path consumes confirmation metadata, not conversational authorship.
+    # Preserve the model's grounded wording byte-for-byte; terminal state,
+    # branch state and the next-question id remain independently auditable.
+    reply = str(interpretation.reply or "") or published_empty_reply_fallback
+    if not reply:
+        reply = CONTEXT_FAILURE_HANDOFF_REPLY
     asked = list(context.cart.get("asked_question_node_ids") or [])
     if next_question_id:
         asked.append(next_question_id)
@@ -5010,7 +5021,10 @@ def _with_structural_proof_audit(
     resolver = context.retrieval_trace.get("service_resolution") or {}
     state = response.cart_state
     active_branch = str(state.get("active_branch_node_id") or "") or None
-    service_fact = (state.get("facts") or {}).get("servico") or {}
+    selection_key = str(
+        ((_service_selection_field(context.graph_contract) or {}).get("key") or "servico")
+    )
+    service_fact = (state.get("facts") or {}).get(selection_key) or {}
     referential_service_values = {
         _normalized_phrase(value)
         for service in context.available_services
@@ -5147,8 +5161,8 @@ def _no_journey_reply(context: ConversationContext, response: AgentResponse) -> 
     candidates = [proved_doubt]
     if response.proof.get("valid"):
         candidates.extend([
-            _statements_only(response.proposal.reply) if response.proposal else None,
-            _statements_only(str(response.reply_text or "")),
+            response.proposal.reply if response.proposal else None,
+            str(response.reply_text or ""),
         ])
     candidates.append(context.retrieval_trace.get("no_journey_fallback_reply"))
     reply = next((str(value).strip() for value in candidates if str(value or "").strip()), "")
@@ -5609,6 +5623,9 @@ def _semantic_service_candidate(
     proposal: ConversationProposal,
 ) -> tuple[dict[str, Any] | None, str | None]:
     resolution = context.retrieval_trace.get("service_resolution") or {}
+    selection_key = str(
+        ((_service_selection_field(context.graph_contract) or {}).get("key") or "servico")
+    )
     if resolution.get("candidate"):
         candidate = dict(resolution["candidate"])
         message = _latest_user_message(context)
@@ -5616,7 +5633,7 @@ def _semantic_service_candidate(
         reserved = [
             other
             for fact in proposal.extracted_facts
-            if fact.field_key != "servico"
+            if fact.field_key != selection_key
             if (other := _fact_span_interval(message, fact.evidence_span)) is not None
         ]
         if interval is None or any(
@@ -5647,7 +5664,7 @@ def _semantic_service_candidate(
     reserved = [
         candidate
         for fact in proposal.extracted_facts
-        if fact.field_key != "servico"
+        if fact.field_key != selection_key
         if (candidate := _fact_span_interval(message, fact.evidence_span)) is not None
     ]
     if interval is None or any(
@@ -5948,12 +5965,9 @@ def _decide(
             "status": proposed_fact.status.value,
             "value": proposed_fact.value,
         }
-    proposal = _normalize_premature_servico_requestion(
-        proposal, contract, projected_contract_facts,
-    )
-    proposal = _normalize_stale_next_question_after_branch_change(
-        proposal, contract, projected_contract_facts,
-    )
+    # The model owns conversational order. Proof may discard invalid
+    # next-question metadata, but runtime never substitutes another graph
+    # question (especially not the first pending field).
     proposal = _preserve_askable_next_question(
         proposal, contract, projected_contract_facts,
     )
@@ -6047,16 +6061,21 @@ def _decide(
             .get("consumed_spans") or []
         ),
     )
-    if service_operations and not service_proof["valid"]:
-        proof["errors"] = [*proof.get("errors", []), *service_proof["errors"]]
-        proof["valid"] = False
-        proof["repair_required"] = False
+    # Branch-operation metadata is an independently discardable component.
+    # The legacy wire name says "service", but anchors also represent products
+    # and audiences. An invalid operation must not erase a grounded model reply
+    # or turn an otherwise valid inbound into silence.
+    applied_service_operations = (
+        list(service_proof.get("operations") or [])
+        if service_proof.get("valid") else []
+    )
+    service_component_errors = list(service_proof.get("errors") or [])
     proof.update({
         "service_resolution": context.retrieval_trace.get("service_resolution") or {},
         "service_operations": service_operations,
         "model_proposed_service_operations": model_proposed_service_operations,
         "model_service_observations": model_service_observations,
-        "applied_service_operations": service_operations,
+        "applied_service_operations": applied_service_operations,
         "service_operation_rejection_reason": (
             "model_operations_replaced_by_backend_resolver"
             if model_proposed_service_operations != service_operations else None
@@ -6064,6 +6083,14 @@ def _decide(
         "service_candidate": service_candidate,
         "service_candidate_rejection_reason": service_candidate_rejection,
         "service_operation_proof": service_proof,
+        "component_errors": [
+            *(proof.get("component_errors") or []),
+            *service_component_errors,
+        ],
+        "errors": [
+            *(proof.get("errors") or []),
+            *service_component_errors,
+        ],
         "consumed_service_spans": (
             (context.retrieval_trace.get("service_resolution") or {})
             .get("consumed_spans") or []
@@ -6089,7 +6116,10 @@ def _decide(
         and proposal.branch_action.value in {"select", "switch", "add"}
         and proposal.branch_anchor_node_id
         != context.retrieval_trace.get("retrieval_branch_node_id")
-        and not [error for error in proof["errors"] if "outside_package" not in error]
+        and not [
+            error for error in proof.get("gating_errors") or []
+            if "outside_package" not in error
+        ]
     ):
         requirement_ids = list(dict.fromkeys([
             proposal.branch_anchor_node_id,
@@ -6101,6 +6131,10 @@ def _decide(
         proof.update({
             "valid": False,
             "errors": [*proof["errors"], "selected_branch_requires_phase_b"],
+            "gating_errors": [
+                *(proof.get("gating_errors") or []),
+                "selected_branch_requires_phase_b",
+            ],
             "repair_required": True,
             "repair_requirements": [
                 {"kind": "node", "id": node_id} for node_id in requirement_ids if node_id
@@ -6144,7 +6178,7 @@ def _decide(
     discovery_only = (
         context.active_branch_node_id is None
         and proposal.branch_action.value == "none"
-        and not service_operations
+        and not applied_service_operations
         and not proof.get("errors")
     )
     # A fact error belonging to a currently active branch OTHER than the one
@@ -6165,7 +6199,10 @@ def _decide(
         and str(entry.get("owner_node_id") or "") in non_focused_active
         for error in entry.get("errors") or []
     }
-    gating_errors = [error for error in proof.get("errors") or [] if error not in deferrable_errors]
+    gating_errors = [
+        error for error in proof.get("gating_errors") or []
+        if error not in deferrable_errors
+    ]
     proof_gates_turn = bool(gating_errors)
     if not proof_gates_turn or discovery_only:
         if discovery_only:
@@ -6178,15 +6215,16 @@ def _decide(
             }
         accepted_facts = list(proof.get("accepted_facts") or [])
         accepted_facts.extend(_service_facts_for_operations(
-            operations=service_operations,
+            operations=applied_service_operations,
             document=document,
             grouped_facts=grouped_facts,
             source_message_id=_source_message_id(context.messages),
         ))
-        if service_candidate and not service_operations:
+        selection_key = branch_selection_field_key(document)
+        if service_candidate and not applied_service_operations:
             previous_service_fact = next(
                 (
-                    fact for fact in grouped_facts.get("servico", [])
+                    fact for fact in grouped_facts.get(selection_key, [])
                     if str(fact.get("owner_node_id") or "")
                     == str(service_candidate["branch_anchor_node_id"])
                     and fact.get("status") == "known"
@@ -6194,7 +6232,7 @@ def _decide(
                 None,
             )
             accepted_facts.append({
-                "field_key": "servico",
+                "field_key": selection_key,
                 "owner_node_id": service_candidate["branch_anchor_node_id"],
                 "status": "needs_confirmation",
                 "value": None,
@@ -6206,7 +6244,7 @@ def _decide(
                 ),
                 "metadata": {
                     "confirmation": {
-                        "kind": "service",
+                        "kind": "branch",
                         "capability": "branch_selector",
                         "candidate": service_candidate.get("slug"),
                         "candidate_title": service_candidate.get("title"),
@@ -6242,7 +6280,7 @@ def _decide(
             # A different candidate starts a fresh clarification ladder. Mark
             # older pending service candidates non-current in the same commit
             # so a later "sim" can never confirm the stale one.
-            for stale in grouped_facts.get("servico", []):
+            for stale in grouped_facts.get(selection_key, []):
                 stale_confirmation = (
                     (stale.get("metadata") or {}).get("confirmation") or {}
                 )
@@ -6317,11 +6355,11 @@ def _decide(
             *([context.active_branch_node_id] if context.active_branch_node_id else []),
             *context.active_branch_node_ids,
         ]))
-        if service_operations:
+        if applied_service_operations:
             active_branch_ids = list(service_proof["next_active_branch_node_ids"])
         committed_branch = (
             (context.retrieval_trace.get("service_resolution") or {}).get("focused_branch_node_id")
-            if service_operations
+            if applied_service_operations
             else context.active_branch_node_id
         )
         if active_branch_ids and committed_branch not in set(active_branch_ids):
@@ -6395,13 +6433,7 @@ def _decide(
         )
         confirmation_pending = bool(qualification_complete and not post_support)
         terminal_intent = "qualification_incomplete" if qualification_incomplete else None
-        reply_seed = str((doubt or {}).get("text") or proposal.reply)
-        if model_proposed_service_operations != service_operations and not doubt:
-            # A rejected branch mutation invalidates the mutation, not the
-            # turn. Keep what the model actually said -- an answer, an
-            # acknowledgement, a useful observation -- and drop only the
-            # interrogative part, whose routing belongs to the graph.
-            reply_seed = _statements_only(reply_seed)
+        reply_seed = str(proposal.reply or "")
         pending_confirmation_fact = next(
             (
                 fact for fact in accepted_facts
@@ -6415,93 +6447,20 @@ def _decide(
             or {}
         )
         if pending_confirmation_fact:
-            confirmation_kind = str(field_confirmation.get("kind") or "")
-            already_said = _assistant_replies(context.messages)
-            if confirmation_kind == "name":
-                confirmation_text = _confirmation_template(
-                    document, "name",
-                    candidate=str(field_confirmation.get("candidate") or ""),
-                    recent_replies=already_said,
-                )
-            else:
-                confirmation_text = _confirmation_template(
-                    document,
-                    _service_candidate_template_key(service_candidate or {}, before_services),
-                    candidate=str(
-                        field_confirmation.get("candidate_title")
-                        or field_confirmation.get("candidate") or ""
-                    ),
-                    recent_replies=already_said,
-                )
-            # A confirmation candidate is the only authoritative outcome for
-            # this turn. Do not leak a model acknowledgement or a validation
-            # error for a different pending field into the confirmation copy.
-            #
-            # The published doubt answer is the exception: a customer who asks
-            # "como funciona o PPF?" names a service and raises a question in
-            # the same breath. Replacing the answer with the confirmation
-            # question leaves that customer with a question instead of an
-            # answer -- and when the same template was already sent, the
-            # duplicate suppression turns it into silence.
-            doubt_text = str((doubt or {}).get("text") or "").strip()
-            lead = [doubt_text]
-            if _confirmation_is_last_resort(contract, field_confirmation):
-                # `last_resort` lets the model's own statements lead too, so a
-                # turn that genuinely answered something never reaches the
-                # customer as a bare confirmation question.
-                lead.append(_statements_only(proposal.reply))
-            reply = " ".join(
-                part for part in (*lead, confirmation_text) if part
-            )
             next_question_id = None
             confirmation_pending = False
             qualification_complete = False
             qualification_incomplete = False
             collection_complete = False
             terminal_intent = None
-        elif terminal_intent or confirmation_pending:
-            natural_summary = ""
-            if confirmation_pending:
-                # Let the model write the qualification summary in its own
-                # words -- the published template is a fallback, not the
-                # only voice. Grounding guard: every collected value must
-                # actually appear in the model's text, or we fall back to
-                # the deterministic template unchanged.
-                collected = _collected_field_facts(
-                    document, active_branch_ids, contract, next_grouped,
-                )
-                candidate = str(proposal.reply or "").strip()
-                if candidate and graph_proof_checker_v3.validate_natural_summary(
-                    candidate, informed_values=[value for _, value in collected],
-                ):
-                    natural_summary = candidate
-            reply = natural_summary or _terminal_reply(
-                document=document,
-                contract=contract,
-                active_branch_ids=active_branch_ids,
-                facts_by_key=next_grouped,
-                missing_fields=terminal_unconfirmed,
-                qualification_complete=qualification_complete,
-            )
-        elif post_support:
-            reply = reply_seed
         else:
-            reply = graph_proof_checker_v3.compose_published_question(
-                reply=reply_seed,
-                next_question_node_id=next_question_id,
-                contract=question_contract,
-            )
-        if service_operations and not pending_confirmation_fact:
-            summary = _service_request_summary(document, active_branch_ids)
-            if summary and _normalized_phrase(summary) not in _normalized_phrase(reply):
-                reply = "\n\n".join(part for part in (summary, reply) if part)
-        greeting_response = str(context.retrieval_trace.get("greeting_response") or "").strip()
-        if greeting_response and not _normalized_phrase(reply).startswith(
-            _normalized_phrase(greeting_response)
-        ):
-            reply = "\n\n".join(part for part in (greeting_response, reply) if part)
-        if unanswered_fact and not next_question_id and not terminal_intent:
-            reply = _statements_only(reply_seed)
+            # Claims and citations have passed the knowledge gate. State and
+            # component metadata may be corrected independently, but the
+            # conversational response is owned by the model.
+            reply = reply_seed
+        # Once proof accepts the knowledge boundary, the model's conversational
+        # text is authoritative. Branch summaries and greeting prefixes stay in
+        # the prompt/RAG; runtime does not append or substitute them here.
         recent_replies = _assistant_replies(context.messages)
         question_text = str(
             ((question_contract.get("questions") or {}).get(next_question_id or "") or {}).get("text")
@@ -6523,47 +6482,28 @@ def _decide(
                 ((context.cart.get("terminal_handoff") or {}).get("intent") or "")
             ) or None,
         )
-        repetition_action = "allowed"
-        if not repetition["passed"]:
-            # Quality gates still observe the semantic failure through proof,
-            # but production commits accepted facts and suppresses only the
-            # unsafe duplicate outbound.
-            terminal_duplicate = "terminal_repetition" in repetition["failures"]
-            # A repeated question is not a reason to say nothing at all. When
-            # the turn carried its own content -- a doubt answered, a service
-            # acknowledged -- withhold the duplicated ask and still deliver
-            # that content. Silence is reserved for a turn with nothing new,
-            # and a repeated terminal handoff genuinely has nothing new.
-            remainder = "" if terminal_duplicate else _statements_only(reply)
-            if remainder and any(
-                conversation_repetition.is_semantic_repetition(previous, remainder)
-                for previous in recent_replies
-            ):
-                remainder = ""
-            if terminal_duplicate:
-                reply = remainder
-                repetition_action = "suppressed_duplicate_terminal"
-            elif (laddered := _repetition_ladder(
-                reply=reply, recent_replies=recent_replies,
-                contract=question_contract, question_node_id=next_question_id,
-                prefix=remainder,
-            ))[0]:
-                # Dropping the duplicated ask used to drop the question with
-                # it, so a field the customer never answered was silently
-                # abandoned whenever the turn happened to carry other
-                # content. The ladder keeps that content as the prefix and
-                # re-asks in a wording this conversation has not heard.
-                reply, repetition_action = laddered
-            elif remainder:
-                reply = remainder
-                repetition_action = "suppressed_duplicate_question"
-            else:
-                # A repeated non-terminal question is still not a reason to
-                # say nothing: keep the original (un-suppressed) reply
-                # rather than go silent. Full silence stays reserved for a
-                # genuinely repeated terminal handoff, which has nothing
-                # new to say by definition.
-                repetition_action = "allowed_never_silent"
+        # Exactly-once handles duplicate processing. Semantic repetition is a
+        # quality observation for the next prompt/evaluator, never permission
+        # to rewrite or suppress a valid response.
+        repetition_action = (
+            "allowed" if repetition["passed"] else "observed_only"
+        )
+        empty_reply_handoff = not str(reply or "").strip()
+        if empty_reply_handoff:
+            persona_policy = (
+                ((_persona_node(document) or {}).get("data") or {})
+                .get("conversation_policy") or {}
+            )
+            reply = str(
+                persona_policy.get("context_failure_handoff_reply") or ""
+            ).strip() or CONTEXT_FAILURE_HANDOFF_REPLY
+            terminal_intent = "empty_model_reply"
+            confirmation_pending = False
+            post_support = False
+            qualification_complete = False
+            qualification_incomplete = False
+            collection_complete = False
+            repetition_action = "empty_reply_handoff"
 
         projection_contract = (
             (document.get("branch_contracts") or {}).get(committed_branch)
@@ -6649,7 +6589,12 @@ def _decide(
             ),
             "repetition_audit": repetition,
             "repetition_action": repetition_action,
-            "fallback_used": bool(proof.get("fallback_used")),
+            "fallback_used": bool(proof.get("fallback_used")) or empty_reply_handoff,
+            "context_failure_handoff": empty_reply_handoff,
+            "model_proposal_errors": [
+                *(proof.get("model_proposal_errors") or []),
+                *(["empty_model_reply"] if empty_reply_handoff else []),
+            ],
             **(doubt or {}),
         }
         evidence_node_ids = list(dict.fromkeys([
@@ -6660,7 +6605,12 @@ def _decide(
             ConversationDecision(classifier="graph_proof_checker_v3",
                                  intent=resolved_intent,
                                  route=route, confidence=1, lead_stage="qualificado" if qualification_complete else "engajado",
-                                 handoff_reason="graph_terminal_qualification" if terminal_intent else None,
+                                 handoff_reason=(
+                                     "graph_context_empty_reply"
+                                     if empty_reply_handoff
+                                     else "graph_terminal_qualification"
+                                     if terminal_intent else None
+                                 ),
                                  evidence_node_ids=evidence_node_ids),
             AgentResponse(reply_text=reply or None, role=route, evidence_node_ids=evidence_node_ids,
                           cart_state=state,
@@ -6701,6 +6651,17 @@ def _decide(
         *fallback_missing,
         *_unknown_fields(contract.get("fields") or [], fallback_grouped),
     ])
+    proposal_errors = [str(error) for error in proof.get("errors") or []]
+    global_proof_errors = [
+        str(error) for error in proof.get("gating_errors") or []
+    ]
+    context_failure_handoff = bool(global_proof_errors)
+    if context_failure_handoff:
+        # No branch/fact/question diagnostic reaches this path anymore; those
+        # are reconciled component-by-component above. What remains is a global
+        # knowledge/isolation failure. End observably with a human handoff and
+        # never commit a silent turn or an unproved commercial reply.
+        fallback_id = None
     fallback_complete = not fallback_unconfirmed
     fallback_incomplete = bool(fallback_unconfirmed and not fallback_askable)
 
@@ -6722,9 +6683,21 @@ def _decide(
     )
     fallback_confirmation_pending = fallback_complete and not fallback_post_support
     fallback_terminal_intent = (
-        "qualification_incomplete" if fallback_incomplete else None
+        "context_proof_failed" if context_failure_handoff
+        else "qualification_incomplete" if fallback_incomplete
+        else None
     )
-    if fallback_terminal_intent or fallback_confirmation_pending:
+    if context_failure_handoff:
+        persona_policy = (
+            ((_persona_node(document) or {}).get("data") or {})
+            .get("conversation_policy") or {}
+        )
+        fallback = str(
+            persona_policy.get("context_failure_handoff_reply") or ""
+        ).strip() or CONTEXT_FAILURE_HANDOFF_REPLY
+        fallback_confirmation_pending = False
+        fallback_post_support = False
+    elif fallback_terminal_intent or fallback_confirmation_pending:
         fallback = _terminal_reply(
             document=document,
             contract=contract,
@@ -6737,9 +6710,10 @@ def _decide(
     elif fallback_post_support:
         fallback = ""
     else:
-        fallback = graph_proof_checker_v3.compose_published_question(
-            reply="", next_question_node_id=fallback_id, contract=contract
-        )
+        fallback = str(
+            ((contract.get("questions") or {}).get(fallback_id or "") or {})
+            .get("text") or ""
+        ).strip()
     # A rejected proposal must not erase the deterministic answer to the
     # customer's interruption.  Only the qualification question is subject
     # to duplicate suppression below.
@@ -6755,6 +6729,7 @@ def _decide(
         "mode": "published_fallback",
         "repair_required": False,
         "fallback_used": True,
+        "context_failure_handoff": context_failure_handoff,
         "missing_fields": [field.get("key") for field in fallback_unconfirmed],
         "aggregate_missing_fields": fallback_unconfirmed,
         "qualification_complete": fallback_complete,
@@ -6770,14 +6745,7 @@ def _decide(
     fallback_facts = dict(context.cart.get("facts") or {})
     for fact in proof.get("accepted_facts") or []:
         fallback_facts[str(fact.get("field_key") or "")] = fact
-    proposal_errors = [str(error) for error in proof.get("errors") or []]
-    branch_safe = not any(
-        error.startswith((
-            "branch_", "keep_", "add_", "publication_", "fact_", "field_owner_",
-        ))
-        or error in {"branch_not_published", "branch_path_checksum_mismatch"}
-        for error in proposal_errors
-    )
+    branch_safe = not global_proof_errors
     fallback_branch = context.active_branch_node_id
     if branch_safe and proposal.branch_action.value in {"select", "switch", "keep", "add"}:
         fallback_branch = proposal.branch_anchor_node_id
@@ -6828,32 +6796,9 @@ def _decide(
         ) or None,
     )
     fallback_proof["repetition_audit"] = fallback_repetition
-    if not fallback_repetition["passed"]:
-        fallback_terminal_duplicate = "terminal_repetition" in fallback_repetition["failures"]
-        remainder = "" if fallback_terminal_duplicate else _statements_only(fallback)
-        if remainder and any(
-            conversation_repetition.is_semantic_repetition(previous, remainder)
-            for previous in [
-                str(row.get("content") or row.get("texto") or "")
-                for row in context.messages
-                if str(row.get("role") or "") == "assistant"
-                or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
-            ][-4:]
-        ):
-            remainder = ""
-        if fallback_terminal_duplicate:
-            fallback = remainder
-            fallback_proof["repetition_action"] = "suppressed_duplicate_terminal"
-        elif remainder:
-            fallback = remainder
-            fallback_proof["repetition_action"] = "suppressed_duplicate_question"
-        else:
-            # Same never-go-silent floor as the other repetition gates in
-            # this module: a repeated non-terminal question is not a
-            # reason to withhold the reply entirely.
-            fallback_proof["repetition_action"] = "allowed_never_silent"
-    else:
-        fallback_proof["repetition_action"] = "allowed"
+    fallback_proof["repetition_action"] = (
+        "allowed" if fallback_repetition["passed"] else "observed_only"
+    )
     fallback_route = (
         ConversationRoute.HUMAN if fallback_terminal_intent else ConversationRoute.SDR
     )
@@ -6868,7 +6813,12 @@ def _decide(
                              ),
                              route=fallback_route, confidence=0,
                              lead_stage=str(context.cart.get("_lead_stage") or "novo"),
-                             handoff_reason="graph_terminal_qualification" if fallback_terminal_intent else None,
+                             handoff_reason=(
+                                 "graph_context_proof_failed"
+                                 if context_failure_handoff
+                                 else "graph_terminal_qualification"
+                                 if fallback_terminal_intent else None
+                             ),
                              evidence_node_ids=[fallback_id] if fallback_id else []),
         AgentResponse(reply_text=fallback or None, role=fallback_route,
                       evidence_node_ids=[fallback_id] if fallback_id else [], cart_state=fallback_state,

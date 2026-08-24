@@ -333,13 +333,15 @@ def test_check_without_additional_fields_still_rejects_a_foreign_branch_fact():
         active_branch_node_id="branch:a", active_branch_node_ids=["branch:a", "branch:b"],
         branch_selection_allowed=False, branch_switch_allowed=True,
     )
-    assert proof["valid"] is False
+    assert proof["valid"] is True
     # Matches pre-existing behavior: contract_a already declares "servico"
     # (for branch:a), so the key isn't unknown -- it's an owner mismatch,
     # not undeclared. additional_fields only adds NEW (key, owner) pairs;
     # it doesn't change this outcome for a key the focused contract already
     # declares under a different owner.
     assert "field_owner_mismatch:servico" in proof["errors"]
+    assert "field_owner_mismatch:servico" in proof["component_errors"]
+    assert proof["accepted_facts"] == []
 
 
 def test_check_field_owner_mismatch_still_distinguished_from_undeclared_field():
@@ -369,9 +371,11 @@ def test_check_field_owner_mismatch_still_distinguished_from_undeclared_field():
         branch_selection_allowed=False, branch_switch_allowed=True,
         additional_fields=[branch_b_field],
     )
-    assert proof["valid"] is False
+    assert proof["valid"] is True
     assert "field_owner_mismatch:servico" in proof["errors"]
+    assert "field_owner_mismatch:servico" in proof["component_errors"]
     assert "undeclared_field:servico" not in proof["errors"]
+    assert proof["accepted_facts"] == []
 
 
 def test_field_validation_entries_are_attributed_to_the_owning_branch():
@@ -528,8 +532,10 @@ def test_unproved_question_text_is_not_authorized_when_selection_is_invalid():
 
     proof = graph_proof_checker_v3.check(**kwargs)
 
-    assert proof["valid"] is False
+    assert proof["valid"] is True
     assert "next_question_not_askable" in proof["errors"]
+    assert "next_question_not_askable" in proof["component_errors"]
+    assert proof["next_question_node_id"] is None
 
 
 def test_add_action_rejects_re_adding_an_already_active_branch():
@@ -618,7 +624,7 @@ def test_pending_name_confirmation_never_resolves_a_required_field():
     )
 
 
-def test_service_operation_requires_authorized_consumed_evidence():
+def test_branch_operation_does_not_depend_on_service_resolver_consumption():
     document = {
         "branch_anchors": ["branch:a"],
         "coordinates": {"branch:a": {"path_checksum": "checksum:a"}},
@@ -628,11 +634,16 @@ def test_service_operation_requires_authorized_consumed_evidence():
         "branch_path_checksum": "checksum:a", "evidence_span": "Vitrifica\u00e7\u00e3o",
         "evidence_type": "exact_catalog", "resolution_method": "exact_catalog",
     }
-    rejected = graph_proof_checker_v3.check_service_operations(
+    accepted_without_resolver = graph_proof_checker_v3.check_service_operations(
         document=document, message="Quero Vitrifica\u00e7\u00e3o", operations=[operation],
         active_branch_node_ids=[], consumed_service_spans=[],
     )
-    assert "service_evidence_not_consumed:branch:a" in rejected["errors"]
+    assert accepted_without_resolver["valid"]
+    assert accepted_without_resolver["errors"] == []
+    assert (
+        "branch_evidence_not_consumed:branch:a"
+        in accepted_without_resolver["observations"]
+    )
 
     accepted = graph_proof_checker_v3.check_service_operations(
         document=document, message="Quero Vitrifica\u00e7\u00e3o", operations=[operation],
@@ -643,6 +654,22 @@ def test_service_operation_requires_authorized_consumed_evidence():
     )
     assert accepted["valid"], accepted["errors"]
     assert accepted["next_active_branch_node_ids"] == ["branch:a"]
+
+
+def test_multiple_questions_are_quality_observation_not_a_global_rejection():
+    kwargs = _base_check_kwargs()
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "next_question_node_id": None,
+        "reply": "Posso explicar. Você quer comparar opções? É para uso próprio?",
+    }
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert proof["gating_errors"] == []
+    assert proof["question_count"] == 2
+    assert proof["observations"] == ["multiple_questions_in_reply"]
 
 
 def test_explicit_change_evidence_can_only_drop_an_active_branch():

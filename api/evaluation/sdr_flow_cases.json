@@ -112,8 +112,8 @@
       "id": "acknowledgement_only_is_not_a_turn",
       "message": "hmmm ta",
       "model_reply": "Entendi.",
-      "expected_reply_contains_question": true,
-      "note": "Um turno de coleta que so reconhece e um silencio disfarcado: a pergunta publicada volta."
+      "expected_reply_preserved": true,
+      "note": "Avaliacao de qualidade sinaliza falta de avanço offline; o runtime nao anexa pergunta nem reescreve a resposta."
     }
   ]
 }

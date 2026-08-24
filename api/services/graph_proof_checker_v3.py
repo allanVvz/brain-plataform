@@ -1,8 +1,8 @@
 """Generic proof checker for structured GraphRAG model proposals."""
 from __future__ import annotations
 
-import difflib
 import re
+import difflib
 import unicodedata
 from copy import deepcopy
 from typing import Any
@@ -403,10 +403,18 @@ def check_service_operations(
     active_branch_node_ids: list[str],
     consumed_service_spans: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Prove a first-class service-set transition independently of fields."""
+    """Prove a graph-branch transition independently of conversational copy.
+
+    ``service_operations`` is the legacy wire name.  Branch anchors can model
+    products, audiences or services, so proof must never require a
+    service-specific resolver to have consumed the same span.  Literal
+    evidence, publication membership and the materialized checksum remain the
+    authority; resolver-consumption is diagnostic only.
+    """
     anchors = set(document.get("branch_anchors") or [])
     after = list(dict.fromkeys(str(value) for value in active_branch_node_ids if value))
     errors: list[str] = []
+    observations: list[str] = []
     applied: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for operation in operations:
@@ -449,7 +457,7 @@ def check_service_operations(
             None,
         )
         if registered is None:
-            errors.append(f"service_evidence_not_consumed:{anchor}")
+            observations.append(f"branch_evidence_not_consumed:{anchor}")
         if action == "add":
             if anchor in after:
                 errors.append(f"service_add_duplicate:{anchor}")
@@ -466,6 +474,7 @@ def check_service_operations(
     return {
         "valid": not errors,
         "errors": errors,
+        "observations": observations,
         "operations": applied,
         "previous_active_branch_node_ids": list(active_branch_node_ids),
         "next_active_branch_node_ids": after,
@@ -745,9 +754,7 @@ def check(
         # authorize conversational content outside the published contract.
         del errors[question_error_count:]
         question_id = None
-    if question_count > 1:
-        errors.append("multiple_questions_in_reply")
-    elif question_id and question_count == 0:
+    if question_id and question_count == 0:
         # The answer can still be valid when the model omitted the optional
         # follow-up. Discard only that component; never append canonical copy
         # or reject the supported explanation with it.
@@ -831,10 +838,35 @@ def check(
     if _FINAL_CONFIRMATION.search(str(proposal.get("reply") or "")) and missing:
         errors.append("premature_final_confirmation")
 
+    # Branch navigation, fact extraction, next-question metadata and a model's
+    # handoff flag are independently discardable components.  They may guide
+    # the next turn, but they must not erase a grounded reply.  Publication,
+    # citation, claim and premature-commercial-confirmation failures remain
+    # global proof errors because those are the actual knowledge/isolation
+    # boundary.
+    component_prefixes = (
+        "branch_", "none_with_branch_anchor", "keep_", "add_",
+        "invalid_branch_action", "field_owner_", "undeclared_field:",
+        "duplicate_extracted_fact:", "fact_", "non_known_fact_",
+        "next_question_", "question_after_",
+    )
+    component_errors = [
+        error for error in errors
+        if error.startswith(component_prefixes) or error == "handoff_not_authorized"
+    ]
+    gating_errors = [error for error in errors if error not in component_errors]
+    if any(error.startswith(("next_question_", "question_after_")) for error in component_errors):
+        question_id = None
+    observations = (
+        ["multiple_questions_in_reply"] if question_count > 1 else []
+    )
     repair = list({(item["kind"], item["id"]): item for item in repair if item.get("id")}.values())
-    repair_only = bool(errors) and all("outside_package" in error for error in errors)
+    repair_only = bool(gating_errors) and all(
+        "outside_package" in error for error in gating_errors
+    )
     return {
-        "valid": not errors, "errors": errors,
+        "valid": not gating_errors, "errors": errors,
+        "gating_errors": gating_errors,
         "repair_required": repair_only and bool(repair),
         "repair_requirements": repair, "ledger": next_ledger,
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
@@ -846,6 +878,9 @@ def check(
         "handoff_required": handoff_required,
         "required_field_count": required_field_count(contract, facts),
         "field_validation": field_validation,
+        "component_errors": component_errors,
+        "observations": observations,
+        "question_count": question_count,
     }
 
 
@@ -856,11 +891,7 @@ def _fold(value: str) -> str:
 
 
 def _question_already_asked(question: str, text: str) -> bool:
-    """Detect a prior natural rendering for memory/repetition accounting.
-
-    This never selects or appends canonical copy. It only prevents the ledger
-    from treating a personalized rendering of the same graph question as new.
-    """
+    """Compare natural question wording for audit/memory accounting only."""
     if question.casefold() in text.casefold():
         return True
     q_folded = _fold(question)
@@ -890,13 +921,7 @@ def _question_already_asked(question: str, text: str) -> bool:
 def compose_published_question(
     *, reply: str, next_question_node_id: str | None, contract: dict[str, Any]
 ) -> str:
-    """Compatibility facade that never rewrites model-authored language.
-
-    Membership, pending state and the one-question limit are proof concerns.
-    Existing callers may keep using this helper while structural paths are
-    progressively extracted, but canonical graph copy is never appended or
-    substituted here.
-    """
+    """Deprecated identity facade; proof never appends or rewrites copy."""
     return str(reply or "").strip()
 
 

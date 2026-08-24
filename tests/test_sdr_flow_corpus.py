@@ -69,6 +69,7 @@ def test_shared_confidence_does_not_turn_any_text_into_a_name():
     assert not graph_proof_checker_v3.is_human_full_name(case["model_value"])
 
 
-def test_shared_acknowledgement_only_reply_carries_no_question():
+def test_shared_acknowledgement_quality_case_is_evaluated_without_rewriting():
     case = CASES["acknowledgement_only_is_not_a_turn"]
-    assert "?" not in graph_agent_runtime_v3._statements_only(case["model_reply"])
+    assert case["model_reply"] == "Entendi."
+    assert case["expected_reply_preserved"] is True

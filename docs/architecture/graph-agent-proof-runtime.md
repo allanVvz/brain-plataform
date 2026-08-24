@@ -1,5 +1,18 @@
 # Runtime de conversa orientado pelo grafo
 
+## Divida de dominio e resultado terminal
+
+Tock Fatal vende produtos, nao servicos. Os identificadores `service_*`,
+`service_slug` e equivalentes permanecem somente como compatibilidade legada.
+A decomposicao futura deve publicar `offering` e `branch` no GraphBundle, sem
+usar nomes legados para redefinir o dominio comercial e sem reconstruir
+Product/Offer/Copy a cada inbound.
+
+Todo inbound processado termina em uma resposta comprovada ou em handoff
+observavel. Se o contexto inteiro nao for confiavel, o runtime registra a causa
+nao secreta e aciona handoff ou pausa observavel. Silencio nao e resultado
+valido de processamento.
+
 ## Limite de autoridade
 
 O GraphBundle publicado e a autoridade para conhecimento, fatos comerciais e
@@ -94,6 +107,12 @@ persona/agente dos nodes citados e evidência publicada para fatos e limites
 comerciais. Ele preserva CAS e o limite de um inbound canônico -> uma decisão ->
 um commit -> no máximo um outbound; não seleciona FAQ, não impõe a primeira
 pergunta pendente e não reescreve uma resposta válida do modelo.
+
+Erro de branch, fato ou pergunta nao autoriza proof a descartar ou reescrever a
+reply do modelo. Proof valida evidencia e isolamento, registra o diagnostico e
+orienta o proximo passo seguro. Quando nao houver contexto confiavel para uma
+resposta comprovada, o proximo passo e handoff ou pausa observavel, nunca um
+turno silencioso.
 
 Uma citação válida que ficou fora do pacote dispara uma expansão do mesmo
 galho e uma segunda chamada ao modelo. Se continuar sem prova, o runtime pede

@@ -1334,9 +1334,7 @@ def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypat
     assert second_decision.route.value == "HUMAN"
     assert second_response.handoff_required is True
     assert second_response.proof["next_question_node_id"] is None
-    assert second_response.reply_text == (
-        "Known: goal: receive support. Not confirmed: name."
-    )
+    assert second_response.reply_text == second_proposal["reply"]
 
     terminal_context = second_context.model_copy(update={
         "messages": [
@@ -1355,8 +1353,8 @@ def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypat
         }},
     )
     assert duplicate_decision.intent == "qualification_incomplete"
-    assert duplicate_response.reply_text is None
-    assert duplicate_response.proof["repetition_action"] == "suppressed_duplicate_terminal"
+    assert duplicate_response.reply_text == "The team will take it from here."
+    assert duplicate_response.proof["repetition_action"] == "observed_only"
 
 
 def test_explicit_unknown_marks_field_unknown_immediately():
@@ -3042,6 +3040,29 @@ def test_explicit_service_switch_drops_focus_before_adding_new_service():
     assert proof["next_active_branch_node_ids"] == ["branch:b"]
 
 
+def test_product_audience_branch_uses_graph_selector_not_legacy_servico():
+    document = {
+        "common_contract": {"fields": [{
+            "key": "purchase_profile", "branch_selection_field": True,
+        }]},
+        "node_by_id": {
+            "audience:retail": {"title": "Uso proprio", "slug": "retail"},
+        },
+    }
+    facts = graph_agent_runtime_v3._service_facts_for_operations(
+        operations=[{
+            "action": "add", "branch_anchor_node_id": "audience:retail",
+            "branch_path_checksum": "checksum:retail",
+            "evidence_span": "uso proprio", "evidence_type": "exact_catalog",
+        }],
+        document=document, grouped_facts={}, source_message_id="msg:retail",
+    )
+
+    assert facts[0]["field_key"] == "purchase_profile"
+    assert facts[0]["value"] == "retail"
+    assert all(fact["field_key"] != "servico" for fact in facts)
+
+
 def test_removing_one_service_preserves_the_other_two():
     document = {
         "branch_anchors": ["branch:a", "branch:b", "branch:c"],
@@ -4091,7 +4112,11 @@ def test_decide_defers_non_focused_branch_fact_error_but_still_answers_naturally
     decision, response = graph_agent_runtime_v3.decide(
         context, model_observation={"proposal": proposal},
     )
-    assert response.proof.get("valid") is False
+    assert response.proof.get("valid") is True
+    assert response.proof.get("gating_errors") == []
+    assert "fact_evidence_not_literal:quantidade" in response.proof.get(
+        "component_errors", []
+    )
     assert response.proof.get("mode") != "published_fallback"
     accepted = {
         (fact["field_key"], fact["owner_node_id"])
@@ -4329,7 +4354,13 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
     }
 
     _decision, response = graph_agent_runtime_v3.decide(
-        context, model_observation={"proposal": model_proposal},
+        context, model_observation={"proposal": {
+            **model_proposal,
+            "reply": (
+                "Agora temos duas opcoes. Quer comparar os detalhes? "
+                "Qual delas chamou mais atencao?"
+            ),
+        }},
     )
 
     assert response.proof["valid"], response.proof["errors"]
@@ -4341,29 +4372,20 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
         "aurora-product-polish-localized",
     }
     assert "objective" not in response.cart_state["facts_by_key"]
-    assert response.proof["next_question_node_id"] is None
-    assert response.proof["question_component_discarded"] is True
-    assert response.reply_text == model_proposal["reply"]
+    assert response.proof["next_question_node_id"] == "q:objective"
+    assert response.proof["question_component_discarded"] is False
+    assert response.reply_text == (
+        "Agora temos duas opcoes. Quer comparar os detalhes? "
+        "Qual delas chamou mais atencao?"
+    )
+    assert response.proof["observations"] == ["multiple_questions_in_reply"]
     assert response.proof["service_operations"] == []
     assert response.proof["service_candidate"] is None
     assert response.proof["service_candidate_rejection_reason"] == "no_service_candidate"
 
 
-def test_decide_fallback_uses_the_published_closing_text_instead_of_silence(monkeypatch):
-    """Regression test for the silent-closing-turn bug found live 2026-08-09
-    (docs/reports/WA_VALIDATOR_E2E_REPORT_2026-08-09.md, item C).
-
-    When a proposal is rejected only over its own completion/handoff signal
-    (here: question_after_completion, because the model still proposed a
-    next_question_node_id even though nothing is missing), the fallback
-    path had no field left to fall back to (fallback_id=None) and
-    compose_published_question(reply="", next_question_node_id=None, ...)
-    returned an empty string. conversation_runtime.commit() only ever sends
-    a non-empty reply_text, so the customer's message that completed
-    qualification got silently no response at all. The branch's own
-    published handoff-rule text (qualification_complete condition) must be
-    used instead of empty in exactly this situation.
-    """
+def test_completion_component_error_preserves_nonempty_model_reply(monkeypatch):
+    """A stale completion component is dropped without rewriting the reply."""
     root = node(1, "persona:generic", parent_type="persona", data={
         "conversation_policy": {
             "qualification": {
@@ -4429,9 +4451,7 @@ def test_decide_fallback_uses_the_published_closing_text_instead_of_silence(monk
     assert decision.intent == "awaiting_confirmation"
     assert decision.route.value == "SDR"
     assert response.handoff_required is False
-    # No field_labels entry for "metragem" in this fixture -- the fallback
-    # humanizes the raw key instead of leaking snake_case with underscores.
-    assert response.reply_text == "Resumo: Metragem: 20.\n\nOs dados estão corretos?"
+    assert response.reply_text == stale_proposal["reply"]
 
 
 def test_keep_without_an_active_branch_cannot_silently_establish_one():

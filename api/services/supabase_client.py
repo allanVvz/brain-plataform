@@ -4063,6 +4063,94 @@ def count_knowledge_rag_chunks_by_entry_ids(entry_ids: list[str]) -> dict[str, i
     return counts
 
 
+def _rag_row_matches_agent(row: dict, agent_slug: str | None) -> bool:
+    """Reject only rows explicitly scoped to a different agent.
+
+    Older publications are persona-wide and carry no agent marker.  Those rows
+    remain visible to the persona's current agent, while any explicit agent
+    scope must match the caller.
+    """
+    expected = str(agent_slug or "").strip().lower()
+    if not expected:
+        return True
+    metadata: dict[str, Any] = {}
+    entry = row.get("entry")
+    if isinstance(entry, dict) and isinstance(entry.get("metadata"), dict):
+        metadata.update(entry["metadata"])
+    if isinstance(row.get("metadata"), dict):
+        metadata.update(row["metadata"])
+    explicit: list[str] = []
+    for key in ("agent_slug", "agent", "agent_slugs", "visible_to_agents"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            explicit.append(value)
+        elif isinstance(value, (list, tuple, set)):
+            explicit.extend(str(item) for item in value if str(item).strip())
+    if not explicit:
+        return True
+    return expected in {value.strip().lower() for value in explicit}
+
+
+def _rag_terms(value: str) -> set[str]:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    normalized = "".join(
+        ch for ch in normalized if not unicodedata.combining(ch)
+    ).lower()
+    return {
+        part for part in re.findall(r"[a-z0-9]+", normalized)
+        if len(part) > 1
+    }
+
+
+def _accent_insensitive_rag_candidates(
+    rows: list[dict], query: str, *, limit: int,
+) -> list[dict]:
+    """Rank published chunks lexically without treating accents as identity.
+
+    PostgreSQL's current ``simple`` text-search configuration treats
+    ``opcoes`` and ``opções`` as different lexemes.  This bounded adapter
+    fallback keeps retrieval useful for informal WhatsApp spelling while still
+    returning RAG chunks (never a canonical response chosen by the runtime).
+    """
+    terms = _rag_terms(query)
+    if not terms:
+        return []
+    normalized_query = " ".join(sorted(terms))
+    ranked: list[tuple[float, str, dict]] = []
+    for row in rows:
+        text_terms = _rag_terms(
+            " ".join(
+                [
+                    str(row.get("chunk_text") or ""),
+                    str(row.get("chunk_summary") or ""),
+                    json.dumps(row.get("metadata") or {}, ensure_ascii=False),
+                ]
+            )
+        )
+        overlap = len(terms & text_terms)
+        if not overlap:
+            continue
+        coverage = overlap / max(1, len(terms))
+        # Coverage is intentionally stronger than the structural tie score so
+        # an exact catalog/group chunk survives the later diversity reranker.
+        score = 1.0 + coverage
+        candidate = {
+            **row,
+            "chunk_id": row.get("chunk_id") or row.get("id"),
+            "source_node_id": (
+                row.get("source_node_id") or row.get("source_graph_node_id")
+            ),
+            "hybrid_score": max(float(row.get("hybrid_score") or 0), score),
+            "adapter_lexical_score": coverage,
+            "adapter_normalized_query": normalized_query,
+        }
+        ranked.append(
+            (score, str(candidate.get("chunk_id") or ""), candidate)
+        )
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in ranked[:max(1, int(limit))]]
+
+
 def search_active_rag_chunks(
     *,
     persona_id: str,
@@ -4073,6 +4161,7 @@ def search_active_rag_chunks(
     active_path_node_ids: list[str] | None = None,
     unresolved_fields: list[str] | None = None,
     graph_version: int | None = None,
+    agent_slug: str | None = None,
 ) -> list[dict]:
     """Return persona-scoped Golden Dataset chunks before any legacy fallback.
 
@@ -4089,24 +4178,32 @@ def search_active_rag_chunks(
         .in_("status", ["active", "approved", "validated", "embedded"])
         .limit(2000)
     )
-    entry_by_id = {str(row.get("id")): row for row in entries if row.get("id")}
+    entry_by_id = {
+        str(row.get("id")): row
+        for row in entries
+        if row.get("id") and _rag_row_matches_agent(row, agent_slug)
+    }
     if not entry_by_id:
         return []
-    chunks = _q(
-        client.table("knowledge_rag_chunks")
-        .select("id,rag_entry_id,persona_id,chunk_index,chunk_text,chunk_summary,metadata")
-        .eq("persona_id", persona_id)
-        .in_("rag_entry_id", list(entry_by_id))
-        .limit(5000)
-    )
+    # PostgREST serializes ``in_`` values into the URL.  A single request with
+    # thousands of entry UUIDs exceeded common proxy URI limits (HTTP 414).
+    # Keep the server-side persona filter and fetch bounded ID batches; ranking
+    # still happens before anything is added to the model prompt.
+    chunks: list[dict] = []
+    entry_ids = list(entry_by_id)
+    for offset in range(0, len(entry_ids), 75):
+        chunks.extend(
+            _q(
+                client.table("knowledge_rag_chunks")
+                .select("id,rag_entry_id,persona_id,chunk_index,chunk_text,chunk_summary,metadata")
+                .eq("persona_id", persona_id)
+                .in_("rag_entry_id", entry_ids[offset:offset + 75])
+                .limit(5000)
+            )
+        )
     # WhatsApp questions commonly contain accents, punctuation and hyphenated
     # names (for example "Coca-Cola" / "preço").  Normalize both sides so a
     # lexical RAG fallback remains useful before embeddings are available.
-    def _rag_terms(value: str) -> set[str]:
-        normalized = unicodedata.normalize("NFKD", value or "")
-        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
-        return {part for part in re.findall(r"[a-z0-9]+", normalized) if len(part) > 1}
-
     terms = _rag_terms(query)
     allowed = set(allowed_node_ids or [])
     active_path = set(active_path_node_ids or [])
@@ -4115,6 +4212,8 @@ def search_active_rag_chunks(
     for chunk in chunks:
         entry = entry_by_id.get(str(chunk.get("rag_entry_id")))
         if not entry:
+            continue
+        if not _rag_row_matches_agent({**chunk, "entry": entry}, agent_slug):
             continue
         metadata = {
             **(entry.get("metadata") or {}),
@@ -4647,8 +4746,10 @@ def search_graph_rag_v3(
     active_path_node_ids: list[str] | None = None,
     missing_fields: list[str] | None = None,
     limit: int = 24,
+    agent_slug: str | None = None,
 ) -> list[dict]:
-    result = get_client().rpc(
+    client = get_client()
+    result = client.rpc(
         "graph_hybrid_search_v3",
         {
             "p_persona_id": persona_id,
@@ -4661,7 +4762,65 @@ def search_graph_rag_v3(
             "p_limit": max(1, min(int(limit), 200)),
         },
     ).execute()
-    return result.data or []
+    rows = [
+        row for row in (result.data or [])
+        if _rag_row_matches_agent(row, agent_slug)
+    ]
+    query_terms = _rag_terms(query)
+    best_overlap = max(
+        (
+            len(
+                query_terms
+                & _rag_terms(
+                    " ".join(
+                        [
+                            str(row.get("chunk_text") or ""),
+                            str(row.get("chunk_summary") or ""),
+                        ]
+                    )
+                )
+            )
+            for row in rows
+        ),
+        default=0,
+    )
+    required_overlap = max(1, int(len(query_terms) * 0.67 + 0.999))
+    if query_terms and best_overlap < required_overlap:
+        published_rows = _q(
+            client.table("knowledge_rag_chunks")
+            .select(
+                "id,rag_entry_id,persona_id,chunk_text,chunk_summary,metadata,"
+                "source_graph_node_id,branch_anchor_node_id,chunk_kind,projection_status"
+            )
+            .eq("persona_id", persona_id)
+            .eq("publication_id", publication_id)
+            .eq("branch_anchor_node_id", branch_node_id)
+            .eq("chunk_kind", "faq")
+            .in_("projection_status", ["ready", "published"])
+            .limit(2000)
+        )
+        supplemental = _accent_insensitive_rag_candidates(
+            [
+                row for row in published_rows
+                if _rag_row_matches_agent(row, agent_slug)
+            ],
+            query,
+            limit=min(max(4, int(limit)), 24),
+        )
+        merged = {
+            str(row.get("chunk_id") or row.get("id")): row
+            for row in [*rows, *supplemental]
+            if row.get("chunk_id") or row.get("id")
+        }
+        rows = sorted(
+            merged.values(),
+            key=lambda row: (
+                float(row.get("hybrid_score") or 0),
+                str(row.get("chunk_id") or row.get("id") or ""),
+            ),
+            reverse=True,
+        )[:max(1, min(int(limit), 200))]
+    return rows
 
 
 def search_graph_faq_v3(

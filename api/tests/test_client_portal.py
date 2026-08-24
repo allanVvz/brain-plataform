@@ -194,6 +194,7 @@ def test_evolution_normalizes_lid_alt_and_text_without_guessing_phone():
         "from_me": False,
         "status": None,
         "text": "Oi",
+        "media": None,
         "raw": {
             "key": {
                 "id": "message-1",

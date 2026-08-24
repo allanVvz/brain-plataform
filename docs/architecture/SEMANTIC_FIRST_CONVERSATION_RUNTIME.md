@@ -24,6 +24,19 @@ persona/agente intacto. Aurora continua em contrato legado isolado; Tock Fatal
 usa GraphBundle. A migracao da divida Aurora para GraphBundle e explicita e
 auditavel, nunca uma mistura de contratos no runtime.
 
+## Divida de nomenclatura comercial
+
+Tock Fatal vende produtos, nao servicos. Os nomes `service_*`, `service_slug`
+e afins que ainda aparecem no runtime/contratos sao apenas compatibilidade
+legada; eles nao devem redefinir o modelo comercial da Tock. Na decomposicao
+futura, essa compatibilidade vira o vocabulario explicito de `offering` e
+`branch`, publicado pelo GraphBundle, sem recriar catalogo ou copy por turno.
+
+Um inbound processado tem resultado observavel: resposta com proof ou handoff
+registrado/visivel. Quando o contexto inteiro nao puder ser confiado, o runtime
+deve acionar handoff ou pausa observavel com diagnostico nao secreto; nunca
+descartar o turno em silencio.
+
 ## Por que
 
 A auditoria ao vivo de 2026-08-21
