@@ -39,6 +39,15 @@ def test_migration_requires_backup_and_complete_path():
     assert result["publish_migrate"] is True
 
 
+def test_release_infrastructure_uses_controlled_path_without_migration():
+    result = classify([".github/workflows/deploy-production.yml", "api/Dockerfile"])
+    assert result["class"] == "conversational"
+    assert result["pause_claims"] is True
+    assert result["wa_validator"] is True
+    assert result["backup"] is False
+    assert result["publish_migrate"] is False
+
+
 def test_graph_bundle_has_separate_publication_path():
     result = classify(["data/graph_bundles/example/bundle.json"])
     assert result["class"] == "graph"

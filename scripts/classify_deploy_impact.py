@@ -72,9 +72,13 @@ def classify(paths: Iterable[str]) -> dict[str, object]:
     )
     if not files or matched["documentation"]:
         impact = "documentation"
-    elif matched["migration"] or matched["release_infra"]:
+    elif matched["migration"]:
         impact = "migration"
-    elif matched["conversational"] or (matched["api"] and matched["worker"]):
+    elif (
+        matched["release_infra"]
+        or matched["conversational"]
+        or (matched["api"] and matched["worker"])
+    ):
         impact = "conversational"
     elif matched["worker"]:
         impact = "worker"
