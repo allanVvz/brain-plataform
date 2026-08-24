@@ -13,6 +13,36 @@ DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
 cd "$ROOT_DIR"
 python3 ops/vps/validate_env.py "$ENV_FILE"
 
+# Existing production installs predate the split API/worker/migrate images and
+# may only declare API_IMAGE. Bootstrap sibling image names from that immutable
+# registry path so the first incremental release does not fall back to a local
+# Docker Hub name. Explicit values in .env.compose remain authoritative.
+read_env_value() {
+  local requested="$1" key value
+  while IFS='=' read -r key value; do
+    [[ "$key" == "$requested" ]] || continue
+    value="${value%$'\r'}"
+    value="${value#\"}"; value="${value%\"}"
+    value="${value#\'}"; value="${value%\'}"
+    printf '%s' "$value"
+    return 0
+  done < "$ENV_FILE"
+}
+API_IMAGE="$(read_env_value API_IMAGE)"
+WORKER_IMAGE="$(read_env_value WORKER_IMAGE)"
+MIGRATE_IMAGE="$(read_env_value MIGRATE_IMAGE)"
+API_IMAGE="${API_IMAGE:-brain-api}"
+if [[ -z "$WORKER_IMAGE" || -z "$MIGRATE_IMAGE" ]]; then
+  [[ "$API_IMAGE" == *brain-api ]] || {
+    echo "WORKER_IMAGE and MIGRATE_IMAGE are required when API_IMAGE does not end in brain-api" >&2
+    exit 1
+  }
+  image_prefix="${API_IMAGE%brain-api}"
+  WORKER_IMAGE="${WORKER_IMAGE:-${image_prefix}brain-workers}"
+  MIGRATE_IMAGE="${MIGRATE_IMAGE:-${image_prefix}brain-migrate}"
+fi
+export API_IMAGE WORKER_IMAGE MIGRATE_IMAGE
+
 STATE_DIR="$ROOT_DIR/.deploy"
 COMPONENTS_FILE="$STATE_DIR/components.env"
 CURRENT_SHA="$(tr -d '\r\n' < "$STATE_DIR/current-tag" 2>/dev/null || true)"

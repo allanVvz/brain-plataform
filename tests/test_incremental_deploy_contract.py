@@ -33,6 +33,13 @@ def test_api_only_path_finishes_before_claim_pause_branch():
     assert api_exit < claims_pause
 
 
+def test_first_split_image_release_bootstraps_from_existing_api_registry():
+    assert 'API_IMAGE="$(read_env_value API_IMAGE)"' in DEPLOY
+    assert 'image_prefix="${API_IMAGE%brain-api}"' in DEPLOY
+    assert 'WORKER_IMAGE="${WORKER_IMAGE:-${image_prefix}brain-workers}"' in DEPLOY
+    assert "export API_IMAGE WORKER_IMAGE MIGRATE_IMAGE" in DEPLOY
+
+
 def test_resume_checks_digest_and_is_idempotent_after_verified():
     assert "image_digests_verified=true" in RESUME
     assert "workers already resumed and release verified" in RESUME
