@@ -751,17 +751,26 @@ def check(
         )
     ]
     if question_count > 0:
-        if question_id in semantic_matches:
-            pass
+        if question_id:
+            if question_id in semantic_matches:
+                pass
+            elif len(semantic_matches) == 1:
+                # The spoken question is the observable authority. A stale
+                # model id is reconciled to the one graph-owned askable
+                # question it semantically matches.
+                question_id = semantic_matches[0]
+                observations.append("next_question_metadata_reconciled")
+            else:
+                errors.append("question_not_semantically_askable")
+                question_id = None
         elif len(semantic_matches) == 1:
-            # The spoken question is the observable authority. A stale or
-            # missing model id is reconciled to the one graph-owned askable
-            # question it semantically matches; facts and memory remain valid.
             question_id = semantic_matches[0]
             observations.append("next_question_metadata_reconciled")
         else:
-            errors.append("question_not_semantically_askable")
-            question_id = None
+            # The model may ask a natural discovery, support or confirmation
+            # question without claiming it advances a qualification field.
+            # Audit it, but never map it to a field or rewrite its text.
+            observations.append("unmapped_model_question")
     elif question_id:
         observations.append("next_question_metadata_without_question")
         question_id = None
@@ -875,21 +884,31 @@ def check(
     repair_only = bool(gating_errors) and all(
         "outside_package" in error for error in gating_errors
     )
+    question_component_invalid = bool(
+        not question_id
+        and question_count > 0
+        and any(
+            error.startswith(("next_question_", "question_"))
+            for error in component_errors
+        )
+    )
+    question_repair = [{
+        "kind": "quality",
+        "issue": "question_not_semantically_askable",
+        "instruction": (
+            "Rewrite the reply yourself. Ask at most one genuinely unresolved "
+            "topic, never a field already known or previously asked, and use "
+            "next_question_node_id only as matching audit metadata."
+        ),
+    }] if question_component_invalid else []
     return {
         "valid": not gating_errors, "errors": errors,
         "gating_errors": gating_errors,
-        "repair_required": repair_only and bool(repair),
-        "repair_requirements": repair, "ledger": next_ledger,
+        "repair_required": (repair_only and bool(repair)) or question_component_invalid,
+        "repair_requirements": [*repair, *question_repair], "ledger": next_ledger,
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
         "next_question_node_id": question_id,
-        "question_component_discarded": bool(
-            not question_id
-            and question_count > 0
-            and any(
-                error.startswith(("next_question_", "question_"))
-                for error in component_errors
-            )
-        ),
+        "question_component_invalid": question_component_invalid,
         "qualification_complete": not missing,
         "handoff_required": handoff_required,
         "required_field_count": required_field_count(contract, facts),
@@ -941,29 +960,6 @@ def _question_already_asked(question: str, text: str) -> bool:
         ).ratio() >= 0.68:
             return True
     return False
-
-
-def compose_published_question(
-    *, reply: str, next_question_node_id: str | None, contract: dict[str, Any],
-    discard_unproved_questions: bool = False,
-) -> str:
-    """Preserve natural proved wording and remove only an invalid question."""
-    text = str(reply or "").strip()
-    if discard_unproved_questions:
-        return " ".join(
-            sentence.strip()
-            for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
-            if sentence.strip() and "?" not in sentence
-        ).strip()
-    if not next_question_node_id:
-        return text
-    question = str(
-        ((contract.get("questions") or {}).get(next_question_node_id) or {}).get("text")
-        or ""
-    ).strip()
-    if not question or not _question_already_asked(question, text):
-        return text
-    return text
 
 
 def validate_natural_summary(reply: str, *, informed_values: list[str]) -> bool:

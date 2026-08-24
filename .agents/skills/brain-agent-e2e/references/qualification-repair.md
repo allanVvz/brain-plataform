@@ -8,7 +8,7 @@ Use this after E2E evidence proves a flow defect. Keep changes generic and prefe
 - Stale graph: preserve customer facts for an unconfirmed appointment request and revalidate graph-bound service/required fields. Keep conservative handoff for transactional state that cannot be safely migrated.
 - Historical service contamination: a current-turn service may replace history only when its slug exists in the current graph; then recalculate required fields.
 - Stalled qualification: explicit intent to receive a graph service enters collection even without booking/quote keywords.
-- Repeated question: reconcile model extraction through `/internal/conversations/decide` before commit; retain a valid grounded model reply and let it choose a natural clarification or next question from the unresolved set. Never force `appointment_policy.field_questions[missing_fields[0]]`.
+- Repeated question: reconcile through one additional model call before commit. The model must choose another useful unresolved topic or no question; a contextual bridge never permits reusing an id from `asked_question_node_ids`. If repair repeats it, hand off observably without publishing the question. Never force `appointment_policy.field_questions[missing_fields[0]]`.
 
 ## Boundaries
 

@@ -63,7 +63,6 @@ def _fixture(monkeypatch):
             "question_repetition": {"max_attempts": 1},
             "doubt_handling": {
                 "answer_before_qualification": "Respondo primeiro.",
-                "continue_with_first_missing_field": "Seguimos com o campo pendente.",
                 "deferred_response": "A equipe explica esse detalhe publicado.",
             },
             "qualification": {
@@ -195,17 +194,31 @@ def _proposal(document):
     }
 
 
-def _decide(document, context):
+def _decide(document, context, *, repaired=False):
+    proposal = _proposal(document)
+    if repaired:
+        proposal = {**proposal, "next_question_node_id": None, "reply": ANSWER}
     return graph_agent_runtime_v3.decide(
-        context, model_observation={"proposal": _proposal(document)},
+        context, model_observation={
+            "proposal": proposal,
+            "repair_attempt": 1 if repaired else 0,
+        },
     )
 
 
 def test_confirmacao_de_servico_nao_engole_a_resposta_da_duvida(monkeypatch):
     """`reply = confirmation_text` levava junto a explicacao do servico."""
     document, pub = _fixture(monkeypatch)
-    _decision, response = _decide(
+    _decision, first = _decide(
         document, _context(document, pub, message_id="msg:1", asked=["q:servico"]),
+    )
+    assert first.reply_text is None
+    assert first.proof["repair_required"] is True
+
+    _decision, response = _decide(
+        document,
+        _context(document, pub, message_id="msg:1", asked=["q:servico"]),
+        repaired=True,
     )
 
     reply = response.reply_text or ""
@@ -221,7 +234,7 @@ def test_duvida_respondida_nao_gasta_o_orcamento_de_pergunta(monkeypatch):
         document, pub, message_id="msg:2",
         asked=["q:servico", "q:servico"],
         history=[{"role": "assistant", "content": "Qual servico te interessa?"}],
-    ))
+    ), repaired=True)
 
     desistencias = [
         fact for fact in response.proof["accepted_facts"]
@@ -231,35 +244,41 @@ def test_duvida_respondida_nao_gasta_o_orcamento_de_pergunta(monkeypatch):
     assert decision.route.value != "HUMAN"
 
 
-def test_supressao_de_duplicata_ainda_entrega_o_conteudo_novo(monkeypatch):
-    """Reter a pergunta repetida nao pode reter o turno inteiro."""
+def test_reparo_do_modelo_preserva_conteudo_novo_sem_repetir_campo(monkeypatch):
+    """A segunda chamada preserva a resposta e remove a pergunta repetida."""
     document, pub = _fixture(monkeypatch)
-    _decision, response = _decide(document, _context(
+    context = _context(
         document, pub, message_id="msg:3",
         asked=["q:servico", "q:servico"],
         history=[
             {"role": "assistant", "content": "Qual servico te interessa?"},
             {"role": "assistant", "content": "Qual servico te interessa?"},
         ],
-    ))
+    )
 
-    assert response.reply_text, "o cliente nao pode ficar sem resposta"
+    _decision, first = _decide(document, context)
+    assert first.reply_text is None
+    assert first.proof["repair_required"] is True
+
+    _decision, response = _decide(document, context, repaired=True)
+
+    assert response.reply_text == ANSWER
+    assert "Qual servico" not in response.reply_text
 
 
-def test_pergunta_suprimida_nao_conta_como_feita(monkeypatch):
-    """O orcamento conta entregas, nao intencoes."""
+def test_proposta_repetida_nao_registra_nova_emissao(monkeypatch):
+    """A memoria conta apenas a pergunta que o cliente recebeu."""
     document, pub = _fixture(monkeypatch)
     _decision, response = _decide(document, _context(
         document, pub, message_id="msg:4",
-        asked=["q:servico", "q:servico"],
+        asked=["q:servico"],
         history=[
-            {"role": "assistant", "content": "Qual servico te interessa?"},
             {"role": "assistant", "content": "Qual servico te interessa?"},
         ],
     ))
 
     asked = response.cart_state["asked_question_node_ids"]
-    assert asked.count("q:servico") == 2, asked
+    assert asked.count("q:servico") == 1, asked
 
 
 def test_o_contrato_comum_nunca_autoriza_mais_que_um_galho(monkeypatch):

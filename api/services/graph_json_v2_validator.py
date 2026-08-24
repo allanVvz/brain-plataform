@@ -230,7 +230,6 @@ def _validate_appointment_policy(nodes: list["object"], errors: list[str]) -> No
     else:
         for key in (
             "answer_before_qualification",
-            "continue_with_first_missing_field",
             "deferred_response",
         ):
             if not str(doubt_handling.get(key) or "").strip():

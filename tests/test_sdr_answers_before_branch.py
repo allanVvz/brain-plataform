@@ -9,7 +9,7 @@ recuperada, e o runtime descartou a proposta inteira com
      "claim_not_authorized:service_detail",
      "claim_evidence_not_authorized:service_detail"]
 
-caindo em `published_fallback` -- que repetia palavra por palavra a pergunta ja
+caindo no fallback legado -- que repetia palavra por palavra a pergunta ja
 enviada e por isso era suprimida pelo antirrepeticao, deixando o turno mudo.
 
 A diferenca para `test_sdr_doubt_not_discarded.py` esta na forma do grafo, e e
@@ -69,7 +69,6 @@ def _fixture(monkeypatch):
             "question_repetition": {"max_attempts": 1},
             "doubt_handling": {
                 "answer_before_qualification": "Respondo primeiro.",
-                "continue_with_first_missing_field": "Seguimos com o campo pendente.",
                 "deferred_response": "A equipe explica esse detalhe publicado.",
             },
             "qualification": {
@@ -224,7 +223,7 @@ def test_a_faq_do_servico_e_respondida_antes_de_o_cliente_escolher(monkeypatch):
         model_observation={"proposal": _proposal(document)},
     )
 
-    assert response.proof.get("mode") != "published_fallback", (
+    assert response.proof.get("mode") != "model_repair_exhausted_handoff", (
         response.proof.get("model_proposal_errors")
     )
     assert "pelicula" in (response.reply_text or ""), response.reply_text

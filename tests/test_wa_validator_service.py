@@ -741,7 +741,7 @@ def test_semantic_turn_audit_rejects_identical_reply_while_field_is_pending():
     assert "reply_not_repeated" in audit["failures"]
 
 
-def test_semantic_turn_audit_accepts_one_contextual_question_resumption():
+def test_semantic_turn_audit_rejects_contextual_question_resumption():
     inputs = _semantic_audit_inputs()
     inputs["recent_replies"] = ["Qual seu nome?"]
     inputs["previous_question_node_id"] = "q:name"
@@ -756,7 +756,9 @@ def test_semantic_turn_audit_accepts_one_contextual_question_resumption():
 
     audit = wv._semantic_turn_audit(**inputs)
 
-    assert audit["passed"] is True, audit["failures"]
+    assert audit["passed"] is False
+    assert "question_repetition_budget" in audit["failures"]
+    assert "question_already_asked" in audit["repetition_audit"]["failures"]
     assert audit["repetition_audit"]["previous_question_emissions"] == 1
 
 
@@ -780,7 +782,7 @@ def test_semantic_turn_audit_rejects_rewritten_third_question_by_node_budget():
 
     assert audit["passed"] is False
     assert "question_repetition_budget" in audit["failures"]
-    assert "question_attempt_budget_exceeded" in audit["repetition_audit"]["failures"]
+    assert "question_already_asked" in audit["repetition_audit"]["failures"]
 
 
 def test_semantic_turn_audit_rejects_superficially_reworded_reply():

@@ -18,11 +18,19 @@ completude/eligibilidade, nao roteiro. CAS, claim atomico e ledger preservam
 um inbound canonico -> uma decisao -> um commit -> no maximo um outbound;
 exactly-once previne duplicidade, nao torna o dialogo deterministico.
 
+`field_questions` permanece no contrato publicado para validar cobertura e
+para auditar semanticamente a pergunta escolhida pelo modelo. Nao e roteiro nem
+copy de runtime: nenhuma camada pode anexar `field_questions[missing_fields[0]]`
+ou selecionar uma FAQ no lugar do modelo. `asked_question_node_ids` registra o
+que o cliente efetivamente recebeu. Um id ja registrado nunca e emitido de
+novo; a primeira proposta repetida volta ao modelo para uma unica reparacao e,
+se a repeticao persistir, o turno termina em handoff observavel sem a pergunta.
+
 Antes de publicar, validar acumulacao top-down de FAQs: cada FAQ de evidencia
 precisa de caminho hierarquico ativo da Persona, fonte/status validos e escopo
-persona/agente intacto. Aurora continua em contrato legado isolado; Tock Fatal
-usa GraphBundle. A migracao da divida Aurora para GraphBundle e explicita e
-auditavel, nunca uma mistura de contratos no runtime.
+persona/agente intacto. Aurora e Tock Fatal usam o runtime v3 e GraphBundle,
+com publicacao, checksum, binding e memoria isolados; o template comum nunca
+mistura contratos entre personas.
 
 ## Divida de nomenclatura comercial
 

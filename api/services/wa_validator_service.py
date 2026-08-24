@@ -2269,10 +2269,10 @@ def _semantic_turn_audit(
             repetition_failures & {"semantic_repetition", "terminal_repetition"}
         ),
         "question_repetition_budget": (
-            "question_attempt_budget_exceeded" not in repetition_failures
+            "question_already_asked" not in repetition_failures
         ),
         "contextual_retry_valid": not bool(
-            repetition_failures & {"contextual_bridge_required", "question_field_not_pending"}
+            repetition_failures & {"question_already_asked", "question_field_not_pending"}
         ),
         "terminal_not_repeated": "terminal_repetition" not in repetition_failures,
         "model_reconciled_without_fallback": (

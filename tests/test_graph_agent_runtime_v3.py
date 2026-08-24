@@ -556,7 +556,9 @@ def test_invalid_model_fallback_never_goes_silent_on_a_non_terminal_repeat():
     )
 
     assert response.proof["repetition_action"] != "suppressed_duplicate_outbound"
-    assert response.reply_text == "Known: name: Beatriz.\n\nIs this correct?"
+    assert response.reply_text == graph_agent_runtime_v3.CONTEXT_FAILURE_HANDOFF_REPLY
+    assert decision.route.value == "HUMAN"
+    assert response.proof["mode"] == "model_output_handoff"
 
 
 def test_invalid_proposal_fallback_confirms_every_active_branch_not_just_the_focused_one(monkeypatch):
@@ -858,63 +860,9 @@ def test_service_branch_does_not_authorize_schedule_availability_payload():
     assert "claim_evidence_not_authorized:availability" in proof["errors"]
 
 
-def test_published_question_preserves_semantic_model_personalization():
-    """Regression test for the duplicate-question-in-one-message gap (2026-08-08 report).
-
-    Evidence across several Aurora transcripts: the model asks a field
-    question in its own words, personalized with a value already known
-    (e.g. "Você consegue trazer o Onix aqui..." instead of the published
-    "...o carro..."), and the literal-substring check in
-    compose_published_question() failed to recognize that as the same
-    question, so it appended the canonical text again in the same message.
-    Content-word overlap should recognize the personalized rewording as
-    already asking it.
-    """
-    document = compiled_fixture()
-    contract = document["branch_contracts"]["branch:a"]
-    emitted = graph_proof_checker_v3.compose_published_question(
-        reply="Perfeito! E qual é a metragem do seu apartamento, você sabe me dizer?",
-        next_question_node_id="question:a", contract=contract,
-    )
-    assert emitted == "Perfeito! E qual é a metragem do seu apartamento, você sabe me dizer?"
-
-
-def test_grounded_prose_and_semantic_question_wording_survive():
-    reply = (
-        "A lavagem técnica cuida do motor e do cofre conforme a condição atual. "
-        "Você percebe algum vazamento de óleo?"
-    )
-    emitted = graph_proof_checker_v3.compose_published_question(
-        reply=reply,
-        next_question_node_id="q:engine-leak",
-        contract={
-            "questions": {
-                "q:engine-leak": {
-                    "field_key": "engine_leak",
-                    "text": "Existe vazamento de óleo?",
-                }
-            }
-        },
-    )
-    assert emitted == reply
-
-
-def test_published_question_preserves_personalized_vehicle_wording():
-    """Regression test for a gap in the fix above, found live 2026-08-08.
-
-    Word-overlap alone still missed a short question whose only real
-    content word is exactly the one the model personalizes away: "Qual é a
-    cor do veículo?" -> the model says "...Qual é a cor do seu Onix?" --
-    "veículo" is gone, replaced by the car model, so content-word overlap
-    was 0. The shared sentence structure around the swapped word (character
-    -run coverage) must catch this even when word overlap alone can't.
-    """
-    contract = {"questions": {"q:color": {"text": "Qual é a cor do veículo?", "field_key": "vehicle_color"}}}
-    emitted = graph_proof_checker_v3.compose_published_question(
-        reply="Entendi, Beatriz! Bancos manchados são comuns. Qual é a cor do seu Onix?",
-        next_question_node_id="q:color", contract=contract,
-    )
-    assert emitted == "Entendi, Beatriz! Bancos manchados são comuns. Qual é a cor do seu Onix?"
+def test_backend_has_no_question_text_composer():
+    """The model reply is never completed or rewritten with graph copy."""
+    assert not hasattr(graph_proof_checker_v3, "compose_published_question")
 
 
 def test_model_question_is_not_reordered_to_first_missing_graph_field():
@@ -1203,27 +1151,6 @@ def test_recent_reply_similarity_is_detected_before_pending_question_exception()
     assert graph_agent_runtime_v3._repeats_recent_outbound(reply, messages) is True
 
 
-def test_repeated_question_is_allowed_only_while_its_field_remains_pending():
-    asked = ["q:name"]
-
-    assert graph_agent_runtime_v3._repeated_pending_question_is_allowed(
-        next_question_node_id="q:name",
-        aggregate_missing=[{"key": "name", "question_node_id": "q:name"}],
-        asked_question_node_ids=asked,
-    ) is True
-    assert graph_agent_runtime_v3._repeated_pending_question_is_allowed(
-        next_question_node_id="q:name",
-        aggregate_missing=[{"key": "objective", "question_node_id": "q:objective"}],
-        asked_question_node_ids=asked,
-    ) is False
-
-    assert graph_agent_runtime_v3._repeated_pending_question_is_allowed(
-        next_question_node_id="q:name",
-        aggregate_missing=[{"key": "name", "question_node_id": "q:name"}],
-        asked_question_node_ids=["q:name", "q:name"],
-    ) is False
-
-
 def test_third_pending_question_attempt_marks_field_unknown():
     contract = {
         "fields": [{
@@ -1266,51 +1193,9 @@ def test_third_pending_question_attempt_marks_field_unknown():
     }
 
 
-def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypatch):
-    root = node(1, "persona:generic", parent_type="persona", data={
-        "conversation_policy": {
-            "question_repetition": {"max_attempts": 1},
-            "doubt_handling": {
-                "answer_before_qualification": "Answer first.",
-                "continue_with_first_missing_field": "Continue with the pending field.",
-                "deferred_response": "The team will explain that published detail.",
-            },
-            "qualification": {
-                "summary_template": "Summary: {informed_fields}.",
-                "completion_message": "The team will continue.",
-                "incomplete_handoff_template": (
-                    "Known: {informed_fields}. Not confirmed: {missing_fields}."
-                ),
-            },
-        },
-        "appointment_policy": {
-            "field_labels": {"name": "name", "goal": "goal"},
-        },
-    })
-    branch = node(2, "branch:a", data={"capabilities": {"branch_anchor": True}})
-    q_name = node(3, "q:name", parent_type="faq", data={"question": "What is your name?"})
-    q_goal = node(4, "q:goal", parent_type="faq", data={"question": "What is your goal?"})
-    branch["metadata"]["qualification"] = {"fields": [
-        {
-            "key": "name", "owner_node_id": "branch:a",
-            "question_node_id": "q:name", "required": True,
-            "accepted_statuses": ["known", "unknown"], "value_schema": {"type": "string"},
-        },
-        {
-            "key": "goal", "owner_node_id": "branch:a",
-            "question_node_id": "q:goal", "required": True,
-            "accepted_statuses": ["known"], "value_schema": {"type": "string"},
-        },
-    ]}
-    document = graph_compiler_v3.compile_graph(
-        persona=PERSONA,
-        node_rows=[root, branch, q_name, q_goal],
-        edge_rows=[
-            edge(1, root, branch), edge(2, branch, q_name), edge(3, branch, q_goal),
-        ],
-    )
+def test_repeated_field_gets_one_model_repair_then_safe_handoff(monkeypatch):
+    document = compiled_fixture()
     pub = publication(document)
-    contract = document["branch_contracts"]["branch:a"]
     monkeypatch.setattr(
         graph_agent_runtime_v3.supabase_client, "get_persona",
         lambda _slug: {**PERSONA, "config": {}},
@@ -1319,106 +1204,47 @@ def test_second_ignored_turn_commits_unknown_summary_and_human_handoff(monkeypat
         graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
         lambda _persona_id: pub,
     )
-    known_goal = {
-        "field_key": "goal", "status": "known", "value": "receive support",
-        "owner_node_id": "branch:a", "source_message_id": "msg:goal",
-    }
-    first_context = ConversationContext(
+    contract = document["branch_contracts"]["branch:a"]
+    question_id = "question:a"
+    question_text = contract["questions"][question_id]["text"]
+    context = ConversationContext(
         persona_slug="generic", agent_slug="agent", graph_version=1,
         graph_checksum=document["checksum"], publication_id=pub["id"],
         messages=[
-            {"role": "assistant", "content": "What is your name?"},
-            {"message_id": "msg:interrupt", "role": "user", "content": "How does support work?"},
+            {"role": "assistant", "content": question_text},
+            {"message_id": "msg:interrupt", "role": "user", "content": "Quero entender melhor."},
         ],
-        cart={
-            "facts": {"goal": known_goal},
-            "facts_by_key": {"goal": [known_goal]},
-            "asked_question_node_ids": ["q:name"],
-        },
+        cart={"facts": {}, "asked_question_node_ids": [question_id]},
         rag_nodes=[], rag_paths=[], graph_contract=contract,
         active_branch_node_id="branch:a", active_branch_node_ids=["branch:a"],
         retrieval_trace={"retrieval_branch_node_id": "branch:a"},
     )
-    first_proposal = {
+    repeated = {
         "branch_action": "keep", "branch_anchor_node_id": "branch:a",
         "branch_path_checksum": contract["branch_path_checksum"],
-        "branch_evidence_span": "", "extracted_facts": [{
-            "field_key": "name", "owner_node_id": "branch:a",
-            "status": "unknown", "value": None,
-            "source_message_id": "msg:interrupt",
-            "evidence_span": "How does support work?", "confidence": 1.0,
-        }], "claims": [],
-        "next_question_node_id": "q:name", "cited_node_ids": [],
-        "cited_chunk_ids": [],
-        "reply": "Support is reviewed by the team for each request. What is your name?",
+        "branch_evidence_span": "", "extracted_facts": [], "claims": [],
+        "next_question_node_id": question_id, "cited_node_ids": [],
+        "cited_chunk_ids": [], "reply": f"Posso ajudar. {question_text}",
         "qualification_complete": False, "handoff_requested": False,
     }
 
-    first_decision, first_response = graph_agent_runtime_v3.decide(
-        first_context, model_observation={"proposal": first_proposal},
+    _first_decision, first_response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": repeated, "repair_attempt": 0},
     )
-
-    assert first_decision.route.value == "SDR"
-    assert first_response.handoff_required is False
-    assert first_response.cart_state["asked_question_node_ids"].count("q:name") == 2
-    assert "name" not in first_response.cart_state["facts_by_key"]
-
-    second_context = first_context.model_copy(update={
-        "messages": [
-            *first_context.messages,
-            {"role": "assistant", "content": first_response.reply_text},
-            {"message_id": "msg:ignored", "role": "user", "content": "Can we move on without that?"},
-        ],
-        "cart": first_response.cart_state,
-    })
-    second_proposal = {
-        **first_proposal,
-        "extracted_facts": [{
-            **first_proposal["extracted_facts"][0],
-            "source_message_id": "msg:ignored",
-            "evidence_span": "Can we move on without that?",
-        }],
-        "reply": "I will preserve what was already provided. What is your name?",
-    }
+    assert first_response.reply_text is None
+    assert first_response.proof["repair_required"] is True
+    assert "question_already_asked" in first_response.proof["repetition_audit"]["failures"]
+    assert first_response.cart_state["asked_question_node_ids"] == [question_id]
 
     second_decision, second_response = graph_agent_runtime_v3.decide(
-        second_context, model_observation={"proposal": second_proposal},
+        context, model_observation={"proposal": repeated, "repair_attempt": 1},
     )
-
-    unknown = second_response.cart_state["facts_by_key"]["name"][0]
-    assert unknown["status"] == "unknown"
-    assert unknown["reason"] == "explicit_unknown"
-    proof_unknown = next(
-        fact for fact in second_response.proof["accepted_facts"]
-        if fact["field_key"] == "name"
-    )
-    assert proof_unknown["reason"] == "explicit_unknown"
-    assert proof_unknown["metadata"] == {"reason": "explicit_unknown"}
-    assert second_decision.intent == "qualification_incomplete"
     assert second_decision.route.value == "HUMAN"
     assert second_response.handoff_required is True
-    assert second_response.proof["next_question_node_id"] is None
-    assert second_response.reply_text == second_proposal["reply"]
+    assert question_text not in (second_response.reply_text or "")
+    assert second_response.cart_state["asked_question_node_ids"] == [question_id]
+    assert second_response.proof["repetition_action"] == "repetition_handoff"
 
-    terminal_context = second_context.model_copy(update={
-        "messages": [
-            *second_context.messages,
-            {"role": "assistant", "content": second_response.reply_text},
-            {"message_id": "msg:after-terminal", "role": "user", "content": "Thanks"},
-        ],
-        "cart": second_response.cart_state,
-    })
-    duplicate_decision, duplicate_response = graph_agent_runtime_v3.decide(
-        terminal_context,
-        model_observation={"proposal": {
-            **second_proposal,
-            "next_question_node_id": None,
-            "reply": "The team will take it from here.",
-        }},
-    )
-    assert duplicate_decision.intent == "qualification_incomplete"
-    assert duplicate_response.reply_text == "The team will take it from here."
-    assert duplicate_response.proof["repetition_action"] == "observed_only"
 
 
 def test_explicit_unknown_marks_field_unknown_immediately():
@@ -1884,8 +1710,9 @@ def test_system_prompt_still_has_anti_repetition_instruction():
     assert "fatos_conhecidos lista tudo" in prompt
     # The 2026-08-19 rewrite folded six scattered anti-repetition clauses into
     # one canonical block plus the ladder. Both have to survive.
-    assert "siga esta ordem" in prompt
-    assert "não devolva silêncio" in prompt
+    assert "não o pergunte novamente" in prompt
+    assert "asked_question_node_ids" in prompt
+    assert "nunca preencha a reply com uma pergunta do backend" in prompt
 
 
 def test_contract_fact_scope_does_not_compare_service_from_another_owner():
@@ -4231,7 +4058,7 @@ def test_decide_defers_non_focused_branch_fact_error_but_still_answers_naturally
     assert "fact_evidence_not_literal:quantidade" in response.proof.get(
         "component_errors", []
     )
-    assert response.proof.get("mode") != "published_fallback"
+    assert response.proof.get("mode") != "model_repair_exhausted_handoff"
     accepted = {
         (fact["field_key"], fact["owner_node_id"])
         for fact in response.proof.get("accepted_facts") or []
@@ -4478,21 +4305,11 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
     )
 
     assert response.proof["valid"], response.proof["errors"]
-    assert response.cart_state["active_branch_node_ids"] == [
-        "aurora-product-polish-localized",
-    ]
-    service_facts = response.cart_state["facts_by_key"]["servico"]
-    assert {fact["owner_node_id"] for fact in service_facts} == {
-        "aurora-product-polish-localized",
-    }
-    assert "objective" not in response.cart_state["facts_by_key"]
-    assert response.proof["next_question_node_id"] is None
-    assert response.proof["question_component_discarded"] is True
-    assert response.reply_text == "Agora temos duas opcoes."
-    assert response.proof["observations"] == ["multiple_questions_in_reply"]
-    assert response.proof["service_operations"] == []
-    assert response.proof["service_candidate"] is None
-    assert response.proof["service_candidate_rejection_reason"] == "no_service_candidate"
+    assert response.reply_text is None
+    assert response.proof["repair_required"] is True
+    assert response.proof["question_component_invalid"] is True
+    assert response.cart_state == context.cart
+
 
 
 def test_completion_component_error_preserves_nonempty_model_reply(monkeypatch):
@@ -4957,91 +4774,6 @@ def test_topological_fields_preserves_graph_required_field_order():
     assert [field["key"] for field in ordered] == [
         "nome_cliente", "servico", "can_visit_in_person",
     ]
-
-
-def repetition_contract(paraphrases=None, invalid_response=None):
-    """A one-field contract whose question the conversation already heard."""
-    return {
-        "questions": {
-            "q:nome": {
-                "field_key": "nome_cliente",
-                "text": "Como você se chama?",
-                "paraphrases": paraphrases or [],
-            },
-        },
-        "fields": [{
-            "key": "nome_cliente",
-            "question_node_id": "q:nome",
-            "validation": (
-                {"invalid_response": invalid_response} if invalid_response else {}
-            ),
-        }],
-    }
-
-
-def test_repetition_ladder_prefers_another_published_wording():
-    reply, action = graph_agent_runtime_v3._repetition_ladder(
-        reply="Como você se chama?",
-        recent_replies=["Como você se chama?"],
-        contract=repetition_contract(
-            paraphrases=["Como você se chama?", "Me diz seu nome, por favor."],
-            invalid_response="Não consegui entender.",
-        ),
-        question_node_id="q:nome",
-    )
-    # The first paraphrase is itself what was already said, so it is skipped.
-    assert reply == "Me diz seu nome, por favor."
-    assert action == "adapted_variant"
-
-
-def test_repetition_ladder_admits_it_did_not_understand_when_wordings_run_out():
-    reply, action = graph_agent_runtime_v3._repetition_ladder(
-        reply="Como você se chama?",
-        recent_replies=["Como você se chama?", "Me diz seu nome, por favor."],
-        contract=repetition_contract(
-            paraphrases=["Me diz seu nome, por favor."],
-            invalid_response="Não consegui entender essa informação.",
-        ),
-        question_node_id="q:nome",
-    )
-    assert reply == "Não consegui entender essa informação."
-    assert action == "admitted_not_understood"
-
-
-def test_repetition_ladder_stops_instead_of_repeating_when_nothing_is_left():
-    reply, action = graph_agent_runtime_v3._repetition_ladder(
-        reply="Como você se chama?",
-        recent_replies=["Como você se chama?", "Não consegui entender."],
-        contract=repetition_contract(invalid_response="Não consegui entender."),
-        question_node_id="q:nome",
-    )
-    assert reply == ""
-    assert action == "stopped_last_resort"
-
-
-def test_repetition_ladder_keeps_new_content_as_the_prefix():
-    """The old path dropped the question with the duplicate, abandoning the field."""
-    reply, action = graph_agent_runtime_v3._repetition_ladder(
-        reply="Fazemos PPF sim. Como você se chama?",
-        recent_replies=["Como você se chama?"],
-        contract=repetition_contract(paraphrases=["Me diz seu nome, por favor."]),
-        question_node_id="q:nome",
-        prefix="Fazemos PPF sim.",
-    )
-    assert reply == "Fazemos PPF sim. Me diz seu nome, por favor."
-    assert action == "adapted_variant"
-
-
-def test_repetition_ladder_never_invents_copy_without_a_graph():
-    """A persona that published no alternatives gets no runtime-authored text."""
-    reply, action = graph_agent_runtime_v3._repetition_ladder(
-        reply="Como você se chama?",
-        recent_replies=["Como você se chama?"],
-        contract=repetition_contract(),
-        question_node_id="q:nome",
-    )
-    assert reply == ""
-    assert action == "stopped_last_resort"
 
 
 def test_agent_identity_comes_from_the_graph_never_from_code():

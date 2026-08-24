@@ -10,7 +10,7 @@ limbo que travava a conversa inteira:
 - nao e `known`  -> nenhum galho ativo -> toda proposta do modelo com
   `branch_action: "keep"` era rejeitada (`keep_without_active_branch`), e sem
   galho a claim `service_detail` tambem nao era autorizada. O modelo tentava
-  explicar o servico e era descartado, caindo em `published_fallback`;
+  explicar o servico e era descartado, caindo no fallback legado;
 - nao esta faltando -> `missing_fields` vazio -> a qualificacao parecia
   completa e o agente emitia o resumo com um unico campo.
 

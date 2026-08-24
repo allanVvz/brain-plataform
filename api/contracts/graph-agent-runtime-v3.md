@@ -136,22 +136,16 @@ Passada a janela, os inbounds estacionados permanecem estacionados e o próximo
 turno é do cliente. Disparo de campanha e conversa nova são portas distintas e
 não passam por essa janela.
 
-A proteção antirrepetição não lança exceção em produção: fatos aceitos são
-commitados e o outbound duplicado é suprimido. A supressão retém a pergunta
-repetida, não o turno: quando o turno tem conteúdo próprio — dúvida respondida,
-serviço reconhecido — esse conteúdo é entregue sem a pergunta e
-`repetition_action` é `suppressed_duplicate_question`. Enquanto a IA estiver
-ligada, o turno nunca termina em silêncio total por repetição: um handoff
-terminal repetido continua suprimido (`suppressed_duplicate_terminal`, nada de
-novo a dizer por definição), mas uma pergunta não-terminal repetida sem
-conteúdo declarativo próprio ainda assim é entregue — `repetition_action` fica
-`allowed_never_silent` e a resposta original (a pergunta) é mantida em vez de
-zerada. Uma pergunta suprimida não entra em `asked_question_node_ids`, porque o
-orçamento conta emissões entregues. Uma dúvida respondida pelo grafo não é uma
-não-resposta e não consome tentativa; uma dúvida apenas adiada consome. CI e
-Validator continuam reprovando o critério semântico pelo proof. Todo proof
-expõe `intent_audit`, `service_resolution`, `journey_transition`,
-`confirmation_state` e `repetition_action`.
+A protecao antirrepeticao preserva os fatos aceitos, mas cada
+`question_node_id` possui uma unica emissao no estado compativel da jornada.
+`question_repetition.max_attempts` e aceito apenas para ler publicacoes antigas
+e nao autoriza uma segunda pergunta. O primeiro diagnostico de repeticao volta
+ao modelo para uma unica reparacao; a resposta candidata nao e publicavel. Se o
+modelo repetir apos o reparo, o runtime emite somente o handoff seguro e registra
+`repetition_action=repetition_handoff`, sem selecionar, anexar, parafrasear ou
+publicar a pergunta. `asked_question_node_ids` contem apenas perguntas realmente
+entregues. Todo proof expoe `intent_audit`, `service_resolution`,
+`journey_transition`, `confirmation_state` e `repetition_action`.
 
 ## Nome completo e confirmação de serviço
 

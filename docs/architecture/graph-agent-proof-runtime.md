@@ -27,8 +27,9 @@ CAS e exactly-once preservam um inbound canonico -> uma decisao -> um commit ->
 no maximo um outbound, sem decidir o conteudo da conversa.
 
 Pre-publicacao valida acumulacao top-down de FAQs de evidencia (caminho ativo
-da Persona, fonte/status e escopo persona/agente). Tock Fatal usa GraphBundle;
-Aurora continua no contrato legado isolado ate migracao explicita e auditavel.
+da Persona, fonte/status e escopo persona/agente). Aurora e Tock Fatal usam
+GraphBundle e runtime v3, mantendo publicacao, checksum, binding e memoria
+isolados por persona.
 
 O runtime de conversa usa o Graph JSON publicado como autoridade estrutural.
 O modelo continua escolhendo como conversar; o backend apenas valida a
@@ -113,6 +114,14 @@ reply do modelo. Proof valida evidencia e isolamento, registra o diagnostico e
 orienta o proximo passo seguro. Quando nao houver contexto confiavel para uma
 resposta comprovada, o proximo passo e handoff ou pausa observavel, nunca um
 turno silencioso.
+
+`field_questions` prova cobertura e ancora a auditoria semantica; nao fornece
+texto para composicao do backend. O modelo pode perguntar naturalmente e usar
+`next_question_node_id` apenas como metadata correspondente. Um id presente em
+`asked_question_node_ids` nao volta a ser emitido, mesmo com parafrase ou ponte
+contextual. A primeira violacao aciona uma reparacao pelo modelo; a segunda
+aciona handoff observavel sem publicar a pergunta repetida. Fatos validos e
+memoria sobrevivem a ambos os diagnosticos.
 
 Uma citação válida que ficou fora do pacote dispara uma expansão do mesmo
 galho e uma segunda chamada ao modelo. Se continuar sem prova, o runtime pede

@@ -33,13 +33,31 @@ def test_shared_conversation_repetition_corpus():
         assert result["failures"] == case["expected_failures"], case["name"]
 
 
-def test_zero_retries_blocks_the_second_question_emission():
+def test_legacy_retry_setting_cannot_authorize_a_second_question_emission():
     result = conversation_repetition.assess_repetition(
         current_reply="A equipe registrou o contexto informado. Qual é o seu nome?",
         question_node_id="q:name",
         question_text="Qual é o seu nome?",
         asked_question_node_ids=["q:name"],
-        max_attempts=0,
+        max_attempts=1,
         field_pending=True,
     )
-    assert "question_attempt_budget_exceeded" in result["failures"]
+    assert result["failures"] == ["question_already_asked"]
+    assert result["allowed_question_emissions"] == 1
+
+
+def test_tock_volume_contextual_bridge_does_not_authorize_reasking_the_field():
+    result = conversation_repetition.assess_repetition(
+        current_reply=(
+            "Perfeito, 4 peças! Vou registrar seu interesse. "
+            "Que tipo de volume você pretende avaliar para revenda?"
+        ),
+        question_node_id="faq:tock-reseller-volume",
+        question_text="Que tipo de volume você pretende avaliar para revenda?",
+        asked_question_node_ids=["faq:tock-reseller-volume"],
+        max_attempts=1,
+        field_pending=True,
+    )
+
+    assert result["failures"] == ["question_already_asked"]
+    assert result["contextual_bridge"]

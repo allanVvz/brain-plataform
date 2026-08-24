@@ -169,7 +169,7 @@ Gate de compilação e aceite:
    change quando a ordem publicada for alterada;
 4. provar em teste que reordenar visualmente muda o contrato compilado e o
    checksum, mas não muda fatos, copy, Embedded ou outro fluxo;
-5. manter Aurora legado e Tock Fatal GraphBundle separados até a migração
+5. manter Aurora e Tock Fatal no runtime v3 com publicacoes e bindings isolados
    explícita da Aurora.
 
 ### Progresso local do pipeline novo — 2026-08-20
@@ -254,7 +254,7 @@ CAS e exactly-once continuam obrigatorios para um inbound -> uma decisao -> um
 commit -> no maximo um outbound, sem escolher conteudo da conversa. O gate de
 publicacao deve validar acumulacao top-down de cada FAQ de evidencia, com caminho
 ativo da Persona, fonte/status e escopo intactos. Tock Fatal segue GraphBundle;
-Aurora permanece no legado isolado ate sua migracao explicita e auditavel.
+Aurora e Tock Fatal operam no runtime v3, com publicacoes e estado isolados.
 
 ### Comportamento do SDR — prioridade corrente (2026-08-23)
 
@@ -537,9 +537,8 @@ governança 7 abaixo).
 
 Uma única fonte autoral declarativa por persona. Todo o resto é derivado.
 
-Tock Fatal e o caminho GraphBundle. Aurora continua isolada no legado ate uma
-migracao explicita e auditavel do seu debito; nao misturar fallback legado e
-contrato GraphBundle no mesmo runtime.
+Tock Fatal e Aurora usam GraphBundle/runtime v3, cada uma isolada por
+publicacao, checksum, binding e memoria; o runtime comum nao mistura contratos.
 
 ```
 GraphBundle (banco, versionado)

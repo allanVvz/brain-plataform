@@ -43,7 +43,9 @@ process.stdout.write(JSON.stringify(result[0].json));
     return json.loads(completed.stdout)
 
 
-def _run_response_validator(node_name: str, model_payload: dict) -> dict:
+def _run_response_validator(
+    node_name: str, model_payload: dict, *, accepted_facts: list[dict] | None = None,
+) -> dict:
     if not shutil.which("node"):
         pytest.skip("node is required to execute the canonical n8n code node")
     javascript = _node(node_name)["parameters"]["jsCode"]
@@ -55,6 +57,7 @@ const nodes = {
   'Build graph repair request': {llm_call_started_at: Date.now(), prompt_estimated_tokens: 1, repair_context_node_ids: [], repair_context_chunk_ids: [], repair_context_chunk_sources: {}},
   'Validate agent response': {model_observation: {token_usage: null}},
   'Validate conversation binding': {model: 'fixture-model'},
+  'Reconcile fields with graph policy': {response: {proof: {accepted_facts: fixture.acceptedFacts || []}}},
 };
 const select = (name) => ({item: {json: nodes[name]}});
 const result = new Function('$', '$json', fixture.javascript)(select, fixture.modelPayload);
@@ -62,7 +65,11 @@ process.stdout.write(JSON.stringify(result[0].json));
 """
     completed = subprocess.run(
         ["node", "-e", harness],
-        input=json.dumps({"javascript": javascript, "modelPayload": model_payload}),
+        input=json.dumps({
+            "javascript": javascript,
+            "modelPayload": model_payload,
+            "acceptedFacts": accepted_facts or [],
+        }),
         text=True,
         capture_output=True,
         check=True,
@@ -244,7 +251,7 @@ def test_tock_sized_audio_prompt_preserves_current_behavior_and_full_transcripti
     assert prompt["memory"]["recent_messages"] == context["shared_memory"]["recent_messages"]
     assert set(prompt["memory"]) == {
         "profile_facts", "current_journey", "pending_items", "recent_messages",
-        "last_handoff", "product_interests",
+        "last_handoff", "product_interests", "asked_question_node_ids",
     }
 
 
@@ -362,16 +369,49 @@ def test_n8n_validators_forward_the_model_selected_question(node_name):
     )
 
 
+def test_repaired_validator_preserves_facts_accepted_before_question_repair():
+    interpretation = {
+        "intents": [], "state_relation": "continue", "answers_field_key": None,
+        "confirmation": {
+            "state": "none", "target_ref": None, "evidence_span": "",
+            "correction_field_key": None, "correction_value": None,
+        },
+        "branch_selections": [], "facts": [], "invalidated_facts": [],
+        "entities": [], "questions": [], "claims": [],
+        "recommended_next_action": "answer_question",
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "next_question_node_id": None, "reply": "Prazer, Ana.",
+        "handoff_requested": False,
+    }
+    accepted = [{
+        "field_key": "name", "value": "Ana", "status": "known",
+        "owner_node_id": "persona:test", "evidence_span": "Ana",
+        "source_message_id": "msg:1", "metadata": {},
+    }]
+
+    result = _run_response_validator(
+        "Validate repaired agent response",
+        {"choices": [{"message": {"content": json.dumps(interpretation)}}]},
+        accepted_facts=accepted,
+    )
+
+    assert result["model_observation"]["interpretation"]["facts"] == accepted
+
+
 def test_n8n_repairs_repetition_with_the_model_before_commit():
     gate = _node("Graph proof needs repair")["parameters"]["conditions"]["conditions"][0][
         "leftValue"
     ]
     repair = _node("Build graph repair request")["parameters"]["jsCode"]
+    repaired_validator = _node("Validate repaired agent response")["parameters"]["jsCode"]
 
     assert "proof.repair_required" in gate
-    assert "proof.repetition_audit.passed === false" in gate
+    assert "repetition_audit" not in gate
     assert "conversation_repetition" in repair
     assert "rewrite the reply itself" in repair
+    assert "preserved_accepted_facts: proof.accepted_facts" in repair
+    assert "const preservedFacts" in repaired_validator
+    assert "preservedFacts.filter" in repaired_validator
 
 
 def test_completed_commit_uses_the_status_key_consumed_by_the_claim_rpc():
@@ -379,6 +419,7 @@ def test_completed_commit_uses_the_status_key_consumed_by_the_claim_rpc():
     assert "payload->'conversation_commit'->>'status'" in SQL
 
 
-def test_unambiguous_graph_branch_cannot_trigger_a_repair_call():
+def test_every_backend_repair_requirement_reaches_the_model_repair_call():
     condition = _node("Graph proof needs repair")["parameters"]["conditions"]["conditions"][0]["leftValue"]
-    assert "deterministic_branch_match" in condition
+    assert "proof.repair_required" in condition
+    assert "deterministic_branch_match" not in condition

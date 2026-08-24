@@ -520,11 +520,11 @@ def test_aurora_conversation_contract_rejects_blank_message_cleanly() -> None:
         raise AssertionError("blank Aurora messages must be rejected before runtime")
 
 
-def test_aurora_publishes_two_attempts_and_closed_objective_values() -> None:
+def test_aurora_does_not_publish_question_retry_authority_and_closes_objective_values() -> None:
     graph = build_graph()
     persona = next(node for node in graph.nodes if node.node_type == "persona")
     policy = (persona.data or {}).get("conversation_policy") or {}
-    assert policy["question_repetition"]["max_attempts"] == 1
+    assert "question_repetition" not in policy
     assert policy["qualification"]["incomplete_handoff_template"]
 
     objective_fields = [

@@ -638,12 +638,20 @@ Se nao aparece no grafo, esta incompleto.
   `data.appointment_policy.field_questions`.
 - Cada campo obrigatorio comum ou presente em `product.data.booking.required_fields`
   deve ter uma pergunta nao vazia no mapa da Persona.
+- `field_questions` continua necessario na autoria para provar cobertura,
+  semantica e pertencimento ao grafo. Ele nao e copy de runtime e nunca
+  autoriza o backend a anexar `field_questions[missing_fields[0]]` na resposta.
 - `missing_fields` define completude e elegibilidade, nao um roteiro de fala:
   o modelo escolhe a proxima pergunta natural, explicacao, recomendacao e
   linguagem dentro dos fatos/limites publicados. O runtime nao pode forcar
   `missing_fields[0]`, selecionar deterministicamente uma FAQ, nem substituir
   uma resposta valida do modelo por uma pergunta pronta.
 - Grafo de agendamento incompleto deve falhar na validacao antes da publicacao.
+- Cada `question_node_id` pode ser emitido uma unica vez no estado compativel
+  da jornada. O historico `asked_question_node_ids` e memoria auditavel para o
+  modelo; ponte contextual ou parafrase nao autoriza repetir o campo. A primeira
+  repeticao pede uma nova composicao ao modelo; repeticao apos o reparo termina
+  em handoff observavel, sem outbound com a pergunta repetida.
 - Sofia deve auxiliar o operador a preencher a matriz campo/pergunta, preservar
   fonte/status e nao copiar perguntas de outra persona ou exemplo.
 
@@ -665,6 +673,6 @@ Se nao aparece no grafo, esta incompleto.
   precisa de caminho hierarquico ativo da Persona ate ela, fontes/status
   validos e escopo de persona/agente sem cruzamento. FAQ fora desse caminho nao
   vira evidencia comercial.
-- Aurora permanece no contrato legado isolado. Tock Fatal usa GraphBundle;
-  migrar o debito da Aurora para GraphBundle e uma etapa explicita, auditavel e
-  nao uma mistura de contratos em runtime.
+- Aurora e Tock Fatal usam `graph_agent_runtime_v3`, cada uma com publicacao,
+  checksum, binding e memoria isolados. O runtime/template comum nao mistura
+  contratos, fatos ou contexto entre as duas personas.

@@ -351,19 +351,14 @@ def _invalid_proposal_fallback(
             qualification_complete=not unconfirmed,
         )
     else:
-        # Only used when the model output could not be parsed at all. The
-        # normal conversational path never substitutes canonical wording, but
-        # an invalid schema still needs one graph-published response instead of
-        # a silent commit.
+        # Invalid model output cannot authorize the backend to choose or append
+        # a qualification question. End observably and leave every graph field
+        # to a subsequent model-owned turn or human continuation.
+        question_id = None
         reply = str(
-            ((contract.get("questions") or {}).get(question_id or "") or {})
-            .get("text") or ""
-        ).strip()
-        if not reply:
-            reply = str(
-                context.retrieval_trace.get("no_journey_fallback_reply") or ""
-            ).strip() or CONTEXT_FAILURE_HANDOFF_REPLY
-            terminal_intent = "invalid_model_output"
+            context.retrieval_trace.get("no_journey_fallback_reply") or ""
+        ).strip() or CONTEXT_FAILURE_HANDOFF_REPLY
+        terminal_intent = "invalid_model_output"
     recent_replies = _assistant_replies(context.messages)
     repetition = conversation_repetition.assess_repetition(
         current_reply=reply,
@@ -382,24 +377,10 @@ def _invalid_proposal_fallback(
     )
     repetition_action = "allowed"
     if not repetition["passed"]:
-        # This fallback already means the model's own proposal was unusable,
-        # so the reply here is the published question itself -- exactly the
-        # sentence the customer just read. Climb the ladder for another
-        # published wording, then for the field's own "I did not catch that",
-        # before considering saying nothing.
-        laddered, repetition_action = _repetition_ladder(
-            reply=reply, recent_replies=recent_replies, contract=contract,
-            question_node_id=question_id,
-        )
-        # Confirmed live 2026-08-17: blanking `reply` on a plain duplicate
-        # (not even a terminal handoff repeat) left two separate customers
-        # with no reply at all on the exact turn they needed one. Silence is
-        # still the last resort, never the first -- so an exhausted ladder
-        # keeps the original text rather than dropping the turn.
-        if laddered:
-            reply = laddered
-        else:
-            repetition_action = "allowed_never_silent"
+        reply = CONTEXT_FAILURE_HANDOFF_REPLY
+        question_id = None
+        terminal_intent = "invalid_model_output_repetition"
+        repetition_action = "repetition_handoff"
     model_errors = list(dict.fromkeys(errors))
     fallback_valid = bool(str(reply or "").strip())
     proof = {
@@ -410,7 +391,7 @@ def _invalid_proposal_fallback(
         "fallback_applied": (
             "published_invalid_proposal" if fallback_valid else None
         ),
-        "mode": "published_fallback",
+        "mode": "model_output_handoff",
         "model_proposal_errors": model_errors,
         "model_proposal": raw if isinstance(raw, dict) else {"raw_type": type(raw).__name__},
         "missing_fields": [field["key"] for field in unconfirmed],
@@ -443,7 +424,7 @@ def _invalid_proposal_fallback(
         ConversationDecision(
             classifier="graph_proof_checker_v3",
             intent=terminal_intent or (
-                "awaiting_confirmation" if confirmation_pending else "published_fallback"
+                "awaiting_confirmation" if confirmation_pending else "model_output_handoff"
             ),
             route=route, confidence=0,
             lead_stage=str(context.cart.get("_lead_stage") or "novo"),
@@ -1067,7 +1048,7 @@ def _preselection_contract(
         # dos 17 contratos de galho da Aurora e nunca no comum. O cliente que
         # perguntava "como funciona o ppf?" antes de escolher recebia
         # `claim_not_authorized`/`claim_evidence_not_authorized`, a proposta
-        # inteira era descartada e o turno caia em `published_fallback` -- ou
+        # inteira era descartada e o turno caia no fallback legado -- ou
         # em silencio, quando o fallback repetia a pergunta anterior. Ou seja:
         # para perguntar sobre um servico o cliente precisava ja te-lo
         # escolhido, o inverso de como uma venda consultiva funciona.
@@ -2379,9 +2360,14 @@ def _repeats_recent_outbound(reply: str, messages: list[dict[str, Any]]) -> bool
 
 
 def _question_repetition_max_attempts(contract: dict[str, Any]) -> int:
-    repetition = ((contract.get("conversation_policy") or {}).get("question_repetition") or {})
-    value = repetition.get("max_attempts", 1)
-    return value if isinstance(value, int) and not isinstance(value, bool) and value in {0, 1} else 1
+    """Compatibility reader for a retired publication knob.
+
+    A field question is now single-emission. Older graphs may still carry
+    ``question_repetition.max_attempts``; accepting the document must never
+    turn that legacy value into permission to ask the same field again.
+    """
+    del contract
+    return 0
 
 
 def _assistant_replies(messages: Sequence[dict[str, Any]], limit: int = 4) -> list[str]:
@@ -2393,77 +2379,6 @@ def _assistant_replies(messages: Sequence[dict[str, Any]], limit: int = 4) -> li
         or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
         if (text := str(row.get("content") or row.get("texto") or "").strip())
     ][-limit:]
-
-
-def _pending_field_for_question(
-    contract: dict[str, Any], question_node_id: str | None
-) -> dict[str, Any]:
-    if not question_node_id:
-        return {}
-    return next(
-        (
-            field for field in contract.get("fields") or []
-            if str(field.get("question_node_id") or "") == str(question_node_id)
-        ),
-        {},
-    )
-
-
-def _confirmation_is_last_resort(
-    contract: dict[str, Any], confirmation: dict[str, Any],
-) -> bool:
-    """Whether the graph asks for this field to be confirmed only as a last resort."""
-    key = str(confirmation.get("field_key") or "")
-    if not key:
-        return False
-    return any(
-        str((field.get("validation") or {}).get("confirmation_policy") or "")
-        == "last_resort"
-        for field in contract.get("fields") or []
-        if str(field.get("key") or "") == key
-    )
-
-
-def _repetition_ladder(
-    *,
-    reply: str,
-    recent_replies: Sequence[str],
-    contract: dict[str, Any],
-    question_node_id: str | None,
-    prefix: str = "",
-) -> tuple[str, str]:
-    """Resolve a turn whose reply would repeat something already said.
-
-    Returns ``(reply, repetition_action)``. Until 2026-08-19 this decision was
-    binary -- emit the duplicate verbatim (``allowed_never_silent``) or say
-    nothing -- because blanking the reply on 2026-08-17 left two customers
-    with no answer at all. Repeating verbatim is what a customer experiences
-    as a broken agent, so the choice is now a ladder of published material:
-
-    1. adapt: another wording this conversation has not heard yet;
-    2. admit: the field's own published ``invalid_response``;
-    3. stop: emit nothing here and let the caller close the turn.
-
-    Every rung is authored in the graph. The runtime never writes copy, so a
-    persona with no alternatives published simply falls to the next rung.
-    """
-    question = (contract.get("questions") or {}).get(str(question_node_id or "")) or {}
-    adapted = _unrepeated_variant(question.get("paraphrases") or [], recent_replies)
-    if adapted:
-        return " ".join(part for part in (prefix, adapted) if part).strip(), "adapted_variant"
-
-    field = _pending_field_for_question(contract, question_node_id)
-    admission = str((field.get("validation") or {}).get("invalid_response") or "").strip()
-    if admission and not any(
-        conversation_repetition.is_semantic_repetition(previous, admission)
-        for previous in recent_replies
-    ):
-        return (
-            " ".join(part for part in (prefix, admission) if part).strip(),
-            "admitted_not_understood",
-        )
-
-    return prefix.strip(), "stopped_last_resort"
 
 
 def _unrepeated_variant(
@@ -2486,43 +2401,6 @@ def _unrepeated_variant(
         ):
             return candidate
     return ""
-
-
-def _repeated_pending_question_is_allowed(
-    *,
-    next_question_node_id: str | None,
-    aggregate_missing: list[dict[str, Any]],
-    asked_question_node_ids: list[str],
-    reply: str = "",
-    question_text: str = "",
-    recent_replies: list[str] | None = None,
-    max_attempts: int = 1,
-) -> bool:
-    """Allow one graph-budgeted, contextual and semantically distinct retry."""
-    if not next_question_node_id:
-        return False
-    pending = any(
-        field.get("question_node_id") == next_question_node_id
-        for field in aggregate_missing
-    )
-    if asked_question_node_ids.count(next_question_node_id) <= 0:
-        return False
-    if not reply and not question_text:
-        return bool(
-            pending
-            and asked_question_node_ids.count(next_question_node_id)
-            < 1 + max(0, min(int(max_attempts), 1))
-        )
-    result = conversation_repetition.assess_repetition(
-        current_reply=reply,
-        recent_replies=recent_replies or [],
-        question_node_id=next_question_node_id,
-        question_text=question_text,
-        asked_question_node_ids=asked_question_node_ids,
-        max_attempts=max_attempts,
-        field_pending=pending,
-    )
-    return result["passed"]
 
 
 def _active_contract_fields(
@@ -3196,7 +3074,8 @@ SYSTEM_PROMPT = (
     "Você é um SDR de verdade conversando por WhatsApp, não um "
     "formulário. Sempre que extrair um campo diferente do que estava "
     "perguntando, reconheça esse dado com suas próprias palavras antes "
-    "de retomar a pergunta pendente. Nunca ignore silenciosamente um "
+    "de escolher o próximo passo. Nunca retome uma pergunta cujo id já "
+    "esteja em asked_question_node_ids. Nunca ignore silenciosamente um "
     "dado que o cliente acabou de dar, e só reconheça o que realmente "
     "esteja em extracted_facts deste turno ou já conhecido em "
     "factual_ledger -- nunca finja ter entendido algo que não foi "
@@ -3220,21 +3099,18 @@ SYSTEM_PROMPT = (
     "turno após turno. Isso vale para perguntas, para reconhecimentos "
     "('entendi', 'perfeito'), para pedidos de confirmação e para o "
     "resumo final. Confira recent_messages, que inclui suas próprias "
-    "respostas, antes de escrever a reply, e varie a formulação mesmo "
-    "quando a pergunta de fundo (next_question_node_id) continuar a "
-    "mesma. Um prefixo vazio como 'Certo' não conta como variação, e "
+    "respostas, antes de escrever a reply. Nunca escolha um "
+    "next_question_node_id que já esteja em asked_question_node_ids; "
+    "paráfrase e ponte contextual continuam sendo repetição do campo. "
+    "Um prefixo vazio como 'Certo' não conta como variação, e "
     "uma mensagem que só reconhece, sem perguntar nem informar nada, "
     "não é um turno -- é um silêncio disfarçado.\n\n"
 
-    "Quando precisar retomar algo já dito, siga esta ordem. Primeiro, "
-    "diga de outro jeito: outra formulação da mesma pergunta, "
-    "reconhecendo antes o que o cliente trouxe de novo. Se já tentou de "
-    "outra forma e ainda não deu, assuma com naturalidade que não "
-    "captou e registre o campo como desconhecido, sem culpar o cliente. "
-    "Só em último caso pare de perguntar aquele campo e siga para o "
-    "próximo assunto pendente. Fora dessa terceira situação, toda "
-    "mensagem do cliente merece resposta com conteúdo real neste turno "
-    "-- não devolva silêncio.\n\n"
+    "Se o cliente não respondeu um campo já perguntado, não o pergunte "
+    "novamente. Responda primeiro qualquer dúvida ou informação nova e "
+    "escolha por conta própria outro tópico genuinamente pendente. Se não "
+    "houver outro tópico útil, siga naturalmente sem pergunta ou proponha "
+    "handoff; nunca preencha a reply com uma pergunta do backend.\n\n"
 
     "Quando a resposta for genuinamente ambígua entre dois ou mais "
     "produtos parecidos, ou quando um termo tiver duas leituras "
@@ -3246,23 +3122,20 @@ SYSTEM_PROMPT = (
     "quando você realmente falhou em ler o campo, não para ambiguidade "
     "do catálogo.\n\n"
 
-    "conversation_policy.question_repetition.max_attempts informa "
-    "quantas retomadas são permitidas além da pergunta inicial (somente "
-    "zero ou uma). Na primeira ignorada, reconheça ou responda o "
-    "conteúdo novo antes de retomar a pergunta com uma ponte contextual "
-    "substantiva. Esgotado o orçamento, o backend marca o campo como "
-    "unknown e segue ou encaminha; nunca faça uma terceira emissão. Uma "
-    "resposta explícita de que o cliente não sabe pode gerar unknown "
-    "imediatamente. Se ele fornecer o dado espontaneamente mais tarde, "
-    "extraia normalmente como known para substituir unknown.\n\n"
+    "conversation_policy.question_repetition.max_attempts é metadado "
+    "legado e não autoriza retomada. Cada question_node_id tem uma única "
+    "emissão por estado compatível da jornada. Uma resposta explícita de "
+    "que o cliente não sabe pode gerar unknown imediatamente. Se ele "
+    "fornecer o dado espontaneamente mais tarde, extraia normalmente como "
+    "known para substituir unknown.\n\n"
 
     "handoff_requested só pode ser true quando TODOS os campos "
     "obrigatórios do galho atual já estão em factual_ledger -- nunca "
     "proponha handoff assim que colher só o primeiro campo (por "
     "exemplo, o nome) se o galho ainda exigir outros depois dele. "
-    "Depois de colher um campo, a próxima ação é sempre perguntar o "
-    "próximo campo pendente do galho, nunca encerrar o turno oferecendo "
-    "encaminhamento antes disso.\n\n"
+    "Depois de colher um campo, escolha naturalmente outro tópico útil "
+    "ainda pendente ou siga sem pergunta; nunca repita um campo já "
+    "perguntado nem encerre oferecendo encaminhamento cedo demais.\n\n"
 
     "tempo_desde_ultima_mensagem indica quanto tempo se passou desde a "
     "última mensagem do cliente. Um intervalo de algumas horas é normal "
@@ -6161,12 +6034,16 @@ def _decide(
         )
         proof["repair_contract"] = contract
         requirements = proof["repair_requirements"]
-        if requirements:
+        retrieval_requirements = [
+            item for item in requirements
+            if item.get("kind") in {"node", "chunk"} and item.get("id")
+        ]
+        if retrieval_requirements:
             rows = supabase_client.get_graph_rag_repair_chunks(
                 publication_id=publication["id"], branch_node_id=proposal.branch_anchor_node_id,
-                requirements=requirements,
+                requirements=retrieval_requirements,
             )
-            repair_chunks = _repair_chunks(rows, requirements)
+            repair_chunks = _repair_chunks(rows, retrieval_requirements)
             if len(repair_chunks) > RAG_CHUNK_LIMIT:
                 raise RuntimeError(
                     "required graph repair package exceeds the 12-chunk prompt limit"
@@ -6182,6 +6059,21 @@ def _decide(
                                  proposal=proposal, proof=proof, repair_context_cards=repair_cards)
         return ConversationDecision(classifier="graph_proof_checker_v3", intent="repair_retrieval",
                                     route=ConversationRoute.SDR, confidence=0, lead_stage=str(context.cart.get("_lead_stage") or "novo")), response
+    if proof["repair_required"]:
+        # One model-owned repair was already attempted. Do not publish the
+        # invalid component and do not let the backend synthesize a question.
+        proof = {
+            **proof,
+            "valid": False,
+            "gating_errors": [
+                *(proof.get("gating_errors") or []),
+                "model_repair_exhausted",
+            ],
+            "errors": [
+                *(proof.get("errors") or []),
+                "model_repair_exhausted",
+            ],
+        }
     # Nao existe verbo para "estou so conversando sobre isto". Sem galho ativo e
     # sem nenhuma operacao para aplicar, `keep` e a escolha honesta do modelo, e
     # nao um defeito -- entao ele nao pode, sozinho, custar o turno. Comparar a
@@ -6469,14 +6361,9 @@ def _decide(
             collection_complete = False
             terminal_intent = None
         else:
-            reply = graph_proof_checker_v3.compose_published_question(
-                reply=reply_seed,
-                next_question_node_id=next_question_id,
-                contract=question_contract,
-                discard_unproved_questions=bool(
-                    proof.get("question_component_discarded")
-                ),
-            )
+            # The model owns every word of the reply. Question metadata is
+            # audited below, never converted into backend-authored copy.
+            reply = reply_seed
         recent_replies = _assistant_replies(context.messages)
         question_text = str(
             ((question_contract.get("questions") or {}).get(audit_question_id or "") or {}).get("text")
@@ -6509,6 +6396,26 @@ def _decide(
             and int(observation.get("repair_attempt") or 0) == 0
             and str(reply or "").strip()
         )
+        repetition_repair_exhausted = bool(
+            not repetition["passed"]
+            and int(observation.get("repair_attempt") or 0) >= 1
+        )
+        if repetition_repair_exhausted:
+            persona_policy = (
+                ((_persona_node(document) or {}).get("data") or {})
+                .get("conversation_policy") or {}
+            )
+            reply = str(
+                persona_policy.get("context_failure_handoff_reply") or ""
+            ).strip() or CONTEXT_FAILURE_HANDOFF_REPLY
+            next_question_id = None
+            terminal_intent = "conversation_repetition_after_repair"
+            confirmation_pending = False
+            post_support = False
+            qualification_complete = False
+            qualification_incomplete = False
+            collection_complete = False
+            repetition_action = "repetition_handoff"
         empty_reply_handoff = not str(reply or "").strip()
         if empty_reply_handoff:
             persona_policy = (
@@ -6637,11 +6544,13 @@ def _decide(
                 if model_proposed_next_question_node_id != next_question_id
                 else None
             ),
-            "fallback_used": bool(proof.get("fallback_used")) or empty_reply_handoff,
-            "context_failure_handoff": empty_reply_handoff,
+            "fallback_used": bool(proof.get("fallback_used")) or empty_reply_handoff
+            or repetition_repair_exhausted,
+            "context_failure_handoff": empty_reply_handoff or repetition_repair_exhausted,
             "model_proposal_errors": [
                 *(proof.get("model_proposal_errors") or []),
                 *(["empty_model_reply"] if empty_reply_handoff else []),
+                *(["conversation_repetition_after_repair"] if repetition_repair_exhausted else []),
             ],
             **(doubt or {}),
         }
@@ -6654,27 +6563,27 @@ def _decide(
                                  intent=resolved_intent,
                                  route=route, confidence=1, lead_stage="qualificado" if qualification_complete else "engajado",
                                  handoff_reason=(
-                                     "graph_context_empty_reply"
+                                     "graph_conversation_repetition"
+                                     if repetition_repair_exhausted
+                                     else "graph_context_empty_reply"
                                      if empty_reply_handoff
                                      else "graph_terminal_qualification"
                                      if terminal_intent else None
                                  ),
                                  evidence_node_ids=evidence_node_ids),
-            AgentResponse(reply_text=reply or None, role=route, evidence_node_ids=evidence_node_ids,
+            AgentResponse(reply_text=None if quality_repair_required else (reply or None),
+                          role=route, evidence_node_ids=evidence_node_ids,
                           cart_state=state,
                           handoff_required=bool(terminal_intent),
                           proposal=proposal, proof=proof),
         )
-    # A rejected model proposal may only emit a graph-owned question or a
-    # graph-owned terminal summary. Routing remains deterministic.
+    # A rejected model proposal may preserve accepted facts, but it never
+    # authorizes the backend to choose or append a qualification question.
     proof_facts = (proof.get("ledger") or {}).get("facts") or contract_facts
     fallback_askable = graph_proof_checker_v3.askable_pending_fields(
         contract, proof_facts,
     )
-    fallback_id = next(
-        (field.get("question_node_id") for field in fallback_askable if field.get("question_node_id")),
-        None,
-    )
+    fallback_id = None
     fallback_missing = graph_proof_checker_v3.pending_fields(contract, proof_facts)
 
     fallback_grouped = {
@@ -6703,78 +6612,30 @@ def _decide(
     global_proof_errors = [
         str(error) for error in proof.get("gating_errors") or []
     ]
-    context_failure_handoff = bool(global_proof_errors)
-    if context_failure_handoff:
-        # No branch/fact/question diagnostic reaches this path anymore; those
-        # are reconciled component-by-component above. What remains is a global
-        # knowledge/isolation failure. End observably with a human handoff and
-        # never commit a silent turn or an unproved commercial reply.
-        fallback_id = None
+    context_failure_handoff = True
+    # What remains after the model repair boundary is a global proof failure.
+    # End observably and never select a field on the model's behalf.
+    fallback_id = None
     fallback_complete = not fallback_unconfirmed
     fallback_incomplete = bool(fallback_unconfirmed and not fallback_askable)
 
-    # Mirror the pending_branch_confirmation guard the accepted-proposal path
-    # uses above (search this file for that name): a rejected proposal must
-    # reopen confirmation for any active branch this ledger hasn't marked
-    # completed too, not just blank out to "" whenever the journey is
-    # already post_qualification_support for whatever was confirmed first.
-    # Confirmed live 2026-08-17/18: a customer's correction to a multi-
-    # service confirmation landed here (model proposal rejected, journey
-    # already post_qualification_support) and got zero outbound reply.
-    fallback_pending_branch_confirmation = bool(
-        set(context.active_branch_node_ids) - set(context.completed_branch_node_ids)
+    fallback_confirmation_pending = False
+    fallback_post_support = False
+    fallback_terminal_intent = "context_proof_failed"
+    persona_policy = (
+        ((_persona_node(document) or {}).get("data") or {})
+        .get("conversation_policy") or {}
     )
-    fallback_post_support = bool(
-        str(context.operational_mode) == "post_qualification_support"
-        and not _explicit_change_requested(_latest_user_message(context))
-        and not fallback_pending_branch_confirmation
-    )
-    fallback_confirmation_pending = fallback_complete and not fallback_post_support
-    fallback_terminal_intent = (
-        "context_proof_failed" if context_failure_handoff
-        else "qualification_incomplete" if fallback_incomplete
-        else None
-    )
-    if context_failure_handoff:
-        persona_policy = (
-            ((_persona_node(document) or {}).get("data") or {})
-            .get("conversation_policy") or {}
-        )
-        fallback = str(
-            persona_policy.get("context_failure_handoff_reply") or ""
-        ).strip() or CONTEXT_FAILURE_HANDOFF_REPLY
-        fallback_confirmation_pending = False
-        fallback_post_support = False
-    elif fallback_terminal_intent or fallback_confirmation_pending:
-        fallback = _terminal_reply(
-            document=document,
-            contract=contract,
-            active_branch_ids=context.active_branch_node_ids
-            or [proposal.branch_anchor_node_id],
-            facts_by_key=fallback_grouped,
-            missing_fields=fallback_unconfirmed,
-            qualification_complete=fallback_complete,
-        )
-    elif fallback_post_support:
-        fallback = ""
-    else:
-        fallback = str(
-            ((contract.get("questions") or {}).get(fallback_id or "") or {})
-            .get("text") or ""
-        ).strip()
-    # A rejected proposal must not erase the deterministic answer to the
-    # customer's interruption.  Only the qualification question is subject
-    # to duplicate suppression below.
-    doubt_text = str((doubt or {}).get("text") or "").strip()
-    if doubt_text:
-        fallback = "\n\n".join(part for part in (doubt_text, fallback) if part)
+    fallback = str(
+        persona_policy.get("context_failure_handoff_reply") or ""
+    ).strip() or CONTEXT_FAILURE_HANDOFF_REPLY
     deterministic_fallback_valid = bool(fallback)
     fallback_proof = {
         **proof,
         "valid": deterministic_fallback_valid,
         "errors": [] if deterministic_fallback_valid else proof.get("errors") or [],
         "model_proposal_errors": proof.get("errors") or [],
-        "mode": "published_fallback",
+        "mode": "model_repair_exhausted_handoff",
         "repair_required": False,
         "fallback_used": True,
         "context_failure_handoff": context_failure_handoff,
@@ -6826,9 +6687,6 @@ def _decide(
             }
         } if fallback_terminal_intent else {}),
     }
-    fallback_question_text = str(
-        ((contract.get("questions") or {}).get(fallback_id or "") or {}).get("text") or ""
-    )
     fallback_repetition = conversation_repetition.assess_repetition(
         current_reply=fallback,
         recent_replies=[
@@ -6838,7 +6696,7 @@ def _decide(
             or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
         ][-4:],
         question_node_id=fallback_id,
-        question_text=fallback_question_text,
+        question_text="",
         asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
         max_attempts=_question_repetition_max_attempts(contract),
         field_pending=bool(fallback_id),
@@ -6861,7 +6719,7 @@ def _decide(
                                  if fallback_confirmation_pending
                                  else "post_qualification_support"
                                  if fallback_post_support
-                                 else "published_fallback"
+                                 else "model_repair_exhausted_handoff"
                              ),
                              route=fallback_route, confidence=0,
                              lead_stage=str(context.cart.get("_lead_stage") or "novo"),

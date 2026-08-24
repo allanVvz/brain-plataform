@@ -536,7 +536,9 @@ def test_unproved_question_text_is_not_authorized_when_selection_is_invalid():
     assert "question_not_semantically_askable" in proof["errors"]
     assert "question_not_semantically_askable" in proof["component_errors"]
     assert proof["next_question_node_id"] is None
-    assert proof["question_component_discarded"] is True
+    assert proof["question_component_invalid"] is True
+    assert proof["repair_required"] is True
+    assert proof["repair_requirements"][0]["issue"] == "question_not_semantically_askable"
 
 
 def test_invalid_question_metadata_never_discards_valid_facts_or_memory():
@@ -571,7 +573,8 @@ def test_invalid_question_metadata_never_discards_valid_facts_or_memory():
     assert proof["accepted_facts"][0]["value"] == "Ana"
     assert proof["ledger"]["facts"]["name"]["value"] == "Ana"
     assert proof["next_question_node_id"] is None
-    assert proof["question_component_discarded"] is True
+    assert proof["question_component_invalid"] is True
+    assert proof["repair_required"] is True
 
 
 def test_add_action_rejects_re_adding_an_already_active_branch():
@@ -745,7 +748,10 @@ def test_multiple_questions_are_quality_observation_not_a_global_rejection():
     assert proof["valid"] is True
     assert proof["gating_errors"] == []
     assert proof["question_count"] == 2
-    assert proof["observations"] == ["multiple_questions_in_reply"]
+    assert proof["observations"] == [
+        "unmapped_model_question",
+        "multiple_questions_in_reply",
+    ]
 
 
 def test_explicit_change_evidence_can_only_drop_an_active_branch():

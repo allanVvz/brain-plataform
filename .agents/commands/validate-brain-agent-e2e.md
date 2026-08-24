@@ -25,7 +25,7 @@ Use `$brain-agent-e2e` to audit or repair a Brain agent through the dashboard, E
 
 Before publication, verify top-down FAQ accumulation (active Persona-to-FAQ path,
 source/status and persona/agent scope). Product, Offer and Copy are compiled
-publication artifacts, never rebuilt per turn. Tock Fatal uses GraphBundle;
-Aurora legacy remains isolated until its explicit audited migration.
+publication artifacts, never rebuilt per turn. Tock Fatal and Aurora both use
+GraphBundle/runtime v3 with isolated publications, checksums, bindings and memory.
 
 Do not deploy, synchronize a remote workflow, repeat ambiguous delivery, delete history, move leads or alter bindings unless separately authorized.

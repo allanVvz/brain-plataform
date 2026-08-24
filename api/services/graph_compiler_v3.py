@@ -558,7 +558,7 @@ def _common_persona_contract(
     # Sem isto o contrato comum publicava `claims: []`, e o cliente que compra
     # perguntando ("como funciona o PPF?") recebia
     # `claim_not_authorized`/`claim_evidence_not_authorized`: a proposta do
-    # modelo era descartada inteira e o turno caia em `published_fallback`
+    # modelo era descartada inteira e o turno caia no fallback legado
     # antes de qualquer servico poder ser escolhido. Precos e regras de um
     # servico especifico continuam de fora -- so um galho os declara.
     shared_claims = [

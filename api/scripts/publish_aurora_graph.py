@@ -43,12 +43,6 @@ def _build_authored_graph() -> GraphJson:
     graph = graph_json_v21_adapter.upgrade_to_v21(legacy)
     graph = graph_conversation_contract.materialize_qualification_questions(graph)
     persona_node = next(node for node in graph.nodes if node.node_type == "persona")
-    conversation_policy = dict((persona_node.data or {}).get("conversation_policy") or {})
-    conversation_policy["question_repetition"] = {
-        **dict(conversation_policy.get("question_repetition") or {}),
-        "max_attempts": 1,
-    }
-    persona_node.data = {**dict(persona_node.data or {}), "conversation_policy": conversation_policy}
     appointment_policy = (persona_node.data or {}).get("appointment_policy") or {}
     question_ids = appointment_policy.get("field_question_node_ids") or {}
     conditional_fields = appointment_policy.get("conditional_fields") or {}

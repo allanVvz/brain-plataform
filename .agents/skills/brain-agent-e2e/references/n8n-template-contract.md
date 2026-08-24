@@ -64,7 +64,7 @@ During review, search the changed production files for newly introduced commerci
 ## Publication boundary
 
 - Before publication, validate active top-down FAQ accumulation from Persona through the hierarchy to every FAQ used as commercial evidence, including source/status and persona/agent scope.
-- Tock Fatal runs on GraphBundle. Aurora remains on its isolated legacy contract until an explicit, audited GraphBundle migration retires that debt; the template/runtime must not blend the two publication contracts.
+- Tock Fatal and Aurora both run on GraphBundle/runtime v3. Their publications, checksums, bindings and memory remain isolated; the shared template/runtime must never blend the two persona contracts.
 
 ## Required regression matrix
 

@@ -81,13 +81,6 @@
             "enabled_from": "2026-08-12T00:00:00Z",
             "after_seconds": 300
           },
-          "question_repetition": {
-            "max_attempts": 1,
-            "restart_requires": [
-              "qualification_confirmed",
-              "purchase_completed"
-            ]
-          },
           "service_clarification": {
             "add_or_switch_question": "Você quer trocar o serviço atual ou adicionar {candidate} ao pedido?",
             "retry_question": "Acho que não estou conseguindo entender direitinho o que você quer. Você quer trocar o serviço atual ou adicionar {candidate} ao pedido?",
@@ -114,7 +107,6 @@
           },
           "doubt_handling": {
             "answer_before_qualification": "Responda primeiro com a resposta factual aprovada da FAQ publicada.",
-            "continue_with_first_missing_field": "Depois da resposta, escolha naturalmente uma pergunta publicada ainda pendente, sem repetir o que já foi respondido.",
             "deferred_response": "O atendente vai te passar esse detalhe assim que concluirmos estas perguntas."
           }
         },
