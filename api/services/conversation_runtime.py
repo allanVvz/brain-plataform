@@ -859,14 +859,12 @@ def build_context(
         for node in graph.nodes
         if node.node_type in ("product", "service") and node.slug
     ]
-    try:
-        projection_nodes, _projection_edges = supabase_client.list_all_knowledge_graph(
-            persona_id=str(persona.get("id") or lead.get("persona_id") or ""),
-            limit_nodes=5000,
-        )
-    except Exception as exc:  # projection UUIDs are optional trace metadata
-        logger.warning("list_all_knowledge_graph failed: %s", exc)
-        projection_nodes = []
+    # Projection UUIDs are optional trace metadata. Loading the complete graph
+    # here used to turn every conversational turn into an unbounded authoring
+    # read (and eventually a huge PostgREST ``in(...)`` URL). Context cards are
+    # already built from the compiled graph plus bounded RAG chunks, so the
+    # production conversation path must not enumerate the authoring graph.
+    projection_nodes: list[dict[str, Any]] = []
     cards = context_cards_service.resolve_cards(
         graph=graph,
         graph_version=version,

@@ -1,6 +1,21 @@
 # Brain Platform Memory
 
-Updated: 2026-08-20
+Updated: 2026-08-24
+
+> Checkpoint positivo atual: Aurora e Tock Fatal passaram a preservar a fala
+> natural do modelo depois do proof. A Aurora demonstrou boa compreensão de
+> necessidade, memória de nome/veículo e múltiplos serviços em conversa real.
+> A pendência observada na Tock não foi falta de inteligência do modelo: uma
+> consulta de catálogo acionou a enumeração completa do grafo, gerou HTTP 414 e
+> pressão de memória no worker, enquanto o RAG não possuía FAQs autossuficientes
+> por grupo. A release de 2026-08-24 remove esse scan do caminho conversacional,
+> preserva perguntas embutidas em confirmações e adiciona navegação consultiva
+> por ProductGroup sem misturar varejo/atacado. Evidência corrente:
+> `docs/handoffs/CHECKPOINT_SDR_PRODUCAO_2026-08-24.md`.
+
+> As informações abaixo permanecem como histórico operacional. Quando houver
+> conflito de versão, checksum, lead ou estado de worker, prevalece o checkpoint
+> mais recente acima e a auditoria read-only da produção.
 
 > Estado corrente: hotfix de áudio (PR #50) foi deployado, testado ao vivo
 > via WA Validator e **revertido** — `quality_pass=false` nas duas sessões,

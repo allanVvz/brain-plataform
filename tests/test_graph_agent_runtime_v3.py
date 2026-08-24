@@ -12,7 +12,10 @@ API_ROOT = Path(__file__).resolve().parents[1] / "api"
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
-from schemas.conversation import ConversationContext, ConversationProposal, ContextCard, ExtractedFact
+from schemas.conversation import (
+    ConversationContext, ConversationProposal, ContextCard, ExtractedFact,
+    SemanticInterpretation,
+)
 from services import graph_agent_runtime_v3, graph_compiler_v3, graph_proof_checker_v3
 
 
@@ -2042,25 +2045,68 @@ def test_published_confirmation_requires_an_explicit_followup_turn(
     )
     intent_kind = "confirmation" if message == "Sim" else "rejection"
     confirmation_state = "affirm" if message == "Sim" else "reject"
-    decision, response = graph_agent_runtime_v3.decide(
-        context, model_observation={
-            "contract_probe": True,
-            "interpretation": {
-                "intents": [{"kind": intent_kind, "evidence_span": message}],
-                "state_relation": "continue",
-                "confirmation": {
-                    "state": confirmation_state,
-                    "target_ref": "qualification:current:0",
-                    "evidence_span": message,
-                },
-            },
-        },
+    reply = (
+        "Perfeito. Posso encaminhar seu atendimento para a equipe?"
+        if handoff else "Sem problema. O que você gostaria de ajustar?"
     )
+    interpretation = SemanticInterpretation.model_validate({
+        "intents": [{"kind": intent_kind, "evidence_span": message}],
+        "state_relation": "continue",
+        "confirmation": {
+            "state": confirmation_state,
+            "target_ref": "qualification:current:0",
+            "evidence_span": message,
+        },
+        "recommended_next_action": "handoff" if handoff else "clarify",
+        "reply": reply,
+        "handoff_requested": handoff,
+    })
+    result = graph_agent_runtime_v3._deterministic_confirmation_decision(
+        context, interpretation,
+    )
+    assert result is not None
+    decision, response = result
     assert decision.intent == intent
     assert decision.route.value == route
     assert response.handoff_required is handoff
     assert response.cart_state["facts"]["name"]["value"] == "Beatriz"
     assert response.proof["explicit_confirmation"] is (message == "Sim")
+    assert response.reply_text == reply
+
+
+def test_confirmation_with_customer_question_never_preempts_model_answer():
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{
+            "message_id": "msg:mixed", "role": "user",
+            "content": "sim, mas quais opções tem?",
+        }],
+        cart={}, rag_nodes=[], rag_paths=[], journey_state="awaiting_confirmation",
+        operational_mode="confirmation",
+        pending_confirmation_ref="qualification:current:0",
+    )
+    interpretation = SemanticInterpretation.model_validate({
+        "intents": [
+            {"kind": "confirmation", "evidence_span": "sim"},
+            {"kind": "commercial_question", "evidence_span": "quais opções tem"},
+        ],
+        "state_relation": "continue",
+        "confirmation": {
+            "state": "affirm", "target_ref": "qualification:current:0",
+            "evidence_span": "sim",
+        },
+        "questions": [{
+            "kind": "product_detail", "topic": "opções",
+            "entity_node_ids": [], "evidence_span": "quais opções tem",
+        }],
+        "recommended_next_action": "answer_question",
+        "reply": "Temos opções publicadas em diferentes grupos. Qual grupo você quer conhecer?",
+        "handoff_requested": False,
+    })
+    assert graph_agent_runtime_v3._deterministic_confirmation_decision(
+        context, interpretation,
+    ) is None
 
 
 def test_previously_mentioned_service_titles_is_empty_before_any_pitch():
@@ -3838,8 +3884,9 @@ def test_confirmed_branch_node_ids_covers_every_active_branch(monkeypatch):
         journey_state="awaiting_confirmation", operational_mode="confirmation",
         pending_confirmation_ref="qualification:current:0",
     )
-    decision, response = graph_agent_runtime_v3.decide(context, model_observation={
-        "interpretation": {
+    result = graph_agent_runtime_v3._deterministic_confirmation_decision(
+        context,
+        SemanticInterpretation.model_validate({
             "intents": [{"kind": "confirmation", "evidence_span": "sim"}],
             "state_relation": "continue",
             "confirmation": {
@@ -3847,8 +3894,13 @@ def test_confirmed_branch_node_ids_covers_every_active_branch(monkeypatch):
                 "target_ref": "qualification:current:0",
                 "evidence_span": "sim",
             },
-        },
-    })
+            "recommended_next_action": "handoff",
+            "reply": "Perfeito. Posso encaminhar seu atendimento para a equipe?",
+            "handoff_requested": True,
+        }),
+    )
+    assert result is not None
+    decision, response = result
     assert decision.intent == "qualification_confirmed"
     assert set(response.proof["confirmed_branch_node_ids"]) == {"branch:a", "branch:b"}
 
