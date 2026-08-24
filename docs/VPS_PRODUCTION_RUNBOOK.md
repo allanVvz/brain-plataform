@@ -137,6 +137,49 @@ bash ops/vps/rollback.sh <commit-sha>
 
 Migrations de producao precisam permanecer retrocompativeis com a imagem anterior; rollback de container nao desfaz schema.
 
+### Retomada controlada dos workers depois do deploy
+
+O workflow de producao publica API e workers com a mesma tag imutavel, mas
+mantem `KEEP_WORKERS_PAUSED=true` durante a validacao. Portanto, API saudavel e
+`audit.sh` verde nao significam que mensagens estejam sendo consumidas. A
+retomada dos workers e uma etapa operacional separada e exige autorizacao
+explicita, porque qualquer inbound ainda em `buffered` podera produzir uma
+resposta real assim que o consumidor iniciar.
+
+Antes da retomada:
+
+1. confirme a tag em `.deploy/current-tag`, health/readiness da API, bindings e
+   estado das IAs;
+2. inventarie buffers `buffered`, `processing`, `awaiting_proof` e
+   `dead_letter`; nao repita um inbound com entrega ou processamento ambiguo;
+3. confirme que nenhum commit terminal permanece em `processing`;
+4. registre os IDs tecnicos dos buffers que serao consumidos.
+
+Suba o worker com a mesma tag da API, informada literalmente a partir do
+checkpoint revisado:
+
+```bash
+IMAGE_TAG=<sha-de-.deploy/current-tag> docker compose --env-file .env.compose up -d workers
+docker compose --env-file .env.compose ps api workers
+docker inspect --format='{{.Config.Image}}' brain-ai-api-1 brain-ai-workers-1
+```
+
+Depois da retomada, acompanhe cada buffer preexistente ate um estado terminal.
+Para cada inbound, exija no maximo uma decisao, um proof valido, um commit e um
+outbound. Pare sem replay se houver `dead_letter`, proof invalido, duplicidade,
+commit preso ou outbound da persona errada. Valide tambem:
+
+```bash
+bash ops/vps/monitor.sh
+docker compose --env-file .env.compose logs --tail=200 workers
+```
+
+`ops/vps/audit.sh` valida a release enquanto os workers podem estar pausados;
+`ops/vps/monitor.sh` e a verificacao que exige o servico `workers` em execucao.
+O relatorio da release deve registrar separadamente `deploy_validated`,
+`workers_resumed`, tag da API/worker, buffers consumidos e o resultado
+`technical_pass`/`quality_pass`.
+
 ## 8. Backup, retencao e monitoramento
 
 Agende como root (ajuste caminhos):
