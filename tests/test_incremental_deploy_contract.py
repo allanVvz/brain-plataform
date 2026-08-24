@@ -41,6 +41,7 @@ def test_first_split_image_release_bootstraps_from_existing_api_registry():
 
 
 def test_abandoned_pre_pause_candidate_can_be_superseded_safely():
+    assert '"$STATE_DIR/lifecycle.json"' in DEPLOY
     assert '"$existing_stage" =~ ^(prepared|images_pulled)$' in DEPLOY
     assert '"$existing_previous" == "$CURRENT_SHA"' in DEPLOY
     assert "prepare_args+=(--force)" in DEPLOY

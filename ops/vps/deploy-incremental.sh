@@ -102,7 +102,7 @@ prepare_args=(
   --impact-class "$IMPACT"
   --pause-reason "incremental $IMPACT deployment"
 )
-if [[ -s "$STATE_DIR/release-lifecycle.json" ]]; then
+if [[ -s "$STATE_DIR/lifecycle.json" ]]; then
   existing_candidate="$(python3 ops/vps/release_lifecycle.py show --field candidate_sha 2>/dev/null || true)"
   existing_stage="$(python3 ops/vps/release_lifecycle.py show --field stage 2>/dev/null || true)"
   existing_previous="$(python3 ops/vps/release_lifecycle.py show --field previous_sha 2>/dev/null || true)"
