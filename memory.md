@@ -13,6 +13,16 @@ Updated: 2026-08-24
 > por ProductGroup sem misturar varejo/atacado. Evidência corrente:
 > `docs/handoffs/CHECKPOINT_SDR_PRODUCAO_2026-08-24.md`.
 
+> Fechamento produtivo do checkpoint: release `2d160a54f930ac3261b3c80b1c98805ff36829a8`,
+> Tock Fatal v11 (`sha256:e139c137…a9a5dc65`) e Aurora v75
+> (`sha256:3f727095…917811ec`) ativas. Smokes diretos Tock
+> `f4c93948-9385-420c-9c41-b9a676a62ffd` e Aurora
+> `8db699d9-6e29-4337-a14c-1a49b08bc602` passaram o envelope técnico em todos
+> os sete turnos. Depois da prova, leads/mensagens foram zerados e API/workers
+> ficaram ativos na mesma imagem. A consulta ampla da Tock já lista produtos
+> reais, mas ainda deve priorizar ProductGroup por meio de projeção por canal no
+> GraphBundle; não reintroduzir seleção determinística no runtime para isso.
+
 > As informações abaixo permanecem como histórico operacional. Quando houver
 > conflito de versão, checksum, lead ou estado de worker, prevalece o checkpoint
 > mais recente acima e a auditoria read-only da produção.

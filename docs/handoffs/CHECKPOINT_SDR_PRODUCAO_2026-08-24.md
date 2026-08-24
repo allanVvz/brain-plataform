@@ -79,5 +79,33 @@ existe no catálogo.
   migrar para avaliação offline;
 - decompor o runtime grande sem misturar a refatoração com conteúdo comercial.
 
-Versão, checksum, SHA, Validator e estado final dos workers são preenchidos no
-fechamento do deploy desta release.
+## Fechamento produtivo
+
+- release implantada: `2d160a54f930ac3261b3c80b1c98805ff36829a8`;
+- imagem comum API/workers: `sha256:ef1439a90e3db614e5bdbe8b18c670014db93d7b8afdba596bf368b53765f7b1`;
+- Tock Fatal ativa: GraphBundle/GraphRAG v11,
+  `sha256:e139c1370211ae59abe1624501addea6b22c9222c3d66a5964c67ce9a9a5dc65`,
+  612 chunks;
+- Aurora ativa: GraphRAG legado v75,
+  `sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec`,
+  551 chunks;
+- bindings preservados: Aurora `6386bc58-ade9-44c4-9211-0f59f23ffca5` e
+  Tock Fatal `680422f3-54e7-4a41-af38-32c576f62979`;
+- WA Validator direto: Tock `f4c93948-9385-420c-9c41-b9a676a62ffd` e Aurora
+  `8db699d9-6e29-4337-a14c-1a49b08bc602`;
+- todos os sete turnos tiveram um inbound, uma decisão, um proof válido, um
+  commit concluído e exatamente um outbound inerte;
+- leads e mensagens foram zerados depois dos smokes; API e workers ficaram
+  ativos na mesma imagem para o novo teste humano.
+
+O smoke confirmou a melhora principal: `quais opções tem` passou a recuperar e
+listar produtos reais, e `quais saias vocês têm` respondeu com a limitação do
+catálogo e uma pergunta consultiva. A Aurora respondeu riscos e lavagem de motor
+antes de continuar a qualificação. Não houve preço, estoque, prazo, data ou
+horário inventado.
+
+Ainda há uma dívida de qualidade na Tock: a FAQ geral de grupos está ligada à
+campanha, fora das branches de canal. Por isso a consulta ampla recuperou
+produtos relevantes antes da visão de ProductGroup. A correção futura é criar
+uma projeção de navegação por canal dentro do GraphBundle, em compilação, sem
+selecionar FAQ nem reconstruir a hierarquia no runtime.
