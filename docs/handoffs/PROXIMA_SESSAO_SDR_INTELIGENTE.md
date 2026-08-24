@@ -1,5 +1,12 @@
 # Handoff — tornar o SDR inteligente, humano e preparado
 
+> **Superado em 2026-08-24 como estado corrente.** Este arquivo preserva a
+> investigação histórica que levou ao runtime semantic-first. O checkpoint
+> positivo, as conversas reais mais recentes e os bloqueadores restantes estão
+> em `CHECKPOINT_SDR_PRODUCAO_2026-08-24.md`. Não voltar a implementar seleção
+> determinística de FAQ, `missing_fields[0]` ou reescrita de resposta pelo
+> proof com base nos sintomas antigos descritos abaixo.
+
 Para quem continuar. Branch `agent/sofia-vitoria-audit`, worktree
 `C:\Repositores\brain-plataform-sofia-vitoria-audit`. Estado técnico e histórico
 completo em `SESSAO_2026-08-22_SEMANTIC_RUNTIME_E_ESCOPO.md` — este documento é

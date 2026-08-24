@@ -25,7 +25,7 @@
       }
     ],
     "conversation_faq_generator": "tock_conversation_faqs_v1",
-    "conversation_faq_count": 585,
+    "conversation_faq_count": 592,
     "conversation_faq_status": "approved"
   },
   "nodes": [
@@ -47524,6 +47524,692 @@
           }
         ]
       }
+    },
+    {
+      "id": "faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
+      "node_type": "faq",
+      "slug": "blusas-bodies-camisas-e-partes-de-cima-navegacao",
+      "title": "Navegação consultiva — Blusas, bodies, camisas e partes de cima",
+      "summary": "No grupo Blusas, bodies, camisas e partes de cima, as opções publicadas são: Blusa POÁ, Blusa em POÁ — R$ 39,90, Blusa em poliamida, Blusa em ribana — lisa, Blusa em ribana — listrada, Blusa em tule, Blusa tule texturizado, Blusa térmica, Blusão de coração, Blusão em mousse — P/M e G/GG, Blusão em mousse — R$ 79,90 (variação 1), Blusão em mousse — R$ 79,90 (variação 2), Blusão em mousse — R$ 99,90, Body em suplex, Body em tule POÁ, Body estampado, Body mula manca, Body poliamida, Body rendado, Básica lisa, Camisa bicolor, Camisa com amarração, Camisa em POÁ. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+      "status": "approved",
+      "data": {
+        "question": "Quais produtos vocês têm em Blusas, bodies, camisas e partes de cima?",
+        "question_aliases": [
+          "quais produtos têm em Blusas, bodies, camisas e partes de cima",
+          "quero ver Blusas, bodies, camisas e partes de cima",
+          "me mostra as opções de Blusas, bodies, camisas e partes de cima",
+          "o que vocês têm de Blusas, bodies, camisas e partes de cima",
+          "quero algo tipo Blusa POÁ",
+          "quero algo tipo Blusa em POÁ — R$ 39,90",
+          "quero algo tipo Blusa em poliamida",
+          "quero algo tipo Blusa em ribana — lisa",
+          "quero algo tipo Blusa em ribana — listrada",
+          "quero algo tipo Blusa em tule",
+          "quero algo tipo Blusa tule texturizado",
+          "quero algo tipo Blusa térmica"
+        ],
+        "answer": "No grupo Blusas, bodies, camisas e partes de cima, as opções publicadas são: Blusa POÁ, Blusa em POÁ — R$ 39,90, Blusa em poliamida, Blusa em ribana — lisa, Blusa em ribana — listrada, Blusa em tule, Blusa tule texturizado, Blusa térmica, Blusão de coração, Blusão em mousse — P/M e G/GG, Blusão em mousse — R$ 79,90 (variação 1), Blusão em mousse — R$ 79,90 (variação 2), Blusão em mousse — R$ 99,90, Body em suplex, Body em tule POÁ, Body estampado, Body mula manca, Body poliamida, Body rendado, Básica lisa, Camisa bicolor, Camisa com amarração, Camisa em POÁ. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+        "source_node_id": "product_group:tock-blusas-bodies-camisas-e-partes-de-cima",
+        "source_node_type": "product_group",
+        "branch_path": [
+          "persona:tock-fatal",
+          "campaign:tock-catalogo-produtos",
+          "product_group:tock-blusas-bodies-camisas-e-partes-de-cima",
+          "faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao"
+        ],
+        "sources": [
+          {
+            "node_id": "product_group:tock-blusas-bodies-camisas-e-partes-de-cima",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-poa",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poliamida",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-ribana",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-ribana-1",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-tule",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-termica",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusao-de-coracao",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusao-em-mousse",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusao-em-mousse-1",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusao-em-mousse-2",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusao-em-mousse-3",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-em-suplex",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-em-tule-poa",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-estampado",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-poliamida",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-basica-lisa",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-camisa-bicolor",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-camisa-com-amarracao",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-camisa-em-poa",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          }
+        ],
+        "channel": "all",
+        "source": "tock_fatal_brand_briefing_catalogo_2026-08-21",
+        "status": "approved",
+        "metadata": {
+          "role": "knowledge_faq",
+          "generator": "tock_conversation_faqs_v1",
+          "accumulated_at_publication": true
+        },
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_accumulated_faq",
+            "evidence_node_ids": [
+              "faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "faq:tock-calcados-navegacao",
+      "node_type": "faq",
+      "slug": "calcados-navegacao",
+      "title": "Navegação consultiva — Calçados",
+      "summary": "No grupo Calçados, as opções publicadas são: Bota Comfortflex, Bota Vizzano, Bota courino, Botas, Tênis Vans, Adidas, Nike, Asics, Tênis Via Marte — branco/bege, Tênis Via Marte — preto, Tênis Via Marte — preto slip-on, Tênis Vizzano. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+      "status": "approved",
+      "data": {
+        "question": "Quais produtos vocês têm em Calçados?",
+        "question_aliases": [
+          "quais produtos têm em Calçados",
+          "quero ver Calçados",
+          "me mostra as opções de Calçados",
+          "o que vocês têm de Calçados",
+          "quero algo tipo Bota Comfortflex",
+          "quero algo tipo Bota Vizzano",
+          "quero algo tipo Bota courino",
+          "quero algo tipo Botas",
+          "quero algo tipo Tênis Vans, Adidas, Nike, Asics",
+          "quero algo tipo Tênis Via Marte — branco/bege",
+          "quero algo tipo Tênis Via Marte — preto",
+          "quero algo tipo Tênis Via Marte — preto slip-on"
+        ],
+        "answer": "No grupo Calçados, as opções publicadas são: Bota Comfortflex, Bota Vizzano, Bota courino, Botas, Tênis Vans, Adidas, Nike, Asics, Tênis Via Marte — branco/bege, Tênis Via Marte — preto, Tênis Via Marte — preto slip-on, Tênis Vizzano. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+        "source_node_id": "product_group:tock-calcados",
+        "source_node_type": "product_group",
+        "branch_path": [
+          "persona:tock-fatal",
+          "campaign:tock-catalogo-produtos",
+          "product_group:tock-calcados",
+          "faq:tock-calcados-navegacao"
+        ],
+        "sources": [
+          {
+            "node_id": "product_group:tock-calcados",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcados-bota-comfortflex",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcados-bota-vizzano",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcados-bota-courino",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcados-botas",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcados-tenis-vans-adidas-nike-asics",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcados-tenis-via-marte",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcados-tenis-via-marte-2",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcados-tenis-via-marte-1",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcados-tenis-vizzano",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          }
+        ],
+        "channel": "all",
+        "source": "tock_fatal_brand_briefing_catalogo_2026-08-21",
+        "status": "approved",
+        "metadata": {
+          "role": "knowledge_faq",
+          "generator": "tock_conversation_faqs_v1",
+          "accumulated_at_publication": true
+        },
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_accumulated_faq",
+            "evidence_node_ids": [
+              "faq:tock-calcados-navegacao"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "faq:tock-calcas-leggings-shorts-e-partes-de-baixo-navegacao",
+      "node_type": "faq",
+      "slug": "calcas-leggings-shorts-e-partes-de-baixo-navegacao",
+      "title": "Navegação consultiva — Calças, leggings, shorts e partes de baixo",
+      "summary": "No grupo Calças, leggings, shorts e partes de baixo, as opções publicadas são: Calça cargo com bolso, Calça em bengaline, Calça em modal, Calça flare em cotele, Calça flare em suplex, Calça flare jeans, Calça flare peluciada, Calça moletinho, Calça moletinho com punho, Calça perua, Legging suplex, Short saia resinada. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+      "status": "approved",
+      "data": {
+        "question": "Quais produtos vocês têm em Calças, leggings, shorts e partes de baixo?",
+        "question_aliases": [
+          "quais produtos têm em Calças, leggings, shorts e partes de baixo",
+          "quero ver Calças, leggings, shorts e partes de baixo",
+          "me mostra as opções de Calças, leggings, shorts e partes de baixo",
+          "o que vocês têm de Calças, leggings, shorts e partes de baixo",
+          "quero algo tipo Calça cargo com bolso",
+          "quero algo tipo Calça em bengaline",
+          "quero algo tipo Calça em modal",
+          "quero algo tipo Calça flare em cotele",
+          "quero algo tipo Calça flare em suplex",
+          "quero algo tipo Calça flare jeans",
+          "quero algo tipo Calça flare peluciada",
+          "quero algo tipo Calça moletinho"
+        ],
+        "answer": "No grupo Calças, leggings, shorts e partes de baixo, as opções publicadas são: Calça cargo com bolso, Calça em bengaline, Calça em modal, Calça flare em cotele, Calça flare em suplex, Calça flare jeans, Calça flare peluciada, Calça moletinho, Calça moletinho com punho, Calça perua, Legging suplex, Short saia resinada. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+        "source_node_id": "product_group:tock-calcas-leggings-shorts-e-partes-de-baixo",
+        "source_node_type": "product_group",
+        "branch_path": [
+          "persona:tock-fatal",
+          "campaign:tock-catalogo-produtos",
+          "product_group:tock-calcas-leggings-shorts-e-partes-de-baixo",
+          "faq:tock-calcas-leggings-shorts-e-partes-de-baixo-navegacao"
+        ],
+        "sources": [
+          {
+            "node_id": "product_group:tock-calcas-leggings-shorts-e-partes-de-baixo",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-cargo-com-bolso",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-em-bengaline",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-em-modal",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-flare-em-cotele",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-flare-em-suplex",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-flare-jeans",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-flare-peluciada",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-moletinho",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-moletinho-com-punho",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-perua",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-legging-suplex",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-short-saia-resinada",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          }
+        ],
+        "channel": "all",
+        "source": "tock_fatal_brand_briefing_catalogo_2026-08-21",
+        "status": "approved",
+        "metadata": {
+          "role": "knowledge_faq",
+          "generator": "tock_conversation_faqs_v1",
+          "accumulated_at_publication": true
+        },
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_accumulated_faq",
+            "evidence_node_ids": [
+              "faq:tock-calcas-leggings-shorts-e-partes-de-baixo-navegacao"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "faq:tock-casacos-jaquetas-cardigans-e-sobreposicoes-navegacao",
+      "node_type": "faq",
+      "slug": "casacos-jaquetas-cardigans-e-sobreposicoes-navegacao",
+      "title": "Navegação consultiva — Casacos, jaquetas, cardigans e sobreposições",
+      "summary": "No grupo Casacos, jaquetas, cardigans e sobreposições, as opções publicadas são: Cardigan pelinho, Casaco com saia, Casaco em lã batida, Casaco em modal plus size, Casaco plus em lãzinha, Jaqueta gominho plus size, Pala em modal, Pala em mousse. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+      "status": "approved",
+      "data": {
+        "question": "Quais produtos vocês têm em Casacos, jaquetas, cardigans e sobreposições?",
+        "question_aliases": [
+          "quais produtos têm em Casacos, jaquetas, cardigans e sobreposições",
+          "quero ver Casacos, jaquetas, cardigans e sobreposições",
+          "me mostra as opções de Casacos, jaquetas, cardigans e sobreposições",
+          "o que vocês têm de Casacos, jaquetas, cardigans e sobreposições",
+          "quero algo tipo Cardigan pelinho",
+          "quero algo tipo Casaco com saia",
+          "quero algo tipo Casaco em lã batida",
+          "quero algo tipo Casaco em modal plus size",
+          "quero algo tipo Casaco plus em lãzinha",
+          "quero algo tipo Jaqueta gominho plus size",
+          "quero algo tipo Pala em modal",
+          "quero algo tipo Pala em mousse"
+        ],
+        "answer": "No grupo Casacos, jaquetas, cardigans e sobreposições, as opções publicadas são: Cardigan pelinho, Casaco com saia, Casaco em lã batida, Casaco em modal plus size, Casaco plus em lãzinha, Jaqueta gominho plus size, Pala em modal, Pala em mousse. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+        "source_node_id": "product_group:tock-casacos-jaquetas-cardigans-e-sobreposicoes",
+        "source_node_type": "product_group",
+        "branch_path": [
+          "persona:tock-fatal",
+          "campaign:tock-catalogo-produtos",
+          "product_group:tock-casacos-jaquetas-cardigans-e-sobreposicoes",
+          "faq:tock-casacos-jaquetas-cardigans-e-sobreposicoes-navegacao"
+        ],
+        "sources": [
+          {
+            "node_id": "product_group:tock-casacos-jaquetas-cardigans-e-sobreposicoes",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-casacos-jaquetas-cardigans-e-sobreposicoes-cardigan-pelinho",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-casacos-jaquetas-cardigans-e-sobreposicoes-casaco-com-saia",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-casacos-jaquetas-cardigans-e-sobreposicoes-casaco-em-la-batida",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-casacos-jaquetas-cardigans-e-sobreposicoes-casaco-em-modal-plus-size",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-casacos-jaquetas-cardigans-e-sobreposicoes-casaco-plus-em-lazinha",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-casacos-jaquetas-cardigans-e-sobreposicoes-jaqueta-gominho-plus-size",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-casacos-jaquetas-cardigans-e-sobreposicoes-pala-em-modal",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-casacos-jaquetas-cardigans-e-sobreposicoes-pala-em-mousse",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          }
+        ],
+        "channel": "all",
+        "source": "tock_fatal_brand_briefing_catalogo_2026-08-21",
+        "status": "approved",
+        "metadata": {
+          "role": "knowledge_faq",
+          "generator": "tock_conversation_faqs_v1",
+          "accumulated_at_publication": true
+        },
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_accumulated_faq",
+            "evidence_node_ids": [
+              "faq:tock-casacos-jaquetas-cardigans-e-sobreposicoes-navegacao"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "faq:tock-conjuntos-navegacao",
+      "node_type": "faq",
+      "slug": "conjuntos-navegacao",
+      "title": "Navegação consultiva — Conjuntos",
+      "summary": "No grupo Conjuntos, as opções publicadas são: Conjunto camisa e colete, Conjunto canelado, Conjunto em cotele, Conjunto em modal, Conjunto em modal manga morcego, Conjunto em mousse — R$ 169,90, Conjunto em mousse — R$ 189,90, Conjunto em suede. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+      "status": "approved",
+      "data": {
+        "question": "Quais produtos vocês têm em Conjuntos?",
+        "question_aliases": [
+          "quais produtos têm em Conjuntos",
+          "quero ver Conjuntos",
+          "me mostra as opções de Conjuntos",
+          "o que vocês têm de Conjuntos",
+          "quero algo tipo Conjunto camisa e colete",
+          "quero algo tipo Conjunto canelado",
+          "quero algo tipo Conjunto em cotele",
+          "quero algo tipo Conjunto em modal",
+          "quero algo tipo Conjunto em modal manga morcego",
+          "quero algo tipo Conjunto em mousse — R$ 169,90",
+          "quero algo tipo Conjunto em mousse — R$ 189,90",
+          "quero algo tipo Conjunto em suede"
+        ],
+        "answer": "No grupo Conjuntos, as opções publicadas são: Conjunto camisa e colete, Conjunto canelado, Conjunto em cotele, Conjunto em modal, Conjunto em modal manga morcego, Conjunto em mousse — R$ 169,90, Conjunto em mousse — R$ 189,90, Conjunto em suede. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+        "source_node_id": "product_group:tock-conjuntos",
+        "source_node_type": "product_group",
+        "branch_path": [
+          "persona:tock-fatal",
+          "campaign:tock-catalogo-produtos",
+          "product_group:tock-conjuntos",
+          "faq:tock-conjuntos-navegacao"
+        ],
+        "sources": [
+          {
+            "node_id": "product_group:tock-conjuntos",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-conjuntos-conjunto-camisa-e-colete",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-conjuntos-conjunto-canelado",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-conjuntos-conjunto-em-cotele",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-conjuntos-conjunto-em-modal",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-conjuntos-conjunto-em-modal-manga-morcego",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-conjuntos-conjunto-em-mousse",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-conjuntos-conjunto-em-mousse-1",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-conjuntos-conjunto-em-suede",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          }
+        ],
+        "channel": "all",
+        "source": "tock_fatal_brand_briefing_catalogo_2026-08-21",
+        "status": "approved",
+        "metadata": {
+          "role": "knowledge_faq",
+          "generator": "tock_conversation_faqs_v1",
+          "accumulated_at_publication": true
+        },
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_accumulated_faq",
+            "evidence_node_ids": [
+              "faq:tock-conjuntos-navegacao"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "faq:tock-infantil-masculino-e-acessorios-navegacao",
+      "node_type": "faq",
+      "slug": "infantil-masculino-e-acessorios-navegacao",
+      "title": "Navegação consultiva — Infantil, masculino e acessórios",
+      "summary": "No grupo Infantil, masculino e acessórios, as opções publicadas são: Blusão masculino, Pijama infantil, Óculos de sol. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+      "status": "approved",
+      "data": {
+        "question": "Quais produtos vocês têm em Infantil, masculino e acessórios?",
+        "question_aliases": [
+          "quais produtos têm em Infantil, masculino e acessórios",
+          "quero ver Infantil, masculino e acessórios",
+          "me mostra as opções de Infantil, masculino e acessórios",
+          "o que vocês têm de Infantil, masculino e acessórios",
+          "quero algo tipo Blusão masculino",
+          "quero algo tipo Pijama infantil",
+          "quero algo tipo Óculos de sol"
+        ],
+        "answer": "No grupo Infantil, masculino e acessórios, as opções publicadas são: Blusão masculino, Pijama infantil, Óculos de sol. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+        "source_node_id": "product_group:tock-infantil-masculino-e-acessorios",
+        "source_node_type": "product_group",
+        "branch_path": [
+          "persona:tock-fatal",
+          "campaign:tock-catalogo-produtos",
+          "product_group:tock-infantil-masculino-e-acessorios",
+          "faq:tock-infantil-masculino-e-acessorios-navegacao"
+        ],
+        "sources": [
+          {
+            "node_id": "product_group:tock-infantil-masculino-e-acessorios",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-infantil-masculino-e-acessorios-blusao-masculino",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-infantil-masculino-e-acessorios-pijama-infantil",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-infantil-masculino-e-acessorios-oculos-de-sol",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          }
+        ],
+        "channel": "all",
+        "source": "tock_fatal_brand_briefing_catalogo_2026-08-21",
+        "status": "approved",
+        "metadata": {
+          "role": "knowledge_faq",
+          "generator": "tock_conversation_faqs_v1",
+          "accumulated_at_publication": true
+        },
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_accumulated_faq",
+            "evidence_node_ids": [
+              "faq:tock-infantil-masculino-e-acessorios-navegacao"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "faq:tock-vestidos-navegacao",
+      "node_type": "faq",
+      "slug": "vestidos-navegacao",
+      "title": "Navegação consultiva — Vestidos",
+      "summary": "No grupo Vestidos, as opções publicadas são: Vestido POÁ, Vestido canelado com fecho, Vestido canelado gola alta — azul, Vestido canelado gola alta — preto, Vestido decote quadrado, Vestido drapeado, Vestido em modal, Vestido em mousse — R$ 129,90, Vestido em mousse — R$ 159,90, Vestido gola quadrada. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+      "status": "approved",
+      "data": {
+        "question": "Quais produtos vocês têm em Vestidos?",
+        "question_aliases": [
+          "quais produtos têm em Vestidos",
+          "quero ver Vestidos",
+          "me mostra as opções de Vestidos",
+          "o que vocês têm de Vestidos",
+          "quero algo tipo Vestido POÁ",
+          "quero algo tipo Vestido canelado com fecho",
+          "quero algo tipo Vestido canelado gola alta — azul",
+          "quero algo tipo Vestido canelado gola alta — preto",
+          "quero algo tipo Vestido decote quadrado",
+          "quero algo tipo Vestido drapeado",
+          "quero algo tipo Vestido em modal",
+          "quero algo tipo Vestido em mousse — R$ 129,90"
+        ],
+        "answer": "No grupo Vestidos, as opções publicadas são: Vestido POÁ, Vestido canelado com fecho, Vestido canelado gola alta — azul, Vestido canelado gola alta — preto, Vestido decote quadrado, Vestido drapeado, Vestido em modal, Vestido em mousse — R$ 129,90, Vestido em mousse — R$ 159,90, Vestido gola quadrada. A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar.",
+        "source_node_id": "product_group:tock-vestidos",
+        "source_node_type": "product_group",
+        "branch_path": [
+          "persona:tock-fatal",
+          "campaign:tock-catalogo-produtos",
+          "product_group:tock-vestidos",
+          "faq:tock-vestidos-navegacao"
+        ],
+        "sources": [
+          {
+            "node_id": "product_group:tock-vestidos",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-vestidos-vestido-poa",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-vestidos-vestido-canelado-com-fecho",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-vestidos-vestido-canelado-gola-alta",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-vestidos-vestido-canelado-gola-alta-1",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-vestidos-vestido-decote-quadrado",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-vestidos-vestido-drapeado",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-vestidos-vestido-em-modal",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-vestidos-vestido-em-mousse",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-vestidos-vestido-em-mousse-1",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          },
+          {
+            "node_id": "product:tock-vestidos-vestido-gola-quadrada",
+            "source": "tock_fatal_brand_briefing_catalogo_2026-08-21"
+          }
+        ],
+        "channel": "all",
+        "source": "tock_fatal_brand_briefing_catalogo_2026-08-21",
+        "status": "approved",
+        "metadata": {
+          "role": "knowledge_faq",
+          "generator": "tock_conversation_faqs_v1",
+          "accumulated_at_publication": true
+        },
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_accumulated_faq",
+            "evidence_node_ids": [
+              "faq:tock-vestidos-navegacao"
+            ]
+          }
+        ]
+      }
     }
   ],
   "edges": [
@@ -63415,6 +64101,132 @@
     {
       "id": "edge:publishes:faq:tock-catalogo-grupos:embed:tock-default",
       "source": "faq:tock-catalogo-grupos",
+      "target": "embed:tock-default",
+      "relation_type": "publishes_to",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:contains:product_group:tock-blusas-bodies-camisas-e-partes-de-cima:faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
+      "source": "product_group:tock-blusas-bodies-camisas-e-partes-de-cima",
+      "target": "faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
+      "relation_type": "contains",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:publishes:faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao:embed:tock-default",
+      "source": "faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
+      "target": "embed:tock-default",
+      "relation_type": "publishes_to",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:contains:product_group:tock-calcados:faq:tock-calcados-navegacao",
+      "source": "product_group:tock-calcados",
+      "target": "faq:tock-calcados-navegacao",
+      "relation_type": "contains",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:publishes:faq:tock-calcados-navegacao:embed:tock-default",
+      "source": "faq:tock-calcados-navegacao",
+      "target": "embed:tock-default",
+      "relation_type": "publishes_to",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:contains:product_group:tock-calcas-leggings-shorts-e-partes-de-baixo:faq:tock-calcas-leggings-shorts-e-partes-de-baixo-navegacao",
+      "source": "product_group:tock-calcas-leggings-shorts-e-partes-de-baixo",
+      "target": "faq:tock-calcas-leggings-shorts-e-partes-de-baixo-navegacao",
+      "relation_type": "contains",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:publishes:faq:tock-calcas-leggings-shorts-e-partes-de-baixo-navegacao:embed:tock-default",
+      "source": "faq:tock-calcas-leggings-shorts-e-partes-de-baixo-navegacao",
+      "target": "embed:tock-default",
+      "relation_type": "publishes_to",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:contains:product_group:tock-casacos-jaquetas-cardigans-e-sobreposicoes:faq:tock-casacos-jaquetas-cardigans-e-sobreposicoes-navegacao",
+      "source": "product_group:tock-casacos-jaquetas-cardigans-e-sobreposicoes",
+      "target": "faq:tock-casacos-jaquetas-cardigans-e-sobreposicoes-navegacao",
+      "relation_type": "contains",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:publishes:faq:tock-casacos-jaquetas-cardigans-e-sobreposicoes-navegacao:embed:tock-default",
+      "source": "faq:tock-casacos-jaquetas-cardigans-e-sobreposicoes-navegacao",
+      "target": "embed:tock-default",
+      "relation_type": "publishes_to",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:contains:product_group:tock-conjuntos:faq:tock-conjuntos-navegacao",
+      "source": "product_group:tock-conjuntos",
+      "target": "faq:tock-conjuntos-navegacao",
+      "relation_type": "contains",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:publishes:faq:tock-conjuntos-navegacao:embed:tock-default",
+      "source": "faq:tock-conjuntos-navegacao",
+      "target": "embed:tock-default",
+      "relation_type": "publishes_to",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:contains:product_group:tock-infantil-masculino-e-acessorios:faq:tock-infantil-masculino-e-acessorios-navegacao",
+      "source": "product_group:tock-infantil-masculino-e-acessorios",
+      "target": "faq:tock-infantil-masculino-e-acessorios-navegacao",
+      "relation_type": "contains",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:publishes:faq:tock-infantil-masculino-e-acessorios-navegacao:embed:tock-default",
+      "source": "faq:tock-infantil-masculino-e-acessorios-navegacao",
+      "target": "embed:tock-default",
+      "relation_type": "publishes_to",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:contains:product_group:tock-vestidos:faq:tock-vestidos-navegacao",
+      "source": "product_group:tock-vestidos",
+      "target": "faq:tock-vestidos-navegacao",
+      "relation_type": "contains",
+      "metadata": {
+        "generator": "tock_conversation_faqs_v1"
+      }
+    },
+    {
+      "id": "edge:publishes:faq:tock-vestidos-navegacao:embed:tock-default",
+      "source": "faq:tock-vestidos-navegacao",
       "target": "embed:tock-default",
       "relation_type": "publishes_to",
       "metadata": {

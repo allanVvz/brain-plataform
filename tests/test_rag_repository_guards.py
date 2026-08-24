@@ -187,5 +187,5 @@ def test_graph_rag_recovers_group_overview_for_unaccented_broad_query(monkeypatc
     )
 
     assert rows[0]["source_node_id"] == "faq:catalog-groups"
-    assert client.searches[0][2] == "opcoes OR quais OR tem"
+    assert client.searches[0][2] == "opcoes"
     assert ("knowledge_rag_chunks", 64) in client.limits

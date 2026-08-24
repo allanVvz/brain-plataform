@@ -159,3 +159,17 @@ Nenhum nome de persona, produto, marca, público ou frase comercial entra em
 `api/routes`, `api/services`, `api/core`, `api/workers` (AGENTS.md §26).
 Catálogo, aliases e valores permitidos vêm do Graph JSON publicado. O validador
 novo é, por construção, agnóstico de persona.
+
+## Checkpoint produtivo de 2026-08-24
+
+O fluxo validado continua simples: busca RAG limitada e filtrada, chunks no
+prompt, resposta livre do modelo, proof do envelope e commit exactly-once. Uma
+confirmação que também contém uma dúvida não pode antecipar o handoff nem trocar
+a resposta pela copy terminal. O texto aprovado pelo proof permanece idêntico;
+o runtime só aplica os componentes estruturais válidos.
+
+O runtime conversacional também não enumera `knowledge_nodes`/`knowledge_edges`
+para resolver metadados opcionais. Essa projeção é responsabilidade de autoria,
+compilação e publicação. A leitura completa no turno gerou HTTP 414 e pressão de
+memória em produção; os context cards agora usam apenas o grafo compilado e os
+chunks RAG limitados.

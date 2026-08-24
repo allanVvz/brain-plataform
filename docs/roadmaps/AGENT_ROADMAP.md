@@ -79,12 +79,59 @@ paralelo seguro.
 | 0 | Higiene do repositório e precedência de documentos | **concluído 2026-08-19** | `deprecation-sweeper` |
 | 1 | Publisher genérico, PublicationPlan, embeddings incrementais | **em progresso — GraphBundle + PublicationPlan + staging/ativação em duas fases já existem e publicaram a Tock Fatal real; falta embeddings incrementais por chunk e o publisher completo de edição/remoção** | `bundle-migrator`, `graph-publisher`, `release-gate` |
 | 2 | Cards editáveis alteram o agente de verdade | a fazer | `card-editor` |
+| 2a | Ordem visual e editável das perguntas de qualificação, integrada à Sofia | **a fazer — prioridade de autoria; sem tornar a conversa um roteiro rígido** | `card-editor`, `graph-publisher` |
 | 3 | Sofia produz dados declarativos, não código | a fazer | `faq-coverage`, `sdr-evaluator` |
 | 4 | Tock Fatal nasce no pipeline novo | **em progresso — v8 ativa (182 nós, catálogo estrutural sem preço); falta escopo de ramo real e os 220 nós comerciais — ver item 4a e a seção "Runtime semantic-first" (2026-08-22)** | `graph-publisher` |
 | 5 | n8n estável e desacoplado do conteúdo | a fazer | — |
 | 6 | Aurora migra para o bundle | a fazer | `bundle-migrator` |
 | 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20; decisão nova 2026-08-22: escopo de conhecimento por agente via cards Embedded — ver seção própria abaixo** | `graph-publisher`, `card-editor` |
 | 8 | Runtime semantic-first (interpretação pelo modelo, prova pelo backend) | **em progresso 2026-08-22, branch `agent/sofia-vitoria-audit` — ver seção própria** | `graph-publisher` |
+| 8a | Navegação consultiva de catálogo e mídia no SDR | **FAQ por ProductGroup entregue no candidato 2026-08-24; falta assets/fotos/vídeos/links e avaliação offline de qualidade** | `faq-coverage`, `sdr-evaluator` |
+
+### 2a — Ordem visual das perguntas e autoria pela Sofia
+
+O editor do grafo deve permitir ordenar visualmente as perguntas de
+qualificação dentro de cada Persona, Audience, produto ou serviço. A ordem
+vertical apresentada na tree deve corresponder à preferência declarada em
+`qualification.fields[]`, preservando `question_node_id`, `depends_on`,
+`priority`, fonte e status. Arrastar uma pergunta para cima ou para baixo deve
+gerar um patch declarativo no grafo existente; não criar tabela, campo
+persistente paralelo nem regra por persona.
+
+Regras de produto e autoria:
+
+- a UI mostra uma prévia numerada da sequência por branch e permite reordenar
+  por drag-and-drop;
+- a posição visual livre só altera a semântica quando o operador salva/aprova
+  a nova ordem; o layout não pode mudar o atendimento silenciosamente;
+- dependências continuam soberanas: a UI bloqueia ou explica uma ordem em que
+  uma pergunta apareça antes do campo declarado em `depends_on`;
+- fatos já conhecidos, campos recusados e perguntas respondidas são pulados;
+- a ordem é uma preferência entre perguntas atualmente elegíveis, não uma
+  volta ao `missing_fields[0]`: o modelo ainda pode escolher outra pergunta
+  pendente e permitida, responder uma dúvida primeiro e variar a linguagem;
+- o proof valida que a pergunta escolhida pertence ao conjunto pendente e tem
+  dependências satisfeitas, sem substituir a resposta do modelo.
+
+A Sofia deve conseguir criar, revisar e reordenar essa sequência por linguagem
+natural, por exemplo: "pergunte primeiro se é uso próprio ou revenda e deixe
+volume por último". Antes de salvar, ela apresenta o diff `ordem anterior →
+ordem proposta`, dependências afetadas, nodes/edges envolvidos e perguntas sem
+fonte ou sem `question_node_id`. A mudança segue o mesmo PublicationPlan, CAS,
+checksum e aprovação humana dos demais cards.
+
+Gate de compilação e aceite:
+
+1. compilar a ordem por topological sort de `depends_on`, usando a sequência
+   visual declarada e `priority` apenas como desempate;
+2. rejeitar ciclos, dependência ausente, pergunta fora da branch ou mistura de
+   persona/canal;
+3. mostrar no dry-run a sequência final de cada branch e marcar como breaking
+   change quando a ordem publicada for alterada;
+4. provar em teste que reordenar visualmente muda o contrato compilado e o
+   checksum, mas não muda fatos, copy, Embedded ou outro fluxo;
+5. manter Aurora legado e Tock Fatal GraphBundle separados até a migração
+   explícita da Aurora.
 
 ### Progresso local do pipeline novo — 2026-08-20
 

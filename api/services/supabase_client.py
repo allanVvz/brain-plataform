@@ -4091,15 +4091,27 @@ def _rag_row_matches_agent(row: dict, agent_slug: str | None) -> bool:
     return expected in {value.strip().lower() for value in explicit}
 
 
-def _rag_terms(value: str) -> set[str]:
+_RAG_LEXICAL_STOPWORDS = {
+    "a", "as", "ao", "aos", "com", "da", "das", "de", "do", "dos",
+    "e", "em", "eu", "me", "o", "os", "para", "por", "pra", "pro",
+    "algo", "busco", "procurando", "procuro", "que", "qual", "quais",
+    "quero", "queria", "tem", "tenho", "tipo", "um", "uma", "voce", "voces",
+}
+
+
+def _rag_terms(value: str, *, meaningful_only: bool = False) -> set[str]:
     normalized = unicodedata.normalize("NFKD", value or "")
     normalized = "".join(
         ch for ch in normalized if not unicodedata.combining(ch)
     ).lower()
-    return {
+    terms = {
         part for part in re.findall(r"[a-z0-9]+", normalized)
         if len(part) > 1
     }
+    if meaningful_only:
+        meaningful = terms - _RAG_LEXICAL_STOPWORDS
+        return meaningful or terms
+    return terms
 
 
 def _accent_insensitive_rag_candidates(
@@ -4112,7 +4124,8 @@ def _accent_insensitive_rag_candidates(
     fallback keeps retrieval useful for informal WhatsApp spelling while still
     returning RAG chunks (never a canonical response chosen by the runtime).
     """
-    terms = _rag_terms(query)
+    all_terms = _rag_terms(query)
+    terms = _rag_terms(query, meaningful_only=True)
     if not terms:
         return []
     normalized_query = " ".join(sorted(terms))
@@ -4131,9 +4144,10 @@ def _accent_insensitive_rag_candidates(
         if not overlap:
             continue
         coverage = overlap / max(1, len(terms))
+        context_coverage = len(all_terms & text_terms) / max(1, len(all_terms))
         # Coverage is intentionally stronger than the structural tie score so
         # an exact catalog/group chunk survives the later diversity reranker.
-        score = 1.0 + coverage
+        score = 1.0 + coverage + (context_coverage * 0.25)
         candidate = {
             **row,
             "chunk_id": row.get("chunk_id") or row.get("id"),
@@ -4783,7 +4797,7 @@ def search_graph_rag_v3(
         row for row in (result.data or [])
         if _rag_row_matches_agent(row, agent_slug)
     ]
-    query_terms = _rag_terms(query)
+    query_terms = _rag_terms(query, meaningful_only=True)
     best_overlap = max(
         (
             len(

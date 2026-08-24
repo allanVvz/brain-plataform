@@ -552,6 +552,25 @@ def test_build_context_survives_rag_search_failure(monkeypatch):
     assert context.rag_chunks == []
 
 
+def test_build_context_never_enumerates_the_authoring_graph(monkeypatch):
+    from services import supabase_client
+
+    _mock_build_context_deps(monkeypatch)
+    monkeypatch.setattr(
+        supabase_client,
+        "list_all_knowledge_graph",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("conversation runtime must not scan the authoring graph")
+        ),
+    )
+
+    context = conversation_runtime.build_context(
+        persona_slug="aurora", lead_ref=23, message="Quais opcoes existem?",
+    )
+
+    assert context.persona_slug == "aurora"
+
+
 def test_graph_publication_preserves_collected_appointment_facts(monkeypatch):
     """A new graph version must rebind policy, not erase customer answers."""
     from services import supabase_client

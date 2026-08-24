@@ -3018,38 +3018,6 @@ def _explicit_change_requested(message: str) -> bool:
     )
 
 
-def _qualification_copy(contract: dict[str, Any]) -> dict[str, Any]:
-    return ((contract.get("conversation_policy") or {}).get("qualification") or {})
-
-
-def _render_qualification_template(
-    template: Any,
-    *,
-    informed_fields: str = "",
-    missing_fields: str = "",
-) -> str:
-    rendered = str(template or "").strip()
-    return (
-        rendered.replace("{informed_fields}", informed_fields)
-        .replace("{missing_fields}", missing_fields)
-        .strip()
-    )
-
-
-def _completion_reply(contract: dict[str, Any]) -> str:
-    reply = str(_qualification_copy(contract).get("completion_message") or "").strip()
-    if not reply:
-        raise RuntimeError("published graph missing qualification completion_message")
-    return reply
-
-
-def _correction_prompt(contract: dict[str, Any]) -> str:
-    reply = str(_qualification_copy(contract).get("correction_prompt") or "").strip()
-    if not reply:
-        raise RuntimeError("published graph missing qualification correction_prompt")
-    return reply
-
-
 def _is_agent_message(row: dict[str, Any]) -> bool:
     return (
         str(row.get("role") or "") == "assistant"
@@ -4308,8 +4276,22 @@ def _deterministic_confirmation_decision(
         return None
     if interpretation is None:
         return None
-    if semantic_conversation_policy.confirms_pending(interpretation, context):
-        reply = _completion_reply(context.graph_contract)
+    # A confirmation may share the same message with a product/service doubt.
+    # In that case the model must answer the doubt before any terminal handoff;
+    # treating the single confirmation component as the whole turn caused a
+    # correct catalog question to be silently replaced in production.
+    if interpretation.questions:
+        return None
+    if (
+        semantic_conversation_policy.confirms_pending(interpretation, context)
+        and interpretation.handoff_requested
+        and interpretation.recommended_next_action.value in {"handoff", "close"}
+    ):
+        # The runtime owns the state transition, never the wording. Proof has
+        # validated the model envelope already, so preserve the reply exactly.
+        reply = interpretation.reply
+        if not str(reply or "").strip():
+            return None
         state = {
             **context.cart,
             "sdr_state": "handed_off",
@@ -4321,14 +4303,14 @@ def _deterministic_confirmation_decision(
         proof = {
             "valid": True,
             "errors": [],
-            "mode": "deterministic_confirmation",
+            "mode": "model_confirmation_handoff",
             "explicit_confirmation": True,
             "missing_fields": [],
             "qualification_complete": True,
             "qualification_incomplete": False,
             "accepted_facts": [],
             "confirmation_state": "qualified_confirmed",
-            "model_calls": 0,
+            "model_calls": 1,
             # Every offering (service or product) active on this ledger just
             # had its confirmation cycle accepted -- stamped 'completed' by
             # commit_graph_turn_and_outbox_v3 (migration 128) so a later
@@ -4355,12 +4337,15 @@ def _deterministic_confirmation_decision(
                 handoff_required=True,
                 proof=proof,
                 token_usage={
-                    "model_calls": 0, "repair_calls": 0, "prompt_tokens": 0,
+                    "model_calls": 1, "repair_calls": 0, "prompt_tokens": 0,
                     "completion_tokens": 0, "total_tokens": 0,
                 },
             ),
         )
     if semantic_conversation_policy.rejects_pending(interpretation, context):
+        reply = interpretation.reply
+        if not str(reply or "").strip():
+            return None
         state = {**context.cart, "sdr_state": "collecting"}
         return (
             ConversationDecision(
@@ -4371,7 +4356,7 @@ def _deterministic_confirmation_decision(
                 lead_stage=str(context.cart.get("_lead_stage") or "engajado"),
             ),
             AgentResponse(
-                reply_text=_correction_prompt(context.graph_contract),
+                reply_text=reply,
                 role=ConversationRoute.SDR,
                 cart_state=state,
                 handoff_required=False,

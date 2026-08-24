@@ -120,6 +120,25 @@ clarificação neutra ou faz handoff seguro quando a política publicada autoriz
 falha de retrieval não cria fato comercial, FAQ selecionada por algoritmo ou
 resposta substituta.
 
+### Confirmação não é prioridade sobre uma dúvida
+
+O componente `confirmation` continua apto a fechar o ledger, mas somente quando
+o modelo recomenda handoff/close, pede o handoff e a mesma mensagem não contém
+uma pergunta comercial. Se houver pergunta, a interpretação segue pelo caminho
+normal para que os chunks recuperados sustentem primeiro a resposta. Em ambos os
+casos, a transição pode alterar rota e metadados, nunca o texto do modelo.
+
+### Dívida técnica registrada
+
+- renomear progressivamente `service_*` para `branch/offering`, preservando as
+  fachadas legadas enquanto produtos, públicos e serviços compartilham anchors;
+- decompor o runtime grande em recuperação, memória, reconciliação, proof,
+  handoff e orquestração;
+- transformar proof em serviço de evidência/isolamento sem composição de fala;
+- mover repetição e qualidade estilística para avaliação offline;
+- suportar assets, fotos, vídeos e links publicados como chunks multimodais,
+  sem carregar catálogo completo no prompt.
+
 O template canônico é
 `api/n8n-workflows/persona-conversation-template.json` (`graph_agentic_v3`) e
 continua idêntico para todas as personas. Somente bindings técnicos são

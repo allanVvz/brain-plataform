@@ -286,6 +286,82 @@ def generate(bundle: dict[str, Any], *, approved: bool) -> dict[str, Any]:
         },
     ])
 
+    # One channel-neutral navigation FAQ per published ProductGroup gives the
+    # vector search a self-contained catalog answer before a channel-specific
+    # Offer is known. Prices and commercial conditions stay exclusively in the
+    # descendant Offer/Copy FAQs, so retail and wholesale never mix here.
+    products_by_group: dict[str, list[dict[str, Any]]] = {}
+    for product_id, group_id in group_by_product.items():
+        product = by_id.get(product_id)
+        if product:
+            products_by_group.setdefault(group_id, []).append(product)
+    for group in groups:
+        group_id = str(group["id"])
+        group_title = str(group.get("title") or group.get("slug"))
+        products = sorted(
+            products_by_group.get(group_id) or [],
+            key=lambda item: str(item.get("title") or ""),
+        )
+        if not products:
+            continue
+        product_titles = [
+            str(product.get("title") or product.get("slug")) for product in products
+        ]
+        stem = str(group.get("slug") or group_id.replace(":", "-"))
+        faq_id = f"faq:tock-{stem}-navegacao"
+        aliases = [
+            f"quais produtos têm em {group_title}",
+            f"quero ver {group_title}",
+            f"me mostra as opções de {group_title}",
+            f"o que vocês têm de {group_title}",
+            *[
+                f"quero algo tipo {title}"
+                for title in product_titles[:8]
+            ],
+        ]
+        sources = [
+            {"node_id": group_id, "source": _source(group)},
+            *[
+                {"node_id": str(product["id"]), "source": _source(product)}
+                for product in products
+            ],
+        ]
+        faq = _faq(
+            faq_id=faq_id,
+            slug=f"{stem}-navegacao",
+            title=f"Navegação consultiva — {group_title}",
+            question=f"Quais produtos vocês têm em {group_title}?",
+            aliases=aliases,
+            answer=(
+                f"No grupo {group_title}, as opções publicadas são: "
+                + ", ".join(product_titles)
+                + ". A recomendação pode ser refinada pelo estilo, ocasião ou objetivo que o cliente informar."
+            ),
+            source_node=group,
+            branch_path=[persona_id, campaign_id, group_id, faq_id],
+            sources=sources,
+            claim_type="service_detail",
+            channel="all",
+            approved=approved,
+        )
+        generated.append(faq)
+        generated_edges.extend([
+            {
+                "id": f"edge:contains:{group_id}:{faq_id}",
+                "source": group_id,
+                "target": faq_id,
+                "relation_type": "contains",
+                "metadata": {"generator": GENERATOR},
+            },
+            {
+                "id": f"edge:publishes:{faq_id}:{embedded['id']}",
+                "source": faq_id,
+                "target": embedded["id"],
+                "relation_type": "publishes_to",
+                "metadata": {"generator": GENERATOR},
+            },
+        ])
+
     result = {**bundle, "nodes": [*nodes, *generated], "edges": [*edges, *generated_edges]}
     if approved:
         for node in result["nodes"]:
