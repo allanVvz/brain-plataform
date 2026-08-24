@@ -4171,12 +4171,46 @@ def search_active_rag_chunks(
     if not persona_id:
         return []
     client = get_client()
+    # Narrow candidates in Postgres before loading entry details.  The old
+    # implementation first loaded up to 2,000 entries and then serialized all
+    # of their UUIDs into repeated ``in.(...)`` chunk requests.  Apart from the
+    # original HTTP 414, broad catalogs made one conversational turn allocate
+    # the whole legacy RAG projection in the API process.
+    terms = _rag_terms(query)
+    candidate_limit = max(48, min(256, max(1, int(limit)) * 8))
+    chunk_query = (
+        client.table("knowledge_rag_chunks")
+        .select(
+            "id,rag_entry_id,persona_id,chunk_index,chunk_text,"
+            "chunk_summary,metadata"
+        )
+        .eq("persona_id", persona_id)
+        .limit(candidate_limit)
+    )
+    if terms:
+        # OR keeps useful accented candidates reachable when one informal
+        # WhatsApp token (for example ``opcoes``) differs from the published
+        # spelling (``opções``).  Final accent-insensitive ranking stays local
+        # over this bounded candidate set.
+        chunk_query = chunk_query.text_search(
+            "search_document",
+            " OR ".join(sorted(terms)),
+            options={"type": "web_search", "config": "simple"},
+        )
+    chunks = _q(chunk_query)
+    entry_ids = list(dict.fromkeys(
+        str(row.get("rag_entry_id"))
+        for row in chunks if row.get("rag_entry_id")
+    ))
+    if not entry_ids:
+        return []
     entries = _q(
         client.table("knowledge_rag_entries")
         .select("id,title,content_type,slug,status,metadata,canonical_key")
         .eq("persona_id", persona_id)
         .in_("status", ["active", "approved", "validated", "embedded"])
-        .limit(2000)
+        .in_("id", entry_ids)
+        .limit(len(entry_ids))
     )
     entry_by_id = {
         str(row.get("id")): row
@@ -4185,26 +4219,9 @@ def search_active_rag_chunks(
     }
     if not entry_by_id:
         return []
-    # PostgREST serializes ``in_`` values into the URL.  A single request with
-    # thousands of entry UUIDs exceeded common proxy URI limits (HTTP 414).
-    # Keep the server-side persona filter and fetch bounded ID batches; ranking
-    # still happens before anything is added to the model prompt.
-    chunks: list[dict] = []
-    entry_ids = list(entry_by_id)
-    for offset in range(0, len(entry_ids), 75):
-        chunks.extend(
-            _q(
-                client.table("knowledge_rag_chunks")
-                .select("id,rag_entry_id,persona_id,chunk_index,chunk_text,chunk_summary,metadata")
-                .eq("persona_id", persona_id)
-                .in_("rag_entry_id", entry_ids[offset:offset + 75])
-                .limit(5000)
-            )
-        )
     # WhatsApp questions commonly contain accents, punctuation and hyphenated
     # names (for example "Coca-Cola" / "preço").  Normalize both sides so a
     # lexical RAG fallback remains useful before embeddings are available.
-    terms = _rag_terms(query)
     allowed = set(allowed_node_ids or [])
     active_path = set(active_path_node_ids or [])
     pending = set(unresolved_fields or [])
@@ -4786,7 +4803,8 @@ def search_graph_rag_v3(
     )
     required_overlap = max(1, int(len(query_terms) * 0.67 + 0.999))
     if query_terms and best_overlap < required_overlap:
-        published_rows = _q(
+        candidate_limit = max(64, min(256, max(1, int(limit)) * 4))
+        published_query = (
             client.table("knowledge_rag_chunks")
             .select(
                 "id,rag_entry_id,persona_id,chunk_text,chunk_summary,metadata,"
@@ -4797,8 +4815,14 @@ def search_graph_rag_v3(
             .eq("branch_anchor_node_id", branch_node_id)
             .eq("chunk_kind", "faq")
             .in_("projection_status", ["ready", "published"])
-            .limit(2000)
+            .limit(candidate_limit)
+            .text_search(
+                "search_document",
+                " OR ".join(sorted(query_terms)),
+                options={"type": "web_search", "config": "simple"},
+            )
         )
+        published_rows = _q(published_query)
         supplemental = _accent_insensitive_rag_candidates(
             [
                 row for row in published_rows

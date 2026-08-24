@@ -16,6 +16,7 @@ class _Query:
         self.client = client
         self.table_name = table
         self.filters = {}
+        self.query_limit = None
 
     def select(self, *_args, **_kwargs):
         return self
@@ -30,14 +31,24 @@ class _Query:
             self.client.chunk_batches.append(list(values))
         return self
 
-    def limit(self, _value):
+    def limit(self, value):
+        self.query_limit = value
+        self.client.limits.append((self.table_name, value))
+        return self
+
+    def text_search(self, column, query, options=None):
+        self.client.searches.append((self.table_name, column, query, options or {}))
         return self
 
     def execute(self):
         if self.table_name == "knowledge_rag_entries":
-            return SimpleNamespace(data=self.client.entries)
+            rows = self.client.entries
+            if "id" in self.filters:
+                entry_ids = set(self.filters["id"])
+                rows = [row for row in rows if row["id"] in entry_ids]
+            return SimpleNamespace(data=rows[: self.query_limit])
         if "rag_entry_id" not in self.filters:
-            return SimpleNamespace(data=self.client.chunks)
+            return SimpleNamespace(data=self.client.chunks[: self.query_limit])
         entry_ids = set(self.filters["rag_entry_id"])
         return SimpleNamespace(
             data=[row for row in self.client.chunks if row["rag_entry_id"] in entry_ids]
@@ -49,6 +60,8 @@ class _Client:
         self.entries = entries
         self.chunks = chunks
         self.chunk_batches = []
+        self.limits = []
+        self.searches = []
 
     def table(self, name):
         return _Query(self, name)
@@ -57,7 +70,7 @@ class _Client:
         return SimpleNamespace(execute=lambda: SimpleNamespace(data=[]))
 
 
-def test_active_rag_chunk_ids_are_batched_to_avoid_http_414(monkeypatch):
+def test_active_rag_candidates_are_bounded_before_entry_details(monkeypatch):
     entries = [
         {
             "id": f"entry-{index}",
@@ -89,7 +102,12 @@ def test_active_rag_chunk_ids_are_batched_to_avoid_http_414(monkeypatch):
     )
 
     assert len(rows) == 12
-    assert [len(batch) for batch in client.chunk_batches] == [75, 75, 10]
+    assert client.chunk_batches == []
+    assert client.searches[0][0:2] == (
+        "knowledge_rag_chunks", "search_document",
+    )
+    assert ("knowledge_rag_chunks", 96) in client.limits
+    assert ("knowledge_rag_entries", 96) in client.limits
 
 
 def test_rag_agent_scope_allows_shared_rows_and_rejects_other_agent():
@@ -169,3 +187,5 @@ def test_graph_rag_recovers_group_overview_for_unaccented_broad_query(monkeypatc
     )
 
     assert rows[0]["source_node_id"] == "faq:catalog-groups"
+    assert client.searches[0][2] == "opcoes OR quais OR tem"
+    assert ("knowledge_rag_chunks", 64) in client.limits
