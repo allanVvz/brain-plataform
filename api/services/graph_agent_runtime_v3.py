@@ -2060,12 +2060,12 @@ def _explicitly_defers_pending_field(message: str) -> bool:
     ))
 
 
-def _preserve_askable_next_question(
+def _normalize_next_question_to_first_missing(
     proposal: ConversationProposal,
     contract: dict[str, Any],
     ledger_facts: dict[str, Any],
 ) -> ConversationProposal:
-    """Keep a model-selected askable question; drop only an invalid choice."""
+    """Resolve the next question from the first graph-owned missing field."""
     effective_facts = dict(ledger_facts)
     for fact in proposal.extracted_facts:
         effective_facts[fact.field_key] = {
@@ -2074,13 +2074,10 @@ def _preserve_askable_next_question(
             "owner_node_id": fact.owner_node_id,
         }
     pending = graph_proof_checker_v3.askable_pending_fields(contract, effective_facts)
-    askable_ids = {
-        str(field.get("question_node_id") or "")
-        for field in pending if field.get("question_node_id")
-    }
-    if proposal.next_question_node_id in askable_ids:
+    expected = pending[0].get("question_node_id") if pending else None
+    if proposal.next_question_node_id == expected:
         return proposal
-    return proposal.model_copy(update={"next_question_node_id": None})
+    return proposal.model_copy(update={"next_question_node_id": expected})
 
 
 def _coerce_direct_field_value(message: str, field: dict[str, Any]) -> Any:
@@ -6013,11 +6010,8 @@ def _decide(
             "status": proposed_fact.status.value,
             "value": proposed_fact.value,
         }
-    # The model owns conversational order. Proof may discard invalid
-    # next-question metadata, but runtime never substitutes another graph
-    # question (especially not the first pending field).
     model_proposed_next_question_node_id = proposal.next_question_node_id
-    proposal = _preserve_askable_next_question(
+    proposal = _normalize_next_question_to_first_missing(
         proposal, contract, projected_contract_facts,
     )
     chunk_sources = {
@@ -6506,13 +6500,11 @@ def _decide(
             collection_complete = False
             terminal_intent = None
         else:
-            # Claims and citations have passed the knowledge gate. State and
-            # component metadata may be corrected independently, but the
-            # conversational response is owned by the model.
-            reply = reply_seed
-        # Once proof accepts the knowledge boundary, the model's conversational
-        # text is authoritative. Branch summaries and greeting prefixes stay in
-        # the prompt/RAG; runtime does not append or substitute them here.
+            reply = graph_proof_checker_v3.compose_published_question(
+                reply=reply_seed,
+                next_question_node_id=next_question_id,
+                contract=question_contract,
+            )
         recent_replies = _assistant_replies(context.messages)
         question_text = str(
             ((question_contract.get("questions") or {}).get(audit_question_id or "") or {}).get("text")
