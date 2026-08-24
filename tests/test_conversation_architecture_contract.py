@@ -164,7 +164,10 @@ def test_model_prompt_is_compact_and_budgeted_before_both_calls():
     assert "const usefulMemory" in initial
     assert "approved_nodes: approvedNodes" in initial
     assert "approved_chunks: approvedChunks" in initial
-    assert "commercial_limits:" in initial
+    assert "conversation_policy:" in initial
+    assert "const promptGraphContract" in initial
+    assert "graph_contract: promptGraphContract" in initial
+    assert "graph_contract: context.graph_contract" not in initial
     assert "commonContractPrompt" not in initial
     assert "service_catalog:" not in initial
     assert "agent_activity" not in initial
@@ -186,7 +189,12 @@ def test_aurora_sized_audio_prompt_stays_below_preventive_budget_without_losing_
     assert result["prompt_estimated_tokens"] <= 22_000
     assert prompt["customer_message"] == message
     assert prompt["source_message_id"] == "wamid-audio-1"
-    assert prompt["graph_contract"] == context["graph_contract"]
+    assert prompt["graph_contract"]["fields"] == context["graph_contract"]["fields"]
+    assert prompt["graph_contract"]["questions"] == context["graph_contract"]["questions"]
+    assert "claims" not in prompt["graph_contract"]
+    assert "closure_node_ids" not in prompt["graph_contract"]
+    assert "mandatory_contract_evidence" not in prompt["graph_contract"]
+    assert prompt["conversation_policy"] == context["graph_contract"]["conversation_policy"]
     assert prompt["approved_nodes"][0]["node_id"] == "faq-polimento"
     assert prompt["approved_chunks"][0]["text"] == context["rag_chunks"][0]["chunk_text"]
     assert prompt["facts_by_key"] == context["cart"]["facts_by_key"]
@@ -213,6 +221,34 @@ def test_tock_sized_audio_prompt_preserves_current_behavior_and_full_transcripti
     }
 
 
+def test_large_published_graph_is_projected_to_a_conversational_contract():
+    message = "ooii"
+    context, binding = _prompt_fixture(large=False, message=message)
+    context["graph_contract"].update({
+        "claims": [
+            {
+                "claim_type": "commercial_fact",
+                "value": {"description": f"published claim {index}"},
+                "evidence_node_ids": [f"faq:{index}"],
+            }
+            for index in range(293)
+        ],
+        "closure_node_ids": [f"node:{index}" for index in range(542)],
+        "eligible_faq_node_ids": [f"faq:{index}" for index in range(299)],
+    })
+
+    result = _run_prompt_builder(context, binding)
+    prompt = json.loads(result["request_body"]["messages"][1]["content"])
+
+    assert result["prompt_estimated_tokens"] < 22_000
+    assert prompt["customer_message"] == message
+    assert prompt["approved_chunks"][0]["text"] == context["rag_chunks"][0]["chunk_text"]
+    assert prompt["graph_contract"]["fields"] == context["graph_contract"]["fields"]
+    assert "claims" not in prompt["graph_contract"]
+    assert "closure_node_ids" not in prompt["graph_contract"]
+    assert "eligible_faq_node_ids" not in prompt["graph_contract"]
+
+
 def test_model_prompt_receives_complete_multi_service_memory_contract():
     initial = _node("Build graph grounded agent request")["parameters"]["jsCode"]
     initial_validator = _node("Validate agent response")["parameters"]["jsCode"]
@@ -232,7 +268,7 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
         "publication: { id: context.publication_id",
         "customer_message: binding.message",
         "branch_candidates: context.retrieval_trace",
-        "graph_contract: context.graph_contract",
+        "graph_contract: promptGraphContract",
         "approved_nodes: approvedNodes",
         "approved_chunks: approvedChunks",
         "pending_confirmation_ref: context.pending_confirmation_ref",

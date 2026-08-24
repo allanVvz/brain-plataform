@@ -4343,8 +4343,7 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
     assert "objective" not in response.cart_state["facts_by_key"]
     assert response.proof["next_question_node_id"] is None
     assert response.proof["question_component_discarded"] is True
-    assert response.reply_text.startswith("Agora temos dois serviços.")
-    assert "identificar seu objetivo" in response.reply_text
+    assert response.reply_text == model_proposal["reply"]
     assert response.proof["service_operations"] == []
     assert response.proof["service_candidate"] is None
     assert response.proof["service_candidate_rejection_reason"] == "no_service_candidate"

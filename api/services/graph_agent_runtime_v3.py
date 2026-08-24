@@ -6269,36 +6269,6 @@ def _decide(
             (str(fact.get("field_key") or ""), str(fact.get("owner_node_id") or "")): fact
             for fact in accepted_facts
         }.values())
-        pending_before = graph_proof_checker_v3.askable_pending_fields(
-            contract, contract_facts,
-        )
-        pending_before_field = pending_before[0] if pending_before else None
-        pending_before_key = str((pending_before_field or {}).get("key") or "")
-        pending_before_owner = str((pending_before_field or {}).get("owner_node_id") or "")
-        pending_answered = any(
-            str(fact.get("field_key") or "") == pending_before_key
-            and str(fact.get("owner_node_id") or "") == pending_before_owner
-            for fact in accepted_facts
-        )
-        residual_message = _message_without_consumed_services(
-            _latest_user_message(context),
-            context.retrieval_trace.get("service_resolution") or {},
-        )
-        rejected_pending = any(
-            str(item.get("field_key") or "") == pending_before_key
-            and str(item.get("owner_node_id") or "") == pending_before_owner
-            for item in rejected_field_validation
-        )
-        incompatible_pending = bool(
-            pending_before_field
-            and not pending_answered
-            and not doubt
-            and (
-                rejected_pending
-                or bool(service_operations and not residual_message)
-                or bool(residual_message and not _looks_like_customer_question(residual_message))
-            )
-        )
         unanswered_fact = _unanswered_fact_after_question_limit(
             context=context,
             contract=contract,
@@ -6432,21 +6402,6 @@ def _decide(
             # acknowledgement, a useful observation -- and drop only the
             # interrogative part, whose routing belongs to the graph.
             reply_seed = _statements_only(reply_seed)
-        if incompatible_pending:
-            invalid_response = str(
-                (((pending_before_field or {}).get("validation") or {}).get("invalid_response"))
-                or _field_feedback(document, "invalid_fallback")
-            ).strip()
-            if unanswered_fact:
-                invalid_response = " ".join(
-                    part for part in (
-                        invalid_response,
-                        _field_feedback(document, "recorded_unknown"),
-                    ) if part
-                )
-            reply_seed = " ".join(
-                part for part in (reply_seed, invalid_response) if part
-            )
         pending_confirmation_fact = next(
             (
                 fact for fact in accepted_facts

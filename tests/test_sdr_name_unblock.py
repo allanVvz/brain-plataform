@@ -307,9 +307,12 @@ def test_repetir_o_candidato_pendente_confirma_e_avanca(monkeypatch):
     assert fact["value"] == "Allan Rodrigues"
 
 
-def test_turno_invalido_explicita_por_que_o_dado_nao_foi_aceito(monkeypatch):
+def test_saudacao_livre_preserva_resposta_valida_do_modelo(monkeypatch):
     document, pub = _fixture(monkeypatch)
-    # O modelo nao consegue ler nada util e devolve so um reconhecimento.
+    reply = (
+        "Oi! Que bom falar com voce. "
+        "O que voce esta buscando para o seu carro?"
+    )
     proposal = {
         "branch_action": "none",
         "branch_anchor_node_id": None,
@@ -317,25 +320,21 @@ def test_turno_invalido_explicita_por_que_o_dado_nao_foi_aceito(monkeypatch):
         "branch_evidence_span": "",
         "extracted_facts": [],
         "claims": [],
-        "next_question_node_id": "q:nome",
+        "next_question_node_id": "q:servico",
         "cited_node_ids": [], "cited_chunk_ids": [],
-        "reply": "Entendi.",
+        "reply": reply,
         "qualification_complete": False, "handoff_requested": False,
     }
     context = _context(
-        document, pub, "hmmm ta",
-        history=[{
-            "message_id": "msg:0", "role": "assistant", "content": NAME_QUESTION,
-        }],
+        document, pub, "ooii", asked=(),
         message_id="msg:3",
     )
 
     _decision, response = _decide(context, proposal)
 
-    reply = response.reply_text or ""
-    assert reply.strip() not in {"", "Entendi."}
-    assert "nao consegui ler esse nome" in reply.casefold(), reply
-    assert response.proof["next_question_node_id"] is None
+    assert response.proof["valid"], response.proof["errors"]
+    assert response.reply_text == reply
+    assert response.proof["next_question_node_id"] == "q:servico"
 
 
 def test_nome_invalido_nao_vira_fato_e_o_turno_continua_util(monkeypatch):
