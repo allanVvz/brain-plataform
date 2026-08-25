@@ -42,6 +42,9 @@ def test_customer_profile_is_resolved_from_the_packaged_api_tree():
     assert wv._CUSTOMER_PROFILES_PATH == API_ROOT / "evaluation" / "wa_validator_customer_profiles.json"
     assert wv._CUSTOMER_PROFILES_PATH.is_file()
     assert wv._customer_profile("appointment")["answers"]["nome_cliente"]["value"]
+    appointment_answers = wv._customer_profile("appointment")["answers"]
+    assert appointment_answers["procedimento_anterior"]["value"] == "nenhum"
+    assert appointment_answers["foco_brilho_riscos"]["value"] == "ambos"
 
 
 def test_bots_keeps_authorized_persona_when_graph_label_lookup_fails(monkeypatch):
@@ -99,6 +102,37 @@ def test_semantic_script_starts_with_one_graph_derived_turn():
     assert script["driver"]["mode"] == "semantic_graph_v1"
     assert script["driver"]["initial_known_fields"] == []
     assert script["steps"][0]["expected_branch_node_id"] == "branch:one"
+
+
+def test_appointment_profile_covers_current_published_polishing_fields():
+    publication = _semantic_publication()
+    contract = publication["document_json"]["branch_contracts"]["branch:one"]
+    for key, question in (
+        ("procedimento_anterior", "Já houve procedimento anterior?"),
+        ("foco_brilho_riscos", "O foco é brilho, riscos ou ambos?"),
+    ):
+        question_id = f"q:{key}"
+        contract["fields"].append({
+            "key": key,
+            "owner_node_id": "branch:one",
+            "required": True,
+            "accepted_statuses": ["known"],
+            "question_node_id": question_id,
+        })
+        contract["questions"][question_id] = {
+            "field_key": key,
+            "text": question,
+        }
+        contract["closure_node_ids"].append(question_id)
+
+    script = wv._semantic_appointment_script(
+        publication=publication,
+        flow_id="sdr_qualificacao_carro",
+        initial_state="cold",
+    )
+
+    assert script["driver"]["answers"]["procedimento_anterior"]["value"] == "nenhum"
+    assert script["driver"]["answers"]["foco_brilho_riscos"]["value"] == "ambos"
 
 
 def test_semantic_script_known_name_is_state_not_a_scripted_message():
