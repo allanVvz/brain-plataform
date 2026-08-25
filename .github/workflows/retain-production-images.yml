@@ -20,21 +20,33 @@ jobs:
     runs-on: ubuntu-latest
     environment: production-cleanup
     steps:
-      - name: Inventory or apply exact image retention
+      - name: Checkout reviewed retention script
+        uses: actions/checkout@v4
+
+      - name: Inventory exact image and stopped-container retention
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
         env:
-          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
-          APPLY_CLEANUP: ${{ inputs.apply }}
+          BRAIN_RELEASE_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          RETENTION_MODE: --dry-run
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: VPS_APP_DIR,APPLY_CLEANUP
-          script: |
-            set -Eeuo pipefail
-            cd "$VPS_APP_DIR"
-            bash ops/vps/retain-release-images.sh --dry-run
-            if [ "$APPLY_CLEANUP" = "true" ]; then
-              CLEANUP_AUTHORIZED=true bash ops/vps/retain-release-images.sh --apply
-            fi
+          envs: BRAIN_RELEASE_ROOT,RETENTION_MODE
+          script_path: ops/vps/retain-release-images.sh
+
+      - name: Apply reviewed image and stopped-container retention
+        if: ${{ inputs.apply }}
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        env:
+          BRAIN_RELEASE_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          RETENTION_MODE: --apply
+          CLEANUP_AUTHORIZED: "true"
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: BRAIN_RELEASE_ROOT,RETENTION_MODE,CLEANUP_AUTHORIZED
+          script_path: ops/vps/retain-release-images.sh

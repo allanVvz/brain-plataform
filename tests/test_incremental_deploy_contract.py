@@ -66,7 +66,14 @@ def test_resume_checks_digest_and_is_idempotent_after_verified():
 
 
 def test_retention_is_dry_run_by_default_and_component_precise():
-    assert 'MODE="${1:---dry-run}"' in RETENTION
+    assert 'MODE="${1:-${RETENTION_MODE:---dry-run}}"' in RETENTION
     assert "CLEANUP_AUTHORIZED=true" in RETENTION
     assert 'keep["$component:$value"]' in RETENTION
     assert "docker volume" not in RETENTION
+
+
+def test_retention_only_removes_stopped_stale_release_containers():
+    assert "exited|dead|created" in RETENTION
+    assert "KEEP_CONTAINER" in RETENTION
+    assert "STALE_CONTAINER" in RETENTION
+    assert 'docker container rm "${removable_containers[@]}"' in RETENTION

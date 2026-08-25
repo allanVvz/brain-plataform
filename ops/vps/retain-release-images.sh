@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="${BRAIN_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-MODE="${1:---dry-run}"
+MODE="${1:-${RETENTION_MODE:---dry-run}}"
 [[ "$MODE" == "--dry-run" || "$MODE" == "--apply" ]] || { echo "expected --dry-run or --apply" >&2; exit 2; }
 if [[ "$MODE" == "--apply" && "${CLEANUP_AUTHORIZED:-false}" != "true" ]]; then
   echo "cleanup apply requires CLEANUP_AUTHORIZED=true from a separately approved operation" >&2
@@ -50,14 +50,37 @@ while IFS=$'\t' read -r reference image_id; do
     preserved=$((preserved + 1))
     continue
   fi
-  container_count="$(docker ps -a --filter "ancestor=$image_id" --format '{{.ID}}' | wc -l | tr -d '[:space:]')"
+  mapfile -t containers < <(docker ps -a --filter "ancestor=$image_id" --format '{{.ID}}\t{{.Names}}\t{{.State}}\t{{.Status}}')
+  container_count="${#containers[@]}"
+  removable_containers=()
+  preserve_in_use=false
   if (( container_count > 0 )); then
+    for container in "${containers[@]}"; do
+      IFS=$'\t' read -r container_id container_name container_state container_status <<< "$container"
+      case "$container_state" in
+        exited|dead|created)
+          removable_containers+=("$container_id")
+          printf 'STALE_CONTAINER\t%s\t%s\tstate=%s\tstatus=%s\timage=%s\n' \
+            "$container_id" "$container_name" "$container_state" "$container_status" "$reference"
+          ;;
+        *)
+          printf 'KEEP_CONTAINER\t%s\t%s\tstate=%s\tstatus=%s\timage=%s\n' \
+            "$container_id" "$container_name" "$container_state" "$container_status" "$reference"
+          preserve_in_use=true
+          ;;
+      esac
+    done
+  fi
+  if [[ "$preserve_in_use" == "true" ]]; then
     printf 'KEEP_IN_USE\t%s\t%s\tcontainers=%s\n' "$reference" "$image_id" "$container_count"
     preserved=$((preserved + 1))
     continue
   fi
   printf '%s\t%s\t%s\n' "${MODE#--}" "$reference" "$image_id"
   if [[ "$MODE" == "--apply" ]]; then
+    if (( ${#removable_containers[@]} > 0 )); then
+      docker container rm "${removable_containers[@]}"
+    fi
     docker image rm "$reference"
   fi
   removed=$((removed + 1))
