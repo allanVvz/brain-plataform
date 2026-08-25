@@ -41,20 +41,27 @@ inactive_sha="$(docker exec "$inactive_cid" sh -c 'tr -d "\r\n" < /image-source-
 
 mkdir -p .deploy/caddy
 caddy_next="$(mktemp .deploy/caddy/.Caddyfile.next.XXXXXX)"
+caddy_rollback="$(mktemp .deploy/caddy/.Caddyfile.rollback.XXXXXX)"
 if [[ "$inactive" == "api-candidate" ]]; then
   sed 's/reverse_proxy api:8080/reverse_proxy api-candidate:8080/g' \
     infra/Caddyfile > "$caddy_next"
 else
   cp infra/Caddyfile "$caddy_next"
 fi
-chmod 0644 "$caddy_next"
+if [[ "$active" == "api-candidate" ]]; then
+  sed 's/reverse_proxy api:8080/reverse_proxy api-candidate:8080/g' \
+    infra/Caddyfile > "$caddy_rollback"
+else
+  cp infra/Caddyfile "$caddy_rollback"
+fi
+chmod 0644 "$caddy_next" "$caddy_rollback"
 caddy_cid="$("${COMPOSE[@]}" ps -q caddy)"
 [[ -n "$caddy_cid" ]] || { echo "Caddy is not running" >&2; exit 1; }
 cutover_loaded=false
 restore_previous_upstream() {
   local exit_code="$?"
-  if [[ "$cutover_loaded" == "true" && -s .deploy/caddy/Caddyfile ]]; then
-    docker cp .deploy/caddy/Caddyfile "$caddy_cid:/tmp/Caddyfile.rollback" || true
+  if [[ "$cutover_loaded" == "true" && -s "$caddy_rollback" ]]; then
+    docker cp "$caddy_rollback" "$caddy_cid:/tmp/Caddyfile.rollback" || true
     docker exec "$caddy_cid" caddy reload \
       --config /tmp/Caddyfile.rollback --adapter caddyfile \
       --address 127.0.0.1:2019 || true
@@ -64,7 +71,7 @@ restore_previous_upstream() {
   else
     "${COMPOSE[@]}" stop api >/dev/null 2>&1 || true
   fi
-  rm -f "$caddy_next"
+  rm -f "$caddy_next" "$caddy_rollback"
   exit "$exit_code"
 }
 trap restore_previous_upstream ERR
@@ -96,6 +103,22 @@ docker exec "$caddy_cid" caddy reload --config /tmp/Caddyfile.next --adapter cad
   --address 127.0.0.1:2019
 cutover_loaded=true
 
+# The first release that introduces the stable Caddy origin must recreate n8n
+# once so Compose replaces its old API_INTERNAL_BASE_URL=http://api:8080.
+# Later API releases leave the n8n container untouched because its Compose
+# configuration is unchanged; Caddy alone tracks the active API slot.
+"${COMPOSE[@]}" up -d --no-deps n8n
+n8n_cid="$("${COMPOSE[@]}" ps -q n8n)"
+[[ -n "$n8n_cid" ]] || { echo "n8n container is missing" >&2; exit 1; }
+n8n_deadline=$((SECONDS + 120))
+until [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$n8n_cid")" == "healthy" ]]; do
+  (( SECONDS < n8n_deadline )) || {
+    echo "n8n did not become healthy after stable API origin update" >&2
+    exit 1
+  }
+  sleep 2
+done
+
 api_domain="$(awk -F= '
   /^[[:space:]]*API_DOMAIN[[:space:]]*=/ {
     value=$2; gsub(/[[:space:]"\047]/,"",value); print value
@@ -117,6 +140,7 @@ else
   "${COMPOSE[@]}" stop api
 fi
 mv -f "$caddy_next" .deploy/caddy/Caddyfile
+rm -f "$caddy_rollback"
 printf '%s\n' "$inactive" > .deploy/api-active-slot
 trap - ERR
 printf 'api_cutover\tfrom=%s\tto=%s\tsha=%s\n' "$active" "$inactive" "$TARGET_SHA"

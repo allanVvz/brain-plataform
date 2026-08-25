@@ -5,6 +5,12 @@
 	admin 127.0.0.1:2019
 }
 
+# Stable Docker-network origin used by n8n. The blue-green deploy rewrites
+# this upstream together with the public API sites before the graceful reload.
+http://caddy {
+	reverse_proxy api:8080
+}
+
 {$API_DOMAIN}, {$API_DOMAIN_SECONDARY} {
 	encode zstd gzip
 	# Access metadata only (method, path, status and latency); request bodies are not logged.

@@ -90,6 +90,12 @@ API_INTERNAL_BASE_URL=https://api.<dominio>
 NEXT_PUBLIC_API_BASE_URL=/api-brain
 ```
 
+O valor acima é o backend server-side usado pelo dashboard/Vercel. Dentro do
+container n8n, o Compose define deliberadamente `API_INTERNAL_BASE_URL=http://caddy`.
+Esse nome é o origin estável da rede Docker: o Caddy acompanha o slot ativo
+(`api` ou `api-candidate`) durante o blue-green. Não aponte o n8n diretamente
+para um desses slots, pois o slot anterior é encerrado depois do cutover.
+
 Nao configure `SUPABASE_SERVICE_KEY` ou segredos do backend na Vercel. O Storage publico recebe apenas `/storage/v1/*`; PostgREST nao e publicado nesse dominio.
 
 ## 5. Ensaio de migracao
