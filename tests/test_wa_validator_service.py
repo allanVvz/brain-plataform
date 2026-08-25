@@ -688,10 +688,10 @@ def test_semantic_turn_audit_rejects_final_confirmation_while_field_confirmation
 
 
 def test_semantic_turn_audit_accepts_any_currently_askable_field():
-    """Graph scope and pending state matter; declaration order does not."""
+    """Graph scope and pending state matter; wording and order do not."""
     inputs = _semantic_audit_inputs()
     inputs["customer_step"]["intended_facts"] = {}
-    inputs["turn"]["text"] = "Perfeito! Qual seu objetivo com o carro?"
+    inputs["turn"]["text"] = "Perfeito! O que você espera alcançar com esse cuidado?"
     inputs["proof_record"]["proof_result"]["missing_fields"] = ["nome_cliente", "objective"]
     inputs["proof_record"]["proof_result"]["next_question_node_id"] = "q:objective"
     inputs["proof_record"]["proof_result"]["accepted_facts"] = []

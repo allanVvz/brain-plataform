@@ -752,8 +752,13 @@ def check(
     ]
     if question_count > 0:
         if question_id:
-            if question_id in semantic_matches:
-                pass
+            if question_id in askable_by_question:
+                # The model owns the wording and supplies the question id as
+                # structured audit metadata.  Prove that the referenced field
+                # is currently askable; do not require lexical similarity to
+                # graph-authored copy that was intentionally withheld from the
+                # prompt.
+                observations.append("model_question_metadata_askable")
             elif len(semantic_matches) == 1:
                 # The spoken question is the observable authority. A stale
                 # model id is reconciled to the one graph-owned askable

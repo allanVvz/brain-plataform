@@ -589,7 +589,7 @@ def test_add_action_rejects_without_any_active_branch():
     assert "add_without_active_branch" in proof["errors"]
 
 
-def test_next_question_may_target_any_currently_askable_graph_field():
+def test_next_question_metadata_accepts_natural_wording_for_any_askable_field():
     contract = {
         "branch_path_checksum": "checksum:a",
         "closure_node_ids": ["branch:a", "q:first", "q:second"],
@@ -616,7 +616,7 @@ def test_next_question_may_target_any_currently_askable_graph_field():
             "branch_path_checksum": "checksum:a", "branch_evidence_span": "",
             "extracted_facts": [], "claims": [],
             "next_question_node_id": "q:second", "cited_node_ids": [],
-            "cited_chunk_ids": [], "reply": "Second?",
+            "cited_chunk_ids": [], "reply": "What result matters most to you?",
             "qualification_complete": False, "handoff_requested": False,
         },
         message="hello", source_message_id="msg-1",
@@ -627,6 +627,7 @@ def test_next_question_may_target_any_currently_askable_graph_field():
     assert proof["valid"] is True
     assert proof["next_question_node_id"] == "q:second"
     assert "question_not_semantically_askable" not in proof["errors"]
+    assert "model_question_metadata_askable" in proof["observations"]
 
 
 def test_add_action_requires_literal_evidence():

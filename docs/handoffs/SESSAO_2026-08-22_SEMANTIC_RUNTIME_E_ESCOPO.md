@@ -60,11 +60,13 @@ grafo publicado. Não há confiança numérica em lugar nenhum do contrato novo:
 todo elemento carrega o trecho literal da mensagem do cliente, porque um score
 não é explicação.
 
-Isso não contradiz `.agents/skills/brain-agent-e2e/SKILL.md` ("model output never
-owns routing, required fields, the next question, handoff or confirmation
-policy"): mudou a **fonte da interpretação**, não a fonte da política. Rota,
-campos obrigatórios, próxima pergunta (`field_questions[missing_fields[0]]`),
-handoff e confirmação continuam determinísticos.
+O grafo continua sendo a fonte da rota, campos obrigatórios, dependências,
+limites comerciais, handoff e confirmação. A próxima pergunta, porém, é
+formulada naturalmente pelo modelo: `missing_fields` mede completude e
+`field_questions` prova cobertura de autoria, sem fornecer copy para o runtime.
+O proof valida apenas que `next_question_node_id` corresponde a um campo ainda
+perguntável; ele não exige igualdade lexical nem anexa
+`field_questions[missing_fields[0]]`.
 
 ### Escopo bidimensional: ramos ativos × agente que responde
 

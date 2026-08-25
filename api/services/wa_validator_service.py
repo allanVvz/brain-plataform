@@ -2294,7 +2294,10 @@ def _semantic_turn_audit(
             or (
                 question_id in askable_question_ids
                 and bool(question_text)
-                and graph_proof_checker_v3._question_already_asked(question_text, reply)
+                # The proof already bound this model-owned wording to an
+                # askable graph field through next_question_node_id.  The
+                # Validator must not reintroduce a lexical copy comparison.
+                and reply.count("?") == 1
             )
         ),
         "known_fact_not_reasked": not asked_fact_already_known,

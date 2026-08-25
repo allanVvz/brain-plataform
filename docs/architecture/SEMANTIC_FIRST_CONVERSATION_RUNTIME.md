@@ -29,6 +29,11 @@ Chunks `question` nao entram no pacote RAG do modelo e o contrato enviado ao
 modelo preserva apenas id, campo e dependencias da pergunta, sem a copy
 `field_questions`. Assim o grafo continua provando cobertura/escopo, enquanto o
 modelo formula a pergunta e o backend jamais a concatena na resposta.
+Quando o modelo devolve `next_question_node_id`, o proof valida que o id aponta
+para um campo ainda perguntavel e com dependencias satisfeitas; ele nao exige
+similaridade lexical com a copy de `field_questions`, que nem entra no prompt.
+Uma metadata invalida descarta somente o componente de pergunta e nunca os
+fatos, a memoria ou a selecao de branch ja validados.
 
 No WA Validator, `exactly-once` e contado no limite persistido: um inbound, uma
 decisao, um proof, um commit e no maximo um outbound. A proposta inicial mais
