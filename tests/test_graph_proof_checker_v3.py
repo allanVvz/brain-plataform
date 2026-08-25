@@ -577,6 +577,49 @@ def test_invalid_question_metadata_never_discards_valid_facts_or_memory():
     assert proof["repair_required"] is True
 
 
+def test_segmented_answer_survives_when_model_repeats_an_asked_topic():
+    kwargs = _base_check_kwargs()
+    kwargs["contract"] = {
+        "branch_path_checksum": "checksum:b",
+        "closure_node_ids": ["branch:b", "q:volume"],
+        "fields": [{
+            "key": "volume", "owner_node_id": "branch:b", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:volume",
+        }],
+        "questions": {
+            "q:volume": {
+                "field_key": "volume", "text": "Qual volume pretende avaliar?",
+            },
+        },
+    }
+    kwargs["ledger"] = {
+        "graph_checksum": "sha256:x", "facts": {},
+        "asked_question_node_ids": ["q:volume"],
+    }
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "answer_text": "Os valores dependem do produto escolhido.",
+        "question_text": "Que tipo de volume voce pretende avaliar para revenda",
+        "next_question_field_key": "volume",
+        "next_question_node_id": None,
+        "reply": (
+            "Os valores dependem do produto escolhido. "
+            "Que tipo de volume voce pretende avaliar para revenda"
+        ),
+    }
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert proof["question_component_invalid"] is True
+    assert proof["question_discarded"] is True
+    assert proof["publishable_answer_text"] == (
+        "Os valores dependem do produto escolhido."
+    )
+    assert proof["repair_required"] is False
+    assert proof["next_question_node_id"] is None
+
+
 def test_add_action_rejects_re_adding_an_already_active_branch():
     kwargs = _base_check_kwargs(active_branch_node_ids=["branch:a", "branch:b"])
     proof = graph_proof_checker_v3.check(**kwargs)

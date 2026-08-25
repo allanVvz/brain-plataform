@@ -206,6 +206,12 @@ class ConversationProposal(StrictModel):
     service_operations: list[ServiceOperation] = Field(default_factory=list)
     extracted_facts: list[ExtractedFact] = Field(default_factory=list)
     claims: list[CommercialClaim] = Field(default_factory=list)
+    # The model authors both segments. Keeping them separate lets proof drop
+    # only an invalid/repeated question without rewriting or losing a grounded
+    # commercial answer. ``reply`` remains the composed compatibility view.
+    answer_text: str = ""
+    question_text: str = ""
+    next_question_field_key: str | None = None
     next_question_node_id: str | None = None
     cited_node_ids: list[str] = Field(default_factory=list)
     cited_chunk_ids: list[str] = Field(default_factory=list)
@@ -353,6 +359,19 @@ class RecommendedNextAction(StrEnum):
     CLOSE = "close"
 
 
+class SemanticResponse(StrictModel):
+    """Model-authored conversational output with an optional next question.
+
+    ``question_field_key`` is semantic audit metadata, not dialogue policy.
+    The backend maps it to a published question node only after proving that
+    the field is currently askable and has never been asked in this journey.
+    """
+
+    answer: str = ""
+    question: str | None = None
+    question_field_key: str | None = None
+
+
 class SemanticInterpretation(StrictModel):
     """The model's whole reading of one inbound, in one structured object.
 
@@ -380,6 +399,10 @@ class SemanticInterpretation(StrictModel):
     recommended_next_action: RecommendedNextAction = RecommendedNextAction.CLARIFY
     cited_node_ids: list[str] = Field(default_factory=list)
     cited_chunk_ids: list[str] = Field(default_factory=list)
+    response: SemanticResponse = Field(default_factory=SemanticResponse)
+    # Compatibility fields for an installed workflow that has not yet been
+    # resynchronised. New canonical workflows use ``response`` exclusively.
+    next_question_field_key: str | None = None
     # Ephemeral reference to an existing graph question. This carries the
     # model's natural choice through the established proof/ledger path and is
     # not a persistent schema field.

@@ -218,6 +218,23 @@ def askable_pending_fields(
     ]
 
 
+def exclude_asked_questions(
+    fields: list[dict[str, Any]], asked_question_node_ids: list[str] | None,
+) -> list[dict[str, Any]]:
+    """Return only fields whose graph question was never emitted.
+
+    Missing data remains missing; this helper only controls conversational
+    eligibility. A spent question cannot become askable again merely because
+    the customer took a detour to ask something else.
+    """
+    asked = {str(value) for value in asked_question_node_ids or [] if value}
+    return [
+        field for field in fields
+        if not field.get("question_node_id")
+        or str(field.get("question_node_id")) not in asked
+    ]
+
+
 def required_field_count(contract: dict[str, Any], facts: dict[str, Any]) -> int:
     """Count of a branch's currently-applicable required fields (resolved or
     not) -- the denominator for a 0-50% qualification progress score."""
@@ -734,24 +751,66 @@ def check(
     missing = pending_fields(contract, facts)
     missing_keys = [field["key"] for field in missing]
     question_id = proposal.get("next_question_node_id")
+    question_field_key = str(
+        proposal.get("next_question_field_key") or ""
+    ).strip() or None
     questions = contract.get("questions") or {}
-    askable = askable_pending_fields(contract, facts)
-    question_count = str(proposal.get("reply") or "").count("?")
+    all_askable = askable_pending_fields(contract, facts)
+    askable = exclude_asked_questions(
+        all_askable,
+        ledger.get("asked_question_node_ids") or [],
+    )
+    answer_text = str(proposal.get("answer_text") or "").strip()
+    question_text = str(proposal.get("question_text") or "").strip()
     reply_text = str(proposal.get("reply") or "")
+    segmented_response = bool(answer_text or question_text or question_field_key)
+    spoken_question_text = question_text if segmented_response else reply_text
+    question_count = (
+        max(1, question_text.count("?")) if question_text
+        else 0
+    ) if segmented_response else spoken_question_text.count("?")
     askable_by_question = {
         str(field.get("question_node_id") or ""): field
         for field in askable
+        if str(field.get("question_node_id") or "")
+    }
+    all_askable_by_question = {
+        str(field.get("question_node_id") or ""): field
+        for field in all_askable
         if str(field.get("question_node_id") or "")
     }
     semantic_matches = [
         candidate_id
         for candidate_id in askable_by_question
         if _question_already_asked(
-            str((questions.get(candidate_id) or {}).get("text") or ""), reply_text,
+            str((questions.get(candidate_id) or {}).get("text") or ""),
+            spoken_question_text,
         )
     ]
     if question_count > 0:
-        if question_id:
+        if question_field_key:
+            field_matches = [
+                field for field in askable
+                if str(field.get("key") or "") == question_field_key
+            ]
+            if len(field_matches) == 1 and field_matches[0].get("question_node_id"):
+                question_id = str(field_matches[0]["question_node_id"])
+                observations.append("model_question_field_askable")
+            else:
+                spent_matches = [
+                    field for field in all_askable
+                    if str(field.get("key") or "") == question_field_key
+                    and field.get("question_node_id")
+                ]
+                if len(spent_matches) == 1:
+                    # Keep the internal id long enough for the repetition
+                    # audit to prove why this semantic topic is unavailable.
+                    question_id = str(spent_matches[0]["question_node_id"])
+                    observations.append("model_question_field_already_asked")
+                else:
+                    errors.append("question_field_not_semantically_askable")
+                    question_id = None
+        elif question_id:
             if question_id in askable_by_question:
                 # The model owns the wording and supplies the question id as
                 # structured audit metadata.  Prove that the referenced field
@@ -759,6 +818,8 @@ def check(
                 # graph-authored copy that was intentionally withheld from the
                 # prompt.
                 observations.append("model_question_metadata_askable")
+            elif question_id in all_askable_by_question:
+                observations.append("model_question_metadata_already_asked")
             elif len(semantic_matches) == 1:
                 # The spoken question is the observable authority. A stale
                 # model id is reconciled to the one graph-owned askable
@@ -776,14 +837,28 @@ def check(
             # question without claiming it advances a qualification field.
             # Audit it, but never map it to a field or rewrite its text.
             observations.append("unmapped_model_question")
-    elif question_id:
+    elif question_id or question_field_key:
         observations.append("next_question_metadata_without_question")
         question_id = None
     if question_id:
-        selected_field = askable_by_question.get(str(question_id))
+        selected_field = all_askable_by_question.get(str(question_id))
         question = questions.get(str(question_id)) or {}
         if not selected_field or question.get("field_key") != selected_field.get("key"):
             errors.append("next_question_not_for_askable_field")
+            question_id = None
+        elif (
+            segmented_response
+            and str(question_id) in {
+                str(value)
+                for value in ledger.get("asked_question_node_ids") or []
+                if value
+            }
+        ):
+            # The v2 envelope lets us remove only the repeated question. The
+            # legacy monolithic envelope continues through the existing
+            # repetition/repair audit because its answer cannot be split
+            # safely from the question.
+            errors.append("question_already_asked")
             question_id = None
     # qualification_complete is 100% derivable from `missing` -- the same
     # reasoning as re-deriving "servico" from active_branch_node_id
@@ -897,23 +972,33 @@ def check(
             for error in component_errors
         )
     )
+    discardable_question = bool(question_component_invalid and answer_text)
     question_repair = [{
         "kind": "quality",
         "issue": "question_not_semantically_askable",
         "instruction": (
-            "Rewrite the reply yourself. Ask at most one genuinely unresolved "
-            "topic, never a field already known or previously asked, and use "
-            "next_question_node_id only as matching audit metadata."
+            "Preserve the grounded answer. Ask no question when every useful "
+            "pending topic was already asked; otherwise choose one unasked "
+            "field by semantic key. Never emit a graph node id."
         ),
-    }] if question_component_invalid else []
+    }] if question_component_invalid and not discardable_question else []
     return {
         "valid": not gating_errors, "errors": errors,
         "gating_errors": gating_errors,
-        "repair_required": (repair_only and bool(repair)) or question_component_invalid,
+        "repair_required": (
+            (repair_only and bool(repair))
+            or (question_component_invalid and not discardable_question)
+        ),
         "repair_requirements": [*repair, *question_repair], "ledger": next_ledger,
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
         "next_question_node_id": question_id,
+        "next_question_field_key": (
+            str((askable_by_question.get(str(question_id)) or {}).get("key") or "")
+            or None
+        ),
         "question_component_invalid": question_component_invalid,
+        "question_discarded": discardable_question,
+        "publishable_answer_text": answer_text if discardable_question else None,
         "qualification_complete": not missing,
         "handoff_required": handoff_required,
         "required_field_count": required_field_count(contract, facts),

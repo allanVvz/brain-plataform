@@ -1212,7 +1212,10 @@ def test_repeated_field_gets_one_model_repair_then_safe_handoff(monkeypatch):
         graph_checksum=document["checksum"], publication_id=pub["id"],
         messages=[
             {"role": "assistant", "content": question_text},
-            {"message_id": "msg:interrupt", "role": "user", "content": "Quero entender melhor."},
+            {
+                "message_id": "msg:interrupt", "role": "user",
+                "content": "Qual e o preco e o pedido minimo?",
+            },
         ],
         cart={"facts": {}, "asked_question_node_ids": [question_id]},
         rag_nodes=[], rag_paths=[], graph_contract=contract,
@@ -1244,6 +1247,27 @@ def test_repeated_field_gets_one_model_repair_then_safe_handoff(monkeypatch):
     assert question_text not in (second_response.reply_text or "")
     assert second_response.cart_state["asked_question_node_ids"] == [question_id]
     assert second_response.proof["repetition_action"] == "repetition_handoff"
+
+    field_key = next(
+        field["key"] for field in contract["fields"]
+        if field.get("question_node_id") == question_id
+    )
+    segmented = {
+        **repeated,
+        "answer_text": "Posso explicar isso sem problema.",
+        "question_text": question_text,
+        "next_question_field_key": field_key,
+        "next_question_node_id": None,
+        "reply": f"Posso explicar isso sem problema. {question_text}",
+    }
+    segmented_decision, segmented_response = graph_agent_runtime_v3.decide(
+        context, model_observation={"proposal": segmented, "repair_attempt": 0},
+    )
+    assert segmented_decision.route.value == "SDR", segmented_response.model_dump()
+    assert segmented_response.reply_text == "Posso explicar isso sem problema."
+    assert segmented_response.handoff_required is False
+    assert segmented_response.proof["question_discarded"] is True
+    assert segmented_response.proof["repair_required"] is False
 
 
 
@@ -1684,35 +1708,20 @@ def test_backend_exact_additive_service_keeps_existing_branch_and_appends_new_on
     assert resolved.extracted_facts[0].owner_node_id == "branch:b"
 
 
-def test_system_prompt_marks_model_service_routing_as_observation_only():
+def test_system_prompt_keeps_model_semantic_and_backend_proof_boundaries():
     prompt = graph_agent_runtime_v3.SYSTEM_PROMPT
-    assert "branch_action" in prompt
-    assert "service_observations" in prompt
-    # Assert the contract, not the copy: this text is tuned for tone and
-    # length, and pinning exact sentences made every prompt edit a red build.
-    assert "por compatibilidade" in prompt
-    assert "nunca autorizam mutação" in prompt
-    assert "resolvedor do backend" in prompt
+    assert "O modelo decide a linguagem" in prompt
+    assert "o backend apenas prova" in prompt
+    assert "chave semantica do campo" in prompt
+    assert "nunca por id de node" in prompt
 
 
-def test_system_prompt_still_has_anti_repetition_instruction():
-    """Regression guard for the SYSTEM_PROMPT extraction (2026-08-14).
-
-    build_context() used to build this text inline as a local `prompt`
-    variable; it was extracted into a module-level constant so it's
-    testable without mocking the whole context-building call chain. This
-    confirms the extraction didn't drop or corrupt the pre-existing
-    anti-repetition instruction.
-    """
+def test_system_prompt_keeps_concise_anti_repetition_and_no_forced_question():
     prompt = graph_agent_runtime_v3.SYSTEM_PROMPT
-    assert "Nunca repita uma frase que você já disse" in prompt
-    assert "handoff_requested só pode ser true" in prompt
-    assert "fatos_conhecidos lista tudo" in prompt
-    # The 2026-08-19 rewrite folded six scattered anti-repetition clauses into
-    # one canonical block plus the ladder. Both have to survive.
-    assert "não o pergunte novamente" in prompt
-    assert "asked_question_node_ids" in prompt
-    assert "nunca preencha a reply com uma pergunta do backend" in prompt
+    assert "Nunca pergunte um fato conhecido nem um topico ja perguntado" in prompt
+    assert "Campo faltante nao obriga pergunta" in prompt
+    assert "responda sem pergunta" in prompt
+    assert "Nao solicite handoff por falha de pergunta" in prompt
 
 
 def test_contract_fact_scope_does_not_compare_service_from_another_owner():

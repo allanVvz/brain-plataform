@@ -18,22 +18,24 @@ completude/eligibilidade, nao roteiro. CAS, claim atomico e ledger preservam
 um inbound canonico -> uma decisao -> um commit -> no maximo um outbound;
 exactly-once previne duplicidade, nao torna o dialogo deterministico.
 
-`field_questions` permanece no contrato publicado para validar cobertura e
-para auditar semanticamente a pergunta escolhida pelo modelo. Nao e roteiro nem
-copy de runtime: nenhuma camada pode anexar `field_questions[missing_fields[0]]`
-ou selecionar uma FAQ no lugar do modelo. `asked_question_node_ids` registra o
-que o cliente efetivamente recebeu. Um id ja registrado nunca e emitido de
-novo; a primeira proposta repetida volta ao modelo para uma unica reparacao e,
-se a repeticao persistir, o turno termina em handoff observavel sem a pergunta.
-Chunks `question` nao entram no pacote RAG do modelo e o contrato enviado ao
-modelo preserva apenas id, campo e dependencias da pergunta, sem a copy
-`field_questions`. Assim o grafo continua provando cobertura/escopo, enquanto o
-modelo formula a pergunta e o backend jamais a concatena na resposta.
-Quando o modelo devolve `next_question_node_id`, o proof valida que o id aponta
-para um campo ainda perguntavel e com dependencias satisfeitas; ele nao exige
-similaridade lexical com a copy de `field_questions`, que nem entra no prompt.
-Uma metadata invalida descarta somente o componente de pergunta e nunca os
-fatos, a memoria ou a selecao de branch ja validados.
+`field_questions` permanece no contrato publicado para validar cobertura na
+autoria e para gerar a identidade interna auditavel de cada pergunta. Nao e
+roteiro nem copy de runtime: nenhuma camada pode anexar
+`field_questions[missing_fields[0]]` ou selecionar uma FAQ no lugar do modelo.
+`asked_question_node_ids` registra internamente o que o cliente efetivamente
+recebeu, mas o prompt recebe somente `asked_topics`, composto por chaves
+semanticas. O mapa de ids e a copy de `field_questions` nao entram no prompt.
+
+A saida do modelo separa `response.answer`, `response.question` e
+`response.question_field_key`. O modelo escreve ambos os textos e pode retornar
+`question=null`; `missing_fields` nunca obriga uma pergunta. O proof converte a
+chave semantica em id somente internamente, depois de provar dependencias,
+pertencimento ao ramo e que o topico ainda nao foi perguntado. Se a pergunta for
+invalida ou repetida e houver uma resposta valida, somente a pergunta e
+descartada, sem nova chamada ao modelo. A resposta, os fatos, a memoria e a
+selecao de branch sobrevivem. Uma resposta sem componente declarativo ainda
+pode receber uma unica reparacao; o contrato legado monolitico continua aceito
+durante a sincronizacao dos workflows instalados.
 
 No WA Validator, `exactly-once` e contado no limite persistido: um inbound, uma
 decisao, um proof, um commit e no maximo um outbound. A proposta inicial mais
@@ -119,6 +121,9 @@ mesma mensagem:
 | `questions[]` | perguntas do cliente que o turno deve responder |
 | `claims[]` | afirmações comerciais, sempre com nós de evidência |
 | `recommended_next_action` | ação seguinte recomendada |
+| `response.answer` | resposta/acolhimento declarativo escrito pelo modelo |
+| `response.question` | pergunta natural opcional, tambem escrita pelo modelo |
+| `response.question_field_key` | chave semantica auditavel; nunca id de node |
 
 ### Sem confiança numérica
 

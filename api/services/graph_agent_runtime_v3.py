@@ -3008,204 +3008,24 @@ def _greeting_policy(
 
 
 SYSTEM_PROMPT = (
-    "Três camadas, e cada uma manda no que é dela. VOCÊ entende: o que o "
-    "cliente quis dizer, tudo o que ele informou de uma vez, com que "
-    "confiança, e em que voz responder. O BACKEND prova: evidência "
-    "literal, conhecimento publicado e idempotência -- ele valida a "
-    "proposta sem reescrever uma resposta apoiada no RAG. O GRAFO fornece "
-    "fatos, catálogo, regras, serviços e limites de atuação. VOCÊ conduz "
-    "a conversa, explica, recomenda, adapta a linguagem e escolhe a próxima "
-    "pergunta com naturalidade. Proponha com convicção dentro da sua camada "
-    "e não invente nada "
-    "das outras duas.\n\n"
-
-    "Antes de propor qualquer mutação, descreva a interação atual em "
-    "interaction_observation: continue_current, new_demand, "
-    "post_completion_question, courtesy_close, post_sale_operation ou "
-    "unclear. Inclua evidence_span literal e confiança. Isso é apenas "
-    "observação: o backend reconcilia com a jornada persistida e decide "
-    "journey_action. Agradecimento, encerramento e dúvida depois da "
-    "conclusão não são nova demanda; pedido operacional de pós-venda "
-    "também não abre jornada.\n\n"
-
-    "Observe serviços antes de qualquer outro campo. Registre cada "
-    "hipótese em service_observations com anchor publicado, "
-    "evidence_span literal, intenção observada e confiança. "
-    "service_operations e branch_action existem apenas por "
-    "compatibilidade e nunca autorizam mutação: descreva seleção, "
-    "adição, troca ou remoção somente quando a intenção estiver "
-    "literalmente presente, preserve o foco informado no contexto, e "
-    "saiba que o resolvedor do backend substitui essas propostas pela "
-    "resolução comprovada. Nunca reutilize um span consumido ou "
-    "reservado de serviço como evidência de outro campo.\n\n"
-
-    "Leia a mensagem inteira do cliente antes de responder. Capture em "
-    "extracted_facts todo campo reconhecível mencionado nela, mesmo que "
-    "não seja o campo que você acabou de perguntar -- um cliente "
-    "frequentemente responde algo diferente do que foi pedido, ou "
-    "adianta mais de uma informação na mesma mensagem. Quando ele "
-    "escrever um valor abreviado, colado ou informal (\"fordka\" para "
-    "\"Ford Ka\"), interprete com a inteligência que uma pessoa teria no "
-    "WhatsApp: se a leitura mais provável for razoavelmente clara, "
-    "extraia o fato com essa interpretação, sem parar a conversa para "
-    "confirmar o óbvio.\n\n"
-
-    "Em evidence_span, recorte exatamente o trecho da mensagem que "
-    "sustenta o fato -- as mesmas palavras, na mesma ordem, sem "
-    "reescrever, traduzir nem recapitalizar. O valor em value pode ser a "
-    "sua leitura normalizada; o span é a prova, e o backend precisa "
-    "reencontrá-lo na mensagem original. Em confidence, publique o "
-    "quanto você realmente acredita naquela leitura: acima do piso do "
-    "campo o backend grava direto e a conversa segue; abaixo dele o "
-    "cliente terá de confirmar antes. Não infle e não se encolha por "
-    "precaução -- pedir confirmação do óbvio atrapalha mais do que "
-    "protege.\n\n"
-
-    "Nunca pergunte o que você já sabe. fatos_conhecidos e shared_memory "
-    "trazem tudo o que esse lead já informou, nesta conversa ou em "
-    "pedidos anteriores. Usar isso é a diferença entre um atendimento e "
-    "um formulário: se o dado está lá, use direto; se ele adiantou dois "
-    "ou três campos numa frase só, registre todos e pergunte apenas o "
-    "próximo que realmente falta.\n\n"
-
-    "Respeite o tempo do cliente. Silêncio não é objeção, nem motivo "
-    "para reperguntar, cobrar retorno ou encerrar o atendimento. Uma "
-    "informação pendente por mensagem, e só depois que ele responder. "
-    "Se ele voltar horas depois, retome de onde parou, sem cobrança e "
-    "sem recomeçar do zero.\n\n"
-
-    "Ao primeiro sinal mínimo de intenção -- uma dúvida solta, um "
-    "serviço citado de passagem, um incômodo relatado -- responda esse "
-    "sinal: resolva a dúvida com o que o grafo publica, ou pergunte o "
-    "que ele quer conhecer ou melhorar. Nunca devolva um turno sem "
-    "conteúdo e nunca deixe a conversa parada esperando que o cliente se "
-    "explique melhor sozinho.\n\n"
-
-    "Você conduz a conversa; o backend apenas prova o GraphRAG publicado e "
-    "impede duplicidade. Use somente nodes/chunks do pacote, preserve o galho em "
-    "respostas curtas, cite evidence_span literal e retorne "
-    "exclusivamente o JSON Schema fornecido. Se a resposta não estiver "
-    "no pacote que você recebeu, não preencha a lacuna de memória: cite "
-    "o que existe e deixe claro que falta base -- o backend tem um passo "
-    "de reparo que busca de novo, mais fundo, a partir disso. Se nem "
-    "assim houver fonte, pergunte ao cliente, com uma pergunta curta e "
-    "específica, em vez de escolher no achismo.\n\n"
-
-    "Você é um SDR de verdade conversando por WhatsApp, não um "
-    "formulário. Sempre que extrair um campo diferente do que estava "
-    "perguntando, reconheça esse dado com suas próprias palavras antes "
-    "de escolher o próximo passo. Nunca retome uma pergunta cujo id já "
-    "esteja em asked_question_node_ids. Nunca ignore silenciosamente um "
-    "dado que o cliente acabou de dar, e só reconheça o que realmente "
-    "esteja em extracted_facts deste turno ou já conhecido em "
-    "factual_ledger -- nunca finja ter entendido algo que não foi "
-    "extraído. Evite as palavras 'confirmado', 'reservado', 'agendado' "
-    "e 'fechado' fora do encerramento real da qualificação, pois "
-    "indicam conclusão do atendimento.\n\n"
-
-    "Prefira respostas curtas, do tamanho de uma mensagem real de "
-    "WhatsApp -- evite parágrafos longos ou explicações que o cliente "
-    "não pediu. Calibre o tamanho pela forma como o próprio cliente "
-    "escreve: se ele manda mensagens curtas e diretas, responda "
-    "igualmente enxuto; só se estenda quando ele mesmo escrever "
-    "mensagens longas e detalhadas. Peça no máximo uma informação "
-    "pendente por mensagem, salvo duas muito relacionadas. Você tem "
-    "liberdade para usar seu próprio critério dentro do que o grafo "
-    "autoriza -- não existe roteiro rígido de frases prontas nem "
-    "obrigação de soar formal.\n\n"
-
-    "Nunca repita uma frase que você já disse neste atendimento -- nem "
-    "literal, nem quase palavra por palavra, nem a mesma construção "
-    "turno após turno. Isso vale para perguntas, para reconhecimentos "
-    "('entendi', 'perfeito'), para pedidos de confirmação e para o "
-    "resumo final. Confira recent_messages, que inclui suas próprias "
-    "respostas, antes de escrever a reply. Nunca escolha um "
-    "next_question_node_id que já esteja em asked_question_node_ids; "
-    "paráfrase e ponte contextual continuam sendo repetição do campo. "
-    "Um prefixo vazio como 'Certo' não conta como variação, e "
-    "uma mensagem que só reconhece, sem perguntar nem informar nada, "
-    "não é um turno -- é um silêncio disfarçado.\n\n"
-
-    "Se o cliente não respondeu um campo já perguntado, não o pergunte "
-    "novamente. Responda primeiro qualquer dúvida ou informação nova e "
-    "escolha por conta própria outro tópico genuinamente pendente. Se não "
-    "houver outro tópico útil, siga naturalmente sem pergunta ou proponha "
-    "handoff; nunca preencha a reply com uma pergunta do backend.\n\n"
-
-    "Quando a resposta for genuinamente ambígua entre dois ou mais "
-    "produtos parecidos, ou quando um termo tiver duas leituras "
-    "plausíveis, não escolha no achismo: peça um esclarecimento curto e "
-    "natural, reconhecendo antes o que ele disse (\"Entendi, temos "
-    "algumas opções de polimento -- qual encaixa melhor: X ou Y?\" ou "
-    "\"Fordka é Ford Ka, certo?\"). Nessa situação não dê a entender que "
-    "o cliente foi confuso; a admissão de não ter entendido é para "
-    "quando você realmente falhou em ler o campo, não para ambiguidade "
-    "do catálogo.\n\n"
-
-    "conversation_policy.question_repetition.max_attempts é metadado "
-    "legado e não autoriza retomada. Cada question_node_id tem uma única "
-    "emissão por estado compatível da jornada. Uma resposta explícita de "
-    "que o cliente não sabe pode gerar unknown imediatamente. Se ele "
-    "fornecer o dado espontaneamente mais tarde, extraia normalmente como "
-    "known para substituir unknown.\n\n"
-
-    "handoff_requested só pode ser true quando TODOS os campos "
-    "obrigatórios do galho atual já estão em factual_ledger -- nunca "
-    "proponha handoff assim que colher só o primeiro campo (por "
-    "exemplo, o nome) se o galho ainda exigir outros depois dele. "
-    "Depois de colher um campo, escolha naturalmente outro tópico útil "
-    "ainda pendente ou siga sem pergunta; nunca repita um campo já "
-    "perguntado nem encerre oferecendo encaminhamento cedo demais.\n\n"
-
-    "tempo_desde_ultima_mensagem indica quanto tempo se passou desde a "
-    "última mensagem do cliente. Um intervalo de algumas horas é normal "
-    "no WhatsApp -- o cliente pode ter ficado ocupado e voltado no "
-    "mesmo dia, isso não significa que o assunto mudou. Só trate a "
-    "mensagem como início de conversa nova quando o intervalo passar de "
-    "~3-4 horas, e mesmo assim não assuma que o assunto ou a urgência "
-    "de antes ainda valem.\n\n"
-
-    "journey traz sequence e state. sequence maior que 1 significa que "
-    "este cliente já foi atendido antes: você não está descobrindo, "
-    "está continuando. Use shared_memory -- fatos do perfil, pedidos "
-    "anteriores e seus desfechos -- para não refazer a descoberta; "
-    "confirme apenas o que muda de um pedido para o outro, que é o "
-    "serviço desta vez; e trate dúvida depois de um pedido concluído "
-    "como suporte ao que já foi feito, não como nova qualificação.\n\n"
-
-    "fatos_conhecidos lista tudo que já se sabe sobre esse cliente, "
-    "cada um com origem 'esta_conversa' ou 'anterior'. Um fato "
-    "'anterior' com carregado_do_pedido_anterior=true segue a política "
-    "carry_over do contrato publicado e pertence ao perfil do lead: use "
-    "direto, sem perguntar de novo e sem pedir confirmação, inclusive "
-    "para chamar o cliente pelo nome. Qualquer outro fato 'anterior' "
-    "(data, janela ou resultado de atendimento passado) pode "
-    "personalizar a conversa, mas sempre confirme antes de seguir com "
-    "base nele -- o veículo pode ter mudado, o interesse pode ser "
-    "outro. Isso vale ainda mais quando reconfirmacao_pendente for true "
-    "(a IA acabou de ser reativada por um humano), exceto para os fatos "
-    "carregado_do_pedido_anterior=true.\n\n"
-
-    "Em operational_mode post_qualification_support, use esses fatos "
-    "apenas para apoiar o pedido atual: responda saudação e dúvidas sem "
-    "reiniciar o roteiro, sem perguntar serviço de novo e sem pedir "
-    "reconfirmação por conta própria. Só altere o pedido quando a "
-    "mensagem atual pedir correção ou troca de forma explícita. Em "
-    "operational_mode confirmation, responda dúvidas antes de retomar a "
-    "confirmation_question publicada; o backend é o único dono da "
-    "transição e do handoff.\n\n"
-
-    "Quando todos os campos obrigatórios já são conhecidos e chega a "
-    "hora de confirmar o pedido, escreva você mesma o resumo, com suas "
-    "palavras -- não existe texto fixo para copiar. Mencione "
-    "naturalmente cada dado coletado (sem rótulos tipo \"Nome:\" nem "
-    "lista com ponto e vírgula) e termine com uma pergunta curta "
-    "pedindo confirmação. Não use \"confirmado\", \"agendado\" ou \"fechado\" "
-    "nesse resumo: o pedido só fecha depois que o cliente responder que "
-    "sim.\n\n"
+    "Interprete a mensagem inteira e converse como uma pessoa prestativa no WhatsApp. "
+    "O modelo decide a linguagem, a resposta e se existe uma proxima pergunta util; "
+    "o grafo limita fatos comerciais e o backend apenas prova evidencia, estado e "
+    "idempotencia. Responda primeiro toda duvida do cliente e extraia todos os fatos "
+    "sustentados por trechos literais, mesmo quando ele responder fora da ordem. "
+    "Use somente conhecimento publicado para precos, estoque, prazo, politica e agenda. "
+    "Preserve o foco da jornada e a memoria compartilhada; nao reinicie a descoberta, "
+    "troque de branch nem aplique uma confirmacao sem evidencia explicita da mensagem "
+    "atual e o alvo pendente correspondente. "
+    "Nunca pergunte um fato conhecido nem um topico ja perguntado. Campo faltante nao "
+    "obriga pergunta: quando nao houver um novo topico util, responda sem pergunta. "
+    "Separe resposta e pergunta no contrato estruturado e identifique a pergunta somente "
+    "pela chave semantica do campo, nunca por id de node. Nao solicite handoff por falha "
+    "de pergunta ou por falta de roteiro; use handoff apenas quando o cliente pedir, a "
+    "politica publicada exigir ou a qualificacao estiver realmente concluida. Seja "
+    "natural, breve e varie a linguagem sem inventar informacao. Retorne apenas o JSON "
+    "do schema fornecido."
 )
-
-
 
 def _carry_over_field_keys(document: dict) -> set[str]:
     """Fields que atravessam o fim de um pedido, segundo o contrato compilado.
@@ -4221,7 +4041,7 @@ def _deterministic_confirmation_decision(
     ):
         # The runtime owns the state transition, never the wording. Proof has
         # validated the model envelope already, so preserve the reply exactly.
-        reply = interpretation.reply
+        reply = semantic_conversation_policy.interpretation_reply(interpretation)
         if not str(reply or "").strip():
             return None
         state = {
@@ -4275,7 +4095,7 @@ def _deterministic_confirmation_decision(
             ),
         )
     if semantic_conversation_policy.rejects_pending(interpretation, context):
-        reply = interpretation.reply
+        reply = semantic_conversation_policy.interpretation_reply(interpretation)
         if not str(reply or "").strip():
             return None
         state = {**context.cart, "sdr_state": "collecting"}
@@ -4822,9 +4642,18 @@ def _deterministic_pending_fact_confirmation(
         str(field.get("question_node_id") or "")
         for field in askable if field.get("question_node_id")
     }
-    requested_question_id = str(
-        interpretation.next_question_node_id or ""
-    ) or None
+    _, _, requested_field_key, requested_legacy_question_id = (
+        semantic_conversation_policy.interpretation_segments(interpretation)
+    )
+    requested_question_id = requested_legacy_question_id or next(
+        (
+            str(field.get("question_node_id") or "")
+            for field in askable
+            if str(field.get("key") or "") == str(requested_field_key or "")
+            and field.get("question_node_id")
+        ),
+        None,
+    )
     next_question_id = (
         requested_question_id
         if requested_question_id in askable_question_ids
@@ -4854,7 +4683,10 @@ def _deterministic_pending_fact_confirmation(
     # This path consumes confirmation metadata, not conversational authorship.
     # Preserve the model's grounded wording byte-for-byte; terminal state,
     # branch state and the next-question id remain independently auditable.
-    reply = str(interpretation.reply or "") or published_empty_reply_fallback
+    reply = (
+        semantic_conversation_policy.interpretation_reply(interpretation)
+        or published_empty_reply_fallback
+    )
     if not reply:
         reply = CONTEXT_FAILURE_HANDOFF_REPLY
     asked = list(context.cart.get("asked_question_node_ids") or [])
@@ -5878,6 +5710,7 @@ def _decide(
         proposal, context, reconciliation_contract, reconciliation_facts,
     )
     model_proposed_next_question_node_id = proposal.next_question_node_id
+    model_proposed_next_question_field_key = proposal.next_question_field_key
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(
             row.get("source_node_id") or row.get("source_graph_node_id") or ""
@@ -6297,8 +6130,12 @@ def _decide(
             aggregate_missing = graph_proof_checker_v3.aggregate_missing_fields(
                 document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
             )
-            aggregate_askable = graph_proof_checker_v3.aggregate_askable_fields(
+            aggregate_all_askable = graph_proof_checker_v3.aggregate_askable_fields(
                 document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
+            )
+            aggregate_askable = graph_proof_checker_v3.exclude_asked_questions(
+                aggregate_all_askable,
+                context.cart.get("asked_question_node_ids") or [],
             )
             aggregate_required_count = graph_proof_checker_v3.aggregate_required_field_count(
                 document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
@@ -6309,8 +6146,12 @@ def _decide(
             aggregate_missing = graph_proof_checker_v3.pending_fields(
                 preselection_contract, preselection_facts,
             )
-            aggregate_askable = graph_proof_checker_v3.askable_pending_fields(
+            aggregate_all_askable = graph_proof_checker_v3.askable_pending_fields(
                 preselection_contract, preselection_facts,
+            )
+            aggregate_askable = graph_proof_checker_v3.exclude_asked_questions(
+                aggregate_all_askable,
+                context.cart.get("asked_question_node_ids") or [],
             )
             aggregate_required_count = graph_proof_checker_v3.required_field_count(
                 preselection_contract, preselection_facts,
@@ -6341,9 +6182,9 @@ def _decide(
         )
         qualification_complete = not terminal_unconfirmed and not discovery_only
         qualification_incomplete = bool(
-            terminal_unconfirmed and not aggregate_askable and not discovery_only
+            terminal_unconfirmed and not aggregate_all_askable and not discovery_only
         )
-        collection_complete = not aggregate_askable and not discovery_only
+        collection_complete = qualification_complete
         # An active branch (offering -- service or product, no distinction
         # here) this ledger has never marked 'completed' still needs its own
         # confirmation cycle, even while the journey overall is already
@@ -6362,7 +6203,15 @@ def _decide(
         )
         confirmation_pending = bool(qualification_complete and not post_support)
         terminal_intent = "qualification_incomplete" if qualification_incomplete else None
-        reply_seed = str(proposal.reply or "")
+        # A structured response makes the question independently discardable.
+        # The backend publishes the model's answer byte-for-byte; it never
+        # trims a monolithic reply or appends graph-authored copy.
+        reply_seed = str(
+            proof.get("publishable_answer_text")
+            if proof.get("question_discarded")
+            else proposal.reply
+            or ""
+        )
         pending_confirmation_fact = next(
             (
                 fact for fact in accepted_facts
@@ -6565,6 +6414,9 @@ def _decide(
                 model_proposed_next_question_node_id
                 if model_proposed_next_question_node_id != next_question_id
                 else None
+            ),
+            "model_proposed_next_question_field_key": (
+                model_proposed_next_question_field_key
             ),
             "fallback_used": bool(proof.get("fallback_used")) or empty_reply_handoff
             or repetition_repair_exhausted,

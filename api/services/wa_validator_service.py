@@ -2012,13 +2012,13 @@ def _semantic_turn_audit(
     missing = [str(value) for value in proof.get("missing_fields") or []]
     question_id = str(proof.get("next_question_node_id") or "") or None
     first_missing = missing[0] if missing else None
-    askable_fields = [
+    askable_fields = graph_proof_checker_v3.exclude_asked_questions([
         field
         for field in graph_proof_checker_v3.askable_pending_fields(
             contract, facts_after,
         )
         if str(field.get("key") or "") in set(missing)
-    ]
+    ], ledger_before.get("asked_question_node_ids") or [])
     askable_question_ids = {
         str(field.get("question_node_id") or "")
         for field in askable_fields
@@ -2281,6 +2281,7 @@ def _semantic_turn_audit(
         "received_content_acknowledged": not intended or bool(declarative_parts),
         "question_semantically_askable": (
             (not missing and question_id is None)
+            or (missing and not askable_fields and question_id is None)
             or (
                 proof.get("confirmation_state") == "field_confirmation"
                 and proof.get("pending_confirmation")

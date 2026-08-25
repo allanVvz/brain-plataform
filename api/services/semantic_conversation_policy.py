@@ -45,6 +45,33 @@ _INTENT_TO_INTERACTION = {
 }
 
 
+def interpretation_segments(
+    interpretation: SemanticInterpretation,
+) -> tuple[str, str, str | None, str | None]:
+    """Return model-authored answer/question segments and audit metadata.
+
+    The flat fields are accepted only for rolling compatibility. The canonical
+    workflow emits ``response`` and never asks the model for graph node ids.
+    """
+    answer = str(interpretation.response.answer or "").strip()
+    question = str(interpretation.response.question or "").strip()
+    field_key = str(
+        interpretation.response.question_field_key
+        or interpretation.next_question_field_key
+        or ""
+    ).strip() or None
+    node_id = str(interpretation.next_question_node_id or "").strip() or None
+    if not answer and not question:
+        answer = str(interpretation.reply or "").strip()
+    return answer, question, field_key, node_id
+
+
+def interpretation_reply(interpretation: SemanticInterpretation) -> str:
+    """Compose only text written by the model; no backend question copy."""
+    answer, question, _, _ = interpretation_segments(interpretation)
+    return " ".join(part for part in (answer, question) if part).strip()
+
+
 def interpretation_to_proposal(
     interpretation: SemanticInterpretation,
     *,
@@ -74,6 +101,9 @@ def interpretation_to_proposal(
     evidence = next(
         (intent.evidence_span for intent in interpretation.intents), ""
     )
+    answer, question, question_field_key, legacy_question_node_id = (
+        interpretation_segments(interpretation)
+    )
     return ConversationProposal(
         interaction_observation={
             "kind": interaction,
@@ -89,8 +119,11 @@ def interpretation_to_proposal(
         claims=[claim.model_dump() for claim in interpretation.claims],
         cited_node_ids=list(interpretation.cited_node_ids),
         cited_chunk_ids=list(interpretation.cited_chunk_ids),
-        next_question_node_id=interpretation.next_question_node_id,
-        reply=interpretation.reply,
+        answer_text=answer,
+        question_text=question,
+        next_question_field_key=question_field_key,
+        next_question_node_id=legacy_question_node_id,
+        reply=" ".join(part for part in (answer, question) if part).strip(),
         qualification_complete=(
             interpretation.recommended_next_action.value in {"handoff", "close"}
         ),

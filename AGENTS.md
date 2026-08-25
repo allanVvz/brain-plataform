@@ -648,10 +648,14 @@ Se nao aparece no grafo, esta incompleto.
   uma resposta valida do modelo por uma pergunta pronta.
 - Grafo de agendamento incompleto deve falhar na validacao antes da publicacao.
 - Cada `question_node_id` pode ser emitido uma unica vez no estado compativel
-  da jornada. O historico `asked_question_node_ids` e memoria auditavel para o
-  modelo; ponte contextual ou parafrase nao autoriza repetir o campo. A primeira
-  repeticao pede uma nova composicao ao modelo; repeticao apos o reparo termina
-  em handoff observavel, sem outbound com a pergunta repetida.
+  da jornada. `asked_question_node_ids` permanece ledger interno; o prompt do
+  modelo recebe apenas os `asked_topics` semanticos, sem ids nem copy das
+  perguntas. Ponte contextual ou parafrase nao autoriza repetir o campo.
+- A resposta declarativa e a pergunta devem ser componentes separados. Se uma
+  pergunta repetida ou invalida acompanhar uma resposta valida, descartar so a
+  pergunta, preservando resposta, fatos, memoria e branch. Reparar pelo modelo
+  apenas quando nao existir componente declarativo publicavel; nunca gerar uma
+  pergunta no backend nem fazer handoff apenas por falha da pergunta.
 - Sofia deve auxiliar o operador a preencher a matriz campo/pergunta, preservar
   fonte/status e nao copiar perguntas de outra persona ou exemplo.
 

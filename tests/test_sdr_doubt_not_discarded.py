@@ -266,6 +266,34 @@ def test_reparo_do_modelo_preserva_conteudo_novo_sem_repetir_campo(monkeypatch):
     assert "Qual servico" not in response.reply_text
 
 
+def test_contrato_segmentado_publica_a_duvida_sem_repetir_campo(monkeypatch):
+    """No v2, uma pergunta ruim nao exige reparo nem descarta a resposta."""
+    document, pub = _fixture(monkeypatch)
+    context = _context(
+        document, pub, message_id="msg:semantic-v2", asked=["q:servico"],
+        history=[{"role": "assistant", "content": "Qual servico te interessa?"}],
+    )
+    proposal = {
+        **_proposal(document),
+        "answer_text": ANSWER,
+        "question_text": "Qual servico te interessa",
+        "next_question_field_key": "servico",
+        "next_question_node_id": None,
+        "reply": f"{ANSWER} Qual servico te interessa",
+    }
+
+    decision, response = graph_agent_runtime_v3.decide(
+        context,
+        model_observation={"proposal": proposal, "repair_attempt": 0},
+    )
+
+    assert decision.route.value != "HUMAN"
+    assert response.reply_text == ANSWER
+    assert response.proof["question_discarded"] is True
+    assert response.proof["repair_required"] is False
+    assert response.cart_state["asked_question_node_ids"] == ["q:servico"]
+
+
 def test_proposta_repetida_nao_registra_nova_emissao(monkeypatch):
     """A memoria conta apenas a pergunta que o cliente recebeu."""
     document, pub = _fixture(monkeypatch)
