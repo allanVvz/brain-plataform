@@ -4319,7 +4319,12 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
         item.get("issue") == "conversation_repetition"
         for item in response.proof["repair_requirements"]
     )
-    assert response.cart_state == context.cart
+    assert response.cart_state["facts"]["servico"] == existing_service
+    assert response.cart_state["facts"]["objective"]["status"] == "unknown"
+    assert response.cart_state["facts"]["objective"]["value"] is None
+    assert response.cart_state["asked_question_node_ids"] == ["q:objective"]
+    assert response.cart_state["active_branch_node_id"] == "aurora-product-polish-localized"
+    assert response.handoff_required is True
 
 
 
