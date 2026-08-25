@@ -4307,7 +4307,17 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
     assert response.proof["valid"], response.proof["errors"]
     assert response.reply_text is None
     assert response.proof["repair_required"] is True
-    assert response.proof["question_component_invalid"] is True
+    # The natural wording is legitimately bound to q:objective.  It is
+    # suppressed because that id was already emitted, not because it differs
+    # lexically from the graph-authored question copy.
+    assert response.proof["question_component_invalid"] is False
+    assert response.proof["next_question_node_id"] == "q:objective"
+    assert response.proof["repetition_audit"]["passed"] is False
+    assert "question_already_asked" in response.proof["repetition_audit"]["failures"]
+    assert any(
+        item.get("issue") == "conversation_repetition"
+        for item in response.proof["repair_requirements"]
+    )
     assert response.cart_state == context.cart
 
 

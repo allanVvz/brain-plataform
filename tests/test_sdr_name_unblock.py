@@ -306,7 +306,7 @@ def test_repetir_o_candidato_pendente_confirma_e_avanca(monkeypatch):
     assert fact["value"] == "Allan Rodrigues"
 
 
-def test_saudacao_livre_pede_reparo_sem_reescrever_pergunta_no_backend(monkeypatch):
+def test_saudacao_livre_aceita_pergunta_natural_vinculada_ao_campo(monkeypatch):
     document, pub = _fixture(monkeypatch)
     reply = (
         "Oi! Que bom falar com voce. "
@@ -332,10 +332,11 @@ def test_saudacao_livre_pede_reparo_sem_reescrever_pergunta_no_backend(monkeypat
     _decision, response = _decide(context, proposal)
 
     assert response.proof["valid"], response.proof["errors"]
-    assert response.reply_text is None
-    assert response.proof["next_question_node_id"] is None
-    assert response.proof["question_component_invalid"] is True
-    assert response.proof["repair_required"] is True
+    assert response.reply_text == reply
+    assert response.proof["next_question_node_id"] == "q:servico"
+    assert response.proof["question_component_invalid"] is False
+    assert response.proof["repair_required"] is False
+    assert "model_question_metadata_askable" in response.proof["observations"]
 
 
 def test_nome_invalido_nao_vira_fato_e_o_turno_continua_util(monkeypatch):
