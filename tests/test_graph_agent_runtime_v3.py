@@ -467,6 +467,36 @@ def test_customer_reply_never_contains_internal_service_change_copy():
     assert " em foco." not in source
 
 
+def test_first_invalid_model_output_requests_one_repair_without_mutating_state():
+    cart = {
+        "facts": {},
+        "facts_by_key": {},
+        "asked_question_node_ids": ["q:volume"],
+        "memory_marker": "preserve-me",
+    }
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum="sha256:test",
+        messages=[{"role": "user", "content": "Qual e o preco?"}],
+        cart=cart, rag_nodes=[], rag_paths=[], graph_contract={},
+    )
+
+    decision, response = graph_agent_runtime_v3._invalid_proposal_fallback(
+        context, {"response": {"answer": "O valor depende do item."}},
+        ["missing:claims"], repair_attempt=0,
+    )
+
+    assert decision.intent == "repair_retrieval"
+    assert decision.route.value == "SDR"
+    assert response.reply_text is None
+    assert response.handoff_required is False
+    assert response.cart_state == cart
+    assert response.proof["repair_required"] is True
+    assert response.proof["fallback_used"] is False
+    assert response.proof["mode"] == "model_output_repair"
+    assert response.proof["repair_requirements"][0]["issue"] == "model_output_invalid"
+
+
 def test_invalid_model_fallback_cannot_leave_terminal_state_on_sdr():
     contract = {
         "branch_anchor_node_id": "branch:a",
@@ -498,7 +528,7 @@ def test_invalid_model_fallback_cannot_leave_terminal_state_on_sdr():
     )
 
     decision, response = graph_agent_runtime_v3._invalid_proposal_fallback(
-        context, {"invalid": True}, ["proposal_schema_invalid"],
+        context, {"invalid": True}, ["proposal_schema_invalid"], repair_attempt=1,
     )
 
     assert decision.intent == "awaiting_confirmation"
@@ -552,7 +582,7 @@ def test_invalid_model_fallback_never_goes_silent_on_a_non_terminal_repeat():
     )
 
     decision, response = graph_agent_runtime_v3._invalid_proposal_fallback(
-        context, {"invalid": True}, ["proposal_schema_invalid"],
+        context, {"invalid": True}, ["proposal_schema_invalid"], repair_attempt=1,
     )
 
     assert response.proof["repetition_action"] != "suppressed_duplicate_outbound"
@@ -622,7 +652,7 @@ def test_invalid_proposal_fallback_confirms_every_active_branch_not_just_the_foc
     )
 
     decision, response = graph_agent_runtime_v3._invalid_proposal_fallback(
-        context, {"invalid": True}, ["proposal_schema_invalid"],
+        context, {"invalid": True}, ["proposal_schema_invalid"], repair_attempt=1,
     )
 
     assert "Polimento" in response.reply_text
@@ -4879,6 +4909,65 @@ def test_semantic_interpretation_payload_reaches_a_real_decision(monkeypatch):
     # Proof that the interpretation was really consumed, not merely tolerated.
     assert response.proof.get("semantic_validation", {}).get("valid") is True
     assert response.reply_text
+
+
+def test_semantic_interpretation_parse_error_uses_exactly_one_repair(monkeypatch):
+    """The production observation shape must carry its repair counter end to end."""
+    document = compiled_fixture()
+    persona_row = {**PERSONA, "config": {}}
+    pub = publication(document)
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_persona",
+        lambda _slug: persona_row,
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_active_graph_publication",
+        lambda _persona_id: pub,
+    )
+    contract = document["branch_contracts"]["branch:b"]
+    context = ConversationContext(
+        persona_slug="generic", agent_slug="agent", graph_version=1,
+        graph_checksum=document["checksum"], publication_id=pub["id"],
+        messages=[{
+            "message_id": "msg:parse-error", "role": "user",
+            "content": "Qual e o preco e o pedido minimo?",
+        }],
+        cart={"facts": {}, "memory_marker": "preserve-me"},
+        rag_nodes=[], rag_paths=[], graph_contract=contract,
+        active_branch_node_id="branch:b", active_branch_node_ids=["branch:b"],
+        retrieval_trace={"retrieval_branch_node_id": "branch:b"},
+    )
+    observation = {
+        "interpretation": {
+            "intents": [{
+                "kind": "doubt", "evidence_span": "preco e pedido minimo",
+            }],
+            "state_relation": "continue",
+            "reply": "Vou explicar isso.",
+            "recommended_next_action": "answer_doubt",
+        },
+        "interpretation_parse_errors": ["missing:claims"],
+    }
+
+    first_decision, first_response = graph_agent_runtime_v3.decide(
+        context, model_observation={**observation, "repair_attempt": 0},
+    )
+
+    assert first_decision.intent == "repair_retrieval"
+    assert first_response.reply_text is None
+    assert first_response.handoff_required is False
+    assert first_response.cart_state == context.cart
+    assert first_response.proof["mode"] == "model_output_repair"
+    assert first_response.proof["repair_required"] is True
+
+    second_decision, second_response = graph_agent_runtime_v3.decide(
+        context, model_observation={**observation, "repair_attempt": 1},
+    )
+
+    assert second_decision.route.value == "HUMAN"
+    assert second_response.handoff_required is True
+    assert second_response.proof["mode"] == "model_output_handoff"
+    assert second_response.proof["repair_required"] is False
 
 
 # ---------------------------------------------------------------------------

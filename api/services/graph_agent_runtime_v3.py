@@ -290,8 +290,55 @@ def _drop_stale_branch_citations(
 
 
 def _invalid_proposal_fallback(
-    context: ConversationContext, raw: Any, errors: list[str]
+    context: ConversationContext, raw: Any, errors: list[str], *, repair_attempt: int = 0,
 ) -> tuple[ConversationDecision, AgentResponse]:
+    model_errors = list(dict.fromkeys(errors))
+    if repair_attempt < 1:
+        # A malformed first response is a model-contract failure, not a
+        # commercial handoff. Keep the already committed conversation state
+        # untouched and let the single model-owned repair boundary regenerate
+        # a complete semantic interpretation. No backend-authored question or
+        # unproved fact is published while that repair is pending.
+        proof = {
+            "valid": False,
+            "errors": model_errors,
+            "gating_errors": [],
+            "repair_required": True,
+            "repair_requirements": [{
+                "kind": "schema",
+                "issue": "model_output_invalid",
+                "instruction": (
+                    "Return one complete semantic interpretation matching the "
+                    "requested JSON contract. Preserve grounded meaning from "
+                    "the customer message and do not repeat a prior question."
+                ),
+            }],
+            "fallback_used": False,
+            "mode": "model_output_repair",
+            "model_proposal_errors": model_errors,
+            "model_proposal": (
+                raw if isinstance(raw, dict) else {"raw_type": type(raw).__name__}
+            ),
+            "accepted_facts": [],
+            "question_component_invalid": False,
+        }
+        return (
+            ConversationDecision(
+                classifier="graph_proof_checker_v3",
+                intent="repair_retrieval",
+                route=ConversationRoute.SDR,
+                confidence=0,
+                lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+            ),
+            AgentResponse(
+                reply_text=None,
+                role=ConversationRoute.SDR,
+                cart_state=context.cart,
+                handoff_required=False,
+                proof=proof,
+            ),
+        )
+
     contract = context.graph_contract or {}
     facts = context.cart.get("facts") or {}
     missing = graph_proof_checker_v3.pending_fields(contract, facts)
@@ -381,7 +428,6 @@ def _invalid_proposal_fallback(
         question_id = None
         terminal_intent = "invalid_model_output_repetition"
         repetition_action = "repetition_handoff"
-    model_errors = list(dict.fromkeys(errors))
     fallback_valid = bool(str(reply or "").strip())
     proof = {
         "valid": fallback_valid,
@@ -5596,7 +5642,12 @@ def _decide(
         raw = proposal.model_dump(mode="json")
         parse_errors = [*parse_errors, *validation.errors]
         if parse_errors:
-            return _invalid_proposal_fallback(context, raw, parse_errors)
+            return _invalid_proposal_fallback(
+                context,
+                raw,
+                parse_errors,
+                repair_attempt=int(observation.get("repair_attempt") or 0),
+            )
     else:
         raw = observation.get("proposal") if isinstance(observation.get("proposal"), dict) else observation
         raw = _sanitize_untrusted_service_operations(raw)
@@ -5604,10 +5655,18 @@ def _decide(
             proposal = ConversationProposal.model_validate(raw)
         except ValidationError as exc:
             return _invalid_proposal_fallback(
-                context, raw, [*parse_errors, f"proposal_schema_invalid:{exc.errors(include_url=False)}"]
+                context,
+                raw,
+                [*parse_errors, f"proposal_schema_invalid:{exc.errors(include_url=False)}"],
+                repair_attempt=int(observation.get("repair_attempt") or 0),
             )
         if parse_errors:
-            return _invalid_proposal_fallback(context, raw, parse_errors)
+            return _invalid_proposal_fallback(
+                context,
+                raw,
+                parse_errors,
+                repair_attempt=int(observation.get("repair_attempt") or 0),
+            )
     if not publication:
         persona = supabase_client.get_persona(context.persona_slug) or {}
         publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}

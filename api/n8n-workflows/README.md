@@ -19,7 +19,9 @@ máximo um repair do modelo. `response.answer` é a mensagem pública completa e
 Quando apenas a pergunta natural é inválida ou repetida, o repair reescreve
 somente a mensagem pública, sem receber IDs ou uma lista de campos
 perguntáveis, enquanto fatos, memória, branch e claims já provados permanecem
-intactos. Uma segunda falha não é publicada e produz handoff observável.
+intactos. Uma primeira saída que não cumpra o schema também atravessa esse
+mesmo limite de um único repair, preservando o estado já commitado; somente uma
+segunda falha não é publicada e produz handoff observável.
 
 O contrato em Markdown faz parte do fluxo auditável:
 `api/contracts/graph-agent-runtime-v3.md` é checksumado dentro de cada
