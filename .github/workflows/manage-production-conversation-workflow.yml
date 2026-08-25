@@ -1,0 +1,82 @@
+name: Manage production conversation workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Read-only template audit or explicit n8n resync
+        type: choice
+        options: [audit, resync]
+        default: audit
+      persona_slug:
+        description: Active persona whose canonical workflow is audited
+        type: choice
+        options: [tock-fatal, aurora]
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production
+  cancel-in-progress: false
+
+jobs:
+  workflow:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Audit or resync canonical n8n template
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          OPERATION: ${{ inputs.operation }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,OPERATION,PERSONA_SLUG
+          command_timeout: 10m
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            [[ "$OPERATION" == "audit" || "$OPERATION" == "resync" ]] || {
+              echo "invalid operation" >&2
+              exit 2
+            }
+            [[ "$PERSONA_SLUG" =~ ^[a-z0-9-]{2,80}$ ]] || {
+              echo "invalid persona slug" >&2
+              exit 2
+            }
+
+            lifecycle_stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
+            case "$lifecycle_stage" in
+              candidate_healthy|validator_complete) ;;
+              *)
+                echo "workflow management requires candidate_healthy or validator_complete; found $lifecycle_stage" >&2
+                exit 1
+                ;;
+            esac
+            python3 -c 'import json; value=json.load(open(".deploy/control/claims-paused.json", encoding="utf-8")); assert value.get("paused") is True, "claims are not paused"'
+
+            active_api_service="$(tr -d '\r\n' < .deploy/api-active-slot 2>/dev/null || true)"
+            [[ "$active_api_service" == "api-candidate" ]] || active_api_service=api
+            compose=(docker compose --env-file .env.compose)
+
+            audit_template() {
+              "${compose[@]}" exec -T "$active_api_service" python -c 'import json,sys; from scripts import resync_graph_agent_workflows as r; from services import deepseek_n8n_service as d, n8n_client, supabase_client; slug=sys.argv[1]; persona=supabase_client.get_persona(slug); binding=r._binding(persona, require_active=True); connection=supabase_client.get_persona_integration_connection(str(persona["id"]), "deepseek") or {}; config=r._resolved_config(persona, connection, binding); expected=d._workflow_for_persona(persona, credential_id=str(config["n8n_credential_id"]), credential_name="Brain DeepSeek \u2014 " + slug, model_binding={"model": config.get("model"), "endpoint": config.get("endpoint"), "reply_source": config.get("reply_source")}); live=n8n_client.get_workflow(str(config["n8n_workflow_id"])) or {}; expected_checksum=d._workflow_checksum(expected); live_checksum=d._workflow_checksum(live) if live else None; print(json.dumps({"persona_slug": slug, "workflow_id": config.get("n8n_workflow_id"), "active": live.get("active"), "stored_checksum": config.get("workflow_checksum"), "live_checksum": live_checksum, "candidate_checksum": expected_checksum, "would_change": live_checksum != expected_checksum}, ensure_ascii=True, sort_keys=True))' "$PERSONA_SLUG"
+            }
+
+            echo "N8N_TEMPLATE_AUDIT_BEFORE=$(audit_template)"
+            if [[ "$OPERATION" == "audit" ]]; then
+              exit 0
+            fi
+
+            "${compose[@]}" exec -T "$active_api_service" \
+              python scripts/resync_graph_agent_workflows.py \
+              "$PERSONA_SLUG" --active-persona "$PERSONA_SLUG"
+            after="$(audit_template)"
+            echo "N8N_TEMPLATE_AUDIT_AFTER=$after"
+            printf '%s' "$after" | python3 -c 'import json,sys; value=json.load(sys.stdin); ok=value.get("active") is True and value.get("would_change") is False and value.get("live_checksum")==value.get("candidate_checksum"); raise SystemExit(0 if ok else 1)'
