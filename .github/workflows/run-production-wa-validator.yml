@@ -1,0 +1,99 @@
+name: Run production WA Validator
+
+on:
+  workflow_dispatch:
+    inputs:
+      persona_slug:
+        description: Persona validated through the internal direct driver
+        type: choice
+        options: [tock-fatal, aurora]
+        required: true
+      flow_id:
+        description: Semantic validator flow compatible with the persona
+        required: true
+      initial_state:
+        description: Initial qualification state
+        type: choice
+        options: [cold, known_name]
+        default: cold
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production-validator
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Run internal direct validation
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          FLOW_ID: ${{ inputs.flow_id }}
+          INITIAL_STATE: ${{ inputs.initial_state }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,PERSONA_SLUG,FLOW_ID,INITIAL_STATE
+          command_timeout: 20m
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            [[ "$PERSONA_SLUG" =~ ^[a-z0-9-]{2,80}$ ]] || { echo "invalid persona slug" >&2; exit 2; }
+            [[ "$FLOW_ID" =~ ^[a-z0-9_]{2,100}$ ]] || { echo "invalid flow id" >&2; exit 2; }
+            [[ "$INITIAL_STATE" == "cold" || "$INITIAL_STATE" == "known_name" ]] || {
+              echo "invalid initial state" >&2
+              exit 2
+            }
+
+            lifecycle_stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
+            case "$lifecycle_stage" in
+              candidate_healthy|validator_complete) ;;
+              *)
+                echo "validator requires candidate_healthy or validator_complete; found $lifecycle_stage" >&2
+                exit 1
+                ;;
+            esac
+
+            active_api_service="$(tr -d '\r\n' < .deploy/api-active-slot 2>/dev/null || true)"
+            [[ "$active_api_service" == "api-candidate" ]] || active_api_service=api
+            compose=(docker compose --env-file .env.compose)
+            "${compose[@]}" ps --status running "$active_api_service" workers
+
+            session_output="$("${compose[@]}" exec -T "$active_api_service" \
+              python -c 'import sys; from services import wa_validator_service as w; generated=w.generate_script(persona_slug=sys.argv[1], flow_id=sys.argv[2], target_contact="production-lifecycle", initial_state=sys.argv[3]); session_id=generated["session_id"]; w.enqueue_session_direct(session_id); print("WA_VALIDATOR_SESSION_ID=" + session_id)' \
+              "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE")"
+            printf '%s\n' "$session_output"
+            session_id="$(printf '%s\n' "$session_output" | sed -n 's/^WA_VALIDATOR_SESSION_ID=//p' | tail -n 1)"
+            [[ "$session_id" =~ ^[A-Za-z0-9_-]{8,160}$ ]] || {
+              echo "validator did not return a valid session id" >&2
+              exit 1
+            }
+
+            deadline=$((SECONDS + 900))
+            while (( SECONDS < deadline )); do
+              summary="$("${compose[@]}" exec -T "$active_api_service" \
+                python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); print(json.dumps({"status": s.get("status"), "technical_pass": s.get("technical_pass"), "quality_pass": s.get("quality_pass"), "quality_scope": s.get("quality_scope"), "turn_count": len(((s.get("output") or {}).get("conversation") or [])), "error": s.get("error")}, ensure_ascii=True, sort_keys=True))' \
+                "$session_id")"
+              printf 'WA_VALIDATOR_STATUS=%s\n' "$summary"
+              status="$(printf '%s' "$summary" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status") or "")')"
+              if [[ "$status" == "done" ]]; then
+                printf '%s' "$summary" | python3 -c 'import json,sys; value=json.load(sys.stdin); ok=value.get("technical_pass") is True and value.get("quality_pass") is True and value.get("quality_scope")=="semantic_graph_v1"; raise SystemExit(0 if ok else 1)'
+                echo "WA_VALIDATOR_RESULT=passed"
+                exit 0
+              fi
+              if [[ "$status" == "error" || "$status" == "failed" ]]; then
+                echo "WA Validator ended with status=$status" >&2
+                exit 1
+              fi
+              sleep 5
+            done
+            echo "WA Validator timed out: $session_id" >&2
+            exit 1
