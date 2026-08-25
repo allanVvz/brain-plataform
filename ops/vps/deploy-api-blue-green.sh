@@ -56,7 +56,8 @@ restore_previous_upstream() {
   if [[ "$cutover_loaded" == "true" && -s .deploy/caddy/Caddyfile ]]; then
     docker cp .deploy/caddy/Caddyfile "$caddy_cid:/tmp/Caddyfile.rollback" || true
     docker exec "$caddy_cid" caddy reload \
-      --config /tmp/Caddyfile.rollback --adapter caddyfile || true
+      --config /tmp/Caddyfile.rollback --adapter caddyfile \
+      --address 127.0.0.1:2019 || true
   fi
   if [[ "$inactive" == "api-candidate" ]]; then
     "${COMPOSE_BG[@]}" stop api-candidate >/dev/null 2>&1 || true
@@ -67,9 +68,32 @@ restore_previous_upstream() {
   exit "$exit_code"
 }
 trap restore_previous_upstream ERR
+
+# Releases before the blue-green lifecycle ran Caddy with `admin off`. The
+# first rollout recreates only Caddy with the still-active upstream so the
+# local-only admin endpoint becomes available. Subsequent rollouts reload
+# gracefully without recreating the edge container.
+if ! docker exec "$caddy_cid" caddy reload \
+  --config /etc/caddy/Caddyfile --adapter caddyfile \
+  --address 127.0.0.1:2019 >/dev/null 2>&1; then
+  echo "bootstrapping local Caddy admin endpoint"
+  "${COMPOSE[@]}" up -d --no-deps --force-recreate caddy
+  caddy_cid="$("${COMPOSE[@]}" ps -q caddy)"
+  admin_deadline=$((SECONDS + 60))
+  until docker exec "$caddy_cid" caddy reload \
+    --config /etc/caddy/Caddyfile --adapter caddyfile \
+    --address 127.0.0.1:2019 >/dev/null 2>&1; do
+    (( SECONDS < admin_deadline )) || {
+      echo "Caddy local admin endpoint did not become ready" >&2
+      exit 1
+    }
+    sleep 1
+  done
+fi
 docker cp "$caddy_next" "$caddy_cid:/tmp/Caddyfile.next"
 docker exec "$caddy_cid" caddy validate --config /tmp/Caddyfile.next --adapter caddyfile
-docker exec "$caddy_cid" caddy reload --config /tmp/Caddyfile.next --adapter caddyfile
+docker exec "$caddy_cid" caddy reload --config /tmp/Caddyfile.next --adapter caddyfile \
+  --address 127.0.0.1:2019
 cutover_loaded=true
 
 api_domain="$(awk -F= '

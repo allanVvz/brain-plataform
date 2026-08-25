@@ -1,6 +1,8 @@
 {
 	email {$ACME_EMAIL}
-	admin off
+	# Local-only admin endpoint is required for graceful blue-green reloads.
+	# Port 2019 is not published by Compose and remains inside the container.
+	admin 127.0.0.1:2019
 }
 
 {$API_DOMAIN}, {$API_DOMAIN_SECONDARY} {

@@ -108,8 +108,8 @@ if [[ -s "$STATE_DIR/lifecycle.json" ]]; then
   existing_previous="$(python3 ops/vps/release_lifecycle.py show --field previous_sha 2>/dev/null || true)"
   if [[ "$existing_candidate" != "$TARGET_SHA" ]]; then
     if [[ "$existing_previous" == "$CURRENT_SHA" \
-      && "$existing_stage" =~ ^(prepared|images_pulled)$ ]]; then
-      echo "superseding pre-pause candidate $existing_candidate at $existing_stage"
+      && "$existing_stage" =~ ^(prepared|images_pulled|claims_paused|queue_drained)$ ]]; then
+      echo "superseding pre-cutover candidate $existing_candidate at $existing_stage"
       prepare_args+=(--force)
     else
       echo "unfinished release cannot be superseded safely: candidate=$existing_candidate stage=$existing_stage" >&2

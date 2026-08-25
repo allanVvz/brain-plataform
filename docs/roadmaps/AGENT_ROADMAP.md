@@ -119,6 +119,13 @@ O soak conversacional de no mínimo 30 minutos é durável e não entra no tempo
 ativo do deploy: a instalação chega a `candidate_healthy`, o validador interno
 é registrado, e outra operação completa o soak e pede autorização de resume.
 
+O blue-green mantém o admin do Caddy restrito a `127.0.0.1:2019` dentro do
+container; a porta não é publicada pelo Compose. Instalações legadas com
+`admin off` fazem uma única recriação controlada do Caddy ainda apontando para
+a API ativa e, depois disso, cada cutover usa reload gracioso. Um candidato
+substituto só pode reiniciar o lifecycle até `queue_drained`, com o mesmo
+`previous_sha`; após `candidate_healthy`, a troca automática continua proibida.
+
 Pendências para concluir o item:
 
 - provar em QA a alternância blue-green e o rollback automático do upstream;
