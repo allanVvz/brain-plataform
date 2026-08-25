@@ -615,19 +615,38 @@ def _mmr(candidates: list[dict[str, Any]], limit: int, *, max_tokens: int = RAG_
     return selected
 
 
-def _required_structural_chunks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep one executable chunk per required node outside probabilistic MMR."""
+def _required_structural_chunks(
+    rows: list[dict[str, Any]],
+    required_node_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Keep one executable non-question chunk per required path node.
+
+    ``get_graph_branch_package_v3`` returns both explicitly requested path
+    nodes and vector-selected FAQ chunks.  Treating every returned source as
+    structural made the whole FAQ candidate set mandatory and could reject a
+    turn before the model ran.  Question wording is already represented by
+    the published contract for audit; it is deliberately excluded from RAG so
+    the model owns the natural phrasing instead of copying graph-authored copy.
+    """
     kind_priority = {
-        "question": 6, "claims": 5, "rule": 5, "rules": 5,
+        "claims": 5, "rule": 5, "rules": 5,
         "validators": 4, "structured_facts": 3, "content": 2,
+    }
+    required_scope = {
+        str(node_id) for node_id in (required_node_ids or []) if node_id
     }
     selected: dict[str, dict[str, Any]] = {}
     for row in rows:
         source = str(row.get("source_node_id") or row.get("source_graph_node_id") or "")
-        if not source:
+        chunk_kind = str(row.get("chunk_kind") or "")
+        if (
+            not source
+            or (required_scope and source not in required_scope)
+            or chunk_kind == "question"
+        ):
             continue
         current = selected.get(source)
-        score = kind_priority.get(str(row.get("chunk_kind") or ""), 1)
+        score = kind_priority.get(chunk_kind, 1)
         current_score = kind_priority.get(str((current or {}).get("chunk_kind") or ""), 1)
         if current is None or score > current_score:
             selected[source] = row
@@ -690,6 +709,7 @@ def _repair_chunks(
         str(row.get("chunk_id") or row.get("id")): row
         for row in rows
         if str(row.get("chunk_id") or row.get("id")) in requested_chunk_ids
+        and str(row.get("chunk_kind") or "") != "question"
     }
     structural = {
         str(row.get("chunk_id") or row.get("id")): row
@@ -3811,7 +3831,9 @@ def build_context(
         str(row.get("chunk_id") or row.get("id")): row
         for row in [*rows, *structural]
     }
-    required_structural = _required_structural_chunks(structural)
+    required_structural = _required_structural_chunks(
+        structural, required_node_ids=required_nodes,
+    )
     reserved: list[dict[str, Any]] = []
     reserved_ids: set[str] = set()
     optional_chunk_slots = _optional_retrieval_chunk_slots(
@@ -3825,7 +3847,7 @@ def build_context(
         for row in [*required_structural, *reserved]
     )
     if required_token_count > RAG_CHUNK_TOKEN_BUDGET:
-        raise RuntimeError("required structural and FAQ chunks exceed the prompt token budget")
+        raise RuntimeError("required structural chunks exceed the prompt token budget")
     remaining_token_budget = RAG_CHUNK_TOKEN_BUDGET - required_token_count
     selected = (
         _mmr(

@@ -25,6 +25,10 @@ ou selecionar uma FAQ no lugar do modelo. `asked_question_node_ids` registra o
 que o cliente efetivamente recebeu. Um id ja registrado nunca e emitido de
 novo; a primeira proposta repetida volta ao modelo para uma unica reparacao e,
 se a repeticao persistir, o turno termina em handoff observavel sem a pergunta.
+Chunks `question` nao entram no pacote RAG do modelo e o contrato enviado ao
+modelo preserva apenas id, campo e dependencias da pergunta, sem a copy
+`field_questions`. Assim o grafo continua provando cobertura/escopo, enquanto o
+modelo formula a pergunta e o backend jamais a concatena na resposta.
 
 Antes de publicar, validar acumulacao top-down de FAQs: cada FAQ de evidencia
 precisa de caminho hierarquico ativo da Persona, fonte/status validos e escopo
