@@ -125,6 +125,10 @@ container; a porta não é publicada pelo Compose. Instalações legadas com
 a API ativa e, depois disso, cada cutover usa reload gracioso. Um candidato
 substituto só pode reiniciar o lifecycle até `queue_drained`, com o mesmo
 `previous_sha`; após `candidate_healthy`, a troca automática continua proibida.
+Uma substituição post-cutover revisada exige `supersede_unfinished_release`,
+motivo não vazio e marker de claims pausados. Antes do novo `prepared`, o estado
+completo anterior é preservado em `.deploy/releases/<candidate_sha>.json` e o
+evento `superseded` é anexado ao ledger durável.
 
 Pendências para concluir o item:
 

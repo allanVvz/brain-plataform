@@ -54,6 +54,10 @@ def _event_path() -> Path:
     return _state_dir() / "lifecycle-events.ndjson"
 
 
+def _release_archive_path(candidate_sha: str) -> Path:
+    return _state_dir() / "releases" / f"{candidate_sha}.json"
+
+
 def _claims_marker_path() -> Path:
     return _state_dir() / "control" / "claims-paused.json"
 
@@ -144,6 +148,23 @@ def _cmd_prepare(args: argparse.Namespace) -> None:
     if existing and existing.get("stage") != "verified" and not args.force:
         raise SystemExit(
             "another release lifecycle is unfinished; resume it or use --force after review"
+        )
+    if existing and existing.get("stage") != "verified" and args.force:
+        reason = str(args.force_reason or "").strip()
+        if not reason:
+            raise SystemExit("forced lifecycle supersession requires --force-reason")
+        archived = dict(existing)
+        archived["superseded_at"] = _now()
+        archived["superseded_by"] = candidate
+        archived["supersede_reason"] = reason
+        archived_candidate = _validate_sha(
+            str(archived.get("candidate_sha") or ""), "archived candidate SHA"
+        )
+        _atomic_write(_release_archive_path(archived_candidate), archived)
+        _append_event(
+            existing,
+            "superseded",
+            {"superseded_by": candidate, "reason": reason},
         )
     now = _now()
     state: dict[str, Any] = {
@@ -316,6 +337,7 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--expected-worker", action="append")
     prepare.add_argument("--pending-messages", type=int, default=0)
     prepare.add_argument("--force", action="store_true")
+    prepare.add_argument("--force-reason", default="")
     prepare.set_defaults(func=_cmd_prepare)
 
     advance = commands.add_parser("advance")

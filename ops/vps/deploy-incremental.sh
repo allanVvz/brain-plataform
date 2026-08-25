@@ -7,6 +7,8 @@ IMPACT="${1:?usage: deploy-incremental.sh <api|worker|conversational|migration> 
 TARGET_SHA="${2:?usage: deploy-incremental.sh <impact> <sha> [--apply]}"
 MODE="${3:---dry-run}"
 DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
+SUPERSEDE_RELEASE_AUTHORIZED="${SUPERSEDE_RELEASE_AUTHORIZED:-false}"
+SUPERSEDE_RELEASE_REASON="${SUPERSEDE_RELEASE_REASON:-}"
 [[ "$IMPACT" =~ ^(api|worker|conversational|migration)$ ]] || { echo "unsupported VPS impact: $IMPACT" >&2; exit 2; }
 [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "full Git SHA required" >&2; exit 2; }
 [[ "$MODE" == "--dry-run" || "$MODE" == "--apply" ]] || { echo "expected --dry-run or --apply" >&2; exit 2; }
@@ -110,7 +112,14 @@ if [[ -s "$STATE_DIR/lifecycle.json" ]]; then
     if [[ "$existing_previous" == "$CURRENT_SHA" \
       && "$existing_stage" =~ ^(prepared|images_pulled|claims_paused|queue_drained)$ ]]; then
       echo "superseding pre-cutover candidate $existing_candidate at $existing_stage"
-      prepare_args+=(--force)
+      prepare_args+=(--force --force-reason "pre-cutover candidate replaced by $TARGET_SHA")
+    elif [[ "$existing_candidate" == "$CURRENT_SHA" \
+      && "$existing_stage" =~ ^(candidate_healthy|validator_complete|soak_complete|awaiting_resume_authorization)$ \
+      && "$SUPERSEDE_RELEASE_AUTHORIZED" == "true" \
+      && -n "$SUPERSEDE_RELEASE_REASON" \
+      && -s "$STATE_DIR/control/claims-paused.json" ]]; then
+      echo "archiving and superseding reviewed release $existing_candidate at $existing_stage"
+      prepare_args+=(--force --force-reason "$SUPERSEDE_RELEASE_REASON")
     else
       echo "unfinished release cannot be superseded safely: candidate=$existing_candidate stage=$existing_stage" >&2
       exit 1

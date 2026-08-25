@@ -14,6 +14,13 @@ on:
       base_sha:
         description: Previously deployed full SHA used for automatic impact classification (optional; defaults to parent commit)
         required: false
+      supersede_unfinished_release:
+        description: Archive and supersede the current paused post-cutover lifecycle after explicit review
+        type: boolean
+        default: false
+      supersede_reason:
+        description: Required reason when superseding an unfinished post-cutover lifecycle
+        required: false
 
 permissions:
   contents: read
@@ -309,6 +316,8 @@ jobs:
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
           IMPACT_CLASS: ${{ needs.classify.outputs.class }}
           REQUESTED_TAG: ${{ inputs.action == 'rollback' && inputs.image_tag || needs.publish.outputs.image_tag }}
+          SUPERSEDE_RELEASE_AUTHORIZED: ${{ inputs.supersede_unfinished_release }}
+          SUPERSEDE_RELEASE_REASON: ${{ inputs.supersede_reason }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -319,7 +328,7 @@ jobs:
           # which can terminate a healthy rollout after migrations but before
           # the worker and post-deploy audits are restored.
           command_timeout: 30m
-          envs: GHCR_USERNAME,GHCR_TOKEN,VPS_APP_DIR,DEPLOY_ACTION,IMPACT_CLASS,REQUESTED_TAG
+          envs: GHCR_USERNAME,GHCR_TOKEN,VPS_APP_DIR,DEPLOY_ACTION,IMPACT_CLASS,REQUESTED_TAG,SUPERSEDE_RELEASE_AUTHORIZED,SUPERSEDE_RELEASE_REASON
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
