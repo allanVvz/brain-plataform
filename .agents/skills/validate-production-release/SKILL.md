@@ -25,8 +25,11 @@ bash ops/vps/validate-production-release.sh
 
 The script checks the installed release artifact, migrations 112–127,
 privileges/RLS, recent CAS conflicts, orphan processing/proof rows, graph
-checksums, Docker resource snapshots, disk use, backup age and last isolated
-restore proof.
+checksums, Docker resource snapshots, disk use, conditional backup age and last
+isolated restore proof. A fresh backup is a hard gate for migrations. For a
+durable non-migration release it is reported as operational evidence and does
+not block resume; a standalone audit without lifecycle context stays fail
+closed.
 
 Read [references/release-gates.md](references/release-gates.md) when interpreting
 the output or writing the release report.
@@ -53,7 +56,8 @@ separate authorization and the `brain-agent-e2e` skill.
 - incomplete migrations;
 - orphan `processing`/`awaiting_proof` work;
 - ledger/publication checksum divergence;
-- missing or stale backup/restore evidence;
+- missing or stale backup evidence when the release includes migration, or
+  missing/stale restore evidence;
 - source SHA, digest or release checksum mismatch;
 - resource pressure above the approved cutover limits.
 

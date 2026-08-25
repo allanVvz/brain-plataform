@@ -9,6 +9,9 @@ INCREMENTAL_DEPLOY = (
 RESUME_WORKFLOW = (
     ROOT / ".github" / "workflows" / "resume-production-workers.yml"
 ).read_text(encoding="utf-8")
+RESUME_SCRIPT = (
+    ROOT / "ops" / "vps" / "resume-production-workers.sh"
+).read_text(encoding="utf-8")
 VALIDATOR = (
     ROOT / "ops" / "vps" / "validate-production-release.sh"
 ).read_text(encoding="utf-8")
@@ -37,6 +40,13 @@ def test_wa_validator_is_not_a_deploy_or_resume_gate():
     assert "--stage awaiting_resume_authorization" in INCREMENTAL_DEPLOY
     assert "wa_validator=optional_not_release_gate" in INCREMENTAL_DEPLOY
     assert "wa_validator_session" not in RESUME_WORKFLOW
+
+
+def test_non_migration_resume_reports_stale_backup_without_hiding_hard_gates():
+    assert 'impact_class="$(python3 ops/vps/release_lifecycle.py show --field impact_class' in VALIDATOR
+    assert '[[ "$impact_class" == "migration" ]]' in VALIDATOR
+    assert "WARN\\tbackup_age" in VALIDATOR
+    assert "bash ops/vps/validate-production-release.sh >/dev/null" not in RESUME_SCRIPT
 
 
 def test_release_validator_requires_this_release_migration_and_exact_sha():

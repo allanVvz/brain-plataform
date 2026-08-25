@@ -18,7 +18,8 @@ be verified in GitHub because workflow YAML cannot enforce branch protection.
 1. Keep agents and transport paused during the controlled cutover.
 2. Require CI, secret/dependency/image scans and the checksummed release
    artifact.
-3. Create and verify a data-only backup, including an isolated restore proof.
+3. For migrations, create and verify a data-only backup. Keep isolated restore
+   evidence current for every release class.
 4. Deploy images by immutable SHA/digest and apply migrations.
 5. Run `/validate-production-release`; recreate PostgREST after function/grant
    changes and Kong only when stale connections remain.
@@ -51,8 +52,9 @@ review `ops/vps/configure-postgres-observability.sql` before applying it; do
 not couple either host change to the release deploy.
 
 Install and monitor `ops/systemd/brain-ai-backup.timer` independently from
-deploy frequency. `ops/vps/monitor.sh` fails when the latest data-only backup
-is older than 26 hours.
+deploy frequency. `ops/vps/monitor.sh` still alerts when the latest data-only
+backup is older than 26 hours; that operational alert blocks migrations but is
+not a deploy/resume gate for a durable non-migration release.
 
 Code release never publishes persona documents, graphs, workflows or backfills.
 

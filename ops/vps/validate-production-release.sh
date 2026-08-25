@@ -11,6 +11,22 @@ COMPOSE=(docker compose --env-file "$ENV_FILE")
 COMPOSE_BG=(docker compose --env-file "$ENV_FILE" --profile blue-green)
 active_api_service="$(tr -d '\r\n' < .deploy/api-active-slot 2>/dev/null || true)"
 [[ "$active_api_service" == "api-candidate" ]] || active_api_service=api
+impact_class="$(python3 ops/vps/release_lifecycle.py show --field impact_class 2>/dev/null || true)"
+require_fresh_backup="${REQUIRE_FRESH_BACKUP:-}"
+if [[ -z "$require_fresh_backup" ]]; then
+  if [[ "$impact_class" == "migration" ]]; then
+    require_fresh_backup=true
+  elif [[ -n "$impact_class" ]]; then
+    require_fresh_backup=false
+  else
+    # A standalone audit without durable release context remains fail closed.
+    require_fresh_backup=true
+  fi
+fi
+[[ "$require_fresh_backup" == "true" || "$require_fresh_backup" == "false" ]] || {
+  echo "REQUIRE_FRESH_BACKUP must be true or false" >&2
+  exit 2
+}
 failed=0
 
 check_file() {
@@ -218,7 +234,12 @@ fi
 
 latest_backup="$(find "$BACKUP_ROOT" -mindepth 2 -maxdepth 2 -name postgres-data.dump -mmin -1560 -print -quit 2>/dev/null || true)"
 if [[ -n "$latest_backup" ]]; then printf 'PASS\tbackup_age\t%s\n' "$latest_backup"
-else printf 'FAIL\tbackup_age\tno data-only backup within 26h\n'; failed=1; fi
+elif [[ "$require_fresh_backup" == "true" ]]; then
+  printf 'FAIL\tbackup_age\tno data-only backup within 26h impact=%s\n' "${impact_class:-unknown}"
+  failed=1
+else
+  printf 'WARN\tbackup_age\tno data-only backup within 26h; not required for impact=%s\n' "$impact_class"
+fi
 
 if [[ -f "$RESTORE_MARKER" && -n "$(find "$RESTORE_MARKER" -mmin -43200 -print -quit 2>/dev/null)" ]]; then
   printf 'PASS\tlast_restore\t%s\n' "$(cat "$RESTORE_MARKER")"

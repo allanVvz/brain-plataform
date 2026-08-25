@@ -124,7 +124,7 @@ and payload->'conversation_commit' is not null;")"
   done
 
   EXPECTED_RELEASE_SHA="$TARGET_SHA" DISK_MAX_PERCENT="$DISK_MAX_PERCENT" \
-    bash ops/vps/validate-production-release.sh >/dev/null
+    bash ops/vps/validate-production-release.sh
 fi
 
 eligible_file=".deploy/resume-eligible-${TARGET_SHA}.txt"
