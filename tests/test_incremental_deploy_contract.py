@@ -65,6 +65,13 @@ def test_resume_checks_digest_and_is_idempotent_after_verified():
     assert "automatic safety pause after resume verification failure" in RESUME
 
 
+def test_resume_uses_the_same_immutable_registry_repositories_as_deploy():
+    assert 'API_IMAGE="$(read_env_value API_IMAGE)"' in RESUME
+    assert 'image_prefix="${API_IMAGE%brain-api}"' in RESUME
+    assert 'WORKER_IMAGE="${WORKER_IMAGE:-${image_prefix}brain-workers}"' in RESUME
+    assert "export API_IMAGE WORKER_IMAGE MIGRATE_IMAGE" in RESUME
+
+
 def test_retention_is_dry_run_by_default_and_component_precise():
     assert 'MODE="${1:-${RETENTION_MODE:---dry-run}}"' in RETENTION
     assert "CLEANUP_AUTHORIZED=true" in RETENTION

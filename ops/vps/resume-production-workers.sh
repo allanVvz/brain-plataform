@@ -9,6 +9,37 @@ RESUME_POLL_SECONDS="${RESUME_POLL_SECONDS:-2}"
 DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
 [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "full Git SHA required" >&2; exit 2; }
 cd "$ROOT_DIR"
+
+# Resume must resolve the same immutable registry repositories as the
+# incremental deploy. Older production installs only declare API_IMAGE, so
+# derive the sibling worker/migrate repositories instead of falling back to
+# the local Compose defaults (brain-workers/brain-migrate).
+read_env_value() {
+  local requested="$1" key value
+  while IFS='=' read -r key value; do
+    [[ "$key" == "$requested" ]] || continue
+    value="${value%$'\r'}"
+    value="${value#\"}"; value="${value%\"}"
+    value="${value#\'}"; value="${value%\'}"
+    printf '%s' "$value"
+    return 0
+  done < "$ENV_FILE"
+}
+API_IMAGE="$(read_env_value API_IMAGE)"
+WORKER_IMAGE="$(read_env_value WORKER_IMAGE)"
+MIGRATE_IMAGE="$(read_env_value MIGRATE_IMAGE)"
+API_IMAGE="${API_IMAGE:-brain-api}"
+if [[ -z "$WORKER_IMAGE" || -z "$MIGRATE_IMAGE" ]]; then
+  [[ "$API_IMAGE" == *brain-api ]] || {
+    echo "WORKER_IMAGE and MIGRATE_IMAGE are required when API_IMAGE does not end in brain-api" >&2
+    exit 1
+  }
+  image_prefix="${API_IMAGE%brain-api}"
+  WORKER_IMAGE="${WORKER_IMAGE:-${image_prefix}brain-workers}"
+  MIGRATE_IMAGE="${MIGRATE_IMAGE:-${image_prefix}brain-migrate}"
+fi
+export API_IMAGE WORKER_IMAGE MIGRATE_IMAGE
+
 COMPOSE=(docker compose --env-file "$ENV_FILE")
 COMPOSE_BG=(docker compose --env-file "$ENV_FILE" --profile blue-green)
 released=false
