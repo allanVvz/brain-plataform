@@ -2610,7 +2610,8 @@ def test_positive_service_candidate_confirmation_applies_bound_operation_only(mo
     assert operation["action"] == "add"
     assert operation["evidence_type"] == "confirmed_candidate"
     assert response.proof["service_operation_proof"]["valid"]
-    assert response.proof["next_question_node_id"] == "q:objective"
+    assert response.proof["next_question_node_id"] is None
+    assert response.proof["repetition_audit"]["question_node_id"] == "q:objective"
     assert "objective" not in response.cart_state["facts_by_key"]
     assert response.reply_text == (
         "Perfeito, vou considerar a vitrificação. Qual é seu objetivo?"
