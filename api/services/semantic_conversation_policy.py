@@ -48,28 +48,34 @@ _INTENT_TO_INTERACTION = {
 def interpretation_segments(
     interpretation: SemanticInterpretation,
 ) -> tuple[str, str, str | None, str | None]:
-    """Return model-authored answer/question segments and audit metadata.
+    """Return the public reply, a legacy question segment and audit metadata.
 
     The flat fields are accepted only for rolling compatibility. The canonical
-    workflow emits ``response`` and never asks the model for graph node ids.
+    workflow emits the complete public message in ``response.answer`` and
+    never asks the model for graph node ids. ``response.question`` is only a
+    fallback for an older installed workflow whose answer is empty; it is
+    never appended to an answer that may already contain the same question.
     """
     answer = str(interpretation.response.answer or "").strip()
-    question = str(interpretation.response.question or "").strip()
+    legacy_question = str(interpretation.response.question or "").strip()
     field_key = str(
         interpretation.response.question_field_key
         or interpretation.next_question_field_key
         or ""
     ).strip() or None
     node_id = str(interpretation.next_question_node_id or "").strip() or None
-    if not answer and not question:
+    if not answer and legacy_question:
+        answer = legacy_question
+        legacy_question = ""
+    if not answer:
         answer = str(interpretation.reply or "").strip()
-    return answer, question, field_key, node_id
+    return answer, legacy_question, field_key, node_id
 
 
 def interpretation_reply(interpretation: SemanticInterpretation) -> str:
-    """Compose only text written by the model; no backend question copy."""
-    answer, question, _, _ = interpretation_segments(interpretation)
-    return " ".join(part for part in (answer, question) if part).strip()
+    """Return one model-authored public message; never compose question copy."""
+    answer, _, _, _ = interpretation_segments(interpretation)
+    return answer
 
 
 def interpretation_to_proposal(
@@ -101,7 +107,7 @@ def interpretation_to_proposal(
     evidence = next(
         (intent.evidence_span for intent in interpretation.intents), ""
     )
-    answer, question, question_field_key, legacy_question_node_id = (
+    answer, _, question_field_key, legacy_question_node_id = (
         interpretation_segments(interpretation)
     )
     return ConversationProposal(
@@ -120,10 +126,13 @@ def interpretation_to_proposal(
         cited_node_ids=list(interpretation.cited_node_ids),
         cited_chunk_ids=list(interpretation.cited_chunk_ids),
         answer_text=answer,
-        question_text=question,
+        # The canonical envelope is deliberately monolithic: proof inspects
+        # the public message itself and may request one model repair, but the
+        # backend never guesses where prose ends and a question begins.
+        question_text="",
         next_question_field_key=question_field_key,
         next_question_node_id=legacy_question_node_id,
-        reply=" ".join(part for part in (answer, question) if part).strip(),
+        reply=answer,
         qualification_complete=(
             interpretation.recommended_next_action.value in {"handoff", "close"}
         ),

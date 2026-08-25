@@ -651,11 +651,13 @@ Se nao aparece no grafo, esta incompleto.
   da jornada. `asked_question_node_ids` permanece ledger interno; o prompt do
   modelo recebe apenas os `asked_topics` semanticos, sem ids nem copy das
   perguntas. Ponte contextual ou parafrase nao autoriza repetir o campo.
-- A resposta declarativa e a pergunta devem ser componentes separados. Se uma
-  pergunta repetida ou invalida acompanhar uma resposta valida, descartar so a
-  pergunta, preservando resposta, fatos, memoria e branch. Reparar pelo modelo
-  apenas quando nao existir componente declarativo publicavel; nunca gerar uma
-  pergunta no backend nem fazer handoff apenas por falha da pergunta.
+- A saida canonica do modelo e uma unica mensagem publica completa em
+  `response.answer`, com no maximo uma pergunta natural. `response.question`
+  existe apenas para leitura compativel de workflow antigo e nunca e anexado a
+  `answer`. Se a pergunta dentro da mensagem for repetida ou invalida, preservar
+  fatos, memoria e branch e fazer no maximo uma reparacao pelo modelo antes do
+  commit; o backend nao tenta separar/recompor prosa, nao gera pergunta e nao
+  publica o turno defeituoso. Uma segunda falha segue para handoff observavel.
 - Sofia deve auxiliar o operador a preencher a matriz campo/pergunta, preservar
   fonte/status e nao copiar perguntas de outra persona ou exemplo.
 

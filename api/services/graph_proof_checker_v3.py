@@ -762,13 +762,24 @@ def check(
     )
     answer_text = str(proposal.get("answer_text") or "").strip()
     question_text = str(proposal.get("question_text") or "").strip()
-    reply_text = str(proposal.get("reply") or "")
-    segmented_response = bool(answer_text or question_text or question_field_key)
-    spoken_question_text = question_text if segmented_response else reply_text
+    reply_text = str(proposal.get("reply") or "").strip()
+    public_reply = reply_text or answer_text or question_text
+    # Only the rolling legacy envelope has a safely removable question
+    # component. The canonical semantic-first envelope puts the complete
+    # public message in answer/reply, so proof must inspect that message and
+    # must never assume its question can be sliced away deterministically.
+    structured_response = bool(answer_text or question_text)
+    separable_question = bool(answer_text and question_text)
+    spoken_question_text = question_text if separable_question else public_reply
     question_count = (
-        max(1, question_text.count("?")) if question_text
-        else 0
-    ) if segmented_response else spoken_question_text.count("?")
+        max(1, question_text.count("?"))
+        if separable_question
+        else (
+            max(1, public_reply.count("?"))
+            if question_field_key and public_reply
+            else public_reply.count("?")
+        )
+    )
     askable_by_question = {
         str(field.get("question_node_id") or ""): field
         for field in askable
@@ -846,18 +857,15 @@ def check(
         if not selected_field or question.get("field_key") != selected_field.get("key"):
             errors.append("next_question_not_for_askable_field")
             question_id = None
-        elif (
-            segmented_response
-            and str(question_id) in {
+        elif structured_response and str(question_id) in {
                 str(value)
                 for value in ledger.get("asked_question_node_ids") or []
                 if value
-            }
-        ):
-            # The v2 envelope lets us remove only the repeated question. The
-            # legacy monolithic envelope continues through the existing
-            # repetition/repair audit because its answer cannot be split
-            # safely from the question.
+            }:
+            # A spent semantic topic is never eligible again. Legacy split
+            # output may drop only its explicit question component; canonical
+            # output requires one model repair because the backend cannot
+            # safely slice prose from the complete public message.
             errors.append("question_already_asked")
             question_id = None
     # qualification_complete is 100% derivable from `missing` -- the same
@@ -972,7 +980,7 @@ def check(
             for error in component_errors
         )
     )
-    discardable_question = bool(question_component_invalid and answer_text)
+    discardable_question = bool(question_component_invalid and separable_question)
     question_repair = [{
         "kind": "quality",
         "issue": "question_not_semantically_askable",

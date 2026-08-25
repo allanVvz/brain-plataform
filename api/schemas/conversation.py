@@ -206,9 +206,10 @@ class ConversationProposal(StrictModel):
     service_operations: list[ServiceOperation] = Field(default_factory=list)
     extracted_facts: list[ExtractedFact] = Field(default_factory=list)
     claims: list[CommercialClaim] = Field(default_factory=list)
-    # The model authors both segments. Keeping them separate lets proof drop
-    # only an invalid/repeated question without rewriting or losing a grounded
-    # commercial answer. ``reply`` remains the composed compatibility view.
+    # Canonical semantic-first proposals carry the complete public message in
+    # ``answer_text`` and ``reply``. ``question_text`` remains only for rolling
+    # compatibility with an installed older workflow; new code never appends
+    # it and proof never slices a canonical message deterministically.
     answer_text: str = ""
     question_text: str = ""
     next_question_field_key: str | None = None
@@ -360,11 +361,13 @@ class RecommendedNextAction(StrEnum):
 
 
 class SemanticResponse(StrictModel):
-    """Model-authored conversational output with an optional next question.
+    """One model-authored public message with optional question metadata.
 
     ``question_field_key`` is semantic audit metadata, not dialogue policy.
     The backend maps it to a published question node only after proving that
     the field is currently askable and has never been asked in this journey.
+    ``question`` is a read-only compatibility field for older workflows; the
+    canonical message, including any natural question, lives in ``answer``.
     """
 
     answer: str = ""

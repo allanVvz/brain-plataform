@@ -620,6 +620,103 @@ def test_segmented_answer_survives_when_model_repeats_an_asked_topic():
     assert proof["next_question_node_id"] is None
 
 
+def test_canonical_answer_question_is_mapped_and_counted_from_semantic_key():
+    kwargs = _base_check_kwargs()
+    kwargs["contract"] = {
+        "branch_path_checksum": "checksum:b",
+        "closure_node_ids": ["branch:b", "q:volume"],
+        "fields": [{
+            "key": "volume", "owner_node_id": "branch:b", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:volume",
+        }],
+        "questions": {
+            "q:volume": {
+                "field_key": "volume", "text": "Qual volume pretende avaliar?",
+            },
+        },
+    }
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "answer_text": (
+            "Posso te orientar. "
+            "Que tipo de volume voce pretende avaliar para revenda"
+        ),
+        "question_text": "",
+        "next_question_field_key": "volume",
+        "next_question_node_id": None,
+        "reply": (
+            "Posso te orientar. "
+            "Que tipo de volume voce pretende avaliar para revenda"
+        ),
+    }
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert proof["question_count"] == 1
+    assert proof["next_question_node_id"] == "q:volume"
+    assert proof["next_question_field_key"] == "volume"
+    assert "model_question_field_askable" in proof["observations"]
+
+
+def test_canonical_repeated_question_requires_repair_without_losing_facts():
+    kwargs = _base_check_kwargs()
+    kwargs["contract"] = {
+        "branch_path_checksum": "checksum:b",
+        "closure_node_ids": ["branch:b", "q:volume", "q:name"],
+        "fields": [
+            {
+                "key": "volume", "owner_node_id": "branch:b", "required": True,
+                "accepted_statuses": ["known"], "question_node_id": "q:volume",
+            },
+            {
+                "key": "name", "owner_node_id": "branch:b", "required": True,
+                "accepted_statuses": ["known"], "question_node_id": "q:name",
+                "value_schema": {"type": "string"},
+            },
+        ],
+        "questions": {
+            "q:volume": {
+                "field_key": "volume", "text": "Qual volume pretende avaliar?",
+            },
+            "q:name": {"field_key": "name", "text": "Como voce se chama?"},
+        },
+    }
+    kwargs["ledger"] = {
+        "graph_checksum": "sha256:x", "facts": {},
+        "asked_question_node_ids": ["q:volume"],
+    }
+    kwargs["message"] = "Meu nome e Ana"
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "extracted_facts": [{
+            "field_key": "name", "owner_node_id": "branch:b",
+            "status": "known", "value": "Ana", "source_message_id": "msg-1",
+            "evidence_span": "Ana", "confidence": 1,
+        }],
+        "answer_text": (
+            "Prazer, Ana. Que tipo de volume voce pretende avaliar para revenda?"
+        ),
+        "question_text": "",
+        "next_question_field_key": "volume",
+        "next_question_node_id": None,
+        "reply": (
+            "Prazer, Ana. Que tipo de volume voce pretende avaliar para revenda?"
+        ),
+    }
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert proof["accepted_facts"][0]["value"] == "Ana"
+    assert proof["ledger"]["facts"]["name"]["value"] == "Ana"
+    assert proof["question_component_invalid"] is True
+    assert proof["question_discarded"] is False
+    assert proof["publishable_answer_text"] is None
+    assert proof["repair_required"] is True
+    assert proof["next_question_node_id"] is None
+
+
 def test_add_action_rejects_re_adding_an_already_active_branch():
     kwargs = _base_check_kwargs(active_branch_node_ids=["branch:a", "branch:b"])
     proof = graph_proof_checker_v3.check(**kwargs)

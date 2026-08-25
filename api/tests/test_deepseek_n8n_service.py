@@ -57,6 +57,17 @@ def test_canonical_template_connections_resolve_to_published_node_names():
     deepseek_n8n_service._validate_workflow_topology(template)
 
 
+def test_terminal_nodes_cannot_return_an_empty_http_200_body():
+    template = json.loads(
+        deepseek_n8n_service._TEMPLATE.read_text(encoding="utf-8")
+    )
+    by_id = {node["id"]: node for node in template["nodes"]}
+
+    assert by_id["commit"]["alwaysOutputData"] is True
+    assert by_id["failsafe"]["alwaysOutputData"] is True
+    assert "empty_terminal_result" in by_id["respond"]["parameters"]["responseBody"]
+
+
 def test_workflow_topology_rejects_dangling_connection():
     with pytest.raises(ValueError, match="connection target is missing"):
         deepseek_n8n_service._validate_workflow_topology({
@@ -64,6 +75,28 @@ def test_workflow_topology_rejects_dangling_connection():
             "connections": {
                 "Inbound": {
                     "main": [[{"node": "Missing", "type": "main", "index": 0}]],
+                },
+            },
+        })
+
+
+def test_workflow_topology_rejects_a_path_without_webhook_response():
+    with pytest.raises(ValueError, match="do not reach Respond to Webhook"):
+        deepseek_n8n_service._validate_workflow_topology({
+            "nodes": [
+                {
+                    "name": "Inbound", "type": "n8n-nodes-base.webhook",
+                },
+                {
+                    "name": "Dead end", "type": "n8n-nodes-base.code",
+                },
+                {
+                    "name": "Respond", "type": "n8n-nodes-base.respondToWebhook",
+                },
+            ],
+            "connections": {
+                "Inbound": {
+                    "main": [[{"node": "Dead end", "type": "main", "index": 0}]],
                 },
             },
         })

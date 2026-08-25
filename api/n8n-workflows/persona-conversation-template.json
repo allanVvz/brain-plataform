@@ -375,6 +375,7 @@
         3420,
         300
       ],
+      "alwaysOutputData": true,
       "onError": "continueErrorOutput"
     },
     {
@@ -403,12 +404,13 @@
       "position": [
         3420,
         560
-      ]
+      ],
+      "alwaysOutputData": true
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{$json}}"
+        "responseBody": "={{Object.keys($json || {}).length ? $json : {ok: false, error: 'empty_terminal_result', workflow_template: 'graph_agentic_v3'}}}"
       },
       "id": "respond",
       "name": "Return canonical result",
