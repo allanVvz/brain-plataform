@@ -55,7 +55,7 @@ def test_abandoned_pre_pause_candidate_can_be_superseded_safely():
         '^(prepared|images_pulled|claims_paused|queue_drained)$'
     ) in DEPLOY
     assert '"$existing_previous" == "$CURRENT_SHA"' in DEPLOY
-    assert "prepare_args+=(--force)" in DEPLOY
+    assert "prepare_args+=(--force --force-reason" in DEPLOY
     assert "unfinished release cannot be superseded safely" in DEPLOY
 
 

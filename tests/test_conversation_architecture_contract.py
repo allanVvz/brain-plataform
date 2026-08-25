@@ -224,7 +224,17 @@ def test_aurora_sized_audio_prompt_stays_below_preventive_budget_without_losing_
     assert prompt["customer_message"] == message
     assert prompt["source_message_id"] == "wamid-audio-1"
     assert prompt["graph_contract"]["fields"] == context["graph_contract"]["fields"]
-    assert prompt["graph_contract"]["questions"] == context["graph_contract"]["questions"]
+    assert prompt["graph_contract"]["questions"] == {
+        question_id: {
+            "field_key": question["field_key"],
+            "depends_on": question.get("depends_on", []),
+        }
+        for question_id, question in context["graph_contract"]["questions"].items()
+    }
+    assert all(
+        "text" not in question
+        for question in prompt["graph_contract"]["questions"].values()
+    )
     assert "claims" not in prompt["graph_contract"]
     assert "closure_node_ids" not in prompt["graph_contract"]
     assert "mandatory_contract_evidence" not in prompt["graph_contract"]
