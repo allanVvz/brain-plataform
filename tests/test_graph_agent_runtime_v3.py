@@ -2610,8 +2610,7 @@ def test_positive_service_candidate_confirmation_applies_bound_operation_only(mo
     assert operation["action"] == "add"
     assert operation["evidence_type"] == "confirmed_candidate"
     assert response.proof["service_operation_proof"]["valid"]
-    assert response.proof["next_question_node_id"] is None
-    assert response.proof["repetition_audit"]["question_node_id"] == "q:objective"
+    assert response.proof["next_question_node_id"] == "q:objective"
     assert "objective" not in response.cart_state["facts_by_key"]
     assert response.reply_text == (
         "Perfeito, vou considerar a vitrificação. Qual é seu objetivo?"
@@ -4312,7 +4311,8 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
     # suppressed because that id was already emitted, not because it differs
     # lexically from the graph-authored question copy.
     assert response.proof["question_component_invalid"] is False
-    assert response.proof["next_question_node_id"] == "q:objective"
+    assert response.proof["next_question_node_id"] is None
+    assert response.proof["repetition_audit"]["question_node_id"] == "q:objective"
     assert response.proof["repetition_audit"]["passed"] is False
     assert "question_already_asked" in response.proof["repetition_audit"]["failures"]
     assert any(
