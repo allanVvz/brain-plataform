@@ -410,7 +410,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{Object.keys($json || {}).length ? $json : {ok: false, error: 'empty_terminal_result', workflow_template: 'graph_agentic_v3'}}}"
+        "responseBody": "={{$json}}"
       },
       "id": "respond",
       "name": "Return canonical result",

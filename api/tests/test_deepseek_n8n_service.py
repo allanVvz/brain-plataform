@@ -57,7 +57,7 @@ def test_canonical_template_connections_resolve_to_published_node_names():
     deepseek_n8n_service._validate_workflow_topology(template)
 
 
-def test_terminal_nodes_cannot_return_an_empty_http_200_body():
+def test_terminal_http_nodes_always_emit_an_item_for_the_webhook_response():
     template = json.loads(
         deepseek_n8n_service._TEMPLATE.read_text(encoding="utf-8")
     )
@@ -65,7 +65,7 @@ def test_terminal_nodes_cannot_return_an_empty_http_200_body():
 
     assert by_id["commit"]["alwaysOutputData"] is True
     assert by_id["failsafe"]["alwaysOutputData"] is True
-    assert "empty_terminal_result" in by_id["respond"]["parameters"]["responseBody"]
+    assert by_id["respond"]["parameters"]["responseBody"] == "={{$json}}"
 
 
 def test_workflow_topology_rejects_dangling_connection():
