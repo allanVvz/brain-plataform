@@ -740,6 +740,25 @@ def test_semantic_turn_audit_accepts_any_currently_askable_field():
     assert audit["criteria"]["question_semantically_askable"] is True
 
 
+def test_semantic_turn_audit_accepts_two_clauses_bound_to_one_askable_field():
+    """Natural follow-up wording does not turn one proof-bound field into two."""
+    inputs = _semantic_audit_inputs()
+    inputs["turn"]["text"] = (
+        "Qual é o seu objetivo? Você busca proteção ou aparência?"
+    )
+    inputs["proof_record"]["proof_result"]["accepted_facts"] = []
+    inputs["proof_record"]["proof_result"]["missing_fields"] = ["objective"]
+    inputs["proof_record"]["proof_result"]["next_question_node_id"] = "q:objective"
+    inputs["ledger_after"]["facts"].pop("objective")
+    inputs["customer_step"]["intended_facts"] = {}
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is True
+    assert audit["asked_field"] == "objective"
+    assert audit["criteria"]["question_semantically_askable"] is True
+
+
 def test_semantic_turn_audit_rejects_a_question_for_a_field_that_is_not_missing():
     inputs = _semantic_audit_inputs()
     inputs["turn"]["text"] = "Perfeito! Qual seu objetivo com o carro?"

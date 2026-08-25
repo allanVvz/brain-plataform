@@ -2297,8 +2297,9 @@ def _semantic_turn_audit(
                 and bool(question_text)
                 # The proof already bound this model-owned wording to an
                 # askable graph field through next_question_node_id.  The
-                # Validator must not reintroduce a lexical copy comparison.
-                and reply.count("?") == 1
+                # Validator must not infer the number of fields from the
+                # number of natural interrogative clauses in the reply.
+                and "?" in reply
             )
         ),
         "known_fact_not_reasked": not asked_fact_already_known,
