@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -38,7 +39,12 @@ def prepare(tmp_path: Path):
 def test_lifecycle_is_durable_idempotent_and_authorized(tmp_path: Path):
     prepare(tmp_path)
     run_lifecycle(tmp_path, "pause-claims", "--reason", "controlled deploy")
-    assert (tmp_path / "control" / "claims-paused.json").exists()
+    control_dir = tmp_path / "control"
+    marker = control_dir / "claims-paused.json"
+    assert marker.exists()
+    if os.name != "nt":
+        assert stat.S_IMODE(control_dir.stat().st_mode) == 0o755
+        assert stat.S_IMODE(marker.stat().st_mode) == 0o644
     for stage in (
         "queue_drained", "migration_complete", "candidate_healthy",
         "awaiting_resume_authorization",

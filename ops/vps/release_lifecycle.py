@@ -62,6 +62,17 @@ def _claims_marker_path() -> Path:
     return _state_dir() / "control" / "claims-paused.json"
 
 
+def _write_claims_marker(value: dict[str, Any]) -> None:
+    """Publish a root-owned marker that the unprivileged worker can read."""
+    path = _claims_marker_path()
+    _atomic_write(path, value)
+    # The worker mounts only this directory read-only and runs as UID 10001.
+    # Keep lifecycle state private, but make this non-secret control contract
+    # traversable/readable without granting the container write access.
+    os.chmod(path.parent, 0o755)
+    os.chmod(path, 0o644)
+
+
 def _validate_sha(value: str, label: str) -> str:
     candidate = str(value or "").strip().lower()
     if not SHA_RE.fullmatch(candidate):
@@ -262,7 +273,7 @@ def _cmd_pause_claims(args: argparse.Namespace) -> None:
         "candidate_sha": state.get("candidate_sha"),
         "safety_pause": bool(args.safety_pause),
     }
-    _atomic_write(_claims_marker_path(), marker)
+    _write_claims_marker(marker)
     if current != "claims_paused":
         entered = _now()
         state["stage"] = "claims_paused"
