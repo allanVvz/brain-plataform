@@ -347,10 +347,10 @@ def test_model_contract_uses_semantic_question_metadata_and_separates_audience_f
         _node("Validate repaired agent response")["parameters"]["jsCode"],
     ]
 
-    # The model authors both text segments and selects only a semantic field
-    # key. Graph ids remain an internal proof/ledger concern.
+    # The model authors one complete public message and selects only a
+    # semantic field key. Graph ids remain an internal proof/ledger concern.
     assert "question_field_key" in initial
-    assert "never a graph question id" in initial
+    assert "never emit a graph question id" in initial.lower()
     assert "next_question_node_id" not in initial
     assert "questions: Object.fromEntries" not in initial
     for validator in validators:
@@ -367,7 +367,7 @@ def test_model_contract_uses_semantic_question_metadata_and_separates_audience_f
 @pytest.mark.parametrize(
     "node_name", ["Validate agent response", "Validate repaired agent response"]
 )
-def test_n8n_validators_forward_separate_model_answer_and_semantic_question(node_name):
+def test_n8n_validators_never_append_compat_question_to_model_answer(node_name):
     interpretation = {
         "intents": [],
         "state_relation": "continue",
@@ -386,8 +386,11 @@ def test_n8n_validators_forward_separate_model_answer_and_semantic_question(node
         "cited_node_ids": [],
         "cited_chunk_ids": [],
         "response": {
-            "answer": "O pedido minimo varia conforme o produto.",
-            "question": "Qual grupo de produtos voce quer conhecer?",
+            "answer": (
+                "O pedido minimo varia conforme o produto. "
+                "Qual grupo de produtos voce quer conhecer?"
+            ),
+            "question": None,
             "question_field_key": "product_interest",
         },
         "handoff_requested": False,
@@ -400,10 +403,7 @@ def test_n8n_validators_forward_separate_model_answer_and_semantic_question(node
     assert parsed["next_question_node_id"] is None
     assert parsed["next_question_field_key"] == "product_interest"
     assert parsed["response"] == interpretation["response"]
-    assert parsed["reply"] == (
-        "O pedido minimo varia conforme o produto. "
-        "Qual grupo de produtos voce quer conhecer?"
-    )
+    assert parsed["reply"] == interpretation["response"]["answer"]
 
 
 def test_repaired_validator_preserves_facts_accepted_before_question_repair():

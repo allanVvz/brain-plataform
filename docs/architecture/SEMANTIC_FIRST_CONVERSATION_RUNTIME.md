@@ -26,16 +26,17 @@ roteiro nem copy de runtime: nenhuma camada pode anexar
 recebeu, mas o prompt recebe somente `asked_topics`, composto por chaves
 semanticas. O mapa de ids e a copy de `field_questions` nao entram no prompt.
 
-A saida do modelo separa `response.answer`, `response.question` e
-`response.question_field_key`. O modelo escreve ambos os textos e pode retornar
-`question=null`; `missing_fields` nunca obriga uma pergunta. O proof converte a
-chave semantica em id somente internamente, depois de provar dependencias,
-pertencimento ao ramo e que o topico ainda nao foi perguntado. Se a pergunta for
-invalida ou repetida e houver uma resposta valida, somente a pergunta e
-descartada, sem nova chamada ao modelo. A resposta, os fatos, a memoria e a
-selecao de branch sobrevivem. Uma resposta sem componente declarativo ainda
-pode receber uma unica reparacao; o contrato legado monolitico continua aceito
-durante a sincronizacao dos workflows instalados.
+A saida do modelo usa `response.answer` como a mensagem publica completa, com
+no maximo uma pergunta natural, e `response.question_field_key` como metadata
+semantica opcional. `response.question` existe somente para compatibilidade de
+workflows em transicao e nunca e anexado a `answer`; `missing_fields` nunca
+obriga uma pergunta. O proof converte a chave semantica em id somente
+internamente, depois de provar dependencias, pertencimento ao ramo e que o
+topico ainda nao foi perguntado. Se a pergunta for invalida ou repetida e
+houver conteudo declarativo valido, uma unica reparacao do modelo remove ou
+troca somente essa pergunta. A resposta fundamentada, os fatos, a memoria e a
+selecao de branch sobrevivem. O backend e o n8n nunca compoem copy publica a
+partir de `field_questions`, ids ou campos faltantes.
 
 No WA Validator, `exactly-once` e contado no limite persistido: um inbound, uma
 decisao, um proof, um commit e no maximo um outbound. A proposta inicial mais
@@ -121,9 +122,9 @@ mesma mensagem:
 | `questions[]` | perguntas do cliente que o turno deve responder |
 | `claims[]` | afirmações comerciais, sempre com nós de evidência |
 | `recommended_next_action` | ação seguinte recomendada |
-| `response.answer` | resposta/acolhimento declarativo escrito pelo modelo |
-| `response.question` | pergunta natural opcional, tambem escrita pelo modelo |
-| `response.question_field_key` | chave semantica auditavel; nunca id de node |
+| `response.answer` | mensagem publica completa escrita pelo modelo, com no maximo uma pergunta natural |
+| `response.question` | compatibilidade de leitura; nunca e concatenado a mensagem publica |
+| `response.question_field_key` | metadata semantica auditavel da pergunta em `answer`; nunca id de node |
 
 ### Sem confiança numérica
 
