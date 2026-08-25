@@ -233,21 +233,11 @@ if (( current_rank < 5 )); then
   current_rank=5
 fi
 
-if [[ "$IMPACT" == "conversational" || "$IMPACT" == "migration" ]]; then
-  echo "candidate healthy; run the internal WA Validator evidence step before resume"
-  exit 0
-fi
-if (( current_rank < 6 )); then
-  python3 ops/vps/release_lifecycle.py advance --stage validator_complete \
-    --gate wa_validator=not_required_worker_only >/dev/null
-  current_rank=6
-fi
-if (( current_rank < 7 )); then
-  python3 ops/vps/release_lifecycle.py advance --stage soak_complete \
-    --gate worker_claims_paused=true >/dev/null
-  current_rank=7
-fi
 if (( current_rank < 8 )); then
-  python3 ops/vps/release_lifecycle.py advance --stage awaiting_resume_authorization >/dev/null
+  python3 ops/vps/release_lifecycle.py advance \
+    --stage awaiting_resume_authorization \
+    --gate wa_validator=optional_not_release_gate \
+    --gate soak=optional_not_release_gate \
+    --gate worker_claims_paused=true >/dev/null
 fi
-echo "worker candidate ready and awaiting explicit resume authorization"
+echo "candidate ready and awaiting explicit resume authorization"

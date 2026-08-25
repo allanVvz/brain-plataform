@@ -99,8 +99,10 @@ toca workers; worker isolado pausa novos claims, drena e troca apenas o worker.
 
 O lifecycle persistido em `.deploy/lifecycle.json` é atômico e retomável:
 
-`prepared -> images_pulled -> claims_paused -> queue_drained -> migration_complete -> candidate_healthy -> validator_complete -> soak_complete -> awaiting_resume_authorization -> workers_resumed -> verified`
+`prepared -> images_pulled -> claims_paused -> queue_drained -> migration_complete -> candidate_healthy -> awaiting_resume_authorization -> workers_resumed -> verified`
 
+`validator_complete` e `soak_complete` permanecem apenas como estados legados
+compatíveis para evidência opcional; não são gates de deploy ou retomada.
 Etapas não aplicáveis podem ser puladas, mas uma regressão só é permitida para
 `claims_paused` como safety stop. A retomada é uma operação separada, exige
 autorização durável e prova um inbound canônico com uma decisão, um proof, um
@@ -402,8 +404,9 @@ hipótese 3 (orçamento de prompt), que não foi coberta nesta rodada.
 
 ### Prova de saída
 
-Validação **somente** pelo WA Validator interno (`POST /wa-validator/run-direct`),
-nunca WhatsApp real — regra rígida de `AGENTS.md`.
+Quando solicitada, a validação usa o WA Validator interno
+(`POST /wa-validator/run-direct`) e nunca WhatsApp real. Ela é diagnóstico
+opcional, não gate de deploy, publicação ou retomada.
 
 - 1 inbound → 1 decisão → 1 proof válido → 1 commit → 1 outbound inerte
 - `qualification_complete=true`
@@ -631,7 +634,8 @@ demanda. Nenhum deles re-deriva o projeto do zero.
 3. Conflito entre documentos resolve pela ordem de precedência, e o agente
    **reporta** o conflito — não escolhe em silêncio.
 4. Nunca rodar Docker local (`AGENTS.md`).
-5. Nunca testar conversa por WhatsApp real; só WA Validator interno.
+5. Quando houver teste automatizado de conversa, preferir o WA Validator
+   interno; ele não é obrigatório para deploy ou retomada.
 6. Reusar as skills existentes em vez de duplicar:
    - `.claude/skills/aurora-premium-sdr/`
    - `.claude/skills/aurora-conversation-evaluator/`

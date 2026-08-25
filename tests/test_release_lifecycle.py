@@ -41,7 +41,7 @@ def test_lifecycle_is_durable_idempotent_and_authorized(tmp_path: Path):
     assert (tmp_path / "control" / "claims-paused.json").exists()
     for stage in (
         "queue_drained", "migration_complete", "candidate_healthy",
-        "validator_complete", "soak_complete", "awaiting_resume_authorization",
+        "awaiting_resume_authorization",
     ):
         run_lifecycle(tmp_path, "advance", "--stage", stage)
     run_lifecycle(
@@ -55,7 +55,7 @@ def test_lifecycle_is_durable_idempotent_and_authorized(tmp_path: Path):
     assert not (tmp_path / "control" / "claims-paused.json").exists()
     state = json.loads((tmp_path / "lifecycle.json").read_text(encoding="utf-8"))
     assert state["resume_authorization"]["actor"] == "operator"
-    assert (tmp_path / "lifecycle-events.ndjson").read_text(encoding="utf-8").count("\n") >= 10
+    assert (tmp_path / "lifecycle-events.ndjson").read_text(encoding="utf-8").count("\n") >= 8
 
 
 def test_unfinished_release_cannot_be_replaced(tmp_path: Path):

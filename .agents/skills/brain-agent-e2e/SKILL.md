@@ -7,6 +7,13 @@ description: Validate Brain AI conversational agents end to end through the dash
 
 Validate the real path `operator -> Evolution -> target persona -> agent -> Evolution -> operator`. Treat persisted destination messages and runtime decisions as evidence; never treat a provider `sent` flag alone as delivery proof.
 
+This skill is an optional diagnostic and repair tool. WA Validator or live E2E
+results are never universal deploy, publication or resume gates. Release
+authorization is decided by the production lifecycle's technical invariants;
+concrete evidence of duplication, wrong-persona context, unproved outbound or
+unsafe price/date/time confirmation still blocks processing regardless of
+which tool discovered it.
+
 ## Load task references
 
 - Read [references/n8n-template-contract.md](references/n8n-template-contract.md) whenever n8n, backend behavior, provisioning or cross-persona reuse is in scope.

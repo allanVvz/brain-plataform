@@ -100,7 +100,6 @@ def classify(paths: Iterable[str]) -> dict[str, object]:
         "publish_migrate": impact == "migration",
         "pause_claims": impact in {"worker", "conversational", "migration"},
         "backup": impact == "migration",
-        "wa_validator": impact == "conversational",
     }
 
 
@@ -128,7 +127,7 @@ def main() -> None:
         with open(args.github_output, "a", encoding="utf-8") as handle:
             for key in (
                 "class", "touch_vps", "publish_api", "publish_worker",
-                "publish_migrate", "pause_claims", "backup", "wa_validator",
+                "publish_migrate", "pause_claims", "backup",
             ):
                 handle.write(f"{key}={str(result[key]).lower()}\n")
 

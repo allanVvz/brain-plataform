@@ -1,16 +1,11 @@
-name: Complete production validation
+name: Record optional production validation
 
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: Record a passed internal WA Validator session or finish the durable soak window
-        type: choice
-        options: [record-validator, complete-soak]
-        default: record-validator
       validator_session_id:
-        description: Required only for record-validator
-        required: false
+        description: Passed internal WA Validator session recorded as optional evidence
+        required: true
 
 permissions:
   contents: read
@@ -28,22 +23,17 @@ jobs:
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
         env:
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
-          VALIDATION_MODE: ${{ inputs.mode }}
           VALIDATOR_SESSION_ID: ${{ inputs.validator_session_id }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: VPS_APP_DIR,VALIDATION_MODE,VALIDATOR_SESSION_ID
+          envs: VPS_APP_DIR,VALIDATOR_SESSION_ID
           command_timeout: 10m
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
             bash ops/vps/audit.sh
-            if [ "$VALIDATION_MODE" = "record-validator" ]; then
-              bash ops/vps/complete-production-validation.sh \
-                record-validator "$VALIDATOR_SESSION_ID"
-            else
-              bash ops/vps/complete-production-validation.sh complete-soak
-            fi
+            bash ops/vps/complete-production-validation.sh \
+              record-validator "$VALIDATOR_SESSION_ID"

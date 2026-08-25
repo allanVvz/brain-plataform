@@ -14,10 +14,12 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
 - Comecar qualquer operacao produtiva por auditoria read-only e dry-run.
 - Deploy, migration e limpeza exigem suas etapas explicitas de
   revisao/autorizacao. Uma autorizacao nao implica as outras.
-- Mudancas de conversa devem ser testadas somente pelo WA Validator
-  direto/interno, sem WhatsApp real.
+- O WA Validator e uma ferramenta diagnostica opcional, nunca um gate
+  obrigatorio de deploy, publicacao ou retomada. Quando solicitado, ele deve
+  rodar direto/interno, sem WhatsApp real.
 - Manter transporte e IAs pausados durante auditoria, deploy e validacao; so
-  retomar mediante autorizacao explicita posterior.
+  retomar mediante autorizacao explicita posterior e gates tecnicos de SHA,
+  digest, fila critica, proof, exactly-once e isolamento.
 - Retencao e limpeza permanecem em dry-run ate autorizacao especifica. Nunca
   inferir permissao para apagar dados a partir de uma autorizacao de deploy.
 

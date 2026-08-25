@@ -47,7 +47,6 @@ jobs:
       publish_migrate: ${{ steps.impact.outputs.publish_migrate }}
       pause_claims: ${{ steps.impact.outputs.pause_claims }}
       backup: ${{ steps.impact.outputs.backup }}
-      wa_validator: ${{ steps.impact.outputs.wa_validator }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -62,7 +61,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           if [ "$DEPLOY_ACTION" = "rollback" ]; then
-            for value in class=migration touch_vps=true publish_api=false publish_worker=false publish_migrate=false pause_claims=true backup=false wa_validator=false; do
+            for value in class=migration touch_vps=true publish_api=false publish_worker=false publish_migrate=false pause_claims=true backup=false; do
               echo "$value" >> "$GITHUB_OUTPUT"
             done
             exit 0

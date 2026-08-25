@@ -55,9 +55,9 @@ jobs:
 
             lifecycle_stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
             case "$lifecycle_stage" in
-              candidate_healthy|validator_complete) ;;
+              candidate_healthy|validator_complete|soak_complete|awaiting_resume_authorization|workers_resumed|verified) ;;
               *)
-                echo "validator requires candidate_healthy or validator_complete; found $lifecycle_stage" >&2
+                echo "validator requires an installed healthy candidate; found $lifecycle_stage" >&2
                 exit 1
                 ;;
             esac

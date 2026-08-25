@@ -2,6 +2,9 @@
 
 Use `$brain-agent-e2e` to audit or repair a Brain agent through the dashboard, Evolution, the canonical n8n workflow and graph-backed runtime.
 
+This command is diagnostic and optional. Never turn it or WA Validator into a
+mandatory deploy, publication or resume gate.
+
 ## Arguments
 
 - `target_persona`: target persona (required)

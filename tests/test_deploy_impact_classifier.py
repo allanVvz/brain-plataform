@@ -29,7 +29,7 @@ def test_non_conversation_worker_uses_drain_without_api_publish():
 def test_conversation_runtime_requires_semantic_path():
     result = classify(["api/services/graph_agent_runtime_v3.py"])
     assert result["class"] == "conversational"
-    assert result["wa_validator"] is True
+    assert "wa_validator" not in result
 
 
 def test_migration_requires_backup_and_complete_path():
@@ -43,7 +43,7 @@ def test_release_infrastructure_uses_controlled_path_without_migration():
     result = classify([".github/workflows/deploy-production.yml", "api/Dockerfile"])
     assert result["class"] == "conversational"
     assert result["pause_claims"] is True
-    assert result["wa_validator"] is True
+    assert "wa_validator" not in result
     assert result["backup"] is False
     assert result["publish_migrate"] is False
 

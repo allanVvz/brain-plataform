@@ -32,6 +32,13 @@ def test_incremental_deploy_pauses_claims_and_requires_explicit_resume():
     assert "authorize-resume" in RESUME_WORKFLOW
 
 
+def test_wa_validator_is_not_a_deploy_or_resume_gate():
+    assert "run the internal WA Validator evidence step before resume" not in INCREMENTAL_DEPLOY
+    assert "--stage awaiting_resume_authorization" in INCREMENTAL_DEPLOY
+    assert "wa_validator=optional_not_release_gate" in INCREMENTAL_DEPLOY
+    assert "wa_validator_session" not in RESUME_WORKFLOW
+
+
 def test_release_validator_requires_this_release_migration_and_exact_sha():
     assert "122_preserve_post_handoff_journey.sql" in VALIDATOR
     assert "126_journey_state_selector.sql" in VALIDATOR

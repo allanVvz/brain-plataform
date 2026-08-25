@@ -37,6 +37,12 @@ Return `PASS` only when every hard gate passes and the intended SHA/digests
 match the approved release. Treat missing evidence as failure. Report warnings
 separately and include only non-secret technical IDs.
 
+WA Validator and conversational soak are optional diagnostic evidence. Their
+absence or failure does not change this release-readiness verdict and never
+blocks deploy or resume by itself. Evaluate the underlying technical evidence
+directly; exactly-once, isolation, proof and confirmation safety remain hard
+gates.
+
 Do not convert provider `sent`/`delivered` into proof. A live E2E requires
 separate authorization and the `brain-agent-e2e` skill.
 
