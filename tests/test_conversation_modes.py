@@ -17,6 +17,27 @@ from services.sdr_documents import compile_persona_documents
 from workers.whatsapp_dispatch_worker import WhatsAppDispatchWorker
 
 
+def test_validator_counts_one_model_repair_as_one_persisted_decision():
+    audit = {
+        "inbound_count": 1,
+        "decision_count": 1,
+        "proof_count": 1,
+        "valid_proof_count": 1,
+        "outbound_count": 1,
+        "outbound_released_after_proof": True,
+        "commit_state": "completed",
+        "prompt_tokens": 30_000,
+        "model_calls": 2,
+        "deterministic_branch_match": True,
+    }
+
+    assert wa_validator_service._conversation_v3_invariant_errors(audit) == []
+    audit["model_calls"] = 3
+    assert wa_validator_service._conversation_v3_invariant_errors(audit) == [
+        "model_calls=3"
+    ]
+
+
 def test_active_whatsapp_binding_accepts_every_contact():
     binding = {"metadata": {"mode": "active", "allowlist": []}}
     assert whatsapp._allowed(binding, "551100000001") is True

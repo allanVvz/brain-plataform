@@ -1747,6 +1747,39 @@ async def _wait_for_reply_delivered(
     )
 
 
+def _conversation_v3_invariant_errors(audit: dict) -> list[str]:
+    """Return commit-level invariant failures for one canonical inbound.
+
+    A proposal plus one model repair is still one persisted decision.  The
+    exactly-once boundary is the decision/proof/commit/outbound ledger, not the
+    number of model calls used to produce the proof-valid proposal.
+    """
+    errors: list[str] = []
+    for key, expected in (
+        ("inbound_count", 1), ("decision_count", 1),
+        ("proof_count", 1), ("valid_proof_count", 1),
+    ):
+        if int(audit.get(key) or 0) != expected:
+            errors.append(f"{key}={audit.get(key)}")
+    if int(audit.get("outbound_count") or 0) > 1:
+        errors.append(f"outbound_count={audit.get('outbound_count')}")
+    if audit.get("outbound_released_after_proof") is not True:
+        errors.append("outbound_released_before_proof")
+    if audit.get("commit_state") != "completed":
+        errors.append(f"commit_state={audit.get('commit_state')}")
+
+    model_calls = max(1, int(audit.get("model_calls") or 0))
+    prompt_tokens = max(
+        int(audit.get("prompt_tokens") or 0),
+        int(audit.get("prompt_estimated_tokens") or 0),
+    )
+    if prompt_tokens > 24_000 * model_calls:
+        errors.append(f"prompt_tokens={prompt_tokens}")
+    if int(audit.get("model_calls") or 0) > 2:
+        errors.append(f"model_calls={audit.get('model_calls')}")
+    return errors
+
+
 async def _wait_for_turn_audit_v3(
     inbound_buffer_id: str,
     *,
@@ -2968,31 +3001,7 @@ async def run_session_direct(
                         turn["timeout"] = True
                     if pipeline_contract == "conversation_v3":
                         audit = turn_audit or supabase_client.audit_conversation_turn_v3(buffer_uuid)
-                        invariant_errors: list[str] = []
-                        for key, expected in (
-                            ("inbound_count", 1), ("decision_count", 1),
-                            ("proof_count", 1), ("valid_proof_count", 1),
-                        ):
-                            if int(audit.get(key) or 0) != expected:
-                                invariant_errors.append(f"{key}={audit.get(key)}")
-                        if int(audit.get("outbound_count") or 0) > 1:
-                            invariant_errors.append(f"outbound_count={audit.get('outbound_count')}")
-                        if audit.get("outbound_released_after_proof") is not True:
-                            invariant_errors.append("outbound_released_before_proof")
-                        if audit.get("commit_state") != "completed":
-                            invariant_errors.append(f"commit_state={audit.get('commit_state')}")
-                        prompt_tokens = max(
-                            int(audit.get("prompt_tokens") or 0),
-                            int(audit.get("prompt_estimated_tokens") or 0),
-                        )
-                        # Token usage is aggregated across proposal and repair
-                        # calls. Keep the 24k ceiling per model call instead of
-                        # rejecting a valid repaired turn on its summed usage.
-                        model_calls = max(1, int(audit.get("model_calls") or 0))
-                        if prompt_tokens > 24_000 * model_calls:
-                            invariant_errors.append(f"prompt_tokens={prompt_tokens}")
-                        if audit.get("deterministic_branch_match") and int(audit.get("model_calls") or 0) > 1:
-                            invariant_errors.append(f"model_calls={audit.get('model_calls')}")
+                        invariant_errors = _conversation_v3_invariant_errors(audit)
                         turn["turn_audit"] = audit
                         if invariant_errors:
                             raise RuntimeError(

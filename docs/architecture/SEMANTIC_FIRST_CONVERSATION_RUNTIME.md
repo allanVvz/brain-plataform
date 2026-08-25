@@ -30,6 +30,12 @@ modelo preserva apenas id, campo e dependencias da pergunta, sem a copy
 `field_questions`. Assim o grafo continua provando cobertura/escopo, enquanto o
 modelo formula a pergunta e o backend jamais a concatena na resposta.
 
+No WA Validator, `exactly-once` e contado no limite persistido: um inbound, uma
+decisao, um proof, um commit e no maximo um outbound. A proposta inicial mais
+uma unica reparacao pelo modelo continuam sendo a mesma decisao persistida;
+`model_calls=2` nao e duplicidade. Mais de uma reparacao (`model_calls>2`),
+decisao/proof duplicado ou segundo outbound continuam bloqueando o release.
+
 Antes de publicar, validar acumulacao top-down de FAQs: cada FAQ de evidencia
 precisa de caminho hierarquico ativo da Persona, fonte/status validos e escopo
 persona/agente intacto. Aurora e Tock Fatal usam o runtime v3 e GraphBundle,
