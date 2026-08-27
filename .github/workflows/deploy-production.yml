@@ -6,7 +6,7 @@ on:
       action:
         description: Deploy the selected image or roll back to the recorded previous image
         type: choice
-        options: [deploy, rollback, inspect_lifecycle, inspect_graph_bundle, preflight_pause, postflight_validate, resume_workers]
+        options: [deploy, rollback, inspect_lifecycle, inspect_graph_bundle, inspect_resume_bindings, preflight_pause, postflight_validate, resume_workers]
         default: deploy
       candidate_sha:
         description: Full release SHA for the controlled production gate
@@ -63,7 +63,7 @@ jobs:
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
         run: |
           set -Eeuo pipefail
-          if [ "$DEPLOY_ACTION" = "inspect_lifecycle" ] || [ "$DEPLOY_ACTION" = "inspect_graph_bundle" ] || [ "$DEPLOY_ACTION" = "preflight_pause" ] || [ "$DEPLOY_ACTION" = "postflight_validate" ] || [ "$DEPLOY_ACTION" = "resume_workers" ]; then
+          if [ "$DEPLOY_ACTION" = "inspect_lifecycle" ] || [ "$DEPLOY_ACTION" = "inspect_graph_bundle" ] || [ "$DEPLOY_ACTION" = "inspect_resume_bindings" ] || [ "$DEPLOY_ACTION" = "preflight_pause" ] || [ "$DEPLOY_ACTION" = "postflight_validate" ] || [ "$DEPLOY_ACTION" = "resume_workers" ]; then
             for value in class=documentation touch_vps=false publish_api=false publish_worker=false publish_migrate=false pause_claims=false backup=false; do
               echo "$value" >> "$GITHUB_OUTPUT"
             done
@@ -151,7 +151,7 @@ jobs:
           IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile edge --profile evolution config --quiet
 
   publish:
-    if: inputs.action != 'rollback' && inputs.action != 'inspect_lifecycle' && inputs.action != 'inspect_graph_bundle' && inputs.action != 'preflight_pause' && inputs.action != 'postflight_validate' && inputs.action != 'resume_workers'
+    if: inputs.action != 'rollback' && inputs.action != 'inspect_lifecycle' && inputs.action != 'inspect_graph_bundle' && inputs.action != 'inspect_resume_bindings' && inputs.action != 'preflight_pause' && inputs.action != 'postflight_validate' && inputs.action != 'resume_workers'
     needs: [classify, validate]
     runs-on: ubuntu-latest
     outputs:
@@ -239,7 +239,7 @@ jobs:
 
   production_gate:
     needs: classify
-    if: inputs.action == 'inspect_lifecycle' || inputs.action == 'inspect_graph_bundle' || inputs.action == 'preflight_pause' || inputs.action == 'postflight_validate' || inputs.action == 'resume_workers'
+    if: inputs.action == 'inspect_lifecycle' || inputs.action == 'inspect_graph_bundle' || inputs.action == 'inspect_resume_bindings' || inputs.action == 'preflight_pause' || inputs.action == 'postflight_validate' || inputs.action == 'resume_workers'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -266,6 +266,18 @@ jobs:
 
             if [ "$GATE_ACTION" = "inspect_lifecycle" ]; then
               python3 ops/vps/release_lifecycle.py show
+            elif [ "$GATE_ACTION" = "inspect_resume_bindings" ]; then
+              docker compose --env-file .env.compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -P pager=off' <<'SQL'
+              select b.id::text as binding_id, p.slug as persona_slug, b.connection_status,
+                     coalesce(b.metadata->>'safety_pause_reason', b.metadata->>'pause_reason', '') as safety_reason,
+                     b.updated_at
+              from public.workflow_bindings b
+              join public.personas p on p.id=b.persona_id
+              where b.active
+                and (b.connection_status='safety_paused'
+                     or coalesce((b.metadata->>'safety_paused')::boolean,false))
+              order by p.slug, b.id;
+SQL
             elif [ "$GATE_ACTION" = "inspect_graph_bundle" ]; then
               test -f .deploy/control/claims-paused.json
               EXPECTED_RELEASE_SHA="$CANDIDATE_SHA" REQUIRE_FRESH_BACKUP=false \
