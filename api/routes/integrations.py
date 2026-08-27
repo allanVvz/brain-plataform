@@ -265,6 +265,9 @@ def get_whatsapp_binding(slug: str, request: Request):
 def put_whatsapp_binding(slug: str, body: WhatsAppBindingBody, request: Request):
     _require_internal_admin(request)
     persona = _persona_or_404(slug, request)
+    phone_number_id = body.phone_number_id.strip()
+    if not phone_number_id:
+        raise HTTPException(400, "phone_number_id obrigatorio")
     if body.mode not in {"disabled", "test_allowlist", "active"}:
         raise HTTPException(400, "mode invalido")
     allowlist = [item.strip() for item in body.allowlist if item and item.strip()]
@@ -283,6 +286,25 @@ def put_whatsapp_binding(slug: str, body: WhatsAppBindingBody, request: Request)
     provider_secret_ciphertext = connection.get("secret_ciphertext")
     if body.mode != "disabled" and not provider_secret_ciphertext:
         raise HTTPException(409, "Token Meta nao configurado para este binding.")
+
+    # A provider number is a routing boundary, not reusable setup data.  Do
+    # this check before upsert/activation so a new persona cannot create a
+    # shadow binding for another persona's number.  Moving an existing number
+    # remains an explicit reassignment operation with its own pause/audit
+    # contract.
+    foreign_binding = next(
+        (
+            binding
+            for binding in supabase_client.get_workflow_bindings_by_phone_number_id(phone_number_id)
+            if str(binding.get("persona_id") or "") != str(persona["id"])
+        ),
+        None,
+    )
+    if foreign_binding:
+        raise HTTPException(
+            409,
+            "phone_number_id ja pertence a outra persona; use a reassociacao auditada do binding.",
+        )
     metadata = {
         "business_id": body.business_id,
         "waba_id": body.waba_id,
@@ -305,7 +327,7 @@ def put_whatsapp_binding(slug: str, body: WhatsAppBindingBody, request: Request)
             "workflow_name": body.workflow_name,
             "n8n_workflow_id": None,
             "whatsapp_number": body.whatsapp_number,
-            "whatsapp_phone_number_id": body.phone_number_id,
+            "whatsapp_phone_number_id": phone_number_id,
             "channel": "whatsapp",
             "provider": "meta_cloud",
             "provider_secret_ciphertext": provider_secret_ciphertext,
