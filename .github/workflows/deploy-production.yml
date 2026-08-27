@@ -270,27 +270,7 @@ jobs:
               test -f .deploy/control/claims-paused.json
               EXPECTED_RELEASE_SHA="$CANDIDATE_SHA" REQUIRE_FRESH_BACKUP=false \
                 bash ops/vps/validate-production-release.sh
-              docker compose exec -T api python - <<'PY'
-              import json
-              from services import graph_bundle_view
-
-              catalog = graph_bundle_view.list_versions("zypi-shop")
-              draft = next(
-                  item
-                  for item in catalog["versions"]
-                  if item["ref"] == "bundle:sdr-whatsapp-multiproduto-draft.json"
-              )
-              assert draft["source"] == "draft"
-              assert draft["state"] == "blocked"
-              assert draft["validation_error_count"] > 0
-              print(json.dumps({
-                  "persona_slug": catalog["persona"]["slug"],
-                  "ref": draft["ref"],
-                  "state": draft["state"],
-                  "validation_error_count": draft["validation_error_count"],
-                  "read_only": catalog["read_only"],
-              }, sort_keys=True))
-              PY
+              docker compose exec -T api python -c 'import json; from services import graph_bundle_view as g; c=g.list_versions("zypi-shop"); d=next(x for x in c["versions"] if x["ref"] == "bundle:sdr-whatsapp-multiproduto-draft.json"); assert d["source"] == "draft"; assert d["state"] == "blocked"; assert d["validation_error_count"] > 0; print(json.dumps({"persona_slug": c["persona"]["slug"], "ref": d["ref"], "state": d["state"], "validation_error_count": d["validation_error_count"], "read_only": c["read_only"]}, sort_keys=True))'
             elif [ "$GATE_ACTION" = "preflight_pause" ]; then
               lifecycle_stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
               lifecycle_candidate="$(python3 ops/vps/release_lifecycle.py show --field candidate_sha)"
