@@ -9,9 +9,13 @@ MODE="${3:---dry-run}"
 DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
 SUPERSEDE_RELEASE_AUTHORIZED="${SUPERSEDE_RELEASE_AUTHORIZED:-false}"
 SUPERSEDE_RELEASE_REASON="${SUPERSEDE_RELEASE_REASON:-}"
+RELEASE_CLASS="${RELEASE_CLASS:-$([[ "$IMPACT" == "api" ]] && echo api || echo runtime)}"
+BACKUP_MODE="${BACKUP_MODE:-evidence_only}"
 [[ "$IMPACT" =~ ^(api|worker|conversational|migration)$ ]] || { echo "unsupported VPS impact: $IMPACT" >&2; exit 2; }
 [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "full Git SHA required" >&2; exit 2; }
 [[ "$MODE" == "--dry-run" || "$MODE" == "--apply" ]] || { echo "expected --dry-run or --apply" >&2; exit 2; }
+[[ "$RELEASE_CLASS" == "api" || "$RELEASE_CLASS" == "runtime" ]] || { echo "invalid RELEASE_CLASS" >&2; exit 2; }
+[[ "$BACKUP_MODE" == "evidence_only" || "$BACKUP_MODE" == "fresh_required" ]] || { echo "invalid BACKUP_MODE" >&2; exit 2; }
 cd "$ROOT_DIR"
 python3 ops/vps/validate_env.py "$ENV_FILE"
 
@@ -90,8 +94,8 @@ disk_used="$(df -P "$ROOT_DIR" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
   echo "disk gate failed: ${disk_used:-unknown}% (required <${DISK_MAX_PERCENT}%)" >&2
   exit 1
 }
-printf 'impact=%s\ntarget=%s\ncurrent=%s\napi_tag=%s\nworker_tag=%s\nmigrate_tag=%s\ndisk_percent=%s\n' \
-  "$IMPACT" "$TARGET_SHA" "$CURRENT_SHA" "$API_TAG" "$WORKER_TAG" "$MIGRATE_TAG" "$disk_used"
+printf 'impact=%s\nrelease_class=%s\nbackup_mode=%s\ntarget=%s\ncurrent=%s\napi_tag=%s\nworker_tag=%s\nmigrate_tag=%s\ndisk_percent=%s\n' \
+  "$IMPACT" "$RELEASE_CLASS" "$BACKUP_MODE" "$TARGET_SHA" "$CURRENT_SHA" "$API_TAG" "$WORKER_TAG" "$MIGRATE_TAG" "$disk_used"
 printf 'pull_services=%s\nreplace_services=%s\n' "${pull_services[*]}" "${replace_services[*]}"
 if [[ "$MODE" == "--dry-run" ]]; then
   exit 0
@@ -102,6 +106,8 @@ prepare_args=(
   --candidate-sha "$TARGET_SHA"
   --previous-sha "$CURRENT_SHA"
   --impact-class "$IMPACT"
+  --release-class "$RELEASE_CLASS"
+  --backup-mode "$BACKUP_MODE"
   --pause-reason "incremental $IMPACT deployment"
 )
 if [[ -s "$STATE_DIR/lifecycle.json" ]]; then
@@ -130,7 +136,7 @@ if [[ -s "$STATE_DIR/lifecycle.json" ]]; then
     fi
   fi
 fi
-python3 ops/vps/release_lifecycle.py "${prepare_args[@]}" >/dev/null
+bash ops/vps/release-prepare.sh "${prepare_args[@]:1}" >/dev/null
 stage_rank() {
   case "$1" in
     prepared) echo 0 ;; images_pulled) echo 1 ;; claims_paused) echo 2 ;;
@@ -143,6 +149,10 @@ stage_rank() {
 current_stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
 current_rank="$(stage_rank "$current_stage")"
 (( current_rank >= 0 )) || { echo "unknown lifecycle stage: $current_stage" >&2; exit 1; }
+if [[ ! -s "$STATE_DIR/evidence/environment.json" ]]; then
+  echo "bootstrapping missing continuous environment evidence (read-only checks)"
+  bash ops/vps/collect-environment-evidence.sh
+fi
 if (( current_rank < 1 )); then
   "${COMPOSE[@]}" pull "${pull_services[@]}"
   python3 ops/vps/release_lifecycle.py advance --stage images_pulled \
@@ -189,13 +199,14 @@ persist_components() {
 
 if [[ "$IMPACT" == "api" ]]; then
   if (( current_rank < 5 )); then
-    bash ops/vps/deploy-api-blue-green.sh "$TARGET_SHA"
+    bash ops/vps/release-rollout-api.sh "$TARGET_SHA"
     wait_for_api
     persist_components
     python3 ops/vps/release_lifecycle.py advance --stage candidate_healthy \
       --gate api_ready=true --gate "api_source_sha=$API_TAG" >/dev/null
     current_rank=5
   fi
+  EXPECTED_RELEASE_SHA="$TARGET_SHA" bash ops/vps/release-verify.sh "$TARGET_SHA"
   if (( current_rank < 10 )); then
     python3 ops/vps/release_lifecycle.py advance --stage verified \
       --gate claims_pause=not_required --gate worker_restarted=false >/dev/null
@@ -205,7 +216,7 @@ if [[ "$IMPACT" == "api" ]]; then
 fi
 
 if (( current_rank < 2 )); then
-  python3 ops/vps/release_lifecycle.py pause-claims \
+  python3 ops/vps/release_lifecycle.py pause-release \
     --reason "incremental $IMPACT deployment" >/dev/null
   current_rank=2
 fi
@@ -214,22 +225,16 @@ if (( current_rank < 3 )); then
   current_rank=3
 fi
 if [[ "$IMPACT" == "migration" ]] && (( current_rank < 4 )); then
-  bash ops/vps/backup.sh
-  "${COMPOSE[@]}" up -d db
-  "${COMPOSE[@]}" up --no-deps --force-recreate db-bootstrap
-  "${COMPOSE[@]}" up --no-deps --force-recreate migrate
-  "${COMPOSE[@]}" up -d --no-deps --force-recreate rest
+  bash ops/vps/release-migrate.sh "$BACKUP_MODE"
   python3 ops/vps/release_lifecycle.py advance --stage migration_complete >/dev/null
   current_rank=4
 fi
 if (( current_rank < 5 )); then
   if [[ "$IMPACT" =~ ^(conversational|migration)$ ]]; then
-    bash ops/vps/deploy-api-blue-green.sh "$TARGET_SHA"
+    bash ops/vps/release-rollout-api.sh "$TARGET_SHA"
     wait_for_api
   fi
-  "${COMPOSE[@]}" up -d --no-deps workers
-  worker_source="$("${COMPOSE[@]}" exec -T workers sh -c 'cat /image-source-sha')"
-  [[ "$worker_source" == "$WORKER_TAG" ]] || { echo "worker source SHA mismatch" >&2; exit 1; }
+  bash ops/vps/release-rollout-worker.sh "$WORKER_TAG"
   persist_components
   python3 ops/vps/release_lifecycle.py advance --stage candidate_healthy \
     --gate api_ready=true --gate "api_source_sha=$API_TAG" \
@@ -238,6 +243,9 @@ if (( current_rank < 5 )); then
 fi
 
 if (( current_rank < 8 )); then
+  EXPECTED_RELEASE_SHA="$TARGET_SHA" bash ops/vps/release-verify.sh "$TARGET_SHA"
+  python3 ops/vps/release_lifecycle.py advance --stage validator_complete \
+    --gate release_validator=true >/dev/null
   python3 ops/vps/release_lifecycle.py advance \
     --stage awaiting_resume_authorization \
     --gate wa_validator=optional_not_release_gate \

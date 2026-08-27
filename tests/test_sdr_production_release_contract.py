@@ -29,11 +29,10 @@ DOCKERIGNORE = (ROOT / ".dockerignore").read_text(encoding="utf-8")
 
 
 def test_incremental_deploy_pauses_claims_and_requires_explicit_resume():
-    assert "release_lifecycle.py pause-claims" in INCREMENTAL_DEPLOY
+    assert "release_lifecycle.py pause-release" in INCREMENTAL_DEPLOY
     assert "drain-worker-claims.sh" in INCREMENTAL_DEPLOY
     assert "awaiting_resume_authorization" in INCREMENTAL_DEPLOY
-    assert "resume-production-workers.sh" in RESUME_WORKFLOW
-    assert "authorize-resume" in RESUME_WORKFLOW
+    assert "release-resume.sh" in RESUME_WORKFLOW
 
 
 def test_wa_validator_is_not_a_deploy_or_resume_gate():
@@ -43,35 +42,31 @@ def test_wa_validator_is_not_a_deploy_or_resume_gate():
     assert "wa_validator_session" not in RESUME_WORKFLOW
 
 
-def test_non_migration_resume_reports_stale_backup_without_hiding_hard_gates():
+def test_non_migration_release_consumes_continuous_backup_evidence():
     assert 'impact_class="$(python3 ops/vps/release_lifecycle.py show --field impact_class' in VALIDATOR
     assert '[[ "$impact_class" == "migration" ]]' in VALIDATOR
-    assert "WARN\\tbackup_age" in VALIDATOR
+    assert "environment_evidence.py" in VALIDATOR
+    assert '[[ "$require_fresh_backup" == "true" ]]' in VALIDATOR
     assert "bash ops/vps/validate-production-release.sh >/dev/null" not in RESUME_SCRIPT
 
 
-def test_release_validator_requires_this_release_migration_and_exact_sha():
-    assert "122_preserve_post_handoff_journey.sql" in VALIDATOR
-    assert "126_journey_state_selector.sql" in VALIDATOR
-    assert "127_sdr_name_service_confirmation.sql" in VALIDATOR
-    assert "128_confirm_branch_offering_within_journey.sql" in VALIDATOR
-    assert "129_carry_over_facts_by_lead.sql" in VALIDATOR
-    assert "130_shared_lead_memory_and_journey_commit_v4.sql" in VALIDATOR
-    assert "release migrations 112-130 are incomplete" in VALIDATOR
+def test_release_validator_uses_dynamic_migration_manifest_and_exact_sha():
+    assert "MIGRATION_MANIFEST.json" in VALIDATOR
+    assert "migration_manifest.py" in VALIDATOR
+    assert "release migrations 112-130 are incomplete" not in VALIDATOR
     assert "EXPECTED_RELEASE_SHA" in VALIDATOR
     assert "release_source_identity" in VALIDATOR
 
 
-def test_release_validator_gate_counts_every_migration_it_lists():
-    """O gate compara `count(*) <> N`. Se a lista crescer e o N ficar para
-    tras, o gate passa com migration faltando -- confianca falsa exatamente no
-    momento em que ela mais importa."""
+def test_release_validator_does_not_embed_a_fixed_migration_list():
     import re
+    assert not re.search(r"'\d{3}_[a-z0-9_]+\.sql'", VALIDATOR)
 
-    bloco = VALIDATOR[VALIDATOR.index("do $$"):VALIDATOR.index("are incomplete")]
-    listadas = len(re.findall(r"'\d{3}_[a-z0-9_]+\.sql'", bloco))
-    esperado = int(re.search(r"\)\) <> (\d+) then", bloco).group(1))
-    assert listadas == esperado, f"{listadas} migrations listadas, gate espera {esperado}"
+
+def test_main_workflow_has_plan_and_approved_resume_actions():
+    assert "options: [plan, deploy, rollback, resume]" in WORKFLOW
+    assert "environment: production-resume" in WORKFLOW
+    assert "release-resume.sh" in WORKFLOW
 
 
 def test_portal_build_does_not_download_google_fonts_during_release():

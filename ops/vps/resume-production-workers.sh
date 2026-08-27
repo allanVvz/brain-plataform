@@ -61,7 +61,7 @@ export API_TAG WORKER_TAG MIGRATE_TAG IMAGE_TAG="$TARGET_SHA"
 pause_after_failure() {
   local exit_code="$?"
   if [[ "$released" == "true" ]]; then
-    python3 ops/vps/release_lifecycle.py pause-claims \
+    python3 ops/vps/release_lifecycle.py pause-release \
       --reason "automatic safety pause after resume verification failure" \
       --safety-pause >/dev/null || true
   fi
@@ -147,15 +147,21 @@ select count(*) from public.lead_buffer
 where direction='inbound'
 and status in ('received','buffered','retry')
 and payload->'conversation_commit' is not null;")"
-  for gate in "$cas_conflicts" "$critical_rows" "$safety_paused_bindings" "$claimable_with_commit"; do
+  # Binding safety pauses are durable, persona-scoped controls. They remain in
+  # force while the shared worker resumes and must never be confused with the
+  # transient release pause. Only release-scope invariants block this step.
+  for gate in "$cas_conflicts" "$critical_rows" "$claimable_with_commit"; do
     [[ "$gate" == "0" ]] || {
-      echo "resume database gate failed: cas=$cas_conflicts critical=$critical_rows safety_paused=$safety_paused_bindings claimable_with_commit=$claimable_with_commit" >&2
+      echo "resume database gate failed: cas=$cas_conflicts critical=$critical_rows claimable_with_commit=$claimable_with_commit" >&2
       exit 1
     }
   done
+  printf 'INFO\tbinding_safety_pauses\t%s preserved\n' "$safety_paused_bindings"
 
-  EXPECTED_RELEASE_SHA="$TARGET_SHA" DISK_MAX_PERCENT="$DISK_MAX_PERCENT" \
-    bash ops/vps/validate-production-release.sh
+  [[ "$(python3 ops/vps/release_lifecycle.py show --field gates.release_validator)" == "True" ]] || {
+    echo "release verification report is incomplete" >&2
+    exit 1
+  }
 fi
 
 eligible_file=".deploy/resume-eligible-${TARGET_SHA}.txt"
@@ -175,7 +181,8 @@ if [[ "$resume_already_released" == "false" ]]; then
   python3 ops/vps/release_lifecycle.py record-gate \
     --gate "resume_disk_percent=$disk_used" \
     --gate "resume_eligible_inbound=$eligible_count" \
-    --gate "resume_cas_conflicts=$cas_conflicts" >/dev/null
+    --gate "resume_cas_conflicts=$cas_conflicts" \
+    --gate "binding_safety_pauses_preserved=$safety_paused_bindings" >/dev/null
 fi
 
 mkdir -p .deploy/control
@@ -206,7 +213,7 @@ verify_container_digest() {
 verify_container_digest "$api_cid" .deploy/release-api-digest api
 verify_container_digest "$worker_cid" .deploy/release-worker-digest worker
 if [[ "$resume_already_released" == "false" ]]; then
-  python3 ops/vps/release_lifecycle.py resume-claims --candidate-sha "$TARGET_SHA" >/dev/null
+  python3 ops/vps/release_lifecycle.py resume-release --candidate-sha "$TARGET_SHA" >/dev/null
   released=true
   python3 ops/vps/release_lifecycle.py advance --stage workers_resumed \
     --gate "api_source_sha=$api_source_sha" \

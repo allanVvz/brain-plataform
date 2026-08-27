@@ -9,7 +9,7 @@ STAGE="$OUT_DIR/stage-$SOURCE_SHA"
 ARCHIVE="$OUT_DIR/brain-release-$SOURCE_SHA.tar.gz"
 mkdir -p "$OUT_DIR"
 rm -rf -- "$STAGE"
-mkdir -p "$STAGE/infra" "$STAGE/api" "$STAGE/supabase" "$STAGE/docs"
+mkdir -p "$STAGE/infra" "$STAGE/api" "$STAGE/supabase" "$STAGE/docs" "$STAGE/scripts"
 
 cp "$ROOT_DIR/docker-compose.yml" "$STAGE/"
 cp "$ROOT_DIR/infra/Caddyfile" "$ROOT_DIR/infra/kong.yml" "$STAGE/infra/"
@@ -17,6 +17,13 @@ cp -a "$ROOT_DIR/infra/grafana" "$STAGE/infra/"
 cp -a "$ROOT_DIR/ops/vps" "$STAGE/ops"
 cp -a "$ROOT_DIR/api/n8n-workflows" "$STAGE/api/"
 cp -a "$ROOT_DIR/supabase/migrations" "$STAGE/supabase/"
+cp "$ROOT_DIR/scripts/migration_manifest.py" "$STAGE/scripts/"
+python "$ROOT_DIR/scripts/migration_manifest.py" create \
+  --directory "$ROOT_DIR/supabase/migrations" \
+  --output "$STAGE/MIGRATION_MANIFEST.json"
+if [[ -n "${RELEASE_PLAN_FILE:-}" && -s "$RELEASE_PLAN_FILE" ]]; then
+  cp "$RELEASE_PLAN_FILE" "$STAGE/RELEASE_PLAN.json"
+fi
 cp -a "$ROOT_DIR/docs/sdr" "$STAGE/docs/"
 printf '%s\n' "$SOURCE_SHA" > "$STAGE/SOURCE_SHA"
 printf '%s\n' "${API_IMAGE_DIGEST:-unresolved}" > "$STAGE/API_IMAGE_DIGEST"

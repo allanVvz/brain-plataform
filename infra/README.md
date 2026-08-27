@@ -1,12 +1,19 @@
-# Infraestrutura self-hosted
+# Infraestrutura self-hosted de produção
 
-A definicao oficial e [`docker-compose.yml`](../docker-compose.yml), configurada por `.env.compose`. Ela executa Postgres/pgvector, PostgREST, Supabase Storage, Kong, migrations, API, workers e Caddy; o dashboard permanece na Vercel.
+A definição versionada é [`docker-compose.yml`](../docker-compose.yml), mas ela
+é operada somente no host final aprovado. Não execute Docker/Compose localmente.
 
-```bash
-cp .env.compose.example .env.compose
-python3 infra/generate_keys.py --write .env.compose
-python3 ops/vps/validate_env.py .env.compose
-docker compose --env-file .env.compose up -d --build
-```
+O pipeline instala artefatos checksummed e imagens imutáveis no host, seguindo
+o plano de impacto. Os comandos oficiais e idempotentes são:
 
-O runbook completo esta em [`docs/VPS_PRODUCTION_RUNBOOK.md`](../docs/VPS_PRODUCTION_RUNBOOK.md).
+- `release-prepare.sh`
+- `release-migrate.sh`
+- `release-rollout-api.sh`
+- `release-rollout-worker.sh`
+- `release-verify.sh`
+- `release-resume.sh`
+
+`deploy.sh` permanece apenas como compatibilidade de bootstrap/rollback; não é
+o caminho normal de release. Veja
+[`docs/runbooks/RELEASE_ORCHESTRATION.md`](../docs/runbooks/RELEASE_ORCHESTRATION.md)
+e [`docs/VPS_PRODUCTION_RUNBOOK.md`](../docs/VPS_PRODUCTION_RUNBOOK.md).

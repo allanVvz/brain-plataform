@@ -20,7 +20,7 @@ concurrency:
 jobs:
   resume:
     runs-on: ubuntu-latest
-    environment: production
+    environment: production-resume
     steps:
       - name: Validate input
         shell: bash
@@ -51,13 +51,5 @@ jobs:
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
             bash ops/vps/audit.sh
-            stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
-            if [ "$stage" = "awaiting_resume_authorization" ]; then
-              python3 ops/vps/release_lifecycle.py authorize-resume \
-                --actor "$AUTHORIZATION_ACTOR" \
-                --reason "$AUTHORIZATION_REASON"
-            elif [ "$stage" != "workers_resumed" ] && [ "$stage" != "verified" ]; then
-              echo "release is not resumable from stage=$stage" >&2
-              exit 1
-            fi
-            bash ops/vps/resume-production-workers.sh "$RELEASE_SHA"
+            bash ops/vps/release-resume.sh \
+              "$RELEASE_SHA" "$AUTHORIZATION_ACTOR" "$AUTHORIZATION_REASON"

@@ -144,6 +144,11 @@ def _parse_gates(values: list[str]) -> dict[str, Any]:
 def _save(state: dict[str, Any], event: str, detail: dict[str, Any] | None = None) -> None:
     state["updated_at"] = _now()
     _atomic_write(_state_path(), state)
+    candidate = str(state.get("candidate_sha") or "")
+    if SHA_RE.fullmatch(candidate):
+        # This compact document is the canonical release report. It is updated
+        # atomically at every transition and survives the next release.
+        _atomic_write(_release_archive_path(candidate), state)
     _append_event(state, event, detail or {})
 
 
@@ -154,6 +159,27 @@ def _cmd_prepare(args: argparse.Namespace) -> None:
     if _state_path().exists():
         existing = _read()
     if existing and existing.get("candidate_sha") == candidate:
+        upgraded = False
+        if int(existing.get("schema_version") or 0) < 2:
+            existing["schema_version"] = 2
+            upgraded = True
+        for key, value in (
+            ("release_class", args.release_class),
+            ("backup_mode", args.backup_mode),
+        ):
+            if key not in existing:
+                existing[key] = value
+                upgraded = True
+        if "pause" not in existing:
+            existing["pause"] = {
+                "type": "release_pause" if args.release_class == "runtime" else "none",
+                "cause": existing.get("pause_reason"),
+                "owner": args.pause_owner or None,
+                "active": _claims_marker_path().exists(),
+            }
+            upgraded = True
+        if upgraded:
+            _save(existing, "schema_upgraded", {"schema_version": 2})
         print(json.dumps(existing, ensure_ascii=False, sort_keys=True))
         return
     if existing and existing.get("stage") != "verified" and not args.force:
@@ -179,14 +205,23 @@ def _cmd_prepare(args: argparse.Namespace) -> None:
         )
     now = _now()
     state: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "candidate_sha": candidate,
         "previous_sha": previous,
         "impact_class": args.impact_class,
+        "release_class": args.release_class,
+        "backup_mode": args.backup_mode,
         "stage": "prepared",
         "stage_entered_at": now,
         "created_at": now,
         "updated_at": now,
+        "pause": {
+            "type": "release_pause" if args.release_class == "runtime" else "none",
+            "cause": args.pause_reason or None,
+            "owner": args.pause_owner or None,
+            "active": False,
+        },
+        # Compatibility field for existing audit readers.
         "pause_reason": args.pause_reason or None,
         "expected_workers": sorted(set(args.expected_worker or ["workers"])),
         "pending_messages": max(0, args.pending_messages),
@@ -268,7 +303,9 @@ def _cmd_pause_claims(args: argparse.Namespace) -> None:
         )
     marker = {
         "paused": True,
+        "pause_type": "release_pause",
         "reason": str(args.reason or "controlled_release").strip(),
+        "owner": str(args.owner or "release_orchestrator").strip(),
         "at": _now(),
         "candidate_sha": state.get("candidate_sha"),
         "safety_pause": bool(args.safety_pause),
@@ -283,6 +320,13 @@ def _cmd_pause_claims(args: argparse.Namespace) -> None:
             "safety_pause": bool(args.safety_pause),
         })
     state["pause_reason"] = marker["reason"]
+    state["pause"] = {
+        "type": "release_pause",
+        "cause": marker["reason"],
+        "owner": marker["owner"],
+        "active": True,
+        "at": marker["at"],
+    }
     _save(
         state,
         "safety_claims_paused" if args.safety_pause else "claims_paused",
@@ -303,6 +347,9 @@ def _cmd_resume_claims(args: argparse.Namespace) -> None:
         _claims_marker_path().unlink()
     except FileNotFoundError:
         pass
+    state.setdefault("pause", {})["active"] = False
+    state["pause"]["resumed_at"] = _now()
+    state["pause"]["resumed_by"] = authorization.get("actor")
     _save(state, "claims_resumed", {"authorized_by": authorization.get("actor")})
     print(expected)
 
@@ -344,7 +391,10 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--candidate-sha", required=True)
     prepare.add_argument("--previous-sha", required=True)
     prepare.add_argument("--impact-class", required=True)
+    prepare.add_argument("--release-class", choices=("frontend", "api", "runtime"), default="runtime")
+    prepare.add_argument("--backup-mode", choices=("evidence_only", "fresh_required"), default="evidence_only")
     prepare.add_argument("--pause-reason", default="")
+    prepare.add_argument("--pause-owner", default="release_orchestrator")
     prepare.add_argument("--expected-worker", action="append")
     prepare.add_argument("--pending-messages", type=int, default=0)
     prepare.add_argument("--force", action="store_true")
@@ -370,12 +420,23 @@ def _parser() -> argparse.ArgumentParser:
 
     pause_claims = commands.add_parser("pause-claims")
     pause_claims.add_argument("--reason", required=True)
+    pause_claims.add_argument("--owner", default="release_orchestrator")
     pause_claims.add_argument("--safety-pause", action="store_true")
     pause_claims.set_defaults(func=_cmd_pause_claims)
+
+    pause_release = commands.add_parser("pause-release")
+    pause_release.add_argument("--reason", required=True)
+    pause_release.add_argument("--owner", default="release_orchestrator")
+    pause_release.add_argument("--safety-pause", action="store_true")
+    pause_release.set_defaults(func=_cmd_pause_claims)
 
     resume_claims = commands.add_parser("resume-claims")
     resume_claims.add_argument("--candidate-sha", required=True)
     resume_claims.set_defaults(func=_cmd_resume_claims)
+
+    resume_release = commands.add_parser("resume-release")
+    resume_release.add_argument("--candidate-sha", required=True)
+    resume_release.set_defaults(func=_cmd_resume_claims)
 
     show = commands.add_parser("show")
     show.add_argument("--field")
