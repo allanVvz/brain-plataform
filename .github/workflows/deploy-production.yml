@@ -273,9 +273,10 @@ jobs:
                 python3 ops/vps/release_lifecycle.py prepare \
                   --candidate-sha "$CANDIDATE_SHA" \
                   --previous-sha "$current" \
-                  --impact-class api \
-                  --pause-reason "GraphBundle v3 controlled production release"
+                --impact-class api \
+                --pause-reason "GraphBundle v3 controlled production release"
                 bash ops/vps/pause-worker-claims.sh "GraphBundle v3 controlled production release"
+                bash ops/vps/drain-worker-claims.sh
               elif [ "$lifecycle_stage" = "awaiting_resume_authorization" ] && [ "$lifecycle_candidate" = "$current" ]; then
                 test -f .deploy/control/claims-paused.json
                 echo "preserving_existing_pause_for=${lifecycle_candidate}"
@@ -283,7 +284,6 @@ jobs:
                 echo "unsupported unfinished lifecycle: stage=${lifecycle_stage} candidate=${lifecycle_candidate}" >&2
                 exit 1
               fi
-              bash ops/vps/drain-worker-claims.sh
               for minute in $(seq 1 15); do
                 echo "quiet_window_minute=${minute}/15"
                 sleep 60
