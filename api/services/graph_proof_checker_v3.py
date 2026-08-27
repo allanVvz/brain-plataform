@@ -26,6 +26,15 @@ _FINAL_CONFIRMATION = re.compile(
     r"\b(confirmad[oa]|reservad[oa]|agendad[oa]|fechad[oa]|booked|confirmed)\b",
     re.IGNORECASE,
 )
+_PRICE_VALUE_IN_REPLY = re.compile(
+    r"(?<!\w)(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}(?!\w)",
+    re.IGNORECASE,
+)
+_COMMERCIAL_DEFERRAL = re.compile(
+    r"\b(?:nao\s+(?:tenho|consigo|posso)|preciso\s+(?:confirmar|verificar)|"
+    r"vou\s+(?:confirmar|verificar)|atendimento\s+humano|equipe\s+humana)\b",
+    re.IGNORECASE,
+)
 _NAME_SEPARATORS = {"-", "'", "’"}
 # Generic floor/ceiling for a complete human name. The graph overrides them
 # per field via `validation.min_tokens` / `validation.max_tokens`.
@@ -879,7 +888,30 @@ def check(
     # moment it mattered most. The authoritative value is returned below;
     # callers should use that instead of proposal["qualification_complete"].
 
-    for claim in proposal.get("claims") or []:
+    claims = proposal.get("claims") or []
+    claim_types = {str(claim.get("claim_type") or "other") for claim in claims}
+    folded_reply = _fold(str(proposal.get("reply") or ""))
+    # The model's structured ``claims`` envelope is part of the proof
+    # boundary. A model must not be able to omit that envelope while still
+    # placing commercial facts directly in customer-facing prose. Confirmed
+    # by production WA Validator 2026-08-27: an empty claims list accompanied
+    # three prices and the unsupported policy "nao ha pedido minimo", which
+    # made the ordinary graph checks report a valid proof.
+    if _PRICE_VALUE_IN_REPLY.search(str(proposal.get("reply") or "")) and "price" not in claim_types:
+        errors.append("claim_omitted_from_proposal:price")
+    minimum_order_asserted = (
+        "nao ha pedido minimo" in folded_reply
+        or "sem pedido minimo" in folded_reply
+        or "compra e unitaria" in folded_reply
+    )
+    if (
+        minimum_order_asserted
+        and not _COMMERCIAL_DEFERRAL.search(folded_reply)
+        and "other" not in claim_types
+    ):
+        errors.append("claim_omitted_from_proposal:minimum_order")
+
+    for claim in claims:
         claim_type = str(claim.get("claim_type") or "other")
         evidence_nodes = set(claim.get("evidence_node_ids") or [])
         evidence_chunks = set(claim.get("evidence_chunk_ids") or [])

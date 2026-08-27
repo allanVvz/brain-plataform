@@ -14,6 +14,67 @@ from services import graph_proof_checker_v3
 from schemas.conversation import ServiceOperation
 
 
+def _check_reply_without_claims(reply: str) -> dict:
+    return graph_proof_checker_v3.check(
+        publication={
+            "status": "active",
+            "checksum": "sha256:reply-claims",
+            "document_json": {"branch_anchors": ["branch:sales"]},
+        },
+        contract={
+            "branch_path_checksum": "checksum:sales",
+            "closure_node_ids": ["branch:sales"],
+            "fields": [],
+            "questions": {},
+            "claims": [],
+        },
+        ledger={"graph_checksum": "sha256:reply-claims", "facts": {}},
+        proposal={
+            "branch_action": "keep",
+            "branch_anchor_node_id": "branch:sales",
+            "branch_path_checksum": "checksum:sales",
+            "branch_evidence_span": "",
+            "extracted_facts": [],
+            "claims": [],
+            "next_question_node_id": None,
+            "cited_node_ids": [],
+            "cited_chunk_ids": [],
+            "reply": reply,
+            "qualification_complete": True,
+            "handoff_requested": False,
+        },
+        message="Qual e o preco e o pedido minimo?",
+        source_message_id="msg-commercial-gap",
+        package_node_ids={"branch:sales"},
+        package_chunk_ids=set(),
+        active_branch_node_id="branch:sales",
+        branch_selection_allowed=False,
+        branch_switch_allowed=False,
+    )
+
+
+def test_reply_cannot_hide_price_and_minimum_order_outside_claim_envelope():
+    proof = _check_reply_without_claims(
+        "O body custa R$ 29,90 e a compra e unitaria, sem pedido minimo."
+    )
+
+    assert "claim_omitted_from_proposal:price" in proof["errors"]
+    assert "claim_omitted_from_proposal:minimum_order" in proof["errors"]
+    assert proof["valid"] is False
+
+
+def test_safe_commercial_deferral_does_not_invent_a_claim():
+    proof = _check_reply_without_claims(
+        "Nao consigo confirmar o pedido minimo com seguranca; preciso verificar com a equipe humana."
+    )
+
+    assert not [
+        error for error in proof["errors"]
+        if error.startswith("claim_omitted_from_proposal:")
+    ]
+    assert proof["valid"] is True, proof["errors"]
+
+
 def test_aggregate_missing_fields_unions_two_active_branches():
     """Two simultaneously-selected services must each keep their own
     required fields pending until resolved, while a shared persona-owned
