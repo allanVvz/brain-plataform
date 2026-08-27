@@ -6,7 +6,7 @@ on:
       action:
         description: Deploy the selected image or roll back to the recorded previous image
         type: choice
-        options: [deploy, rollback, inspect_lifecycle, inspect_graph_bundle, inspect_resume_bindings, preflight_pause, postflight_validate, resume_workers]
+        options: [deploy, rollback, inspect_lifecycle, inspect_graph_bundle, inspect_resume_bindings, clear_code_release_binding_pauses, preflight_pause, postflight_validate, resume_workers]
         default: deploy
       candidate_sha:
         description: Full release SHA for the controlled production gate
@@ -63,7 +63,7 @@ jobs:
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
         run: |
           set -Eeuo pipefail
-          if [ "$DEPLOY_ACTION" = "inspect_lifecycle" ] || [ "$DEPLOY_ACTION" = "inspect_graph_bundle" ] || [ "$DEPLOY_ACTION" = "inspect_resume_bindings" ] || [ "$DEPLOY_ACTION" = "preflight_pause" ] || [ "$DEPLOY_ACTION" = "postflight_validate" ] || [ "$DEPLOY_ACTION" = "resume_workers" ]; then
+          if [ "$DEPLOY_ACTION" = "inspect_lifecycle" ] || [ "$DEPLOY_ACTION" = "inspect_graph_bundle" ] || [ "$DEPLOY_ACTION" = "inspect_resume_bindings" ] || [ "$DEPLOY_ACTION" = "clear_code_release_binding_pauses" ] || [ "$DEPLOY_ACTION" = "preflight_pause" ] || [ "$DEPLOY_ACTION" = "postflight_validate" ] || [ "$DEPLOY_ACTION" = "resume_workers" ]; then
             for value in class=documentation touch_vps=false publish_api=false publish_worker=false publish_migrate=false pause_claims=false backup=false; do
               echo "$value" >> "$GITHUB_OUTPUT"
             done
@@ -151,7 +151,7 @@ jobs:
           IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile edge --profile evolution config --quiet
 
   publish:
-    if: inputs.action != 'rollback' && inputs.action != 'inspect_lifecycle' && inputs.action != 'inspect_graph_bundle' && inputs.action != 'inspect_resume_bindings' && inputs.action != 'preflight_pause' && inputs.action != 'postflight_validate' && inputs.action != 'resume_workers'
+    if: inputs.action != 'rollback' && inputs.action != 'inspect_lifecycle' && inputs.action != 'inspect_graph_bundle' && inputs.action != 'inspect_resume_bindings' && inputs.action != 'clear_code_release_binding_pauses' && inputs.action != 'preflight_pause' && inputs.action != 'postflight_validate' && inputs.action != 'resume_workers'
     needs: [classify, validate]
     runs-on: ubuntu-latest
     outputs:
@@ -239,7 +239,7 @@ jobs:
 
   production_gate:
     needs: classify
-    if: inputs.action == 'inspect_lifecycle' || inputs.action == 'inspect_graph_bundle' || inputs.action == 'inspect_resume_bindings' || inputs.action == 'preflight_pause' || inputs.action == 'postflight_validate' || inputs.action == 'resume_workers'
+    if: inputs.action == 'inspect_lifecycle' || inputs.action == 'inspect_graph_bundle' || inputs.action == 'inspect_resume_bindings' || inputs.action == 'clear_code_release_binding_pauses' || inputs.action == 'preflight_pause' || inputs.action == 'postflight_validate' || inputs.action == 'resume_workers'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -268,6 +268,31 @@ jobs:
               python3 ops/vps/release_lifecycle.py show
             elif [ "$GATE_ACTION" = "inspect_resume_bindings" ]; then
               docker compose --env-file .env.compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -P pager=off -c "select b.id::text as binding_id, p.slug as persona_slug, b.connection_status, coalesce(b.metadata->>\$\$safety_pause_reason\$\$, b.metadata->>\$\$pause_reason\$\$, \$\$\$\$) as safety_reason, b.updated_at from public.workflow_bindings b join public.personas p on p.id=b.persona_id where b.active and (b.connection_status=\$\$safety_paused\$\$ or coalesce((b.metadata->>\$\$safety_paused\$\$)::boolean,false)) order by p.slug, b.id;"'
+            elif [ "$GATE_ACTION" = "clear_code_release_binding_pauses" ]; then
+              test -f .deploy/control/claims-paused.json
+              [ "$(python3 ops/vps/release_lifecycle.py show --field stage)" = "awaiting_resume_authorization" ]
+              [ "$(python3 ops/vps/release_lifecycle.py show --field candidate_sha)" = "$CANDIDATE_SHA" ]
+              [ "$current" = "$CANDIDATE_SHA" ]
+              EXPECTED_RELEASE_SHA="$CANDIDATE_SHA" REQUIRE_FRESH_BACKUP=false \
+                bash ops/vps/validate-production-release.sh
+              docker compose --env-file .env.compose exec -T api python - <<'PY'
+            from datetime import datetime, timezone
+            from services import supabase_client
+
+            bindings = supabase_client.get_client().table("workflow_bindings").select("*").eq("active", True).execute().data or []
+            targets = [binding for binding in bindings if bool((binding.get("metadata") or {}).get("safety_paused")) or binding.get("connection_status") == "safety_paused"]
+            assert len(targets) == 2, f"expected exactly two paused bindings, found {len(targets)}"
+            for binding in targets:
+                  metadata = dict(binding.get("metadata") or {})
+                  assert binding.get("connection_status") in {"connected", "open"}, binding["id"]
+                  assert str(metadata.get("safety_pause_reason") or metadata.get("pause_reason") or "").startswith("code_release:"), binding["id"]
+                  metadata["safety_paused"] = False
+                  metadata["safety_pause_released_at"] = datetime.now(timezone.utc).isoformat()
+                  metadata["safety_pause_release_reason"] = "explicit_user_authorization_after_graphbundle_v3_release"
+                  supabase_client.update_workflow_binding_metadata(str(binding["id"]), metadata)
+                  supabase_client.insert_event({"event_type": "whatsapp.binding_safety_pause_released", "entity_type": "workflow_binding", "entity_id": str(binding["id"]), "persona_id": binding["persona_id"], "payload": {"reason": metadata["safety_pause_release_reason"]}}, source="ops.release_resume")
+            print({"released_binding_ids": [str(binding["id"]) for binding in targets]})
+            PY
             elif [ "$GATE_ACTION" = "inspect_graph_bundle" ]; then
               test -f .deploy/control/claims-paused.json
               EXPECTED_RELEASE_SHA="$CANDIDATE_SHA" REQUIRE_FRESH_BACKUP=false \
