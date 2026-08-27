@@ -6,8 +6,11 @@ on:
       action:
         description: Deploy the selected image or roll back to the recorded previous image
         type: choice
-        options: [deploy, rollback]
+        options: [deploy, rollback, preflight_pause, postflight_validate]
         default: deploy
+      candidate_sha:
+        description: Full release SHA for the controlled production gate
+        required: false
       image_tag:
         description: Existing immutable SHA tag (optional; current commit for deploy, recorded previous for rollback)
         required: false
@@ -60,6 +63,12 @@ jobs:
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
         run: |
           set -Eeuo pipefail
+          if [ "$DEPLOY_ACTION" = "preflight_pause" ] || [ "$DEPLOY_ACTION" = "postflight_validate" ]; then
+            for value in class=documentation touch_vps=false publish_api=false publish_worker=false publish_migrate=false pause_claims=false backup=false; do
+              echo "$value" >> "$GITHUB_OUTPUT"
+            done
+            exit 0
+          fi
           if [ "$DEPLOY_ACTION" = "rollback" ]; then
             for value in class=migration touch_vps=true publish_api=false publish_worker=false publish_migrate=false pause_claims=true backup=false; do
               echo "$value" >> "$GITHUB_OUTPUT"
@@ -142,7 +151,7 @@ jobs:
           IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile edge --profile evolution config --quiet
 
   publish:
-    if: inputs.action != 'rollback'
+    if: inputs.action != 'rollback' && inputs.action != 'preflight_pause' && inputs.action != 'postflight_validate'
     needs: [classify, validate]
     runs-on: ubuntu-latest
     outputs:
@@ -227,6 +236,54 @@ jobs:
           tags: ghcr.io/${{ steps.meta.outputs.repository }}/brain-migrate:${{ steps.meta.outputs.image_tag }}
           cache-from: type=gha,scope=migrate
           cache-to: type=gha,mode=max,scope=migrate
+
+  production_gate:
+    needs: classify
+    if: inputs.action == 'preflight_pause' || inputs.action == 'postflight_validate'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Audit and control the production release gate
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          GATE_ACTION: ${{ inputs.action }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 30m
+          envs: VPS_APP_DIR,GATE_ACTION,CANDIDATE_SHA
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            current="$(tr -d '\r\n' < .deploy/current-tag)"
+            [[ "$current" =~ ^[0-9a-f]{40}$ ]]
+            bash ops/vps/audit.sh
+
+            if [ "$GATE_ACTION" = "preflight_pause" ]; then
+              python3 ops/vps/release_lifecycle.py prepare \
+                --candidate-sha "$CANDIDATE_SHA" \
+                --previous-sha "$current" \
+                --impact-class api \
+                --pause-reason "GraphBundle v3 controlled production release"
+              bash ops/vps/pause-worker-claims.sh "GraphBundle v3 controlled production release"
+              bash ops/vps/drain-worker-claims.sh
+              for minute in $(seq 1 15); do
+                echo "quiet_window_minute=${minute}/15"
+                sleep 60
+              done
+              EXPECTED_RELEASE_SHA="$current" REQUIRE_FRESH_BACKUP=false \
+                bash ops/vps/validate-production-release.sh
+            else
+              test -f .deploy/control/claims-paused.json
+              EXPECTED_RELEASE_SHA="$CANDIDATE_SHA" REQUIRE_FRESH_BACKUP=false \
+                bash ops/vps/validate-production-release.sh
+            fi
+            python3 ops/vps/release_lifecycle.py show
 
   deploy:
     needs: [classify, validate, publish]
