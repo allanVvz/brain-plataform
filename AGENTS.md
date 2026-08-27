@@ -17,9 +17,13 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
 - O WA Validator e uma ferramenta diagnostica opcional, nunca um gate
   obrigatorio de deploy, publicacao ou retomada. Quando solicitado, ele deve
   rodar direto/interno, sem WhatsApp real.
-- Manter transporte e IAs pausados durante auditoria, deploy e validacao; so
-  retomar mediante autorizacao explicita posterior e gates tecnicos de SHA,
-  digest, fila critica, proof, exactly-once e isolamento.
+- Aplicar pausa no menor escopo afetado. Frontend/documentacao e API sem
+  worker/transporte nao pausam IAs. Runtime compartilhado usa `release_pause`;
+  conteudo isolado usa `persona_pause`. `binding_safety_pause` e independente
+  da release e nunca e removida por deploy/resume.
+- Somente `release_pause` e retomada pelo workflow de release, mediante
+  autorizacao explicita posterior e gates tecnicos de SHA, digest, fila
+  critica, proof, exactly-once e isolamento.
 - Retencao e limpeza permanecem em dry-run ate autorizacao especifica. Nunca
   inferir permissao para apagar dados a partir de uma autorizacao de deploy.
 
@@ -577,6 +581,20 @@ Deploy:
 
 frontend: Vercel, root dashboard
 backend: backend final aprovado
+
+Classes oficiais de release:
+
+1. `frontend`: CI + deploy Vercel; sem pausa, backup ou gates de worker.
+2. `api`: imagem imutavel + health/readiness + rollback automatico; sem pausa
+   e sem backup novo, consultando evidencia continua do ambiente.
+3. `runtime`: worker, migration ou transporte; plano, `release_pause`, drain,
+   rollout, verificacao e aprovacao humana somente antes de `resume`.
+
+O plano vem de `scripts/classify_deploy_impact.py`; o relatorio canonico fica
+em `.deploy/releases/<sha>.json`. Migration e validada pelo manifesto dinamico
+do runner, nunca por lista fixa de nomes. Backup completo dentro da release so
+ocorre quando `backup_mode=fresh_required`; nos demais casos a release consulta
+a evidencia agendada. Contrato completo: `docs/runbooks/RELEASE_ORCHESTRATION.md`.
 24. Regra final
 
 Todo conhecimento deve responder:

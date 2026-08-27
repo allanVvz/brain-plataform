@@ -21,6 +21,8 @@ Connection env (with defaults matching the compose ``db`` service):
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sys
 import time
@@ -31,6 +33,7 @@ import psycopg2
 ROOT = Path(__file__).resolve().parent.parent
 LEGACY_FILE = ROOT / "docs" / "qa" / "00_legacy_leads_messages.sql"
 MIGRATIONS_DIR = ROOT / "supabase" / "migrations"
+MANIFEST_FILE = ROOT / "MIGRATION_MANIFEST.json"
 
 # Known repairs to run BEFORE a given migration filename. Drift between the
 # legacy CREATE in migration N and columns used by indexes/queries of later
@@ -56,6 +59,25 @@ def _bool_env(name: str, default: bool) -> bool:
 
 
 LEDGER_TABLE = "public._compose_migrations"
+
+
+def verify_runner_manifest(migrations: list[Path]) -> dict:
+    """Prove the immutable runner contains exactly its declared SQL bytes."""
+    if not MANIFEST_FILE.is_file():
+        raise SystemExit(f"migration runner manifest missing: {MANIFEST_FILE}")
+    manifest = json.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
+    expected = {
+        str(item["filename"]): str(item["sha256"])
+        for item in manifest.get("migrations", [])
+    }
+    actual_names = {path.name for path in migrations}
+    if actual_names != set(expected):
+        raise SystemExit("migration runner manifest/file set mismatch")
+    for path in migrations:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != expected[path.name]:
+            raise SystemExit(f"migration checksum mismatch: {path.name}")
+    return manifest
 
 
 def ensure_platform_bootstrap(conn, password: str) -> None:
@@ -223,6 +245,13 @@ def main() -> int:
     migrations = sorted(MIGRATIONS_DIR.glob("*.sql"))
     if not migrations:
         raise SystemExit(f"no migrations found in {MIGRATIONS_DIR}")
+    manifest = verify_runner_manifest(migrations)
+    print(
+        "migration runner manifest: "
+        f"version={manifest.get('runner_version')} "
+        f"sha256={manifest.get('manifest_sha256')} "
+        f"count={manifest.get('count')} latest={manifest.get('latest')}"
+    )
 
     conn = connect_with_retry(dsn)
     bootstrap_password = os.environ.get("POSTGRES_PASSWORD") or dsn["password"]

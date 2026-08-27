@@ -36,9 +36,14 @@ def test_blue_green_uses_local_only_caddy_admin_with_bootstrap():
 def test_api_only_path_finishes_before_claim_pause_branch():
     api_branch = DEPLOY.index('if [[ "$IMPACT" == "api" ]]')
     api_exit = DEPLOY.index("exit 0", api_branch)
-    claims_pause = DEPLOY.index("release_lifecycle.py pause-claims", api_exit)
-    assert "deploy-api-blue-green.sh" in DEPLOY[api_branch:api_exit]
+    claims_pause = DEPLOY.index("release_lifecycle.py pause-release", api_exit)
+    assert "release-rollout-api.sh" in DEPLOY[api_branch:api_exit]
     assert api_exit < claims_pause
+
+
+def test_environment_evidence_is_bootstrapped_only_when_missing():
+    assert '[[ ! -s "$STATE_DIR/evidence/environment.json" ]]' in DEPLOY
+    assert "collect-environment-evidence.sh" in DEPLOY
 
 
 def test_first_split_image_release_bootstraps_from_existing_api_registry():
@@ -68,6 +73,11 @@ def test_resume_checks_digest_and_is_idempotent_after_verified():
     assert "image_digests_verified=true" in RESUME
     assert "workers already resumed and release verified" in RESUME
     assert "automatic safety pause after resume verification failure" in RESUME
+
+
+def test_binding_safety_pauses_are_preserved_but_do_not_block_release_resume():
+    assert 'for gate in "$cas_conflicts" "$critical_rows" "$claimable_with_commit"' in RESUME
+    assert "binding_safety_pauses_preserved" in RESUME
 
 
 def test_resume_uses_the_same_immutable_registry_repositories_as_deploy():

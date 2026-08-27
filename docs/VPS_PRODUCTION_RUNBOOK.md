@@ -1,5 +1,11 @@
 # Brain AI na VPS Hostinger
 
+> Contrato atual de release: `docs/runbooks/RELEASE_ORCHESTRATION.md`. Todos os
+> comandos Docker desta página são exclusivamente para o host produtivo
+> aprovado; nunca os execute na máquina local. O workflow oficial oferece
+> `plan → deploy → verify → resume`, e required reviewers ficam somente em
+> `production-resume`.
+
 Este e o runbook oficial do backend de producao. O dashboard continua na Vercel e chama a API pelo rewrite same-origin `/api-brain`.
 
 ## Arquitetura e portas
@@ -133,7 +139,10 @@ GitHub Secrets obrigatorios:
 - `VPS_HOST`, `VPS_PORT`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_APP_DIR`;
 - `GHCR_USERNAME`, `GHCR_TOKEN` com leitura dos pacotes privados.
 
-Proteja o environment GitHub `production` com aprovadores. O deploy grava tags saudaveis em `.deploy/`. Se o readiness falhar, volta automaticamente aos containers da tag anterior. Rollback manual:
+Use `production` para segredos e auditorias sem required reviewers; proteja
+`production-resume` com aprovadores. O deploy grava tags saudáveis em
+`.deploy/`. Se o readiness falhar, volta automaticamente aos containers da tag
+anterior. Rollback manual:
 
 ```bash
 bash ops/vps/rollback.sh
@@ -145,23 +154,10 @@ Migrations de producao precisam permanecer retrocompativeis com a imagem anterio
 
 ### Retomada controlada dos workers depois do deploy
 
-> Atualização 2026-08-24: o procedimento abaixo com `KEEP_WORKERS_PAUSED` e
-> `docker compose up workers` é legado. O fluxo oficial agora classifica o
-> impacto, mantém o processo vivo atrás do marker de pausa de claims e usa os
-> workflows `Record optional production validation` e `Resume production workers`.
-> API isolada não toca workers. A autoridade de versão é
-> `.deploy/components.env` mais os digests aprovados, e a retomada deve chamar
-> `ops/vps/resume-production-workers.sh <sha-completo>` após autorização
-> explícita e aprovação dos gates técnicos. WA Validator e soak são
-> diagnósticos opcionais, nunca requisitos de retomada.
-> Nunca retome diretamente pelo Compose.
-
-O workflow de producao publica API e workers com a mesma tag imutavel, mas
-mantem `KEEP_WORKERS_PAUSED=true` durante a validacao. Portanto, API saudavel e
-`audit.sh` verde nao significam que mensagens estejam sendo consumidas. A
-retomada dos workers e uma etapa operacional separada e exige autorizacao
-explicita, porque qualquer inbound ainda em `buffered` podera produzir uma
-resposta real assim que o consumidor iniciar.
+Somente a classe `runtime` cria `release_pause`; API isolada não toca workers.
+O deploy termina em `awaiting_resume_authorization` e a ação oficial `resume`
+chama `release-resume.sh` depois do review do relatório JSON. WA Validator e
+soak são diagnósticos opcionais. Pausas de binding/persona são preservadas.
 
 Antes da retomada:
 
@@ -173,21 +169,10 @@ Antes da retomada:
 3. confirme que nenhum commit terminal permanece em `processing`;
 4. registre os IDs tecnicos dos buffers que serao consumidos.
 
-Suba o worker com a mesma tag da API, informada literalmente a partir do
-checkpoint revisado:
-
-```bash
-IMAGE_TAG=<sha-de-.deploy/current-tag> docker compose --env-file .env.compose up -d workers
-docker compose --env-file .env.compose ps api workers
-docker inspect --format='{{.Config.Image}}' brain-ai-api-1 brain-ai-workers-1
-```
-
-Nunca execute apenas `docker compose ... up -d workers` enquanto `IMAGE_TAG` em
-`.env.compose` estiver diferente de `.deploy/current-tag`: o Compose poderá
-baixar e iniciar silenciosamente uma imagem antiga. Corrija primeiro a tag do
-arquivo operacional ou forneça o SHA literal revisado, use `--no-deps` para não
-recriar a API durante a retomada e confirme também o digest, não apenas o nome
-da tag.
+Retome exclusivamente pela ação `resume` do workflow oficial (ou pelo workflow
+de compatibilidade `Resume production workers`). Ambos chamam
+`release-resume.sh`, conferem o relatório/digests e removem somente a
+`release_pause`. Nunca retome diretamente pelo Compose.
 
 Depois da retomada, acompanhe cada buffer preexistente ate um estado terminal.
 Para cada inbound, exija no maximo uma decisao, um proof valido, um commit e um

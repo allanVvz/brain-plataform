@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Full-stack compatibility path used by rollback/bootstrap only. Normal
+# releases are orchestrated by deploy-incremental.sh and the idempotent
+# release-{prepare,migrate,rollout-api,rollout-worker,verify,resume}.sh commands.
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 STATE_DIR="$ROOT_DIR/.deploy"
@@ -57,24 +61,6 @@ verify_local_images() {
   done < <("${COMPOSE[@]}" config --images | sort -u)
 }
 
-env_value() {
-  local key="$1"
-  awk -v wanted="$key" '
-    {
-      line=$0
-      sub(/\r$/, "", line)
-    }
-    line ~ "^[[:space:]]*" wanted "[[:space:]]*=" {
-      sub("^[[:space:]]*" wanted "[[:space:]]*=[[:space:]]*", "", line)
-      if (line ~ /^".*"$/ || line ~ /^\047.*\047$/) {
-        line=substr(line, 2, length(line) - 2)
-      }
-      value=line
-    }
-    END { print value }
-  ' "$ENV_FILE"
-}
-
 wait_for_api() {
   local api_bind deadline
   api_bind="$("${COMPOSE[@]}" port api 8080)"
@@ -87,45 +73,6 @@ wait_for_api() {
     fi
     sleep 5
   done
-}
-
-configure_whatsapp_bindings() {
-  local allow_missing_hook="$1"
-  local meta_persona evolution_persona meta_token
-  meta_persona="$(env_value WHATSAPP_META_PERSONA_SLUG)"
-  evolution_persona="$(env_value WHATSAPP_EVOLUTION_PERSONA_SLUG)"
-
-  if [[ -z "$meta_persona" && -z "$evolution_persona" ]]; then
-    echo "WhatsApp binding rollout hook is not configured; skipping."
-    return 0
-  fi
-  if [[ -z "$meta_persona" || -z "$evolution_persona" ]]; then
-    echo "Both WHATSAPP_META_PERSONA_SLUG and WHATSAPP_EVOLUTION_PERSONA_SLUG are required." >&2
-    return 1
-  fi
-
-  if ! "${COMPOSE[@]}" exec -T api \
-    test -f /app/scripts/configure_whatsapp_hotfix_bindings.py; then
-    if [[ "$allow_missing_hook" == "true" ]]; then
-      echo "Binding hook is unavailable in the rollback image; preserving binding state." >&2
-      return 0
-    fi
-    echo "Binding hook is unavailable in the target API image." >&2
-    return 1
-  fi
-
-  meta_token="$(env_value META_WHATSAPP_ACCESS_TOKEN)"
-  if [[ -z "$meta_token" ]]; then
-    echo "META_WHATSAPP_ACCESS_TOKEN is required for the configured Meta binding." >&2
-    return 1
-  fi
-  "${COMPOSE[@]}" exec -T \
-    -e META_WHATSAPP_ACCESS_TOKEN="$meta_token" \
-    api python scripts/configure_whatsapp_hotfix_bindings.py \
-    --meta-persona "$meta_persona" \
-    --evolution-persona "$evolution_persona" \
-    --apply
-  unset meta_token
 }
 
 deploy_tag() {

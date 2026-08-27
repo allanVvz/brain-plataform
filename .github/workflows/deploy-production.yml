@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: Deploy the selected image or roll back to the recorded previous image
+        description: Plan, deploy, roll back, or resume an installed release
         type: choice
-        options: [deploy, rollback]
+        options: [plan, deploy, rollback, resume]
         default: deploy
       image_tag:
         description: Existing immutable SHA tag (optional; current commit for deploy, recorded previous for rollback)
@@ -20,6 +20,9 @@ on:
         default: false
       supersede_reason:
         description: Required reason when superseding an unfinished post-cutover lifecycle
+        required: false
+      resume_reason:
+        description: Reviewed reason for resuming the installed runtime release
         required: false
 
 permissions:
@@ -47,6 +50,10 @@ jobs:
       publish_migrate: ${{ steps.impact.outputs.publish_migrate }}
       pause_claims: ${{ steps.impact.outputs.pause_claims }}
       backup: ${{ steps.impact.outputs.backup }}
+      release_class: ${{ steps.impact.outputs.release_class }}
+      backup_mode: ${{ steps.impact.outputs.backup_mode }}
+      resume_required: ${{ steps.impact.outputs.resume_required }}
+      plan_json: ${{ steps.impact.outputs.plan_json }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -60,10 +67,11 @@ jobs:
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
         run: |
           set -Eeuo pipefail
-          if [ "$DEPLOY_ACTION" = "rollback" ]; then
-            for value in class=migration touch_vps=true publish_api=false publish_worker=false publish_migrate=false pause_claims=true backup=false; do
+          if [ "$DEPLOY_ACTION" = "rollback" ] || [ "$DEPLOY_ACTION" = "resume" ]; then
+            for value in class=conversational release_class=runtime touch_vps=true publish_api=false publish_worker=false publish_migrate=false pause_claims=true backup=false backup_mode=evidence_only resume_required=true; do
               echo "$value" >> "$GITHUB_OUTPUT"
             done
+            echo 'plan_json={"schema_version":1,"class":"conversational","release_class":"runtime","backup_mode":"evidence_only","resume_required":true}' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           base="$REQUESTED_BASE_SHA"
@@ -71,9 +79,21 @@ jobs:
           git cat-file -e "${base}^{commit}"
           python scripts/classify_deploy_impact.py --base "$base" --head "$TARGET_SHA" --github-output "$GITHUB_OUTPUT"
 
+      - name: Persist the release plan
+        shell: bash
+        env:
+          PLAN_JSON: ${{ steps.impact.outputs.plan_json }}
+        run: printf '%s\n' "$PLAN_JSON" | python -m json.tool > release-plan.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-plan-${{ github.run_id }}
+          path: release-plan.json
+          retention-days: 30
+
   validate:
     needs: classify
-    if: inputs.action == 'rollback' || needs.classify.outputs.touch_vps == 'true'
+    if: inputs.action == 'rollback' || (inputs.action == 'deploy' && needs.classify.outputs.touch_vps == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -142,7 +162,7 @@ jobs:
           IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile edge --profile evolution config --quiet
 
   publish:
-    if: inputs.action != 'rollback'
+    if: inputs.action == 'deploy' && needs.classify.outputs.touch_vps == 'true'
     needs: [classify, validate]
     runs-on: ubuntu-latest
     outputs:
@@ -257,7 +277,10 @@ jobs:
           WORKER_IMAGE_DIGEST: ${{ needs.publish.outputs.worker_digest }}
           MIGRATE_IMAGE_DIGEST: ${{ needs.publish.outputs.migrate_digest }}
           RUNTIME_BASE_IMAGE_DIGEST: ${{ needs.publish.outputs.runtime_base_digest }}
-        run: bash ops/release/build-artifact.sh "$TARGET_SHA"
+          PLAN_JSON: ${{ needs.classify.outputs.plan_json }}
+        run: |
+          printf '%s\n' "$PLAN_JSON" > release-plan.json
+          RELEASE_PLAN_FILE="$PWD/release-plan.json" bash ops/release/build-artifact.sh "$TARGET_SHA"
 
       # The GitHub-hosted runner's outbound connection to the VPS
       # intermittently hits a bare TCP dial timeout (confirmed via VPS-side
@@ -314,6 +337,8 @@ jobs:
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
           IMPACT_CLASS: ${{ needs.classify.outputs.class }}
+          RELEASE_CLASS: ${{ needs.classify.outputs.release_class }}
+          BACKUP_MODE: ${{ needs.classify.outputs.backup_mode }}
           REQUESTED_TAG: ${{ inputs.action == 'rollback' && inputs.image_tag || needs.publish.outputs.image_tag }}
           SUPERSEDE_RELEASE_AUTHORIZED: ${{ inputs.supersede_unfinished_release }}
           SUPERSEDE_RELEASE_REASON: ${{ inputs.supersede_reason }}
@@ -327,7 +352,7 @@ jobs:
           # which can terminate a healthy rollout after migrations but before
           # the worker and post-deploy audits are restored.
           command_timeout: 30m
-          envs: GHCR_USERNAME,GHCR_TOKEN,VPS_APP_DIR,DEPLOY_ACTION,IMPACT_CLASS,REQUESTED_TAG,SUPERSEDE_RELEASE_AUTHORIZED,SUPERSEDE_RELEASE_REASON
+          envs: GHCR_USERNAME,GHCR_TOKEN,VPS_APP_DIR,DEPLOY_ACTION,IMPACT_CLASS,RELEASE_CLASS,BACKUP_MODE,REQUESTED_TAG,SUPERSEDE_RELEASE_AUTHORIZED,SUPERSEDE_RELEASE_REASON
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
@@ -341,10 +366,43 @@ jobs:
               bash ops/vps/deploy-incremental.sh "$IMPACT_CLASS" "$REQUESTED_TAG" --dry-run
               bash ops/vps/deploy-incremental.sh "$IMPACT_CLASS" "$REQUESTED_TAG" --apply
               bash ops/vps/release-checkpoint.sh "${REQUESTED_TAG:0:12}"
-              # Content-contract validation is a separate concern from "did
-              # the deploy succeed" — captured here instead of letting it
-              # abort the script, so audit.sh (the real health check)
-              # always runs next regardless, and a content-authoring gap
-              # can never silently skip it again.
             fi
             bash ops/vps/audit.sh
+
+  resume:
+    needs: classify
+    if: inputs.action == 'resume'
+    runs-on: ubuntu-latest
+    # Configure required reviewers only on this environment. Deploy/verify do
+    # not need a second manual gate; resuming claims is the explicit approval.
+    environment: production-resume
+    steps:
+      - name: Validate resume input
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.image_tag }}
+        run: |
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "image_tag must be the installed full SHA for resume" >&2
+            exit 2
+          }
+
+      - name: Resume the reviewed release
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          RELEASE_SHA: ${{ inputs.image_tag }}
+          AUTHORIZATION_ACTOR: ${{ github.actor }}
+          AUTHORIZATION_REASON: ${{ inputs.resume_reason || 'release plan and verification reviewed' }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 10m
+          envs: VPS_APP_DIR,RELEASE_SHA,AUTHORIZATION_ACTOR,AUTHORIZATION_REASON
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            bash ops/vps/audit.sh
+            bash ops/vps/release-resume.sh "$RELEASE_SHA" "$AUTHORIZATION_ACTOR" "$AUTHORIZATION_REASON"

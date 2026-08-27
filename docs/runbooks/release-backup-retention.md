@@ -1,7 +1,13 @@
 # Release backup retention
 
-Production release backups are full rollback points. They include database and
-volume dumps, immutable API/migration images, manifest state and checksums.
+Production backups are a continuous environment control, independent from
+deploy frequency. They include database and volume dumps, manifest state and
+checksums; immutable application images remain in the registry.
+
+The scheduled backup and restore proof are summarized by
+`ops/vps/collect-environment-evidence.sh`. Normal API and compatible migration
+releases consume that evidence and do not create another full backup. A release
+creates a new backup only when its plan has `backup_mode=fresh_required`.
 
 The VPS worktree is not the deployed application source: production runs the
 immutable GHCR image SHA. Historical `.releases`, `.rollbacks` and staging

@@ -1,6 +1,18 @@
 # Brain Platform Memory
 
-Updated: 2026-08-24
+Updated: 2026-08-27
+
+> Contrato operacional vigente: releases são classificadas como `frontend`,
+> `api` ou `runtime` por `scripts/classify_deploy_impact.py`. Backup/restore,
+> disco e grants/RLS são evidências contínuas; migrations usam manifesto
+> dinâmico; pausa de release, binding e persona são estados independentes; o
+> fluxo oficial é `plan → deploy → verify → resume`, com aprovação humana antes
+> de `resume`. Fonte canônica:
+> `docs/runbooks/RELEASE_ORCHESTRATION.md`.
+
+> Todos os checkpoints de incidente abaixo são históricos. Frases como
+> “workers parados”, “safety_paused” ou “não retomar” descrevem apenas o momento
+> registrado e nunca devem ser usadas como estado atual sem auditoria read-only.
 
 > Checkpoint positivo atual: Aurora e Tock Fatal passaram a preservar a fala
 > natural do modelo depois do proof. A Aurora demonstrou boa compreensão de

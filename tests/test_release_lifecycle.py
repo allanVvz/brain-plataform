@@ -61,6 +61,9 @@ def test_lifecycle_is_durable_idempotent_and_authorized(tmp_path: Path):
     assert not (tmp_path / "control" / "claims-paused.json").exists()
     state = json.loads((tmp_path / "lifecycle.json").read_text(encoding="utf-8"))
     assert state["resume_authorization"]["actor"] == "operator"
+    assert state["pause"]["type"] == "release_pause"
+    assert state["pause"]["active"] is False
+    assert (tmp_path / "releases" / f"{SHA}.json").is_file()
     assert (tmp_path / "lifecycle-events.ndjson").read_text(encoding="utf-8").count("\n") >= 8
 
 
