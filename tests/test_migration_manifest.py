@@ -16,3 +16,10 @@ def test_manifest_is_dynamic_and_checksum_changes_with_sql(tmp_path: Path):
     second.write_text("select 3;", encoding="utf-8")
     after = build_manifest(tmp_path)
     assert after["manifest_sha256"] != before["manifest_sha256"]
+
+
+def test_production_migration_image_requires_embedded_manifest():
+    root = Path(__file__).resolve().parents[1]
+    dockerfile = (root / "infra" / "migrate.Dockerfile").read_text(encoding="utf-8")
+    assert "REQUIRE_MIGRATION_MANIFEST=true" in dockerfile
+    assert "MIGRATION_MANIFEST.json" in dockerfile
