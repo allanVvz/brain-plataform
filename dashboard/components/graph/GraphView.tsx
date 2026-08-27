@@ -66,6 +66,10 @@ interface GraphViewProps {
   focusNodeId?: string | null;
   showAllEdges?: boolean;
   branchDistance?: number;
+  /** Explicit storage namespace. v3 includes persona + version/checksum. */
+  layoutScope?: string;
+  /** Keeps node dragging for layout, but disables semantic graph mutations. */
+  readOnly?: boolean;
 }
 
 type StoredViewport = Pick<Viewport, "x" | "y" | "zoom">;
@@ -649,7 +653,7 @@ const edgeTypes: EdgeTypes = {
 
 // ── Main component ─────────────────────────────────────────────
 
-function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConnectNodes, onDeleteEdge, mode, searchQuery, focusNodeId, showAllEdges = false, branchDistance = 48 }: GraphViewProps) {
+function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConnectNodes, onDeleteEdge, mode, searchQuery, focusNodeId, showAllEdges = false, branchDistance = 48, layoutScope, readOnly = false }: GraphViewProps) {
   const { fitView, getViewport, setViewport, getNodes } = useReactFlow();
   const [panActive, setPanActive] = useState(false);
   const [graphNodeOpacity, setGraphNodeOpacity] = useState(false);
@@ -658,15 +662,17 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
     () => Array.from(new Set((rawNodes || []).map((n: any) => n?.data?.persona_slug || n?.data?.persona_id || n?.id).filter(Boolean))).slice(0, 3).join("|") || "global",
     [rawNodes],
   );
+  const viewportScope = layoutScope || `v2:${personaScope}`;
+  const positionsScope = layoutScope || personaScope;
   const viewportKey = useMemo(
-    () => `knowledge-graph-viewport:v2:${personaScope}:${mode}:${focusNodeId || "all"}`,
-    [personaScope, mode, focusNodeId],
+    () => `knowledge-graph-viewport:${viewportScope}:${mode}:${focusNodeId || "all"}`,
+    [viewportScope, mode, focusNodeId],
   );
   // Saved node positions are per persona + mode (not per focus): a manual
   // arrangement should hold regardless of which node is focused.
   const positionsKey = useMemo(
-    () => `knowledge-graph-positions:${personaScope}:${mode}`,
-    [personaScope, mode],
+    () => `knowledge-graph-positions:${positionsScope}:${mode}`,
+    [positionsScope, mode],
   );
   const initialViewportDone = useRef(false);
   const lastFocusNodeId = useRef<string | null | undefined>(undefined);
@@ -754,10 +760,10 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
           width: 14,
           height: 14,
         } : undefined,
-        data: { ...data, onDelete: onDeleteEdge, viewMode: mode },
+        data: { ...data, onDelete: readOnly ? undefined : onDeleteEdge, deletable: !readOnly && data.deletable !== false, viewMode: mode },
       };
     });
-  }, [activeRawEdges, focusNodeId, mode, onDeleteEdge]);
+  }, [activeRawEdges, focusNodeId, mode, onDeleteEdge, readOnly]);
 
   // Decorate nodes with search/focus state for fade-out.
   const decoratedNodes = useMemo<Node[]>(() => {
@@ -889,7 +895,7 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
       edges={edges}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
-      onConnect={handleConnect}
+      onConnect={readOnly ? undefined : handleConnect}
       onNodeClick={handleClick}
       onSelectionChange={({ nodes: selected }) => onSelectionChange?.(selected)}
       onMoveEnd={saveViewport}
@@ -898,8 +904,9 @@ function GraphInner({ rawNodes, rawEdges, onNodeClick, onSelectionChange, onConn
       edgeTypes={edgeTypes}
       connectionMode={ConnectionMode.Loose}
       connectionRadius={28}
-      edgesFocusable
+      edgesFocusable={!readOnly}
       edgesUpdatable={false}
+      nodesConnectable={!readOnly}
       selectNodesOnDrag={false}
       selectionOnDrag={!panActive}
       selectionKeyCode={null}
