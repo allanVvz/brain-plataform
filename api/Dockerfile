@@ -31,6 +31,13 @@ ENV PYTHONUNBUFFERED=1 \
     FASTEMBED_CACHE_PATH=/opt/venv/fastembed-cache \
     PATH="/opt/venv/bin:$PATH"
 
+# Refresh security fixes that may land after the upstream slim image was
+# published. CI scans the resulting runtime image and fails closed on HIGH or
+# CRITICAL findings with an available fix.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 # Non-root runtime user.
 RUN useradd --create-home --uid 10001 appuser
 
